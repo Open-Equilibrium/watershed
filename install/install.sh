@@ -10,7 +10,7 @@ usage() {
     printf '%s\n' \
         'Usage: install.sh --prefix <absolute-prefix> [--no-default-executor]' \
         '' \
-        'Install Flow Agent on Ubuntu 24.04 x64 from sibling bundle artifacts.' \
+        'Install Flow Agent on Linux or macOS from sibling bundle artifacts.' \
         '' \
         'Options:' \
         '  --prefix <absolute-prefix>  Install into <absolute-prefix>/bin.' \
@@ -47,6 +47,20 @@ case "$prefix" in
     *) fail '--prefix must be absolute' ;;
 esac
 
+host=$(/usr/bin/uname -s) || fail 'cannot identify installation host'
+case "$host" in
+    Linux) descriptor_root=/proc/self/fd ;;
+    Darwin) descriptor_root=/dev/fd ;;
+    *) fail 'installation requires Linux or macOS' ;;
+esac
+metadata() {
+    if [ "$host" = Darwin ]; then
+        /usr/bin/stat -L -f "$2" "$3"
+    else
+        /usr/bin/stat -L -c "$1" -- "$3"
+    fi
+}
+
 case "$0" in
     /*) installer=$0 ;;
     *) installer=$PWD/$0 ;;
@@ -55,11 +69,11 @@ esac
 bundle=${installer%/*}
 [ "$bundle" != "$installer" ] || fail 'installer bundle is unavailable'
 exec 3<"$bundle" || fail 'cannot open installer bundle'
-bundle_fd=/proc/self/fd/3
+bundle_fd=$descriptor_root/3
 [ -d "$bundle_fd" ] || fail 'installer bundle is not a directory'
-bundle_mode=$(/usr/bin/stat -L -c '%a' -- "$bundle_fd") || fail 'cannot inspect installer bundle mode'
+bundle_mode=$(metadata '%a' '%Lp' "$bundle_fd") || fail 'cannot inspect installer bundle mode'
 [ $((0$bundle_mode & 0022)) -eq 0 ] || fail 'installer bundle is writable by other users'
-bundle_owner=$(/usr/bin/stat -L -c '%u' -- "$bundle_fd") || fail 'cannot inspect installer bundle owner'
+bundle_owner=$(metadata '%u' '%u' "$bundle_fd") || fail 'cannot inspect installer bundle owner'
 current_owner=$(/usr/bin/id -u) || fail 'cannot inspect installer owner'
 [ "$bundle_owner" -eq 0 ] || [ "$bundle_owner" -eq "$current_owner" ] || fail 'untrusted installer bundle owner'
 readiness_owner=$current_owner
@@ -68,18 +82,11 @@ if [ "$install_executor" -eq 1 ] && [ "$current_owner" -eq 0 ]; then
     readiness_owner=$(/usr/bin/id -u -- "$SUDO_USER") || fail 'cannot inspect readiness user'
     readiness_group=$(/usr/bin/id -g -- "$SUDO_USER") || fail 'cannot inspect readiness user group'
     [ "$readiness_owner" -ne 0 ] || fail 'root is not a valid readiness user'
-    readiness_runtime_dir=/run/user/$readiness_owner
-    [ -d "$readiness_runtime_dir" ] && [ ! -L "$readiness_runtime_dir" ] \
-        || fail 'readiness user has no active systemd user manager'
-    readiness_runtime_owner=$(/usr/bin/stat -L -c '%u' -- "$readiness_runtime_dir") \
-        || fail 'cannot inspect readiness user runtime'
-    [ "$readiness_runtime_owner" -eq "$readiness_owner" ] \
-        || fail 'readiness user runtime has an unexpected owner'
-    [ -S "$readiness_runtime_dir/bus" ] \
-        || fail 'readiness user has no active systemd user manager'
-    set -- /usr/sbin/runuser --user "$SUDO_USER" -- /usr/bin/env \
-        XDG_RUNTIME_DIR=$readiness_runtime_dir \
-        DBUS_SESSION_BUS_ADDRESS=unix:path=$readiness_runtime_dir/bus
+    if [ "$host" = Darwin ]; then
+        set -- /usr/bin/sudo -n -u "$SUDO_USER" --
+    else
+        set -- /usr/sbin/runuser --user "$SUDO_USER" --
+    fi
 fi
 
 validate_source() {
@@ -87,26 +94,26 @@ validate_source() {
     source_name=$2
     [ -f "$source_path" ] || fail "missing regular bundle artifact: $source_name"
     [ -x "$source_path" ] || fail "bundle artifact is not executable: $source_name"
-    source_links=$(/usr/bin/stat -L -c '%h' -- "$source_path") || fail 'cannot inspect bundle artifact'
+    source_links=$(metadata '%h' '%l' "$source_path") || fail 'cannot inspect bundle artifact'
     [ "$source_links" -eq 1 ] || fail "hard-linked bundle artifact is unsafe: $source_name"
-    source_mode=$(/usr/bin/stat -L -c '%a' -- "$source_path") || fail 'cannot inspect bundle artifact mode'
+    source_mode=$(metadata '%a' '%Lp' "$source_path") || fail 'cannot inspect bundle artifact mode'
     [ $((0$source_mode & 0022)) -eq 0 ] || fail "writable bundle artifact is unsafe: $source_name"
-    source_owner=$(/usr/bin/stat -L -c '%u' -- "$source_path") || fail 'cannot inspect bundle artifact owner'
+    source_owner=$(metadata '%u' '%u' "$source_path") || fail 'cannot inspect bundle artifact owner'
     [ "$source_owner" -eq 0 ] || [ "$source_owner" -eq "$current_owner" ] || fail "untrusted bundle artifact owner: $source_name"
 }
 
 flow_source_name=$bundle/flow
-flow_source_entry=$bundle_fd/flow
+flow_source_entry=$bundle/flow
 [ ! -L "$flow_source_entry" ] || fail "linked bundle artifact is unsafe: $flow_source_name"
 exec 4<"$flow_source_entry" || fail "missing regular bundle artifact: $flow_source_name"
-flow_source=/proc/self/fd/4
+flow_source=$descriptor_root/4
 validate_source "$flow_source" "$flow_source_name"
 if [ "$install_executor" -eq 1 ]; then
     executor_source_name=$bundle/flow-executor
-    executor_source_entry=$bundle_fd/flow-executor
+    executor_source_entry=$bundle/flow-executor
     [ ! -L "$executor_source_entry" ] || fail "linked bundle artifact is unsafe: $executor_source_name"
     exec 5<"$executor_source_entry" || fail "missing regular bundle artifact: $executor_source_name"
-    executor_source=/proc/self/fd/5
+    executor_source=$descriptor_root/5
     validate_source "$executor_source" "$executor_source_name"
 fi
 
@@ -121,21 +128,25 @@ else
 fi
 
 exec 6<"$bin" || fail 'cannot open installation bin directory'
-bin_fd=/proc/self/fd/6
+bin_fd=$descriptor_root/6
 [ -d "$bin_fd" ] || fail 'installation bin path is unsafe'
-bin_mode=$(/usr/bin/stat -L -c '%a' -- "$bin_fd") || fail 'cannot inspect installation bin mode'
+bin_mode=$(metadata '%a' '%Lp' "$bin_fd") || fail 'cannot inspect installation bin mode'
 [ $((0$bin_mode & 0022)) -eq 0 ] || fail 'installation bin directory is writable by other users'
-bin_owner=$(/usr/bin/stat -L -c '%u' -- "$bin_fd") || fail 'cannot inspect installation bin owner'
+bin_owner=$(metadata '%u' '%u' "$bin_fd") || fail 'cannot inspect installation bin owner'
 [ "$bin_owner" -eq "$current_owner" ] || fail 'installation bin directory is not owned by the installer administrator'
 
-flow_target=$bin_fd/flow
-executor_target=$bin_fd/flow-executor
+# The working directory anchors publication and rollback on both native hosts;
+# Darwin's descriptor filesystem does not support traversing directory entries.
+cd "$bin" || fail 'cannot enter installation bin directory'
+[ . -ef "$bin_fd" ] || fail 'installation bin path changed during installation'
+flow_target=./flow
+executor_target=./flow-executor
 [ ! -e "$flow_target" ] && [ ! -L "$flow_target" ] || fail 'existing installation is not upgraded'
 [ ! -e "$executor_target" ] && [ ! -L "$executor_target" ] || fail 'existing installation is not upgraded'
 
-flow_stage=$bin_fd/.flow.install.$$
-executor_stage=$bin_fd/.flow-executor.install.$$
-readiness_config=$bin_fd/.flow-readiness-config.$$
+flow_stage=./.flow.install.$$
+executor_stage=./.flow-executor.install.$$
+readiness_config=./.flow-readiness-config.$$
 readiness_status_file=$readiness_config/status
 published_flow=0
 published_executor=0
@@ -172,7 +183,7 @@ wait_for_readiness_status() {
         readiness_attempts=$((readiness_attempts - 1))
     done
     [ -f "$readiness_status_file" ] && [ ! -L "$readiness_status_file" ] || return 1
-    readiness_status_metadata=$(/usr/bin/stat -c '%u:%h:%s' -- "$readiness_status_file") || return 1
+    readiness_status_metadata=$(metadata '%u:%h:%s' '%u:%l:%z' "$readiness_status_file") || return 1
     case "$readiness_status_metadata" in
         "$readiness_owner:1:2"|"$readiness_owner:1:3"|"$readiness_owner:1:4") ;;
         *) return 1 ;;
@@ -242,13 +253,13 @@ verify_bin_binding() {
 verify_bundle_binding
 verify_bin_binding
 
-/bin/cp --reflink=never --no-preserve=mode,ownership,timestamps -- "$flow_source" "$flow_stage" \
+(umask 077; set -C; /bin/cat <&4 > "$flow_stage") \
     || fail 'cannot stage flow'
-/bin/chmod 0755 -- "$flow_stage" || fail 'cannot protect staged flow'
+/bin/chmod 0755 "$flow_stage" || fail 'cannot protect staged flow'
 if [ "$install_executor" -eq 1 ]; then
-    /bin/cp --reflink=never --no-preserve=mode,ownership,timestamps -- "$executor_source" "$executor_stage" \
+    (umask 077; set -C; /bin/cat <&5 > "$executor_stage") \
         || fail 'cannot stage flow-executor'
-    /bin/chmod 0755 -- "$executor_stage" || fail 'cannot protect staged flow-executor'
+    /bin/chmod 0755 "$executor_stage" || fail 'cannot protect staged flow-executor'
 fi
 verify_bundle_binding
 exec 3<&-
@@ -267,18 +278,31 @@ if [ "$install_executor" -eq 1 ]; then
     /bin/mkdir -m 0700 -- "$readiness_config" || fail 'cannot isolate readiness configuration'
     readiness_config_created=1
     if [ "$current_owner" -eq 0 ]; then
-        /bin/chown "$readiness_owner:$readiness_group" -- "$readiness_config" \
+        if [ "$host" = Darwin ]; then
+            owner_command=/usr/sbin/chown
+        else
+            owner_command=/bin/chown
+        fi
+        "$owner_command" "$readiness_owner:$readiness_group" "$readiness_config" \
             || fail 'cannot assign readiness configuration'
     fi
-    /usr/bin/setsid "$@" /bin/sh -c '
+    if [ "$host" = Darwin ]; then
+        # macOS /bin/sh supports job control without a terminal: each background
+        # job gets its own process group. No external session helper is required.
+        set -m
+    else
+        set -- /usr/bin/setsid "$@"
+    fi
+    "$@" /bin/sh -c '
         umask 077
         PATH=
         HOME=$(cd "$1" && /bin/pwd -P) || exit 1
         [ "$HOME" -ef "$1" ] || exit 1
         XDG_CONFIG_HOME=$HOME
         unset FLOW_AGENT_HOME
+        unset XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS
         export PATH HOME XDG_CONFIG_HOME
-        if cd / && "$2" executor check </dev/null; then
+        if "$2" executor check </dev/null; then
             readiness_status=0
         else
             readiness_status=$?

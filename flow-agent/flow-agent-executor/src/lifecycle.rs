@@ -1,48 +1,6 @@
 use std::time::Instant;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum InnerStatusPolicy {
-    Ignore,
-    IfReportable,
-    RequiredAndClassify,
-}
-
-pub(crate) fn inner_status_policy(
-    classification: Option<proto::ExecutorToolClassificationV0>,
-) -> InnerStatusPolicy {
-    use proto::ExecutorToolClassificationV0 as Classification;
-
-    match classification {
-        None | Some(Classification::NonzeroExit | Classification::SignalTermination) => {
-            InnerStatusPolicy::RequiredAndClassify
-        }
-        Some(
-            Classification::StderrCapExceeded
-            | Classification::StdoutCapExceeded
-            | Classification::StdoutStderrCapExceeded
-            | Classification::OutputCollectorFailed
-            | Classification::OutputDrainTimeout,
-        ) => InnerStatusPolicy::IfReportable,
-        Some(
-            Classification::Cancelled
-            | Classification::ProcessCapacityExceeded
-            | Classification::ToolTimedOut,
-        ) => InnerStatusPolicy::Ignore,
-    }
-}
-
-pub(crate) fn capacity_can_classify(
-    classification: Option<proto::ExecutorToolClassificationV0>,
-) -> bool {
-    use proto::ExecutorToolClassificationV0 as Classification;
-
-    matches!(
-        classification,
-        None | Some(Classification::NonzeroExit | Classification::SignalTermination)
-    )
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum CleanupAction {
     Wait,
     ForceKill,

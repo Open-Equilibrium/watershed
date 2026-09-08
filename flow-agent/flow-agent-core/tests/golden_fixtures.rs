@@ -159,8 +159,6 @@ fn hello_flow_source_tools_cover_m0_contract() {
             max: None,
         }]
     );
-    assert_eq!(read_file.read_only_mounts, vec!["workspace"]);
-    assert!(read_file.writable_mounts.is_empty());
 
     assert_eq!(write_summary.tool_kind, ToolKind::OwnScript);
     assert_eq!(
@@ -173,7 +171,6 @@ fn hello_flow_source_tools_cover_m0_contract() {
         Some("printf '%s\\n' \"$SUMMARY\" > out/summary.txt\n")
     );
     assert!(write_summary.allowed_parameters.is_empty());
-    assert_eq!(write_summary.writable_mounts, vec!["workspace/out"]);
 }
 
 #[test]
@@ -379,25 +376,15 @@ fn assert_smoke_flow_payload_dimensions(stream: &[EventEnvelope]) {
         "tool_id",
         serde_json::json!("echo"),
     );
-    assert_payload_eq(
-        tool_started,
-        "tool_kind",
-        serde_json::json!("predefined-command"),
+    assert_eq!(
+        tool_started.payload,
+        serde_json::json!({
+            "allowed_parameters": [],
+            "tool_id": "echo",
+            "tool_kind": "predefined-command",
+            "tool_name": "Echo",
+        })
     );
-    assert_payload_eq(tool_started, "allowed_parameters", serde_json::json!([]));
-    assert_payload_eq(
-        tool_started,
-        "max_concurrent_processes_and_threads",
-        serde_json::json!(16),
-    );
-    assert_payload_eq(tool_started, "network_access", serde_json::json!("deny"));
-    assert_payload_eq(
-        tool_started,
-        "read_only_mounts",
-        serde_json::json!(["workspace"]),
-    );
-    assert_payload_eq(tool_started, "runtime_profile", serde_json::json!("exact"));
-    assert_payload_eq(tool_started, "writable_mounts", serde_json::json!([]));
 }
 
 fn assert_hello_flow_payload_dimensions(stream: &[EventEnvelope]) {
@@ -457,24 +444,15 @@ fn assert_hello_flow_payload_dimensions(stream: &[EventEnvelope]) {
         "tool_id",
         serde_json::json!("read-file"),
     );
-    assert_payload_eq(
-        read_file,
-        "tool_kind",
-        serde_json::json!("predefined-command"),
+    assert_eq!(
+        read_file.payload,
+        serde_json::json!({
+            "allowed_parameters": ["--file"],
+            "tool_id": "read-file",
+            "tool_kind": "predefined-command",
+            "tool_name": "ReadFile",
+        })
     );
-    assert_payload_eq(
-        read_file,
-        "allowed_parameters",
-        serde_json::json!(["--file"]),
-    );
-    assert_payload_eq(read_file, "network_access", serde_json::json!("deny"));
-    assert_payload_eq(
-        read_file,
-        "read_only_mounts",
-        serde_json::json!(["workspace"]),
-    );
-    assert_payload_eq(read_file, "runtime_profile", serde_json::json!("exact"));
-    assert_payload_eq(read_file, "writable_mounts", serde_json::json!([]));
 
     let write_summary = find_payload_event(
         stream,
@@ -482,18 +460,14 @@ fn assert_hello_flow_payload_dimensions(stream: &[EventEnvelope]) {
         "tool_id",
         serde_json::json!("write-summary"),
     );
-    assert_payload_eq(write_summary, "tool_kind", serde_json::json!("own-script"));
-    assert_payload_eq(write_summary, "allowed_parameters", serde_json::json!([]));
-    assert_payload_eq(write_summary, "network_access", serde_json::json!("deny"));
-    assert_payload_eq(
-        write_summary,
-        "read_only_mounts",
-        serde_json::json!(["workspace"]),
-    );
-    assert_payload_eq(
-        write_summary,
-        "writable_mounts",
-        serde_json::json!(["workspace/out"]),
+    assert_eq!(
+        write_summary.payload,
+        serde_json::json!({
+            "allowed_parameters": [],
+            "tool_id": "write-summary",
+            "tool_kind": "own-script",
+            "tool_name": "WriteSummary",
+        })
     );
 
     let subflow_started = stream

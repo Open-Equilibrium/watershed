@@ -9,48 +9,6 @@ use std::io;
 #[cfg(test)]
 use std::path::Path;
 
-pub fn validate_script_write_target(
-    policy: &core_policy::CommandPolicy,
-    target: &str,
-) -> Result<String, RuntimeError> {
-    let relative = normalize_script_write_target(target)?;
-    let scoped = core_script::workspace_scope_path(&relative);
-    if !policy
-        .filesystem
-        .writable_mounts
-        .iter()
-        .any(|root| core_script::relative_path_is_inside_scope(&scoped, root))
-    {
-        return Err(RuntimeError::denied(
-            core_policy::DenyReasonCode::WriteDenied,
-            format!("tool {} lacks write scope {scoped}", policy.tool_id),
-        ));
-    }
-    let temp_parent_scoped = script_replacement_temp_parent_scope(&relative);
-    if !policy
-        .filesystem
-        .writable_mounts
-        .iter()
-        .any(|root| core_script::relative_path_is_inside_scope(&temp_parent_scoped, root))
-    {
-        return Err(RuntimeError::denied(
-            core_policy::DenyReasonCode::WriteDenied,
-            format!(
-                "tool {} lacks write scope for replacement temp under {temp_parent_scoped}",
-                policy.tool_id
-            ),
-        ));
-    }
-    Ok(relative)
-}
-
-pub fn script_replacement_temp_parent_scope(relative: &str) -> String {
-    relative.rsplit_once('/').map_or_else(
-        || core_script::workspace_scope_path(""),
-        |(parent, _)| core_script::workspace_scope_path(parent),
-    )
-}
-
 #[cfg(test)]
 pub fn anchored_workspace_write_path(
     workspace: &Path,
@@ -83,8 +41,8 @@ pub fn anchored_workspace_write_path_from(
 }
 
 pub fn normalize_script_write_target(target: &str) -> Result<String, RuntimeError> {
-    // WHY: script write targets use one shared slash-only path policy across parser,
-    // policy and runtime checks.
+    // The deterministic fixture stub accepts only literal workspace-relative outputs.
+    // This is an implementation constraint, not host Tool containment.
     if target.is_empty()
         || target.starts_with('/')
         || target.contains(':')

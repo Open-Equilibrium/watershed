@@ -10,14 +10,12 @@ fn reconciliation_output() -> String {
     proto::canonical_json(&serde_json::json!({
         "enforcement": {
             "applied_policy_digest": "0".repeat(64),
-            "backend": proto::EXECUTOR_BACKEND_V0,
+            "backend": "fixture-backend",
             "backend_version": "test",
             "executor": proto::EXECUTOR_NAME_V0,
             "executor_version": "test",
-            "isolation_active": true,
-            "max_concurrent_processes_and_threads": 16,
-            "platform": proto::EXECUTOR_PLATFORM_V0,
-            "runtime_profile": "exact",
+            "self_protection_active": true,
+            "platform": "fixture-platform",
         },
         "request_hash": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
         "schema": "flow-tool-attempt-output-v1",

@@ -579,8 +579,6 @@ fn productive_recovery_round_trips_a_tool_attempt_on_every_platform() {
             attempt_kind: RunAttemptKind::Tool,
             expected_enforcement: Some(ToolEnforcementExpectation {
                 applied_policy_digest: "0".repeat(64),
-                max_concurrent_processes_and_threads: 16,
-                runtime_profile: proto::RuntimeReadProfileV0::Exact,
             }),
             request_hash: request_hash.to_owned(),
             tool_id: Some("inspect".to_owned()),
@@ -598,8 +596,6 @@ fn productive_recovery_round_trips_a_tool_attempt_on_every_platform() {
         durable_output: Some(serde_json::json!({
             "enforcement": crate::runtime::productive::test_enforcement_receipt(
                 "0".repeat(64),
-                16,
-                core_script::ToolRuntimeProfile::Exact,
             ),
             "request_hash": request_hash,
             "schema": "flow-tool-attempt-output-v1",
@@ -622,8 +618,6 @@ fn productive_recovery_round_trips_a_tool_attempt_on_every_platform() {
             attempt_kind: RunAttemptKind::Tool,
             expected_enforcement: Some(ToolEnforcementExpectation {
                 applied_policy_digest: "0".repeat(64),
-                max_concurrent_processes_and_threads: 16,
-                runtime_profile: proto::RuntimeReadProfileV0::Exact,
             }),
             request_hash: request_hash.to_owned(),
             tool_id: Some("inspect".to_owned()),
@@ -653,8 +647,6 @@ fn productive_recovery_round_trips_a_tool_attempt_on_every_platform() {
             attempt_kind: RunAttemptKind::Tool,
             expected_enforcement: Some(ToolEnforcementExpectation {
                 applied_policy_digest: "0".repeat(64),
-                max_concurrent_processes_and_threads: 16,
-                runtime_profile: proto::RuntimeReadProfileV0::Exact,
             }),
             request_hash: request_hash.to_owned(),
             tool_id: Some("inspect".to_owned()),

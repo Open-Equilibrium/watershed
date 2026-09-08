@@ -35,7 +35,7 @@ fn shared_workspace_tool_write_parents_are_concurrent_safe() {
 
     for index in 0..10 {
         let tool = format!(
-            "tool:\n  id: write-summary-{index}\n  name: WriteSummary{index}\n  tool_kind: own-script\n  command: script:write-summary-{index}\n  script_runtime: posix-sh\n  script_body: |\n    printf 'hello {index}\\n' > out/summary-{index}.txt\n  allowed_parameters: []\n  max_concurrent_processes_and_threads: 16\n  runtime_profile: exact\n  read_only_mounts: [\"workspace\"]\n  writable_mounts: [\"workspace/out\"]\n  network: deny\n"
+            "tool:\n  id: write-summary-{index}\n  name: WriteSummary{index}\n  tool_kind: own-script\n  command: script:write-summary-{index}\n  script_runtime: posix-sh\n  script_body: |\n    printf 'hello {index}\\n' > out/summary-{index}.txt\n  allowed_parameters: []\n"
         );
         let phase = format!(
             "phase:\n  id: summarize-{index}\n  name: Summarize{index}\n  instruction_refs: [write-output]\n  tool_refs: [write-summary-{index}]\n  output:\n    type: string\n"
@@ -203,11 +203,6 @@ fn run_flow_rejects_multi_write_own_script_before_side_effects() {
     printf 'partial\n' > out/partial.txt
     printf '%s\n' "$SUMMARY" > out/summary.txt
   allowed_parameters: []
-  max_concurrent_processes_and_threads: 16
-  runtime_profile: exact
-  read_only_mounts: ["workspace"]
-  writable_mounts: ["workspace/out"]
-  network: deny
 "#,
     )
     .expect("write-summary fixture mutated");
@@ -388,22 +383,17 @@ fn run_flow_rejects_symlinked_summary_ancestor_without_side_effects() {
 }
 
 #[test]
-fn own_script_internal_directory_alias_cannot_escape_writable_mount() {
+fn own_script_fixture_rejects_internal_output_directory_alias() {
     let workspace = workspace_copy("hello-flow");
     fs::remove_dir_all(workspace.join("out")).expect("fixture out directory removed");
-    fs::create_dir(workspace.join("private")).expect("ungranted directory created");
+    fs::create_dir(workspace.join("private")).expect("alias destination created");
     create_directory_alias(&workspace.join("out"), &workspace.join("private"));
 
-    let (registry, policy) = fixture_runtime_policy("hello-flow", "hello-flow");
+    let (registry, _policy) = fixture_runtime_policy("hello-flow", "hello-flow");
     let tool = registry
         .tool_block("write-summary")
         .expect("write-summary tool exists");
-    let write_policy = policy
-        .commands
-        .iter()
-        .find(|command| command.tool_id == "write-summary")
-        .expect("write-summary policy exists");
-    let write = plan_own_script(tool, write_policy)
+    let write = plan_own_script(tool)
         .expect("own-script plan compiles")
         .expect("own-script plan writes output");
     let anchored_workspace = AnchoredDir::workspace(&workspace).expect("workspace anchors");

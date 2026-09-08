@@ -156,6 +156,7 @@ fn productive_executor_boundary_failure_closes_tool_event_and_leaves_attempt_unc
         FakeToolExecutionFault::InvalidTerminal,
         FakeToolExecutionFault::RequestHashMismatch,
         FakeToolExecutionFault::ReceiptMismatch,
+        FakeToolExecutionFault::InactiveSelfProtection,
     ] {
         let (_workspace, fixture) = smoke_productive_execution_fixture();
         let flow = fixture.smoke_flow();

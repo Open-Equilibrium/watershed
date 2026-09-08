@@ -9,8 +9,7 @@ use evidence_support::{
     write_jsonl,
 };
 use flow_agent_core::{
-    M12_EXECUTOR_STARTUP_PROCESS_CAPACITY, M12ExecutorStartupMeasurement, configure_executor_path,
-    run_m12_executor_startup,
+    M12ExecutorStartupMeasurement, configure_executor_path, run_m12_executor_startup,
 };
 use report::write_report;
 use serde::{Deserialize, Serialize};
@@ -41,19 +40,34 @@ struct Config {
 struct ChildMeasurement {
     schema: String,
     executor_elapsed_ns: u64,
-    max_concurrent_processes_and_threads: u32,
+    self_protection_active: bool,
+}
+
+impl ChildMeasurement {
+    fn validate(self) -> Result<Self, DynError> {
+        if self.schema != MEASUREMENT_CHILD_SCHEMA {
+            return Err(io::Error::other("fresh measurement child schema did not match").into());
+        }
+        if !self.self_protection_active {
+            return Err(io::Error::other(
+                "fresh measurement child did not confirm active self-protection",
+            )
+            .into());
+        }
+        Ok(self)
+    }
 }
 
 fn measure_once() -> Result<ChildMeasurement, DynError> {
     let workspace = TempRoot::create("flow-m12-startup")?;
     let M12ExecutorStartupMeasurement {
         executor_elapsed,
-        max_concurrent_processes_and_threads,
+        self_protection_active,
     } = run_m12_executor_startup(workspace.path()).map_err(io::Error::other)?;
     Ok(ChildMeasurement {
         schema: MEASUREMENT_CHILD_SCHEMA.to_owned(),
         executor_elapsed_ns: duration_ns(executor_elapsed),
-        max_concurrent_processes_and_threads,
+        self_protection_active,
     })
 }
 
@@ -81,17 +95,7 @@ fn fresh_child_measurement(executor: &Path) -> Result<ChildMeasurement, DynError
     if output.stdout.is_empty() || output.stdout.len() > MAX_MEASUREMENT_CHILD_BYTES {
         return Err(io::Error::other("fresh measurement child violated its output bound").into());
     }
-    let measurement: ChildMeasurement = serde_json::from_slice(&output.stdout)?;
-    if measurement.schema != MEASUREMENT_CHILD_SCHEMA {
-        return Err(io::Error::other("fresh measurement child schema did not match").into());
-    }
-    if measurement.max_concurrent_processes_and_threads != M12_EXECUTOR_STARTUP_PROCESS_CAPACITY {
-        return Err(io::Error::other(
-            "fresh measurement child did not retain the configured process capacity",
-        )
-        .into());
-    }
-    Ok(measurement)
+    Ok(serde_json::from_slice(&output.stdout)?)
 }
 
 fn parse_args<I, S>(args: I) -> Result<Config, DynError>
@@ -157,10 +161,7 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        ChildMeasurement, Config, DynError, M12_EXECUTOR_STARTUP_PROCESS_CAPACITY,
-        MEASUREMENT_CHILD_SCHEMA, parse_args,
-    };
+    use super::{ChildMeasurement, Config, DynError, MEASUREMENT_CHILD_SCHEMA, parse_args};
     use crate::{
         evidence_support::test::FlushTrackingWriter, report::write_report_with_measurement,
     };
@@ -177,6 +178,15 @@ mod tests {
             warmups,
             samples,
         }
+    }
+
+    fn measurement(elapsed_ns: u64) -> ChildMeasurement {
+        serde_json::from_value(serde_json::json!({
+            "schema": MEASUREMENT_CHILD_SCHEMA,
+            "executor_elapsed_ns": elapsed_ns,
+            "self_protection_active": true,
+        }))
+        .expect("child evidence binds the elapsed observation to active own-file protection")
     }
 
     #[test]
@@ -207,15 +217,12 @@ mod tests {
         let mut observation = 0_u64;
         let mut measure = || -> Result<ChildMeasurement, DynError> {
             observation += 1;
-            Ok(ChildMeasurement {
-                schema: MEASUREMENT_CHILD_SCHEMA.to_owned(),
-                executor_elapsed_ns: observation * 10,
-                max_concurrent_processes_and_threads: M12_EXECUTOR_STARTUP_PROCESS_CAPACITY,
-            })
+            Ok(measurement(observation * 10))
         };
         let mut writer = Vec::new();
 
         assert!(write_report_with_measurement(&mut writer, config(1, 3), &mut measure,).unwrap());
+        assert_eq!(observation, 4);
 
         let records = String::from_utf8(writer)
             .unwrap()
@@ -235,17 +242,22 @@ mod tests {
             .unwrap();
         assert_eq!(aggregate["executor_p50_ns"], 30);
         assert_eq!(aggregate["executor_p95_ns"], 40);
+        assert_eq!(aggregate["executor_max_ns"], 40);
+        assert_eq!(aggregate["count"], 3);
+        assert_eq!(
+            records
+                .iter()
+                .filter(|record| record["kind"] == "sample")
+                .map(|record| record["executor_elapsed_ns"].as_u64().unwrap())
+                .collect::<Vec<_>>(),
+            [20, 30, 40]
+        );
+        assert_eq!(records.last().unwrap()["complete"], true);
     }
 
     #[test]
     fn report_identifies_the_real_executor_boundary() {
-        let mut measure = || -> Result<ChildMeasurement, DynError> {
-            Ok(ChildMeasurement {
-                schema: MEASUREMENT_CHILD_SCHEMA.to_owned(),
-                executor_elapsed_ns: 1,
-                max_concurrent_processes_and_threads: M12_EXECUTOR_STARTUP_PROCESS_CAPACITY,
-            })
-        };
+        let mut measure = || -> Result<ChildMeasurement, DynError> { Ok(measurement(1)) };
         let mut writer = Vec::new();
 
         assert!(write_report_with_measurement(&mut writer, config(1, 1), &mut measure,).unwrap());
@@ -257,12 +269,22 @@ mod tests {
             .collect::<Vec<_>>();
         let metadata = &records[0];
         assert_eq!(metadata["schema"], "flow-m12-executor-startup-v0");
-        assert!(metadata["environment"].get("contract_image").is_some());
+        assert_eq!(metadata["environment"]["os"], std::env::consts::OS);
+        assert_eq!(metadata["environment"]["arch"], std::env::consts::ARCH);
+        assert_eq!(
+            metadata["environment"]["reference_platform"],
+            cfg!(any(
+                all(target_os = "linux", target_arch = "x86_64"),
+                all(target_os = "macos", target_arch = "aarch64")
+            ))
+        );
+        assert_eq!(metadata["self_protection_required"], true);
         let sample = records
             .iter()
             .find(|record| record["kind"] == "sample")
             .unwrap();
         assert_eq!(sample["executor_elapsed_ns"], 1);
+        assert_eq!(sample["self_protection_active"], true);
         let aggregate = records
             .iter()
             .find(|record| record["kind"] == "aggregate")
@@ -274,8 +296,85 @@ mod tests {
         assert_eq!(aggregate["inputs"]["tool"], "/bin/echo");
         assert_eq!(aggregate["inputs"]["tool_arguments"], Value::Array(vec![]));
         assert_eq!(aggregate["inputs"]["tool_environment"], "empty");
-        assert_eq!(aggregate["inputs"]["runtime_profile"], "exact");
+        assert_eq!(aggregate["inputs"]["self_protection_required"], true);
         assert_eq!(aggregate["inputs"]["tool_executions_per_child"], 1);
+    }
+
+    #[test]
+    fn report_rejects_unverified_warmups_and_samples_without_losing_the_prefix() {
+        for fail_at in [0_usize, 2] {
+            for invalid_schema in [false, true] {
+                let mut calls = 0;
+                let mut measure = || -> Result<ChildMeasurement, DynError> {
+                    let mut value = serde_json::to_value(measurement(1)).unwrap();
+                    if calls == fail_at {
+                        if invalid_schema {
+                            value["schema"] = "wrong-schema".into();
+                        } else {
+                            value["self_protection_active"] = false.into();
+                        }
+                    }
+                    calls += 1;
+                    Ok(serde_json::from_value(value).unwrap())
+                };
+                let mut writer = FlushTrackingWriter::default();
+
+                assert!(
+                    !write_report_with_measurement(&mut writer, config(1, 3), &mut measure)
+                        .unwrap()
+                );
+                assert_eq!(calls, fail_at + 1);
+                assert!(writer.flushed);
+                let records = String::from_utf8(writer.bytes)
+                    .unwrap()
+                    .lines()
+                    .map(|line| serde_json::from_str::<Value>(line).unwrap())
+                    .collect::<Vec<_>>();
+                assert_eq!(records[0]["kind"], "metadata");
+                assert_eq!(
+                    records
+                        .iter()
+                        .filter(|record| record["kind"] == "sample")
+                        .count(),
+                    fail_at.saturating_sub(1)
+                );
+                let failure = &records[records.len() - 2];
+                assert_eq!(failure["kind"], "workload_failure");
+                assert!(
+                    failure["error"]
+                        .as_str()
+                        .unwrap()
+                        .contains(if invalid_schema {
+                            "schema"
+                        } else {
+                            "self-protection"
+                        })
+                );
+                assert_eq!(records.last().unwrap()["kind"], "summary");
+                assert_eq!(records.last().unwrap()["complete"], false);
+                assert!(!records.iter().any(|record| record["kind"] == "aggregate"));
+            }
+        }
+    }
+
+    #[test]
+    fn child_evidence_requires_the_guard_and_rejects_legacy_fields() {
+        let valid = serde_json::to_value(measurement(1)).unwrap();
+        let mut missing = valid.clone();
+        missing
+            .as_object_mut()
+            .unwrap()
+            .remove("self_protection_active");
+        assert!(serde_json::from_value::<ChildMeasurement>(missing).is_err());
+        for (field, value) in [
+            ("max_concurrent_processes_and_threads", serde_json::json!(8)),
+            ("runtime_profile", serde_json::json!("exact")),
+            ("isolation_active", serde_json::json!(true)),
+        ] {
+            let mut legacy = valid.clone();
+            legacy[field] = value;
+            assert!(serde_json::from_value::<ChildMeasurement>(legacy).is_err());
+        }
     }
 
     #[test]

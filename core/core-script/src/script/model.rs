@@ -59,8 +59,6 @@ pub const MAX_REGISTRY_TRAVERSAL_DEPTH: usize = 64;
 pub const MAX_BLOCK_NAME_CHARS: usize = 256;
 /// Maximum UTF-8 bytes in an Instruction prompt or own-script body.
 pub const MAX_REGISTRY_DEFINITION_BYTES: usize = 64 * 1024;
-/// Maximum exact read-only and writable mount capabilities declared by one Tool.
-pub const MAX_FILESYSTEM_MOUNTS: usize = 64;
 
 /// Shared id/name pair for every registry block.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -132,6 +130,7 @@ impl RegistryBlock {
 
 /// Tool definition block.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ToolBlock {
     /// Tool identity.
     #[serde(flatten)]
@@ -148,50 +147,7 @@ pub struct ToolBlock {
     pub script_body: Option<String>,
     /// Parameters accepted by the tool.
     pub allowed_parameters: Vec<AllowedParameter>,
-    /// Maximum concurrent Tool processes and threads, including descendants.
-    pub max_concurrent_processes_and_threads: u32,
-    /// Runtime objects made readable in addition to exact filesystem mounts.
-    #[serde(default)]
-    pub runtime_profile: ToolRuntimeProfile,
-    /// Exact Workspace directory capabilities mounted read-only.
-    pub read_only_mounts: Vec<String>,
-    /// Exact Workspace directory capabilities mounted writable.
-    pub writable_mounts: Vec<String>,
-    /// Network policy declared for this tool.
-    pub network: NetworkPolicy,
 }
-
-/// Named runtime-read profile selected for one Tool.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub enum ToolRuntimeProfile {
-    /// Resolve only the exact administrator-owned runtime object manifest.
-    #[default]
-    Exact,
-    /// Add the official Executor's reviewed read-only host system roots.
-    HostSystemRead,
-}
-
-impl ToolRuntimeProfile {
-    /// All supported runtime-read profiles.
-    pub const ALL: [Self; 2] = [Self::Exact, Self::HostSystemRead];
-
-    /// Returns the canonical serialized token.
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Exact => "exact",
-            Self::HostSystemRead => "host-system-read",
-        }
-    }
-
-    /// Parses a canonical serialized token.
-    pub fn parse(value: &str) -> Option<Self> {
-        Self::ALL
-            .into_iter()
-            .find(|profile| profile.as_str() == value)
-    }
-}
-
-impl_token_serde!(ToolRuntimeProfile, "Tool runtime profile");
 
 /// Tool execution family.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -341,164 +297,6 @@ impl ParameterValueType {
 }
 
 impl_token_serde!(ParameterValueType, "parameter value type");
-
-/// Network policy declared by a tool.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum NetworkPolicy {
-    /// Deny all network access.
-    Deny(NetworkDeny),
-    /// Explicit default plus allowlist entries.
-    Declared {
-        /// Default network behavior.
-        default: NetworkDefault,
-        /// Allowed network destinations.
-        allow: Vec<NetworkAllowEntry>,
-    },
-}
-
-/// Marker serialized as the literal `deny` network policy.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct NetworkDeny;
-
-impl NetworkDeny {
-    /// Returns the canonical serialized token.
-    pub const fn as_str(&self) -> &'static str {
-        "deny"
-    }
-
-    /// Parses the canonical serialized token.
-    pub fn parse(value: &str) -> Option<Self> {
-        (value == Self.as_str()).then_some(Self)
-    }
-}
-
-impl Serialize for NetworkDeny {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str(self.as_str())
-    }
-}
-
-impl<'de> Deserialize<'de> for NetworkDeny {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let value = String::deserialize(deserializer)?;
-        Self::parse(&value).ok_or_else(|| serde::de::Error::custom("expected \"deny\""))
-    }
-}
-
-/// Default network policy.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum NetworkDefault {
-    /// Deny access unless a matching allow entry exists.
-    Deny,
-}
-
-impl NetworkDefault {
-    /// Returns the canonical serialized token.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Deny => "deny",
-        }
-    }
-
-    /// Parses a canonical serialized token.
-    pub fn parse(value: &str) -> Option<Self> {
-        (value == Self::Deny.as_str()).then_some(Self::Deny)
-    }
-}
-
-impl Serialize for NetworkDefault {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str(self.as_str())
-    }
-}
-
-impl<'de> Deserialize<'de> for NetworkDefault {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let value = String::deserialize(deserializer)?;
-        Self::parse(&value)
-            .ok_or_else(|| serde::de::Error::custom(format!("unknown network default: {value}")))
-    }
-}
-
-/// One declared network allow entry.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct NetworkAllowEntry {
-    /// Allow entry kind.
-    pub kind: NetworkAllowKind,
-    /// Transport protocol.
-    pub transport: NetworkTransport,
-    /// Canonical CIDR range.
-    pub cidr: String,
-    /// Destination port.
-    pub port: u16,
-}
-
-/// Network allow entry kind.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum NetworkAllowKind {
-    /// CIDR destination range.
-    Cidr,
-}
-
-impl NetworkAllowKind {
-    /// Returns the canonical serialized token.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Cidr => "cidr",
-        }
-    }
-
-    /// Parses a canonical serialized token.
-    pub fn parse(value: &str) -> Option<Self> {
-        (value == Self::Cidr.as_str()).then_some(Self::Cidr)
-    }
-}
-
-impl_token_serde!(NetworkAllowKind, "network allow kind");
-
-/// Network transport protocol.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum NetworkTransport {
-    /// TCP transport.
-    Tcp,
-    /// UDP transport.
-    Udp,
-}
-
-impl NetworkTransport {
-    /// All supported network transports.
-    pub const ALL: [Self; 2] = [Self::Tcp, Self::Udp];
-
-    /// Returns the canonical serialized token.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Tcp => "tcp",
-            Self::Udp => "udp",
-        }
-    }
-
-    /// Parses a canonical serialized token.
-    pub fn parse(value: &str) -> Option<Self> {
-        Self::ALL
-            .into_iter()
-            .find(|transport| transport.as_str() == value)
-    }
-}
-
-impl_token_serde!(NetworkTransport, "network transport");
 
 /// Prompt instruction block.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

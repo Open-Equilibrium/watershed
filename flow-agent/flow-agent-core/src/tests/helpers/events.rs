@@ -153,14 +153,9 @@ pub(in crate::tests) fn tool_started_line(event_id: &str, sequence: u64) -> Stri
         Some("flow-001"),
         serde_json::json!({
             "allowed_parameters": [],
-            "max_concurrent_processes_and_threads": 1,
-            "network_access": "deny",
-            "read_only_mounts": ["workspace"],
             "tool_id": "tool",
             "tool_kind": "predefined-command",
             "tool_name": "Tool",
-            "runtime_profile": "exact",
-            "writable_mounts": [],
         }),
     )
 }

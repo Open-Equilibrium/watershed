@@ -395,7 +395,7 @@ fn productive_recovery_rejects_invalid_tool_attempts_before_redispatch() {
 #[test]
 fn productive_recovery_rejects_tampered_tool_bindings_before_redispatch() {
     type OutputMutation = fn(&mut serde_json::Value);
-    let cases: [(&str, OutputMutation, &str); 3] = [
+    let cases: [(&str, OutputMutation, &str); 4] = [
         (
             "missing-receipt",
             |output| {
@@ -412,8 +412,13 @@ fn productive_recovery_rejects_tampered_tool_bindings_before_redispatch() {
             "does not match the prepared request hash",
         ),
         (
-            "wrong-runtime-profile",
-            |output| output["enforcement"]["runtime_profile"] = "host-system-read".into(),
+            "wrong-policy-digest",
+            |output| output["enforcement"]["applied_policy_digest"] = "1".repeat(64).into(),
+            "enforcement receipt does not match",
+        ),
+        (
+            "inactive-self-protection",
+            |output| output["enforcement"]["self_protection_active"] = false.into(),
             "enforcement receipt does not match",
         ),
     ];

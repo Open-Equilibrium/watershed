@@ -6,10 +6,21 @@ use std::{
     time::Duration,
 };
 
-const PROBE: &str = concat!(
-    r#"{"backend":"fake-backend","backend_version":"1","executor":"fake-executor","executor_version":"1","platform":"ubuntu-24.04-x86_64","protocol_versions":["0"],"ready":true,"runtime_mounts":[{"executable":"/bin/echo","runtime_profile":"exact","source":"/usr/bin/echo","target":"/bin/echo"}],"schema":"flow-executor-probe-v0","supported_policy_features":["process-capacity"]}"#,
-    "\n"
-);
+fn platform() -> String {
+    format!("{}-{}", env::consts::OS, env::consts::ARCH)
+}
+
+fn backend() -> String {
+    format!("fake-{}", platform())
+}
+
+fn probe() -> String {
+    format!(
+        "{{\"backend\":\"{}\",\"backend_version\":\"1\",\"executor\":\"fake-executor\",\"executor_version\":\"1\",\"platform\":\"{}\",\"protocol_versions\":[\"0\"],\"ready\":true,\"schema\":\"flow-executor-probe-v0\",\"supported_policy_features\":[\"flow-owned-write-protection\"]}}\n",
+        backend(),
+        platform(),
+    )
+}
 
 fn mode(executable: &Path) -> &str {
     executable
@@ -28,19 +39,6 @@ fn field<'a>(request: &'a str, name: &str) -> &'a str {
     value.split_once('"').expect("field is closed").0
 }
 
-fn number_field(request: &str, name: &str) -> u32 {
-    let needle = format!("\"{name}\":");
-    request
-        .split_once(&needle)
-        .expect("canonical request contains the field")
-        .1
-        .chars()
-        .take_while(char::is_ascii_digit)
-        .collect::<String>()
-        .parse()
-        .expect("numeric request field is a u32")
-}
-
 fn completed(request: &str, mode: &str) -> String {
     let request_id = field(request, "request_id");
     let policy_digest = field(request, "policy_digest");
@@ -49,20 +47,20 @@ fn completed(request: &str, mode: &str) -> String {
     } else {
         policy_digest
     };
-    let isolation_active = mode != "inactive-evidence";
-    let requested_capacity = number_field(request, "max_concurrent_processes_and_threads");
-    let enforced_capacity = if mode == "mismatched-capacity" {
-        requested_capacity + 1
+    let self_protection_active = mode != "inactive-evidence";
+    let legacy_evidence = if mode == "legacy-evidence" {
+        "\"isolation_active\":true,"
     } else {
-        requested_capacity
+        ""
     };
     let backend = if mode == "mismatched-identity" {
-        "different-backend"
+        "different-backend".to_owned()
     } else {
-        "fake-backend"
+        backend()
     };
     let enforcement = format!(
-        "\"enforcement\":{{\"applied_policy_digest\":\"{policy_digest}\",\"backend\":\"{backend}\",\"backend_version\":\"1\",\"executor\":\"fake-executor\",\"executor_version\":\"1\",\"isolation_active\":{isolation_active},\"max_concurrent_processes_and_threads\":{enforced_capacity},\"platform\":\"ubuntu-24.04-x86_64\",\"runtime_profile\":\"exact\"}},"
+        "\"enforcement\":{{\"applied_policy_digest\":\"{policy_digest}\",\"backend\":\"{backend}\",\"backend_version\":\"1\",\"executor\":\"fake-executor\",\"executor_version\":\"1\",{legacy_evidence}\"platform\":\"{}\",\"self_protection_active\":{self_protection_active}}},",
+        platform(),
     );
     let enforcement = if mode == "missing-evidence" {
         ""
@@ -78,18 +76,19 @@ fn main() {
     let executable = env::current_exe().expect("fake Executor resolves itself");
     let mode = mode(&executable);
     if env::args().nth(1).as_deref() == Some("--probe") {
+        let probe = probe();
         match mode {
-            "unknown-version" => print!("{}", PROBE.replace("[\"0\"]", "[\"1\"]")),
+            "unknown-version" => print!("{}", probe.replace("[\"0\"]", "[\"1\"]")),
             "closed-schema" => print!(
                 "{}",
-                PROBE.replace(
+                probe.replace(
                     ",\"supported_policy_features\"",
                     ",\"unexpected\":true,\"supported_policy_features\""
                 )
             ),
             "duplicate-member" => print!(
                 "{}",
-                PROBE.replace("\"schema\":", "\"schema\":\"duplicate\",\"schema\":")
+                probe.replace("\"schema\":", "\"schema\":\"duplicate\",\"schema\":")
             ),
             "malformed-probe" => println!("not-json"),
             "oversized-probe" => io::stdout()
@@ -99,7 +98,7 @@ fn main() {
                 eprintln!("private-fixture-diagnostic");
                 process::exit(1);
             }
-            _ => print!("{PROBE}"),
+            _ => print!("{probe}"),
         }
         return;
     }
@@ -135,6 +134,10 @@ fn main() {
         format!("{{\"request_id\":\"{request_id}\",\"schema\":\"flow-executor-start-v0\"}}\n");
     if start != expected_start {
         return;
+    }
+    if matches!(mode, "valid" | "productive-session") {
+        fs::write(executable.with_extension("request.json"), &request)
+            .expect("synthetic request is captured");
     }
     fs::write(executable.with_extension("tool-spawned"), b"spawned")
         .expect("dispatch marker is written");

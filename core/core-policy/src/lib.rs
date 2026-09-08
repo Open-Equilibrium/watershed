@@ -7,14 +7,11 @@ mod compile;
 
 pub use artifact::{
     AllowedParameterPolicy, CommandPolicy, DenyReasonCode, EnvironmentDefault, EnvironmentPolicy,
-    FilesystemPolicy, NetworkPolicy, PhaseScope, PolicyArtifact, PolicyArtifactError,
-    PolicyArtifactValidationError, PolicyTarget, RuntimeLimits, canonical_artifact_json,
+    PhaseScope, PolicyArtifact, PolicyArtifactError, PolicyArtifactValidationError, RuntimeLimits,
+    canonical_artifact_json,
 };
 pub use compile::{PolicyCompileError, compile_policy_artifact};
-pub use core_script::{
-    MAX_FILESYSTEM_MOUNTS, NetworkAllowEntry, NetworkAllowKind, NetworkDefault, NetworkTransport,
-    ParameterValueType, ScriptRuntime, ToolKind, ToolRuntimeProfile,
-};
+pub use core_script::{ParameterValueType, ScriptRuntime, ToolKind};
 
 /// Policy artifact version string emitted by the v0 compiler.
 pub const POLICY_VERSION_V0: &str = "0";

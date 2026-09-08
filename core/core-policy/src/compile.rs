@@ -1,12 +1,10 @@
 use crate::{
     OWN_SCRIPT_RUNNER_POSIX_SH, POLICY_VERSION_V0, TrustedPredefinedCommand,
     artifact::{
-        AllowedParameterPolicy, CommandPolicy, EnvironmentDefault, EnvironmentPolicy,
-        FilesystemPolicy, NetworkPolicy, PhaseScope, PolicyArtifact, PolicyArtifactValidationError,
-        PolicyTarget, RuntimeLimits, policy_artifact_error,
+        AllowedParameterPolicy, CommandPolicy, EnvironmentDefault, EnvironmentPolicy, PhaseScope,
+        PolicyArtifact, PolicyArtifactValidationError, RuntimeLimits, policy_artifact_error,
     },
 };
-use core_script::NetworkDefault;
 use std::{
     collections::{BTreeMap, BTreeSet},
     fmt,
@@ -17,11 +15,6 @@ use std::{
 pub enum PolicyCompileError {
     /// Requested flow reference was missing.
     MissingFlow(String),
-    /// Supported policy-artifact target was asked to encode network allow entries.
-    NonEmptyNetworkAllowlist {
-        /// Tool id with non-empty network allow entries.
-        tool_id: String,
-    },
     /// Compiled artifact failed validation.
     InvalidArtifact(PolicyArtifactValidationError),
 }
@@ -32,10 +25,6 @@ impl fmt::Display for PolicyCompileError {
             Self::MissingFlow(reference) => {
                 write!(f, "policy compile references missing flow {reference}")
             }
-            Self::NonEmptyNetworkAllowlist { tool_id } => write!(
-                f,
-                "supported policy-artifact target for tool {tool_id} must use a deny-all network allowlist"
-            ),
             Self::InvalidArtifact(err) => write!(f, "{err}"),
         }
     }
@@ -45,12 +34,12 @@ impl std::error::Error for PolicyCompileError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::InvalidArtifact(err) => Some(err),
-            Self::MissingFlow(_) | Self::NonEmptyNetworkAllowlist { .. } => None,
+            Self::MissingFlow(_) => None,
         }
     }
 }
 
-/// Compiles a policy artifact for one sandbox target.
+/// Compiles the invocation policy for one resolved Flow.
 pub fn compile_policy_artifact(
     registry: &core_script::ResolvedRegistry,
     flow_ref: &str,
@@ -98,7 +87,6 @@ pub fn compile_policy_artifact(
             },
         },
         source_flow_definition_id: flow_block.identity.id.clone(),
-        target: PolicyTarget::LinuxBubblewrapSeccomp,
     };
     artifact
         .validate()
@@ -201,24 +189,6 @@ fn command_policy_from_tool(
         }
     };
 
-    let network = match &tool.network {
-        core_script::NetworkPolicy::Deny(_) => NetworkPolicy {
-            allow: Vec::new(),
-            default: NetworkDefault::Deny,
-        },
-        core_script::NetworkPolicy::Declared { allow, .. } => {
-            if !allow.is_empty() {
-                return Err(PolicyCompileError::NonEmptyNetworkAllowlist {
-                    tool_id: tool.identity.id.clone(),
-                });
-            }
-            NetworkPolicy {
-                allow: allow.clone(),
-                default: NetworkDefault::Deny,
-            }
-        }
-    };
-
     Ok(CommandPolicy {
         allowed_parameters: tool
             .allowed_parameters
@@ -232,13 +202,6 @@ fn command_policy_from_tool(
             default: EnvironmentDefault::Clear,
         },
         executable,
-        filesystem: FilesystemPolicy {
-            read_only_mounts: tool.read_only_mounts.clone(),
-            writable_mounts: tool.writable_mounts.clone(),
-        },
-        max_concurrent_processes_and_threads: tool.max_concurrent_processes_and_threads,
-        network,
-        runtime_profile: tool.runtime_profile,
         script_runtime,
         tool_id: tool.identity.id.clone(),
         tool_kind: tool.tool_kind.clone(),

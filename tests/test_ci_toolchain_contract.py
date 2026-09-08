@@ -21,24 +21,17 @@ ACTION_PINS = {
 }
 TOPIC_BRANCH_TYPES = ("feat", "fix", "docs", "test", "ci", "chore", "refactor")
 UBUNTU = "matrix.os == 'ubuntu-24.04'"
-NON_UBUNTU = "matrix.os != 'ubuntu-24.04'"
-M12_TARGET = "x86_64-unknown-linux-musl"
-M12_EXECUTOR = f"target/{M12_TARGET}/release/flow-executor"
-M12_INSTALLED_EXECUTOR = "/usr/local/libexec/watershed/flow-executor"
-M12_CONTAINER = "watershed-m12"
-M12_COVERAGE_USER = "watershed"
-M12_COVERAGE_ENV = "/root/m12-coverage.env"
-M12_COVERAGE_BIN_DIR = f"/work/target/{M12_TARGET}/debug"
-M12_PRODUCTION_EXECUTOR = "/root/m12-production/flow-executor"
+NATIVE = "matrix.os != 'windows-latest'"
+WINDOWS = "matrix.os == 'windows-latest'"
+M12_EXECUTOR = "target/m12-standard/release/flow-executor"
 EVIDENCE_ONLY_UNIX_RUNNER_PATTERN = (
     r"flow-agent[\\/]flow-agent-core[\\/]src[\\/]runtime[\\/]"
     r"tool_runner[\\/]unix_process(\.rs|[\\/])"
 )
 M12_INSTALLER_ACCEPTANCE = ROOT / "scripts" / "run-m12-installer-acceptance.sh"
 M12_READINESS_NEGATIVES = ROOT / "scripts" / "run-m12-readiness-negatives.sh"
-M12_OFFICIAL_LINUX = (
-    ROOT / "flow-agent" / "flow-agent-executor" / "tests" / "official_linux.rs"
-)
+M12_NATIVE_SUPPORT = ROOT / "flow-agent/flow-agent-executor/tests/native_support/mod.rs"
+M12_NATIVE_HELPER = ROOT / "scripts/m12_native.py"
 
 
 def workflow_text() -> str:
@@ -147,7 +140,7 @@ class CiWorkflowContractTest(unittest.TestCase):
             "macos-26": "--workspace",
             "windows-latest": "-p core-script -p core-policy -p proto",
         })
-        for name in ("Check lints", "Run tests", "Run Rustdoc tests", "Check line coverage"):
+        for name in ("Check lints", "Run tests", "Run Rustdoc tests", "Check shared Windows line coverage"):
             command = step_run(workflow, name)
             self.assertIn("${{ matrix.packages }}", command)
             for os_name, packages in scopes.items():
@@ -163,7 +156,7 @@ class CiWorkflowContractTest(unittest.TestCase):
                     else:
                         self.assertIn("--workspace", tokens)
         assert_step_state(
-            self, workflow, "Check M1.2 unsupported platforms", condition="matrix.os == 'macos-26'"
+            self, workflow, "Run native release Executor acceptance", condition=NATIVE
         )
 
     def test_versions_come_from_their_canonical_project_files(self) -> None:
@@ -284,23 +277,29 @@ class CiWorkflowContractTest(unittest.TestCase):
         mutations = (
             workflow.replace("cargo fmt --all --check", "true", 1),
             workflow.replace("--fail-under-lines 90", "--fail-under-lines 89", 1),
+            workflow.replace("report --fail-under-lines 90", "report --fail-under-lines 89", 1),
             workflow.replace("cargo audit", "true", 1),
             workflow.replace("pnpm run docs:render-check", "true", 1),
             workflow.replace("--example m11_budgets", "--example m12_executor_startup", 1),
             workflow.replace("--example m12_executor_startup", "--example m11_budgets", 1),
-            workflow.replace(
-                f'-- --executor {M12_INSTALLED_EXECUTOR}',
-                "--",
-                1,
-            ),
-            workflow.replace("cargo test --locked -p flow-agent-executor", "true", 1),
+            workflow.replace(f'-- --executor "$PWD/{M12_EXECUTOR}"', "--", 1),
+            workflow.replace("--test native_contract", "--test absent", 1),
+            workflow.replace("--test native_self_protection", "--test absent", 1),
             workflow.replace("cargo llvm-cov show-env --sh", "true", 1),
             workflow.replace("cargo llvm-cov report", "true", 1),
-            workflow.replace('grep -q "INTERP"', 'grep -q "NOT_INTERP"', 1),
-            workflow.replace("/usr/bin/env -i", "/usr/bin/env", 1),
+            workflow.replace('export M12_COVERAGE_BIN_DIR="$CARGO_TARGET_DIR/debug"',
+                             'export M12_COVERAGE_BIN_DIR="target/m12-standard/release"', 1),
+            workflow.replace('/bin/sh scripts/run-m12-readiness-negatives.sh', "true", 1),
+            workflow.replace("install.tests.test_install install.tests.test_readiness",
+                             "install.tests.test_install", 1),
+            workflow.replace(
+                '\n'.join(step_lines(workflow, "Run M1.2 installer contract tests")),
+                '\n'.join(step_lines(workflow, "Run M1.2 installer contract tests"))
+                .replace(NATIVE, UBUNTU), 1),
         )
-        for mutated in mutations:
-            with self.subTest(mutated=mutated), self.assertRaises(AssertionError):
+        for index, mutated in enumerate(mutations):
+            self.assertTrue(mutated != workflow, "mutation must exercise an existing gate")
+            with self.subTest(mutation=index), self.assertRaises(AssertionError):
                 self.assert_ci_gate_contract(mutated)
 
     def test_testing_contract_covers_tooling_and_rustdoc_gates(self) -> None:
@@ -314,10 +313,10 @@ class CiWorkflowContractTest(unittest.TestCase):
         ):
             self.assertIn(contract, testing)
 
-    def test_official_linux_can_use_the_cargo_built_executor(self) -> None:
+    def test_native_contract_uses_debug_or_explicit_release_executor(self) -> None:
         self.assertIn(
             'env!("CARGO_BIN_EXE_flow-executor")',
-            M12_OFFICIAL_LINUX.read_text(encoding="utf-8"),
+            M12_NATIVE_SUPPORT.read_text(encoding="utf-8"),
         )
 
     def assert_ci_gate_contract(self, workflow: str) -> None:
@@ -336,6 +335,13 @@ class CiWorkflowContractTest(unittest.TestCase):
         for name, command in commands.items():
             assert_step_state(self, workflow, name)
             self.assertEqual(step_run(workflow, name), command)
+
+        assert_step_state(self, workflow, "Run M1.2 installer contract tests", condition=NATIVE)
+        self.assertEqual(
+            folded_tokens(workflow, "Run M1.2 installer contract tests"),
+            ["node", "scripts/run-python.mjs", "-m", "unittest",
+             "install.tests.test_install", "install.tests.test_readiness"],
+        )
 
         self.assertEqual(
             folded_tokens(workflow, "Run tests"),
@@ -364,157 +370,47 @@ class CiWorkflowContractTest(unittest.TestCase):
                 "--doc",
             ],
         )
-        assert_step_state(
-            self, workflow, "Check line coverage", condition=NON_UBUNTU
-        )
-        coverage = folded_tokens(workflow, "Check line coverage")
-        for required in (
-            "cargo",
-            "llvm-cov",
-            "nextest",
-            "--locked",
-            "--workspace",
-            "--all-targets",
-            "--all-features",
-            "--show-missing-lines",
-        ):
+        assert_step_state(self, workflow, "Check shared Windows line coverage", condition=WINDOWS)
+        coverage = folded_tokens(workflow, "Check shared Windows line coverage")
+        for required in ("cargo", "llvm-cov", "nextest", "--locked", "--workspace",
+                         "--all-targets", "--all-features", "--show-missing-lines"):
             self.assertIn(required, coverage)
         self.assertEqual(coverage[coverage.index("--fail-under-lines") + 1], "90")
         self.assertEqual(coverage[coverage.index("--config") + 1], TEST_ISOLATION)
-        self.assertIn(
-            EVIDENCE_ONLY_UNIX_RUNNER_PATTERN,
-            coverage[coverage.index("--ignore-filename-regex") + 1],
-        )
+        exclusions = coverage[coverage.index("--ignore-filename-regex") + 1]
+        self.assertIn(EVIDENCE_ONLY_UNIX_RUNNER_PATTERN, exclusions)
 
-        coverage_prepare_lines = assert_step_state(
-            self,
-            workflow,
-            "Prepare instrumented M1.2 coverage artifacts",
-            condition=UBUNTU,
-        )
-        coverage_prepare = step_run(
-            workflow, "Prepare instrumented M1.2 coverage artifacts"
-        )
-        for required in (
-            "Signature: 8a477f597d28d172789f06886806bc55",
-            "target/CACHEDIR.TAG",
-            f"cargo llvm-cov show-env --sh --target {M12_TARGET} "
-            f"--coverage-target-only > {M12_COVERAGE_ENV}",
-            f"install -D -m 0755 {M12_EXECUTOR} {M12_PRODUCTION_EXECUTOR}",
-            f". {M12_COVERAGE_ENV}",
-            "cargo llvm-cov clean --workspace",
-            f"cargo clean --release --target {M12_TARGET} --workspace",
-            "cargo clean --release -p flow-agent-cli "
-            "--target-dir target/m12-standard",
-            "cargo clean --release -p flow-agent-cli "
-            "--target-dir target/m12-acceptance",
-            "cargo build --locked --release -p flow-agent-executor --bin flow-executor "
-            "--target-dir target/m12-standard",
-            "cargo build --locked --release -p flow-agent-cli --bin flow "
-            "--target-dir target/m12-standard",
-            "cargo build --locked --release -p flow-agent-cli --bin flow "
-            "--features m12-install-acceptance --target-dir target/m12-acceptance",
-            "cargo nextest run",
-            "--no-run",
-            f"--target {M12_TARGET}",
-            "--workspace",
-            "--all-targets",
-            "--all-features",
-            f"cargo build --locked --target {M12_TARGET}",
-            "-p flow-agent-executor --bin flow-executor",
-            "-p flow-agent-cli --bin flow",
-        ):
-            self.assertIn(required, coverage_prepare)
-        self.assertIn("        shell: bash", coverage_prepare_lines)
-        prepare_order = (
-            "target/CACHEDIR.TAG",
-            f"install -D -m 0755 {M12_EXECUTOR} {M12_PRODUCTION_EXECUTOR}",
-            "cargo llvm-cov show-env",
-            "cargo llvm-cov clean",
-            "cargo clean --release",
-            "cargo build",
-            f". {M12_COVERAGE_ENV}",
-            "cargo nextest run",
-        )
-        positions = [coverage_prepare.index(command) for command in prepare_order]
-        self.assertEqual(positions, sorted(positions))
-        self.assertEqual(coverage_prepare.count("cargo nextest run"), 1)
-        instrumented = coverage_prepare[coverage_prepare.index(f". {M12_COVERAGE_ENV}") :]
-        self.assertEqual(instrumented.count("cargo build"), 2)
-        self.assertNotIn("--release", instrumented)
-        nextest = instrumented.index("cargo nextest run")
-        executor_build = instrumented.index(
-            "-p flow-agent-executor --bin flow-executor", nextest
-        )
-        cli_build = instrumented.index("-p flow-agent-cli --bin flow", executor_build)
-        self.assertLess(nextest, executor_build)
-        self.assertLess(executor_build, cli_build)
-        self.assertNotIn("readelf -l", coverage_prepare)
-        self.assertNotIn("metadata=coverage-", coverage_prepare)
-        self.assertNotIn("target/m12-dynamic", coverage_prepare)
-
-        linux_coverage_lines = assert_step_state(
-            self, workflow, "Check Linux line coverage", condition=UBUNTU
-        )
-        linux_coverage = step_run(workflow, "Check Linux line coverage")
-        self.assertIn("docker exec", linux_coverage)
-        self.assertIn(M12_CONTAINER, linux_coverage)
-        for required in (
-            f". {M12_COVERAGE_ENV}",
-            'install -d -m 0700 "$RUNNER_TEMP"',
-            "FLOW_EXECUTOR_DYNAMIC_UNDER_TEST=/work/target/m12-standard/release/flow-executor",
-            "cargo nextest run",
-            f"--target {M12_TARGET}",
-            "--workspace",
-            "--all-targets",
-            "--all-features",
-            "cargo llvm-cov report",
-            f"runuser --user {M12_COVERAGE_USER} --preserve-environment",
-            "^Cap(Inh|Prm|Eff|Amb):[[:space:]]+0{16}$",
-            "--fail-under-lines 90",
-            "--show-missing-lines",
-        ):
-            self.assertIn(required, linux_coverage)
-        self.assertIn("        shell: bash", linux_coverage_lines)
-        self.assertIn(TEST_ISOLATION, linux_coverage)
-        coverage_run = linux_coverage[
-            linux_coverage.index("cargo nextest run") : linux_coverage.index(
-                "cargo llvm-cov report"
-            )
-        ]
-        report = linux_coverage[linux_coverage.index("cargo llvm-cov report") :]
-        self.assertNotIn("--release", coverage_run)
-        self.assertNotIn("--release", report)
-        self.assertIn(f"--target {M12_TARGET}", report)
-        self.assertIn("--coverage-target-only", report)
-        self.assertIn(EVIDENCE_ONLY_UNIX_RUNNER_PATTERN, report)
-        self.assertEqual(linux_coverage.count("cargo nextest run"), 1)
-        self.assertNotIn("metadata=coverage-", linux_coverage)
-        self.assertNotIn("-p flow-agent-executor", linux_coverage)
-        self.assertNotIn("--bin flow-executor", linux_coverage)
-        self.assertNotIn("binary(flow-executor)", linux_coverage)
-        self.assertNotIn("FLOW_EXECUTOR_UNDER_TEST=", linux_coverage)
+        native_lines = assert_step_state(
+            self, workflow, "Check native coverage and installation acceptance", condition=NATIVE)
+        self.assertIn("        shell: bash", native_lines)
+        native = step_run(workflow, "Check native coverage and installation acceptance")
         ordered = (
-            f". {M12_COVERAGE_ENV}",
+            "cargo llvm-cov clean --workspace",
+            'eval "$(cargo llvm-cov show-env --sh)"',
+            "cargo build --locked -p flow-agent-cli -p flow-agent-executor",
+            'export M12_COVERAGE_BIN_DIR="$CARGO_TARGET_DIR/debug"',
+            "/bin/sh scripts/run-m12-installer-acceptance.sh",
             "cargo nextest run",
-            "cargo llvm-cov report",
+            "/bin/sh scripts/run-m12-readiness-negatives.sh",
+            "cargo llvm-cov report --fail-under-lines 90",
         )
-        positions = [linux_coverage.index(command) for command in ordered]
+        for command in ordered:
+            self.assertIn(command, native)
+        positions = [native.index(command) for command in ordered]
         self.assertEqual(positions, sorted(positions))
-        self.assertNotIn("/tmp/flow-executor-", linux_coverage)
-        self.assertNotIn("scripts/run-m12-installer-acceptance.sh", linux_coverage)
-        self.assertNotIn("m12-install-acceptance", linux_coverage)
-        privilege_drop = linux_coverage.index(
-            f"/usr/sbin/runuser --user {M12_COVERAGE_USER} --preserve-environment"
-        )
-        nextest = linux_coverage.index("cargo nextest run")
-        report = linux_coverage.index("cargo llvm-cov report")
-        self.assertLess(privilege_drop, nextest)
-        self.assertLess(privilege_drop, report)
-        self.assertNotIn("cargo nextest run", linux_coverage[:privilege_drop])
-        self.assertIn(
-            "chown -R watershed:watershed /cargo /work/target", linux_coverage
-        )
+        self.assertEqual(native.count("cargo nextest run"), 1)
+        native_test = native[native.index("cargo nextest run"):
+                             native.index("/bin/sh scripts/run-m12-readiness-negatives.sh")]
+        self.assertEqual(shlex.split(native_test.replace("\\\n", " ")), [
+            "cargo", "nextest", "run", "--config", TEST_ISOLATION, "--locked",
+            "--workspace", "--all-targets", "--all-features",
+        ])
+        report = shlex.split(native[native.index("cargo llvm-cov report"):].replace("\\\n", " "))
+        self.assertEqual(report, ["cargo", "llvm-cov", "report", "--fail-under-lines", "90",
+                                  "--ignore-filename-regex", exclusions, "--show-missing-lines"])
+        for forbidden in ("--release", "--target ", "--coverage-target-only", "docker ",
+                          "runuser ", "systemctl ", "--skip", "|| true"):
+            self.assertNotIn(forbidden, native)
 
         self.assert_evidence_gate(
             workflow,
@@ -553,7 +449,8 @@ class CiWorkflowContractTest(unittest.TestCase):
         artifact: str,
         output: str,
     ) -> None:
-        condition = f"{UBUNTU} && !cancelled()" if milestone == "M1.2" else UBUNTU
+        host_condition = NATIVE if milestone == "M1.2" else UBUNTU
+        condition = f"{host_condition} && !cancelled()" if milestone == "M1.2" else host_condition
         run_lines = assert_step_state(
             self, workflow, run_name, condition=condition, continue_on_error=True
         )
@@ -562,22 +459,15 @@ class CiWorkflowContractTest(unittest.TestCase):
         self.assertIn("cargo run --locked -p flow-agent-core --release", run)
         self.assertIn(f"--features {feature} --example {example}", run)
         if milestone == "M1.2":
-            self.assertIn(
-                "install -d -m 0755 /usr/local/libexec/watershed",
-                run,
-            )
-            self.assertIn(
-                f"install -m 0755 {M12_EXECUTOR} {M12_INSTALLED_EXECUTOR}",
-                run,
-            )
-            self.assertIn(f"-- --executor {M12_INSTALLED_EXECUTOR}", run)
+            self.assertIn(f'-- --executor "$PWD/{M12_EXECUTOR}"', run)
+            artifact += "-${{ matrix.os }}"
         self.assertIn(f"> {output}", run)
 
         upload_name = f"Upload {milestone} " + (
             "performance evidence" if milestone == "M1.1" else "executor startup evidence"
         )
         upload = assert_step_state(
-            self, workflow, upload_name, condition=f"{UBUNTU} && always()"
+            self, workflow, upload_name, condition=f"{host_condition} && always()"
         )
         joined = "\n".join(upload)
         self.assertIn(f"name: {artifact}", joined)
@@ -591,293 +481,74 @@ class CiWorkflowContractTest(unittest.TestCase):
             self,
             workflow,
             enforce_name,
-            condition=f"{UBUNTU} && always() && steps.{run_id}.outcome != 'success'",
+            condition=f"{host_condition} && always() && steps.{run_id}.outcome != 'success'",
         )
         self.assertEqual(step_run(workflow, enforce_name), "exit 1")
 
     def assert_m12_release_boundary(self, workflow: str) -> None:
-        contract_images = re.findall(
-            r"^      M12_CONTRACT_IMAGE: (ubuntu:24\.04@sha256:[0-9a-f]{64})$",
-            workflow,
-            re.MULTILINE,
-        )
-        self.assertEqual(len(contract_images), 1)
-        contract_image = contract_images[0]
-        self.assertEqual(workflow.count(contract_image), 1)
-
-        single_commands = {
-            "Install M1.2 executor target": f"rustup target add {M12_TARGET}",
-            "Run M1.2 installer contract tests": (
-                "node scripts/run-python.mjs -m unittest install.tests.test_install"
-            ),
-        }
-        for name, command in single_commands.items():
-            assert_step_state(self, workflow, name, condition=UBUNTU)
-            self.assertEqual(step_run(workflow, name), command)
-
-        apparmor = "\n".join(
-            assert_step_state(
-                self,
-                workflow,
-                "Authorize Bubblewrap user namespaces",
-                condition=UBUNTU,
-            )
-        )
-        for required in (
-            "--no-install-recommends apparmor",
-            "/etc/apparmor.d/watershed-bwrap-userns",
-            "/usr/bin/bwrap flags=(unconfined)",
-            "userns,",
-            "apparmor_parser --replace",
-            "kernel.apparmor_restrict_unprivileged_userns",
-        ):
-            self.assertIn(required, apparmor)
-        for forbidden in (
-            "apparmor-profiles",
-            "/usr/share/apparmor",
-            "sysctl --write",
-            "sysctl -w",
-            "CAP_NET_ADMIN",
-        ):
-            self.assertNotIn(forbidden, apparmor)
-        self.assertLess(
-            workflow.index("      - name: Authorize Bubblewrap user namespaces"),
-            workflow.index("      - name: Run M1.2 executor tests"),
-        )
-
-        start = "\n".join(
-            assert_step_state(
-                self, workflow, "Start controlled M1.2 Ubuntu", condition=UBUNTU
-            )
-        )
-        for required in (
-            "$M12_CONTRACT_IMAGE",
-            "docker build",
-            "systemd dbus-user-session",
-            "--privileged",
-            "--cgroupns=private",
-            "--security-opt apparmor=unconfined",
-            "--tmpfs /run",
-            "/sbin/init",
-            'src=$GITHUB_WORKSPACE,dst=/work,readonly',
-            "dst=/opt/rust,readonly",
-            "dst=/opt/cargo-registry,readonly",
-            "type=volume,dst=/work/target",
-            "dst=/usr/local/bin/cargo-llvm-cov,readonly",
-            "dst=/usr/local/bin/cargo-nextest,readonly",
-            "dst=/usr/local/bin/node,readonly",
-        ):
-            self.assertIn(required, start)
-        self.assertNotIn(contract_image, start)
-        for forbidden in (
-            "--init",
-            "--cgroupns=host",
-            "src=/sys/fs/cgroup",
-            "sleep infinity",
-            "/var/run/docker.sock",
-            "sysctl",
-            "apparmor_parser",
-            'src=$HOME,dst=',
-        ):
-            self.assertNotIn(forbidden, start)
-
-        provision = "\n".join(
-            assert_step_state(
-                self, workflow, "Provision M1.2 Ubuntu dependencies", condition=UBUNTU
-            )
-        )
-        for required in (
-            f"docker exec {M12_CONTAINER}",
-            "bubblewrap",
-            "binutils",
-            "build-essential",
-            "ca-certificates",
-            "musl-tools",
-            "passwd",
-            "python3",
-            "procps",
-            "strace",
-            "util-linux",
-            "/opt/cargo-registry",
-            "useradd --create-home --uid 10001 --shell /bin/sh watershed",
-            "systemd --version",
-            'test "$2" = 255',
-            "systemctl start user-runtime-dir@10001.service user@10001.service",
-            "systemctl is-active --quiet user@10001.service",
-            "test -S /run/user/10001/bus",
-        ):
-            self.assertIn(required, provision)
-        self.assertNotIn("loginctl enable-linger", workflow)
-        self.assertNotIn("uname -r", provision)
-
-        for name, command in {
-            "Build M1.2 executor": (
-                "cargo build --locked --release -p flow-agent-executor "
-                f"--bin flow-executor --target {M12_TARGET}"
-            ),
-            "Build M1.2 dynamic rejection fixture": (
-                "cargo build --locked --release -p flow-agent-executor --bin flow-executor"
-            ),
-        }.items():
-            assert_step_state(self, workflow, name, condition=UBUNTU)
-            build = step_run(workflow, name)
-            self.assertIn("docker exec", build)
-            self.assertIn(M12_CONTAINER, build)
-            self.assertIn(command, build)
-            self.assertIn("CARGO_NET_OFFLINE=true", build)
-            self.assertIn("HOME=/home/watershed", build)
-            self.assertIn(
-                f"runuser --user {M12_COVERAGE_USER} --preserve-environment", build
-            )
-        static = "\n".join(
-            assert_step_state(
-                self, workflow, "Check M1.2 executor is static", condition=UBUNTU
-            )
-        )
-        for required in (M12_EXECUTOR, "readelf -l", 'grep -q "INTERP"', "exit 1"):
-            self.assertIn(required, static)
-
-        readiness = "\n".join(
-            assert_step_state(
-                self, workflow, "Check M1.2 executor readiness", condition=UBUNTU
-            )
-        )
-        for required in (
-            f"/work/{M12_EXECUTOR} --probe",
-            "/usr/bin/env -i",
-            f"runuser --user {M12_COVERAGE_USER} --",
-            'assert probe["ready"] is True, probe',
-        ):
-            self.assertIn(required, readiness)
-        self.assertNotIn("XDG_RUNTIME_DIR", readiness)
-        self.assertNotIn("DBUS_SESSION_BUS_ADDRESS", readiness)
-
-        executor_tests = "\n".join(
-            assert_step_state(
-                self, workflow, "Run M1.2 executor tests", condition=UBUNTU
-            )
-        )
-        self.assertIn("BWRAP_UNDER_TEST=/usr/bin/bwrap", executor_tests)
-        self.assertIn(
-            "FLOW_EXECUTOR_DYNAMIC_UNDER_TEST=/work/target/release/flow-executor",
-            executor_tests,
-        )
-        self.assertIn(f"FLOW_EXECUTOR_UNDER_TEST=/work/{M12_EXECUTOR}", executor_tests)
-        self.assertNotIn("XDG_RUNTIME_DIR", executor_tests)
-        self.assertNotIn("DBUS_SESSION_BUS_ADDRESS", executor_tests)
-        self.assertIn(
-            f"runuser --user {M12_COVERAGE_USER} --preserve-environment",
-            executor_tests,
-        )
-        self.assertIn(
-            "cargo test --locked -p flow-agent-executor --test official_linux",
-            step_run(workflow, "Run M1.2 executor tests"),
-        )
-
+        assert_step_state(self, workflow, "Build native installation artifacts", condition=NATIVE)
+        build = step_run(workflow, "Build native installation artifacts")
+        self.assertIn("cargo build --locked --release -p flow-agent-cli -p flow-agent-executor "
+                      "--target-dir target/m12-standard", build)
+        self.assertIn("cargo build --locked --release -p flow-agent-cli "
+                      "--features m12-install-acceptance --target-dir target/m12-acceptance", build)
+        self.assertIn(f"{M12_EXECUTOR} --probe", build)
+        self.assertIn('assert probe["ready"] is True', build)
+        assert_step_state(self, workflow, "Run native release Executor acceptance", condition=NATIVE)
+        release = step_run(workflow, "Run native release Executor acceptance")
+        self.assertIn(f'FLOW_EXECUTOR_UNDER_TEST="$PWD/{M12_EXECUTOR}"', release)
+        self.assertIn("cargo nextest run --locked -p flow-agent-executor "
+                      "--test native_contract --test native_self_protection", release)
+        self.assertNotIn("--skip", release)
+        self.assertLess(workflow.index("      - name: Build native installation artifacts"),
+                        workflow.index("      - name: Run native release Executor acceptance"))
+        self.assertLess(workflow.index("      - name: Run native release Executor acceptance"),
+                        workflow.index("      - name: Check native coverage and installation acceptance"))
+        assert_step_state(self, workflow, "Run public Custom Executor conformance", condition=NATIVE)
         conformance = step_run(workflow, "Run public Custom Executor conformance")
-        self.assertIn(
-            "install -d -m 0755 /usr/local/libexec/watershed",
-            conformance,
-        )
-        self.assertIn(
-            f"install -m 0755 /work/{M12_EXECUTOR} {M12_INSTALLED_EXECUTOR}",
-            conformance,
-        )
-        self.assertIn(f"--executor {M12_INSTALLED_EXECUTOR}", conformance)
-        self.assertNotIn(f"--executor /work/{M12_EXECUTOR}", conformance)
+        self.assertIn("--example custom_executor_conformance", conformance)
+        self.assertIn(f'--executor "$PWD/{M12_EXECUTOR}"', conformance)
 
-        assert_step_state(
-            self, workflow, "Run M1.2 installer acceptance", condition=UBUNTU
-        )
-        installer = step_run(workflow, "Run M1.2 installer acceptance")
-        self.assertIn("docker exec", installer)
-        self.assertIn(M12_CONTAINER, installer)
-        self.assertIn("--env RUNNER_TEMP=/opt/watershed-m12", installer)
-        self.assertNotIn("--env RUNNER_TEMP=/tmp/", installer)
-        self.assertIn(f". {M12_COVERAGE_ENV}", installer)
-        self.assertIn(
-            f"export M12_COVERAGE_BIN_DIR={M12_COVERAGE_BIN_DIR}", installer
-        )
-        self.assertIn("scripts/run-m12-installer-acceptance.sh", installer)
-        installer_acceptance = M12_INSTALLER_ACCEPTANCE.read_text(encoding="utf-8")
-        for required in (
-            "systemctl start user-runtime-dir@10001.service user@10001.service",
-            "systemctl is-active --quiet user@10001.service",
-            "test -S /run/user/10001/bus",
-        ):
-            self.assertIn(required, installer_acceptance)
-        self.assertIn(
-            "scripts/run-m12-readiness-negatives.sh", installer_acceptance
-        )
-        self.assertIn(
-            'target/m12-acceptance/release/flow "$acceptance_bundle/flow"',
-            installer_acceptance,
-        )
-        self.assertEqual(installer_acceptance.count(M12_PRODUCTION_EXECUTOR), 2)
-        self.assertNotIn(M12_EXECUTOR, installer_acceptance)
-        for required in (
-            'coverage_flow="$M12_COVERAGE_BIN_DIR/flow"',
-            'coverage_executor="$M12_COVERAGE_BIN_DIR/flow-executor"',
-            'install -m 0755 "$coverage_flow" "$bundle/flow"',
-            'install -m 0755 "$coverage_executor" "$bundle/flow-executor"',
-            'install -m 0755 "$coverage_flow" "$standard_prefix/bin/flow"',
-            'install -m 0755 "$coverage_flow" "$custom_prefix/bin/flow"',
-            'install -m 0755 "$coverage_executor" '
-            '"$standard_prefix/bin/flow-executor"',
-        ):
-            self.assertIn(required, installer_acceptance)
-        production_check = installer_acceptance.index(
-            'run_as_watershed "$standard_prefix/bin/flow" executor check'
-        )
-        coverage_switch = installer_acceptance.index(
-            'if [ -n "${M12_COVERAGE_BIN_DIR:-}" ]'
-        )
-        readiness_negatives = installer_acceptance.index(
-            "scripts/run-m12-readiness-negatives.sh"
-        )
-        instrumented_check = installer_acceptance.index(
-            'run_as_watershed "$standard_prefix/bin/flow" executor check',
-            coverage_switch,
-        )
-        self.assertLess(production_check, coverage_switch)
-        self.assertLess(coverage_switch, instrumented_check)
-        self.assertLess(instrumented_check, readiness_negatives)
-        selection_check = 'check_custom_selection\n'
-        self.assertIn(selection_check, installer_acceptance[:coverage_switch])
-        self.assertIn(
-            selection_check,
-            installer_acceptance[instrumented_check:readiness_negatives],
-        )
-        self.assertIn("[ -e /var/lib/systemd/linger/watershed ]", installer_acceptance)
-        self.assertIn("[ -L /var/lib/systemd/linger/watershed ]", installer_acceptance)
-        self.assertNotIn("loginctl show-user", installer_acceptance)
+        # CI provisioning is explicit; the product installer never performs it.
+        assert_step_state(self, workflow, "Provision native Linux protection prerequisites",
+                          condition=UBUNTU)
+        prerequisites = step_run(workflow, "Provision native Linux protection prerequisites")
+        for required in ("--no-install-recommends bubblewrap apparmor",
+                         "/usr/bin/bwrap flags=(unconfined)", "userns,",
+                         "apparmor_parser --replace /etc/apparmor.d/watershed-bwrap-userns",
+                         'test "$(sysctl -n kernel.apparmor_restrict_unprivileged_userns)" = 1'):
+            self.assertIn(required, prerequisites)
+        for forbidden in ("sysctl -w", "sysctl --write", "systemctl ", "useradd ", "docker ",
+                          "official_linux", "linux_support", "static-self-reexec"):
+            self.assertNotIn(forbidden, workflow)
 
-        assert_step_state(
-            self, workflow, "Check M1.2 unsupported platforms", condition="matrix.os == 'macos-26'"
-        )
-        self.assertEqual(
-            step_run(workflow, "Check M1.2 unsupported platforms"),
-            "cargo nextest run --locked -p flow-agent-cli --test cli "
-            "-E 'test(=executor::executor_commands_fail_closed_on_unsupported_platform_without_config_mutation)'",
-        )
-
-        evidence = folded_tokens(workflow, "Run M1.2 executor startup evidence")
-        for environment_name in (
-            "GITHUB_SHA",
-            "ImageOS",
-            "ImageVersion",
-            "M12_CONTRACT_IMAGE",
-        ):
-            self.assertIn(environment_name, evidence)
+        installer = M12_INSTALLER_ACCEPTANCE.read_text(encoding="utf-8")
+        for required in ('target/m12-standard/release/flow "$bundle/flow"',
+                         f'{M12_EXECUTOR} "$bundle/flow-executor"',
+                         'target/m12-acceptance/release/flow "$acceptance_bundle/flow"',
+                         f'{M12_EXECUTOR} "$acceptance_bundle/flow-executor"',
+                         'install -m 0755 "$coverage_flow" "$coverage_bundle/flow"',
+                         'install -m 0755 "$coverage_executor" "$coverage_bundle/flow-executor"',
+                         '--prefix "$standard_prefix"',
+                         '--prefix "$custom_prefix" --no-default-executor',
+                         'executor configure --default',
+                         'assert receipt["self_protection_active"] is True'):
+            self.assertIn(required, installer)
+        coverage = installer.index('if [ -n "${M12_COVERAGE_BIN_DIR:-}" ]')
+        self.assertIn('check_custom_selection\n', installer[:coverage])
+        self.assertIn('check_custom_selection\n', installer[coverage:])
+        self.assertIn('/bin/sh "$bundle/install.sh" --prefix "$standard_prefix"', installer[coverage:])
+        self.assertIn('config="$home/Library/Application Support"', installer)
+        self.assertIn('expected_platform=macos-26-aarch64', installer)
+        for source in (installer, M12_READINESS_NEGATIVES.read_text(encoding="utf-8")):
+            for forbidden in ("systemctl ", "runuser ", "useradd ", "chown ", "/root/", "/work/",
+                              "sysctl ", "apparmor_parser", "static-self-reexec"):
+                self.assertNotIn(forbidden, source)
 
     def test_m12_installer_acceptance_prepares_fixture_home_before_init(self):
         installer_acceptance = M12_INSTALLER_ACCEPTANCE.read_text(encoding="utf-8")
         fixture_home_setup = (
             'install -d -m 0700 "$config" "$home" "$agent_home" '
-            '"$fixture_home" "$fixture_workspace"'
-        )
-        fixture_home_ownership = (
-            'chown -R watershed:watershed "$config" "$home" "$agent_home" '
             '"$fixture_home" "$fixture_workspace"'
         )
         fixture_init = (
@@ -886,51 +557,28 @@ class CiWorkflowContractTest(unittest.TestCase):
         )
 
         setup = installer_acceptance.index(fixture_home_setup)
-        ownership = installer_acceptance.index(fixture_home_ownership)
         initialization = installer_acceptance.index(fixture_init)
-        self.assertLess(setup, ownership)
-        self.assertLess(ownership, initialization)
+        self.assertLess(setup, initialization)
+        self.assertIn('mktemp -d "$RUNNER_TEMP/m12-installer.XXXXXX"', installer_acceptance)
 
     def test_m12_installer_acceptance_has_finite_liveness_bounds(self) -> None:
-        workflow = workflow_text()
+        installer = M12_INSTALLER_ACCEPTANCE.read_text(encoding="utf-8")
         readiness = M12_READINESS_NEGATIVES.read_text(encoding="utf-8")
-
-        self.assertNotIn("LLVM_PROFILE_FILE", readiness)
-
-        self.assertRegex(
-            step_run(workflow, "Run M1.2 installer acceptance"),
-            r"exec /usr/bin/timeout\b[\s\S]*?"
-            r"/bin/sh scripts/run-m12-installer-acceptance\.sh",
-        )
-        cleanup = assert_step_state(
-            self,
-            workflow,
-            "Stop controlled M1.2 Ubuntu",
-            condition=f"{UBUNTU} && always()",
-        )
-        self.assertIn(f"docker rm --force {M12_CONTAINER}", "\n".join(cleanup))
-        self.assertRegex(
-            readiness,
-            r"run_with_deadline\s+/usr/bin/unshare\s+--mount\b[\s\S]*?"
-            r"negative_status=\$\?[\s\S]*?"
-            r"cleanup_delegated_scope\s+\"\$fault_dir\"",
-        )
-        self.assertRegex(
-            readiness,
-            r"run_with_deadline\s+/usr/bin/setpriv\b[\s\S]*?"
-            r'"\$M12_STANDARD_PREFIX/bin/flow" executor check',
-        )
-        self.assertRegex(
-            readiness,
-            r"run_with_deadline\s+/usr/bin/env\b[\s\S]*?"
-            r'"\$M12_INSTALL_BUNDLE/install\.sh"',
-        )
-        self.assertNotIn("2>&1", readiness)
-        for stream in ("missing_manager", "missing_manager_install"):
-            self.assertIn(f'test ! -s "${stream}_stdout"', readiness)
-            self.assertIn(
-                f'case "$(/bin/cat "${stream}_stderr")" in', readiness
-            )
+        helper = M12_NATIVE_HELPER.read_text(encoding="utf-8")
+        self.assertIn('exec node scripts/run-python.mjs scripts/m12_native.py acceptance "$0"', installer)
+        self.assertIn("exec node scripts/run-python.mjs scripts/m12_native.py readiness", readiness)
+        self.assertIn('run(["/bin/sh", sys.argv[2], "--bounded"], timeout=600, capture=False)', helper)
+        for required in ("timeout=20", "start_new_session=True",
+                         "child.communicate(timeout=timeout)",
+                         "os.killpg(child.pid, signal.SIGTERM)",
+                         "os.killpg(child.pid, signal.SIGKILL)",
+                         "child.communicate(timeout=2)",
+                         'assert checked.returncode == 65',
+                         'assert checked.stdout == b""',
+                         'assert installed.returncode == 1',
+                         'assert list((prefix / "bin").iterdir()) == []'):
+            self.assertIn(required, helper)
+        self.assertNotIn("subprocess.STDOUT", helper)
 
 
 if __name__ == "__main__":

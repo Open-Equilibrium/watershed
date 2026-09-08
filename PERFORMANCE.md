@@ -47,9 +47,7 @@ The [M1.1 limits matrix](flow-agent/benchmarks/M1_1_BUDGETS.md) owns every fixed
 
 ### M1.2 Executor evidence
 
-This is current legacy-runtime evidence, not the ADR-0166 release promise. The replacement [security contract](SECURITY.md#accepted-flow-agent-security-target) removes the general process-capacity/isolation requirements; migrate the workload with the runtime under the selected ADR-0174 scope, while retaining comparable complete-lifecycle observations. Do not infer hostile cleanup from bounded waiting.
-
-The one-shot Executor and Sandbox architecture is canonical in `PROTOCOL.md`. The [M1.2 startup evidence](flow-agent/benchmarks/M1_2_STARTUP_EVIDENCE.md) records one fixed productive Tool invocation per fresh child as one unadjusted `executor_elapsed_ns` distribution across preparation, readiness, transient scope/cgroup creation, the one-shot Sandbox lifecycle, complete cleanup and result/receipt validation. Review the design for avoidable probe, policy, descriptor and process-start work without weakening readiness or isolation; Custom Executor performance is administrator-owned. The configured process/thread capacity is a hard security capability, never a performance threshold.
+The [M1.2 startup evidence](flow-agent/benchmarks/M1_2_STARTUP_EVIDENCE.md) owns the fixed one-noop workload, measured interval and report contract. Native Linux and macOS hosts retain separate, unadjusted `executor_elapsed_ns` distributions through preparation, readiness, the one-shot Executor/Tool lifecycle and exact result/receipt validation, with mandatory own-file protection under the [accepted security contract](SECURITY.md#accepted-flow-agent-security-target). Never pool their observations or substitute one host's evidence for the other. Review avoidable probe, request, descriptor and process-start work without weakening readiness or protection; Custom Executor performance is administrator-owned. Historical container observations measure the legacy boundary, not replacement native evidence. Bounded waiting does not prove hostile-descendant cleanup.
 
 ## Meta-Harness
 

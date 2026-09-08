@@ -201,8 +201,6 @@ pub(crate) fn recovered_tool_value(
     proto::validate_enforcement_receipt_v0(
         &output.enforcement,
         &output.enforcement.applied_policy_digest,
-        output.enforcement.runtime_profile,
-        output.enforcement.max_concurrent_processes_and_threads,
     )
     .map_err(|_| {
         RuntimeError::Protocol(

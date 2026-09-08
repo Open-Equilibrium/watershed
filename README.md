@@ -4,7 +4,7 @@ Watershed is an **AGPL/free-software AI-native work platform** for reusable, mea
 
 ## Project status
 
-**M1.2 — Flow Agent OS isolation.** Current milestone status is canonical in [PLAN.md](PLAN.md#m12--flow-agent-os-isolation). The current legacy implementation runs productive Tools only on Ubuntu 24.04 x64, including Custom Executors; other platforms fail closed. The approved, unimplemented replacement is [trusted Tools with native Flow-file protection](SECURITY.md#accepted-flow-agent-security-target) on Linux x86_64 and macOS ARM64. The native mechanism and first-release protected scope are decided; implementation and native product verification remain pending.
+**M1.2 — Flow Agent OS isolation, in progress.** The runtime now implements [trusted Tools with native Flow-file protection](SECURITY.md#accepted-flow-agent-security-target) on Linux x86_64 and macOS ARM64. Native acceptance, installation and repository closeout must pass before this becomes a release claim. Current status is canonical in [PLAN.md](PLAN.md#m12--flow-agent-os-isolation).
 
 [PLATFORMS.md](PLATFORMS.md) defines each product's native release targets, current capabilities and required verification; compilation alone is not a support claim.
 
@@ -12,11 +12,11 @@ Watershed is an **AGPL/free-software AI-native work platform** for reusable, mea
 
 ```
 core/         core-script (building-block model/parser) and core-policy
-              (capability model + policy→sandbox compiler)
+              (Tool invocation validation and policy artifacts)
 proto/        proto: event and Executor wire schemas/types (the integration seam)
 flow-agent/   flow-agent-core (engine/runtime/session), flow-agent-cli
               (human CLI, machine-readable run mode, tail/replay/resume), and
-              flow-agent-executor (one-shot Ubuntu isolation companion)
+              flow-agent-executor (one-shot native self-protection companion)
 meta-harness/ host-scoped headless control plane for local CLI agents
 liquid/       local-first Page/Block workspace and app-building product
 docs/         governance, specs, decisions
@@ -33,67 +33,39 @@ cargo build --locked --workspace
 cargo nextest run --config 'target."cfg(all())".runner = ["node", "../../scripts/run-isolated-rust-test.mjs"]' --locked --workspace --all-targets
 ```
 
-### Developer/test installation on Ubuntu 24.04 x64
+### Developer/test installation on Linux or macOS
 
-The end-user distribution must follow the [prebuilt-artifact installation contract](SECURITY.md#m12-tool-execution-trust-boundary); it is not implemented yet. For developer/test staging, build one administrator-owned bundle from the repository root. The installer requires `install.sh`, `flow` and, for the standard path, the static `flow-executor` as regular executable siblings. It installs into an unused absolute prefix and does not perform upgrades.
+The end-user distribution must follow the [prebuilt-artifact installation contract](SECURITY.md#m12-tool-execution-trust-boundary). Download packaging remains pending. For local staging on a supported native host, build a private bundle from the repository root:
 
 ```sh
-sudo apt-get update
-sudo apt-get install --yes --no-install-recommends \
-  apparmor bubblewrap build-essential musl-tools procps util-linux
-rustup target add x86_64-unknown-linux-musl
-cargo build --locked --release -p flow-agent-cli --bin flow
-cargo build --locked --release -p flow-agent-executor --bin flow-executor \
-  --target x86_64-unknown-linux-musl
-
-install_bundle=$(sudo mktemp -d /var/tmp/watershed-install.XXXXXX)
-sudo chmod 0755 "$install_bundle"
-sudo install -m 0755 install/install.sh "$install_bundle/install.sh"
-sudo install -m 0755 target/release/flow "$install_bundle/flow"
-sudo install -m 0755 \
-  target/x86_64-unknown-linux-musl/release/flow-executor \
-  "$install_bundle/flow-executor"
+cargo build --locked --release -p flow-agent-cli -p flow-agent-executor
+install_bundle=$(mktemp -d)
+install -m 0755 install/install.sh target/release/flow \
+  target/release/flow-executor "$install_bundle/"
+/bin/sh "$install_bundle/install.sh" --prefix "$HOME/.local/watershed"
+"$HOME/.local/watershed/bin/flow" executor check
 ```
 
-Choose one installation path. The standard path installs and checks the bundled Default Executor. On Ubuntu 24.04, authorize its unprivileged Bubblewrap user namespace once:
+Use a fresh prefix: the installer never upgrades existing binaries. It checks the Default Executor as the intended unprivileged user. Missing host prerequisites are errors; it does not update a kernel, change system security policy or start a privileged service. See [PLATFORMS.md](PLATFORMS.md) for native prerequisites and verification.
+
+Alternatively, omit the Default Executor explicitly and select an administrator-reviewed Custom Executor as the operating-system account that will run Flow:
 
 ```sh
-sudo tee /etc/apparmor.d/watershed-bwrap-userns >/dev/null <<'APPARMOR'
-abi <abi/4.0>,
-include <tunables/global>
-
-/usr/bin/bwrap flags=(unconfined) {
-  userns,
-}
-APPARMOR
-sudo apparmor_parser --replace /etc/apparmor.d/watershed-bwrap-userns
-```
-
-```sh
-sudo /bin/sh "$install_bundle/install.sh" --prefix /opt/watershed
-/opt/watershed/bin/flow executor check
-```
-
-Run the command from the unprivileged operating-system account that will run Flow. The installer verifies the Default Executor as that account; if it fails, do not disable the kernel restriction.
-
-The custom path explicitly omits the Default Executor. After installation, the operating-system account that will run Flow Agent selects an administrator-reviewed absolute Custom Executor and checks it; do not use `sudo` for these two configuration commands unless that account is root.
-
-```sh
-sudo /bin/sh "$install_bundle/install.sh" \
-  --prefix /opt/watershed --no-default-executor
-/opt/watershed/bin/flow executor configure --path /absolute/path/to/custom-executor
-/opt/watershed/bin/flow executor check
+/bin/sh "$install_bundle/install.sh" \
+  --prefix "$HOME/.local/watershed" --no-default-executor
+"$HOME/.local/watershed/bin/flow" executor configure --path /absolute/path/to/custom-executor
+"$HOME/.local/watershed/bin/flow" executor check
 ```
 
 `/bin/sh install/install.sh --help` is the canonical option summary. Custom Executor readiness validates the protocol boundary but is not a compatibility or security certification; see the [Executor architecture](docs/concept/flow-agent-executor-architecture.md).
 
 Set `FLOW_AGENT_HOME` to an unused absolute path before exercising local authoring or runtime state. Workspace layout is illustrated in [`docs/concept/V-Spec_FlowAgent.html`](docs/concept/V-Spec_FlowAgent.html). [`PROTOCOL.md`](PROTOCOL.md) defines Registry authoring; the [registry schema](core/core-script/schemas/registry-block.schema.json) documents its intended field/type shape. Checked-in deterministic examples live under [`flow-agent/fixtures/`](flow-agent/fixtures/) and make no provider, subprocess or isolation claim.
 
-For productive execution, initialize the Global Flow home with `flow init`, configure its provider and model through the V-Spec, inspect authoring grammar with `flow create <tool|instruction|phase|flow> --help`, authenticate through the commands in [PROTOCOL.md](PROTOCOL.md), then run the authored Flow. The standard Ubuntu installation resolves its sibling `flow-executor`; `flow executor check` reports readiness. In this legacy implementation, Engineers configure Tools, exact mounts and runtime-read profiles; those fields are not the approved replacement schema. The [security contract](SECURITY.md#m12-tool-execution-trust-boundary) owns the productive boundary.
+For productive execution, initialize the Global Flow home with `flow init`, configure its provider and model through the V-Spec, inspect authoring grammar with `flow create <tool|instruction|phase|flow> --help`, authenticate through the commands in [PROTOCOL.md](PROTOCOL.md), then run the authored Flow. Engineers configure Tool commands and accepted parameters and trust their complete implementations, helpers and delegation chains. The [security contract](SECURITY.md#m12-tool-execution-trust-boundary) owns the productive boundary.
 
 The Global Flow home and its configuration authority are defined in [PROTOCOL.md](PROTOCOL.md#local-run-storage-and-m11-conversation-trees).
 
-The complete command, storage and Executor contract is in [`PROTOCOL.md`](PROTOCOL.md). Current legacy Tool networking is deny-all. The approved replacement does not promise general network containment; Engineers must trust Tool implementations and their dependency/delegation chains.
+The complete command, storage and Executor contract is in [`PROTOCOL.md`](PROTOCOL.md). Native self-protection is not general filesystem, network or hostile-Tool containment.
 
 ## Product boundaries
 

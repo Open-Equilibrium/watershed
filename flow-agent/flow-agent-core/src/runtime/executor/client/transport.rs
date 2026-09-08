@@ -1,7 +1,6 @@
 use super::super::process::{
     child_exited_without_reaping, configure_executor_child, terminate_child_or_fail_stop,
 };
-use super::preparation::PreparedMount;
 use super::{invalid_response, runtime_open_error};
 use crate::runtime::types::RuntimeError;
 use std::{
@@ -23,13 +22,15 @@ pub(super) enum ExecutorPreflightProcess {
 
 pub(super) fn duplicate_executor_descriptor(executable: &File) -> Result<OwnedFd, RuntimeError> {
     let minimum = i32::try_from(
-        proto::EXECUTOR_MOUNT_DESCRIPTOR_BASE_V0 as usize + proto::MAX_EXECUTOR_MOUNTS_V0 + 64,
+        proto::EXECUTOR_PROTECTED_DESCRIPTOR_BASE_V0 as usize
+            + proto::MAX_EXECUTOR_PROTECTED_OBJECTS_V0
+            + 64,
     )
     .expect("protocol descriptor bounds fit i32");
     rustix::io::fcntl_dupfd_cloexec(executable, minimum).map_err(|_| {
         super::executor_error(
             proto::ExecutorErrorCodeV0::Unavailable,
-            "validated Executor descriptor could not be moved outside the mount range",
+            "validated Executor descriptor could not be moved outside the protected descriptor range",
         )
     })
 }
@@ -80,17 +81,17 @@ impl Drop for ChildGuard {
 
 pub(super) fn preflight_one_shot(
     executable: &File,
-    mounts: &[PreparedMount],
+    protected_descriptors: &[OwnedFd],
     request: &proto::ExecutorRequestV0,
     request_bytes: &[u8],
 ) -> Result<ExecutorPreflightProcess, RuntimeError> {
     let now = Instant::now;
     preflight_one_shot_with_deadline(
         executable,
-        mounts,
+        protected_descriptors,
         request,
         request_bytes,
-        || executor_deadline_at(request.limits.timeout_ms, now()),
+        || executor_deadline_at(request.resolved_policy.limits.timeout_ms, now()),
         |_| Ok(()),
         &now,
     )
@@ -98,7 +99,7 @@ pub(super) fn preflight_one_shot(
 
 fn preflight_one_shot_with_deadline(
     executable: &File,
-    mounts: &[PreparedMount],
+    protected_descriptors: &[OwnedFd],
     request: &proto::ExecutorRequestV0,
     request_bytes: &[u8],
     deadline: impl FnOnce() -> Result<Instant, RuntimeError>,
@@ -106,20 +107,20 @@ fn preflight_one_shot_with_deadline(
     now: &impl Fn() -> Instant,
 ) -> Result<ExecutorPreflightProcess, RuntimeError> {
     let executor = duplicate_executor_descriptor(executable)?;
-    let inherited_path = format!("/proc/self/fd/{}", executor.as_raw_fd());
+    let inherited_path = super::super::process::executor_image_path(executor.as_raw_fd());
     let high_base = executor
         .as_raw_fd()
         .checked_add(1)
         .ok_or_else(|| invalid_response("Executor descriptor range overflowed"))?;
-    let inherited = mounts
+    let inherited = protected_descriptors
         .iter()
-        .map(|mount| rustix::io::fcntl_dupfd_cloexec(&mount.descriptor, high_base))
+        .map(|descriptor| rustix::io::fcntl_dupfd_cloexec(descriptor, high_base))
         .collect::<Result<Vec<_>, _>>()
         .map_err(runtime_open_error)?;
     let remaps = inherited
         .iter()
-        .zip(&request.mounts)
-        .map(|(source, mount)| (source.as_raw_fd(), mount.descriptor as i32))
+        .zip(&request.resolved_policy.protected_objects)
+        .map(|(source, object)| (source.as_raw_fd(), object.descriptor as i32))
         .collect::<Vec<_>>();
     let reserve_standard_descriptor = || {
         File::open("/dev/null").map_err(|_| {
@@ -255,7 +256,7 @@ fn preflight_one_shot_with_deadline(
                         stderr_read,
                         request_id: request.request_id.clone(),
                         policy_digest: request.policy_digest.clone(),
-                        timeout_ms: request.limits.timeout_ms,
+                        timeout_ms: request.resolved_policy.limits.timeout_ms,
                     };
                     return before_executor_deadline(hard_deadline, now, || {
                         ExecutorPreflightProcess::Ready(waiting)
@@ -489,7 +490,7 @@ fn before_executor_deadline<T>(
 #[cfg(test)]
 pub(super) fn preflight_one_shot_at_deadline(
     executable: &File,
-    mounts: &[PreparedMount],
+    protected_descriptors: &[OwnedFd],
     request: &proto::ExecutorRequestV0,
     request_bytes: &[u8],
     deadline: Instant,
@@ -498,7 +499,7 @@ pub(super) fn preflight_one_shot_at_deadline(
 ) -> Result<ExecutorPreflightProcess, RuntimeError> {
     preflight_one_shot_with_deadline(
         executable,
-        mounts,
+        protected_descriptors,
         request,
         request_bytes,
         || Ok(deadline),

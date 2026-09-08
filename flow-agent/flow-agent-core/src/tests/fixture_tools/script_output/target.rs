@@ -1,6 +1,5 @@
 use super::super::super::helpers::empty_workspace;
-use super::super::super::{helpers::fixture_runtime_policy, support::assert_denied};
-use crate::runtime::fixture_tools::validate_script_write_target;
+use crate::runtime::fixture_tools::compile_own_script_operations;
 use crate::runtime::{
     fixture_tools::anchored_workspace_write_path, fs_guards::with_anchored_replacement_temp,
 };
@@ -40,30 +39,12 @@ fn publish_stays_bound_to_the_opened_target_directory() {
 }
 
 #[test]
-fn exact_write_mounts_cover_nested_and_out_of_scope_targets() {
-    let (_registry, policy) = fixture_runtime_policy("hello-flow", "hello-flow");
-    let command_policy = policy
-        .commands
-        .iter()
-        .find(|command| command.tool_id == "write-summary")
-        .expect("write-summary policy exists");
-    assert_eq!(
-        validate_script_write_target(command_policy, "out/summary.txt")
-            .expect("declared write target accepted"),
-        "out/summary.txt"
-    );
-    let mut file_scoped_policy = command_policy.clone();
-    file_scoped_policy.filesystem.writable_mounts = vec!["workspace/out/summary.txt".to_owned()];
-    assert_denied(
-        validate_script_write_target(&file_scoped_policy, "out/summary.txt")
-            .expect_err("file-scoped writes cannot reserve replacement temps"),
-        core_policy::DenyReasonCode::WriteDenied,
-        "replacement temp",
-    );
-    assert_denied(
-        validate_script_write_target(command_policy, "other/summary.txt")
-            .expect_err("out-of-scope write must reject"),
-        core_policy::DenyReasonCode::WriteDenied,
-        "lacks write scope",
-    );
+fn fixture_write_targets_accept_workspace_relative_outputs() {
+    for target in ["out/summary.txt", "other/summary.txt", "summary.txt"] {
+        let write = compile_own_script_operations(&format!("printf 'hello\\n' > {target}"))
+            .expect("literal workspace-relative fixture output accepted")
+            .expect("fixture plans an output");
+        assert_eq!(write.target, target);
+        assert_eq!(write.contents, b"hello\n");
+    }
 }

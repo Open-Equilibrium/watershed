@@ -4,15 +4,11 @@ use std::{collections::BTreeSet, fmt};
 
 mod command;
 mod environment;
-mod filesystem;
-mod network;
 
 pub use command::{AllowedParameterPolicy, CommandPolicy};
 pub use environment::{EnvironmentDefault, EnvironmentPolicy};
-pub use filesystem::FilesystemPolicy;
-pub use network::NetworkPolicy;
 
-/// Compiled policy artifact for one target sandbox backend.
+/// Compiled Tool invocation and Phase availability policy.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PolicyArtifact {
@@ -26,8 +22,6 @@ pub struct PolicyArtifact {
     pub runtime_limits: RuntimeLimits,
     /// Source flow definition id.
     pub source_flow_definition_id: String,
-    /// Sandbox target for this artifact.
-    pub target: PolicyTarget,
 }
 
 impl PolicyArtifact {
@@ -41,12 +35,6 @@ impl PolicyArtifact {
 
         for command in &self.commands {
             command.validate()?;
-            if !command.network.allow.is_empty() {
-                return Err(policy_artifact_error(format!(
-                    "tool {} network allow must be empty for linux-bubblewrap-seccomp policy artifacts",
-                    command.tool_id
-                )));
-            }
         }
         self.validate_phase_scope()?;
 
@@ -101,14 +89,6 @@ impl PolicyArtifact {
 
         Ok(())
     }
-}
-
-/// Target sandbox backend represented by a policy artifact.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum PolicyTarget {
-    /// Ubuntu 24.04 x64 Bubblewrap/seccomp policy target.
-    LinuxBubblewrapSeccomp,
 }
 
 /// Error returned when a policy artifact fails validation.
@@ -235,15 +215,6 @@ pub fn canonical_artifact_json(artifact: &PolicyArtifact) -> Result<String, Poli
             parameter.allowed_values.sort();
         }
         command.environment.allow.sort();
-        command.filesystem.read_only_mounts.sort();
-        command.filesystem.writable_mounts.sort();
-        command.network.allow.sort_by(|a, b| {
-            a.transport
-                .as_str()
-                .cmp(b.transport.as_str())
-                .then_with(|| a.cidr.cmp(&b.cidr))
-                .then_with(|| a.port.cmp(&b.port))
-        });
     }
     artifact
         .phase_scope

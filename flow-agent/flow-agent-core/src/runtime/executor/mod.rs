@@ -1,7 +1,5 @@
 mod client;
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 mod config;
-#[cfg(any(all(target_os = "linux", target_arch = "x86_64"), test))]
 mod probe;
 mod process;
 mod selection;
@@ -12,9 +10,9 @@ pub(crate) use client::{
     ExecutorDispatchOutcome, ExecutorPreflightOutcome, PreparedExecutor, PreparedExecutorTool,
     PreparedExecutorWaiting,
 };
-#[cfg(all(test, target_os = "linux", target_arch = "x86_64"))]
+#[cfg(test)]
 pub(crate) use config::{EXECUTOR_CONFIG_MAX_BYTES, ExecutorConfigStore};
-#[cfg(all(test, target_os = "linux", target_arch = "x86_64"))]
+#[cfg(test)]
 pub(crate) use selection::default_executor_path;
 pub use selection::{
     ExecutorSelection, ExecutorSelectionSource, configure_default_executor,

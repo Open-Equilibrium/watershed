@@ -11,7 +11,6 @@ flowchart TD
   C[flow-agent-cli] --> F[flow-agent-core]
   C --> S[core-script]
   C --> R[proto]
-  E[flow-agent-executor] --> P[core-policy]
   E[flow-agent-executor] --> R
   F --> P[core-policy]
   F --> S
@@ -21,7 +20,7 @@ flowchart TD
   S --> R
 ```
 
-The package manifests are the executable dependency source of truth. `flow-agent-executor` is the companion binary launched through the protocol, not a library dependency of Flow Agent core.
+The package manifests are the executable dependency source of truth. Test-only dependencies are omitted. `flow-agent-executor` is the companion binary launched through the protocol, not a library dependency of Flow Agent core.
 
 ## Flow Agent runtime responsibilities
 
@@ -40,11 +39,13 @@ flowchart TD
   R --> Y[policy resolution]
   Y --> E[one-shot Executor client]
   E --> X[flow-executor]
-  X --> B[Ubuntu Bubblewrap and seccomp]
+  X --> B[Linux Bubblewrap and seccomp]
+  X --> M[macOS Seatbelt]
   B --> T[Tool process and descendants]
+  M --> T
 ```
 
-The Fixture path is deterministic and in process and makes no OS-isolation claim. Current legacy productive Tool execution uses the one-shot Executor contract and fails closed outside Ubuntu; the accepted replacement remains unimplemented. Provider-only Flows have a separate [platform boundary](../PLATFORMS.md).
+The Fixture path is deterministic and in process and makes no OS-isolation claim. Productive execution shares request validation, Ready/Start, supervision and result handling; native modules enforce only the selected self-protection boundary. This source implementation still requires native replacement acceptance. Provider-only Flows have a separate [platform boundary](../PLATFORMS.md). [SECURITY.md](../SECURITY.md) defines guarantees and trusted Tool/delegation responsibilities.
 
 ### Persistence and inputs
 

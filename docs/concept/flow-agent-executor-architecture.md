@@ -1,6 +1,6 @@
 # Flow Agent execution and security architecture
 
-**Status: accepted first-release replacement architecture, not implemented.** The [security contract](../../SECURITY.md#accepted-flow-agent-security-target) is normative. Mac Seatbelt, protected overlapping locations and this installation's protected inventory are selected. Later features and discussion context belong only to the [roadmap](../../PLAN.md#later-flow-agent-roadmap). Diagrams specify intended first-release outcomes, not evidence that the new boundary exists. Current Ubuntu execution still uses the legacy one-shot Bubblewrap/seccomp/cgroup implementation. macOS Tool execution still fails closed.
+**Status: replacement integrated; native verification pending.** The [security contract](../../SECURITY.md#accepted-flow-agent-security-target) is normative. Linux Bubblewrap/seccomp and Mac Seatbelt now implement the narrow replacement, including selected-home protection and warned overlapping locations. The diagrams explain the required boundary; they are not full runtime verification. [TESTING.md](../../TESTING.md#m12-transition-and-executor-evidence) owns native results and gaps. Future features belong only to the [roadmap](../../PLAN.md#later-flow-agent-roadmap).
 
 ## Responsibility and architecture
 
@@ -14,19 +14,8 @@ Flow Agent controls the workflow; the Executor starts and supervises a Tool; the
 | Native boundary | Block direct modifications of protected Flow objects by the Tool and its children. | Contain all other host effects, independent services or privileged actors. |
 | Tool and dependency chain | Implement the admitted action correctly even for hostile inputs. | Rely on Flow to repair unsafe path handling, shell construction or delegated authority. |
 
-```mermaid
-flowchart TD
-  Engineer["Engineer: manually configured trusted definitions"] --> Flow["Flow Agent: validate and retain authority"]
-  Model["Untrusted model request"] --> Flow
-  Flow --> Executor["Short-lived flow-executor"]
-  Executor --> Guard["Mandatory native write protection"]
-  Guard --> Tool["Tool process"]
-  Tool --> Child["New helper: inherits protection"]
-  Flow --> Files["Protected Flow files: internal runtime writes and manual authoring"]
-  Tool -.-> Service["Independent service: delegated authority"]
-```
 
-The existing `flow` / `flow-executor` separation remains useful; removing broad isolation does not require embedding every launcher in the controller. Flow owns selection and launch authorization. The companion never receives permission to let a Tool overwrite protected files. There is no Tool configuration-proposal path in this release. Current administrator-selected Custom Executors remain part of the trusted installation, without third-party certification; the replacement must not make a Custom selection an automatic protection bypass.
+The `flow` / `flow-executor` separation remains. Flow admits the protected inventory once under publication leases and validates each invocation; the short-lived companion receives the exact resolved policy and establishes protection before the first Tool instruction. [PROTOCOL.md](../../PROTOCOL.md#m12-executor-protocol-adr-0146-adr-0160-adr-0161-adr-0162) owns descriptor, digest and receipt details. Configuration administration is manual. Administrator-selected Custom Executors remain trusted installation code and cannot serve as an automatic protection bypass; only explicit Custom selection permits an absent official sibling (ADR-0175).
 
 ## Security case matrix
 
@@ -53,9 +42,10 @@ flowchart TD
   Check -->|No| Reject["Reject before Tool effects"]
   Check -->|Yes| Ready{"Mandatory native boundary ready?"}
   Ready -->|No| Stop["Fail before launch"]
-  Ready -->|Yes| Intent["Persist intent and authorize launch"]
-  Intent --> Run["Execute trusted Tool"]
-  Run --> Result["Record bounded result"]
+  Ready -->|Yes| Intent["Persist intent; retain same Executor after Ready"]
+  Intent --> Start["Commit tool.started; send matching Start"]
+  Start --> Run["Establish protection; execute trusted Tool"]
+  Run --> Result["Validate self-protection receipt; persist bounded result"]
 ```
 
 A read Tool must enforce its own promised project scope, including links, replacement races and hostile path input relevant to its implementation. Flow's parameter validation does not inspect every later file operation. A build Tool's dependency chain includes build scripts, plugins and project code, including code the model may have edited. A correct implementation must not confuse untrusted text with new execution authority.
@@ -77,7 +67,7 @@ sequenceDiagram
   Note over F: No restart with broader direct-write authority
 ```
 
-A direct-write block is not a whole-Tool rollback. The Tool may already have edited other files or contacted a service. A Tool may also catch an OS error and report success; the blocked write stays blocked, but Flow does not thereby know the Tool's result is truthful. The final native mechanism must cover object identity and child inheritance, not just match a path in command text. No Tool permission lifts this guard.
+A direct-write block is not a whole-Tool rollback. The Tool may already have edited other files or contacted a service. A Tool may also catch an OS error and report success; the blocked write stays blocked, but Flow does not thereby know the Tool's result is truthful. Native acceptance must prove object identity and child inheritance for the integrated mechanism; a path match in command text is insufficient. No Tool permission lifts this guard.
 
 ### 3. Compromised Tool
 
@@ -131,12 +121,12 @@ flowchart TD
   Guard -->|Yes| Start["Durable authorization then Tool launch"]
   Start --> Terminal{"Reliable terminal evidence?"}
   Terminal -->|Yes| Record["Record observed outcome"]
-  Terminal -->|No: timeout, cancellation or crash| Unknown["Stop further dispatch; preserve uncertainty"]
+  Terminal -->|Missing after dispatch| Unknown["Stop further dispatch; preserve uncertainty"]
   Unknown --> Cleanup["Attempt supported cleanup; report only what is known"]
   Cleanup --> NoReplay["Do not automatically repeat uncertain effects"]
 ```
 
-A timeout is not proof that every helper stopped. Removing hostile-descendant cleanup guarantees does not remove bounded waits, cancellation handling or honest recovery. A write restriction must survive in a child that outlives its parent for as long as that child can run; the new native acceptance must demonstrate that inheritance property. It does not promise that the child cannot keep changing its other admitted resources.
+A timeout is not proof that every helper stopped. Removing hostile-descendant cleanup guarantees does not remove bounded waits, cancellation handling or honest recovery. A write restriction must survive in a child that outlives its parent for as long as that child can run; native acceptance must demonstrate that inheritance property. It does not promise that the child cannot keep changing its other admitted resources.
 
 ### 7. Parallel agents
 
@@ -170,10 +160,10 @@ flowchart TD
 
 An outer container, VM or sandbox can add filesystem, network or resource limits. It may also block the native mechanism, provider connection or intended Mac automation. Compatibility must be tested with real nested execution; there is no support promise for arbitrary sandbox products. A user-selected outer environment does not turn a Linux guest into native macOS Tool support or replace required native release evidence.
 
-## Migration and native acceptance
+## Integration and native acceptance
 
-The [native protection proposal](flow-agent-native-protection-proposal.md) specifies the evaluated candidate's object/lifecycle rules, native App Sandbox comparison and outstanding product acceptance. Only the explicitly accepted rules in `SECURITY.md`, including ADR-0169's file-layout restrictions, are policy; experimental success is not shipping approval.
+The [native protection design](flow-agent-native-protection-proposal.md) owns protected-object discovery, alias/ancestor invariants and the historical App Sandbox comparison. Linux uses a host-root bind with targeted read-only protection, read-only `/proc`, private `/dev` and seccomp; Mac uses narrow parameter-bound Seatbelt rules. Neither enforces general network denial, runtime-read profiles or process/thread capacity. The invariant is mandatory direct-write protection of this installation's selected home, platform stores and required program objects, inherited by new helpers. Other homes and independent services remain outside it.
 
-The [current wire contract](../../PROTOCOL.md#m12-executor-protocol-adr-0146-adr-0160-adr-0161-adr-0162), [legacy test matrix](../../TESTING.md#m12-transition-and-executor-evidence) and [legacy startup workload](../../flow-agent/benchmarks/M1_2_STARTUP_EVIDENCE.md) remain executable evidence for the code that exists. Do not publish new permission fields while silently retaining incompatible semantics, remove old checks before their replacement, or claim that a mock proves native protection.
+Runtime, policy/schema, wire and fixtures have been migrated. The [native test matrix](../../TESTING.md#m12-transition-and-executor-evidence) and release-artifact acceptance are being migrated from the prior systemd/container gate to Ubuntu 24.04 x86_64 and macOS 26 ARM64. Native GREEN for this replacement is not available. Historical feasibility and passing Windows shared tests cannot establish complete protected-set admission, publication races, child lifetime or native installation correctness.
 
-The selected boundary requires a coherent schema/runtime/fixture migration. Native tests must cover the outcomes above on the [release targets](../../PLATFORMS.md), including ordinary Mac development workloads, child inheritance, direct write/delete/replacement, missing protection, manual/internal publication, cancellation and crash outcomes. Benchmark the new complete invocation lifecycle without estimated thresholds. External-service and cross-installation exclusions must remain visible in user-facing claims. Standard Tools and marketplace decisions remain [D-066](../decisions/open-decisions.html#d-066) and [D-067](../decisions/open-decisions.html#d-067).
+Acceptance must retain ordinary shell/C, Python and npm build workloads with explicit allowed controls, alongside protected-write/alias/ancestry denial, global versus local instructions, missing protection, manual/internal publication, bounded output, cancellation and honest crash/recovery outcomes. [PERFORMANCE.md](../../PERFORMANCE.md) owns complete lifecycle observations. Standard Tools and the later marketplace remain [D-066](../decisions/open-decisions.html#d-066) and [D-067](../decisions/open-decisions.html#d-067).

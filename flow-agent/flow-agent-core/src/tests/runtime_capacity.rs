@@ -316,14 +316,6 @@ impl ProductiveToolExecutor for LiveLimitToolExecutor {
         unreachable!()
     }
 
-    fn max_concurrent_processes_and_threads(&self, _prepared: &Self::Prepared) -> u32 {
-        unreachable!()
-    }
-
-    fn runtime_profile(&self, _prepared: &Self::Prepared) -> proto::RuntimeReadProfileV0 {
-        unreachable!()
-    }
-
     fn preflight(
         &mut self,
         _prepared: Self::Prepared,

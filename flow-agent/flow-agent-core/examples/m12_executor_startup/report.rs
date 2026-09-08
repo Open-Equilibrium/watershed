@@ -1,9 +1,6 @@
-use super::{
-    ChildMeasurement, Config, M12_EXECUTOR_STARTUP_PROCESS_CAPACITY, fresh_child_measurement,
-};
+use super::{ChildMeasurement, Config, fresh_child_measurement};
 use crate::evidence_support::{
-    DynError, Environment as CommonEnvironment, bounded_environment_value,
-    current_environment as common_environment, percentile, write_jsonl,
+    DynError, Environment, current_environment as common_environment, percentile, write_jsonl,
 };
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -14,31 +11,6 @@ const REPORT_SUITE: &str = "Flow Agent M1.2 Executor startup evidence";
 const BENCHMARK: &str = "prepared_selected_executor_single_noop_tool";
 
 #[derive(Serialize)]
-struct Environment {
-    os: &'static str,
-    arch: &'static str,
-    rustc: String,
-    reference_platform: bool,
-    commit_sha: Option<String>,
-    runner_image: Option<String>,
-    runner_image_version: Option<String>,
-    contract_image: Option<String>,
-    logical_cpus: usize,
-    cpu_model: Option<String>,
-    total_memory_bytes: Option<u64>,
-    host_isolation: HostIsolation,
-}
-
-#[derive(Serialize)]
-struct HostIsolation {
-    systemd_version: Option<String>,
-    cgroup_version: Option<u8>,
-    cgroup_path: Option<String>,
-    pids_controller_available: bool,
-    pids_events_available: bool,
-}
-
-#[derive(Serialize)]
 struct Metadata {
     kind: &'static str,
     schema: &'static str,
@@ -46,7 +18,7 @@ struct Metadata {
     warmup_samples: usize,
     measured_samples: usize,
     tool_executions_per_fresh_child: usize,
-    max_concurrent_processes_and_threads: u32,
+    self_protection_required: bool,
     environment: Environment,
 }
 
@@ -57,6 +29,7 @@ struct RawSample {
     benchmark: &'static str,
     sample: usize,
     executor_elapsed_ns: u64,
+    self_protection_active: bool,
 }
 
 #[derive(Serialize)]
@@ -96,97 +69,24 @@ fn inputs() -> Value {
         "tool": "/bin/echo",
         "tool_arguments": [],
         "tool_environment": "empty",
-        "runtime_profile": "exact",
-        "max_concurrent_processes_and_threads": M12_EXECUTOR_STARTUP_PROCESS_CAPACITY,
+        "self_protection_required": true,
         "executor_interval": [
             "selected Executor preparation and readiness",
-            "canonical request and capability preparation",
-            "one-shot Executor and Sandbox lifecycle",
+            "canonical invocation and own-file protection preparation",
+            "one-shot Executor and Tool lifecycle",
             "validated terminal Tool result and enforcement receipt"
         ],
         "distribution": "executor_elapsed_ns"
     })
 }
 
-#[cfg(target_os = "linux")]
-fn host_isolation_metadata() -> HostIsolation {
-    let cgroup_root = std::path::Path::new("/sys/fs/cgroup");
-    let cgroup_v2 = cgroup_root.join("cgroup.controllers");
-    let cgroup_path = std::fs::read_to_string("/proc/self/cgroup")
-        .ok()
-        .and_then(|source| {
-            source
-                .lines()
-                .find_map(|line| line.strip_prefix("0::"))
-                .map(str::to_owned)
-        });
-    let pids_controller_available = std::fs::read_to_string(&cgroup_v2)
-        .ok()
-        .is_some_and(|controllers| controllers.split_whitespace().any(|name| name == "pids"));
-    let pids_events_available = cgroup_path.as_deref().is_some_and(|path| {
-        cgroup_root
-            .join(path.trim_start_matches('/'))
-            .join("pids.events")
-            .is_file()
-    });
-    let systemd_version = std::process::Command::new("systemd")
-        .arg("--version")
-        .output()
-        .ok()
-        .filter(|output| output.status.success())
-        .and_then(|output| {
-            String::from_utf8_lossy(&output.stdout)
-                .lines()
-                .next()
-                .map(|line| line.chars().take(256).collect())
-        });
-    HostIsolation {
-        systemd_version,
-        cgroup_version: cgroup_v2.is_file().then_some(2),
-        cgroup_path,
-        pids_controller_available,
-        pids_events_available,
-    }
-}
-
-#[cfg(not(target_os = "linux"))]
-fn host_isolation_metadata() -> HostIsolation {
-    HostIsolation {
-        systemd_version: None,
-        cgroup_version: None,
-        cgroup_path: None,
-        pids_controller_available: false,
-        pids_events_available: false,
-    }
-}
-
 fn current_environment() -> Environment {
-    let CommonEnvironment {
-        os,
-        arch,
-        rustc,
-        reference_platform,
-        commit_sha,
-        runner_image,
-        runner_image_version,
-        logical_cpus,
-        cpu_model,
-        total_memory_bytes,
-    } = common_environment();
-    Environment {
-        os,
-        arch,
-        rustc,
-        reference_platform,
-        commit_sha,
-        runner_image,
-        runner_image_version,
-        contract_image: bounded_environment_value("M12_CONTRACT_IMAGE", 256),
-        logical_cpus,
-        cpu_model,
-        total_memory_bytes,
-        host_isolation: host_isolation_metadata(),
-    }
+    let mut environment = common_environment();
+    environment.reference_platform = cfg!(any(
+        all(target_os = "linux", target_arch = "x86_64"),
+        all(target_os = "macos", target_arch = "aarch64")
+    ));
+    environment
 }
 
 fn write_failure(writer: &mut impl Write, error: &dyn Error) -> Result<(), DynError> {
@@ -222,13 +122,13 @@ pub(super) fn write_report_with_measurement(
             warmup_samples: config.warmups,
             measured_samples: config.samples,
             tool_executions_per_fresh_child: 1,
-            max_concurrent_processes_and_threads: M12_EXECUTOR_STARTUP_PROCESS_CAPACITY,
+            self_protection_required: true,
             environment: current_environment(),
         },
     )?;
 
     for _ in 0..config.warmups {
-        if let Err(error) = measure() {
+        if let Err(error) = measure().and_then(ChildMeasurement::validate) {
             write_failure(writer, error.as_ref())?;
             write_jsonl(
                 writer,
@@ -245,7 +145,7 @@ pub(super) fn write_report_with_measurement(
 
     let mut executor_samples = Vec::with_capacity(config.samples);
     for sample in 0..config.samples {
-        let measurement = match measure() {
+        let measurement = match measure().and_then(ChildMeasurement::validate) {
             Ok(measurement) => measurement,
             Err(error) => {
                 write_failure(writer, error.as_ref())?;
@@ -269,6 +169,7 @@ pub(super) fn write_report_with_measurement(
                 benchmark: BENCHMARK,
                 sample,
                 executor_elapsed_ns: measurement.executor_elapsed_ns,
+                self_protection_active: measurement.self_protection_active,
             },
         )?;
         executor_samples.push(measurement.executor_elapsed_ns);

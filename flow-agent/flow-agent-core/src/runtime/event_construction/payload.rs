@@ -99,14 +99,9 @@ pub(crate) fn tool_started_payload(
             .iter()
             .map(|parameter| parameter.name.as_str())
             .collect::<Vec<_>>(),
-        "max_concurrent_processes_and_threads": command_policy.max_concurrent_processes_and_threads,
-        "network_access": tool_network_access(&tool.network),
-        "read_only_mounts": command_policy.filesystem.read_only_mounts,
-        "runtime_profile": command_policy.runtime_profile.as_str(),
         "tool_id": tool.identity.id,
         "tool_kind": tool_kind(&tool.tool_kind),
         "tool_name": tool.identity.name,
-        "writable_mounts": command_policy.filesystem.writable_mounts,
     });
     if let Some(attempt_id) = attempt_id {
         payload
@@ -124,12 +119,5 @@ fn tool_kind(tool_kind: &core_script::ToolKind) -> proto::ToolKind {
     match tool_kind {
         core_script::ToolKind::PredefinedCommand => proto::ToolKind::PredefinedCommand,
         core_script::ToolKind::OwnScript => proto::ToolKind::OwnScript,
-    }
-}
-
-fn tool_network_access(network: &core_script::NetworkPolicy) -> proto::ToolNetworkAccess {
-    match network {
-        core_script::NetworkPolicy::Deny(_) => proto::ToolNetworkAccess::Deny,
-        core_script::NetworkPolicy::Declared { .. } => proto::ToolNetworkAccess::Declared,
     }
 }

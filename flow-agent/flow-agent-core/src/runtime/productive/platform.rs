@@ -1,5 +1,10 @@
 use super::RuntimeError;
 
+mod releases;
+use releases::{
+    productive_execution_supported_release, productive_tool_execution_supported_release,
+};
+
 pub(crate) fn ensure_productive_execution_platform() -> Result<(), RuntimeError> {
     let release = current_productive_execution_release();
     if release.as_deref().is_some_and(|release| {
@@ -28,29 +33,9 @@ pub(crate) fn ensure_productive_tool_execution_platform() -> Result<(), RuntimeE
     } else {
         Err(RuntimeError::executor(
             proto::ExecutorErrorCodeV0::PolicyUnsupported,
-            "productive Tool execution requires Ubuntu 24.04 x64",
+            "productive Tool execution requires Ubuntu 24.04 x64 or macOS 26 ARM64",
         ))
     }
-}
-
-pub(crate) fn productive_execution_supported_release(
-    target_os: &str,
-    target_arch: &str,
-    release: &str,
-) -> bool {
-    match (target_os, target_arch) {
-        ("linux", "x86_64") => ubuntu_24_04_release(release),
-        ("macos", "aarch64") => macos_26_release(release),
-        _ => false,
-    }
-}
-
-pub(crate) fn productive_tool_execution_supported_release(
-    target_os: &str,
-    target_arch: &str,
-    release: &str,
-) -> bool {
-    target_os == "linux" && target_arch == "x86_64" && ubuntu_24_04_release(release)
 }
 
 #[cfg(target_os = "linux")]
@@ -74,41 +59,4 @@ fn current_productive_execution_release() -> Option<String> {
         .success()
         .then(|| String::from_utf8(output.stdout).ok())
         .flatten()
-}
-
-fn ubuntu_24_04_release(release: &str) -> bool {
-    let mut id = None;
-    let mut version_id = None;
-    for line in release.lines() {
-        let Some((key, value)) = line.split_once('=') else {
-            continue;
-        };
-        let value = value
-            .strip_prefix('"')
-            .and_then(|value| value.strip_suffix('"'))
-            .or_else(|| {
-                value
-                    .strip_prefix('\'')
-                    .and_then(|value| value.strip_suffix('\''))
-            })
-            .unwrap_or(value);
-        let slot = match key {
-            "ID" => &mut id,
-            "VERSION_ID" => &mut version_id,
-            _ => continue,
-        };
-        if slot.replace(value).is_some() {
-            return false;
-        }
-    }
-    id == Some("ubuntu") && version_id == Some("24.04")
-}
-
-fn macos_26_release(release: &str) -> bool {
-    let components = release.trim().split('.').collect::<Vec<_>>();
-    components.len() >= 2
-        && components[0] == "26"
-        && components.iter().all(|component| {
-            !component.is_empty() && component.bytes().all(|byte| byte.is_ascii_digit())
-        })
 }

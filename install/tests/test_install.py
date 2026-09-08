@@ -17,23 +17,21 @@ PROBE_DOCUMENT = (
     '{"backend":"bubblewrap-seccomp","backend_version":"test",'
     '"executor":"flow-executor","executor_version":"0.0.0",'
     '"platform":"ubuntu-24.04-x86_64","protocol_versions":["0"],'
-    '"ready":true,"runtime_mounts":[],"schema":"flow-executor-probe-v0",'
-    '"supported_policy_features":["static-self-reexec"]}'
+    '"ready":true,"schema":"flow-executor-probe-v0",'
+    '"supported_policy_features":["flow-owned-write-protection"]}'
 )
 
 
 @unittest.skipUnless(
-    sys.platform.startswith("linux")
-    and pathlib.Path("/bin/sh").exists()
-    and pathlib.Path("/usr/bin/setsid").exists(),
-    "requires Linux /bin/sh and /usr/bin/setsid",
+    sys.platform in ("linux", "darwin"),
+    "requires a native Linux or macOS host",
 )
 class PrefixInstallerTest(unittest.TestCase):
     def test_help_succeeds_without_installing(self):
         expected = (
             "Usage: install.sh --prefix <absolute-prefix> [--no-default-executor]\n"
             "\n"
-            "Install Flow Agent on Ubuntu 24.04 x64 from sibling bundle artifacts.\n"
+            "Install Flow Agent on Linux or macOS from sibling bundle artifacts.\n"
             "\n"
             "Options:\n"
             "  --prefix <absolute-prefix>  Install into <absolute-prefix>/bin.\n"
@@ -172,6 +170,32 @@ class PrefixInstallerTest(unittest.TestCase):
             self.assertNotEqual(rejected.returncode, 0)
             self.assertFalse((unsafe_prefix / "bin" / "flow").exists())
 
+    def test_readiness_does_not_require_or_forward_a_user_manager(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            bundle = self.bundle(root)
+            flow = bundle / "flow"
+            source = flow.read_text(encoding="utf-8")
+            flow.write_text(
+                source.replace(
+                    "#!/bin/sh\n",
+                    "#!/bin/sh\n"
+                    'test -z "${XDG_RUNTIME_DIR+x}" || exit 65\n'
+                    'test -z "${DBUS_SESSION_BUS_ADDRESS+x}" || exit 65\n',
+                ),
+                encoding="utf-8",
+            )
+            completed = subprocess.run(
+                ["/bin/sh", str(bundle / "install.sh"), "--prefix", str(root / "prefix")],
+                env={"PATH": "", "XDG_RUNTIME_DIR": str(root / "absent-runtime"),
+                     "DBUS_SESSION_BUS_ADDRESS": "unix:path=/absent/bus"},
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=15,
+            )
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertFalse((root / "absent-runtime").exists())
+            self.assertEqual(sorted(p.name for p in (root / "prefix" / "bin").iterdir()),
+                             ["flow", "flow-executor"])
+
     def test_installed_files_are_regular_executable_siblings(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = pathlib.Path(temporary)
@@ -215,7 +239,7 @@ class PrefixInstallerTest(unittest.TestCase):
             root = pathlib.Path(temporary)
             bundle = self.bundle(root)
             readiness_called = root / "readiness-called"
-            diagnostic = "error: executor_unavailable: pids.events omits max"
+            diagnostic = "error: executor_unavailable: native protection self-test failed"
             (bundle / "flow").write_text(
                 "#!/bin/sh\n"
                 "test \"$1 $2\" = \"executor check\" || exit 64\n"

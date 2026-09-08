@@ -23,13 +23,11 @@ pub use bounded_read::for_each_reader_line_with_limit;
 pub use bounded_read::{decode_utf8, path_io_error, read_opened_file_with_limit};
 
 mod local_state;
-#[cfg(any(test, all(target_os = "linux", target_arch = "x86_64")))]
 mod protected_inventory;
 #[cfg(test)]
 pub(crate) use local_state::PROTECTED_STATE_LOCK_DEADLINE;
 pub(crate) use local_state::unix_access_is_private;
 pub(crate) use local_state::{ProtectedStateLock, ProtectedStateLockError, canonical_decimal};
-#[cfg(any(test, all(target_os = "linux", target_arch = "x86_64")))]
 pub(crate) use protected_inventory::verify_protected_aliases;
 
 mod anchored_file;
@@ -123,55 +121,6 @@ pub(crate) struct AnchoredDirectoryIdentity {
 }
 
 impl AnchoredDir {
-    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-    pub(crate) fn open_capability_nofollow(
-        &self,
-        relative: &str,
-    ) -> Result<std::os::fd::OwnedFd, RuntimeError> {
-        use rustix::fs::{Mode, OFlags};
-
-        let mut descriptor = rustix::io::dup(self.dir.as_ref()).map_err(|source| {
-            path_io_error(
-                &self.path,
-                std::io::Error::from_raw_os_error(source.raw_os_error()),
-            )
-        })?;
-        if relative.is_empty() {
-            return Ok(descriptor);
-        }
-        for component in std::path::Path::new(relative).components() {
-            let std::path::Component::Normal(component) = component else {
-                return Err(RuntimeError::Protocol(
-                    "workspace capability path is not canonical".to_owned(),
-                ));
-            };
-            descriptor = rustix::fs::openat(
-                &descriptor,
-                component,
-                OFlags::PATH | OFlags::NOFOLLOW | OFlags::CLOEXEC,
-                Mode::empty(),
-            )
-            .map_err(|source| {
-                path_io_error(
-                    &self.path.join(relative),
-                    std::io::Error::from_raw_os_error(source.raw_os_error()),
-                )
-            })?;
-            let stat = rustix::fs::fstat(&descriptor).map_err(|source| {
-                path_io_error(
-                    &self.path.join(relative),
-                    std::io::Error::from_raw_os_error(source.raw_os_error()),
-                )
-            })?;
-            if rustix::fs::FileType::from_raw_mode(stat.st_mode) == rustix::fs::FileType::Symlink {
-                return Err(RuntimeError::Protocol(
-                    "workspace capability path must not contain symlinks".to_owned(),
-                ));
-            }
-        }
-        Ok(descriptor)
-    }
-
     pub(crate) fn workspace(path: &Path) -> Result<Self, RuntimeError> {
         let dir = Dir::open_ambient_dir(path, ambient_authority())
             .map_err(|source| path_io_error(path, source))?;

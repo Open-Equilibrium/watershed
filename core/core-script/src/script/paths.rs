@@ -1,5 +1,3 @@
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-
 /// Root of the logical workspace scope namespace.
 pub const WORKSPACE_SCOPE_ROOT: &str = "workspace";
 
@@ -41,36 +39,6 @@ pub fn is_valid_allowed_parameter_name(value: &str) -> bool {
     };
     first.is_ascii_alphanumeric()
         && bytes.all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
-}
-
-/// Returns whether `value` is a canonical IPv4 or IPv6 CIDR.
-pub fn is_valid_canonical_cidr(value: &str) -> bool {
-    let Some((addr, prefix)) = value.split_once('/') else {
-        return false;
-    };
-    if prefix.len() > 1 && prefix.starts_with('0') {
-        return false;
-    }
-    if value.matches('/').count() != 1 {
-        return false;
-    }
-
-    let Ok(prefix) = prefix.parse::<u8>() else {
-        return false;
-    };
-    match addr.parse::<IpAddr>() {
-        Ok(IpAddr::V4(addr)) => {
-            prefix <= 32
-                && host_bits_are_zero_v4(addr, prefix)
-                && value == format!("{addr}/{prefix}")
-        }
-        Ok(IpAddr::V6(addr)) => {
-            prefix <= 128
-                && host_bits_are_zero_v6(addr, prefix)
-                && value == format!("{addr}/{prefix}")
-        }
-        Err(_) => false,
-    }
 }
 
 /// Normalizes a safe slash-separated relative path or rejects unsafe aliases.
@@ -152,28 +120,4 @@ fn matches_lower_token(value: &str, min_len: usize, max_len: usize) -> bool {
         && value.bytes().all(|byte| {
             byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_' || byte == b'-'
         })
-}
-
-fn host_bits_are_zero_v4(addr: Ipv4Addr, prefix: u8) -> bool {
-    let value = u32::from(addr);
-    match 32 - prefix {
-        0 => true,
-        32 => value == 0,
-        host_bits => {
-            let host_mask = (1u32 << host_bits) - 1;
-            value & host_mask == 0
-        }
-    }
-}
-
-fn host_bits_are_zero_v6(addr: Ipv6Addr, prefix: u8) -> bool {
-    let value = u128::from(addr);
-    match 128 - prefix {
-        0 => true,
-        128 => value == 0,
-        host_bits => {
-            let host_mask = (1u128 << host_bits) - 1;
-            value & host_mask == 0
-        }
-    }
 }

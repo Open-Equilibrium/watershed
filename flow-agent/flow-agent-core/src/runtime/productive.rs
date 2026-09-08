@@ -38,10 +38,6 @@ pub(crate) use execution::{
 pub(crate) use platform::ensure_productive_execution_platform;
 pub(crate) use platform::ensure_productive_tool_execution_platform;
 #[cfg(test)]
-pub(crate) use platform::productive_execution_supported_release;
-#[cfg(test)]
-pub(crate) use platform::productive_tool_execution_supported_release;
-#[cfg(test)]
 pub(crate) use provider_result::MAX_ACCUMULATED_PROVIDER_INPUT_BYTES;
 pub(crate) use provider_result::MAX_DURABLE_PROVIDER_OUTPUT_BYTES;
 #[cfg(test)]
@@ -184,26 +180,18 @@ pub(crate) trait ProductiveToolExecutor {
 
     fn policy_digest<'a>(&self, prepared: &'a Self::Prepared) -> &'a str;
 
-    fn max_concurrent_processes_and_threads(&self, prepared: &Self::Prepared) -> u32;
-
-    fn runtime_profile(&self, prepared: &Self::Prepared) -> proto::RuntimeReadProfileV0;
-
     fn validate_enforcement_receipt(
         &self,
         prepared: &Self::Prepared,
         receipt: &proto::EnforcementReceiptV0,
     ) -> Result<(), RuntimeError> {
-        proto::validate_enforcement_receipt_v0(
-            receipt,
-            self.policy_digest(prepared),
-            self.runtime_profile(prepared),
-            self.max_concurrent_processes_and_threads(prepared),
+        proto::validate_enforcement_receipt_v0(receipt, self.policy_digest(prepared)).map_err(
+            |_| {
+                RuntimeError::Protocol(
+                    "Executor enforcement receipt does not match its prepared request".to_owned(),
+                )
+            },
         )
-        .map_err(|_| {
-            RuntimeError::Protocol(
-                "Executor enforcement receipt does not match its prepared request".to_owned(),
-            )
-        })
     }
 
     fn preflight(
@@ -246,14 +234,6 @@ impl ProductiveToolExecutor for Option<PreparedExecutor> {
 
     fn policy_digest<'a>(&self, prepared: &'a Self::Prepared) -> &'a str {
         prepared.policy_digest()
-    }
-
-    fn max_concurrent_processes_and_threads(&self, prepared: &Self::Prepared) -> u32 {
-        prepared.max_concurrent_processes_and_threads()
-    }
-
-    fn runtime_profile(&self, prepared: &Self::Prepared) -> proto::RuntimeReadProfileV0 {
-        prepared.runtime_profile()
     }
 
     fn preflight(

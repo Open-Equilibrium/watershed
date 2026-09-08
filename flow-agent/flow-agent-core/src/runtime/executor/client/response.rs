@@ -38,9 +38,6 @@ pub(super) fn decode_tool_outcome(
             proto::ExecutorToolClassificationV0::NonzeroExit => {
                 ToolTerminalClassification::NonzeroExit
             }
-            proto::ExecutorToolClassificationV0::ProcessCapacityExceeded => {
-                ToolTerminalClassification::ProcessCapacityExceeded
-            }
             proto::ExecutorToolClassificationV0::SignalTermination => {
                 ToolTerminalClassification::SignalTermination
             }

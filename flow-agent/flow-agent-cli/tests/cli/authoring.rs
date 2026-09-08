@@ -63,8 +63,6 @@ fn init_create_and_validate_custom_recursive_flow() {
             "predefined-command",
             "--command-id",
             "agent-report",
-            "--max-concurrent-processes-and-threads",
-            "8",
             "--argv",
             "--fixed",
             "--parameter",
@@ -123,34 +121,6 @@ fn init_create_and_validate_custom_recursive_flow() {
             "--parameter-max-length",
             "128",
             "--end-parameter",
-            "--runtime-profile",
-            "host-system-read",
-            "--read-only-mount",
-            "workspace",
-            "--writable-mount",
-            "workspace/reports",
-            "--network-default",
-            "deny",
-            "--network-allow",
-            "--network-kind",
-            "cidr",
-            "--network-transport",
-            "tcp",
-            "--network-cidr",
-            "127.0.0.1/32",
-            "--network-port",
-            "443",
-            "--end-network-allow",
-            "--network-allow",
-            "--network-kind",
-            "cidr",
-            "--network-transport",
-            "udp",
-            "--network-cidr",
-            "::1/128",
-            "--network-port",
-            "53",
-            "--end-network-allow",
         ],
         vec![
             "create",
@@ -163,10 +133,6 @@ fn init_create_and_validate_custom_recursive_flow() {
             "own-script",
             "--script-body-file",
             "report.sh",
-            "--max-concurrent-processes-and-threads",
-            "8",
-            "--network-default",
-            "deny",
         ],
         vec![
             "create",
@@ -411,10 +377,6 @@ fn custom_registry_root_accepts_instruction_and_script_stdin_sources() {
             "--tool-kind",
             "own-script",
             "--script-body-stdin",
-            "--max-concurrent-processes-and-threads",
-            "8",
-            "--network",
-            "deny",
         ])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -552,10 +514,6 @@ fn invalid_stdin_sources_are_rejected_without_reading_stdin() {
                 "--command-id",
                 "agent-report",
                 "--script-body-stdin",
-                "--max-concurrent-processes-and-threads",
-                "8",
-                "--network",
-                "deny",
             ],
             "script body is invalid for predefined-command",
         ),
@@ -610,10 +568,6 @@ fn invalid_stdin_backed_identities_are_rejected_before_reading_stdin() {
                 "--tool-kind",
                 "own-script",
                 "--script-body-stdin",
-                "--max-concurrent-processes-and-threads",
-                "8",
-                "--network",
-                "deny",
             ],
         ),
     ] {
@@ -642,11 +596,16 @@ fn invalid_stdin_backed_identities_are_rejected_before_reading_stdin() {
 }
 
 #[test]
-fn tool_argv_preserves_literal_help_flags() {
+fn tool_argv_preserves_literal_help_flags_and_environment_tokens() {
     let workspace = empty_workspace();
     initialize_default_workspace(&workspace);
 
-    for (id, literal) in [("long-help", "--help"), ("short-help", "-h")] {
+    for (id, literal) in [
+        ("long-help", "--help"),
+        ("short-help", "-h"),
+        ("environment", "$TOOL_INPUT"),
+        ("legacy-literal", "--network"),
+    ] {
         let create = flow_command()
             .current_dir(&workspace)
             .args([
@@ -660,10 +619,6 @@ fn tool_argv_preserves_literal_help_flags() {
                 "predefined-command",
                 "--command-id",
                 "agent-echo",
-                "--max-concurrent-processes-and-threads",
-                "8",
-                "--network",
-                "deny",
                 "--argv",
                 literal,
             ])
@@ -734,9 +689,9 @@ fn authoring_help_exposes_each_complete_block_grammar() {
                 "--script-body-file",
                 "--parameter-value-type",
                 "--end-parameter",
-                "--network deny",
-                "--network-allow",
-                "--end-network-allow",
+                "--argv",
+                "--script-body-stdin",
+                "--parameter-max-length",
             ][..],
         ),
     ] {
@@ -756,7 +711,65 @@ fn authoring_help_exposes_each_complete_block_grammar() {
                 "{kind} help lacks {fragment}: {stdout}"
             );
         }
+        if kind == "tool" {
+            for flag in LEGACY_TOOL_FLAGS {
+                assert!(!stdout.contains(flag), "obsolete flag in Tool help: {flag}");
+            }
+        }
         assert!(output.stderr.is_empty(), "{kind}");
+    }
+}
+
+const LEGACY_TOOL_FLAGS: [&str; 12] = [
+    "--max-concurrent-processes-and-threads",
+    "--runtime-profile",
+    "--read-only-mount",
+    "--writable-mount",
+    "--network",
+    "--network-default",
+    "--network-allow",
+    "--network-kind",
+    "--network-transport",
+    "--network-cidr",
+    "--network-port",
+    "--end-network-allow",
+];
+
+#[test]
+fn legacy_tool_flags_reject_before_stdin_and_never_publish() {
+    let workspace = empty_workspace();
+    initialize_default_workspace(&workspace);
+    let definition = session_home_path().join("registry/tools/legacy-tool.yaml");
+
+    for flag in LEGACY_TOOL_FLAGS {
+        let child = flow_command()
+            .current_dir(&workspace)
+            .args([
+                "create",
+                "tool",
+                "--id",
+                "legacy-tool",
+                "--name",
+                "LegacyTool",
+                "--tool-kind",
+                "own-script",
+                "--script-body-stdin",
+                flag,
+            ])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("legacy authoring command should start");
+        let output = wait_with_output_before(child, cli_child_watchdog());
+        let stderr = String::from_utf8(output.stderr).expect("stderr should be UTF-8");
+        assert_eq!(output.status.code(), Some(64), "{flag}: {stderr}");
+        assert!(
+            stderr.contains(&format!("unknown argument {flag:?}")),
+            "{flag}: {stderr}"
+        );
+        assert!(output.stdout.is_empty(), "{flag}");
+        assert!(!definition.exists(), "{flag} must not publish a definition");
     }
 }
 
@@ -796,10 +809,6 @@ fn authoring_public_diagnostics_and_exit_classes_are_stable() {
         "predefined-command",
         "--command-id",
         "agent-echo",
-        "--max-concurrent-processes-and-threads",
-        "8",
-        "--network",
-        "deny",
     ];
     let created = flow_command()
         .current_dir(&workspace)
@@ -826,10 +835,6 @@ fn authoring_public_diagnostics_and_exit_classes_are_stable() {
             "predefined-command",
             "--command-id",
             "agent-echo",
-            "--max-concurrent-processes-and-threads",
-            "8",
-            "--network",
-            "deny",
         ],
         65,
         "invalid_definition",

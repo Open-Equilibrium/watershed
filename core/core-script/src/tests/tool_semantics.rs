@@ -1,10 +1,8 @@
 use super::super::error::SemanticValidationError;
 use super::super::model::{
-    AllowedParameter, BlockIdentity, MAX_FILESYSTEM_MOUNTS, NetworkAllowEntry, NetworkAllowKind,
-    NetworkDefault, NetworkDeny, NetworkPolicy, NetworkTransport, ParameterValueType,
-    RegistryBlock, ResolvedRegistry, ToolBlock, ToolCommand, ToolKind, ToolRuntimeProfile,
+    AllowedParameter, BlockIdentity, ParameterValueType, ToolBlock, ToolCommand, ToolKind,
 };
-use super::super::semantics::{validate_registry_block_semantics, validate_tool_semantics};
+use super::super::semantics::validate_tool_semantics;
 use super::super::values::parameter_pattern_matches;
 use super::own_script_tool;
 
@@ -43,7 +41,6 @@ fn semantic_validation_enforces_tool_kind_specific_script_fields() {
 
     let mut predefined = ToolBlock {
         allowed_parameters: Vec::new(),
-        max_concurrent_processes_and_threads: 32,
         command: ToolCommand::Predefined {
             command_id: "agent-echo".to_owned(),
             argv: Vec::new(),
@@ -52,13 +49,9 @@ fn semantic_validation_enforces_tool_kind_specific_script_fields() {
             id: "echo".to_owned(),
             name: "Echo".to_owned(),
         },
-        network: NetworkPolicy::Deny(NetworkDeny),
-        read_only_mounts: Vec::new(),
-        runtime_profile: ToolRuntimeProfile::Exact,
         script_body: Some("echo unexpected".to_owned()),
         script_runtime: None,
         tool_kind: ToolKind::PredefinedCommand,
-        writable_mounts: Vec::new(),
     };
 
     let err =
@@ -84,7 +77,6 @@ fn semantic_validation_rejects_nul_bearing_tool_execution_fields() {
 
     let predefined = ToolBlock {
         allowed_parameters: Vec::new(),
-        max_concurrent_processes_and_threads: 32,
         command: ToolCommand::Predefined {
             command_id: "agent-echo".to_owned(),
             argv: vec!["unsafe\0argument".to_owned()],
@@ -93,13 +85,9 @@ fn semantic_validation_rejects_nul_bearing_tool_execution_fields() {
             id: "echo".to_owned(),
             name: "Echo".to_owned(),
         },
-        network: NetworkPolicy::Deny(NetworkDeny),
-        read_only_mounts: Vec::new(),
-        runtime_profile: ToolRuntimeProfile::Exact,
         script_body: None,
         script_runtime: None,
         tool_kind: ToolKind::PredefinedCommand,
-        writable_mounts: Vec::new(),
     };
     let error = validate_tool_semantics(&predefined).expect_err("NUL argv is rejected");
     assert!(error.to_string().contains("NUL"));
@@ -118,21 +106,6 @@ fn semantic_validation_rejects_nul_bearing_tool_execution_fields() {
     let error = validate_tool_semantics(&parameterized)
         .expect_err("NUL enum parameter values are rejected");
     assert!(error.to_string().contains("NUL"));
-}
-
-#[test]
-fn semantic_validation_rejects_zero_process_capacity() {
-    let mut tool = own_script_tool("write-summary", "script:write-summary");
-    tool.max_concurrent_processes_and_threads = 0;
-
-    let error = validate_tool_semantics(&tool).expect_err("zero capacity is rejected");
-
-    assert!(
-        error
-            .to_string()
-            .contains("max_concurrent_processes_and_threads must be positive"),
-        "{error}"
-    );
 }
 
 #[test]
@@ -185,89 +158,4 @@ fn semantic_validation_compiles_tool_parameter_patterns() {
         SemanticValidationError::InvalidToolDefinition { message, .. }
             if message.contains("min must be <= max")
     ));
-}
-
-#[test]
-fn semantic_validation_rejects_noncanonical_network_cidr() {
-    let mut tool = own_script_tool("network-tool", "script:network-tool");
-    tool.network = NetworkPolicy::Declared {
-        allow: vec![NetworkAllowEntry {
-            cidr: "192.0.2.42/24".to_owned(),
-            kind: NetworkAllowKind::Cidr,
-            port: 443,
-            transport: NetworkTransport::Tcp,
-        }],
-        default: NetworkDefault::Deny,
-    };
-
-    let err = validate_tool_semantics(&tool).expect_err("host-bit CIDR rejected");
-
-    assert!(err.to_string().contains("invalid canonical CIDR"));
-    assert_eq!(
-        err,
-        SemanticValidationError::InvalidCanonicalCidr {
-            cidr: "192.0.2.42/24".to_owned(),
-            tool_id: "network-tool".to_owned(),
-        }
-    );
-
-    if let NetworkPolicy::Declared { allow, .. } = &mut tool.network {
-        allow[0].cidr = "192.0.2.0/24".to_owned();
-    }
-    validate_registry_block_semantics(&RegistryBlock::Tool(tool)).expect("canonical CIDR accepted");
-}
-
-#[test]
-fn registry_boundaries_reject_unsafe_tool_filesystem_paths() {
-    for (field, value) in [
-        ("read_only_mounts", "../outside"),
-        ("read_only_mounts", "/tmp"),
-        ("read_only_mounts", r"workspace\out"),
-        ("read_only_mounts", "other"),
-        ("writable_mounts", "C:/temp"),
-        ("writable_mounts", "workspace/./out"),
-        ("writable_mounts", "workspace/NUL"),
-    ] {
-        let mut tool = own_script_tool("unsafe-path", "script:unsafe-path");
-        match field {
-            "read_only_mounts" => tool.read_only_mounts.push(value.to_owned()),
-            "writable_mounts" => tool.writable_mounts.push(value.to_owned()),
-            _ => unreachable!(),
-        }
-
-        let err = ResolvedRegistry::from_blocks([RegistryBlock::Tool(tool)])
-            .expect_err("unsafe tool filesystem path is rejected");
-
-        assert!(err.to_string().contains(field), "{field} {value:?}: {err}");
-    }
-}
-
-#[test]
-fn semantic_validation_accepts_exact_workspace_mounts() {
-    let mut tool = own_script_tool("safe-path", "script:safe-path");
-    tool.read_only_mounts = vec!["workspace".to_owned()];
-    tool.writable_mounts = vec!["workspace/out".to_owned()];
-
-    validate_tool_semantics(&tool).expect("exact Workspace mounts are accepted");
-}
-
-#[test]
-fn semantic_validation_bounds_and_deduplicates_exact_mounts() {
-    let mut duplicate = own_script_tool("duplicate-mount", "script:duplicate-mount");
-    duplicate.read_only_mounts = vec!["workspace/out".to_owned()];
-    duplicate.writable_mounts = vec!["workspace/out".to_owned()];
-    let error = validate_tool_semantics(&duplicate).expect_err("duplicate mount is rejected");
-    assert!(error.to_string().contains("declared more than once"));
-
-    let mut oversized = own_script_tool("too-many-mounts", "script:too-many-mounts");
-    oversized.read_only_mounts = (0..MAX_FILESYSTEM_MOUNTS)
-        .map(|index| format!("workspace/read-{index}"))
-        .collect();
-    oversized.writable_mounts = vec!["workspace/write".to_owned()];
-    let error = validate_tool_semantics(&oversized).expect_err("mount limit is enforced");
-    assert!(
-        error
-            .to_string()
-            .contains(&format!("maximum of {MAX_FILESYSTEM_MOUNTS}"))
-    );
 }

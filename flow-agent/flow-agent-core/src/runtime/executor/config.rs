@@ -27,7 +27,7 @@ const EXECUTOR_CONFIG_SCHEMA: &str = "flow-executor-selection-v0";
 pub(crate) const EXECUTOR_CONFIG_MAX_BYTES: u64 = 16 * 1024;
 static STAGE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
-#[cfg(all(test, target_os = "linux", target_arch = "x86_64"))]
+#[cfg(test)]
 thread_local! {
     static PARENT_MISSING_OBSERVER: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
         const { std::cell::RefCell::new(None) };
@@ -35,12 +35,12 @@ thread_local! {
         const { std::cell::RefCell::new(None) };
 }
 
-#[cfg(all(test, target_os = "linux", target_arch = "x86_64"))]
+#[cfg(test)]
 fn set_parent_missing_observer(observer: impl FnOnce() + 'static) {
     PARENT_MISSING_OBSERVER.with_borrow_mut(|slot| *slot = Some(Box::new(observer)));
 }
 
-#[cfg(all(test, target_os = "linux", target_arch = "x86_64"))]
+#[cfg(test)]
 fn parent_missing_observer() {
     if let Some(observer) = PARENT_MISSING_OBSERVER.with_borrow_mut(Option::take) {
         observer();
@@ -487,7 +487,6 @@ mod tests {
         assert_eq!(executor.path, credential.with_file_name("executor.json"));
     }
 
-    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     #[test]
     fn protected_configuration_settles_a_first_use_parent_race() {
         let root = crate::tests::empty_workspace();
@@ -516,7 +515,6 @@ mod tests {
         );
     }
 
-    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     #[test]
     fn protected_configuration_retains_parent_replaced_after_read_validation() {
         use std::fs;

@@ -452,9 +452,6 @@ fn validate_tool_enforcement_expectation(
                 &expectation.applied_policy_digest,
                 "Tool intent policy digest",
             )?;
-            if expectation.max_concurrent_processes_and_threads == 0 {
-                return Err(protocol("Tool intent process capacity must be positive"));
-            }
             Ok(())
         }
         (RunAttemptKind::Provider, None) => Ok(()),

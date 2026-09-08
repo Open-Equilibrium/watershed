@@ -144,6 +144,8 @@ fn native_executor_protects_own_files_and_leaves_project_work_available() {
             })))
             .map_err(|error| error.to_string())?;
         input.flush().map_err(|error| error.to_string())?;
+        // Start is a closed one-shot control document; EOF authorizes dispatch.
+        drop(input);
         let terminal = read_record()?;
         if terminal["outcome"] != "completed"
             || terminal["tool_result"]["status"] != "completed"
@@ -158,7 +160,6 @@ fn native_executor_protects_own_files_and_leaves_project_work_available() {
         }
         Ok(())
     })();
-    drop(input);
     let _ = child.kill();
     let _ = child.wait();
     drop(receiver);

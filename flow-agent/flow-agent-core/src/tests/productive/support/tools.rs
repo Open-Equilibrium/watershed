@@ -9,10 +9,8 @@ use crate::runtime::{
 
 pub(in super::super) struct FakePreparedTool {
     invocation: ToolInvocation,
-    max_concurrent_processes_and_threads: u32,
     policy_digest: String,
     request_hash: String,
-    runtime_profile: core_script::ToolRuntimeProfile,
 }
 pub(in super::super) struct FakeToolExecutor {
     pub(in super::super) cancel_before_outcome: bool,
@@ -34,6 +32,7 @@ pub(in super::super) enum FakeToolExecutionFault {
     InvalidTerminal,
     RequestHashMismatch,
     ReceiptMismatch,
+    InactiveSelfProtection,
 }
 
 impl Default for FakeToolExecutor {
@@ -81,11 +80,8 @@ impl ProductiveToolExecutor for FakeToolExecutor {
         let request_hash = super::fake_tool_request_hash();
         Ok(FakePreparedTool {
             invocation: invocation.clone(),
-            max_concurrent_processes_and_threads: command_policy
-                .max_concurrent_processes_and_threads,
             policy_digest,
             request_hash,
-            runtime_profile: command_policy.runtime_profile,
         })
     }
 
@@ -95,19 +91,6 @@ impl ProductiveToolExecutor for FakeToolExecutor {
 
     fn policy_digest<'a>(&self, prepared: &'a Self::Prepared) -> &'a str {
         &prepared.policy_digest
-    }
-
-    fn max_concurrent_processes_and_threads(&self, prepared: &Self::Prepared) -> u32 {
-        prepared.max_concurrent_processes_and_threads
-    }
-
-    fn runtime_profile(&self, prepared: &Self::Prepared) -> proto::RuntimeReadProfileV0 {
-        match prepared.runtime_profile {
-            core_script::ToolRuntimeProfile::Exact => proto::RuntimeReadProfileV0::Exact,
-            core_script::ToolRuntimeProfile::HostSystemRead => {
-                proto::RuntimeReadProfileV0::HostSystemRead
-            }
-        }
     }
 
     fn preflight(
@@ -171,13 +154,13 @@ impl ProductiveToolExecutor for FakeToolExecutor {
         } else {
             self.outcome.clone()
         };
+        let mut enforcement = test_enforcement_receipt(policy_digest);
+        if matches!(self.fault, FakeToolExecutionFault::InactiveSelfProtection) {
+            enforcement.self_protection_active = false;
+        }
         Ok(ExecutorDispatchOutcome::Completed(Box::new(
             ExecutorToolExecution {
-                enforcement: test_enforcement_receipt(
-                    policy_digest,
-                    prepared.max_concurrent_processes_and_threads,
-                    prepared.runtime_profile,
-                ),
+                enforcement,
                 outcome,
                 request_hash,
             },
@@ -211,14 +194,6 @@ impl ProductiveToolExecutor for UnsupportedToolExecutor {
     }
 
     fn policy_digest<'a>(&self, _prepared: &'a Self::Prepared) -> &'a str {
-        unreachable!()
-    }
-
-    fn max_concurrent_processes_and_threads(&self, _prepared: &Self::Prepared) -> u32 {
-        unreachable!()
-    }
-
-    fn runtime_profile(&self, _prepared: &Self::Prepared) -> proto::RuntimeReadProfileV0 {
         unreachable!()
     }
 

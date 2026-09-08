@@ -9,10 +9,10 @@ use std::io::{self, Write};
 
 mod target;
 #[cfg(test)]
-pub use target::{anchored_workspace_write_path, normalize_script_write_target};
+pub use target::anchored_workspace_write_path;
 pub use target::{
     anchored_workspace_write_path_from, ensure_anchored_writable_regular_leaf,
-    validate_script_write_target,
+    normalize_script_write_target,
 };
 
 #[cfg(test)]

@@ -35,11 +35,6 @@ fn predefined_tool(parameters: Vec<core_script::AllowedParameter>) -> core_scrip
         script_runtime: None,
         script_body: None,
         allowed_parameters: parameters,
-        max_concurrent_processes_and_threads: 16,
-        runtime_profile: core_script::ToolRuntimeProfile::Exact,
-        read_only_mounts: vec!["workspace".to_owned()],
-        writable_mounts: Vec::new(),
-        network: core_script::NetworkPolicy::Deny(core_script::NetworkDeny),
     }
 }
 

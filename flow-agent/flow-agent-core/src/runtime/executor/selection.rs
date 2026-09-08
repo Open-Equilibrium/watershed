@@ -1,13 +1,10 @@
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 use super::{
     config::ExecutorConfigStore,
     probe::{ProbedExecutor, probe_executor},
 };
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 use crate::runtime::fs_guards::AnchoredDir;
 use crate::runtime::types::RuntimeError;
 use std::path::{Path, PathBuf};
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 use std::{env, fs::File};
 
 /// Authority that selected the effective productive Executor.
@@ -32,24 +29,20 @@ impl ExecutorSelectionSource {
 /// Absolute productive Executor selected by the administrator boundary.
 #[derive(Debug)]
 pub struct ExecutorSelection {
-    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     validated: Option<ProbedExecutor>,
     path: PathBuf,
     source: ExecutorSelectionSource,
 }
 
 impl ExecutorSelection {
-    #[cfg(any(all(target_os = "linux", target_arch = "x86_64"), test))]
     pub(super) fn new(path: PathBuf, source: ExecutorSelectionSource) -> Self {
         Self {
-            #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
             validated: None,
             path,
             source,
         }
     }
 
-    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     fn with_probe(mut self, probed: ProbedExecutor) -> Self {
         self.validated = Some(probed);
         self
@@ -65,7 +58,6 @@ impl ExecutorSelection {
         self.source
     }
 
-    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     pub(crate) fn probe(&self) -> &proto::ExecutorProbeV0 {
         &self
             .validated
@@ -74,7 +66,6 @@ impl ExecutorSelection {
             .probe
     }
 
-    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     pub(crate) fn executable(&self) -> &File {
         &self
             .validated
@@ -84,6 +75,17 @@ impl ExecutorSelection {
             .selected
             .image
     }
+
+    pub(super) fn programs(&self) -> impl Iterator<Item = &super::probe::InstalledProgram> {
+        let programs = &self
+            .validated
+            .as_ref()
+            .expect("resolved Executor selection carries its installed programs")
+            .programs;
+        [&programs.selected, &programs.flow]
+            .into_iter()
+            .chain(programs.sibling.as_ref())
+    }
 }
 
 /// Performs the no-Tool-spawn readiness check and returns the effective selection.
@@ -92,7 +94,6 @@ pub fn executor_check() -> Result<ExecutorSelection, RuntimeError> {
 }
 
 /// Validates and atomically selects an administrator-supplied absolute Executor.
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 pub fn configure_executor_path(path: &Path) -> Result<ExecutorSelection, RuntimeError> {
     if !path.is_absolute() {
         return Err(RuntimeError::Usage(
@@ -106,30 +107,15 @@ pub fn configure_executor_path(path: &Path) -> Result<ExecutorSelection, Runtime
     Ok(selection.with_probe(probed))
 }
 
-/// Rejects productive Executor configuration on unsupported platforms.
-#[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
-pub fn configure_executor_path(_path: &Path) -> Result<ExecutorSelection, RuntimeError> {
-    unsupported_platform()
-}
-
 /// Removes only the protected custom override and restores default sibling selection.
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 pub fn configure_default_executor() -> Result<bool, RuntimeError> {
     ExecutorConfigStore::platform_default()?.configure_default()
 }
 
-/// Rejects productive Executor configuration on unsupported platforms.
-#[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
-pub fn configure_default_executor() -> Result<bool, RuntimeError> {
-    unsupported_platform()
-}
-
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 fn resolve_executor() -> Result<ExecutorSelection, RuntimeError> {
     resolve_executor_with_roots(&protected_directories(false)?)
 }
 
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 pub(super) fn protected_directories(create: bool) -> Result<Vec<AnchoredDir>, RuntimeError> {
     let open = || {
         let home = crate::runtime::session_store::open_flow_agent_home(create)?;
@@ -144,7 +130,6 @@ pub(super) fn protected_directories(create: bool) -> Result<Vec<AnchoredDir>, Ru
     })
 }
 
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 pub(super) fn resolve_executor_with_roots(
     roots: &[AnchoredDir],
 ) -> Result<ExecutorSelection, RuntimeError> {
@@ -160,7 +145,6 @@ pub(super) fn resolve_executor_with_roots(
     Ok(selection.with_probe(probed))
 }
 
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 fn current_flow_path() -> Result<PathBuf, RuntimeError> {
     env::current_exe().map_err(|source| RuntimeError::Io {
         path: PathBuf::from("<current executable>"),
@@ -168,25 +152,11 @@ fn current_flow_path() -> Result<PathBuf, RuntimeError> {
     })
 }
 
-#[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
-fn resolve_executor() -> Result<ExecutorSelection, RuntimeError> {
-    unsupported_platform()
-}
-
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 pub(crate) fn default_executor_path(flow: &Path) -> PathBuf {
     flow.with_file_name("flow-executor")
 }
 
-#[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
-fn unsupported_platform<T>() -> Result<T, RuntimeError> {
-    Err(RuntimeError::executor(
-        proto::ExecutorErrorCodeV0::PolicyUnsupported,
-        "productive Executor support requires Ubuntu 24.04 x64",
-    ))
-}
-
-#[cfg(all(test, target_os = "linux", target_arch = "x86_64"))]
+#[cfg(test)]
 mod tests {
     use super::{ExecutorSelection, ExecutorSelectionSource};
     use std::{fs, io::Read as _, os::unix::fs::PermissionsExt as _};
@@ -207,7 +177,7 @@ mod tests {
             .expect("installed programs are retained");
         let probe = proto::parse_executor_probe_v0(
             concat!(
-                r#"{"backend":"bubblewrap-seccomp","backend_version":"test","executor":"flow-executor","executor_version":"0.0.0","platform":"ubuntu-24.04-x86_64","protocol_versions":["0"],"ready":true,"runtime_mounts":[],"schema":"flow-executor-probe-v0","supported_policy_features":["process-capacity","static-self-reexec"]}"#,
+                r#"{"backend":"bubblewrap-seccomp","backend_version":"test","executor":"flow-executor","executor_version":"0.0.0","platform":"ubuntu-24.04-x86_64","protocol_versions":["0"],"ready":true,"schema":"flow-executor-probe-v0","supported_policy_features":["flow-owned-write-protection"]}"#,
                 "\n"
             )
             .as_bytes(),

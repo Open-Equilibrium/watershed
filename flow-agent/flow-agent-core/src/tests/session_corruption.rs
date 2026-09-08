@@ -201,14 +201,9 @@ fn session_log_allows_tool_reuse_in_later_phase_execution() {
             Some("flow-001"),
             serde_json::json!({
                 "allowed_parameters": [],
-                "max_concurrent_processes_and_threads": 1,
-                "network_access": "deny",
-                "read_only_mounts": [],
                 "tool_id": "echo",
                 "tool_kind": "predefined-command",
                 "tool_name": "Echo",
-                "runtime_profile": "exact",
-                "writable_mounts": [],
             }),
         ),
         event_line(
@@ -257,14 +252,9 @@ fn session_log_allows_tool_reuse_in_later_phase_execution() {
             Some("flow-001"),
             serde_json::json!({
                 "allowed_parameters": [],
-                "max_concurrent_processes_and_threads": 1,
-                "network_access": "deny",
-                "read_only_mounts": [],
                 "tool_id": "echo",
                 "tool_kind": "predefined-command",
                 "tool_name": "Echo",
-                "runtime_profile": "exact",
-                "writable_mounts": [],
             }),
         ),
         event_line(

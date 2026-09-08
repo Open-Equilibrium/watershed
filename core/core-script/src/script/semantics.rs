@@ -1,13 +1,11 @@
 use crate::script::error::SemanticValidationError;
 use crate::script::model::{
-    BlockIdentity, FlowBlock, InstructionBlock, MAX_BLOCK_NAME_CHARS, MAX_FILESYSTEM_MOUNTS,
-    MAX_PHASE_LOOP_ITERATIONS, MAX_REGISTRY_DEFINITION_BYTES, NetworkPolicy, ParameterValueType,
-    PhaseBlock, RegistryBlock, RegistryBlockKind, ScriptRuntime, ToolBlock, ToolCommand, ToolKind,
+    BlockIdentity, FlowBlock, InstructionBlock, MAX_BLOCK_NAME_CHARS, MAX_PHASE_LOOP_ITERATIONS,
+    MAX_REGISTRY_DEFINITION_BYTES, ParameterValueType, PhaseBlock, RegistryBlock,
+    RegistryBlockKind, ScriptRuntime, ToolBlock, ToolCommand, ToolKind,
 };
 use crate::script::paths::{
-    WORKSPACE_SCOPE_ROOT, is_valid_allowed_parameter_name, is_valid_block_id,
-    is_valid_canonical_cidr, is_valid_command_id, normalize_safe_relative_path,
-    strip_workspace_scope,
+    is_valid_allowed_parameter_name, is_valid_block_id, is_valid_command_id,
 };
 use crate::script::values::{
     parameter_pattern_matches, validate_predicate_against_contract, validate_predicate_definition,
@@ -231,12 +229,6 @@ fn invalid_phase(phase: &PhaseBlock, message: &str) -> SemanticValidationError {
 }
 
 pub(super) fn validate_tool_semantics(tool: &ToolBlock) -> Result<(), SemanticValidationError> {
-    if tool.max_concurrent_processes_and_threads == 0 {
-        return Err(invalid_tool(
-            tool,
-            "max_concurrent_processes_and_threads must be positive",
-        ));
-    }
     match (&tool.tool_kind, &tool.command) {
         (ToolKind::OwnScript, ToolCommand::OwnScript(command)) => {
             let expected = crate::script::model::own_script_command_id(&tool.identity.id);
@@ -375,58 +367,6 @@ pub(super) fn validate_tool_semantics(tool: &ToolBlock) -> Result<(), SemanticVa
                 tool_id: tool.identity.id.clone(),
                 message: format!("integer parameter {} min must be <= max", parameter.name),
             });
-        }
-    }
-
-    let mount_count = tool
-        .read_only_mounts
-        .len()
-        .saturating_add(tool.writable_mounts.len());
-    if mount_count > MAX_FILESYSTEM_MOUNTS {
-        return Err(invalid_tool(
-            tool,
-            &format!(
-                "filesystem mount count {mount_count} exceeds the maximum of {MAX_FILESYSTEM_MOUNTS}"
-            ),
-        ));
-    }
-
-    let mut declared_mounts = BTreeSet::new();
-    for (field, mounts) in [
-        ("read_only_mounts", &tool.read_only_mounts),
-        ("writable_mounts", &tool.writable_mounts),
-    ] {
-        for mount in mounts {
-            if normalize_safe_relative_path(mount).is_none()
-                || mount != WORKSPACE_SCOPE_ROOT && strip_workspace_scope(mount).is_none()
-            {
-                return Err(invalid_tool(
-                    tool,
-                    &format!(
-                        "{field} entry {mount:?} must be workspace or a safe path below workspace"
-                    ),
-                ));
-            }
-            if !declared_mounts.insert(mount) {
-                return Err(invalid_tool(
-                    tool,
-                    &format!("filesystem mount {mount:?} is declared more than once"),
-                ));
-            }
-        }
-    }
-
-    if let NetworkPolicy::Declared { allow, .. } = &tool.network {
-        for entry in allow {
-            if entry.port == 0 {
-                return Err(invalid_tool(tool, "network allow port must be at least 1"));
-            }
-            if !is_valid_canonical_cidr(&entry.cidr) {
-                return Err(SemanticValidationError::InvalidCanonicalCidr {
-                    cidr: entry.cidr.clone(),
-                    tool_id: tool.identity.id.clone(),
-                });
-            }
         }
     }
 

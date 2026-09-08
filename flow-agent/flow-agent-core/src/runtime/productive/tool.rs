@@ -70,10 +70,6 @@ where
     )?;
     let request_hash = context.tool_executor.request_hash(&prepared).to_owned();
     let expected_policy_digest = context.tool_executor.policy_digest(&prepared).to_owned();
-    let expected_runtime_profile = context.tool_executor.runtime_profile(&prepared);
-    let expected_process_capacity = context
-        .tool_executor
-        .max_concurrent_processes_and_threads(&prepared);
     let recovered = mark_recovery_failure(
         &mut context.recovery_failed,
         context.recovery.recover_attempt(
@@ -165,8 +161,6 @@ where
             attempt_kind: RunAttemptKind::Tool,
             expected_enforcement: Some(ToolEnforcementExpectation {
                 applied_policy_digest: expected_policy_digest.clone(),
-                max_concurrent_processes_and_threads: expected_process_capacity,
-                runtime_profile: expected_runtime_profile,
             }),
             request_hash: request_hash.clone(),
             tool_id: Some(tool.identity.id.clone()),
@@ -315,17 +309,14 @@ where
                     "Executor result does not match its prepared request".to_owned(),
                 ));
             }
-            proto::validate_enforcement_receipt_v0(
-                &enforcement,
-                &expected_policy_digest,
-                expected_runtime_profile,
-                expected_process_capacity,
-            )
-            .map_err(|_| {
-                RuntimeError::Protocol(
-                    "Executor enforcement receipt does not match its prepared request".to_owned(),
-                )
-            })?;
+            proto::validate_enforcement_receipt_v0(&enforcement, &expected_policy_digest).map_err(
+                |_| {
+                    RuntimeError::Protocol(
+                        "Executor enforcement receipt does not match its prepared request"
+                            .to_owned(),
+                    )
+                },
+            )?;
             tool_terminal(&outcome)?;
             Ok(())
         };

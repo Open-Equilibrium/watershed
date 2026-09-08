@@ -1,27 +1,17 @@
 use crate::{
-    backend::{
-        BubblewrapCapabilities, MountBinding, ProbeState, SandboxPlan, validate_mount_contract,
-    },
-    lifecycle::{
-        CleanupAction, CleanupController, InnerStatusPolicy, capacity_can_classify,
-        inner_status_policy,
-    },
+    backend::ProbeState,
+    lifecycle::{CleanupAction, CleanupController},
     protocol,
 };
-use core_policy::{
-    CommandPolicy, EnvironmentDefault, EnvironmentPolicy, FilesystemPolicy, NetworkDefault,
-    NetworkPolicy, PhaseScope, PolicyArtifact, PolicyTarget, RuntimeLimits, ToolKind,
-    ToolRuntimeProfile,
-};
 use proto::{
-    EXECUTOR_MOUNT_DESCRIPTOR_BASE_V0, EXECUTOR_REQUEST_SCHEMA_V0, ExecutorLimitsV0,
-    ExecutorMountAccessV0, ExecutorMountOriginV0, ExecutorMountV0, ExecutorObjectKindV0,
-    ExecutorRequestV0, ExecutorResolvedMountV0, ExecutorResolvedPolicyV0,
-    ExecutorToolClassificationV0, RuntimeReadProfileV0, UnixObjectIdentityV0,
-    resolved_policy_digest_v0,
+    ExecutorLimitsV0, ExecutorObjectKindV0, ExecutorProtectedObjectV0, ExecutorRequestV0,
+    ExecutorResolvedPolicyV0, UnixObjectIdentityV0, resolved_policy_digest_v0,
 };
-use std::io::{Cursor, Write};
-use std::{collections::BTreeMap, time::Instant};
+use std::{
+    collections::BTreeMap,
+    io::{Cursor, Write},
+    time::Instant,
+};
 
 #[test]
 fn cleanup_controller_orders_term_kill_reap_and_output_drain() {
@@ -83,57 +73,12 @@ fn cleanup_controller_orders_term_kill_reap_and_output_drain() {
 }
 
 #[test]
-fn bounded_failures_substitute_only_prior_inner_tool_status() {
-    for classification in [
-        ExecutorToolClassificationV0::StdoutCapExceeded,
-        ExecutorToolClassificationV0::StderrCapExceeded,
-        ExecutorToolClassificationV0::StdoutStderrCapExceeded,
-        ExecutorToolClassificationV0::OutputCollectorFailed,
-        ExecutorToolClassificationV0::OutputDrainTimeout,
-    ] {
-        assert_eq!(
-            inner_status_policy(Some(classification)),
-            InnerStatusPolicy::IfReportable
-        );
-    }
-    assert_eq!(
-        inner_status_policy(None),
-        InnerStatusPolicy::RequiredAndClassify
-    );
-    assert_eq!(
-        inner_status_policy(Some(ExecutorToolClassificationV0::ToolTimedOut)),
-        InnerStatusPolicy::Ignore
-    );
-}
-
-#[test]
-fn process_capacity_classifies_only_before_bounded_lifecycle_failures() {
-    assert!(capacity_can_classify(None));
-    for classification in [
-        ExecutorToolClassificationV0::NonzeroExit,
-        ExecutorToolClassificationV0::SignalTermination,
-    ] {
-        assert!(capacity_can_classify(Some(classification)));
-    }
-    for classification in [
-        ExecutorToolClassificationV0::Cancelled,
-        ExecutorToolClassificationV0::StdoutCapExceeded,
-        ExecutorToolClassificationV0::StderrCapExceeded,
-        ExecutorToolClassificationV0::StdoutStderrCapExceeded,
-        ExecutorToolClassificationV0::OutputCollectorFailed,
-        ExecutorToolClassificationV0::OutputDrainTimeout,
-        ExecutorToolClassificationV0::ProcessCapacityExceeded,
-        ExecutorToolClassificationV0::ToolTimedOut,
-    ] {
-        assert!(!capacity_can_classify(Some(classification)));
-    }
-}
-
-#[test]
 fn protocol_probe_is_one_canonical_document() {
+    if run_isolated("WATERSHED_EXECUTOR_PROTOCOL_PROBE_CHILD") {
+        return;
+    }
     let mut output = Vec::new();
     let mut diagnostics = Vec::new();
-
     protocol::run_with_diagnostics(
         &["--probe".to_owned()],
         Cursor::new([]),
@@ -145,12 +90,21 @@ fn protocol_probe_is_one_canonical_document() {
     let probe = proto::parse_executor_probe_v0(&output).expect("probe is exact protocol JSON");
     assert_eq!(probe.schema, proto::EXECUTOR_PROBE_SCHEMA_V0);
     assert_eq!(probe.executor, proto::EXECUTOR_NAME_V0);
-    assert_eq!(probe.platform, proto::EXECUTOR_PLATFORM_V0);
+    assert_eq!(probe.backend, crate::backend::BACKEND);
+    assert_eq!(probe.platform, crate::backend::PLATFORM);
     assert_eq!(
         output,
         proto::canonical_executor_probe_v0(&probe).expect("probe canonicalizes")
     );
     assert_eq!(diagnostics.is_empty(), probe.ready);
+    assert_eq!(
+        probe.supported_policy_features,
+        if probe.ready {
+            vec![proto::EXECUTOR_FEATURE_SELF_PROTECTION_V0.to_owned()]
+        } else {
+            Vec::new()
+        }
+    );
 }
 
 #[test]
@@ -225,6 +179,7 @@ impl Write for FlushTrackingOutput {
 fn absent_or_invalid_start_never_dispatches_after_a_flushed_ready() {
     let cases = [
         Vec::new(),
+        vec![b' '; proto::MAX_EXECUTOR_CONTROL_BYTES_V0 + 1],
         b"{\"request_id\":\"other\",\"schema\":\"flow-executor-start-v0\"}\n".to_vec(),
         b"{\"request_id\":\"request-1\",\"schema\":\"flow-executor-start-v0\",\"start\":true}\n"
             .to_vec(),
@@ -252,558 +207,262 @@ fn absent_or_invalid_start_never_dispatches_after_a_flushed_ready() {
     }
 }
 
-#[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
 #[test]
-fn protocol_returns_a_typed_error_on_an_unsupported_platform() {
-    let request = exact_request(&[], &[]);
-    let input = proto::canonical_executor_request_v0(&request).expect("request canonicalizes");
-    let mut output = Vec::new();
-
-    protocol::run_with(&[], Cursor::new(input), &mut output)
-        .expect("unsupported platform is a typed response");
-
-    assert!(matches!(
-        proto::parse_executor_preflight_v0(&output, &request.request_id)
-            .expect("preflight is exact protocol JSON"),
-        proto::ExecutorPreflightV0::Error {
-            request_id,
-            code: proto::ExecutorErrorCodeV0::PolicyUnsupported,
-            ..
-        } if request_id == request.request_id
-    ));
-}
-
-#[test]
-fn stock_bubblewrap_uses_descriptor_paths_and_a_trusted_inner_verifier() {
-    let plan = SandboxPlan::new(
-        BubblewrapCapabilities::stock(),
-        vec![MountBinding {
-            access: ExecutorMountAccessV0::ReadOnly,
-            descriptor: 12,
-            source: UnixObjectIdentityV0 {
-                device: 7,
-                inode: 11,
-                kind: ExecutorObjectKindV0::File,
-            },
-            target: "/opt/tool/bin/tool".to_owned(),
-        }],
-    )
-    .expect("bounded exact mount plan");
-
-    assert!(
-        plan.arguments
-            .windows(3)
-            .any(|window| { window == ["--ro-bind", "/proc/self/fd/12", "/opt/tool/bin/tool"] })
+fn one_exact_start_dispatches_once_and_flushes_the_bound_receipt() {
+    let request = request();
+    let start = proto::canonical_executor_start_v0(&proto::ExecutorStartV0 {
+        request_id: request.request_id.clone(),
+        schema: proto::EXECUTOR_START_SCHEMA_V0.to_owned(),
+    })
+    .expect("Start canonicalizes");
+    let response = proto::ExecutorResponseV0::Completed {
+        enforcement: proto::EnforcementReceiptV0 {
+            applied_policy_digest: request.policy_digest.clone(),
+            backend: crate::backend::BACKEND.to_owned(),
+            backend_version: "test".to_owned(),
+            executor: proto::EXECUTOR_NAME_V0.to_owned(),
+            executor_version: env!("CARGO_PKG_VERSION").to_owned(),
+            platform: crate::backend::PLATFORM.to_owned(),
+            self_protection_active: true,
+        },
+        request_id: request.request_id.clone(),
+        schema: proto::EXECUTOR_RESPONSE_SCHEMA_V0.to_owned(),
+        tool_result: proto::ExecutorToolResultV0 {
+            classification: None,
+            exit_code: Some(0),
+            status: proto::ExecutorToolStatusV0::Completed,
+            stderr_base64: String::new(),
+            stdout_base64: proto::encode_executor_stream_v0(b"ok\n"),
+        },
+    };
+    let mut output = FlushTrackingOutput::default();
+    let mut dispatches = 0;
+    protocol::complete_preflight(Cursor::new(start), &mut output, &request.request_id, || {
+        dispatches += 1;
+        Ok(response.clone())
+    })
+    .expect("exact Start dispatches");
+    assert_eq!(dispatches, 1);
+    assert_eq!(
+        output.flushes, 2,
+        "Ready and the terminal response are flushed"
     );
-    assert_eq!(plan.inner_identity_checks.len(), 1);
-    assert_eq!(plan.inner_identity_checks[0].target, "/opt/tool/bin/tool");
+    let ready = proto::canonical_executor_preflight_v0(&proto::ExecutorPreflightV0::Ready {
+        request_id: request.request_id.clone(),
+        schema: proto::EXECUTOR_PREFLIGHT_SCHEMA_V0.to_owned(),
+    })
+    .unwrap();
+    assert!(output.bytes.starts_with(&ready));
+    let terminal = proto::parse_executor_response_v0(
+        &output.bytes[ready.len()..],
+        &request.request_id,
+        &request.policy_digest,
+    )
+    .expect("terminal response is bound to the exact request");
+    assert_eq!(terminal, response);
 }
 
 #[test]
-fn native_descriptor_mounts_still_require_post_mount_identity_verification() {
-    let plan = SandboxPlan::new(
-        BubblewrapCapabilities::descriptor_mounts(),
-        vec![MountBinding {
-            access: ExecutorMountAccessV0::ReadWrite,
-            descriptor: 13,
-            source: UnixObjectIdentityV0 {
-                device: 17,
-                inode: 19,
+fn changed_invocation_or_protected_objects_fail_before_readiness() {
+    type Mutate = fn(&mut ExecutorResolvedPolicyV0);
+    let cases: [(&str, Mutate); 12] = [
+        ("argv", |policy| {
+            policy.argv.push("different argument".to_owned())
+        }),
+        ("environment", |policy| {
+            policy
+                .environment
+                .insert("DECLARED".to_owned(), "different".to_owned());
+        }),
+        ("executable", |policy| {
+            policy.executable = "/opt/tool/bin/tool".to_owned()
+        }),
+        ("working directory", |policy| {
+            policy.working_directory = "/other-workspace".to_owned()
+        }),
+        ("timeout", |policy| policy.limits.timeout_ms += 1),
+        ("stdout bound", |policy| policy.limits.max_stdout_bytes += 1),
+        ("stderr bound", |policy| policy.limits.max_stderr_bytes += 1),
+        ("protected path", |policy| {
+            policy.protected_objects[0].path = "/other-owned".to_owned()
+        }),
+        ("protected identity", |policy| {
+            policy.protected_objects[0].identity.inode += 1
+        }),
+        ("protected kind", |policy| {
+            policy.protected_objects[0].identity.kind = ExecutorObjectKindV0::File
+        }),
+        ("Tool id", |policy| policy.tool_id = "different".to_owned()),
+        ("Tool kind", |policy| {
+            policy.tool_kind = "own-script".to_owned()
+        }),
+    ];
+    let original = request();
+    proto::canonical_executor_request_v0(&original).expect("baseline request is valid");
+    for (name, mutate) in cases {
+        let mut altered = original.clone();
+        mutate(&mut altered.resolved_policy);
+        let error = rejected_request(&altered);
+        assert!(error.contains("digest does not match"), "{name}: {error}");
+    }
+}
+
+#[test]
+fn legacy_security_and_duplicate_invocation_fields_fail_before_readiness() {
+    let original = request();
+    for (field, value) in [
+        ("argv", serde_json::json!(["duplicate"])),
+        ("mounts", serde_json::json!([])),
+        ("runtime_profile", serde_json::json!("exact")),
+    ] {
+        let mut document = serde_json::to_value(&original).unwrap();
+        document[field] = value;
+        assert_rejected_document(&document);
+    }
+    for (field, value) in [
+        ("artifact", serde_json::json!({})),
+        ("command", serde_json::json!({})),
+        ("mounts", serde_json::json!([])),
+        ("runtime_profile", serde_json::json!("host-system-read")),
+    ] {
+        let mut document = serde_json::to_value(&original).unwrap();
+        document["resolved_policy"][field] = value;
+        assert_rejected_document(&document);
+    }
+    let mut document = serde_json::to_value(&original).unwrap();
+    document["resolved_policy"]["limits"]["max_concurrent_processes_and_threads"] = 16.into();
+    assert_rejected_document(&document);
+}
+
+#[test]
+fn protected_objects_are_nonempty_unique_and_bounded_before_readiness() {
+    let mut exact = request();
+    exact.resolved_policy.protected_objects = (0..proto::MAX_EXECUTOR_PROTECTED_OBJECTS_V0)
+        .map(|index| ExecutorProtectedObjectV0 {
+            descriptor: proto::EXECUTOR_PROTECTED_DESCRIPTOR_BASE_V0 + index as u32,
+            path: format!("/flow-owned-{index}"),
+            identity: UnixObjectIdentityV0 {
+                device: 1,
+                inode: index as u64 + 1,
                 kind: ExecutorObjectKindV0::Directory,
             },
-            target: "/workspace/out".to_owned(),
-        }],
-    )
-    .expect("bounded writable mount plan");
+        })
+        .collect();
+    bind_digest(&mut exact);
+    proto::canonical_executor_request_v0(&exact)
+        .expect("the full protected descriptor capacity is representable");
 
-    assert!(
-        plan.arguments
-            .windows(3)
-            .any(|window| window == ["--bind-fd", "13", "/workspace/out"])
-    );
-    assert_eq!(plan.inner_identity_checks[0].source.inode, 19);
-}
-
-#[test]
-fn sandbox_plan_has_no_host_or_network_fallback() {
-    let plan = SandboxPlan::new(BubblewrapCapabilities::stock(), Vec::new())
-        .expect("empty exact mount set is structurally valid");
-
-    for required in [
-        "--die-with-parent",
-        "--new-session",
-        "--unshare-user",
-        "--unshare-pid",
-        "--as-pid-1",
-        "--unshare-net",
-        "--unshare-ipc",
-        "--unshare-uts",
-        "--disable-userns",
-        "--cap-drop",
-        "--clearenv",
-    ] {
-        assert!(plan.arguments.iter().any(|argument| argument == required));
-    }
-    assert!(!plan.arguments.iter().any(|argument| argument == "/"));
-}
-
-#[test]
-fn sandbox_rejects_mounts_that_overlap_executor_reserved_paths() {
-    for target in [
-        "/",
-        "/proc",
-        "/proc/self/fd/12",
-        "/dev",
-        "/dev/null",
-        "/run",
-        "/run/user-controlled",
-    ] {
-        let error = SandboxPlan::new(
-            BubblewrapCapabilities::stock(),
-            vec![MountBinding {
-                access: ExecutorMountAccessV0::ReadWrite,
-                descriptor: 12,
-                source: UnixObjectIdentityV0 {
-                    device: 7,
-                    inode: 11,
-                    kind: ExecutorObjectKindV0::Directory,
-                },
-                target: target.to_owned(),
-            }],
-        )
-        .expect_err("Executor-owned roots must remain unavailable to request mounts");
-
-        assert_eq!(error.code, proto::ExecutorErrorCodeV0::PolicyUnsupported);
-        assert_eq!(
-            error.to_string(),
-            "mount target overlaps an Executor-reserved path"
-        );
-    }
-}
-
-#[test]
-fn host_system_read_is_a_fixed_reviewed_ubuntu_set() {
-    assert_eq!(
-        crate::backend::HOST_SYSTEM_READ_MOUNTS,
-        [
-            ("/usr/bin", "/bin"),
-            ("/etc", "/etc"),
-            ("/usr/lib", "/lib"),
-            ("/usr/lib64", "/lib64"),
-            ("/usr/sbin", "/sbin"),
-            ("/usr", "/usr"),
-        ]
-    );
-}
-
-#[test]
-fn runtime_manifest_matches_the_closed_productive_executable_set() {
-    let mut manifest = crate::backend::runtime_mount_manifest()
-        .into_iter()
-        .filter_map(|mount| mount.executable)
-        .collect::<Vec<_>>();
-    manifest.sort_unstable();
-    manifest.dedup();
-
-    let mut policy = std::iter::once(proto::EXECUTOR_OWN_SCRIPT_EXECUTABLE_V0.to_owned())
-        .chain(
-            core_policy::TrustedPredefinedCommand::ALL
-                .into_iter()
-                .filter_map(core_policy::TrustedPredefinedCommand::productive_executable)
-                .map(str::to_owned),
-        )
-        .collect::<Vec<_>>();
-    policy.sort_unstable();
-
-    let mut protocol = proto::EXECUTOR_EXACT_EXECUTABLES_V0
-        .into_iter()
-        .map(str::to_owned)
-        .collect::<Vec<_>>();
-    protocol.sort_unstable();
-
-    assert_eq!(manifest, policy);
-    assert_eq!(manifest, protocol);
-}
-
-#[test]
-fn policy_translation_rejects_reachable_policy_command_and_manifest_conflicts() {
-    type Mutate = fn(&mut ExecutorRequestV0);
-    let cases: [(&str, Mutate, &str); 6] = [
-        (
-            "invalid policy",
-            |request| {
-                request.resolved_policy.artifact["policy_version"] = serde_json::json!("1");
-            },
-            "request policy is invalid",
-        ),
-        (
-            "unsupported target",
-            |request| {
-                request.resolved_policy.artifact["target"] = serde_json::json!("future-sandbox");
-            },
-            "request policy is invalid",
-        ),
-        (
-            "Tool absent from policy",
-            |request| {
-                request.tool_id = "other".to_owned();
-                request.resolved_policy.tool_id = request.tool_id.clone();
-            },
-            "request Tool is absent from its policy",
-        ),
-        (
-            "resolved command substitution",
-            |request| {
-                request.resolved_policy.command["command_id"] = serde_json::json!("agent-read");
-            },
-            "resolved command does not exactly match its policy artifact",
-        ),
-        (
-            "fixture-only command",
-            |request| {
-                let command = &mut request.resolved_policy.artifact["commands"][0];
-                command["command_id"] = serde_json::json!("agent-negative");
-                command["executable"] = serde_json::json!("registry:agent-negative");
-                request.resolved_policy.command = command.clone();
-            },
-            "request command is absent from the official executable manifest",
-        ),
-        (
-            "runtime manifest source substitution",
-            |request| {
-                request
-                    .resolved_policy
-                    .mounts
-                    .iter_mut()
-                    .find(|mount| mount.target == "/bin/echo")
-                    .expect("fixture has executable runtime mount")
-                    .source = "/usr/bin/cat".to_owned();
-            },
-            "request mount set does not exactly match its policy and runtime manifest",
-        ),
-    ];
-
-    for (name, mutate, message) in cases {
-        let mut request = exact_request(&[], &[]);
-        mutate(&mut request);
-
-        let error = reachable_backend_error(request, name);
-
-        assert_eq!(
-            error.code,
-            proto::ExecutorErrorCodeV0::PolicyUnsupported,
-            "{name}"
-        );
-        assert!(error.to_string().contains(message), "{name}: {error}");
-    }
-}
-
-#[test]
-fn execution_fields_cannot_escalate_the_selected_tool_policy() {
-    type Mutate = fn(&mut ExecutorRequestV0);
-    let cases: [(&str, Mutate); 7] = [
-        ("Tool kind", |request| {
-            request.tool_kind = "own-script".to_owned();
-            request.resolved_policy.tool_kind = request.tool_kind.clone();
-        }),
-        ("runtime profile", |request| {
-            request.runtime_profile = RuntimeReadProfileV0::HostSystemRead;
-            request.resolved_policy.runtime_profile = request.runtime_profile;
-        }),
-        ("executable", |request| {
-            request.executable = "/bin/cat".to_owned();
-        }),
-        ("timeout", |request| {
-            request.limits.timeout_ms += 1;
-            request.resolved_policy.limits = request.limits.clone();
-        }),
-        ("process capacity", |request| {
-            request.limits.max_concurrent_processes_and_threads += 1;
-            request.resolved_policy.limits = request.limits.clone();
-        }),
-        ("working directory", |request| {
-            request.working_directory = "/tmp".to_owned();
-        }),
-        ("environment", |request| {
-            request
-                .environment
-                .insert("UNDECLARED".to_owned(), "value".to_owned());
-        }),
-    ];
-
-    for (name, mutate) in cases {
-        let mut request = exact_request(&[], &[]);
-        mutate(&mut request);
-
-        let error = reachable_backend_error(request, name);
-
-        assert_eq!(
-            error.code,
-            proto::ExecutorErrorCodeV0::PolicyUnsupported,
-            "{name}"
-        );
-        assert_eq!(
-            error.to_string(),
-            "request execution fields do not match the selected Tool policy",
-            "{name}"
-        );
-    }
-}
-
-#[test]
-fn request_mounts_must_exactly_equal_policy_and_runtime_capabilities() {
-    let mut request = exact_request(&["workspace/input"], &["workspace/out"]);
-    let capability = mount(
-        request.mounts.len(),
-        ExecutorMountOriginV0::Workspace,
-        ExecutorMountAccessV0::ReadOnly,
-        "/workspace/extra",
-    );
-    request.mounts.push(capability.clone());
-    request
+    let mut overflow = exact.clone();
+    let mut object = overflow
         .resolved_policy
-        .mounts
-        .push(resolved_mount(&capability, "workspace/extra"));
-
-    let error =
-        validate_mount_contract(&request).expect_err("an undeclared capability must fail closed");
-
-    assert!(
-        error.to_string().contains("does not exactly match"),
-        "{error}"
-    );
-}
-
-#[test]
-fn request_mount_access_and_provenance_are_policy_bound() {
-    let mut request = exact_request(&["workspace/input"], &["workspace/out"]);
-    let writable = request
-        .mounts
-        .iter_mut()
-        .find(|mount| mount.target == "/workspace/out")
-        .expect("fixture has writable mount");
-    writable.access = ExecutorMountAccessV0::ReadOnly;
-    request
-        .resolved_policy
-        .mounts
-        .iter_mut()
-        .find(|mount| mount.target == "/workspace/out")
-        .expect("fixture has resolved writable mount")
-        .access = ExecutorMountAccessV0::ReadOnly;
-
-    assert!(validate_mount_contract(&request).is_err());
-}
-
-#[test]
-fn configured_mount_capacity_is_independent_from_runtime_mounts() {
-    let configured = (0..core_policy::MAX_FILESYSTEM_MOUNTS)
-        .map(|index| format!("workspace/read-{index}"))
-        .collect::<Vec<_>>();
-    let request = exact_request_owned(configured, Vec::new());
-
-    validate_mount_contract(&request)
-        .expect("all 64 configured mounts plus the fixed runtime objects remain reachable");
+        .protected_objects
+        .last()
+        .unwrap()
+        .clone();
+    object.descriptor += 1;
+    object.path = "/one-too-many".to_owned();
+    overflow.resolved_policy.protected_objects.push(object);
+    let mut empty = request();
+    empty.resolved_policy.protected_objects.clear();
+    let mut duplicate = request();
+    let mut object = duplicate.resolved_policy.protected_objects[0].clone();
+    object.descriptor += 1;
+    duplicate.resolved_policy.protected_objects.push(object);
+    let mut wrong_slot = request();
+    wrong_slot.resolved_policy.protected_objects[0].descriptor += 1;
+    let mut relative = request();
+    relative.resolved_policy.protected_objects[0].path = "relative-owned".to_owned();
+    for mut invalid in [overflow, empty, duplicate, wrong_slot, relative] {
+        bind_digest(&mut invalid);
+        assert!(!rejected_request(&invalid).is_empty());
+    }
 }
 
 #[test]
 fn response_stream_limits_cannot_exceed_the_protocol_capacity() {
-    let mut request = exact_request(&[], &[]);
-    request.limits.max_stdout_bytes = proto::MAX_EXECUTOR_TOOL_STREAM_BYTES_V0 as u64 + 1;
-    request.resolved_policy.limits = request.limits.clone();
-
-    let error = validate_mount_contract(&request)
-        .expect_err("an unrepresentable response limit must fail before launch");
-
-    assert!(error.to_string().contains("exceed protocol capacity"));
-}
-
-#[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
-#[test]
-fn productive_execution_fails_closed_outside_the_official_linux_target() {
-    let response = crate::backend::preflight(exact_request(&[], &[]))
-        .expect("unsupported platform produces a definitive preflight");
-
-    assert!(matches!(
-        response,
-        crate::backend::Preflight::Error(proto::ExecutorPreflightV0::Error {
-            code: proto::ExecutorErrorCodeV0::PolicyUnsupported,
-            ..
-        })
-    ));
-}
-
-fn reachable_backend_error(request: ExecutorRequestV0, case: &str) -> crate::backend::BackendError {
-    let mut request = request;
-    request.policy_digest =
-        resolved_policy_digest_v0(&request.resolved_policy).expect("policy digest");
-    let bytes = proto::canonical_executor_request_v0(&request)
-        .unwrap_or_else(|error| panic!("{case} must reach the backend: {error}"));
-    let request = proto::parse_executor_request_v0(&bytes)
-        .unwrap_or_else(|error| panic!("{case} must survive protocol parsing: {error}"));
-    match validate_mount_contract(&request) {
-        Ok(()) => panic!("{case} must be rejected by the backend"),
-        Err(error) => error,
+    for stdout in [true, false] {
+        for limit in [0, proto::MAX_EXECUTOR_TOOL_STREAM_BYTES_V0 as u64 + 1] {
+            let mut invalid = request();
+            if stdout {
+                invalid.resolved_policy.limits.max_stdout_bytes = limit;
+            } else {
+                invalid.resolved_policy.limits.max_stderr_bytes = limit;
+            }
+            bind_digest(&mut invalid);
+            assert!(rejected_request(&invalid).contains("limits"));
+        }
     }
 }
 
-fn exact_request(read_only: &[&str], writable: &[&str]) -> ExecutorRequestV0 {
-    exact_request_owned(
-        read_only.iter().map(|path| (*path).to_owned()).collect(),
-        writable.iter().map(|path| (*path).to_owned()).collect(),
-    )
-}
-
-fn exact_request_owned(read_only: Vec<String>, writable: Vec<String>) -> ExecutorRequestV0 {
-    let artifact = policy_artifact(read_only.clone(), writable.clone());
-    let command = serde_json::to_value(&artifact.commands[0]).expect("command serializes");
-    let artifact = serde_json::to_value(artifact).expect("policy serializes");
-    let mut capabilities = crate::backend::runtime_mount_manifest()
-        .into_iter()
-        .filter(|mount| {
-            mount.runtime_profile == RuntimeReadProfileV0::Exact
-                && mount.executable.as_deref() == Some("/bin/echo")
-        })
-        .map(|runtime| {
-            let capability = mount(
-                0,
-                ExecutorMountOriginV0::Runtime,
-                ExecutorMountAccessV0::ReadOnly,
-                &runtime.target,
-            );
-            (capability, runtime.source)
-        })
-        .chain(read_only.iter().map(|path| {
-            let capability = mount(
-                0,
-                ExecutorMountOriginV0::Workspace,
-                ExecutorMountAccessV0::ReadOnly,
-                &sandbox_workspace_path(path),
-            );
-            (capability, path.clone())
-        }))
-        .chain(writable.iter().map(|path| {
-            let capability = mount(
-                0,
-                ExecutorMountOriginV0::Workspace,
-                ExecutorMountAccessV0::ReadWrite,
-                &sandbox_workspace_path(path),
-            );
-            (capability, path.clone())
-        }))
-        .collect::<Vec<_>>();
-    capabilities.sort_by(|left, right| left.0.target.cmp(&right.0.target));
-    for (index, (entry, _)) in capabilities.iter_mut().enumerate() {
-        entry.descriptor = EXECUTOR_MOUNT_DESCRIPTOR_BASE_V0 + index as u32;
-    }
-    let mounts = capabilities
-        .iter()
-        .map(|(mount, _)| mount.clone())
-        .collect::<Vec<_>>();
-    let resolved_mounts = capabilities
-        .iter()
-        .map(|(mount, source)| resolved_mount(mount, source))
-        .collect();
-    let limits = ExecutorLimitsV0 {
-        max_concurrent_processes_and_threads: 64,
-        max_stderr_bytes: 1_024,
-        max_stdout_bytes: 1_024,
-        timeout_ms: 1_000,
-    };
+fn request() -> ExecutorRequestV0 {
     let resolved_policy = ExecutorResolvedPolicyV0 {
-        artifact,
-        command,
-        limits: limits.clone(),
-        mounts: resolved_mounts,
-        runtime_profile: RuntimeReadProfileV0::Exact,
-        tool_id: "echo".to_owned(),
-        tool_kind: "predefined-command".to_owned(),
-    };
-    ExecutorRequestV0 {
-        argv: vec!["ok".to_owned()],
-        environment: BTreeMap::new(),
+        argv: vec!["literal host argument".to_owned()],
+        environment: BTreeMap::from([("DECLARED".to_owned(), "literal value".to_owned())]),
         executable: "/bin/echo".to_owned(),
-        limits,
-        mounts,
-        policy_digest: resolved_policy_digest_v0(&resolved_policy).expect("policy digest"),
-        resolved_policy,
-        request_id: "request-1".to_owned(),
-        runtime_profile: RuntimeReadProfileV0::Exact,
-        schema: EXECUTOR_REQUEST_SCHEMA_V0.to_owned(),
+        limits: ExecutorLimitsV0 {
+            max_stderr_bytes: 1_024,
+            max_stdout_bytes: 1_024,
+            timeout_ms: 1_000,
+        },
+        protected_objects: vec![ExecutorProtectedObjectV0 {
+            descriptor: proto::EXECUTOR_PROTECTED_DESCRIPTOR_BASE_V0,
+            path: "/flow-owned".to_owned(),
+            identity: UnixObjectIdentityV0 {
+                device: 1,
+                inode: 1,
+                kind: ExecutorObjectKindV0::Directory,
+            },
+        }],
         tool_id: "echo".to_owned(),
         tool_kind: "predefined-command".to_owned(),
         working_directory: "/workspace".to_owned(),
+    };
+    ExecutorRequestV0 {
+        policy_digest: resolved_policy_digest_v0(&resolved_policy).expect("policy digest"),
+        resolved_policy,
+        request_id: "request-1".to_owned(),
+        schema: proto::EXECUTOR_REQUEST_SCHEMA_V0.to_owned(),
     }
 }
 
-fn resolved_mount(mount: &ExecutorMountV0, source: &str) -> ExecutorResolvedMountV0 {
-    ExecutorResolvedMountV0 {
-        access: mount.access,
-        descriptor: mount.descriptor,
-        origin: mount.origin,
-        source: source.to_owned(),
-        source_identity: mount.source_identity.clone(),
-        target: mount.target.clone(),
-    }
+fn bind_digest(request: &mut ExecutorRequestV0) {
+    request.policy_digest =
+        resolved_policy_digest_v0(&request.resolved_policy).expect("policy digest");
 }
 
-fn mount(
-    index: usize,
-    origin: ExecutorMountOriginV0,
-    access: ExecutorMountAccessV0,
-    target: &str,
-) -> ExecutorMountV0 {
-    ExecutorMountV0 {
-        access,
-        descriptor: EXECUTOR_MOUNT_DESCRIPTOR_BASE_V0 + index as u32,
-        origin,
-        source_identity: UnixObjectIdentityV0 {
-            device: 1,
-            inode: 1,
-            kind: ExecutorObjectKindV0::File,
-        },
-        target: target.to_owned(),
-    }
+fn rejected_request(request: &ExecutorRequestV0) -> String {
+    assert_rejected_document(&serde_json::to_value(request).unwrap())
 }
 
-fn sandbox_workspace_path(policy_path: &str) -> String {
-    format!("/{policy_path}")
+fn assert_rejected_document(document: &serde_json::Value) -> String {
+    // Raw JSON must reach the entry point; the canonical encoder already rejects these requests.
+    let mut input = serde_json::to_vec(document).unwrap();
+    input.push(b'\n');
+    let mut output = Vec::new();
+    let error = protocol::run_with(&[], Cursor::new(input), &mut output)
+        .expect_err("invalid request must fail before dispatch");
+    assert!(output.is_empty(), "invalid request must not publish Ready");
+    error
 }
 
-fn policy_artifact(read_only: Vec<String>, writable: Vec<String>) -> PolicyArtifact {
-    PolicyArtifact {
-        commands: vec![CommandPolicy {
-            allowed_parameters: Vec::new(),
-            argv: Vec::new(),
-            command_id: "agent-echo".to_owned(),
-            environment: EnvironmentPolicy {
-                allow: Vec::new(),
-                default: EnvironmentDefault::Clear,
-            },
-            executable: "registry:agent-echo".to_owned(),
-            filesystem: FilesystemPolicy {
-                read_only_mounts: read_only,
-                writable_mounts: writable,
-            },
-            max_concurrent_processes_and_threads: 64,
-            network: NetworkPolicy {
-                allow: Vec::new(),
-                default: NetworkDefault::Deny,
-            },
-            runtime_profile: ToolRuntimeProfile::Exact,
-            script_runtime: None,
-            tool_id: "echo".to_owned(),
-            tool_kind: ToolKind::PredefinedCommand,
-        }],
-        phase_scope: vec![PhaseScope {
-            phase_id: "run".to_owned(),
-            tool_ids: vec!["echo".to_owned()],
-        }],
-        policy_version: core_policy::POLICY_VERSION_V0.to_owned(),
-        runtime_limits: RuntimeLimits {
-            headless: true,
-            timeout_ms: 1_000,
-        },
-        source_flow_definition_id: "flow".to_owned(),
-        target: PolicyTarget::LinuxBubblewrapSeccomp,
+pub(crate) fn run_isolated(child_env: &str) -> bool {
+    if std::env::var_os(child_env).is_some() {
+        return false;
     }
+    let name = std::thread::current()
+        .name()
+        .expect("test thread has a name")
+        .to_owned();
+    let output =
+        std::process::Command::new(std::env::current_exe().expect("test executable resolves"))
+            .args(["--exact", &name, "--nocapture"])
+            .env(child_env, "1")
+            .output()
+            .expect("isolated test starts");
+    assert!(
+        output.status.success(),
+        "isolated test failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    true
 }

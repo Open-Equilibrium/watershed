@@ -226,27 +226,24 @@ impl<'a> PayloadValidator<'a> {
                 self.require_role()?;
             }
             EventType::ToolStarted => {
+                if let Some(field) = self.payload.keys().find(|field| {
+                    !matches!(
+                        field.as_str(),
+                        "tool_id" | "tool_kind" | "tool_name" | "allowed_parameters" | "attempt_id"
+                    )
+                }) {
+                    return Err(EventValidationError::new(
+                        format!("payload.{field}"),
+                        "unknown Tool invocation metadata field",
+                    ));
+                }
                 self.optional_string("attempt_id")?;
                 self.require_string("tool_id")?;
                 self.require_string("tool_name")?;
                 if ToolKind::try_from(self.require_string("tool_kind")?).is_err() {
                     return Err(self.error("tool_kind", "must be predefined-command or own-script"));
                 }
-                self.require_string_array("read_only_mounts")?;
-                self.require_string_array("writable_mounts")?;
-                match self.require_string("runtime_profile")? {
-                    "exact" | "host-system-read" => {}
-                    _ => {
-                        return Err(
-                            self.error("runtime_profile", "must be exact or host-system-read")
-                        );
-                    }
-                }
                 self.require_string_array("allowed_parameters")?;
-                self.require_positive_integer("max_concurrent_processes_and_threads")?;
-                if ToolNetworkAccess::try_from(self.require_string("network_access")?).is_err() {
-                    return Err(self.error("network_access", "must be deny or declared"));
-                }
             }
             EventType::ToolProgress => {
                 self.optional_string("attempt_id")?;

@@ -64,25 +64,34 @@ fn registry_root_rejects_symlinked_path_components() {
 }
 
 #[test]
-fn run_flow_rejects_positive_tool_egress_before_fixture_execution() {
-    let workspace = workspace_copy("smoke-flow");
-    replace_registry_text(
-        &workspace,
-        "tools/echo.yaml",
-        "  network: deny\n",
-        "  network:\n    default: deny\n    allow:\n      - kind: cidr\n        transport: tcp\n        cidr: 192.0.2.0/24\n        port: 443\n",
-    );
+fn run_flow_rejects_legacy_isolation_settings_before_fixture_execution() {
+    for declaration in [
+        "read_only_mounts: [workspace]",
+        "writable_mounts: []",
+        "runtime_profile: exact",
+        "max_concurrent_processes_and_threads: 16",
+        "network: deny",
+        "network:\n    default: deny\n    allow:\n      - kind: cidr\n        transport: tcp\n        cidr: 192.0.2.0/24\n        port: 443",
+    ] {
+        let workspace = workspace_copy("smoke-flow");
+        replace_registry_text(
+            &workspace,
+            "tools/echo.yaml",
+            "  allowed_parameters: []\n",
+            &format!("  allowed_parameters: []\n  {declaration}\n"),
+        );
 
-    let error = run_flow(&workspace, "smoke-flow", EmitMode::Jsonl)
-        .expect_err("M1.2 rejects positive tool egress before fixture execution");
+        let error = run_flow(&workspace, "smoke-flow", EmitMode::Jsonl)
+            .expect_err("legacy security settings must reject before fixture execution");
 
-    assert!(matches!(
-        error,
-        RuntimeError::Policy(core_policy::PolicyCompileError::NonEmptyNetworkAllowlist {
-            tool_id
-        }) if tool_id == "echo"
-    ));
-    assert!(!crate::tests::helpers::workspace_session_dir(&workspace).exists());
+        let field = declaration
+            .split_once(':')
+            .expect("declaration has a field")
+            .0;
+        assert!(matches!(&error, RuntimeError::Registry(_)), "{error}");
+        assert!(error.to_string().contains(field), "{field}: {error}");
+        super::helpers::assert_no_session_artifacts(&workspace, "smoke-flow");
+    }
 }
 
 #[test]

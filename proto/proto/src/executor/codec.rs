@@ -1,15 +1,13 @@
 use super::validation::{
-    validate_absolute_path, validate_receipt, validate_request, validate_schema, validate_text,
-    validate_tool_result,
+    validate_receipt, validate_request, validate_schema, validate_text, validate_tool_result,
 };
 use super::{
-    EXECUTOR_EXACT_EXECUTABLES_V0, EXECUTOR_PREFLIGHT_SCHEMA_V0, EXECUTOR_PROBE_SCHEMA_V0,
-    EXECUTOR_RESPONSE_SCHEMA_V0, EXECUTOR_START_SCHEMA_V0, EnforcementReceiptV0,
-    ExecutorErrorCodeV0, ExecutorPreflightV0, ExecutorProbeV0, ExecutorProtocolError,
-    ExecutorRequestV0, ExecutorResolvedPolicyV0, ExecutorResponseV0, ExecutorStartV0,
-    MAX_ERROR_MESSAGE_CHARS, MAX_EXECUTOR_CONTROL_BYTES_V0, MAX_EXECUTOR_PROBE_BYTES_V0,
-    MAX_EXECUTOR_REQUEST_BYTES_V0, MAX_EXECUTOR_RESPONSE_BYTES_V0, MAX_EXECUTOR_RUNTIME_MOUNTS_V0,
-    MAX_FEATURES, MAX_ID_CHARS, MAX_NAME_CHARS, MAX_PATH_CHARS, RuntimeReadProfileV0,
+    EXECUTOR_PREFLIGHT_SCHEMA_V0, EXECUTOR_PROBE_SCHEMA_V0, EXECUTOR_RESPONSE_SCHEMA_V0,
+    EXECUTOR_START_SCHEMA_V0, EnforcementReceiptV0, ExecutorErrorCodeV0, ExecutorPreflightV0,
+    ExecutorProbeV0, ExecutorProtocolError, ExecutorRequestV0, ExecutorResolvedPolicyV0,
+    ExecutorResponseV0, ExecutorStartV0, MAX_ERROR_MESSAGE_CHARS, MAX_EXECUTOR_CONTROL_BYTES_V0,
+    MAX_EXECUTOR_PROBE_BYTES_V0, MAX_EXECUTOR_REQUEST_BYTES_V0, MAX_EXECUTOR_RESPONSE_BYTES_V0,
+    MAX_FEATURES, MAX_ID_CHARS, MAX_NAME_CHARS,
 };
 use crate::{canonical_json, parse_unique_json};
 use serde::Serialize;
@@ -30,22 +28,20 @@ pub fn resolved_policy_digest_v0(
     Ok(digest.iter().map(|byte| format!("{byte:02x}")).collect())
 }
 
-/// Validates one receipt against the policy, runtime profile, and capacity Flow requested.
+/// Validates active self-protection and the digest of the complete policy Flow requested.
 pub fn validate_enforcement_receipt_v0(
     receipt: &EnforcementReceiptV0,
     expected_policy_digest: &str,
-    expected_runtime_profile: RuntimeReadProfileV0,
-    expected_max_concurrent_processes_and_threads: u32,
 ) -> Result<(), ExecutorProtocolError> {
     validate_receipt(receipt)?;
-    if !receipt.isolation_active
-        || receipt.applied_policy_digest != expected_policy_digest
-        || receipt.runtime_profile != expected_runtime_profile
-        || receipt.max_concurrent_processes_and_threads
-            != expected_max_concurrent_processes_and_threads
-    {
+    if receipt.applied_policy_digest != expected_policy_digest {
         return Err(ExecutorProtocolError::new(
-            "Executor enforcement receipt does not match the requested isolation policy",
+            "Executor applied the wrong policy digest",
+        ));
+    }
+    if !receipt.self_protection_active {
+        return Err(ExecutorProtocolError::new(
+            "Executor self-protection was not active",
         ));
     }
     Ok(())
@@ -217,18 +213,8 @@ pub fn parse_executor_response_v0(
             tool_result,
             ..
         } => {
-            validate_receipt(enforcement)?;
+            validate_enforcement_receipt_v0(enforcement, expected_policy_digest)?;
             validate_tool_result(tool_result)?;
-            if enforcement.applied_policy_digest != expected_policy_digest {
-                return Err(ExecutorProtocolError::new(
-                    "Executor applied the wrong policy digest",
-                ));
-            }
-            if !enforcement.isolation_active {
-                return Err(ExecutorProtocolError::new(
-                    "Executor isolation was not active",
-                ));
-            }
         }
         ExecutorResponseV0::Error { code, message, .. } => {
             if *code != ExecutorErrorCodeV0::SandboxSetupFailed {
@@ -260,7 +246,6 @@ pub fn parse_executor_probe_v0(bytes: &[u8]) -> Result<ExecutorProbeV0, Executor
     if probe.protocol_versions.is_empty()
         || probe.protocol_versions.len() > MAX_FEATURES
         || probe.supported_policy_features.len() > MAX_FEATURES
-        || probe.runtime_mounts.len() > MAX_EXECUTOR_RUNTIME_MOUNTS_V0
     {
         return Err(ExecutorProtocolError::new(
             "Executor probe list bounds are invalid",
@@ -272,42 +257,6 @@ pub fn parse_executor_probe_v0(bytes: &[u8]) -> Result<ExecutorProbeV0, Executor
         .chain(&probe.supported_policy_features)
     {
         validate_text(value, "probe feature", MAX_NAME_CHARS)?;
-    }
-    let mut mount_keys = std::collections::BTreeSet::new();
-    let mut mount_targets = std::collections::BTreeSet::new();
-    for mount in &probe.runtime_mounts {
-        validate_text(&mount.source, "runtime mount source", MAX_PATH_CHARS)?;
-        validate_text(&mount.target, "runtime mount target", MAX_PATH_CHARS)?;
-        validate_absolute_path(&mount.source, "runtime mount source")?;
-        validate_absolute_path(&mount.target, "runtime mount target")?;
-        if let Some(executable) = &mount.executable {
-            validate_text(executable, "runtime mount executable", MAX_PATH_CHARS)?;
-            validate_absolute_path(executable, "runtime mount executable")?;
-            if !EXECUTOR_EXACT_EXECUTABLES_V0.contains(&executable.as_str()) {
-                return Err(ExecutorProtocolError::new(
-                    "Executor runtime mount names an unsupported executable",
-                ));
-            }
-        } else if mount.runtime_profile == RuntimeReadProfileV0::Exact {
-            return Err(ExecutorProtocolError::new(
-                "exact Executor runtime mounts must name an executable",
-            ));
-        }
-        let key = (
-            mount.runtime_profile as u8,
-            mount.executable.as_deref(),
-            mount.source.as_str(),
-        );
-        let target_key = (
-            mount.runtime_profile as u8,
-            mount.executable.as_deref(),
-            mount.target.as_str(),
-        );
-        if !mount_keys.insert(key) || !mount_targets.insert(target_key) {
-            return Err(ExecutorProtocolError::new(
-                "Executor runtime mount manifest contains duplicates",
-            ));
-        }
     }
     Ok(probe)
 }

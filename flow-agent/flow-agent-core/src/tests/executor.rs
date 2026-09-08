@@ -1,22 +1,13 @@
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 use crate::runtime::executor::{
     EXECUTOR_CONFIG_MAX_BYTES, ExecutorConfigStore, ExecutorSelectionSource, default_executor_path,
 };
-#[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
-use crate::runtime::executor::{
-    PreparedExecutor, configure_default_executor, configure_executor_path, executor_check,
-};
-#[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
-use crate::runtime::types::RuntimeError;
 use std::fs;
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 use std::{
     env,
     os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _},
     path::Path,
 };
 
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 fn private_configuration_workspace(label: &str) -> crate::tests::test_support::TempWorkspace {
     let root = crate::tests::helpers::empty_workspace(label);
     fs::set_permissions(&root, fs::Permissions::from_mode(0o700))
@@ -24,10 +15,8 @@ fn private_configuration_workspace(label: &str) -> crate::tests::test_support::T
     root
 }
 
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 mod conformance;
 
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 #[test]
 fn default_executor_is_the_flow_binary_sibling() {
     let flow = Path::new("/trusted/bin/flow");
@@ -37,7 +26,6 @@ fn default_executor_is_the_flow_binary_sibling() {
     assert_eq!(selected, flow.with_file_name("flow-executor"));
 }
 
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 #[test]
 fn protected_override_round_trips_and_default_removes_only_the_override() {
     let root = private_configuration_workspace("executor-config-roundtrip");
@@ -90,7 +78,6 @@ fn protected_override_round_trips_and_default_removes_only_the_override() {
     assert!(store.read().expect("removed override reads").is_none());
 }
 
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 #[test]
 fn executor_override_recovers_an_abandoned_publication_stage() {
     let root = private_configuration_workspace("executor-config-stage-recovery");
@@ -109,7 +96,6 @@ fn executor_override_recovers_an_abandoned_publication_stage() {
     );
 }
 
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 #[test]
 fn executor_override_rejects_relative_paths_without_publishing() {
     let root = private_configuration_workspace("executor-config-relative");
@@ -124,7 +110,6 @@ fn executor_override_rejects_relative_paths_without_publishing() {
     assert!(!config.exists());
 }
 
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 #[test]
 fn executor_override_rejects_an_oversized_document() {
     let root = private_configuration_workspace("executor-config-oversized");
@@ -140,7 +125,6 @@ fn executor_override_rejects_an_oversized_document() {
     assert!(error.to_string().contains("oversized"), "{error}");
 }
 
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 #[test]
 fn executor_override_rejects_an_oversized_path_without_publishing() {
     let root = private_configuration_workspace("executor-config-write-oversized");
@@ -156,7 +140,6 @@ fn executor_override_rejects_an_oversized_path_without_publishing() {
     assert!(!config.exists());
 }
 
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 #[test]
 fn executor_override_creates_a_missing_nested_parent_and_round_trips() {
     let root = private_configuration_workspace("executor-config-nested-parent");
@@ -183,7 +166,6 @@ fn executor_override_creates_a_missing_nested_parent_and_round_trips() {
     );
 }
 
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 #[test]
 fn executor_override_publishes_after_a_contended_lock_is_released() {
     use std::{fs::OpenOptions, sync::mpsc, thread, time::Duration};
@@ -224,7 +206,6 @@ fn executor_override_publishes_after_a_contended_lock_is_released() {
     );
 }
 
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 #[test]
 fn executor_override_rejects_invalid_documents() {
     let root = private_configuration_workspace("executor-config-invalid");
@@ -260,7 +241,6 @@ fn executor_override_rejects_invalid_documents() {
     }
 }
 
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 #[test]
 fn executor_override_rejects_unsafe_file_and_parent_objects_without_replacing_them() {
     let root = private_configuration_workspace("executor-config-unsafe-objects");
@@ -295,39 +275,6 @@ fn executor_override_rejects_unsafe_file_and_parent_objects_without_replacing_th
     assert!(directory_target.is_dir());
 }
 
-#[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
-#[test]
-fn productive_executor_entry_points_fail_closed_before_mutating_candidate_state() {
-    let root = crate::tests::helpers::empty_workspace("executor-unsupported-platform");
-    let candidate = root.join("flow-executor");
-
-    assert_policy_unsupported(executor_check());
-    assert_policy_unsupported(configure_executor_path(&candidate));
-    assert_policy_unsupported(configure_default_executor());
-    assert_policy_unsupported(PreparedExecutor::prepare_selected());
-
-    assert!(
-        fs::read_dir(&*root)
-            .expect("fixture remains readable")
-            .next()
-            .is_none(),
-        "unsupported Executor calls must not modify candidate state"
-    );
-}
-
-#[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
-fn assert_policy_unsupported<T>(result: Result<T, RuntimeError>) {
-    match result {
-        Err(RuntimeError::Executor(failure)) => assert_eq!(
-            failure.code(),
-            proto::ExecutorErrorCodeV0::PolicyUnsupported
-        ),
-        Err(error) => panic!("unexpected Executor failure: {error}"),
-        Ok(_) => panic!("productive Executor must be unavailable on this platform"),
-    }
-}
-
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 #[test]
 fn protected_executor_override_has_private_directory_file_and_lock_modes() {
     let root = private_configuration_workspace("executor-config-private");
@@ -358,7 +305,6 @@ fn protected_executor_override_has_private_directory_file_and_lock_modes() {
     );
 }
 
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 #[test]
 fn executor_override_rejects_a_linked_configuration_file() {
     use std::os::unix::fs::symlink;
@@ -383,7 +329,6 @@ fn executor_override_rejects_a_linked_configuration_file() {
     assert_eq!(fs::read(&target).expect("link target remains"), b"{}");
 }
 
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 #[test]
 fn executor_override_rejects_a_hard_linked_configuration_file() {
     let root = private_configuration_workspace("executor-config-hardlink");

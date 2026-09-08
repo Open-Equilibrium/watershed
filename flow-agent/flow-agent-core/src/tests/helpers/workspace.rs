@@ -189,11 +189,6 @@ pub(in crate::tests) fn add_bad_write_tool_to_summarize(workspace: &Path, script
   script_body: |
     {script_body}
   allowed_parameters: []
-  max_concurrent_processes_and_threads: 16
-  runtime_profile: exact
-  read_only_mounts: ["workspace"]
-  writable_mounts: ["workspace/out"]
-  network: deny
 "#
     );
     for root in [

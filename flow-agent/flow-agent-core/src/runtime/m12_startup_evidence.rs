@@ -14,9 +14,6 @@ use crate::runtime::{
     tool_runner::ToolInvocation,
 };
 
-/// Fixed process-and-thread capacity used by the M1.2 startup evidence Tool.
-pub const M12_EXECUTOR_STARTUP_PROCESS_CAPACITY: u32 = 8;
-
 fn fixed_executor_policy() -> core_policy::PolicyArtifact {
     core_policy::PolicyArtifact {
         commands: vec![core_policy::CommandPolicy {
@@ -28,16 +25,6 @@ fn fixed_executor_policy() -> core_policy::PolicyArtifact {
                 default: core_policy::EnvironmentDefault::Clear,
             },
             executable: "registry:agent-echo".to_owned(),
-            filesystem: core_policy::FilesystemPolicy {
-                read_only_mounts: vec!["workspace".to_owned()],
-                writable_mounts: Vec::new(),
-            },
-            max_concurrent_processes_and_threads: M12_EXECUTOR_STARTUP_PROCESS_CAPACITY,
-            network: core_policy::NetworkPolicy {
-                allow: Vec::new(),
-                default: core_policy::NetworkDefault::Deny,
-            },
-            runtime_profile: core_policy::ToolRuntimeProfile::Exact,
             script_runtime: None,
             tool_id: "m12-startup-noop".to_owned(),
             tool_kind: core_policy::ToolKind::PredefinedCommand,
@@ -52,7 +39,6 @@ fn fixed_executor_policy() -> core_policy::PolicyArtifact {
             timeout_ms: 5_000,
         },
         source_flow_definition_id: "m12-executor-startup".to_owned(),
-        target: core_policy::PolicyTarget::LinuxBubblewrapSeccomp,
     }
 }
 
@@ -61,18 +47,18 @@ fn fixed_executor_policy() -> core_policy::PolicyArtifact {
 pub struct M12ExecutorStartupMeasurement {
     /// Preparation and readiness through validated Tool result and enforcement receipt.
     pub executor_elapsed: Duration,
-    /// Exact process-and-thread capacity confirmed by the Executor receipt.
-    pub max_concurrent_processes_and_threads: u32,
+    /// Mandatory own-file protection confirmed by the validated Executor receipt.
+    pub self_protection_active: bool,
 }
 
 fn is_prefixed_lower_sha256(value: &str) -> bool {
     strip_sha256_prefix(value).is_some_and(is_lowercase_sha256_hex)
 }
 
-/// Rejects public M1.2 Executor checks outside the canonical contract host.
+/// Rejects public M1.2 Executor checks outside supported native Tool hosts.
 pub fn ensure_m12_executor_host() -> Result<(), String> {
     ensure_productive_tool_execution_platform()
-        .map_err(|_| "M1.2 Executor startup requires Ubuntu 24.04 x64".to_owned())
+        .map_err(|_| "M1.2 Executor startup requires a supported native Tool host".to_owned())
 }
 
 /// Measures one fixed no-op Tool through the real prepared Executor boundary.
@@ -105,6 +91,8 @@ pub fn run_m12_executor_startup(workspace: &Path) -> Result<M12ExecutorStartupMe
             "m12-startup-evidence",
         )
         .map_err(|_| "selected Executor did not complete M1.2 evidence")?;
+    let expected_request_hash = prepared.request_hash().to_owned();
+    let expected_policy_digest = prepared.policy_digest().to_owned();
     let dispatch = executor
         .execute_prepared(prepared)
         .map_err(|_| "selected Executor did not complete M1.2 evidence")?;
@@ -120,11 +108,9 @@ pub fn run_m12_executor_startup(workspace: &Path) -> Result<M12ExecutorStartupMe
     {
         return Err("Executor did not return the exact no-op Tool result".to_owned());
     }
-    if !execution.enforcement.isolation_active
-        || execution.enforcement.runtime_profile != proto::RuntimeReadProfileV0::Exact
-        || execution.enforcement.max_concurrent_processes_and_threads
-            != M12_EXECUTOR_STARTUP_PROCESS_CAPACITY
-        || !is_lowercase_sha256_hex(&execution.enforcement.applied_policy_digest)
+    if proto::validate_enforcement_receipt_v0(&execution.enforcement, &expected_policy_digest)
+        .is_err()
+        || execution.request_hash != expected_request_hash
         || !is_prefixed_lower_sha256(&execution.request_hash)
     {
         return Err("Executor did not return the exact enforcement evidence".to_owned());
@@ -133,17 +119,13 @@ pub fn run_m12_executor_startup(workspace: &Path) -> Result<M12ExecutorStartupMe
 
     Ok(M12ExecutorStartupMeasurement {
         executor_elapsed,
-        max_concurrent_processes_and_threads: execution
-            .enforcement
-            .max_concurrent_processes_and_threads,
+        self_protection_active: execution.enforcement.self_protection_active,
     })
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        M12_EXECUTOR_STARTUP_PROCESS_CAPACITY, fixed_executor_policy, is_prefixed_lower_sha256,
-    };
+    use super::{fixed_executor_policy, is_prefixed_lower_sha256};
 
     #[test]
     fn fixed_evidence_policy_is_an_exact_empty_echo() {
@@ -153,16 +135,15 @@ mod tests {
         let command = &policy.commands[0];
         assert_eq!(command.command_id, "agent-echo");
         assert!(command.argv.is_empty());
+        assert!(command.allowed_parameters.is_empty());
         assert!(command.environment.allow.is_empty());
         assert_eq!(
-            command.runtime_profile,
-            core_policy::ToolRuntimeProfile::Exact
+            command.environment.default,
+            core_policy::EnvironmentDefault::Clear
         );
-        assert_eq!(command.filesystem.read_only_mounts, ["workspace"]);
-        assert_eq!(
-            command.max_concurrent_processes_and_threads,
-            M12_EXECUTOR_STARTUP_PROCESS_CAPACITY
-        );
+        assert_eq!(command.tool_kind, core_policy::ToolKind::PredefinedCommand);
+        assert_eq!(policy.phase_scope[0].tool_ids, ["m12-startup-noop"]);
+        assert_eq!(policy.runtime_limits.timeout_ms, 5_000);
     }
 
     #[test]

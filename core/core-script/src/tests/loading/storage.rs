@@ -418,10 +418,6 @@ tool:
   script_body: |
     echo outside
   allowed_parameters: []
-  max_concurrent_processes_and_threads: 32
-  read_only_mounts: []
-  writable_mounts: []
-  network: deny
 "#,
     )
     .expect("outside registry file written");

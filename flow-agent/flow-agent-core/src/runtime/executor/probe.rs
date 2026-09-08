@@ -1,18 +1,13 @@
 use super::ExecutorSelection;
-#[cfg(any(test, all(target_os = "linux", target_arch = "x86_64")))]
 use super::ExecutorSelectionSource;
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 use super::process::{
     child_exited_without_reaping, configure_executor_child, terminate_child_or_fail_stop,
 };
-#[cfg(any(test, all(target_os = "linux", target_arch = "x86_64")))]
 use crate::runtime::fs_guards::AnchoredDir;
 use crate::runtime::types::RuntimeError;
 use std::path::Path;
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 use {crate::runtime::fs_guards::AnchoredFile, std::fs::File};
 
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 use std::{
     io::{self, Read},
     os::{
@@ -26,26 +21,20 @@ use std::{
     time::{Duration, Instant},
 };
 
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 const MAX_PROBE_STDERR_BYTES: usize = 4 * 1024;
 #[derive(Debug)]
 pub(super) struct ProbedExecutor {
-    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     pub(super) programs: InstalledPrograms,
-    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     pub(super) probe: proto::ExecutorProbeV0,
 }
 
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 #[derive(Debug)]
 pub(super) struct InstalledProgram {
     pub(super) path: AnchoredFile,
     pub(super) image: File,
 }
 
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 #[derive(Debug)]
 pub(super) struct InstalledPrograms {
     pub(super) selected: InstalledProgram,
@@ -53,7 +42,6 @@ pub(super) struct InstalledPrograms {
     pub(super) sibling: Option<InstalledProgram>,
 }
 
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 impl InstalledPrograms {
     fn verify_aliases(&self, roots: &[AnchoredDir]) -> Result<(), RuntimeError> {
         let images = [&self.selected, &self.flow]
@@ -75,29 +63,17 @@ pub(super) fn probe_executor(
     installation_flow: &Path,
     protected_directories: &[AnchoredDir],
 ) -> Result<ProbedExecutor, RuntimeError> {
-    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-    {
-        probe_linux_executor(selection, installation_flow, protected_directories)
-    }
-    #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
-    {
-        let _ = (selection, installation_flow, protected_directories);
-        Err(protocol_failure(
-            proto::ExecutorErrorCodeV0::PolicyUnsupported,
-            "productive Executor support requires Ubuntu 24.04 x64",
-        ))
-    }
+    probe_native_executor(selection, installation_flow, protected_directories)
 }
 
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-fn probe_linux_executor(
+fn probe_native_executor(
     selection: &ExecutorSelection,
     installation_flow: &Path,
     protected_directories: &[AnchoredDir],
 ) -> Result<ProbedExecutor, RuntimeError> {
     let programs = open_validated_executable(selection, installation_flow)?;
     programs.verify_aliases(protected_directories)?;
-    let inherited_path = format!("/proc/self/fd/{}", programs.selected.image.as_raw_fd());
+    let inherited_path = super::process::executor_image_path(programs.selected.image.as_raw_fd());
     let mut command = Command::new(inherited_path);
     command
         .arg("--probe")
@@ -190,7 +166,6 @@ fn probe_linux_executor(
     Ok(ProbedExecutor { programs, probe })
 }
 
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 fn receive_bounded_read(
     receiver: mpsc::Receiver<io::Result<BoundedRead>>,
     started: Instant,
@@ -208,12 +183,12 @@ fn receive_bounded_read(
         })
 }
 
-#[cfg(any(test, all(target_os = "linux", target_arch = "x86_64")))]
 fn validate_probe(
     selection: &ExecutorSelection,
     probe: &proto::ExecutorProbeV0,
     readiness_diagnostic: Option<&str>,
 ) -> Result<(), RuntimeError> {
+    let (platform, backend) = host_identity();
     if !probe
         .protocol_versions
         .iter()
@@ -229,7 +204,7 @@ fn validate_probe(
             readiness_diagnostic.unwrap_or("Executor readiness requirements are not satisfied"),
         ));
     }
-    if probe.platform != proto::EXECUTOR_PLATFORM_V0 {
+    if probe.platform != platform {
         return Err(executor_unavailable(
             "Executor readiness requirements are not satisfied",
         ));
@@ -237,20 +212,16 @@ fn validate_probe(
     if !probe
         .supported_policy_features
         .iter()
-        .any(|feature| feature == proto::EXECUTOR_FEATURE_PROCESS_CAPACITY_V0)
+        .any(|feature| feature == proto::EXECUTOR_FEATURE_SELF_PROTECTION_V0)
     {
         return Err(executor_unavailable(
-            "Executor does not support the required process-capacity boundary",
+            "Executor does not support mandatory Flow-owned write protection",
         ));
     }
     if selection.source() == ExecutorSelectionSource::Default
         && (probe.executor != proto::EXECUTOR_NAME_V0
             || probe.executor_version != env!("CARGO_PKG_VERSION")
-            || probe.backend != proto::EXECUTOR_BACKEND_V0
-            || !probe
-                .supported_policy_features
-                .iter()
-                .any(|feature| feature == proto::EXECUTOR_FEATURE_STATIC_SELF_REEXEC_V0))
+            || probe.backend != backend)
     {
         return Err(executor_unavailable(
             "installed Default Executor identity or version is incompatible",
@@ -259,13 +230,22 @@ fn validate_probe(
     Ok(())
 }
 
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn host_identity() -> (&'static str, &'static str) {
+    #[cfg(target_os = "linux")]
+    {
+        ("ubuntu-24.04-x86_64", "bubblewrap-seccomp")
+    }
+    #[cfg(target_os = "macos")]
+    {
+        ("macos-26-aarch64", "seatbelt")
+    }
+}
+
 struct BoundedRead {
     bytes: Vec<u8>,
     overflowed: bool,
 }
 
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 fn read_bounded(mut reader: impl Read, limit: usize) -> io::Result<BoundedRead> {
     let mut bytes = Vec::with_capacity(limit.min(8 * 1024));
     let mut buffer = [0_u8; 8 * 1024];
@@ -282,7 +262,6 @@ fn read_bounded(mut reader: impl Read, limit: usize) -> io::Result<BoundedRead> 
     Ok(BoundedRead { bytes, overflowed })
 }
 
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 pub(super) fn open_validated_executable(
     selection: &ExecutorSelection,
     installation_flow: &Path,
@@ -317,7 +296,6 @@ pub(super) fn open_validated_executable(
     })
 }
 
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 fn validate_sibling_ownership(flow: &File, sibling: &File) -> Result<(), RuntimeError> {
     let owner = |file: &File| {
         file.metadata()
@@ -332,7 +310,6 @@ fn validate_sibling_ownership(flow: &File, sibling: &File) -> Result<(), Runtime
     Ok(())
 }
 
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 fn open_program(path: &Path) -> Result<InstalledProgram, RuntimeError> {
     use crate::runtime::fs_guards::{AnchoredDir, DirectoryErrorMode};
     use std::path::Component;
@@ -362,7 +339,6 @@ fn open_program(path: &Path) -> Result<InstalledProgram, RuntimeError> {
     open_anchored_program(parent.file(leaf))
 }
 
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 fn open_anchored_program(path: AnchoredFile) -> Result<InstalledProgram, RuntimeError> {
     use rustix::fs::{Mode, OFlags};
 
@@ -396,12 +372,10 @@ fn open_anchored_program(path: AnchoredFile) -> Result<InstalledProgram, Runtime
     Ok(InstalledProgram { path, image: file })
 }
 
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 fn owner_is_trusted(owner: u32, effective_uid: u32) -> bool {
     owner == 0 || owner == effective_uid
 }
 
-#[cfg(any(test, all(target_os = "linux", target_arch = "x86_64")))]
 fn executor_unavailable(message: &str) -> RuntimeError {
     protocol_failure(proto::ExecutorErrorCodeV0::Unavailable, message)
 }
@@ -414,21 +388,30 @@ mod diagnostic_tests {
         types::RuntimeError,
     };
 
+    fn ready_probe() -> proto::ExecutorProbeV0 {
+        let (platform, backend) = super::host_identity();
+        proto::ExecutorProbeV0 {
+            backend: backend.to_owned(),
+            backend_version: "test".to_owned(),
+            executor: proto::EXECUTOR_NAME_V0.to_owned(),
+            executor_version: env!("CARGO_PKG_VERSION").to_owned(),
+            platform: platform.to_owned(),
+            protocol_versions: vec![proto::EXECUTOR_PROTOCOL_VERSION_V0.to_owned()],
+            ready: true,
+            schema: proto::EXECUTOR_PROBE_SCHEMA_V0.to_owned(),
+            supported_policy_features: vec![proto::EXECUTOR_FEATURE_SELF_PROTECTION_V0.to_owned()],
+        }
+    }
+
     #[test]
     fn unready_probe_reports_its_bounded_actionable_diagnostic() {
         let selection = ExecutorSelection::new(
             "administrator-selected-executor".into(),
             ExecutorSelectionSource::Custom,
         );
-        let probe = proto::parse_executor_probe_v0(
-            concat!(
-                r#"{"backend":"bubblewrap-seccomp","backend_version":"unavailable","executor":"flow-executor","executor_version":"0.0.0","platform":"ubuntu-24.04-x86_64","protocol_versions":["0"],"ready":false,"runtime_mounts":[],"schema":"flow-executor-probe-v0","supported_policy_features":[]}"#,
-                "\n"
-            )
-            .as_bytes(),
-        )
-        .expect("fake probe is valid");
-        let diagnostic = "flow-executor readiness: official Executor requires static-self-reexec";
+        let mut probe = ready_probe();
+        probe.ready = false;
+        let diagnostic = "flow-executor readiness: native write protection is unavailable";
 
         let error = validate_probe(&selection, &probe, Some(diagnostic))
             .expect_err("unready fake probe is rejected");
@@ -449,20 +432,16 @@ mod diagnostic_tests {
             "administrator-selected-executor".into(),
             ExecutorSelectionSource::Custom,
         );
-        let probe = proto::parse_executor_probe_v0(
-            concat!(
-                r#"{"backend":"custom","backend_version":"1","executor":"custom","executor_version":"1","platform":"ubuntu-24.04-x86_64","protocol_versions":["0"],"ready":true,"runtime_mounts":[],"schema":"flow-executor-probe-v0","supported_policy_features":["process-capacity"]}"#,
-                "\n"
-            )
-            .as_bytes(),
-        )
-        .expect("custom probe is valid wire data");
+        let mut probe = ready_probe();
+        probe.backend = "custom".to_owned();
+        probe.executor = "custom".to_owned();
+        probe.executor_version = "1".to_owned();
         validate_probe(&selection, &probe, None).expect("supported custom probe is ready");
 
-        let mut missing_capacity = probe.clone();
-        missing_capacity.supported_policy_features.clear();
-        let error = validate_probe(&selection, &missing_capacity, None)
-            .expect_err("Custom Executors must advertise process-capacity enforcement");
+        let mut missing_protection = probe.clone();
+        missing_protection.supported_policy_features.clear();
+        let error = validate_probe(&selection, &missing_protection, None)
+            .expect_err("Custom Executors must advertise mandatory write protection");
         assert!(matches!(
             error,
             RuntimeError::Executor(ref failure)
@@ -496,14 +475,7 @@ mod diagnostic_tests {
             "/trusted/flow-executor".into(),
             ExecutorSelectionSource::Default,
         );
-        let probe = proto::parse_executor_probe_v0(
-            concat!(
-                r#"{"backend":"bubblewrap-seccomp","backend_version":"test","executor":"flow-executor","executor_version":"0.0.0","platform":"ubuntu-24.04-x86_64","protocol_versions":["0"],"ready":true,"runtime_mounts":[],"schema":"flow-executor-probe-v0","supported_policy_features":["process-capacity","static-self-reexec"]}"#,
-                "\n"
-            )
-            .as_bytes(),
-        )
-        .expect("test probe is valid");
+        let probe = ready_probe();
         validate_probe(&selection, &probe, None).expect("official identity is compatible");
 
         let mut wrong_executor = probe.clone();
@@ -512,17 +484,7 @@ mod diagnostic_tests {
         wrong_version.executor_version = "mismatch".to_owned();
         let mut wrong_backend = probe.clone();
         wrong_backend.backend = "other".to_owned();
-        let mut missing_static_reexec = probe;
-        missing_static_reexec
-            .supported_policy_features
-            .retain(|feature| feature != proto::EXECUTOR_FEATURE_STATIC_SELF_REEXEC_V0);
-
-        for incompatible in [
-            wrong_executor,
-            wrong_version,
-            wrong_backend,
-            missing_static_reexec,
-        ] {
+        for incompatible in [wrong_executor, wrong_version, wrong_backend] {
             let error = validate_probe(&selection, &incompatible, None)
                 .expect_err("altered official identity is rejected");
             assert!(error.to_string().contains("incompatible"), "{error}");
@@ -534,38 +496,7 @@ fn protocol_failure(code: proto::ExecutorErrorCodeV0, message: &str) -> RuntimeE
     RuntimeError::executor(code, message)
 }
 
-#[cfg(all(test, not(all(target_os = "linux", target_arch = "x86_64"))))]
-mod unsupported_platform_tests {
-    use super::probe_executor;
-    use crate::runtime::{
-        executor::{ExecutorSelection, ExecutorSelectionSource},
-        types::RuntimeError,
-    };
-    use std::path::Path;
-
-    #[test]
-    fn probing_fails_closed_without_attempting_to_run_an_executor() {
-        let selection = ExecutorSelection::new(
-            "administrator-selected-executor".into(),
-            ExecutorSelectionSource::Custom,
-        );
-
-        let error = probe_executor(&selection, Path::new("official-flow"), &[])
-            .expect_err("unsupported platforms cannot probe a productive Executor");
-
-        match error {
-            RuntimeError::Executor(failure) => {
-                assert_eq!(
-                    failure.code(),
-                    proto::ExecutorErrorCodeV0::PolicyUnsupported
-                );
-            }
-            other => panic!("unexpected Executor failure: {other}"),
-        }
-    }
-}
-
-#[cfg(all(test, target_os = "linux", target_arch = "x86_64"))]
+#[cfg(test)]
 mod tests {
     use super::{open_program, open_validated_executable, owner_is_trusted};
     use crate::runtime::executor::{ExecutorSelection, ExecutorSelectionSource};

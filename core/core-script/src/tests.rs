@@ -5,9 +5,9 @@ use super::load::{
 };
 use super::model::{
     BlockIdentity, FlowBlock, FlowValue, MAX_REGISTRY_ENTRIES, MAX_REGISTRY_FILE_BYTES,
-    MAX_REGISTRY_TOTAL_BYTES, MAX_REGISTRY_TRAVERSAL_DEPTH, NetworkDeny, NetworkPolicy, PhaseBlock,
-    RegistryBlock, ResolvedRegistry, ScriptRuntime, ToolBlock, ToolCommand, ToolKind,
-    ToolRuntimeProfile, ValueContract, ValuePredicate,
+    MAX_REGISTRY_TOTAL_BYTES, MAX_REGISTRY_TRAVERSAL_DEPTH, PhaseBlock, RegistryBlock,
+    ResolvedRegistry, ScriptRuntime, ToolBlock, ToolCommand, ToolKind, ValueContract,
+    ValuePredicate,
 };
 use serde_json::Value;
 use std::{
@@ -73,19 +73,14 @@ mod values;
 fn own_script_tool(id: &str, command: &str) -> ToolBlock {
     ToolBlock {
         allowed_parameters: Vec::new(),
-        max_concurrent_processes_and_threads: 32,
         command: ToolCommand::OwnScript(command.to_owned()),
         identity: BlockIdentity {
             id: id.to_owned(),
             name: "TestTool".to_owned(),
         },
-        network: NetworkPolicy::Deny(NetworkDeny),
-        read_only_mounts: Vec::new(),
-        runtime_profile: ToolRuntimeProfile::Exact,
         script_body: Some("echo ok".to_owned()),
         script_runtime: Some(ScriptRuntime::PosixSh),
         tool_kind: ToolKind::OwnScript,
-        writable_mounts: Vec::new(),
     }
 }
 

@@ -35,13 +35,6 @@ fn registry_diagnostics_preserve_operator_context_and_error_sources() {
             "own-script command must be script:<tool-id>: inspect used script:other",
         ),
         (
-            SemanticValidationError::InvalidCanonicalCidr {
-                cidr: "10.0.0.1/24".to_owned(),
-                tool_id: "inspect".to_owned(),
-            },
-            "invalid canonical CIDR for tool inspect: 10.0.0.1/24",
-        ),
-        (
             SemanticValidationError::InvalidInstructionDefinition {
                 instruction_id: "review".to_owned(),
                 message: "missing parameter".to_owned(),

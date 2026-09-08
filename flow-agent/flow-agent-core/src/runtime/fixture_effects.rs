@@ -46,7 +46,7 @@ pub fn compile_fixture_tool_effect(
             ))
         }
         (core_script::ToolKind::OwnScript, core_script::ToolCommand::OwnScript(_)) => {
-            let write = plan_own_script(tool, policy)?;
+            let write = plan_own_script(tool)?;
             Ok((
                 PlannedFixtureEffect::OwnScript {
                     progress: "stub write completed".to_owned(),

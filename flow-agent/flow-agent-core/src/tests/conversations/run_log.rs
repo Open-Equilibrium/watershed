@@ -45,8 +45,6 @@ fn intent_record(index: usize) -> RunLogRecord {
 fn tool_enforcement_expectation() -> ToolEnforcementExpectation {
     ToolEnforcementExpectation {
         applied_policy_digest: "0".repeat(64),
-        max_concurrent_processes_and_threads: 16,
-        runtime_profile: proto::RuntimeReadProfileV0::Exact,
     }
 }
 
@@ -348,16 +346,16 @@ fn run_attempt_inspection_rejects_every_ambiguous_record_sequence() {
             timestamp: "2026-07-30T12:00:01Z".to_owned(),
             durable_output: None,
         };
-    let mut zero_capacity_intent =
+    let mut invalid_digest_intent =
         intent_with_kind_and_tool("tool-005", RunAttemptKind::Tool, Some("inspect"));
     let RunLogRecord::Intent {
         expected_enforcement: Some(expectation),
         ..
-    } = &mut zero_capacity_intent
+    } = &mut invalid_digest_intent
     else {
         unreachable!("Tool intent has an enforcement expectation")
     };
-    expectation.max_concurrent_processes_and_threads = 0;
+    expectation.applied_policy_digest = "invalid".to_owned();
     let cases = [
         (
             "missing-definition",
@@ -444,9 +442,9 @@ fn run_attempt_inspection_rejects_every_ambiguous_record_sequence() {
             "invalid tool_id",
         ),
         (
-            "tool-intent-zero-process-capacity",
-            vec![definition.clone(), zero_capacity_intent],
-            "process capacity must be positive",
+            "tool-intent-invalid-policy-digest",
+            vec![definition.clone(), invalid_digest_intent],
+            "Tool intent policy digest",
         ),
         (
             "result-tool-id-mismatch",

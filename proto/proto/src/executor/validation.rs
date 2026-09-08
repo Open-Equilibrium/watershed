@@ -1,39 +1,39 @@
 use super::codec::resolved_policy_digest_v0;
 use super::stream::decode_executor_stream_v0;
 use super::{
-    EXECUTOR_MOUNT_DESCRIPTOR_BASE_V0, EXECUTOR_REQUEST_SCHEMA_V0, EnforcementReceiptV0,
-    ExecutorExecVectorErrorV0, ExecutorMountAccessV0, ExecutorMountOriginV0, ExecutorProtocolError,
-    ExecutorRequestV0, ExecutorToolClassificationV0, ExecutorToolResultV0, ExecutorToolStatusV0,
-    MAX_ENVIRONMENT_ENTRIES, MAX_EXECUTOR_MOUNTS_V0, MAX_EXECUTOR_RUNTIME_MOUNTS_V0,
-    MAX_EXECUTOR_TOOL_STREAM_BYTES_V0, MAX_EXECUTOR_WORKSPACE_MOUNTS_V0, MAX_ID_CHARS,
-    MAX_NAME_CHARS, MAX_PATH_CHARS, validate_executor_exec_vector_v0,
+    EXECUTOR_PROTECTED_DESCRIPTOR_BASE_V0, EXECUTOR_REQUEST_SCHEMA_V0, EnforcementReceiptV0,
+    ExecutorExecVectorErrorV0, ExecutorProtocolError, ExecutorRequestV0,
+    ExecutorToolClassificationV0, ExecutorToolResultV0, ExecutorToolStatusV0,
+    MAX_ENVIRONMENT_ENTRIES, MAX_EXECUTOR_PROTECTED_OBJECTS_V0, MAX_EXECUTOR_TOOL_STREAM_BYTES_V0,
+    MAX_ID_CHARS, MAX_NAME_CHARS, MAX_PATH_CHARS, validate_executor_exec_vector_v0,
 };
 use crate::session_object::decode_lowercase_sha256_hex;
 
 pub(super) fn validate_request(request: &ExecutorRequestV0) -> Result<(), ExecutorProtocolError> {
     validate_schema(&request.schema, EXECUTOR_REQUEST_SCHEMA_V0, "request")?;
     validate_text(&request.request_id, "request_id", MAX_ID_CHARS)?;
-    validate_text(&request.tool_id, "tool_id", MAX_ID_CHARS)?;
-    validate_text(&request.tool_kind, "tool_kind", MAX_NAME_CHARS)?;
-    validate_text(&request.executable, "executable", MAX_PATH_CHARS)?;
-    validate_absolute_path(&request.executable, "executable")?;
+    let policy = &request.resolved_policy;
+    validate_text(&policy.tool_id, "tool_id", MAX_ID_CHARS)?;
+    validate_text(&policy.tool_kind, "tool_kind", MAX_NAME_CHARS)?;
+    validate_text(&policy.executable, "executable", MAX_PATH_CHARS)?;
+    validate_absolute_path(&policy.executable, "executable")?;
     validate_text(
-        &request.working_directory,
+        &policy.working_directory,
         "working_directory",
         MAX_PATH_CHARS,
     )?;
-    validate_absolute_path(&request.working_directory, "working_directory")?;
-    if request.environment.len() > MAX_ENVIRONMENT_ENTRIES {
+    validate_absolute_path(&policy.working_directory, "working_directory")?;
+    if policy.environment.len() > MAX_ENVIRONMENT_ENTRIES {
         return Err(ExecutorProtocolError::new(
             "Executor environment has too many entries",
         ));
     }
-    for (name, value) in &request.environment {
+    for (name, value) in &policy.environment {
         validate_text(name, "environment name", MAX_NAME_CHARS)?;
         validate_text(value, "environment value", MAX_PATH_CHARS)?;
     }
     if let Err(error) =
-        validate_executor_exec_vector_v0(&request.executable, &request.argv, &request.environment)
+        validate_executor_exec_vector_v0(&policy.executable, &policy.argv, &policy.environment)
     {
         return Err(ExecutorProtocolError::new(match error {
             ExecutorExecVectorErrorV0::NulByte => "Executor argv is invalid",
@@ -44,128 +44,54 @@ pub(super) fn validate_request(request: &ExecutorRequestV0) -> Result<(), Execut
             ExecutorExecVectorErrorV0::ByteBudget { .. } => "Executor argv exceeds its byte limit",
         }));
     }
-    if request.mounts.len() > MAX_EXECUTOR_MOUNTS_V0 {
+    if policy.protected_objects.is_empty() {
         return Err(ExecutorProtocolError::new(
-            "Executor mount list exceeds its limit",
+            "Executor protected object list must be nonempty",
         ));
     }
-    let mut descriptors = std::collections::BTreeSet::new();
-    let mut targets = std::collections::BTreeSet::new();
-    let mut runtime_mounts = 0_usize;
-    let mut workspace_mounts = 0_usize;
-    for (index, mount) in request.mounts.iter().enumerate() {
-        let expected_descriptor = EXECUTOR_MOUNT_DESCRIPTOR_BASE_V0
-            .checked_add(u32::try_from(index).expect("mount limit fits u32"))
-            .expect("mount descriptor range is bounded");
-        if mount.descriptor != expected_descriptor || !descriptors.insert(mount.descriptor) {
-            return Err(ExecutorProtocolError::new(
-                "Executor mount descriptor is invalid",
-            ));
-        }
-        validate_text(&mount.target, "mount target", MAX_PATH_CHARS)?;
-        validate_absolute_path(&mount.target, "mount target")?;
-        if !targets.insert(mount.target.as_str()) {
-            return Err(ExecutorProtocolError::new(
-                "Executor mount target is invalid",
-            ));
-        }
-        match mount.origin {
-            ExecutorMountOriginV0::Workspace => {
-                workspace_mounts += 1;
-                if mount.target != "/workspace" && !mount.target.starts_with("/workspace/") {
-                    return Err(ExecutorProtocolError::new(
-                        "Executor workspace mount target is outside /workspace",
-                    ));
-                }
-            }
-            ExecutorMountOriginV0::Runtime => {
-                runtime_mounts += 1;
-                if mount.access != ExecutorMountAccessV0::ReadOnly
-                    || mount.target == "/workspace"
-                    || mount.target.starts_with("/workspace/")
-                {
-                    return Err(ExecutorProtocolError::new(
-                        "Executor runtime mount capability is invalid",
-                    ));
-                }
-            }
-        }
-    }
-    if workspace_mounts > MAX_EXECUTOR_WORKSPACE_MOUNTS_V0
-        || runtime_mounts > MAX_EXECUTOR_RUNTIME_MOUNTS_V0
-    {
+    if policy.protected_objects.len() > MAX_EXECUTOR_PROTECTED_OBJECTS_V0 {
         return Err(ExecutorProtocolError::new(
-            "Executor mount provenance bounds are invalid",
+            "Executor protected object list exceeds its limit",
         ));
     }
-    validate_resolved_policy(request)?;
+    let mut paths = std::collections::BTreeSet::new();
+    for (index, object) in policy.protected_objects.iter().enumerate() {
+        let expected_descriptor = EXECUTOR_PROTECTED_DESCRIPTOR_BASE_V0
+            .checked_add(u32::try_from(index).expect("protected object limit fits u32"))
+            .expect("protected descriptor range is bounded");
+        if object.descriptor != expected_descriptor {
+            return Err(ExecutorProtocolError::new(
+                "Executor protected object descriptor is invalid",
+            ));
+        }
+        validate_text(&object.path, "protected object path", MAX_PATH_CHARS)?;
+        validate_absolute_path(&object.path, "protected object path")?;
+        if !paths.insert(object.path.as_str()) {
+            return Err(ExecutorProtocolError::new(
+                "Executor protected object path is duplicated",
+            ));
+        }
+    }
     validate_digest(&request.policy_digest, "policy_digest")?;
     if resolved_policy_digest_v0(&request.resolved_policy)? != request.policy_digest {
         return Err(ExecutorProtocolError::new(
             "Executor request policy digest does not match",
         ));
     }
-    if request.limits.timeout_ms == 0
-        || request.limits.max_stdout_bytes == 0
-        || request.limits.max_stderr_bytes == 0
-        || request.limits.max_concurrent_processes_and_threads == 0
+    if policy.limits.timeout_ms == 0
+        || policy.limits.max_stdout_bytes == 0
+        || policy.limits.max_stderr_bytes == 0
     {
         return Err(ExecutorProtocolError::new(
             "Executor limits must be nonzero",
         ));
     }
-    if request.limits.max_stdout_bytes > MAX_EXECUTOR_TOOL_STREAM_BYTES_V0 as u64
-        || request.limits.max_stderr_bytes > MAX_EXECUTOR_TOOL_STREAM_BYTES_V0 as u64
+    if policy.limits.max_stdout_bytes > MAX_EXECUTOR_TOOL_STREAM_BYTES_V0 as u64
+        || policy.limits.max_stderr_bytes > MAX_EXECUTOR_TOOL_STREAM_BYTES_V0 as u64
     {
         return Err(ExecutorProtocolError::new(
             "Executor stream limits exceed the protocol bound",
         ));
-    }
-    Ok(())
-}
-
-fn validate_resolved_policy(request: &ExecutorRequestV0) -> Result<(), ExecutorProtocolError> {
-    let policy = &request.resolved_policy;
-    validate_text(&policy.tool_id, "resolved policy tool_id", MAX_ID_CHARS)?;
-    validate_text(
-        &policy.tool_kind,
-        "resolved policy tool_kind",
-        MAX_NAME_CHARS,
-    )?;
-    if !policy.artifact.is_object() || !policy.command.is_object() {
-        return Err(ExecutorProtocolError::new(
-            "Executor resolved policy artifacts must be objects",
-        ));
-    }
-    if policy.tool_id != request.tool_id
-        || policy.tool_kind != request.tool_kind
-        || policy.runtime_profile != request.runtime_profile
-        || policy.limits != request.limits
-        || policy.mounts.len() != request.mounts.len()
-    {
-        return Err(ExecutorProtocolError::new(
-            "Executor resolved policy does not match the request",
-        ));
-    }
-    for (resolved, requested) in policy.mounts.iter().zip(&request.mounts) {
-        validate_text(&resolved.source, "resolved mount source", MAX_PATH_CHARS)?;
-        let source_is_valid = match resolved.origin {
-            ExecutorMountOriginV0::Workspace => validate_workspace_source(&resolved.source).is_ok(),
-            ExecutorMountOriginV0::Runtime => {
-                validate_absolute_path(&resolved.source, "resolved runtime mount source").is_ok()
-            }
-        };
-        if !source_is_valid
-            || resolved.access != requested.access
-            || resolved.descriptor != requested.descriptor
-            || resolved.origin != requested.origin
-            || resolved.source_identity != requested.source_identity
-            || resolved.target != requested.target
-        {
-            return Err(ExecutorProtocolError::new(
-                "Executor resolved mount does not match the inherited capability",
-            ));
-        }
     }
     Ok(())
 }
@@ -183,11 +109,6 @@ pub(super) fn validate_receipt(
     ] {
         validate_text(value, name, MAX_NAME_CHARS)?;
     }
-    if receipt.max_concurrent_processes_and_threads == 0 {
-        return Err(ExecutorProtocolError::new(
-            "Executor receipt process capacity must be nonzero",
-        ));
-    }
     Ok(())
 }
 
@@ -201,7 +122,6 @@ pub(super) fn validate_tool_result(
         (Status::Completed, None, Some(0)) => true,
         (Status::Failed, Some(Classification::NonzeroExit), Some(code)) => code != 0,
         (Status::Failed, Some(Classification::SignalTermination), None) => true,
-        (Status::Failed, Some(Classification::ProcessCapacityExceeded), _) => true,
         (
             Status::Failed,
             Some(
@@ -289,23 +209,5 @@ pub(super) fn validate_absolute_path(value: &str, name: &str) -> Result<(), Exec
         )))
     } else {
         Ok(())
-    }
-}
-
-fn validate_workspace_source(value: &str) -> Result<(), ExecutorProtocolError> {
-    if value == "workspace"
-        || value.strip_prefix("workspace/").is_some_and(|relative| {
-            !relative.is_empty()
-                && !relative.contains('\\')
-                && relative
-                    .split('/')
-                    .all(|component| !component.is_empty() && !matches!(component, "." | ".."))
-        })
-    {
-        Ok(())
-    } else {
-        Err(ExecutorProtocolError::new(
-            "Executor workspace mount source is not canonical",
-        ))
     }
 }

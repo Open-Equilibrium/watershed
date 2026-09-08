@@ -16,11 +16,9 @@ const EPERM: u32 = 1;
 const ENOSYS: u32 = 38;
 const CLONE_NAMESPACE_FLAGS: u32 = 0x7e02_0000;
 const X32_SYSCALL_BIT: u32 = 0x4000_0000;
-const SOCKETPAIR_SYSCALL: u32 = 53;
 const CLONE_SYSCALL: u32 = 56;
 const CLONE3_SYSCALL: u32 = 435;
-const DENY_EPERM_SYSCALLS: [u32; 18] = [
-    41,  // socket
+const DENY_EPERM_SYSCALLS: [u32; 17] = [
     101, // ptrace
     155, // pivot_root
     165, // mount
@@ -123,13 +121,6 @@ fn filter_instructions() -> Vec<Instruction> {
         program.push(Instruction::jump(BPF_JMP_JEQ_K, syscall, 0, 1));
         program.push(Instruction::statement(BPF_RET_K, SECCOMP_RET_ERRNO | EPERM));
     }
-    // socketpair(AF_UNIX, ...) remains usable for ordinary local process plumbing.
-    program.extend([
-        Instruction::jump(BPF_JMP_JEQ_K, SOCKETPAIR_SYSCALL, 0, 3),
-        Instruction::statement(BPF_LD_W_ABS, 16),
-        Instruction::jump(BPF_JMP_JEQ_K, 1, 1, 0),
-        Instruction::statement(BPF_RET_K, SECCOMP_RET_ERRNO | EPERM),
-    ]);
     // Normal clone/fork remains usable; new namespaces are denied.
     program.extend([
         Instruction::jump(BPF_JMP_JEQ_K, CLONE_SYSCALL, 0, 3),
@@ -148,8 +139,7 @@ mod tests {
     use super::{
         BPF_JMP_JEQ_K, BPF_JMP_JSET_K, BPF_LD_W_ABS, BPF_RET_K, CLONE_NAMESPACE_FLAGS,
         CLONE_SYSCALL, CLONE3_SYSCALL, DENY_EPERM_SYSCALLS, ENOSYS, EPERM, Instruction,
-        SECCOMP_RET_ALLOW, SECCOMP_RET_ERRNO, SOCKETPAIR_SYSCALL, filter_bytes,
-        filter_instructions,
+        SECCOMP_RET_ALLOW, SECCOMP_RET_ERRNO, filter_bytes, filter_instructions,
     };
     use std::{fs::File, io::Read};
 
@@ -170,10 +160,6 @@ mod tests {
         assert_eq!(
             &program[cursor..],
             &[
-                Instruction::jump(BPF_JMP_JEQ_K, SOCKETPAIR_SYSCALL, 0, 3),
-                Instruction::statement(BPF_LD_W_ABS, 16),
-                Instruction::jump(BPF_JMP_JEQ_K, 1, 1, 0),
-                Instruction::statement(BPF_RET_K, SECCOMP_RET_ERRNO | EPERM),
                 Instruction::jump(BPF_JMP_JEQ_K, CLONE_SYSCALL, 0, 3),
                 Instruction::statement(BPF_LD_W_ABS, 16),
                 Instruction::jump(BPF_JMP_JSET_K, CLONE_NAMESPACE_FLAGS, 0, 1),

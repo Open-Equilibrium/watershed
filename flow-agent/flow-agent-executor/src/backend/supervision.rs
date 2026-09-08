@@ -1,7 +1,6 @@
 use crate::{
     backend::BackendError,
-    cgroup::ToolCgroup,
-    lifecycle::{CleanupAction, CleanupController, InnerStatusPolicy, inner_status_policy},
+    lifecycle::{CleanupAction, CleanupController},
 };
 use proto::{
     ExecutorToolClassificationV0, ExecutorToolResultV0, ExecutorToolStatusV0,
@@ -9,10 +8,8 @@ use proto::{
 };
 use rustix::fd::OwnedFd;
 use std::{
-    fs::File,
-    io::{Read, Seek, SeekFrom},
-    os::unix::process::ExitStatusExt,
-    process::{Command, ExitStatus},
+    io::{Read, Write},
+    process::{Child, Command, ExitStatus},
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -22,75 +19,11 @@ use std::{
     time::{Duration, Instant},
 };
 
-#[cfg(test)]
-use std::process::Child;
-
-pub(super) fn empty_status_document() -> Result<OwnedFd, BackendError> {
-    rustix::fs::memfd_create(
-        "flow-executor-status",
-        rustix::fs::MemfdFlags::CLOEXEC | rustix::fs::MemfdFlags::ALLOW_SEALING,
-    )
-    .map_err(|error| BackendError::setup(format!("failed to create Tool status: {error}")))
-}
-
-pub(super) fn read_inner_status(descriptor: &OwnedFd) -> Result<Option<ExitStatus>, BackendError> {
-    let mut file = File::from(
-        rustix::io::fcntl_dupfd_cloexec(descriptor, 3).map_err(|error| {
-            BackendError::uncertain(format!("failed to read Tool status: {error}"))
-        })?,
-    );
-    file.seek(SeekFrom::Start(0)).map_err(|error| {
-        BackendError::uncertain(format!("failed to rewind Tool status: {error}"))
-    })?;
-    let mut bytes = Vec::new();
-    file.take(5)
-        .read_to_end(&mut bytes)
-        .map_err(|error| BackendError::uncertain(format!("failed to read Tool status: {error}")))?;
-    if bytes.is_empty() {
-        return Ok(None);
+pub(super) fn signal_child(child: &Child, signal: rustix::process::Signal) {
+    // Child remains unreaped while its PID is used, preventing PID reuse.
+    if let Some(pid) = rustix::process::Pid::from_raw(child.id() as i32) {
+        let _ = rustix::process::kill_process(pid, signal);
     }
-    let seals = rustix::fs::fcntl_get_seals(descriptor).map_err(|error| {
-        BackendError::uncertain(format!("failed to verify Tool status: {error}"))
-    })?;
-    if seals != final_status_seals() {
-        return Err(BackendError::uncertain("Tool status record is not sealed"));
-    }
-    let bytes: [u8; 4] = bytes
-        .try_into()
-        .map_err(|_| BackendError::uncertain("Tool status record is invalid"))?;
-    Ok(Some(ExitStatus::from_raw(i32::from_ne_bytes(bytes))))
-}
-
-pub(super) fn apply_inner_status(
-    outcome: &mut ProcessOutcome,
-    descriptor: &OwnedFd,
-) -> Result<(), BackendError> {
-    let policy = inner_status_policy(outcome.classification);
-    match policy {
-        InnerStatusPolicy::Ignore => return Ok(()),
-        InnerStatusPolicy::IfReportable if outcome.status.is_none() => return Ok(()),
-        InnerStatusPolicy::IfReportable | InnerStatusPolicy::RequiredAndClassify => {}
-    }
-    if !outcome.status.is_some_and(|status| status.success()) {
-        return Err(BackendError::uncertain(
-            "trusted inner Executor did not exit successfully",
-        ));
-    }
-    let status = read_inner_status(descriptor)?.ok_or_else(|| {
-        BackendError::uncertain("trusted inner Executor did not record a Tool status")
-    })?;
-    outcome.status = Some(status);
-    if policy == InnerStatusPolicy::RequiredAndClassify {
-        outcome.classification = classify_exit(Some(status));
-    }
-    Ok(())
-}
-
-pub(super) fn final_status_seals() -> rustix::fs::SealFlags {
-    rustix::fs::SealFlags::SEAL
-        | rustix::fs::SealFlags::SHRINK
-        | rustix::fs::SealFlags::GROW
-        | rustix::fs::SealFlags::WRITE
 }
 
 pub(super) struct ProcessOutcome {
@@ -156,8 +89,7 @@ pub(super) fn terminate_and_reap(child: &mut Child) -> ExitStatus {
 }
 
 fn fail_closed_unreaped_child() -> ! {
-    // An enforcement receipt is only valid after proven cleanup. Process exit
-    // closes the one-shot Executor boundary and leaves Flow to mark it uncertain.
+    // No receipt may claim a reaped root when bounded supervision cannot prove it.
     std::process::exit(1)
 }
 
@@ -166,7 +98,8 @@ pub(super) fn run_bounded(
     timeout_ms: u64,
     stdout_limit: u64,
     stderr_limit: u64,
-    tool_cgroup: &ToolCgroup,
+    input: Vec<u8>,
+    inherited: Vec<OwnedFd>,
 ) -> Result<ProcessOutcome, BackendError> {
     let deadline = Instant::now()
         .checked_add(Duration::from_millis(timeout_ms))
@@ -175,9 +108,14 @@ pub(super) fn run_bounded(
     signal_hook::flag::register(signal_hook::consts::SIGTERM, Arc::clone(&cancelled)).map_err(
         |error| BackendError::setup(format!("failed to install cancel handler: {error}")),
     )?;
-    let mut child = command
-        .spawn()
-        .map_err(|error| BackendError::setup(format!("failed to launch Bubblewrap: {error}")))?;
+    let mut child = command.spawn().map_err(|error| {
+        BackendError::setup(format!("failed to launch native protection: {error}"))
+    })?;
+    drop(inherited);
+    let mut stdin = child.stdin.take().expect("native command has piped input");
+    thread::spawn(move || {
+        let _ = stdin.write_all(&input);
+    });
     let stdout = child
         .stdout
         .take()
@@ -245,26 +183,16 @@ pub(super) fn run_bounded(
             }
         }
         if cleanup.is_none() && primary.is_some() {
-            tool_cgroup
-                .signal_termination()
-                .unwrap_or_else(|_| fail_closed_unreaped_child());
+            if status.is_none() {
+                signal_child(&child, rustix::process::Signal::TERM);
+            }
             cleanup = Some(CleanupController::new(Instant::now()));
         }
         if let Some(controller) = cleanup.as_mut() {
-            let cgroup_empty = tool_cgroup
-                .is_empty()
-                .unwrap_or_else(|_| fail_closed_unreaped_child());
             let output_drained = stdout.is_some() && stderr.is_some();
-            match controller.advance(
-                Instant::now(),
-                cgroup_empty && status.is_some(),
-                output_drained,
-            ) {
+            match controller.advance(Instant::now(), status.is_some(), output_drained) {
                 CleanupAction::Wait => {}
                 CleanupAction::ForceKill => {
-                    tool_cgroup
-                        .force_kill()
-                        .unwrap_or_else(|_| fail_closed_unreaped_child());
                     if status.is_none() {
                         let _ = child.kill();
                     }
@@ -307,7 +235,7 @@ pub(super) fn run_bounded(
     })
 }
 
-fn classify_exit(status: Option<ExitStatus>) -> Option<ExecutorToolClassificationV0> {
+pub(super) fn classify_exit(status: Option<ExitStatus>) -> Option<ExecutorToolClassificationV0> {
     status.map_or(
         Some(ExecutorToolClassificationV0::SignalTermination),
         |status| {
@@ -370,8 +298,7 @@ pub(super) fn tool_result(outcome: &ProcessOutcome) -> ExecutorToolResultV0 {
             | ExecutorToolClassificationV0::StderrCapExceeded
             | ExecutorToolClassificationV0::StdoutStderrCapExceeded
             | ExecutorToolClassificationV0::OutputCollectorFailed
-            | ExecutorToolClassificationV0::OutputDrainTimeout
-            | ExecutorToolClassificationV0::ProcessCapacityExceeded,
+            | ExecutorToolClassificationV0::OutputDrainTimeout,
         ) => outcome.status.and_then(|status| status.code()),
         Some(
             ExecutorToolClassificationV0::Cancelled

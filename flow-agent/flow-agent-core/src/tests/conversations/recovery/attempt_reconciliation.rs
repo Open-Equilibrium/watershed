@@ -20,11 +20,12 @@ fn tool_intent(attempt_id: &str) -> RunAttemptIntent {
     RunAttemptIntent {
         attempt_id: attempt_id.to_owned(),
         attempt_kind: RunAttemptKind::Tool,
-        expected_enforcement: Some(ToolEnforcementExpectation {
-            applied_policy_digest: "0".repeat(64),
-            max_concurrent_processes_and_threads: 16,
-            runtime_profile: proto::RuntimeReadProfileV0::Exact,
-        }),
+        expected_enforcement: Some(
+            serde_json::from_value::<ToolEnforcementExpectation>(serde_json::json!({
+                "applied_policy_digest": "0".repeat(64),
+            }))
+            .expect("Tool intent binds the resolved policy digest"),
+        ),
         request_hash: REQUEST_HASH.to_owned(),
         tool_id: Some("read-file".to_owned()),
         timestamp: "2026-07-30T12:00:00Z".to_owned(),
@@ -35,8 +36,6 @@ fn reconciliation_output(request_hash: &str, tool_result: serde_json::Value) -> 
     proto::canonical_json(&serde_json::json!({
         "enforcement": crate::runtime::productive::test_enforcement_receipt(
             "0".repeat(64),
-            16,
-            core_script::ToolRuntimeProfile::Exact,
         ),
         "request_hash": request_hash,
         "schema": "flow-tool-attempt-output-v1",
@@ -239,16 +238,19 @@ fn tool_reconciliation_rejects_invalid_outer_evidence_without_mutation() {
     wrong_policy["enforcement"]["applied_policy_digest"] = "1".repeat(64).into();
     let wrong_policy =
         proto::canonical_json(&wrong_policy).expect("wrong policy evidence canonicalizes");
-    let mut wrong_profile: serde_json::Value =
+    let mut inactive_protection: serde_json::Value =
         serde_json::from_str(&valid).expect("valid reconciliation parses");
-    wrong_profile["enforcement"]["runtime_profile"] = "host-system-read".into();
-    let wrong_profile =
-        proto::canonical_json(&wrong_profile).expect("wrong profile evidence canonicalizes");
-    let mut wrong_process_capacity: serde_json::Value =
+    inactive_protection["enforcement"]["self_protection_active"] = false.into();
+    let inactive_protection =
+        proto::canonical_json(&inactive_protection).expect("inactive protection canonicalizes");
+    let mut missing_protection: serde_json::Value =
         serde_json::from_str(&valid).expect("valid reconciliation parses");
-    wrong_process_capacity["enforcement"]["max_concurrent_processes_and_threads"] = 17.into();
-    let wrong_process_capacity = proto::canonical_json(&wrong_process_capacity)
-        .expect("wrong process capacity evidence canonicalizes");
+    missing_protection["enforcement"]
+        .as_object_mut()
+        .expect("receipt is an object")
+        .remove("self_protection_active");
+    let missing_protection =
+        proto::canonical_json(&missing_protection).expect("missing protection canonicalizes");
 
     for (name, source, expected) in [
         (
@@ -285,14 +287,14 @@ fn tool_reconciliation_rejects_invalid_outer_evidence_without_mutation() {
             "enforcement receipt does not match the uncertain attempt",
         ),
         (
-            "wrong-profile",
-            wrong_profile,
+            "inactive-self-protection",
+            inactive_protection,
             "enforcement receipt does not match the uncertain attempt",
         ),
         (
-            "wrong-process-capacity",
-            wrong_process_capacity,
-            "enforcement receipt does not match the uncertain attempt",
+            "missing-self-protection",
+            missing_protection,
+            "missing field `self_protection_active`",
         ),
         (
             "invalid-flow-value",

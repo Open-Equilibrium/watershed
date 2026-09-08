@@ -24,7 +24,7 @@ use crate::runtime::{
 use crate::tests::helpers::configured_smoke_productive_execution_fixture;
 use std::{
     env, fs,
-    os::unix::fs::PermissionsExt as _,
+    os::unix::fs::{MetadataExt as _, PermissionsExt as _},
     path::{Path, PathBuf},
     process::Command,
     time::{Duration, Instant},
@@ -43,8 +43,8 @@ fn controller_admission_rejects_a_protected_home_file_with_an_outside_alias() {
     let root = crate::tests::helpers::empty_workspace("executor-home-alias-admission");
     fs::set_permissions(&*root, fs::Permissions::from_mode(0o700))
         .expect("synthetic installation is private");
-    isolate_executor_configuration(&root);
     let fixture = compile_fake_executor(&root);
+    isolate_executor_configuration(&root);
     let executor_path = stage_case(&fixture, &root, "ready-without-start");
     configure_executor_path(&executor_path).expect("valid Custom Executor is selected");
     let home = crate::runtime::session_store::open_flow_agent_home(true)
@@ -100,8 +100,8 @@ fn fake_companions_cover_the_closed_executor_protocol_matrix() {
     let root = crate::tests::helpers::empty_workspace("executor-fake-conformance");
     fs::set_permissions(&*root, fs::Permissions::from_mode(0o700))
         .expect("fake companion parent is private");
-    isolate_executor_configuration(&root);
     let fixture = compile_fake_executor(&root);
+    isolate_executor_configuration(&root);
 
     for (mode, expected_code) in [
         (
@@ -163,6 +163,51 @@ fn fake_companions_cover_the_closed_executor_protocol_matrix() {
     assert_eq!(execution.outcome.exit_code, Some(0));
     assert_eq!(execution.outcome.stdout, b"\n");
     assert!(execution.outcome.stderr.is_empty());
+    assert_eq!(
+        execution.enforcement.backend,
+        format!("fake-{}-{}", env::consts::OS, env::consts::ARCH)
+    );
+    assert_eq!(
+        execution.enforcement.platform,
+        format!("{}-{}", env::consts::OS, env::consts::ARCH)
+    );
+    let (request, request_bytes) = captured_request(&root.join("fake-executor-valid"));
+    assert_eq!(request.resolved_policy.executable, "/bin/echo");
+    assert_eq!(
+        request.resolved_policy.argv,
+        ["literal argument", "", "$HOME;\nnext"]
+    );
+    assert_eq!(
+        request.resolved_policy.working_directory,
+        fs::canonicalize(root.join("workspace-valid"))
+            .unwrap()
+            .to_str()
+            .unwrap()
+    );
+    assert!(request.resolved_policy.environment.is_empty());
+    assert_eq!(request.resolved_policy.limits.timeout_ms, 1_000);
+    assert!(!request.resolved_policy.protected_objects.is_empty());
+    for object in &request.resolved_policy.protected_objects {
+        let metadata = fs::metadata(&object.path).expect("protected object identity reads");
+        assert_eq!(object.identity.device, metadata.dev());
+        assert_eq!(object.identity.inode, metadata.ino());
+        assert_eq!(
+            object.identity.kind,
+            if metadata.is_dir() {
+                proto::ExecutorObjectKindV0::Directory
+            } else {
+                proto::ExecutorObjectKindV0::File
+            }
+        );
+    }
+    assert_eq!(
+        execution.enforcement.applied_policy_digest,
+        proto::resolved_policy_digest_v0(&request.resolved_policy).unwrap()
+    );
+    assert_eq!(
+        execution.request_hash,
+        crate::runtime::digest::prefixed_sha256_hex(&request_bytes)
+    );
     assert!(
         root.join("fake-executor-valid.tool-spawned").exists(),
         "valid fake companion must dispatch its fake Tool"
@@ -198,7 +243,7 @@ fn fake_companions_cover_the_closed_executor_protocol_matrix() {
         "oversized-output",
         "missing-evidence",
         "inactive-evidence",
-        "mismatched-capacity",
+        "legacy-evidence",
         "mismatched-evidence",
         "mismatched-identity",
         "stderr-output",
@@ -244,8 +289,8 @@ fn productive_session_uses_the_selected_executor_and_persists_its_receipt() {
     let executor_root = crate::tests::helpers::empty_workspace("executor-productive-session");
     fs::set_permissions(&*executor_root, fs::Permissions::from_mode(0o700))
         .expect("fake companion parent is private");
-    isolate_executor_configuration(&executor_root);
     let fixture = compile_fake_executor(&executor_root);
+    isolate_executor_configuration(&executor_root);
     let executor = stage_case(&fixture, &executor_root, "productive-session");
     let marker = executor.with_extension("tool-spawned");
     configure_executor_path(&executor).expect("productive Executor is selected");
@@ -320,13 +365,20 @@ fn productive_session_uses_the_selected_executor_and_persists_its_receipt() {
         .expected_enforcement
         .as_ref()
         .expect("Tool intent persists its enforcement expectation");
+    let (request, request_bytes) = captured_request(&executor);
     assert_eq!(
-        expected_enforcement.runtime_profile,
-        proto::RuntimeReadProfileV0::Exact
+        expected_enforcement.applied_policy_digest,
+        request.policy_digest
     );
     assert_eq!(
-        expected_enforcement.max_concurrent_processes_and_threads,
-        16
+        tool_attempt.request_hash,
+        crate::runtime::digest::prefixed_sha256_hex(&request_bytes)
+    );
+    assert_eq!(request.resolved_policy.tool_id, "echo");
+    assert!(!request.resolved_policy.protected_objects.is_empty());
+    assert_eq!(
+        request.resolved_policy.working_directory,
+        fs::canonicalize(&workspace).unwrap().to_str().unwrap()
     );
 
     let projected = project_tool_run_log_page(
@@ -363,13 +415,23 @@ fn productive_session_uses_the_selected_executor_and_persists_its_receipt() {
         expected_enforcement.applied_policy_digest.as_str()
     );
     assert_eq!(durable_output["enforcement"]["executor"], "fake-executor");
-    assert_eq!(durable_output["enforcement"]["backend"], "fake-backend");
-    assert_eq!(durable_output["enforcement"]["isolation_active"], true);
-    assert_eq!(durable_output["enforcement"]["runtime_profile"], "exact");
     assert_eq!(
-        durable_output["enforcement"]["max_concurrent_processes_and_threads"],
-        16
+        durable_output["enforcement"]["backend"],
+        format!("fake-{}-{}", env::consts::OS, env::consts::ARCH)
     );
+    assert_eq!(
+        durable_output["enforcement"]["platform"],
+        format!("{}-{}", env::consts::OS, env::consts::ARCH)
+    );
+    assert_eq!(
+        durable_output["enforcement"]["self_protection_active"],
+        true
+    );
+    let persisted_receipt: proto::EnforcementReceiptV0 =
+        serde_json::from_value(durable_output["enforcement"].clone())
+            .expect("persisted receipt uses the closed self-protection contract");
+    proto::validate_enforcement_receipt_v0(&persisted_receipt, &request.policy_digest)
+        .expect("persisted receipt is bound to the dispatched request");
     assert_eq!(
         durable_output["tool_result"]["value"]["status"]["value"],
         "completed"
@@ -380,9 +442,33 @@ fn productive_session_uses_the_selected_executor_and_persists_its_receipt() {
     );
 }
 
+fn captured_request(executor: &Path) -> (proto::ExecutorRequestV0, Vec<u8>) {
+    let bytes = fs::read(executor.with_extension("request.json"))
+        .expect("fake companion captured its synthetic request");
+    let request = proto::parse_executor_request_v0(&bytes)
+        .expect("dispatched request validates against the closed wire contract");
+    assert_eq!(
+        bytes,
+        proto::canonical_executor_request_v0(&request).expect("request is canonical")
+    );
+    (request, bytes)
+}
+
 fn isolate_executor_configuration(root: &Path) {
     // Cargo's exact-test child and nextest both give this test exclusive process state.
-    unsafe { env::set_var("XDG_CONFIG_HOME", root.join("xdg-config")) };
+    #[cfg(target_os = "linux")]
+    unsafe {
+        env::set_var("XDG_CONFIG_HOME", root.join("xdg-config"))
+    };
+    #[cfg(target_os = "macos")]
+    {
+        let home = root.join("synthetic-home");
+        fs::create_dir(&home).expect("synthetic user home is staged");
+        fs::set_permissions(&home, fs::Permissions::from_mode(0o700))
+            .expect("synthetic user home is private");
+        // Compile the fixture before this switch so rustup retains its real toolchain home.
+        unsafe { env::set_var("HOME", home) };
+    }
 }
 
 fn compile_fake_executor(root: &Path) -> PathBuf {
@@ -437,7 +523,11 @@ fn prepare_case(
         .expect("fake companion policy has one command");
     let invocation = ToolInvocation {
         executable: "/bin/echo".to_owned(),
-        argv: Vec::new(),
+        argv: vec![
+            "literal argument".to_owned(),
+            String::new(),
+            "$HOME;\nnext".to_owned(),
+        ],
     };
     let prepared = executor.prepare_tool(&workspace, &policy, command, &invocation, REQUEST_ID)?;
     Ok((executor, prepared))
@@ -461,16 +551,6 @@ fn policy(timeout_ms: u64) -> core_policy::PolicyArtifact {
                 default: core_policy::EnvironmentDefault::Clear,
             },
             executable: "registry:agent-echo".to_owned(),
-            filesystem: core_policy::FilesystemPolicy {
-                read_only_mounts: vec!["workspace".to_owned()],
-                writable_mounts: Vec::new(),
-            },
-            max_concurrent_processes_and_threads: 16,
-            network: core_policy::NetworkPolicy {
-                allow: Vec::new(),
-                default: core_policy::NetworkDefault::Deny,
-            },
-            runtime_profile: core_policy::ToolRuntimeProfile::Exact,
             script_runtime: None,
             tool_id: "fake-conformance".to_owned(),
             tool_kind: core_policy::ToolKind::PredefinedCommand,
@@ -485,7 +565,6 @@ fn policy(timeout_ms: u64) -> core_policy::PolicyArtifact {
             timeout_ms,
         },
         source_flow_definition_id: "fake-conformance".to_owned(),
-        target: core_policy::PolicyTarget::LinuxBubblewrapSeccomp,
     };
     policy.validate().expect("fake companion policy is valid");
     policy

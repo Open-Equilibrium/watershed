@@ -1,64 +1,60 @@
 #!/bin/sh
 set -eu
+unset FLOW_AGENT_HOME XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS
 
 : "${RUNNER_TEMP:?RUNNER_TEMP must name a private temporary directory}"
+if [ "${1-}" != --bounded ]; then
+  exec node scripts/run-python.mjs scripts/m12_native.py acceptance "$0"
+fi
+shift
+acceptance_root=$(mktemp -d "$RUNNER_TEMP/m12-installer.XXXXXX")
+acceptance_root=$(cd "$acceptance_root" && /bin/pwd -P)
 
-bundle="$RUNNER_TEMP/m12-install-bundle"
-acceptance_bundle="$RUNNER_TEMP/m12-acceptance-install-bundle"
-acceptance_prefix="$RUNNER_TEMP/m12-acceptance-prefix"
-standard_prefix="$RUNNER_TEMP/m12-standard-prefix"
-custom_prefix="$RUNNER_TEMP/m12-custom-prefix"
-config="$RUNNER_TEMP/m12-config"
-home="$RUNNER_TEMP/m12-home"
-agent_home="$RUNNER_TEMP/m12-agent-home"
-fixture_home="$RUNNER_TEMP/m12-fixture-home"
-fixture_error="$RUNNER_TEMP/m12-fixture-smoke.stderr"
-fixture_output="$RUNNER_TEMP/m12-fixture-smoke.jsonl"
-fixture_workspace="$RUNNER_TEMP/m12-fixture-workspace"
-productive_workspace="$RUNNER_TEMP/m12-productive-workspace"
-unavailable_workspace="$RUNNER_TEMP/m12-unavailable-workspace"
-systemd_liveness_timeout=1m
-termination_grace=10s
-run_with_deadline() (
-  exec /usr/bin/timeout --signal=TERM --kill-after="$termination_grace" \
-    "$systemd_liveness_timeout" "$@"
-)
-run_as_watershed() {
-  /usr/sbin/runuser --user watershed --preserve-environment -- /usr/bin/env \
-    PATH= HOME="$home" XDG_CONFIG_HOME="$config" \
-    "$@"
+bundle="$acceptance_root/m12-install-bundle"
+acceptance_bundle="$acceptance_root/m12-acceptance-install-bundle"
+acceptance_prefix="$acceptance_root/m12-acceptance-prefix"
+standard_prefix="$acceptance_root/m12-standard-prefix"
+custom_prefix="$acceptance_root/m12-custom-prefix"
+config="$acceptance_root/m12-config"
+home="$acceptance_root/m12-home"
+agent_home="$acceptance_root/m12-agent-home"
+fixture_home="$acceptance_root/m12-fixture-home"
+fixture_error="$acceptance_root/m12-fixture-smoke.stderr"
+fixture_output="$acceptance_root/m12-fixture-smoke.jsonl"
+fixture_workspace="$acceptance_root/m12-fixture-workspace"
+productive_workspace="$acceptance_root/m12-productive-workspace"
+unavailable_workspace="$acceptance_root/m12-unavailable-workspace"
+case "$(/usr/bin/uname -s)" in
+  Linux) expected_platform=ubuntu-24.04-x86_64; expected_backend=bubblewrap-seccomp ;;
+  Darwin)
+    expected_platform=macos-26-aarch64
+    expected_backend=seatbelt
+    config="$home/Library/Application Support"
+    ;;
+  *) printf 'native installer acceptance requires Linux or macOS\n' >&2; exit 1 ;;
+esac
+run_local() {
+  /usr/bin/env PATH= HOME="$home" XDG_CONFIG_HOME="$config" "$@"
 }
 run_in_workspace() {
   workspace=$1
   shift
-  run_as_watershed /bin/sh -c 'cd "$1" && shift && exec "$@"' \
-    watershed-workspace "$workspace" "$@"
+  run_local /bin/sh -c 'cd "$1" && shift && exec "$@"' \
+    flow-workspace "$workspace" "$@"
 }
-assert_linger_disabled() {
-  if [ -e /var/lib/systemd/linger/watershed ] || [ -L /var/lib/systemd/linger/watershed ]; then
-    printf 'installer acceptance requires Linger=no\n' >&2
-    exit 1
-  fi
-}
-run_with_deadline systemctl start user-runtime-dir@10001.service user@10001.service
-run_with_deadline systemctl is-active --quiet user@10001.service
-test -S /run/user/10001/bus
 install -d -m 0755 "$bundle" "$acceptance_bundle"
 install -d -m 0700 "$config" "$home" "$agent_home" "$fixture_home" "$fixture_workspace" "$productive_workspace" "$unavailable_workspace"
-chown -R watershed:watershed "$config" "$home" "$agent_home" "$fixture_home" "$fixture_workspace" "$productive_workspace" "$unavailable_workspace"
 install -m 0755 install/install.sh "$bundle/install.sh"
 install -m 0755 target/m12-standard/release/flow "$bundle/flow"
-install -m 0755 /root/m12-production/flow-executor "$bundle/flow-executor"
+install -m 0755 target/m12-standard/release/flow-executor "$bundle/flow-executor"
 install -m 0755 install/install.sh "$acceptance_bundle/install.sh"
 install -m 0755 target/m12-acceptance/release/flow "$acceptance_bundle/flow"
-install -m 0755 /root/m12-production/flow-executor "$acceptance_bundle/flow-executor"
-assert_linger_disabled
-(cd / && PATH= HOME="$home" XDG_CONFIG_HOME="$config" SUDO_USER=watershed /bin/sh "$bundle/install.sh" --prefix "$standard_prefix")
+install -m 0755 target/m12-standard/release/flow-executor "$acceptance_bundle/flow-executor"
+(cd / && PATH= HOME="$home" XDG_CONFIG_HOME="$config" /bin/sh "$bundle/install.sh" --prefix "$standard_prefix")
 test -x "$standard_prefix/bin/flow"
 test -x "$standard_prefix/bin/flow-executor"
-run_as_watershed "$standard_prefix/bin/flow" executor check </dev/null
-assert_linger_disabled
-(cd / && PATH= HOME="$home" XDG_CONFIG_HOME="$config" SUDO_USER=watershed /bin/sh "$acceptance_bundle/install.sh" --prefix "$acceptance_prefix")
+run_local "$standard_prefix/bin/flow" executor check </dev/null
+(cd / && PATH= HOME="$home" XDG_CONFIG_HOME="$config" /bin/sh "$acceptance_bundle/install.sh" --prefix "$acceptance_prefix")
 test -x "$acceptance_prefix/bin/flow"
 test -x "$acceptance_prefix/bin/flow-executor"
 (cd / && PATH= HOME="$home" XDG_CONFIG_HOME="$config" /bin/sh "$bundle/install.sh" --prefix "$custom_prefix" --no-default-executor)
@@ -79,7 +75,6 @@ printf '%s\n' \
   'fixture_profile: stub-model' \
   'stub_model: deterministic' \
   >> "$fixture_home/config.yaml"
-chown -R watershed:watershed "$fixture_home"
 run_in_workspace "$fixture_workspace" /usr/bin/env FLOW_AGENT_HOME="$fixture_home" "$custom_prefix/bin/flow" validate smoke-flow
 set +e
 run_in_workspace "$fixture_workspace" /usr/bin/env FLOW_AGENT_HOME="$fixture_home" "$custom_prefix/bin/flow" run smoke-flow --emit jsonl > "$fixture_output" 2> "$fixture_error"
@@ -104,7 +99,6 @@ printf '%s\n' \
   '{"openai-codex":{"type":"oauth","access":"ci-inert-access","refresh":"ci-inert-refresh","expires":18446744073709551615,"accountId":"ci-inert-account","isFedramp":false}}' \
   > "$config/flow-agent/credentials.json"
 chmod 0600 "$agent_home/config.yaml" "$config/flow-agent/credentials.json"
-chown -R watershed:watershed "$agent_home" "$config"
 test ! -e "$config/flow-agent/executor.json"
 productive_output=$(
   run_in_workspace "$productive_workspace" /usr/bin/env \
@@ -120,7 +114,7 @@ case "$productive_output" in
     ;;
 esac
 test ! -e "$config/flow-agent/executor.json"
-/usr/bin/python3 - "$agent_home" <<'PY'
+node scripts/run-python.mjs - "$agent_home" "$expected_platform" "$expected_backend" <<'PY'
 import json
 import pathlib
 import sys
@@ -163,9 +157,12 @@ assert durable["schema"] == "flow-tool-attempt-output-v1", durable
 assert durable["request_hash"].startswith("sha256:"), durable
 receipt = durable["enforcement"]
 assert receipt["executor"] == "flow-executor", receipt
-assert receipt["isolation_active"] is True, receipt
-assert receipt["platform"] == "ubuntu-24.04-x86_64", receipt
-assert receipt["runtime_profile"] == "exact", receipt
+assert set(receipt) == {"applied_policy_digest", "backend", "backend_version",
+                        "executor", "executor_version", "self_protection_active", "platform"}, receipt
+assert receipt["self_protection_active"] is True, receipt
+assert receipt["platform"] == sys.argv[2], receipt
+assert receipt["backend"] == sys.argv[3], receipt
+assert receipt["applied_policy_digest"].startswith("sha256:"), receipt
 PY
 set +e
 productive_unavailable=$(run_in_workspace "$unavailable_workspace" /usr/bin/env FLOW_AGENT_HOME="$agent_home" "$custom_prefix/bin/flow" run smoke-flow 2>&1)
@@ -189,17 +186,17 @@ if [ -e "$unavailable_workspace/.flow" ]; then
   exit 1
 fi
 check_custom_selection() {
-  run_as_watershed "$custom_prefix/bin/flow" executor configure --path "$bundle/flow-executor"
+  run_local "$custom_prefix/bin/flow" executor configure --path "$bundle/flow-executor"
   test -f "$config/flow-agent/executor.json"
-  run_as_watershed "$custom_prefix/bin/flow" executor check </dev/null
+  run_local "$custom_prefix/bin/flow" executor check </dev/null
   ln -s "$custom_prefix/bin/absent-executor" "$custom_prefix/bin/flow-executor"
-  if run_as_watershed "$custom_prefix/bin/flow" executor check </dev/null; then
+  if run_local "$custom_prefix/bin/flow" executor check </dev/null; then
     printf 'Custom selection ignored an unsafe installed sibling\n' >&2
     exit 1
   else
     test "$?" -eq 65
   fi
-  if run_as_watershed "$custom_prefix/bin/flow" executor configure --path "$bundle/flow-executor"; then
+  if run_local "$custom_prefix/bin/flow" executor configure --path "$bundle/flow-executor"; then
     printf 'Custom configuration ignored an unsafe installed sibling\n' >&2
     exit 1
   else
@@ -207,16 +204,16 @@ check_custom_selection() {
   fi
   test -L "$custom_prefix/bin/flow-executor"
   rm -- "$custom_prefix/bin/flow-executor"
-  run_as_watershed "$custom_prefix/bin/flow" executor check </dev/null
-  run_as_watershed "$custom_prefix/bin/flow" executor configure --default
+  run_local "$custom_prefix/bin/flow" executor check </dev/null
+  run_local "$custom_prefix/bin/flow" executor configure --default
   test ! -e "$config/flow-agent/executor.json"
-  if run_as_watershed "$custom_prefix/bin/flow" executor check </dev/null; then
+  if run_local "$custom_prefix/bin/flow" executor check </dev/null; then
     printf 'Default selection accepted its missing required Executor\n' >&2
     exit 1
   else
     test "$?" -eq 65
   fi
-  run_as_watershed "$standard_prefix/bin/flow" executor check </dev/null
+  run_local "$standard_prefix/bin/flow" executor check </dev/null
 }
 check_custom_selection
 if [ -n "${M12_COVERAGE_BIN_DIR:-}" ]; then
@@ -224,17 +221,17 @@ if [ -n "${M12_COVERAGE_BIN_DIR:-}" ]; then
   coverage_executor="$M12_COVERAGE_BIN_DIR/flow-executor"
   test -x "$coverage_flow"
   test -x "$coverage_executor"
-  install -m 0755 "$coverage_flow" "$bundle/flow"
-  install -m 0755 "$coverage_executor" "$bundle/flow-executor"
-  install -m 0755 "$coverage_flow" "$standard_prefix/bin/flow"
-  install -m 0755 "$coverage_flow" "$custom_prefix/bin/flow"
-  install -m 0755 "$coverage_executor" "$standard_prefix/bin/flow-executor"
-  run_as_watershed "$standard_prefix/bin/flow" executor check </dev/null
+  coverage_bundle="$acceptance_root/m12-coverage-bundle"
+  standard_prefix="$acceptance_root/m12-coverage-standard"
+  custom_prefix="$acceptance_root/m12-coverage-custom"
+  install -d -m 0755 "$coverage_bundle"
+  install -m 0755 install/install.sh "$coverage_bundle/install.sh"
+  install -m 0755 "$coverage_flow" "$coverage_bundle/flow"
+  install -m 0755 "$coverage_executor" "$coverage_bundle/flow-executor"
+  bundle=$coverage_bundle
+  # Exercise the actual installer with instrumented binaries, not a post-install swap.
+  (cd / && run_local /bin/sh "$bundle/install.sh" --prefix "$standard_prefix")
+  (cd / && run_local /bin/sh "$bundle/install.sh" --prefix "$custom_prefix" --no-default-executor)
+  run_local "$standard_prefix/bin/flow" executor check </dev/null
   check_custom_selection
 fi
-M12_INSTALL_BUNDLE="$bundle" \
-  M12_STANDARD_PREFIX="$standard_prefix" \
-  M12_CONFIG="$config" \
-  M12_HOME="$home" \
-  /bin/sh scripts/run-m12-readiness-negatives.sh
-assert_linger_disabled

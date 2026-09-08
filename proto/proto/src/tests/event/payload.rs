@@ -121,12 +121,7 @@ pub(super) fn payload_cases() -> Vec<PayloadCase> {
                 "tool_id": "tool-1",
                 "tool_name": "Tool",
                 "tool_kind": "predefined-command",
-                "read_only_mounts": [],
-                "runtime_profile": "exact",
-                "writable_mounts": [],
-                "allowed_parameters": [],
-                "network_access": "deny",
-                "max_concurrent_processes_and_threads": 32
+                "allowed_parameters": []
             }),
             required_field: Some("tool_id"),
             typed_field: "tool_id",
@@ -184,6 +179,62 @@ pub(super) fn payload_cases() -> Vec<PayloadCase> {
             typed_field: "code",
         },
     ]
+}
+
+#[test]
+fn tool_started_retains_exact_invocation_metadata() {
+    for tool_kind in ["predefined-command", "own-script"] {
+        for attempt_id in [None, Some("attempt-1")] {
+            let mut payload = json!({
+                "tool_id": "tool-1",
+                "tool_name": "Tool",
+                "tool_kind": tool_kind,
+                "allowed_parameters": ["path", "format"]
+            });
+            if let Some(attempt_id) = attempt_id {
+                payload["attempt_id"] = json!(attempt_id);
+            }
+            let mut event = EventEnvelope::new(
+                "evt-001",
+                EventType::ToolStarted,
+                "smoke001",
+                1,
+                "2026-01-01T00:00:00Z",
+                "flow-agent-cli",
+                payload.clone(),
+            );
+            event.flow_id = Some("flow-1".to_owned());
+            event.validate_v0().expect("invocation metadata is valid");
+            let jsonl = event.canonical_jsonl().expect("event serializes");
+            let decoded: EventEnvelope = serde_json::from_str(&jsonl).expect("event parses");
+            assert_eq!(decoded.payload, payload);
+
+            for (field, value) in [
+                ("read_only_mounts", json!(["workspace"])),
+                ("writable_mounts", json!([])),
+                ("runtime_profile", json!("exact")),
+                ("max_concurrent_processes_and_threads", json!(32)),
+                ("network_access", json!("deny")),
+                ("network", json!("deny")),
+                ("unknown_metadata", json!(true)),
+            ] {
+                let mut obsolete = event.clone();
+                obsolete.payload[field] = value;
+                assert_eq!(
+                    obsolete
+                        .validate_v0()
+                        .expect_err("undeclared invocation metadata must be rejected")
+                        .field(),
+                    format!("payload.{field}")
+                );
+                assert!(obsolete.canonical_jsonl().is_err());
+                assert!(serde_json::to_string(&obsolete).is_err());
+                let mut raw = serde_json::to_value(&event).expect("valid event serializes");
+                raw["payload"] = obsolete.payload;
+                assert!(serde_json::from_value::<EventEnvelope>(raw).is_err());
+            }
+        }
+    }
 }
 
 #[test]
@@ -429,27 +480,17 @@ fn event_specific_payload_invariants_are_bounded() {
         (EventType::PhaseEntered, "phase_kind", Some(json!("step"))),
         (EventType::PhaseEntered, "iteration", Some(json!(0))),
         (EventType::MessageDelta, "role", Some(json!("critic"))),
-        (EventType::ToolStarted, "read_only_mounts", None),
-        (
-            EventType::ToolStarted,
-            "max_concurrent_processes_and_threads",
-            None,
-        ),
-        (
-            EventType::ToolStarted,
-            "max_concurrent_processes_and_threads",
-            Some(json!(0)),
-        ),
+        (EventType::ToolStarted, "tool_name", None),
+        (EventType::ToolStarted, "tool_kind", None),
+        (EventType::ToolStarted, "allowed_parameters", None),
         (EventType::ToolStarted, "tool_kind", Some(json!("shell"))),
+        (EventType::ToolStarted, "attempt_id", Some(Value::Null)),
+        (EventType::ToolStarted, "attempt_id", Some(json!(""))),
+        (EventType::ToolStarted, "attempt_id", Some(json!(1))),
         (
             EventType::ToolStarted,
-            "network_access",
-            Some(json!("allow")),
-        ),
-        (
-            EventType::ToolStarted,
-            "read_only_mounts",
-            Some(json!("workspace")),
+            "allowed_parameters",
+            Some(json!("path")),
         ),
         (
             EventType::ToolStarted,

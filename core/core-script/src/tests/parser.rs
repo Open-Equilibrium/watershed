@@ -1,5 +1,5 @@
 use super::super::load::parse_registry_block;
-use super::super::model::{FlowValue, RegistryBlock, ScriptRuntime, ToolRuntimeProfile};
+use super::super::model::{FlowValue, RegistryBlock, ScriptRuntime};
 use super::super::parser::{MAX_YAML_BYTES, MAX_YAML_DEPTH, parse_safe_yaml_config};
 use super::super::paths::{is_valid_block_id, is_valid_command_id};
 use proptest::prelude::*;
@@ -82,38 +82,6 @@ fn parser_rejects_implicit_null_with_neutral_diagnostic() {
 }
 
 #[test]
-fn parser_accepts_exact_mount_policy_and_default_runtime_profile() {
-    let exact = r#"tool:
-  id: exact-tool
-  name: ExactTool
-  tool_kind: predefined-command
-  command:
-    command_id: agent-echo
-    argv: []
-  allowed_parameters: []
-  max_concurrent_processes_and_threads: 32
-  runtime_profile: host-system-read
-  read_only_mounts: ["workspace"]
-  writable_mounts: ["workspace/out"]
-  network: deny
-"#;
-    let RegistryBlock::Tool(tool) = parse_registry_block("exact-tool.yaml", exact)
-        .expect("the exact mount capability grammar parses")
-    else {
-        panic!("expected Tool block");
-    };
-    assert_eq!(tool.runtime_profile, ToolRuntimeProfile::HostSystemRead);
-
-    let defaulted = exact.replace("  runtime_profile: host-system-read\n", "");
-    let RegistryBlock::Tool(tool) = parse_registry_block("default-profile.yaml", &defaulted)
-        .expect("an omitted runtime profile defaults to exact")
-    else {
-        panic!("expected Tool block");
-    };
-    assert_eq!(tool.runtime_profile, ToolRuntimeProfile::Exact);
-}
-
-#[test]
 fn parser_preserves_quoted_merge_key_as_literal_map_key() {
     let value: FlowValue = parse_safe_yaml_config(
         "quoted-merge-key.yaml",
@@ -175,13 +143,6 @@ fn parser_enforces_registry_schema() {
             "empty-flow.yaml",
             flow_block.replace("phase_refs: [inspect, summarize]", "phase_refs: []"),
         ),
-        (
-            "zero-port.yaml",
-            tool.replace(
-                "network: deny",
-                "network:\n    default: deny\n    allow:\n      - kind: cidr\n        transport: tcp\n        cidr: 192.0.2.0/24\n        port: 0",
-            ),
-        ),
     ];
 
     for (name, source) in cases {
@@ -239,8 +200,8 @@ fn parser_handles_block_script_bodies_and_requires_content() {
     );
 
     let duplicate = literal.replacen(
-        "  writable_mounts: [\"workspace/out\"]\n",
-        "  writable_mounts: [\"workspace/out\"]\n  writable_mounts: []\n",
+        "  script_runtime: posix-sh\n",
+        "  script_runtime: posix-sh\n  script_runtime: posix-sh\n",
         1,
     );
     let err = parse_registry_block("real-duplicate.yaml", &duplicate)
@@ -275,10 +236,6 @@ fn parser_decodes_yaml_double_quoted_escapes() {
   script_runtime: posix-sh
   script_body: "printf '%s\n' \"$SUMMARY\" > out/summary.txt"
   allowed_parameters: []
-  max_concurrent_processes_and_threads: 32
-  read_only_mounts: ["workspace"]
-  writable_mounts: ["workspace/out"]
-  network: deny
 "#,
     )
     .expect("YAML 1.2 double-quoted escapes parse");
@@ -388,13 +345,6 @@ fn parser_rejects_plain_yaml_non_string_scalars_for_string_fields() {
 fn parser_rejects_malformed_or_quoted_typed_scalars() {
     let parameter_tool =
         include_str!("../../../../flow-agent/fixtures/hello-flow/registry/tools/read-file.yaml");
-    let network_tool = include_str!(
-        "../../../../flow-agent/fixtures/sandbox-negative/registry/tools/network-tool.yaml"
-    )
-    .replace(
-        "  network: deny\n",
-        "  network:\n    default: deny\n    allow:\n      - kind: cidr\n        transport: tcp\n        cidr: 192.0.2.0/24\n        port: 443\n",
-    );
     let integer_parameter = parameter_tool.replace(
         "      value_type: workspace-relative-path\n      required: true\n      value_pattern: \"^[A-Za-z0-9_./-]+$\"\n      max_length: 128",
         "      value_type: integer\n      required: true\n      min: nope",
@@ -410,8 +360,8 @@ fn parser_rejects_malformed_or_quoted_typed_scalars() {
             parameter_tool.replace("max_length: 128", "max_length: \"128\""),
         ),
         (
-            "quoted-port.yaml",
-            network_tool.replace("port: 443", "port: \"443\""),
+            "quoted-min.yaml",
+            integer_parameter.replace("min: nope", "min: \"1\""),
         ),
         (
             "malformed-required.yaml",
@@ -422,10 +372,6 @@ fn parser_rejects_malformed_or_quoted_typed_scalars() {
             parameter_tool.replace("required: true", "required: True"),
         ),
         ("malformed-min.yaml", integer_parameter),
-        (
-            "malformed-port.yaml",
-            network_tool.replace("port: 443", "port: nope"),
-        ),
     ] {
         let err = parse_registry_block(name, &source)
             .expect_err("schema-typed scalars must use their declared representation");
@@ -446,17 +392,4 @@ fn ids_follow_v0_token_rules() {
     assert!(is_valid_command_id("agent-read"));
     assert!(!is_valid_command_id("1-agent-read"));
     assert!(!is_valid_command_id("agent.read"));
-}
-
-#[test]
-fn parser_rejects_unsafe_tool_filesystem_paths() {
-    let fixture = include_str!(
-        "../../../../flow-agent/fixtures/hello-flow/registry/tools/write-summary.yaml"
-    );
-    let source = fixture.replace(
-        "  read_only_mounts: [\"workspace\"]",
-        "  read_only_mounts: [\"../outside\"]",
-    );
-    parse_registry_block("unsafe-tool-path.yaml", &source)
-        .expect_err("unsafe YAML tool filesystem path is rejected");
 }

@@ -91,19 +91,20 @@ fn run_flow_rejects_existing_own_script_output_on_repeat_run() {
 }
 
 #[test]
-fn run_flow_rejects_write_summary_without_declared_writable_mount() {
+fn run_flow_rejects_legacy_write_mount_before_fixture_effects() {
     let workspace = workspace_copy("hello-flow");
     replace_registry_text(
         &workspace,
         "tools/write-summary.yaml",
-        r#"writable_mounts: ["workspace/out"]"#,
-        "writable_mounts: []",
+        "  allowed_parameters: []\n",
+        "  allowed_parameters: []\n  writable_mounts: []\n",
     );
 
     let err = run_flow(&workspace, "hello-flow", EmitMode::Jsonl)
-        .expect_err("undeclared write scope must fail");
+        .expect_err("legacy write authorization must reject before fixture execution");
 
-    assert_denied(err, core_policy::DenyReasonCode::WriteDenied, "write scope");
+    assert!(matches!(&err, RuntimeError::Registry(_)), "{err}");
+    assert!(err.to_string().contains("writable_mounts"), "{err}");
     assert!(!workspace.join("out/summary.txt").exists());
     assert_no_session_artifacts(&workspace, "hello-flow");
 }
@@ -181,7 +182,7 @@ fn run_flow_preflights_outputs_even_when_later_phase_has_sandbox_denial() {
     .expect("negative instruction written");
     fs::write(
         crate::tests::test_support::session_home_path().join("registry/tools/negative-tool.yaml"),
-        "tool:\n  id: negative-tool\n  name: NegativeTool\n  tool_kind: predefined-command\n  command:\n    command_id: agent-negative\n    argv: [\"write\"]\n  allowed_parameters: []\n  max_concurrent_processes_and_threads: 16\n  runtime_profile: exact\n  read_only_mounts: [\"workspace\"]\n  writable_mounts: []\n  network: deny\n",
+        "tool:\n  id: negative-tool\n  name: NegativeTool\n  tool_kind: predefined-command\n  command:\n    command_id: agent-negative\n    argv: [\"write\"]\n  allowed_parameters: []\n",
     )
     .expect("negative sentinel tool written");
     fs::write(
@@ -221,21 +222,21 @@ fn run_flow_preflights_later_own_script_path_before_earlier_side_effects() {
 }
 
 #[test]
-fn run_flow_allows_summary_write_inside_enclosing_writable_mount() {
+fn run_flow_writes_summary_to_workspace_root_without_mount_authorization() {
     let workspace = workspace_copy("hello-flow");
     replace_registry_text(
         &workspace,
         "tools/write-summary.yaml",
-        "  read_only_mounts: [\"workspace\"]\n  writable_mounts: [\"workspace/out\"]",
-        "  read_only_mounts: []\n  writable_mounts: [\"workspace\"]",
+        "> out/summary.txt",
+        "> summary.txt",
     );
 
     let output = run_flow(&workspace, "hello-flow", EmitMode::Jsonl)
-        .expect("enclosing write scope permits summary artifact");
+        .expect("workspace-relative fixture output needs no mount authorization");
 
     assert!(!output.failed);
     assert_eq!(
-        fs::read_to_string(workspace.join("out/summary.txt")).expect("summary is written"),
+        fs::read_to_string(workspace.join("summary.txt")).expect("summary is written"),
         "hello\n"
     );
 }

@@ -1,10 +1,14 @@
 use super::super::process::child_exited_without_reaping;
+use super::tests::one_shot_request;
 use super::transport::{
     ExecutorPreflightProcess, WaitingExecutor, preflight_one_shot, preflight_one_shot_at_deadline,
     start_one_shot_at_deadlines,
 };
 use crate::runtime::types::RuntimeError;
-use std::{cell::Cell, fs::File, path::Path, process::Child, time::Duration, time::Instant};
+use std::{
+    cell::Cell, fs::File, os::fd::OwnedFd, path::Path, process::Child, time::Duration,
+    time::Instant,
+};
 
 #[test]
 fn expired_preflight_rejects_available_ready_and_error_records() {
@@ -46,7 +50,7 @@ fn expired_preflight_rejects_available_ready_and_error_records() {
                 )
             },
         );
-        let request = request();
+        let (request, protected_descriptors) = one_shot_request();
         let executor = File::open("/bin/sh").expect("shell executor opens");
         let before = Instant::now();
         let deadline = before + Duration::from_secs(1);
@@ -55,7 +59,7 @@ fn expired_preflight_rejects_available_ready_and_error_records() {
 
         let outcome = preflight_one_shot_at_deadline(
             &executor,
-            &[],
+            &protected_descriptors,
             &request,
             script.as_bytes(),
             deadline,
@@ -85,8 +89,8 @@ fn expired_preflight_rejects_available_ready_and_error_records() {
 fn expired_start_deadline_writes_nothing() {
     let workspace = crate::tests::empty_workspace();
     let tool_started = workspace.join("tool-started");
-    let request = request();
-    let waiting = waiting_executor(&request, &tool_started);
+    let (request, protected_descriptors) = one_shot_request();
+    let waiting = waiting_executor(&request, &protected_descriptors, &tool_started);
     let before = Instant::now();
     let deadline = before + Duration::from_secs(1);
     let after = deadline + Duration::from_secs(1);
@@ -106,8 +110,8 @@ fn expired_start_deadline_writes_nothing() {
 fn expired_terminal_deadline_rejects_available_result() {
     let workspace = crate::tests::empty_workspace();
     let tool_started = workspace.join("tool-started");
-    let request = request();
-    let waiting = waiting_executor(&request, &tool_started);
+    let (request, protected_descriptors) = one_shot_request();
+    let waiting = waiting_executor(&request, &protected_descriptors, &tool_started);
     let before = Instant::now();
     let deadline = before + Duration::from_secs(1);
     let after = deadline + Duration::from_secs(1);
@@ -137,7 +141,11 @@ fn expired_terminal_deadline_rejects_available_result() {
     );
 }
 
-fn waiting_executor(request: &proto::ExecutorRequestV0, marker: &Path) -> WaitingExecutor {
+fn waiting_executor(
+    request: &proto::ExecutorRequestV0,
+    protected_descriptors: &[OwnedFd],
+    marker: &Path,
+) -> WaitingExecutor {
     let preflight = canonical_preflight(&proto::ExecutorPreflightV0::Ready {
         request_id: request.request_id.clone(),
         schema: proto::EXECUTOR_PREFLIGHT_SCHEMA_V0.to_owned(),
@@ -146,14 +154,12 @@ fn waiting_executor(request: &proto::ExecutorRequestV0, marker: &Path) -> Waitin
         proto::canonical_executor_response_v0(&proto::ExecutorResponseV0::Completed {
             enforcement: proto::EnforcementReceiptV0 {
                 applied_policy_digest: request.policy_digest.clone(),
-                backend: proto::EXECUTOR_BACKEND_V0.to_owned(),
+                backend: format!("fake-{}-{}", std::env::consts::OS, std::env::consts::ARCH),
                 backend_version: "test".to_owned(),
                 executor: proto::EXECUTOR_NAME_V0.to_owned(),
                 executor_version: "test".to_owned(),
-                isolation_active: true,
-                max_concurrent_processes_and_threads: 16,
-                platform: proto::EXECUTOR_PLATFORM_V0.to_owned(),
-                runtime_profile: proto::RuntimeReadProfileV0::Exact,
+                platform: format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH),
+                self_protection_active: true,
             },
             request_id: request.request_id.clone(),
             schema: proto::EXECUTOR_RESPONSE_SCHEMA_V0.to_owned(),
@@ -176,43 +182,11 @@ fn waiting_executor(request: &proto::ExecutorRequestV0, marker: &Path) -> Waitin
         marker = marker.display(),
     );
     let executor = File::open("/bin/sh").expect("shell executor opens");
-    match preflight_one_shot(&executor, &[], request, script.as_bytes())
+    match preflight_one_shot(&executor, protected_descriptors, request, script.as_bytes())
         .expect("fake Executor reaches readiness")
     {
         ExecutorPreflightProcess::Ready(waiting) => waiting,
         ExecutorPreflightProcess::Rejected(code) => panic!("unexpected rejection: {code:?}"),
-    }
-}
-
-fn request() -> proto::ExecutorRequestV0 {
-    let limits = proto::ExecutorLimitsV0 {
-        max_concurrent_processes_and_threads: 16,
-        max_stderr_bytes: 0,
-        max_stdout_bytes: 0,
-        timeout_ms: 100,
-    };
-    proto::ExecutorRequestV0 {
-        argv: Vec::new(),
-        environment: Default::default(),
-        executable: "/bin/sh".to_owned(),
-        limits: limits.clone(),
-        mounts: Vec::new(),
-        resolved_policy: proto::ExecutorResolvedPolicyV0 {
-            artifact: serde_json::json!({}),
-            command: serde_json::json!({}),
-            limits,
-            mounts: Vec::new(),
-            runtime_profile: proto::RuntimeReadProfileV0::Exact,
-            tool_id: "tool".to_owned(),
-            tool_kind: "command".to_owned(),
-        },
-        policy_digest: "a".repeat(64),
-        request_id: "request-1".to_owned(),
-        runtime_profile: proto::RuntimeReadProfileV0::Exact,
-        schema: proto::EXECUTOR_REQUEST_SCHEMA_V0.to_owned(),
-        tool_id: "tool".to_owned(),
-        tool_kind: "command".to_owned(),
-        working_directory: "/".to_owned(),
     }
 }
 

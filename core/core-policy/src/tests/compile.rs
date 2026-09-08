@@ -68,61 +68,6 @@ fn smoke_registry_with_tool(
 }
 
 #[test]
-fn policy_compiler_rejects_non_empty_network_allowlists_for_supported_target() {
-    let registry = smoke_registry_with_tool(|tool| {
-        tool.network = core_script::NetworkPolicy::Declared {
-            default: core_script::NetworkDefault::Deny,
-            allow: vec![core_script::NetworkAllowEntry {
-                kind: core_script::NetworkAllowKind::Cidr,
-                transport: core_script::NetworkTransport::Tcp,
-                cidr: "192.0.2.0/24".to_owned(),
-                port: 443,
-            }],
-        };
-    });
-
-    let err = compile_policy_artifact(&registry, "smoke-flow")
-        .expect_err("network allowlist is rejected");
-
-    assert!(matches!(
-        &err,
-        PolicyCompileError::NonEmptyNetworkAllowlist { .. }
-    ));
-    assert_eq!(
-        err.to_string(),
-        "supported policy-artifact target for tool echo must use a deny-all network allowlist"
-    );
-    assert!(std::error::Error::source(&err).is_none());
-}
-
-#[test]
-fn policy_compiler_preserves_the_selected_runtime_profile() {
-    let registry = smoke_registry_with_tool(|tool| {
-        tool.runtime_profile = core_script::ToolRuntimeProfile::HostSystemRead;
-    });
-
-    let artifact = compile_policy_artifact(&registry, "smoke-flow")
-        .expect("the selected runtime profile compiles");
-
-    assert_eq!(
-        artifact.commands[0].runtime_profile,
-        core_script::ToolRuntimeProfile::HostSystemRead
-    );
-}
-
-#[test]
-fn policy_compiler_preserves_process_capacity() {
-    let registry = smoke_registry_with_tool(|tool| {
-        tool.max_concurrent_processes_and_threads = 7;
-    });
-
-    let artifact = compile_policy_artifact(&registry, "smoke-flow")
-        .expect("the configured process capacity compiles");
-
-    assert_eq!(artifact.commands[0].max_concurrent_processes_and_threads, 7);
-}
-
-#[test]
 fn policy_compiler_rejects_unknown_predefined_commands() {
     let registry = smoke_registry_with_tool(|tool| {
         tool.command = core_script::ToolCommand::Predefined {

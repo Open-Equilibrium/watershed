@@ -284,7 +284,10 @@ mod tests {
             parse_number::<u8>("01", "--loop-max-iterations"),
             "--loop-max-iterations",
         );
-        for (value, flag) in [("01", "--parameter-max-length"), ("01", "--network-port")] {
+        for (value, flag) in [
+            ("01", "--parameter-max-length"),
+            ("+1", "--parameter-max-length"),
+        ] {
             assert_usage(parse_number::<u16>(value, flag), flag);
         }
         for value in ["-0", "01", "+1"] {
