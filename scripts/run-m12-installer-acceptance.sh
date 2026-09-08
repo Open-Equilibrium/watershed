@@ -192,8 +192,30 @@ check_custom_selection() {
   run_as_watershed "$custom_prefix/bin/flow" executor configure --path "$bundle/flow-executor"
   test -f "$config/flow-agent/executor.json"
   run_as_watershed "$custom_prefix/bin/flow" executor check </dev/null
-  run_as_watershed "$standard_prefix/bin/flow" executor configure --default
+  ln -s "$custom_prefix/bin/absent-executor" "$custom_prefix/bin/flow-executor"
+  if run_as_watershed "$custom_prefix/bin/flow" executor check </dev/null; then
+    printf 'Custom selection ignored an unsafe installed sibling\n' >&2
+    exit 1
+  else
+    test "$?" -eq 65
+  fi
+  if run_as_watershed "$custom_prefix/bin/flow" executor configure --path "$bundle/flow-executor"; then
+    printf 'Custom configuration ignored an unsafe installed sibling\n' >&2
+    exit 1
+  else
+    test "$?" -eq 65
+  fi
+  test -L "$custom_prefix/bin/flow-executor"
+  rm -- "$custom_prefix/bin/flow-executor"
+  run_as_watershed "$custom_prefix/bin/flow" executor check </dev/null
+  run_as_watershed "$custom_prefix/bin/flow" executor configure --default
   test ! -e "$config/flow-agent/executor.json"
+  if run_as_watershed "$custom_prefix/bin/flow" executor check </dev/null; then
+    printf 'Default selection accepted its missing required Executor\n' >&2
+    exit 1
+  else
+    test "$?" -eq 65
+  fi
   run_as_watershed "$standard_prefix/bin/flow" executor check </dev/null
 }
 check_custom_selection

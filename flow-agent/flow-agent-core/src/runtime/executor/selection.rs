@@ -97,7 +97,7 @@ pub fn configure_executor_path(path: &Path) -> Result<ExecutorSelection, Runtime
         ));
     }
     let selection = ExecutorSelection::new(path.to_owned(), ExecutorSelectionSource::Custom);
-    let probed = probe_executor(&selection, None)?;
+    let probed = probe_executor(&selection, Some(&current_flow_path()?))?;
     ExecutorConfigStore::platform_default()?.configure(path)?;
     Ok(selection.with_probe(probed))
 }
@@ -123,22 +123,23 @@ pub fn configure_default_executor() -> Result<bool, RuntimeError> {
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 pub(crate) fn resolve_executor() -> Result<ExecutorSelection, RuntimeError> {
     let store = ExecutorConfigStore::platform_default()?;
-    let flow = env::current_exe().map_err(|error| RuntimeError::Io {
-        path: PathBuf::from("<current executable>"),
-        source: error,
-    })?;
-    let (selection, official_flow) = match store.read()? {
-        Some(selection) => (selection, None),
-        None => (
-            ExecutorSelection::new(
-                default_executor_path(&flow),
-                ExecutorSelectionSource::Default,
-            ),
-            Some(flow.as_path()),
-        ),
-    };
-    let probed = probe_executor(&selection, official_flow)?;
+    let flow = current_flow_path()?;
+    let selection = store.read()?.unwrap_or_else(|| {
+        ExecutorSelection::new(
+            default_executor_path(&flow),
+            ExecutorSelectionSource::Default,
+        )
+    });
+    let probed = probe_executor(&selection, Some(&flow))?;
     Ok(selection.with_probe(probed))
+}
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn current_flow_path() -> Result<PathBuf, RuntimeError> {
+    env::current_exe().map_err(|source| RuntimeError::Io {
+        path: PathBuf::from("<current executable>"),
+        source,
+    })
 }
 
 #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]

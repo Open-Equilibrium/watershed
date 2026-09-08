@@ -38,15 +38,15 @@ pub(super) struct ProbedExecutor {
 
 pub(super) fn probe_executor(
     selection: &ExecutorSelection,
-    official_flow: Option<&Path>,
+    installation_flow: Option<&Path>,
 ) -> Result<ProbedExecutor, RuntimeError> {
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     {
-        probe_linux_executor(selection, official_flow)
+        probe_linux_executor(selection, installation_flow)
     }
     #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
     {
-        let _ = (selection, official_flow);
+        let _ = (selection, installation_flow);
         Err(protocol_failure(
             proto::ExecutorErrorCodeV0::PolicyUnsupported,
             "productive Executor support requires Ubuntu 24.04 x64",
@@ -57,9 +57,9 @@ pub(super) fn probe_executor(
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 fn probe_linux_executor(
     selection: &ExecutorSelection,
-    official_flow: Option<&Path>,
+    installation_flow: Option<&Path>,
 ) -> Result<ProbedExecutor, RuntimeError> {
-    let executable = open_validated_executable(selection, official_flow)?;
+    let executable = open_validated_executable(selection, installation_flow)?;
     let inherited_path = format!("/proc/self/fd/{}", executable.as_raw_fd());
     let mut command = Command::new(inherited_path);
     command
@@ -248,13 +248,54 @@ fn read_bounded(mut reader: impl Read, limit: usize) -> io::Result<BoundedRead> 
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 fn open_validated_executable(
     selection: &ExecutorSelection,
-    official_flow: Option<&Path>,
+    installation_flow: Option<&Path>,
 ) -> Result<File, RuntimeError> {
+    let executable = open_program(selection.path())?;
+    if let Some(flow_path) = installation_flow {
+        let flow = open_program(flow_path)?;
+        if selection.source() == ExecutorSelectionSource::Default {
+            validate_sibling_ownership(&flow, &executable)?;
+        } else {
+            let sibling_path = super::selection::default_executor_path(flow_path);
+            match fs::symlink_metadata(&sibling_path) {
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Err(_) => {
+                    return Err(executor_unavailable(
+                        "Default Executor sibling metadata is unavailable",
+                    ));
+                }
+                Ok(_) => {
+                    let sibling = open_program(&sibling_path)?;
+                    validate_sibling_ownership(&flow, &sibling)?;
+                }
+            }
+        }
+    }
+    Ok(executable)
+}
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn validate_sibling_ownership(flow: &File, sibling: &File) -> Result<(), RuntimeError> {
+    let owner = |file: &File| {
+        file.metadata()
+            .map(|metadata| metadata.uid())
+            .map_err(|_| executor_unavailable("installed program metadata is unavailable"))
+    };
+    if owner(flow)? != owner(sibling)? {
+        return Err(executor_unavailable(
+            "Flow and Default Executor are not trusted administrator-owned siblings",
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn open_program(path: &Path) -> Result<File, RuntimeError> {
     use rustix::fs::{Mode, OFlags};
 
     let descriptor = rustix::fs::open(
-        selection.path(),
-        OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW,
+        path,
+        OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW | OFlags::NONBLOCK,
         Mode::empty(),
     )
     .map_err(|_| executor_unavailable("Executor executable is missing or unsafe"))?;
@@ -271,8 +312,7 @@ fn open_validated_executable(
     {
         return Err(executor_unavailable("Executor executable is unsafe"));
     }
-    let parent = selection
-        .path()
+    let parent = path
         .parent()
         .ok_or_else(|| executor_unavailable("Executor installation directory is unavailable"))?;
     let parent_metadata = fs::symlink_metadata(parent)
@@ -285,19 +325,6 @@ fn open_validated_executable(
         return Err(executor_unavailable(
             "Executor installation directory is unsafe",
         ));
-    }
-    if let Some(flow_path) = official_flow {
-        let flow_metadata = fs::metadata(flow_path)
-            .map_err(|_| executor_unavailable("Flow installation identity is unavailable"))?;
-        if !flow_metadata.is_file()
-            || flow_metadata.nlink() != 1
-            || flow_metadata.uid() != metadata.uid()
-            || flow_metadata.permissions().mode() & 0o022 != 0
-        {
-            return Err(executor_unavailable(
-                "Flow and Default Executor are not trusted administrator-owned siblings",
-            ));
-        }
     }
     Ok(file)
 }
