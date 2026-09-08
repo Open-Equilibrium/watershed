@@ -1,6 +1,6 @@
 # Testing
 
-**Flow security transition:** Existing Tool fixtures, schema, isolation and receipt tests verify the current legacy runtime. They do not prove the [accepted replacement security contract](SECURITY.md#accepted-flow-agent-security-target) (ADR-0166–ADR-0169). D-063 owns the remaining native mechanism/protected-object choices and finite acceptance; the configuration review lifecycle is decided. Use red-first tests and migrate runtime, definitions and evidence together. Both native replacement Executors require actual platform evidence before the first Flow Agent release.
+**Flow security transition:** Existing Tool fixtures, schema, isolation and receipt tests verify the current legacy runtime. They do not prove the [accepted replacement security contract](SECURITY.md#accepted-flow-agent-security-target) (ADR-0166–ADR-0170). D-063 owns the remaining native mechanism/protected-object choices and finite acceptance; the configuration review lifecycle and terminal-access compatibility cost are decided. Use red-first tests and migrate runtime, definitions and evidence together. Both native replacement Executors require actual platform evidence before the first Flow Agent release.
 
 Verification strategy. Tests enforce product behavior and the boundaries in `SECURITY.md`; fixed workloads provide the observational evidence defined by `PERFORMANCE.md`. Definition of Done (see `AGENTS.md`) requires both where relevant.
 
