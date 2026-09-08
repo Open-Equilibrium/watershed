@@ -97,7 +97,7 @@ pub fn configure_executor_path(path: &Path) -> Result<ExecutorSelection, Runtime
         ));
     }
     let selection = ExecutorSelection::new(path.to_owned(), ExecutorSelectionSource::Custom);
-    let probed = probe_executor(&selection, Some(&current_flow_path()?))?;
+    let probed = probe_executor(&selection, &current_flow_path()?)?;
     ExecutorConfigStore::platform_default()?.configure(path)?;
     Ok(selection.with_probe(probed))
 }
@@ -130,7 +130,7 @@ pub(crate) fn resolve_executor() -> Result<ExecutorSelection, RuntimeError> {
             ExecutorSelectionSource::Default,
         )
     });
-    let probed = probe_executor(&selection, Some(&flow))?;
+    let probed = probe_executor(&selection, &flow)?;
     Ok(selection.with_probe(probed))
 }
 

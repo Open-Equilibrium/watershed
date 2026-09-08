@@ -38,7 +38,7 @@ pub(super) struct ProbedExecutor {
 
 pub(super) fn probe_executor(
     selection: &ExecutorSelection,
-    installation_flow: Option<&Path>,
+    installation_flow: &Path,
 ) -> Result<ProbedExecutor, RuntimeError> {
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     {
@@ -57,7 +57,7 @@ pub(super) fn probe_executor(
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 fn probe_linux_executor(
     selection: &ExecutorSelection,
-    installation_flow: Option<&Path>,
+    installation_flow: &Path,
 ) -> Result<ProbedExecutor, RuntimeError> {
     let executable = open_validated_executable(selection, installation_flow)?;
     let inherited_path = format!("/proc/self/fd/{}", executable.as_raw_fd());
@@ -248,26 +248,24 @@ fn read_bounded(mut reader: impl Read, limit: usize) -> io::Result<BoundedRead> 
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 fn open_validated_executable(
     selection: &ExecutorSelection,
-    installation_flow: Option<&Path>,
+    installation_flow: &Path,
 ) -> Result<File, RuntimeError> {
     let executable = open_program(selection.path())?;
-    if let Some(flow_path) = installation_flow {
-        let flow = open_program(flow_path)?;
-        if selection.source() == ExecutorSelectionSource::Default {
-            validate_sibling_ownership(&flow, &executable)?;
-        } else {
-            let sibling_path = super::selection::default_executor_path(flow_path);
-            match fs::symlink_metadata(&sibling_path) {
-                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-                Err(_) => {
-                    return Err(executor_unavailable(
-                        "Default Executor sibling metadata is unavailable",
-                    ));
-                }
-                Ok(_) => {
-                    let sibling = open_program(&sibling_path)?;
-                    validate_sibling_ownership(&flow, &sibling)?;
-                }
+    let flow = open_program(installation_flow)?;
+    if selection.source() == ExecutorSelectionSource::Default {
+        validate_sibling_ownership(&flow, &executable)?;
+    } else {
+        let sibling_path = super::selection::default_executor_path(installation_flow);
+        match fs::symlink_metadata(&sibling_path) {
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(_) => {
+                return Err(executor_unavailable(
+                    "Default Executor sibling metadata is unavailable",
+                ));
+            }
+            Ok(_) => {
+                let sibling = open_program(&sibling_path)?;
+                validate_sibling_ownership(&flow, &sibling)?;
             }
         }
     }
@@ -483,7 +481,7 @@ mod unsupported_platform_tests {
             ExecutorSelectionSource::Custom,
         );
 
-        let error = probe_executor(&selection, Some(Path::new("official-flow")))
+        let error = probe_executor(&selection, Path::new("official-flow"))
             .err()
             .expect("unsupported platforms cannot probe a productive Executor");
 
@@ -501,7 +499,7 @@ mod unsupported_platform_tests {
 
 #[cfg(all(test, target_os = "linux", target_arch = "x86_64"))]
 mod tests {
-    use super::{open_validated_executable, owner_is_trusted};
+    use super::{open_program, open_validated_executable, owner_is_trusted};
     use crate::runtime::executor::{ExecutorSelection, ExecutorSelectionSource};
     use std::{
         fs,
@@ -525,17 +523,15 @@ mod tests {
 
         let symbolic = root.join("symbolic");
         symlink(&target, &symbolic).expect("symbolic link is staged");
-        let selection = ExecutorSelection::new(symbolic, ExecutorSelectionSource::Custom);
         assert!(
-            open_validated_executable(&selection, None).is_err(),
+            open_program(&symbolic).is_err(),
             "symbolic executable link must be rejected"
         );
 
         let hard = root.join("hard");
         fs::hard_link(&target, &hard).expect("hard link is staged");
-        let selection = ExecutorSelection::new(hard, ExecutorSelectionSource::Custom);
         assert!(
-            open_validated_executable(&selection, None).is_err(),
+            open_program(&hard).is_err(),
             "hard-linked executable must be rejected"
         );
     }
@@ -552,37 +548,37 @@ mod tests {
                 .expect("program is executable");
         }
         let selection = ExecutorSelection::new(custom, ExecutorSelectionSource::Custom);
-        open_validated_executable(&selection, Some(&flow))
+        open_validated_executable(&selection, &flow)
             .expect("Custom-only installation does not require the absent default");
         let default = ExecutorSelection::new(sibling.clone(), ExecutorSelectionSource::Default);
         assert!(
-            open_validated_executable(&default, Some(&flow)).is_err(),
+            open_validated_executable(&default, &flow).is_err(),
             "default selection still requires its selected program"
         );
 
         fs::write(&sibling, b"installed default").expect("optional default is staged");
         fs::set_permissions(&sibling, fs::Permissions::from_mode(0o700))
             .expect("optional default is executable");
-        open_validated_executable(&selection, Some(&flow))
+        open_validated_executable(&selection, &flow)
             .expect("safe installed sibling is admitted with Custom selection");
 
         fs::set_permissions(&sibling, fs::Permissions::from_mode(0o722))
             .expect("unsafe sibling permissions are staged");
         assert!(
-            open_validated_executable(&selection, Some(&flow)).is_err(),
+            open_validated_executable(&selection, &flow).is_err(),
             "Custom selection must not hide an unsafe installed sibling"
         );
         fs::remove_file(&sibling).expect("unsafe test sibling is removed");
         symlink(root.join("missing-default"), &sibling).expect("dangling sibling is staged");
         assert!(
-            open_validated_executable(&selection, Some(&flow)).is_err(),
+            open_validated_executable(&selection, &flow).is_err(),
             "dangling sibling must not be treated as an absent optional program"
         );
         fs::remove_file(&sibling).expect("dangling test sibling is removed");
 
         fs::remove_file(&flow).expect("Flow removal is staged");
         assert!(
-            open_validated_executable(&selection, Some(&flow)).is_err(),
+            open_validated_executable(&selection, &flow).is_err(),
             "Custom selection does not make Flow optional"
         );
         fs::write(&flow, b"installed program").expect("Flow is restored");
@@ -590,7 +586,7 @@ mod tests {
             .expect("Flow is executable again");
         fs::remove_file(selection.path()).expect("selected program removal is staged");
         assert!(
-            open_validated_executable(&selection, Some(&flow)).is_err(),
+            open_validated_executable(&selection, &flow).is_err(),
             "explicitly selected Custom Executor is always required"
         );
     }
