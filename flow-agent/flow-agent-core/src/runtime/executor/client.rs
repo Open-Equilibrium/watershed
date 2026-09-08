@@ -737,6 +737,8 @@ mod tests {
 
     #[test]
     fn one_shot_completion_cleans_its_process_group_once() {
+        use std::{fs, os::unix::fs::PermissionsExt as _};
+
         reset_process_group_cleanup_calls_for_test();
         let (request, protected_descriptors) = one_shot_request();
         let expected_response = proto::ExecutorPreflightV0::Error {
@@ -750,7 +752,20 @@ mod tests {
         )
         .expect("response is UTF-8");
         let request_bytes = format!("printf '%s' '{response}'\n").into_bytes();
-        let executor = File::open("/bin/sh").expect("shell executor opens");
+        let root = crate::tests::empty_workspace();
+        let path = root.join("executor");
+        fs::copy("/bin/sh", &path).expect("private shell executor is copied");
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o700))
+            .expect("private shell executor is executable");
+        let executor = File::open(&path).expect("shell executor opens");
+        let parent_flags =
+            rustix::io::fcntl_getfd(&executor).expect("parent descriptor flags read");
+        assert!(parent_flags.contains(rustix::io::FdFlags::CLOEXEC));
+        fs::rename(&path, root.join("retained-executor"))
+            .expect("opened shell executor is renamed");
+        fs::write(&path, b"invalid replacement executable\n").expect("old path is replaced");
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600))
+            .expect("replacement is not executable");
 
         assert!(matches!(
             preflight_without_wall_clock_deadline(
@@ -762,6 +777,11 @@ mod tests {
             .expect("canonical Executor response is accepted"),
             ExecutorPreflightProcess::Rejected(proto::ExecutorErrorCodeV0::Unavailable)
         ));
+        assert_eq!(
+            rustix::io::fcntl_getfd(&executor).expect("parent descriptor remains open"),
+            parent_flags,
+            "launch must preserve the parent's close-on-exec protection"
+        );
         assert_eq!(
             process_group_cleanup_calls_for_test(),
             1,
