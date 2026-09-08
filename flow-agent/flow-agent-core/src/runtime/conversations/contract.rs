@@ -23,11 +23,10 @@ pub(crate) const RUN_LOG_LEAF: &str = "run-log.jsonl";
 pub(crate) const RUN_OBJECTS_DIR: &str = "objects";
 pub(crate) const RUN_RECOVERY_LEAF: &str = "recovery.jsonl";
 pub(crate) const RUN_SESSION_LOCK_LEAF: &str = "session.lock";
-pub(crate) const RUN_LOG_RECORD_SCHEMA_V0: &str = "flow-run-log-record-v0";
 pub(crate) const TOOL_RUN_LOG_PAGE_SCHEMA: &str = "flow-tool-run-log-page-v0";
 pub(crate) const CONVERSATION_STATUS_PAGE_SCHEMA: &str = "flow-conversation-status-page-v0";
 
-pub(super) const RUN_LOG_RECORD_SCHEMA_V1: &str = "flow-run-log-record-v1";
+pub(crate) const RUN_LOG_RECORD_SCHEMA_V1: &str = "flow-run-log-record-v1";
 pub(super) const UNPUBLISHED_PRODUCTIVE_RUN_MARKER: &str = ".unpublished-productive-run";
 const RUN_CREATION_STAGE_MARKER_PREFIX: &str = ".run-creation-identity-";
 const CONVERSATION_LIFECYCLE_MARKER_PREFIX: &str = ".conversation-lifecycle-identity-";
@@ -121,7 +120,7 @@ pub(super) fn parse_run_object_digest(value: &str) -> Result<[u8; 32], RuntimeEr
 }
 
 pub(super) fn validate_record_schema(schema: &str) -> Result<(), RuntimeError> {
-    if matches!(schema, RUN_LOG_RECORD_SCHEMA_V0 | RUN_LOG_RECORD_SCHEMA_V1) {
+    if schema == RUN_LOG_RECORD_SCHEMA_V1 {
         Ok(())
     } else {
         Err(protocol("run log record has an unsupported schema"))

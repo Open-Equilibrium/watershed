@@ -2,9 +2,8 @@ use super::{
     Common, ContentSource, Cursor, parse_bool, parse_number, set_once, set_once_with, unknown,
 };
 use core_script::{
-    AllowedParameter, NetworkAllowEntry, NetworkAllowKind, NetworkDefault, NetworkDeny,
-    NetworkPolicy, NetworkTransport, ParameterValueType, RegistryBlockKind, ScriptRuntime,
-    ToolBlock, ToolCommand, ToolKind,
+    AllowedParameter, ParameterValueType, RegistryBlockKind, ScriptRuntime, ToolBlock, ToolCommand,
+    ToolKind,
 };
 use flow_agent_core::RuntimeError;
 use std::path::Path;
@@ -12,9 +11,11 @@ use std::path::Path;
 pub(super) const USAGE: &str = concat!(
     "Usage:\n",
     "  flow create tool --id ID --name NAME --tool-kind predefined-command ",
-    "--command-id ID [--argv TOKEN]... [TOOL_OPTIONS]\n",
+    "--command-id ID [--argv TOKEN]... ",
+    "[TOOL_OPTIONS]\n",
     "  flow create tool --id ID --name NAME --tool-kind own-script ",
-    "<--script-body-file PATH|--script-body-stdin> [TOOL_OPTIONS]\n",
+    "<--script-body-file PATH|--script-body-stdin> ",
+    "[TOOL_OPTIONS]\n",
     "\n",
     "TOOL_OPTIONS:\n",
     "  [--parameter --parameter-name NAME ",
@@ -22,11 +23,6 @@ pub(super) const USAGE: &str = concat!(
     "--parameter-required <true|false> [--parameter-allowed-value VALUE]... ",
     "[--parameter-value-pattern REGEX] [--parameter-max-length N] ",
     "[--parameter-min I64] [--parameter-max I64] --end-parameter]...\n",
-    "  [--read-scope PATH]... [--write-scope PATH]... ",
-    "[--protected-path-grant PATH]...\n",
-    "  <--network deny|--network-default deny ",
-    "[--network-allow --network-kind cidr --network-transport <tcp|udp> ",
-    "--network-cidr CIDR --network-port PORT --end-network-allow]...>",
 );
 
 #[derive(Default)]
@@ -37,11 +33,6 @@ struct Fields {
     argv: Vec<String>,
     script_body: Option<ContentSource>,
     parameters: Vec<AllowedParameter>,
-    read_scope: Vec<String>,
-    write_scope: Vec<String>,
-    protected_path_grants: Vec<String>,
-    network: Option<NetworkPolicy>,
-    network_allow: Vec<NetworkAllowEntry>,
 }
 
 pub(super) fn parse(workspace: &Path, args: &[String]) -> Result<ToolBlock, RuntimeError> {
@@ -67,32 +58,6 @@ pub(super) fn parse(workspace: &Path, args: &[String]) -> Result<ToolBlock, Runt
                 set_once_with(&mut fields.script_body, flag, || Ok(ContentSource::Stdin))?
             }
             "--parameter" => fields.parameters.push(parse_parameter(&mut cursor)?),
-            "--read-scope" => fields.read_scope.push(cursor.value(flag)?.to_owned()),
-            "--write-scope" => fields.write_scope.push(cursor.value(flag)?.to_owned()),
-            "--protected-path-grant" => fields
-                .protected_path_grants
-                .push(cursor.value(flag)?.to_owned()),
-            "--network" => {
-                let value = cursor.value(flag)?;
-                let deny = NetworkDeny::parse(value)
-                    .ok_or_else(|| RuntimeError::Usage("--network accepts only deny".to_owned()))?;
-                set_once(&mut fields.network, NetworkPolicy::Deny(deny), flag)?;
-            }
-            "--network-default" => {
-                let value = cursor.value(flag)?;
-                let default = NetworkDefault::parse(value).ok_or_else(|| {
-                    RuntimeError::Usage("--network-default accepts only deny".to_owned())
-                })?;
-                set_once(
-                    &mut fields.network,
-                    NetworkPolicy::Declared {
-                        default,
-                        allow: Vec::new(),
-                    },
-                    flag,
-                )?;
-            }
-            "--network-allow" => fields.network_allow.push(parse_network_allow(&mut cursor)?),
             other => return Err(unknown(other)),
         }
     }
@@ -134,21 +99,6 @@ pub(super) fn parse(workspace: &Path, args: &[String]) -> Result<ToolBlock, Runt
             )
         }
     };
-    let network = match fields
-        .network
-        .ok_or_else(|| RuntimeError::Usage("missing network policy".to_owned()))?
-    {
-        NetworkPolicy::Deny(deny) if fields.network_allow.is_empty() => NetworkPolicy::Deny(deny),
-        NetworkPolicy::Deny(_) => {
-            return Err(RuntimeError::Usage(
-                "--network-allow requires --network-default deny".to_owned(),
-            ));
-        }
-        NetworkPolicy::Declared { default, .. } => NetworkPolicy::Declared {
-            default,
-            allow: fields.network_allow,
-        },
-    };
     let script_body = script_body
         .map(|source| source.read(workspace))
         .transpose()?;
@@ -159,10 +109,6 @@ pub(super) fn parse(workspace: &Path, args: &[String]) -> Result<ToolBlock, Runt
         script_runtime,
         script_body,
         allowed_parameters: fields.parameters,
-        read_scope: fields.read_scope,
-        write_scope: fields.write_scope,
-        protected_path_grants: fields.protected_path_grants,
-        network,
     })
 }
 
@@ -237,88 +183,112 @@ pub(super) fn parse_parameter(cursor: &mut Cursor<'_>) -> Result<AllowedParamete
     Ok(parameter)
 }
 
-pub(super) fn parse_network_allow(
-    cursor: &mut Cursor<'_>,
-) -> Result<NetworkAllowEntry, RuntimeError> {
-    cursor.expect("--network-kind")?;
-    let kind = NetworkAllowKind::parse(cursor.value("--network-kind")?)
-        .ok_or_else(|| RuntimeError::Usage("--network-kind accepts only cidr".to_owned()))?;
-    cursor.expect("--network-transport")?;
-    let value = cursor.value("--network-transport")?;
-    let transport = NetworkTransport::parse(value)
-        .ok_or_else(|| RuntimeError::Usage(format!("invalid network transport {value:?}")))?;
-    cursor.expect("--network-cidr")?;
-    let cidr = cursor.value("--network-cidr")?.to_owned();
-    cursor.expect("--network-port")?;
-    let port = parse_number(cursor.value("--network-port")?, "--network-port")?;
-    cursor.expect("--end-network-allow")?;
-    Ok(NetworkAllowEntry {
-        kind,
-        transport,
-        cidr,
-        port,
-    })
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{parse, parse_network_allow, parse_parameter};
+    use super::{parse, parse_parameter};
     use crate::authoring::{
         Cursor,
         test_support::{args, assert_usage, empty_workspace},
     };
     use std::{fs, path::Path};
 
-    #[test]
-    fn network_allow_groups_follow_top_level_occurrence_order() {
-        let tool = parse(
-            Path::new("."),
-            &args(&[
-                "--network-allow",
-                "--network-kind",
-                "cidr",
-                "--network-transport",
-                "tcp",
-                "--network-cidr",
-                "127.0.0.1/32",
-                "--network-port",
-                "443",
-                "--end-network-allow",
-                "--id",
-                "inspect",
-                "--network-default",
-                "deny",
-                "--name",
-                "Inspect",
-                "--tool-kind",
-                "predefined-command",
-                "--command-id",
-                "agent-report",
-                "--network-allow",
-                "--network-kind",
-                "cidr",
-                "--network-transport",
-                "udp",
-                "--network-cidr",
-                "::1/128",
-                "--network-port",
-                "53",
-                "--end-network-allow",
-            ]),
-        )
-        .expect("complete top-level groups may appear in any order");
-        let core_script::NetworkPolicy::Declared { default, allow } = tool.network else {
-            panic!("the declared network policy is preserved");
-        };
+    fn minimal_predefined_tool() -> Vec<String> {
+        args(&[
+            "--id",
+            "inspect",
+            "--name",
+            "Inspect",
+            "--tool-kind",
+            "predefined-command",
+            "--command-id",
+            "agent-report",
+        ])
+    }
 
-        assert_eq!(default, core_script::NetworkDefault::Deny);
+    #[test]
+    fn predefined_tool_requires_only_invocation_definition() {
+        let tool = parse(Path::new("."), &minimal_predefined_tool())
+            .expect("Tool creation needs no isolation settings");
+        assert_eq!(tool.identity.id, "inspect");
+        assert_eq!(tool.identity.name, "Inspect");
+        assert_eq!(tool.tool_kind, core_script::ToolKind::PredefinedCommand);
         assert_eq!(
-            allow
-                .iter()
-                .map(|entry| (entry.cidr.as_str(), entry.port))
-                .collect::<Vec<_>>(),
-            [("127.0.0.1/32", 443), ("::1/128", 53)]
+            tool.command,
+            core_script::ToolCommand::Predefined {
+                command_id: "agent-report".to_owned(),
+                argv: Vec::new(),
+            }
         );
+        assert!(tool.script_runtime.is_none());
+        assert!(tool.script_body.is_none());
+        assert!(tool.allowed_parameters.is_empty());
+    }
+
+    #[test]
+    fn legacy_isolation_flags_are_unknown_even_with_formerly_valid_values() {
+        for (flag, value) in [
+            ("--max-concurrent-processes-and-threads", "16"),
+            ("--runtime-profile", "exact"),
+            ("--runtime-profile", "host-system-read"),
+            ("--read-only-mount", "workspace"),
+            ("--writable-mount", "workspace/reports"),
+            ("--network", "deny"),
+            ("--network-default", "deny"),
+        ] {
+            let mut arguments = minimal_predefined_tool();
+            arguments.extend([flag.to_owned(), value.to_owned()]);
+            assert_usage(
+                parse(Path::new("."), &arguments),
+                &format!("unknown argument {flag:?}"),
+            );
+        }
+    }
+
+    #[test]
+    fn parameter_groups_follow_top_level_occurrence_order() {
+        let mut arguments = args(&[
+            "--parameter",
+            "--parameter-name",
+            "--first",
+            "--parameter-value-type",
+            "enum",
+            "--parameter-required",
+            "true",
+            "--parameter-allowed-value",
+            "one",
+            "--parameter-allowed-value",
+            "two",
+            "--end-parameter",
+        ]);
+        arguments.extend(minimal_predefined_tool());
+        arguments.extend(args(&[
+            "--parameter",
+            "--parameter-name",
+            "--second",
+            "--parameter-value-type",
+            "integer",
+            "--parameter-required",
+            "false",
+            "--parameter-min",
+            "-1",
+            "--parameter-max",
+            "2",
+            "--end-parameter",
+        ]));
+        let tool = parse(Path::new("."), &arguments)
+            .expect("complete top-level groups may appear in any order");
+        assert_eq!(
+            tool.allowed_parameters
+                .iter()
+                .map(|parameter| parameter.name.as_str())
+                .collect::<Vec<_>>(),
+            ["--first", "--second"]
+        );
+        assert_eq!(tool.allowed_parameters[0].allowed_values, ["one", "two"]);
+        assert!(tool.allowed_parameters[0].required);
+        assert!(!tool.allowed_parameters[1].required);
+        assert_eq!(tool.allowed_parameters[1].min, Some(-1));
+        assert_eq!(tool.allowed_parameters[1].max, Some(2));
     }
 
     #[test]
@@ -342,8 +312,6 @@ mod tests {
                     "Tool",
                     "--tool-kind",
                     "predefined-command",
-                    "--network",
-                    "deny",
                 ]),
                 "missing --command-id",
             ),
@@ -357,8 +325,6 @@ mod tests {
                     "own-script",
                     "--command-id",
                     "agent-report",
-                    "--network",
-                    "deny",
                 ]),
                 "command flags are invalid",
             ),
@@ -370,8 +336,6 @@ mod tests {
                     "Tool",
                     "--tool-kind",
                     "own-script",
-                    "--network",
-                    "deny",
                 ]),
                 "missing script body source",
             ),
@@ -385,11 +349,13 @@ mod tests {
                     "predefined-command",
                     "--command-id",
                     "agent-report",
+                    "--command-id",
+                    "other-command",
                 ]),
-                "missing network policy",
+                "duplicate --command-id",
             ),
-            (args(&["--network", "allow"]), "accepts only deny"),
-            (args(&["--network-default", "allow"]), "accepts only deny"),
+            (args(&["--network", "allow"]), "unknown argument"),
+            (args(&["--network-default", "allow"]), "unknown argument"),
             (args(&["--tool-kind"]), "missing value for --tool-kind"),
         ] {
             assert_usage(parse(workspace, &arguments), expected);
@@ -464,51 +430,25 @@ mod tests {
             assert_usage(parse_parameter(&mut Cursor::new(&arguments)), expected);
         }
 
-        for (arguments, expected) in [
-            (
-                args(&[
-                    "--network-kind",
-                    "host",
-                    "--network-transport",
-                    "tcp",
-                    "--network-cidr",
-                    "127.0.0.1/32",
-                    "--network-port",
-                    "443",
-                    "--end-network-allow",
-                ]),
-                "accepts only cidr",
-            ),
-            (
-                args(&[
-                    "--network-kind",
-                    "cidr",
-                    "--network-transport",
-                    "sctp",
-                    "--network-cidr",
-                    "127.0.0.1/32",
-                    "--network-port",
-                    "443",
-                    "--end-network-allow",
-                ]),
-                "invalid network transport",
-            ),
-            (
-                args(&[
-                    "--network-kind",
-                    "cidr",
-                    "--network-transport",
-                    "udp",
-                    "--network-cidr",
-                    "127.0.0.1/32",
-                    "--network-port",
-                    "many",
-                    "--end-network-allow",
-                ]),
-                "invalid --network-port",
-            ),
-        ] {
-            assert_usage(parse_network_allow(&mut Cursor::new(&arguments)), expected);
+        let legacy_group = args(&[
+            "--network-allow",
+            "--network-kind",
+            "cidr",
+            "--network-transport",
+            "tcp",
+            "--network-cidr",
+            "127.0.0.1/32",
+            "--network-port",
+            "443",
+            "--end-network-allow",
+        ]);
+        for start in [0, 1] {
+            let mut arguments = minimal_predefined_tool();
+            arguments.extend_from_slice(&legacy_group[start..]);
+            assert_usage(
+                parse(Path::new("."), &arguments),
+                &format!("unknown argument {:?}", legacy_group[start]),
+            );
         }
     }
 
@@ -532,8 +472,6 @@ mod tests {
                     "agent-report",
                     "--script-body-file",
                     "script.sh",
-                    "--network",
-                    "deny",
                 ]),
             ),
             "script body is invalid",
@@ -552,8 +490,6 @@ mod tests {
                     "script.sh",
                     "--script-body-file",
                     "missing.sh",
-                    "--network",
-                    "deny",
                 ]),
             ),
             "duplicate --script-body-file",
@@ -561,9 +497,14 @@ mod tests {
         assert_usage(
             parse(
                 &workspace,
-                &args(&["--network", "deny", "--network-default", "deny"]),
+                &args(&[
+                    "--tool-kind",
+                    "own-script",
+                    "--tool-kind",
+                    "predefined-command",
+                ]),
             ),
-            "duplicate --network-default",
+            "duplicate --tool-kind",
         );
         assert_usage(
             parse(&workspace, &args(&["--unsupported"])),

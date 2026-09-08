@@ -19,15 +19,13 @@ pub use script::model::{
     MAX_FLOW_VALUE_NODES, MAX_PHASE_FANOUT, MAX_PHASE_ITERATIONS, MAX_PHASE_LOOP_ITERATIONS,
     MAX_PHASE_NESTING_DEPTH, MAX_REGISTRY_DEFINITION_BYTES, MAX_REGISTRY_ENTRIES,
     MAX_REGISTRY_FILE_BYTES, MAX_REGISTRY_TOTAL_BYTES, MAX_REGISTRY_TRAVERSAL_DEPTH,
-    NetworkAllowEntry, NetworkAllowKind, NetworkDefault, NetworkDeny, NetworkPolicy,
-    NetworkTransport, ParameterValueType, PhaseBlock, PhaseLoop, PhaseTransition, RegistryBlock,
-    RegistryBlockKind, ResolvedRegistry, ScriptRuntime, ToolBlock, ToolCommand, ToolKind,
-    ValueContract, ValueFieldContract, ValuePathSegment, ValuePredicate, own_script_command_id,
+    ParameterValueType, PhaseBlock, PhaseLoop, PhaseTransition, RegistryBlock, RegistryBlockKind,
+    ResolvedRegistry, ScriptRuntime, ToolBlock, ToolCommand, ToolKind, ValueContract,
+    ValueFieldContract, ValuePathSegment, ValuePredicate, own_script_command_id,
 };
 pub use script::parser::parse_safe_yaml_config;
 pub use script::paths::{
-    WORKSPACE_SCOPE_ROOT, is_valid_allowed_parameter_name, is_valid_block_id,
-    is_valid_canonical_cidr, is_valid_command_id, normalize_protected_path_pattern,
+    WORKSPACE_SCOPE_ROOT, is_valid_allowed_parameter_name, is_valid_block_id, is_valid_command_id,
     normalize_safe_relative_path, relative_path_has_windows_alias, relative_path_is_inside_scope,
     strip_workspace_scope, workspace_scope_path,
 };

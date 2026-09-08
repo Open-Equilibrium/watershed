@@ -7,9 +7,7 @@ use std::fmt;
 pub(super) fn state_identifier_fields(
     event_type: EventType,
 ) -> &'static [(EventStateIdentifierKind, &'static str)] {
-    use EventStateIdentifierKind::{
-        Attempt, FlowDefinition, Message, Phase, PhaseExecution, Step, Tool,
-    };
+    use EventStateIdentifierKind::{Attempt, FlowDefinition, Message, Phase, PhaseExecution, Tool};
 
     match event_type {
         EventType::SessionStarted
@@ -26,9 +24,6 @@ pub(super) fn state_identifier_fields(
         }
         EventType::PhaseEntered | EventType::PhaseCompleted | EventType::PhaseFailed => {
             &[(PhaseExecution, "phase_execution_id"), (Phase, "phase_id")]
-        }
-        EventType::StepStarted | EventType::StepCompleted => {
-            &[(Phase, "phase_id"), (Step, "step_id")]
         }
         EventType::MessageDelta | EventType::MessageCompleted => &[(Message, "message_id")],
         EventType::ToolStarted
@@ -201,14 +196,9 @@ impl<'a> PayloadValidator<'a> {
             EventType::PhaseEntered => {
                 self.require_string("phase_id")?;
                 self.require_string("phase_name")?;
-                let current_shape = self.payload.contains_key("phase_execution_id")
-                    || self.payload.contains_key("phase_kind")
-                    || self.payload.contains_key("iteration");
-                if current_shape {
-                    self.require_string("phase_execution_id")?;
-                    self.require_phase_kind()?;
-                    self.require_positive_integer("iteration")?;
-                }
+                self.require_string("phase_execution_id")?;
+                self.require_phase_kind()?;
+                self.require_positive_integer("iteration")?;
                 self.require_string_array("instruction_ids")?;
                 self.require_string_array("tool_ids")?;
             }
@@ -226,40 +216,6 @@ impl<'a> PayloadValidator<'a> {
                 self.require_positive_integer("iteration")?;
                 self.require_string("error")?;
             }
-            EventType::StepStarted | EventType::StepCompleted => {
-                self.require_string("step_id")?;
-                self.require_string("step_name")?;
-                self.optional_string("phase_id")?;
-                self.optional_string("instruction_id")?;
-                let connection_ids = self.optional_string_array("connection_ids")?;
-                let connection_kinds = self.optional_string_array("connection_kinds")?;
-                match (connection_ids, connection_kinds) {
-                    (Some(ids), Some(kinds)) => {
-                        if ids.len() != kinds.len() {
-                            return Err(self.error(
-                                "connection_ids",
-                                "must have the same length as payload.connection_kinds",
-                            ));
-                        }
-                        if kinds
-                            .iter()
-                            .any(|kind| !matches!(*kind, "data" | "trigger" | "refresh"))
-                        {
-                            return Err(self.error(
-                                "connection_kinds",
-                                "values must be data, trigger, or refresh",
-                            ));
-                        }
-                    }
-                    (None, None) => {}
-                    _ => {
-                        return Err(self.error(
-                            "connection_ids",
-                            "and payload.connection_kinds must be present together",
-                        ));
-                    }
-                }
-            }
             EventType::MessageDelta => {
                 self.require_string("message_id")?;
                 self.require_role()?;
@@ -270,18 +226,24 @@ impl<'a> PayloadValidator<'a> {
                 self.require_role()?;
             }
             EventType::ToolStarted => {
+                if let Some(field) = self.payload.keys().find(|field| {
+                    !matches!(
+                        field.as_str(),
+                        "tool_id" | "tool_kind" | "tool_name" | "allowed_parameters" | "attempt_id"
+                    )
+                }) {
+                    return Err(EventValidationError::new(
+                        format!("payload.{field}"),
+                        "unknown Tool invocation metadata field",
+                    ));
+                }
                 self.optional_string("attempt_id")?;
                 self.require_string("tool_id")?;
                 self.require_string("tool_name")?;
                 if ToolKind::try_from(self.require_string("tool_kind")?).is_err() {
                     return Err(self.error("tool_kind", "must be predefined-command or own-script"));
                 }
-                self.require_string_array("read_scope")?;
-                self.require_string_array("write_scope")?;
                 self.require_string_array("allowed_parameters")?;
-                if ToolNetworkAccess::try_from(self.require_string("network_access")?).is_err() {
-                    return Err(self.error("network_access", "must be deny or declared"));
-                }
             }
             EventType::ToolProgress => {
                 self.optional_string("attempt_id")?;
@@ -368,16 +330,6 @@ impl<'a> PayloadValidator<'a> {
             .get(field)
             .ok_or_else(|| self.error(field, "must be a string array"))
             .and_then(|value| self.string_array(field, value))
-    }
-
-    fn optional_string_array(
-        &self,
-        field: &'static str,
-    ) -> Result<Option<Vec<&'a str>>, EventValidationError> {
-        self.payload
-            .get(field)
-            .map(|value| self.string_array(field, value))
-            .transpose()
     }
 
     fn string_array(

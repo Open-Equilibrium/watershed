@@ -29,7 +29,6 @@ const INDEX_SCHEMA: &str = "flow-conversation-history-validation-v1";
 const INDEX_MARKER_LIMIT: u64 = 4096;
 const LEASE_LEAF: &str = "lease";
 const MARKER_LEAF: &str = "marker.json";
-pub(super) const ANCESTRY_LEAF: &str = "ancestry.bin";
 const INDEX_RUN_PREFIX: &str = "g";
 const EVENT_POINTER_RUN_PREFIX: &str = "pointer-";
 const EVENT_IDENTIFIER_RUN_PREFIX: &str = "event-ident-";
@@ -121,7 +120,7 @@ impl HistoryScratch {
         Self::create_in_root(root, conversation_id, limit)
     }
 
-    pub(super) fn create_in_root(
+    fn create_in_root(
         root: AnchoredDir,
         conversation_id: &str,
         limit: u64,
@@ -300,7 +299,7 @@ pub(super) fn write_sorted_scratch_run<T: AsRef<[u8]>>(
     Ok(())
 }
 
-pub(super) fn cleanup_stale_scratch(root: &AnchoredDir) -> Result<(), RuntimeError> {
+fn cleanup_stale_scratch(root: &AnchoredDir) -> Result<(), RuntimeError> {
     for_each_scratch_leaf(root, |leaf| {
         let _ = validate_inactive_scratch(root, leaf)?;
         Ok(())
@@ -625,8 +624,7 @@ fn remove_empty_scratch_dir(
         ));
     }
     drop(rebound);
-    root.dir
-        .remove_dir(leaf)
+    root.remove_dir(leaf)
         .map_err(|source| path_io_error(&root.path.join(leaf), source))
 }
 
@@ -638,7 +636,6 @@ fn valid_scratch_leaf(leaf: &str) -> bool {
 fn valid_scratch_member(member: &str) -> bool {
     member == MARKER_LEAF
         || member == LEASE_LEAF
-        || member == ANCESTRY_LEAF
         || valid_scratch_run_member(member)
         || member
             .strip_prefix(EVENT_POINTER_RUN_PREFIX)
@@ -825,7 +822,6 @@ fn open_scratch_file_for_update(path: &AnchoredFile) -> Result<(File, fs::Metada
     open_anchored_file_for_update(path)
 }
 
-#[cfg(unix)]
 fn available_space(path: &Path) -> Result<u64, RuntimeError> {
     #[cfg(test)]
     if let Some(bytes) = AVAILABLE_SPACE_OVERRIDE.with(Cell::get) {
@@ -840,40 +836,4 @@ fn available_space(path: &Path) -> Result<u64, RuntimeError> {
     stat.f_bavail
         .checked_mul(stat.f_frsize)
         .ok_or_else(|| protocol("available scratch space overflow"))
-}
-
-#[cfg(windows)]
-fn available_space(path: &Path) -> Result<u64, RuntimeError> {
-    #[cfg(test)]
-    if let Some(bytes) = AVAILABLE_SPACE_OVERRIDE.with(Cell::get) {
-        return Ok(bytes);
-    }
-    use std::os::windows::ffi::OsStrExt as _;
-    use windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
-    let wide = path
-        .as_os_str()
-        .encode_wide()
-        .chain(std::iter::once(0))
-        .collect::<Vec<_>>();
-    let mut available = 0u64;
-    let result = unsafe {
-        GetDiskFreeSpaceExW(
-            wide.as_ptr(),
-            &mut available,
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-        )
-    };
-    if result == 0 {
-        Err(path_io_error(path, std::io::Error::last_os_error()))
-    } else {
-        Ok(available)
-    }
-}
-
-#[cfg(not(any(unix, windows)))]
-fn available_space(_path: &Path) -> Result<u64, RuntimeError> {
-    Err(protocol(
-        "history validation scratch space cannot be admitted on this platform",
-    ))
 }

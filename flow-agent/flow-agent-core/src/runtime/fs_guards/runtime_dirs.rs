@@ -3,6 +3,7 @@ use crate::runtime::{
     session_store::WorkspaceStore,
     types::{LOG_STORAGE_DIR, RuntimeError, SESSION_STORAGE_DIR},
 };
+#[cfg(test)]
 use std::path::Path;
 
 pub struct RuntimeDirs {
@@ -35,6 +36,7 @@ fn ensure_runtime_dirs_from(workspace: &AnchoredWorkspace) -> Result<RuntimeDirs
     Ok(RuntimeDirs { logs, sessions })
 }
 
+#[cfg(test)]
 pub fn open_runtime_dir(workspace: &Path, leaf: &str) -> Result<Option<AnchoredDir>, RuntimeError> {
     let workspace = AnchoredWorkspace::open(workspace)?;
     open_runtime_dir_from(&workspace, leaf)
@@ -51,7 +53,7 @@ pub(crate) fn open_anchored_runtime_dir_read_only(
     workspace: &AnchoredWorkspace,
     leaf: &str,
 ) -> Result<Option<AnchoredDir>, RuntimeError> {
-    let Some(store) = WorkspaceStore::open_read_only(workspace)? else {
+    let Some(store) = WorkspaceStore::open(workspace, false)? else {
         return Ok(None);
     };
     store.child(leaf, false)

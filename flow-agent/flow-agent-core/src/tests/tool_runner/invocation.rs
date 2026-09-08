@@ -35,10 +35,6 @@ fn predefined_tool(parameters: Vec<core_script::AllowedParameter>) -> core_scrip
         script_runtime: None,
         script_body: None,
         allowed_parameters: parameters,
-        read_scope: vec!["workspace".to_owned()],
-        write_scope: Vec::new(),
-        protected_path_grants: Vec::new(),
-        network: core_script::NetworkPolicy::Deny(core_script::NetworkDeny),
     }
 }
 
@@ -222,7 +218,10 @@ fn own_script_uses_the_fixed_runner_and_no_implicit_interpreter() {
 
     let invocation = build_tool_invocation(&tool, &core_script::FlowValue::Map(BTreeMap::new()))
         .expect("own script invocation builds");
-    assert_eq!(invocation.executable, "/bin/sh");
+    assert_eq!(
+        invocation.executable,
+        proto::EXECUTOR_OWN_SCRIPT_EXECUTABLE_V0
+    );
     assert_eq!(
         invocation.argv,
         ["-c", "printf '%s\\n' ok", "flow-tool:custom-script"]

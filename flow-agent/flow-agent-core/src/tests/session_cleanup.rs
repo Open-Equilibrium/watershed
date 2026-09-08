@@ -3,13 +3,10 @@ use super::{
     test_support::workspace_copy,
 };
 use crate::runtime::{
-    resume::resume_session_internal_with_cleanup_observer,
-    session::{
-        run_flow, run_flow_internal_with_cleanup_observer, run_flow_internal_with_stage_observers,
-    },
+    session::{run_flow_internal_with_cleanup_observer, run_flow_internal_with_stage_observers},
     session_reservation::write_reserved_session_metadata,
     stage_results::reconcile_controlled_stages,
-    types::{EmitMode, RunOutput, RuntimeError},
+    types::{RunOutput, RuntimeError},
 };
 use std::fs;
 
@@ -295,42 +292,6 @@ fn controlled_run_operation_and_cleanup_failures_are_both_returned() {
         crate::tests::helpers::workspace_session_dir(&workspace)
             .join("sandbox-negative-write.jsonl")
             .is_file()
-    );
-    assert!(lock_path.is_dir());
-    fs::remove_dir(&lock_path).expect("blocking lock directory removed");
-}
-
-#[test]
-fn resume_validation_and_cleanup_failures_are_both_returned() {
-    let workspace = workspace_copy("smoke-flow");
-    let completed =
-        run_flow(&workspace, "smoke-flow", EmitMode::Jsonl).expect("fixture run completes");
-    fs::write(&completed.session_path, "{not-json}\n").expect("session log corrupted");
-    let lock_path = crate::tests::helpers::workspace_session_dir(&workspace)
-        .join(format!("{}.lock", completed.session_id));
-
-    let err = resume_session_internal_with_cleanup_observer(
-        &workspace,
-        &completed.session_id,
-        true,
-        |lock| {
-            lock.remove().expect("lock file removed");
-            fs::create_dir(lock.diagnostic_path()).expect("lock path replaced with a directory");
-        },
-    )
-    .expect_err("validation and cleanup failures must both be returned");
-
-    assert!(matches!(
-        &err,
-        RuntimeError::ControlledStageFailures {
-            operation: Some(_),
-            finalization: None,
-            cleanup: Some(cleanup),
-        } if cleanup.to_string().contains(".lock")
-    ));
-    assert!(
-        err.to_string().contains("ownership cleanup failed"),
-        "{err}"
     );
     assert!(lock_path.is_dir());
     fs::remove_dir(&lock_path).expect("blocking lock directory removed");

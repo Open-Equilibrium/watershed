@@ -2,6 +2,11 @@ name: CI
 
 on:
   workflow_dispatch:
+    inputs:
+      mac_self_protection_evaluation:
+        description: Run the ADR-0167 experimental Mac guard probe (not release proof)
+        type: boolean
+        default: false
   pull_request:
     branches: [main]
   push:
@@ -20,23 +25,40 @@ permissions:
 
 jobs:
   m1:
-    name: Flow Agent gates (${{ matrix.os }}) [${{ github.event_name }}]
+    name: ${{ matrix.product }} gates (${{ matrix.os }}) [${{ github.event_name }}]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-26, windows-latest]
+        include:
+          - os: ubuntu-24.04
+            packages: --workspace
+            product: Flow Agent
+          - os: macos-26
+            packages: --workspace
+            product: Flow Agent
+          - os: windows-latest
+            packages: -p core-script -p core-policy -p proto
+            product: Shared contracts
 
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
 
       - name: Install pinned Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .node-version
 
+      - name: Classify product changes
+        id: scope
+        run: node scripts/ci-product-scope.mjs
+
       - name: Check Node version
+        if: steps.scope.outputs.product == 'true'
         shell: pwsh
         run: |
           $expectedNode = (Get-Content -Raw .node-version).Trim()
@@ -45,9 +67,50 @@ jobs:
           }
 
       - name: Run repository tooling tests
+        if: steps.scope.outputs.product == 'true'
         run: node scripts/run-python.mjs -m unittest discover -s tests -p "test_*.py"
 
+      - name: Establish experimental Mac unprotected red control
+        if: steps.scope.outputs.product == 'true' && (matrix.os == 'macos-26' && github.event_name == 'workflow_dispatch' && inputs.mac_self_protection_evaluation)
+        timeout-minutes: 2
+        shell: bash
+        run: |
+          if python3 scripts/probe-macos-self-protection.py --mode baseline; then
+            echo 'Unprotected control unexpectedly satisfied the guard assertions' >&2
+            exit 1
+          else
+            probe_status=$?
+            test "$probe_status" -eq 1
+          fi
+
+      - name: Evaluate experimental Mac profile and launcher (not release proof)
+        if: steps.scope.outputs.product == 'true' && (matrix.os == 'macos-26' && github.event_name == 'workflow_dispatch' && inputs.mac_self_protection_evaluation)
+        timeout-minutes: 2
+        shell: bash
+        run: |
+          probe_status=0
+          for probe_mode in profile guarded-launch host-build lifecycle-baseline lifecycle; do
+            if python3 scripts/probe-macos-self-protection.py --mode "$probe_mode"; then
+              result=0
+            else
+              result=$?
+            fi
+            printf '%s exit_code=%s\n' "$probe_mode" "$result"
+            if (( result > probe_status )); then probe_status=$result; fi
+          done
+          exit "$probe_status"
+
+      - name: Compare native App Sandbox (not release proof)
+        if: steps.scope.outputs.product == 'true' && (!cancelled() && matrix.os == 'macos-26' && github.event_name == 'workflow_dispatch' && inputs.mac_self_protection_evaluation)
+        timeout-minutes: 6
+        run: python3 scripts/probe-macos-app-sandbox.py
+
+      - name: Run M1.2 installer contract tests
+        if: steps.scope.outputs.product == 'true' && (matrix.os != 'windows-latest')
+        run: node scripts/run-python.mjs -m unittest install.tests.test_install install.tests.test_readiness
+
       - name: Select pinned Rust
+        if: steps.scope.outputs.product == 'true'
         shell: pwsh
         run: |
           $toolchain = node scripts/run-python.mjs -c "import tomllib; print(tomllib.load(open('rust-toolchain.toml', 'rb'))['toolchain']['channel'])"
@@ -57,89 +120,205 @@ jobs:
             throw "Rust $toolchain must be active for CI gates"
           }
 
+      - name: Check Flow build targets
+        if: steps.scope.outputs.product == 'true'
+        shell: pwsh
+        run: |
+          $targetTest = Join-Path $env:RUNNER_TEMP flow-build-targets.exe
+          rustc --test --edition 2024 --deny warnings flow-agent/build.rs -o $targetTest
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $targetTest
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Install gate tools
-        uses: taiki-e/install-action@a2a5f6e99e1a31540baa0468acfa302cff0f359f # v2.86.4
+        if: steps.scope.outputs.product == 'true'
+        uses: taiki-e/install-action@7b8d4719ee4aaa279bdf55df38dacb9ebfe12a6c # v2.87.6
         with:
           tool: cargo-nextest@0.9.143,cargo-llvm-cov@0.9.0,cargo-audit@0.22.2,cargo-deny@0.20.2,lychee@0.24.2
 
+      - name: Provision native Linux protection prerequisites
+        if: steps.scope.outputs.product == 'true' && (matrix.os == 'ubuntu-24.04')
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends bubblewrap apparmor
+          sudo tee /etc/apparmor.d/watershed-bwrap-userns >/dev/null <<'APPARMOR'
+          abi <abi/4.0>,
+          include <tunables/global>
+
+          /usr/bin/bwrap flags=(unconfined) {
+            userns,
+          }
+          APPARMOR
+          sudo apparmor_parser --replace /etc/apparmor.d/watershed-bwrap-userns
+          test "$(sysctl -n kernel.apparmor_restrict_unprivileged_userns)" = 1
+
       - name: Check formatting
+        if: steps.scope.outputs.product == 'true'
         shell: pwsh
         run: cargo fmt --all --check
 
       - name: Check lints
-        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+        if: steps.scope.outputs.product == 'true'
+        run: cargo clippy --locked ${{ matrix.packages }} --all-targets --all-features -- -D warnings
 
       - name: Run tests
+        if: steps.scope.outputs.product == 'true'
         run: >-
           cargo nextest run
+          --no-fail-fast
           --config 'target."cfg(all())".runner = ["node", "../../scripts/run-isolated-rust-test.mjs"]'
           --locked
-          --workspace
+          ${{ matrix.packages }}
           --all-targets
           --all-features
 
       - name: Run Rustdoc tests
+        if: steps.scope.outputs.product == 'true'
         run: >-
           cargo --config .cargo/test-isolation.toml test
           --locked
-          --workspace
+          ${{ matrix.packages }}
           --all-features
           --doc
 
-      - name: Run optimized performance tests
-        if: matrix.os == 'ubuntu-24.04'
-        run: >-
-          cargo nextest run
-          --config 'target."cfg(all())".runner = ["node", "../../scripts/run-isolated-rust-test.mjs"]'
-          --locked
-          -p flow-agent-core
-          --release
-          --run-ignored ignored-only
-          -j 1
+      - name: Build native installation artifacts
+        if: steps.scope.outputs.product == 'true' && (matrix.os != 'windows-latest')
+        shell: bash
+        run: |
+          cargo build --locked --release -p flow-agent-cli -p flow-agent-executor --target-dir target/m12-standard
+          cargo build --locked --release -p flow-agent-cli --features m12-install-acceptance --target-dir target/m12-acceptance
+          target/m12-standard/release/flow-executor --probe |
+            python3 -c 'import json, sys; probe=json.load(sys.stdin); assert probe["ready"] is True, probe'
 
-      - name: Run M1.1 optimized budget suite
-        id: m11_budgets
-        if: matrix.os == 'ubuntu-24.04'
+      - name: Stage native Executor installation
+        if: steps.scope.outputs.product == 'true' && (matrix.os != 'windows-latest')
+        shell: python
+        run: |
+          import os, pathlib, shutil, tempfile
+          installation = pathlib.Path(tempfile.mkdtemp(prefix="m12-executor-", dir=os.environ["RUNNER_TEMP"])).resolve()
+          executor = installation / "flow-executor"
+          # Cargo artifacts can have aliases in deps; install distinct bytes before admission.
+          shutil.copyfile("target/m12-standard/release/flow-executor", executor)
+          executor.chmod(0o755)
+          assert executor.stat().st_nlink == 1
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as environment:
+              environment.write(f"M12_INSTALLED_EXECUTOR={executor}\n")
+
+      - name: Run native release Executor acceptance
+        if: steps.scope.outputs.product == 'true' && (matrix.os != 'windows-latest')
+        shell: bash
+        run: |
+          FLOW_EXECUTOR_UNDER_TEST="$M12_INSTALLED_EXECUTOR" \
+            cargo nextest run --locked -p flow-agent-executor --test native_contract --test native_self_protection
+
+      - name: Run public Custom Executor conformance
+        if: steps.scope.outputs.product == 'true' && (matrix.os != 'windows-latest')
+        shell: bash
+        run: |
+          cargo run --locked -p flow-agent-core --features m12-startup-evidence \
+            --example custom_executor_conformance -- \
+            --executor "$M12_INSTALLED_EXECUTOR"
+
+      - name: Run M1.1 performance evidence
+        id: m11_evidence
+        if: steps.scope.outputs.product == 'true' && (matrix.os == 'ubuntu-24.04')
         continue-on-error: true
         shell: bash
         run: |
-          mkdir -p target/m11-budgets
+          mkdir -p target/m11-performance
           cargo run --locked -p flow-agent-core --release \
             --features m11-budget-evidence --example m11_budgets \
-            > target/m11-budgets/m11-budgets.jsonl
+            > target/m11-performance/m11-performance-evidence.jsonl
 
-      - name: Upload M1.1 optimized budget evidence
-        if: matrix.os == 'ubuntu-24.04' && always()
+      - name: Upload M1.1 performance evidence
+        if: steps.scope.outputs.product == 'true' && (matrix.os == 'ubuntu-24.04' && always())
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: m11-optimized-budgets
-          path: target/m11-budgets/m11-budgets.jsonl
+          name: m11-performance-evidence
+          path: target/m11-performance/m11-performance-evidence.jsonl
           if-no-files-found: error
 
-      - name: Enforce M1.1 optimized budgets
-        if: matrix.os == 'ubuntu-24.04' && steps.m11_budgets.outcome != 'success'
+      - name: Enforce M1.1 evidence integrity
+        if: steps.scope.outputs.product == 'true' && (matrix.os == 'ubuntu-24.04' && always() && steps.m11_evidence.outcome != 'success')
         shell: bash
         run: exit 1
 
-      - name: Check line coverage
+      - name: Run M1.2 executor startup evidence
+        id: m12_startup_evidence
+        if: steps.scope.outputs.product == 'true' && (matrix.os != 'windows-latest')
+        continue-on-error: true
+        shell: bash
+        run: |
+          mkdir -p target/m12-startup
+          cargo run --locked -p flow-agent-core --release \
+            --features m12-startup-evidence --example m12_executor_startup \
+            -- --executor "$M12_INSTALLED_EXECUTOR" \
+            > target/m12-startup/m12-executor-startup.jsonl
+
+      - name: Upload M1.2 executor startup evidence
+        if: steps.scope.outputs.product == 'true' && (matrix.os != 'windows-latest' && always())
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: m12-executor-startup-evidence-${{ matrix.os }}
+          path: target/m12-startup/m12-executor-startup.jsonl
+          if-no-files-found: error
+
+      - name: Enforce M1.2 executor startup evidence
+        if: steps.scope.outputs.product == 'true' && (matrix.os != 'windows-latest' && always() && steps.m12_startup_evidence.outcome != 'success')
+        shell: bash
+        run: exit 1
+
+      - name: Check shared Windows line coverage
+        if: steps.scope.outputs.product == 'true' && (matrix.os == 'windows-latest')
         run: >-
           cargo llvm-cov nextest
           --config 'target."cfg(all())".runner = ["node", "../../scripts/run-isolated-rust-test.mjs"]'
           --locked
-          --workspace
+          ${{ matrix.packages }}
           --all-targets
           --all-features
           --fail-under-lines 90
-          --ignore-filename-regex '((^|[\\/])(tests?|src[\\/]tests\.rs)([\\/]|$)|flow-agent[\\/]flow-agent-cli[\\/]src[\\/](main|parsing)\.rs$|flow-agent[\\/]flow-agent-core[\\/]src[\\/]runtime[\\/]m11_budget_evidence(\.rs|[\\/]))'
+          --ignore-filename-regex '((^|[\\/])(tests?|src[\\/]tests\.rs)([\\/]|$)|flow-agent[\\/]flow-agent-cli[\\/]src[\\/](main|parsing)\.rs$|flow-agent[\\/]flow-agent-core[\\/]src[\\/]runtime[\\/](m11_budget_evidence|m12_startup_evidence)(\.rs|[\\/])|flow-agent[\\/]flow-agent-core[\\/]src[\\/]runtime[\\/]tool_runner[\\/]unix_process(\.rs|[\\/]))'
           --show-missing-lines
 
+      - name: Check native coverage and installation acceptance
+        if: steps.scope.outputs.product == 'true' && (matrix.os != 'windows-latest')
+        shell: bash
+        run: |
+          cargo llvm-cov clean --workspace
+          eval "$(cargo llvm-cov show-env --sh)"
+          cargo build --locked -p flow-agent-cli -p flow-agent-executor
+          export M12_COVERAGE_BIN_DIR="$CARGO_TARGET_DIR/debug"
+          /bin/sh scripts/run-m12-installer-acceptance.sh
+          cargo nextest run \
+            --config 'target."cfg(all())".runner = ["node", "../../scripts/run-isolated-rust-test.mjs"]' \
+            --locked --workspace --all-targets --all-features
+          /bin/sh scripts/run-m12-readiness-negatives.sh
+          cargo llvm-cov report --fail-under-lines 90 \
+            --ignore-filename-regex '((^|[\\/])(tests?|src[\\/]tests\.rs)([\\/]|$)|flow-agent[\\/]flow-agent-cli[\\/]src[\\/](main|parsing)\.rs$|flow-agent[\\/]flow-agent-core[\\/]src[\\/]runtime[\\/](m11_budget_evidence|m12_startup_evidence)(\.rs|[\\/])|flow-agent[\\/]flow-agent-core[\\/]src[\\/]runtime[\\/]tool_runner[\\/]unix_process(\.rs|[\\/]))' \
+            --show-missing-lines
+
       - name: Check RustSec advisories
+        if: steps.scope.outputs.product == 'true'
         run: cargo audit
 
       - name: Check dependency policy
+        if: steps.scope.outputs.product == 'true'
         run: cargo deny check
 
+      - name: Install pinned Corepack
+        if: steps.scope.outputs.product == 'true'
+        shell: pwsh
+        run: |
+          $toolsRoot = Join-Path $env:RUNNER_TEMP watershed-node-tools
+          npm install --global --prefix $toolsRoot corepack@0.36.0
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $toolsBin = if ($IsWindows) { $toolsRoot } else { Join-Path $toolsRoot bin }
+          $toolsBin | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+
       - name: Enable Corepack
+        if: steps.scope.outputs.product == 'true'
         shell: pwsh
         run: |
           corepack enable
@@ -150,20 +329,49 @@ jobs:
           }
 
       - name: Install Node dev tools
+        if: steps.scope.outputs.product == 'true'
         run: pnpm install --frozen-lockfile
 
       - name: Check Node advisories
-        run: pnpm audit --lockfile-only
+        if: steps.scope.outputs.product == 'true'
+        run: pnpm audit
 
       - name: Render HTML docs
+        if: steps.scope.outputs.product == 'true'
         run: pnpm run docs:render-check
 
       - name: Check documentation links
+        if: steps.scope.outputs.product == 'true'
         shell: pwsh
         run: |
-          $docsJson = node scripts/list-tracked-files.mjs '*.md' '*.html'
+          $docsJson = node scripts/list-tracked-files.mjs '*.md' '*.html' ':(top,exclude)AGENTS.md' ':(top,exclude).agents/**' ':(top,exclude).codex/**'
           if ($LASTEXITCODE -ne 0) {
             exit $LASTEXITCODE
           }
           $docs = @($docsJson | ConvertFrom-Json)
           lychee --no-progress --include-fragments -- @docs
+
+      - name: Select minimum Node
+        if: steps.scope.outputs.product == 'true' && (matrix.os == 'ubuntu-24.04')
+        id: minimum-node
+        shell: pwsh
+        run: |
+          $requirement = (Get-Content -Raw package.json | ConvertFrom-Json).engines.node
+          if ($requirement -notmatch '^>=(\d+\.\d+\.\d+)$') {
+            throw 'The Node requirement must declare one minimum version as >=x.y.z'
+          }
+          "version=$($Matches[1])" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Install minimum Node
+        if: steps.scope.outputs.product == 'true' && (matrix.os == 'ubuntu-24.04')
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ steps.minimum-node.outputs.version }}
+
+      - name: Check minimum Node tooling
+        if: steps.scope.outputs.product == 'true' && (matrix.os == 'ubuntu-24.04')
+        shell: bash
+        run: |
+          test "$(node --version)" = "v${{ steps.minimum-node.outputs.version }}"
+          node scripts/run-python.mjs -m unittest discover -s tests -p "test_*.py"
+          node scripts/check-html-render.mjs

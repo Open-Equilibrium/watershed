@@ -1,5 +1,3 @@
-#[cfg(target_os = "linux")]
-use super::super::helpers::assert_no_active_session_lock;
 use super::super::{
     helpers::{
         add_bad_write_tool_to_summarize, assert_no_session_artifacts, replace_registry_text,
@@ -12,7 +10,7 @@ use crate::runtime::{
     session::run_flow,
     types::{EmitMode, RuntimeError},
 };
-use std::{fs, path::Path};
+use std::fs;
 
 #[test]
 fn run_flow_executes_own_script_without_exact_fixture_body() {
@@ -92,35 +90,21 @@ fn run_flow_rejects_existing_own_script_output_on_repeat_run() {
     );
 }
 
-fn retarget_summary_output(workspace: &Path, target: &str) {
-    replace_registry_text(
-        workspace,
-        "tools/write-summary.yaml",
-        "script_body: |\n    printf '%s\\n' \"$SUMMARY\" > out/summary.txt",
-        &format!("script_body: |\n    printf '%s\\n' \"$SUMMARY\" > {target}"),
-    );
-    replace_registry_text(
-        workspace,
-        "tools/write-summary.yaml",
-        r#"write_scope: ["workspace/out"]"#,
-        r#"write_scope: ["workspace"]"#,
-    );
-}
-
 #[test]
-fn run_flow_rejects_write_summary_without_declared_write_scope() {
+fn run_flow_rejects_legacy_write_mount_before_fixture_effects() {
     let workspace = workspace_copy("hello-flow");
     replace_registry_text(
         &workspace,
         "tools/write-summary.yaml",
-        r#"write_scope: ["workspace/out"]"#,
-        "write_scope: []",
+        "  allowed_parameters: []\n",
+        "  allowed_parameters: []\n  writable_mounts: []\n",
     );
 
     let err = run_flow(&workspace, "hello-flow", EmitMode::Jsonl)
-        .expect_err("undeclared write scope must fail");
+        .expect_err("legacy write authorization must reject before fixture execution");
 
-    assert_denied(err, core_policy::DenyReasonCode::WriteDenied, "write scope");
+    assert!(matches!(&err, RuntimeError::Registry(_)), "{err}");
+    assert!(err.to_string().contains("writable_mounts"), "{err}");
     assert!(!workspace.join("out/summary.txt").exists());
     assert_no_session_artifacts(&workspace, "hello-flow");
 }
@@ -198,7 +182,7 @@ fn run_flow_preflights_outputs_even_when_later_phase_has_sandbox_denial() {
     .expect("negative instruction written");
     fs::write(
         crate::tests::test_support::session_home_path().join("registry/tools/negative-tool.yaml"),
-        "tool:\n  id: negative-tool\n  name: NegativeTool\n  tool_kind: predefined-command\n  command:\n    command_id: agent-negative\n    argv: [\"write\"]\n  allowed_parameters: []\n  read_scope: [\"workspace\"]\n  write_scope: []\n  protected_path_grants: []\n  network: deny\n",
+        "tool:\n  id: negative-tool\n  name: NegativeTool\n  tool_kind: predefined-command\n  command:\n    command_id: agent-negative\n    argv: [\"write\"]\n  allowed_parameters: []\n",
     )
     .expect("negative sentinel tool written");
     fs::write(
@@ -238,73 +222,21 @@ fn run_flow_preflights_later_own_script_path_before_earlier_side_effects() {
 }
 
 #[test]
-fn run_flow_rejects_protected_own_script_write_without_grant() {
-    let workspace = workspace_copy("hello-flow");
-    retarget_summary_output(&workspace, ".env");
-
-    let err = run_flow(&workspace, "hello-flow", EmitMode::Jsonl)
-        .expect_err("ungranted protected path write must reject");
-
-    assert_denied(
-        err,
-        core_policy::DenyReasonCode::ProtectedPathDenied,
-        "protected path",
-    );
-    assert!(!workspace.join(".env").exists());
-    assert_no_session_artifacts(&workspace, "hello-flow");
-}
-
-#[cfg(target_os = "linux")]
-#[test]
-fn run_flow_allows_linux_case_variant_of_protected_path_pattern() {
-    let workspace = workspace_copy("hello-flow");
-    retarget_summary_output(&workspace, ".ENV");
-
-    let output = run_flow(&workspace, "hello-flow", EmitMode::Jsonl)
-        .expect("linux runtime protected-path matching is case-sensitive");
-
-    assert!(!output.failed);
-    assert_no_active_session_lock(&workspace, &output.session_id);
-    assert_eq!(
-        fs::read_to_string(workspace.join(".ENV")).expect("case variant output is written"),
-        "hello\n"
-    );
-}
-
-#[cfg(any(windows, target_os = "macos"))]
-#[test]
-fn run_flow_rejects_case_variant_of_protected_path_pattern() {
-    let workspace = workspace_copy("hello-flow");
-    retarget_summary_output(&workspace, ".ENV");
-
-    let err = run_flow(&workspace, "hello-flow", EmitMode::Jsonl)
-        .expect_err("runtime protected-path matching is case-insensitive");
-
-    assert_denied(
-        err,
-        core_policy::DenyReasonCode::ProtectedPathDenied,
-        "protected path",
-    );
-    assert!(!workspace.join(".ENV").exists());
-    assert_no_session_artifacts(&workspace, "hello-flow");
-}
-
-#[test]
-fn run_flow_allows_summary_write_inside_enclosing_write_scope() {
+fn run_flow_writes_summary_to_workspace_root_without_mount_authorization() {
     let workspace = workspace_copy("hello-flow");
     replace_registry_text(
         &workspace,
         "tools/write-summary.yaml",
-        r#"write_scope: ["workspace/out"]"#,
-        r#"write_scope: ["workspace"]"#,
+        "> out/summary.txt",
+        "> summary.txt",
     );
 
     let output = run_flow(&workspace, "hello-flow", EmitMode::Jsonl)
-        .expect("enclosing write scope permits summary artifact");
+        .expect("workspace-relative fixture output needs no mount authorization");
 
     assert!(!output.failed);
     assert_eq!(
-        fs::read_to_string(workspace.join("out/summary.txt")).expect("summary is written"),
+        fs::read_to_string(workspace.join("summary.txt")).expect("summary is written"),
         "hello\n"
     );
 }

@@ -1,7 +1,5 @@
 mod root_binding;
 
-#[cfg(windows)]
-use super::helpers::create_windows_junction;
 use super::{
     helpers::{
         assert_no_session_artifacts, create_directory_alias, empty_workspace,
@@ -14,7 +12,7 @@ use crate::runtime::{
     apply::{FlowApplication, apply_flow_with_sink},
     context::ContextManifestCheckpoint,
     event_writer::RuntimeEventSink,
-    execution_plan::{FlowExecutionOptions, ToolSideEffectMode, runtime_protected_path_match_mode},
+    execution_plan::{FlowExecutionOptions, ToolSideEffectMode},
     fixture_tools::{plan_own_script, preflight_own_script_outputs, write_script_output},
     fs_guards::{AnchoredDir, replacement_temp_path},
     planning::plan_flow,
@@ -28,7 +26,6 @@ use std::{
     path::Path,
     sync::{Arc, Barrier},
     thread,
-    time::Instant,
 };
 
 #[test]
@@ -38,7 +35,7 @@ fn shared_workspace_tool_write_parents_are_concurrent_safe() {
 
     for index in 0..10 {
         let tool = format!(
-            "tool:\n  id: write-summary-{index}\n  name: WriteSummary{index}\n  tool_kind: own-script\n  command: script:write-summary-{index}\n  script_runtime: posix-sh\n  script_body: |\n    printf 'hello {index}\\n' > out/summary-{index}.txt\n  allowed_parameters: []\n  read_scope: [\"workspace\"]\n  write_scope: [\"workspace/out\"]\n  protected_path_grants: []\n  network: deny\n"
+            "tool:\n  id: write-summary-{index}\n  name: WriteSummary{index}\n  tool_kind: own-script\n  command: script:write-summary-{index}\n  script_runtime: posix-sh\n  script_body: |\n    printf 'hello {index}\\n' > out/summary-{index}.txt\n  allowed_parameters: []\n"
         );
         let phase = format!(
             "phase:\n  id: summarize-{index}\n  name: Summarize{index}\n  instruction_refs: [write-output]\n  tool_refs: [write-summary-{index}]\n  output:\n    type: string\n"
@@ -96,7 +93,6 @@ fn shared_workspace_tool_write_parents_are_concurrent_safe() {
     }
 }
 
-#[cfg(unix)]
 #[test]
 fn run_flow_rejects_symlinked_log_dir_without_side_effects() {
     use std::os::unix::fs::symlink;
@@ -122,7 +118,6 @@ fn run_flow_rejects_symlinked_log_dir_without_side_effects() {
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn run_flow_rejects_symlinked_session_leaf_without_side_effects() {
     use std::os::unix::fs::symlink;
@@ -145,7 +140,6 @@ fn run_flow_rejects_symlinked_session_leaf_without_side_effects() {
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn run_flow_rejects_symlinked_summary_leaf_without_side_effects() {
     use std::os::unix::fs::symlink;
@@ -209,10 +203,6 @@ fn run_flow_rejects_multi_write_own_script_before_side_effects() {
     printf 'partial\n' > out/partial.txt
     printf '%s\n' "$SUMMARY" > out/summary.txt
   allowed_parameters: []
-  read_scope: ["workspace"]
-  write_scope: ["workspace/out"]
-  protected_path_grants: []
-  network: deny
 "#,
     )
     .expect("write-summary fixture mutated");
@@ -231,8 +221,18 @@ fn run_flow_rejects_multi_write_own_script_before_side_effects() {
 
 #[test]
 fn run_flow_rejects_non_file_declared_write_paths_before_side_effects() {
-    for (leaf_is_directory, expected) in [(true, "must be a file"), (false, "must be a directory")]
-    {
+    for (leaf_is_directory, reason, expected) in [
+        (
+            true,
+            core_policy::DenyReasonCode::WriteDenied,
+            "must be a file",
+        ),
+        (
+            false,
+            core_policy::DenyReasonCode::SymlinkEscapeDenied,
+            "must be a directory",
+        ),
+    ] {
         let workspace = workspace_copy("hello-flow");
         let output_parent = workspace.join("out");
         if leaf_is_directory {
@@ -248,7 +248,7 @@ fn run_flow_rejects_non_file_declared_write_paths_before_side_effects() {
         let err = run_flow(&workspace, "hello-flow", EmitMode::Jsonl)
             .expect_err("non-file declared write path must fail preflight");
 
-        assert_denied(err, core_policy::DenyReasonCode::WriteDenied, expected);
+        assert_denied(err, reason, expected);
         assert_no_session_artifacts(&workspace, "hello-flow");
     }
 }
@@ -306,7 +306,6 @@ fn tool_started_commit_failure_prevents_own_script_side_effect() {
             event: &EventEnvelope,
             _canonical_jsonl: &str,
             _context_manifest: Option<ContextManifestCheckpoint>,
-            _measurement_started_at: Option<Instant>,
         ) -> Result<(), RuntimeError> {
             if event.event_type == EventType::ToolStarted
                 && event
@@ -362,7 +361,6 @@ fn tool_started_commit_failure_prevents_own_script_side_effect() {
     assert!(!workspace.join("out/summary.txt").exists());
 }
 
-#[cfg(unix)]
 #[test]
 fn run_flow_rejects_symlinked_summary_ancestor_without_side_effects() {
     use std::os::unix::fs::symlink;
@@ -384,67 +382,33 @@ fn run_flow_rejects_symlinked_summary_ancestor_without_side_effects() {
     assert_no_session_artifacts(&workspace, "hello-flow");
 }
 
-#[cfg(windows)]
 #[test]
-fn run_flow_rejects_junction_summary_ancestor_without_side_effects() {
-    let workspace = workspace_copy("hello-flow");
-    let outside = empty_workspace("outside-summary-junction");
-    fs::remove_dir_all(workspace.join("out")).expect("fixture out directory removed");
-    create_windows_junction(&workspace.join("out"), &outside);
-
-    let err = run_flow(&workspace, "hello-flow", EmitMode::Jsonl)
-        .expect_err("junction summary ancestor must fail");
-
-    assert_denied(
-        err,
-        core_policy::DenyReasonCode::SymlinkEscapeDenied,
-        "reparse",
-    );
-    assert!(!outside.join("summary.txt").exists());
-    assert_no_session_artifacts(&workspace, "hello-flow");
-}
-
-#[cfg(any(unix, windows))]
-#[test]
-fn own_script_internal_directory_alias_cannot_escape_write_scope() {
+fn own_script_fixture_rejects_internal_output_directory_alias() {
     let workspace = workspace_copy("hello-flow");
     fs::remove_dir_all(workspace.join("out")).expect("fixture out directory removed");
-    fs::create_dir(workspace.join("private")).expect("ungranted directory created");
+    fs::create_dir(workspace.join("private")).expect("alias destination created");
     create_directory_alias(&workspace.join("out"), &workspace.join("private"));
 
-    let (registry, policy) = fixture_runtime_policy("hello-flow", "hello-flow");
+    let (registry, _policy) = fixture_runtime_policy("hello-flow", "hello-flow");
     let tool = registry
         .tool_block("write-summary")
         .expect("write-summary tool exists");
-    let write_policy = policy
-        .commands
-        .iter()
-        .find(|command| command.tool_id == "write-summary")
-        .expect("write-summary policy exists");
-    let match_mode = runtime_protected_path_match_mode(&policy.target);
-    let write = plan_own_script(tool, match_mode, write_policy)
+    let write = plan_own_script(tool)
         .expect("own-script plan compiles")
         .expect("own-script plan writes output");
     let anchored_workspace = AnchoredDir::workspace(&workspace).expect("workspace anchors");
-    let expected_alias = if cfg!(windows) { "reparse" } else { "symlink" };
+    let expected_alias = "symlink";
 
-    let preflight_err =
-        preflight_own_script_outputs(&anchored_workspace, Some(&write), match_mode, write_policy)
-            .expect_err("preflight rejects the aliased write ancestor");
+    let preflight_err = preflight_own_script_outputs(&anchored_workspace, Some(&write))
+        .expect_err("preflight rejects the aliased write ancestor");
     assert_denied(
         preflight_err,
         core_policy::DenyReasonCode::SymlinkEscapeDenied,
         expected_alias,
     );
 
-    let apply_err = write_script_output(
-        &anchored_workspace,
-        &write.target,
-        &write.contents,
-        match_mode,
-        write_policy,
-    )
-    .expect_err("apply rejects the aliased write ancestor");
+    let apply_err = write_script_output(&anchored_workspace, &write.target, &write.contents)
+        .expect_err("apply rejects the aliased write ancestor");
     assert_denied(
         apply_err,
         core_policy::DenyReasonCode::SymlinkEscapeDenied,
@@ -453,7 +417,6 @@ fn own_script_internal_directory_alias_cannot_escape_write_scope() {
     assert!(!workspace.join("private/summary.txt").exists());
 }
 
-#[cfg(any(unix, windows))]
 #[test]
 fn run_flow_rejects_hardlinked_summary_leaf_without_side_effects() {
     let workspace = workspace_copy("hello-flow");
@@ -472,30 +435,4 @@ fn run_flow_rejects_hardlinked_summary_leaf_without_side_effects() {
         "outside\n"
     );
     assert_no_session_artifacts(&workspace, "hello-flow");
-}
-
-#[cfg(not(any(unix, windows)))]
-#[test]
-fn run_flow_replaces_hardlinked_summary_leaf_without_modifying_link_target_when_link_count_unverified()
- {
-    let workspace = workspace_copy("hello-flow");
-    fs::create_dir_all(workspace.join("out")).expect("out dir");
-    let outside = empty_workspace("outside-summary-hardlink-unverified");
-    let outside_target = outside.join("summary.txt");
-    fs::write(&outside_target, "outside\n").expect("outside target written");
-    let summary_path = workspace.join("out/summary.txt");
-    fs::hard_link(&outside_target, &summary_path).expect("summary hard link");
-
-    let output = run_flow(&workspace, "hello-flow", EmitMode::Jsonl)
-        .expect("unverifiable hardlink is safely replaced");
-
-    assert!(!output.failed);
-    assert_eq!(
-        fs::read_to_string(&outside_target).expect("outside target readable"),
-        "outside\n"
-    );
-    assert_eq!(
-        fs::read_to_string(&summary_path).expect("summary is replaced"),
-        "hello\n"
-    );
 }

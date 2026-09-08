@@ -1,8 +1,4 @@
-use super::{
-    EnvironmentPolicy, FilesystemPolicy, NetworkPolicy, PolicyArtifactValidationError,
-    policy_artifact_error,
-};
-use crate::protected_paths::ProtectedPathMatchMode;
+use super::{EnvironmentPolicy, PolicyArtifactValidationError, policy_artifact_error};
 use crate::{OWN_SCRIPT_RUNNER_POSIX_SH, TrustedPredefinedCommand};
 use core_script::{ParameterValueType, ScriptRuntime, ToolKind};
 use serde::{Deserialize, Serialize};
@@ -22,10 +18,6 @@ pub struct CommandPolicy {
     pub environment: EnvironmentPolicy,
     /// Executable identity used by the target backend.
     pub executable: String,
-    /// Filesystem access policy.
-    pub filesystem: FilesystemPolicy,
-    /// Network access policy.
-    pub network: NetworkPolicy,
     /// Script runtime for own-script tools.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub script_runtime: Option<ScriptRuntime>,
@@ -36,10 +28,7 @@ pub struct CommandPolicy {
 }
 
 impl CommandPolicy {
-    pub(super) fn validate(
-        &self,
-        protected_path_match_mode: ProtectedPathMatchMode,
-    ) -> Result<(), PolicyArtifactValidationError> {
+    pub(super) fn validate(&self) -> Result<(), PolicyArtifactValidationError> {
         self.validate_command_shape()?;
         let mut parameter_names = BTreeSet::new();
         for parameter in &self.allowed_parameters {
@@ -52,9 +41,6 @@ impl CommandPolicy {
             }
         }
         self.environment.validate(&self.tool_id)?;
-        self.filesystem
-            .validate(&self.tool_id, protected_path_match_mode)?;
-        self.network.validate(&self.tool_id)?;
 
         Ok(())
     }

@@ -87,7 +87,7 @@ fn provider_reservation_covers_utf8_boundary_adjusted_message_deltas() {
         objects: Vec::new(),
         provider_bytes: Vec::new(),
     };
-    let reservation = build_provider_dispatch_reservation(&compiled).expect("provider envelope");
+    let reservation = build_provider_dispatch_reservation(&compiled);
     let reserved_delta_records = usize::try_from(reservation.event_count)
         .expect("event count fits usize")
         - PRODUCTIVE_CLOSURE_RECORDS;
@@ -180,7 +180,7 @@ fn productive_dispatch_envelopes_cover_every_selected_maximum() {
         }],
         provider_bytes: Vec::new(),
     };
-    let provider = build_provider_dispatch_reservation(&compiled).expect("provider envelope");
+    let provider = build_provider_dispatch_reservation(&compiled);
     assert_provider_dispatch_envelope(provider, 3, 17, 1);
     assert_eq!(provider.event_count, 1_094);
 
@@ -205,7 +205,7 @@ fn provider_dispatch_reserves_the_complete_bounded_route_to_the_next_dispatch() 
         objects: Vec::new(),
         provider_bytes: Vec::new(),
     };
-    let reservation = build_provider_dispatch_reservation(&compiled).expect("provider envelope");
+    let reservation = build_provider_dispatch_reservation(&compiled);
     let route_after_chunks = 1
         + core_script::MAX_PHASE_NESTING_DEPTH
         + (core_script::MAX_FLOW_NESTING_DEPTH - 1)

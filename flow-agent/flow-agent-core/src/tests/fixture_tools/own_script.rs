@@ -1,6 +1,4 @@
-use super::super::helpers::fixture_runtime_policy;
 use crate::runtime::{
-    execution_plan::runtime_protected_path_match_mode,
     fixture_tools::{
         compile_own_script_operations, evaluate_script_command, normalize_script_write_target,
         script_redirection,
@@ -10,14 +8,6 @@ use crate::runtime::{
 
 #[test]
 fn helpers_reject_unsupported_m1_shell_shapes() {
-    let (_registry, policy) = fixture_runtime_policy("hello-flow", "hello-flow");
-    let command_policy = policy
-        .commands
-        .iter()
-        .find(|command| command.tool_id == "write-summary")
-        .expect("write-summary policy exists");
-    let match_mode = runtime_protected_path_match_mode(&policy.target);
-
     assert_eq!(
         script_redirection("printf 'hello > world\\n' > \"out/quoted.txt\"")
             .expect("quoted redirection parses"),
@@ -154,7 +144,7 @@ fn helpers_reject_unsupported_m1_shell_shapes() {
     ));
 
     assert!(
-        compile_own_script_operations(match_mode, command_policy, "\n# comment\n---\necho noop\n")
+        compile_own_script_operations("\n# comment\n---\necho noop\n")
             .expect("noop-like lines and echo compile")
             .is_none()
     );

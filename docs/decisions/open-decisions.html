@@ -5,7 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Watershed - Open Decisions</title>
 <style>
-:root{--bg:#101317;--panel:#171b21;--panel2:#20262e;--text:#eef1f5;--muted:#a8b1bd;--line:#303844;--accent:#6db7ff;--warn:#ffd37a;--good:#8ce8aa;--r:8px;--font:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:16px/1.55 var(--font)}a{color:var(--accent)}main{max-width:1180px;margin:0 auto;padding:28px}.hero{border-bottom:1px solid var(--line);padding-bottom:20px;margin-bottom:20px}h1{font-size:40px;line-height:1.05;margin:0 0 10px}h2{font-size:22px;margin:28px 0 12px}h3{font-size:18px;margin:0 0 8px}.muted{color:var(--muted)}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.decision{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:14px}.decision p{margin:8px 0}.decision ul{margin:8px 0 0 20px;padding:0}.tag{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:2px 8px;margin:0 4px 8px 0;color:var(--muted);font-size:12px}.m1{color:var(--good)}.m2{color:var(--warn)}nav{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}nav a{border:1px solid var(--line);border-radius:999px;padding:5px 10px;text-decoration:none;color:var(--muted)}nav a:hover{background:var(--panel2);color:var(--text)}@media(max-width:820px){main{padding:18px}.grid{grid-template-columns:1fr}h1{font-size:32px}}
+:root{--bg:#101317;--panel:#171b21;--panel2:#20262e;--text:#eef1f5;--muted:#a8b1bd;--line:#303844;--accent:#6db7ff;--warn:#ffd37a;--good:#8ce8aa;--r:8px;--font:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:16px/1.55 var(--font)}a{color:var(--accent)}main{max-width:1180px;margin:0 auto;padding:28px}.hero{border-bottom:1px solid var(--line);padding-bottom:20px;margin-bottom:20px}h1{font-size:40px;line-height:1.05;margin:0 0 10px}h2{font-size:22px;margin:28px 0 12px}h3{font-size:18px;margin:0 0 8px}.muted{color:var(--muted)}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;align-items:start}.decision{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:14px}.decision p{margin:8px 0}.decision ul{margin:8px 0 0 20px;padding:0}.tag{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:2px 8px;margin:0 4px 8px 0;color:var(--muted);font-size:12px}.m1{color:var(--good)}.m2{color:var(--warn)}nav{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}nav a{border:1px solid var(--line);border-radius:999px;padding:5px 10px;text-decoration:none;color:var(--muted)}nav a:hover{background:var(--panel2);color:var(--text)}@media(max-width:820px){main{padding:18px}.grid{grid-template-columns:1fr}h1{font-size:32px}}
+summary{cursor:pointer}summary h3{display:inline;margin:0}summary:focus-visible{outline:2px solid var(--accent);outline-offset:5px}details[open]>summary{margin-bottom:12px}
 </style>
 </head>
 <body>
@@ -15,188 +16,258 @@
     <p class="muted">Live maintainer decisions only. Accepted decisions live in <a href="../adr/ADR-LOG.md">ADR-LOG.md</a>; implementation detail belongs in the canonical docs listed in <a href="../../AGENTS.md">AGENTS.md</a>.</p>
     <p><span class="tag">Rule</span> Hygiene limits and canonical-home rules live in <a href="../../AGENTS.md">AGENTS.md</a>.</p>
     <nav aria-label="Decision links">
-      <a href="#m1-2">Post-M1.2</a>
-      <a href="#m2">M2</a>
-      <a href="#m3">M3</a>
-      <a href="#post-m1">Post-M1</a>
+      <a href="#release-1">Flow Agent: first release</a>
+      <a href="#release-security">Shared release safeguards</a>
+      <a href="#m2">Meta-Harness (M2)</a>
+      <a href="#m3">Liquid (M3)</a>
+      <a href="#post-m1">Flow Agent: extended capabilities</a>
     </nav>
   </header>
 
-  <section id="m1-2">
-    <h2>Post-M1.2 - Flow Agent Platform Expansion</h2>
+  <section id="release-1">
+    <h2>Flow Agent - First Release</h2>
     <div class="grid">
-      <article id="d-046" class="decision">
-        <h3>D-046 - Approved Network Address Enforcement</h3>
-        <p><strong>Status:</strong> Open, post-M1.2 blocker before positive network grants; M1.2 ships deny-all Tool networking.</p>
-        <p><strong>Question:</strong> After M1.2's enforced deny-all policy, how should Linux allow connections only to approved network addresses and ports?</p>
-        <ul><li><strong>A:</strong> Put the process in an isolated network area with firewall rules. Pro: uses common Linux features. Con: needs extra privileges and CI setup.</li><li><strong>B:</strong> Route connection requests through a checker that approves each one. Pro: precise decisions. Con: more components must work correctly.</li><li><strong>C:</strong> Let Linux itself filter the process's connections. Pro: strong low-level enforcement. Con: harder to operate and also needs privileges.</li></ul>
-        <p><strong>Recommendation:</strong> Keep block-all until one approach is selected and proven.</p>
-        <p><strong>Acceptance criterion:</strong> Record the backend and runner, then pass a finite matrix for allowed and denied TCP/UDP CIDR/port rules, DNS, DoH, DoT, child processes and indirect connection attempts before enabling any positive grant.</p>
-      </article>
-      <article id="d-047" class="decision">
-        <h3>D-047 - Windows Process Isolation</h3>
-        <p><strong>Status:</strong> Open, post-M1.2 blocker before Windows productive Tool support; Windows is outside the M1.2 MVP.</p>
-        <p><strong>Question:</strong> Which Windows enforcement boundary must Flow Agent use so real Tool processes and their children cannot exceed the declared filesystem, network and process policy?</p>
-        <ul><li><strong>A:</strong> Build a native boundary from restricted tokens or AppContainer, Job Objects, filesystem ACLs and enforceable network controls. Pro: native integration and lower steady-state overhead. Con: several mechanisms must compose correctly and parity is difficult to prove.</li><li><strong>B:</strong> Run Tools in a managed Hyper-V, Windows Sandbox or equivalent isolated environment. Pro: a stronger coarse boundary. Con: higher startup cost, optional host features and more file/network plumbing.</li><li><strong>C:</strong> Keep Windows productive Tool execution fail-closed until either A or B is proven. Pro: makes no unsupported parity claim. Con: productive execution remains unavailable on Windows.</li></ul>
-        <p><strong>Recommendation:</strong> Use C as the post-M1.2 posture while prototyping A; select A or B only after the same automated negative matrix proves read, write, network, process, child-process, policy-artifact parity and fail-closed behavior on the documented Windows runner.</p>
-        <p><strong>Acceptance criterion:</strong> Record the selected backend and runner, then pass that finite matrix before enabling Windows productive Tool execution or claiming platform parity.</p>
-      </article>
+      <details id="d-069" class="decision" style="grid-column:1/-1">
+        <summary><h3>D-069 - Mac Executor Launch And Installation Trust</h3></summary>
+        <p><strong>Status:</strong> Blocks completion of M1.2's native Mac integration. Seatbelt, native Mac support and mandatory Flow-file protection remain approved; this is not a request to reopen them. <a href="../../TESTING.md#native-verification-status">Native evidence and remaining implementation defects</a> are canonical in TESTING.md.</p>
+        <p><strong>Problem:</strong> Flow currently opens and checks the Executor program, then tries to start that same open file instead of looking up its filename again. This additionally resists a filename being replaced between checking and starting it. Linux accepts this launch route; the Mac integration does not. Keeping the file handle open through startup changed the Mac error, but did not fix any of the ten failing tests. That unsuccessful experiment was removed; no unprotected or unchecked-path fallback was added.</p>
+        <p><strong>Why a decision is needed:</strong> Checking a filename and then starting it is simpler, but another program could replace it in that small interval. Existing confined Tools must already be unable to do that. The <a href="../../SECURITY.md#native-self-protection-and-its-limits">accepted trust model</a> excludes hostile unconfined writers and deliberate administrator changes; nevertheless, silently dropping the current open-file binding would hide a real difference. The second start inside Seatbelt must also use the chosen contract.</p>
+        <ul>
+          <li><strong>A - Start from the checked, administrator-managed installation on Mac.</strong> Keep no-follow ownership, alias and identity admission, protect the installation from Tools, and reject detected changes. Explicitly require administrator maintenance to avoid changing the selected installation during active execution; do not promise atomic check-and-start against an unconfined writer. Pro: smallest change and no new launch-copy store or installation service. Con: loses the extra filename-exchange resistance during Mac startup; repeated checks alone do not close that interval.</li>
+          <li><strong>B - Retain the stronger open-file identity target.</strong> First design and evaluate a Mac-compatible launch copy or protected staging arrangement that preserves the admitted identity through both starts. Pro: aims to retain the additional filename-exchange protection. Con: adds copying or alias state, publication/cleanup and signing/path-lifetime work; no such design is verified, and a private copy alone does not contain a hostile unconfined writer.</li>
+        </ul>
+        <p><strong>Recommendation:</strong> A, because installation code is already trusted and the product promise is direct Tool/child write protection, not containment of other host-authority programs. Keep Linux's working retained-image path unless separately changed. Neither option permits a Tool to modify enforcement code, ignores failed admission, or claims that ordinary Tool commands cannot run on Mac.</p>
+        <p><strong>Acceptance criterion:</strong> Record the chosen launch and maintenance boundary before implementation. On native macOS ARM64, prove readiness, the outer Executor and its inner Seatbelt start, valid Tool execution, mandatory direct-write denial and explicit rejection without fallback for unsafe installations. Exercise filename replacement at each launch boundary: A must reject detected mismatches and document the remaining unconfined-writer interval; B must execute only the admitted image or reject before unverified code starts. Preserve inherited-handle cleanup and pass the complete native installation, release-artifact, coverage and performance gates; cross-compilation or source inspection cannot close this decision.</p>
+      </details>
+      <details id="d-066" class="decision" style="grid-column:1/-1">
+        <summary><h3>D-066 - Standard Tools And Executable-Code Trust</h3></summary>
+        <p><strong>Status:</strong> Discussion required before the first Flow Agent release. Default Tools should be replaceable; their catalog, behavior and trust presentation are not yet specified. The <a href="../../SECURITY.md#accepted-flow-agent-security-target">security contract</a> remains canonical.</p>
+        <p><strong>Question:</strong> Which Tools should ship, what precise actions must they implement safely for hostile model inputs, and how should Engineers understand the code they are authorizing?</p>
+        <ul>
+          <li><strong>A - A small maintained default set with explicit contracts.</strong> Pro: useful without every Engineer writing basic Tools; each Tool can have meaningful behavioral tests and a clear owner. Con: Watershed must maintain those implementations and disclose where they execute project code, helpers or external services.</li>
+          <li><strong>B - Definitions/examples only, with Engineers supplying implementations.</strong> Pro: less bundled code to maintain. Con: greater setup effort and more repeated security-sensitive implementation work.</li>
+        </ul>
+        <p><strong>Recommendation:</strong> A, with the smallest useful set. Before choosing it, specify each Tool's input/path/action limits, replacement procedure, dependency/update responsibility and executable-code trust display. A safe file Tool and a build command that executes project code have different responsibilities; neither a description nor a marketplace listing proves safety. Ordinary assigned Tool calls remain prompt-free; first-release configuration administration stays manual under <a href="../../SECURITY.md#configuration-and-migration-boundary">SECURITY.md</a>.</p>
+        <p><strong>Acceptance criterion:</strong> Approve the catalog and user-facing trust explanation, then prove each shipped Tool's promised behavior under adversarial inputs on its declared platforms. Demonstrate replacing a default Tool without widening authority silently. Do not advertise third-party Tool certification or general host isolation.</p>
+      </details>
+    </div>
+  </section>
+
+  <section id="release-security">
+    <h2>Watershed - Shared Release Safeguards</h2>
+    <div class="grid">
+      <details id="d-065" class="decision" style="grid-column:1/-1">
+        <summary><h3>D-065 - Development And Release Publication Safeguards</h3></summary>
+        <p><strong>Status:</strong> Must be decided, implemented and verified before each affected product's first release: Flow Agent, Meta-Harness and Liquid. This entry records open work, not active protection. The approved download contract is canonical in <a href="../../SECURITY.md#m12-tool-execution-trust-boundary">SECURITY.md</a> (ADR-0164/ADR-0165); it does not require users to install a build-provenance verifier.</p>
+        <p><strong>Problem:</strong> A stolen publishing account or an unsafe build step could place a harmful program in the real GitHub Release, even while the visible source code remains unchanged. HTTPS and a matching checksum would still succeed. The development team must protect that trusted source without making installation harder for users.</p>
+        <h4>Decisions required</h4>
+        <ul>
+          <li><strong>Who may publish?</strong> Select the authorized people and automation, account protection and recovery rules, and required approval for source, release tags and publishing-workflow changes. Decide how the rules work with the actual maintainer team; do not assume a second reviewer exists.</li>
+          <li><strong>What may build code access?</strong> Decide how untrusted contributions, dependency/build scripts and third-party automation are separated from publishing and Mac-signing authority. Select minimum automation permissions, credential lifetime/storage and runner isolation; reference the existing <a href="../../SECURITY.md#plugins--supply-chain">dependency safeguards</a>, not a duplicate audit process.</li>
+          <li><strong>Which bytes may be published?</strong> Bind the approved source revision, existing <a href="../../TESTING.md#ci">required gates</a>, build inputs and final platform bundles to one release record. Decide who checks this record, completes any required Mac signing before final checksums, and authorizes publication. Internal evidence does not add an end-user provenance requirement.</li>
+          <li><strong>How is the first Flow Agent package delivered?</strong> Pending maintainer choice: a version- and platform-specific <code>.tar.gz</code> plus <code>SHA256SUMS</code>, downloaded from GitHub Releases in the browser, verified with existing OS tools, then installed create-only. This recommendation avoids an online bootstrap but requires manual verification; an automated downloader would add implementation and redirect/asset-host policy. Package layout and verification must bind the selected version, platform and final bytes before execution. No publication is authorized by this proposal.</li>
+          <li><strong>Can a published version change?</strong> Select tag/asset replacement restrictions and evaluate GitHub's available release protections. Decide the correction procedure so the same version does not silently acquire different programs. Also fix the official bootstrap/download route and HTTPS redirect/asset-host rules for the approved installer contract.</li>
+          <li><strong>What happens after a suspected compromise?</strong> Assign an incident owner and a procedure to halt publication, revoke affected access, withdraw or mark unsafe releases, notify users and publish a corrected version. Decide evidence retention and account/signing recovery; an offline user cannot receive immediate withdrawal information.</li>
+        </ul>
+        <h4>Options and recommendation</h4>
+        <ul>
+          <li><strong>A - A protected release workflow with explicit maintainer approval.</strong> Pro: repeatable builds and checks with narrowly scoped publication access. Con: workflow, runner, approval and recovery controls must be configured and maintained.</li>
+          <li><strong>B - Documented manual publication of approved, tested artifacts.</strong> Pro: fewer automated publishing permissions and a small initial setup. Con: more human steps and greater risk of uploading the wrong bytes or losing release evidence.</li>
+        </ul>
+        <p><strong>Recommendation:</strong> A, sized to the actual team, with narrowly scoped release authority separated from untrusted build work. B is viable only with an equally explicit artifact-check and recovery procedure. Neither option is approved by this entry.</p>
+        <p><strong>Acceptance criterion:</strong> Record the selected controls and responsible owner for every question above. Retain non-secret evidence of the actual repository/workflow settings and a release rehearsal tied to one source revision and final bundle set. In a safe test setup, prove an unauthorized publishing attempt is rejected, untrusted build work lacks publication/signing authority, a mismatched artifact is rejected before publication, and the selected correction/withdrawal procedure works. Pass the canonical native installation checks in <a href="../../SECURITY.md#m12-tool-execution-trust-boundary">SECURITY.md</a>. Maintainer approval of that evidence is required before the first release of each affected product; green branch CI or this checklist alone does not close the decision.</p>
+      </details>
     </div>
   </section>
 
   <section id="m2">
     <h2>M2 - Meta-Harness And AgentPulse</h2>
     <div class="grid">
-      <article id="d-010" class="decision">
-        <h3>D-010 - AgentPulse v0 Formulas</h3>
+      <details id="d-010" class="decision">
+        <summary><h3>D-010 - AgentPulse v0 Formulas</h3></summary>
         <p><strong>Status:</strong> Open, M2 blocker.</p>
         <p><strong>Question:</strong> Should the three scores use only facts already recorded during runs, or also an AI judgment?</p>
         <ul><li><strong>A:</strong> Use recorded run facts only. Pro: the same input always gives the same auditable score. Con: the first version captures fewer nuances.</li><li><strong>B:</strong> Add AI-assigned quality labels. Pro: captures more nuance. Con: scores become subjective and harder to test.</li></ul>
         <p><strong>Recommendation:</strong> A for M2; reserve model-scored labels for later evaluation.</p>
-      </article>
-      <article id="d-021" class="decision">
-        <h3>D-021 - Meta-Harness Packaging</h3>
+      </details>
+      <details id="d-021" class="decision">
+        <summary><h3>D-021 - Meta-Harness Packaging</h3></summary>
         <p><strong>Status:</strong> Open implementation detail before M2; ADR-0018 already requires a non-graphical controller.</p>
         <p><strong>Question:</strong> How should that controller be packaged for its first release?</p>
         <ul><li><strong>A:</strong> A command-line app plus a background service. Pro: useful without Liquid and easy to test. Con: no rich interface.</li><li><strong>B:</strong> Add a small status screen after the controller works. Pro: easier demonstrations. Con: another part to package and maintain.</li></ul>
         <p><strong>Recommendation:</strong> A; no competing full standalone GUI in the MVP.</p>
-      </article>
-      <article id="d-023" class="decision">
-        <h3>D-023 - Meta-Harness Service/API Transport</h3>
+      </details>
+      <details id="d-023" class="decision">
+        <summary><h3>D-023 - Meta-Harness Service/API Transport</h3></summary>
         <p><strong>Status:</strong> Open before M2 implementation.</p>
         <p><strong>Question:</strong> How should programs on the same computer, and authenticated Liquid clients on other devices, communicate with Meta-Harness without moving agent ownership off the host?</p>
         <ul><li><strong>A:</strong> Use a private connection that works only on the same computer. Pro: smallest security surface. Con: remote Liquid needs a later gateway.</li><li><strong>B:</strong> Use one protected web connection for local and remote clients. Pro: one network-capable path. Con: larger local security surface.</li><li><strong>C:</strong> Define one shared set of commands, carried by a private local connection on the host and a protected network connection remotely. Pro: fits both topologies. Con: both connections must behave alike.</li></ul>
         <p><strong>Recommendation:</strong> C as the direction, starting with only the parts M2 needs.</p>
-      </article>
-      <article id="d-024" class="decision">
-        <h3>D-024 - Meta-Harness State Storage</h3>
+      </details>
+      <details id="d-024" class="decision">
+        <summary><h3>D-024 - Meta-Harness State Storage</h3></summary>
         <p><strong>Status:</strong> Open before M2 implementation.</p>
         <p><strong>Question:</strong> Where do session registry, config proposals, audit records and metrics live?</p>
         <ul><li><strong>A:</strong> SQLite plus append-only transcript/log files. Pro: queryable and local. Con: migration discipline needed.</li><li><strong>B:</strong> JSONL/files only. Pro: transparent. Con: weaker queries and concurrency.</li></ul>
         <p><strong>Recommendation:</strong> A for registry/config/metrics, while keeping transcripts append-only and exportable.</p>
-      </article>
-      <article id="d-048" class="decision">
-        <h3>D-048 - HerdR CLI-Agent Backend Integration</h3>
+      </details>
+      <details id="d-048" class="decision">
+        <summary><h3>D-048 - HerdR CLI-Agent Backend Integration</h3></summary>
         <p><strong>Status:</strong> Open, M2 blocker before Meta-Harness CLI-agent process execution.</p>
         <p><strong>Question:</strong> Should Meta-Harness reuse HerdR for host-local terminals, whole CLI agent processes and session persistence while retaining policy, normalized records, shared config, schedules, audit and AgentPulse? This boundary is unrelated to Flow's Executor protocol and does not manage Flow Tool Sandboxes.</p>
         <ul><li><strong>A:</strong> Integrate HerdR as an optional Meta-Harness agent executor through its versioned CLI/socket API. Pro: reuses terminal multiplexing, process persistence, agent detection and remote attachment while preserving Meta-Harness boundaries. Con: requires stable identity mapping, failure recovery and a maintained adapter.</li><li><strong>B:</strong> Require HerdR as the runtime for all external CLI agents. Pro: one execution path and an existing terminal UI. Con: couples M2 availability and semantics to HerdR's platform support, protocol and roadmap.</li><li><strong>C:</strong> Build the Meta-Harness agent executor independently and use HerdR only as a comparison. Pro: complete control over the CLI-process boundary. Con: duplicates substantial terminal, process and persistence work.</li></ul>
         <p><strong>Recommendation:</strong> A behind a backend-neutral Meta-Harness agent-executor contract, subject to a bounded integration spike; keep direct semantic adapters where they provide richer events.</p>
-        <p><strong>Acceptance criterion:</strong> The spike starts, steers, observes and restores Codex plus one other CLI agent without an attached HerdR UI; preserves stable Meta-Harness session identity across detach and service restarts; routes every mutation through the Meta-Harness policy/audit gate; normalizes HerdR events without treating terminal inference as semantic truth; rejects cross-host process claims; and documents fail-closed behavior for unsupported Linux, macOS or Windows capabilities.</p>
-      </article>
+        <p><strong>Acceptance criterion:</strong> The spike starts, steers, observes and restores Codex plus one other CLI agent without an attached HerdR UI; preserves stable Meta-Harness session identity across detach and service restarts; routes every mutation through the Meta-Harness policy/audit gate; normalizes HerdR events without treating terminal inference as semantic truth; rejects cross-host process claims; and documents fail-closed behavior for unsupported capabilities on the native targets in <a href="../../PLATFORMS.md">PLATFORMS.md</a>.</p>
+      </details>
     </div>
   </section>
 
   <section id="m3">
     <h2>M3 - Liquid</h2>
     <div class="grid">
-      <article id="d-009" class="decision">
-        <h3>D-009 - Liquid UI Framework</h3>
+      <details id="d-009" class="decision">
+        <summary><h3>D-009 - Liquid UI Framework</h3></summary>
         <p><strong>Status:</strong> Open before Liquid app shell work.</p>
         <p><strong>Question:</strong> Which Dart/native UI stack should implement Liquid?</p>
         <ul><li><strong>A:</strong> Flutter. Pro: mature cross-platform tooling. Con: larger runtime surface.</li><li><strong>B:</strong> Lower-level native/Dart stack. Pro: tighter control. Con: higher implementation cost.</li></ul>
         <p><strong>Recommendation:</strong> Flutter unless a concrete MVP requirement rules it out.</p>
-      </article>
-      <article id="d-027" class="decision">
-        <h3>D-027 - Liquid CLI/API Surface</h3>
+      </details>
+      <details id="d-027" class="decision">
+        <summary><h3>D-027 - Liquid CLI/API Surface</h3></summary>
         <p><strong>Status:</strong> Open before external-agent Liquid edits.</p>
         <p><strong>Question:</strong> Which typed Workspace reads, changes and App actions should remain stable in the MVP?</p>
         <ul><li><strong>A:</strong> A small set of resource-specific commands and action schemas. Pro: compact for agents, easy to test and restrict. Con: new capabilities need explicit additions.</li><li><strong>B:</strong> One broad document interface. Pro: flexible. Con: harder to secure, discover efficiently and change safely.</li></ul>
         <p><strong>Recommendation:</strong> A.</p>
-      </article>
-      <article id="d-028" class="decision">
-        <h3>D-028 - Liquid Action History Model</h3>
+      </details>
+      <details id="d-028" class="decision">
+        <summary><h3>D-028 - Liquid Action History Model</h3></summary>
         <p><strong>Status:</strong> Open before M3 storage work.</p>
         <p><strong>Question:</strong> How should Liquid remember changes so users can inspect and undo them?</p>
         <ul><li><strong>A:</strong> Keep an unchangeable sequence of actions plus occasional full save points. Pro: auditable and reversible. Con: old entries must be combined or archived later.</li><li><strong>B:</strong> Keep only the current state plus periodic backups. Pro: simpler storage. Con: weak audit and undo.</li></ul>
         <p><strong>Recommendation:</strong> A.</p>
-      </article>
-      <article id="d-029" class="decision">
-        <h3>D-029 - Liquid Storage Model</h3>
+      </details>
+      <details id="d-029" class="decision">
+        <summary><h3>D-029 - Liquid Storage Model</h3></summary>
         <p><strong>Status:</strong> Open before M3 storage work.</p>
         <p><strong>Question:</strong> How should Liquid store workspace state and history on the user's device?</p>
         <ul><li><strong>A:</strong> Use a SQLite database as the local copy. Pro: reliable offline searches and all-or-nothing updates. Con: upgrades and sharing need careful data conversion.</li><li><strong>B:</strong> Use folders of readable JSON files as the local copy. Pro: transparent. Con: weaker consistency and slower searching.</li></ul>
         <p><strong>Recommendation:</strong> A unless sync requirements force a different engine.</p>
-      </article>
-      <article id="d-031" class="decision">
-        <h3>D-031 - Revert Semantics</h3>
+      </details>
+      <details id="d-031" class="decision">
+        <summary><h3>D-031 - Revert Semantics</h3></summary>
         <p><strong>Status:</strong> Open before action-history implementation.</p>
         <p><strong>Question:</strong> How should Liquid undo a faulty or unwanted change?</p>
         <ul><li><strong>A:</strong> Record a new action that reverses the earlier one, or restore a save point when changes conflict. Pro: preserves history. Con: conflicts need clear handling.</li><li><strong>B:</strong> Replace history with the earlier state. Pro: simple. Con: weakens the audit trail.</li></ul>
         <p><strong>Recommendation:</strong> A.</p>
-      </article>
-      <article id="d-035" class="decision">
-        <h3>D-035 - Sync Conflict Semantics</h3>
+      </details>
+      <details id="d-035" class="decision">
+        <summary><h3>D-035 - Sync Conflict Semantics</h3></summary>
         <p><strong>Status:</strong> Open before shared-workspace work.</p>
         <p><strong>Question:</strong> When local replicas send concurrent offline changes to the central Sync Server, how should Liquid combine them?</p>
         <ul><li><strong>A:</strong> Combine recorded changes using the same fixed rule for each field and ask the user when no safe combination exists. Pro: preserves local-first behavior and audit history. Con: more merge design.</li><li><strong>B:</strong> Keep the most recent ordinary field value and ask only about deletes or structural changes. Pro: smaller first implementation. Con: can silently discard intent.</li></ul>
         <p><strong>Recommendation:</strong> A, scoped first to the M3 Block Types and action model.</p>
-      </article>
+      </details>
     </div>
   </section>
 
   <section id="post-m1">
-    <h2>Post-M1 Flow Agent Seams</h2>
+    <span id="post-m1-2"></span>
+    <h2>Flow Agent - Permissions, Integrations And Offline Use</h2>
     <div class="grid">
-      <article id="d-020" class="decision">
-        <h3>D-020 - Flow Agent Embedded Core API</h3>
+      <details id="d-067" class="decision">
+        <summary><h3>D-067 - Building Block Marketplace</h3></summary>
+        <p><strong>Status:</strong> Later-roadmap specification, not a blocker for the first Flow Agent release. No marketplace is implemented or authorized by this entry.</p>
+        <p><strong>Question:</strong> How should Engineers discover and share Building Blocks without confusing distribution checks with trust in executable code?</p>
+        <ul>
+          <li><strong>A - An opt-in catalog with explicit versioned installation.</strong> Pro: a smaller initial discovery/distribution surface with visible author, source, dependencies and declared behavior. Con: Engineers still assess trust and manage updates.</li>
+          <li><strong>B - An integrated marketplace with managed updates and review services.</strong> Pro: easier discovery and lifecycle management. Con: publishing authority, moderation, dependency resolution, update consent and compromised-package response require a larger specification.</li>
+        </ul>
+        <p><strong>Recommendation:</strong> Specify A first when this roadmap item is scheduled. Decide author identity, artifact integrity/version pinning, install/update consent, requested scopes, provenance, removal/revocation and incident handling. A listing or review is not a Watershed guarantee that third-party code is safe; default-Tool responsibility remains separate under <a href="#d-066">D-066</a>.</p>
+        <p><strong>Acceptance criterion:</strong> Approve the specification before implementation; demonstrate discovery, explicit installation/replacement, tampered-artifact rejection, permission-changing updates and a compromised-package response under the published responsibility model. Never execute downloaded code merely to inspect a listing.</p>
+      </details>
+      <details id="d-020" class="decision">
+        <summary><h3>D-020 - Flow Agent Embedded Core API</h3></summary>
         <p><strong>Status:</strong> Open before external Rust embedding; not an M1 blocker.</p>
         <p><strong>Current scope:</strong> Until a post-M1 supported library is selected, only the CLI and protocol are supported Flow Agent interfaces. Rust <code>pub</code> items are workspace implementation detail without a compatibility promise.</p>
         <p><strong>Question:</strong> Should another Rust application run Flow Agent inside the same program, or start the <code>flow</code> command and communicate through its documented input and output?</p>
         <ul><li><strong>A:</strong> Add a small supported Rust library interface after M1. Pro: direct calls without managing another process. Con: Watershed must keep that interface compatible and tightly couples both programs.</li><li><strong>B:</strong> Keep the current Rust building blocks internal and use the command/protocol boundary. Pro: a smaller public surface and independent crashes/upgrades. Con: the caller must manage a process and adapter.</li></ul>
         <p><strong>Recommendation:</strong> A only when a concrete post-M1 consumer proves the smallest useful interface; see <a href="../../PROTOCOL.md">PROTOCOL.md</a>.</p>
-      </article>
-      <article id="d-056" class="decision">
-        <h3>D-056 - Existing Output Security-Metadata Matrix</h3>
+      </details>
+      <details id="d-056" class="decision">
+        <summary><h3>D-056 - Existing Output Security-Metadata Matrix</h3></summary>
         <p><strong>Status:</strong> Open before post-M1 existing-output replacement; not an M1.1 blocker.</p>
-        <p><strong>Question:</strong> Which exact security-metadata fields must atomic own-script output replacement preserve on Linux, macOS and Windows, and what happens when a required field cannot be read or applied?</p>
+        <p><strong>Question:</strong> Which exact security-metadata fields must atomic own-script output replacement preserve on Flow Agent's native targets in <a href="../../PLATFORMS.md">PLATFORMS.md</a>, and what happens when a required field cannot be read or applied?</p>
         <p><strong>Decided direction:</strong> The ADR-0087/ADR-0088 create-only boundary rejects every existing output target in M1.1; replacement remains unavailable until this finite per-platform field matrix is decided and implemented.</p>
         <ul><li><strong>A:</strong> Preserve a maintainer-selected native field set and fail when any selected field is unavailable. Pro: explicit, testable preservation. Con: replacements can fail because of privileges or platform support.</li><li><strong>B:</strong> Preserve a smaller maintainer-selected field set and reject targets carrying selected unsupported metadata. Pro: a narrower implementation. Con: detection and rejection rules remain platform-specific.</li></ul>
         <p><strong>Recommendation:</strong> A; choose the exact fields and unavailable-field behavior only with platform evidence.</p>
-        <p><strong>Acceptance criterion:</strong> Record the exact finite matrix and failure behavior, then pass Linux, macOS and Windows fixtures for every required field before restoring existing-output replacement.</p>
-      </article>
-      <article id="d-058" class="decision">
-        <h3>D-058 - Portable Conversation Archive And Tree Handoff</h3>
+        <p><strong>Acceptance criterion:</strong> Record the exact finite matrix and failure behavior, then pass native fixtures on each supported Flow Agent target for every required field before restoring existing-output replacement.</p>
+      </details>
+      <details id="d-058" class="decision">
+        <summary><h3>D-058 - Portable Conversation Archive And Tree Handoff</h3></summary>
         <p><strong>Status:</strong> Open before cross-device Portable continuation or a public tree-navigation/import surface.</p>
         <p><strong>Question:</strong> Which public archive closure should carry a completed checkpoint to another device while preserving tree navigation, transactional import and the accepted child-Run/branch semantics?</p>
         <ul><li><strong>A:</strong> Export the complete Conversation tree and every referenced immutable artifact. Pro: self-contained history and full tree navigation. Con: archives can be large and repeat old data.</li><li><strong>B:</strong> Export only the selected branch's verified transitive closure. Pro: smaller and sufficient for that continuation. Con: omitted sibling branches need a later union/import rule before one tree can be reconstructed.</li><li><strong>C:</strong> Define content-addressed archive records that support both full export and incremental transfer through one schema. Pro: deduplication and efficient repeated device sync. Con: the first contract, recovery matrix and retention policy are more complex.</li></ul>
         <p><strong>Recommendation:</strong> A first; keep the schema content-addressable so C can later optimize transport without changing Conversation authority. A Pi-style tree view renders the imported canonical graph and never becomes a second history authority.</p>
         <p><strong>Acceptance criterion:</strong> Fix the public archive closure, schema, size/resource bounds, content hashes, D-062 authenticated-root/provenance result, access/confidentiality and transfer protection, export/import transaction, version migration, branch-ID collision handling, optional coordinated source/destination fencing and recovery matrix. Exclude credential-store records, Runtime-binding credential references, approvals, Runtime bindings, structural source-host path/authority fields and leases, while treating all recorded user/provider/Tool/artifact content—including embedded path strings—as inert, potentially sensitive evidence. Require the destination actor to select and authorize one canonical Workspace, validate its compatibility and explicitly rebind allowed paths/artifacts before effects. Re-import into an existing Conversation must verify its common prefix by identity and hash, transactionally union non-conflicting descendant branches, be idempotent on repeated input and fail without mutation on conflicting records; it never merges two linear Runs. Prove no completed effect is redispatched; an uncertain provider attempt in the selected checkpoint's reachable state keeps that checkpoint non-executable because it has no reconciliation surface, while a relevant uncertain Tool attempt blocks child-Run creation until existing eligible-Tool reconciliation settles it; unrelated uncertain branches remain history without tainting eligible branches; and two disconnected continuations converge as distinct child branches.</p>
-      </article>
-      <article id="d-059" class="decision">
-        <h3>D-059 - Offline Provisioning And Local Inference Binding</h3>
+      </details>
+      <details id="d-059" class="decision">
+        <summary><h3>D-059 - Offline Provisioning And Local Inference Binding</h3></summary>
         <p><strong>Status:</strong> Open before claiming offline-after-provisioning productive Flow execution.</p>
         <p><strong>Decided boundary:</strong> ADR-0153 requires a provider-neutral capability contract and device-local Runtime binding. A binding identifies the endpoint plus the provider/model, local artifact/quantization/runtime, credential-reference and resource-policy fields applicable to that provider; local artifacts and credentials may be absent. Credential material remains in the Flow-owned protected store.</p>
         <p><strong>Question:</strong> How should a device provision and discover conforming local artifacts, verify their claims and choose among compatible installed bindings without depending on an Internet service?</p>
         <ul><li><strong>A:</strong> The operator installs a signed artifact manifest and explicitly selects one binding; a local probe verifies identity, capabilities and readiness before use. Pro: deterministic choice and small discovery surface. Con: more manual provisioning.</li><li><strong>B:</strong> Flow Agent discovers installed bindings from a protected device-local catalog, probes each and selects only by an explicit deterministic policy. Pro: easier multi-model operation. Con: catalog mutation, tie-breaking and stale entries add state.</li><li><strong>C:</strong> Meta-Harness may manage the same protected host catalog through Flow Agent's public surface, while standalone Flow Agent retains A. Pro: centralized fleet management without breaking standalone use. Con: audit, reconciliation and ownership between both clients need a finite contract.</li></ul>
         <p><strong>Recommendation:</strong> A first; make its manifest/catalog schema reusable by B and C. Keep model acquisition outside Conversation state and evaluate actual context, latency, memory, energy and tool capabilities rather than model-size labels.</p>
         <p><strong>Acceptance criterion:</strong> Record the supported artifact/signature, catalog/discovery, capability, provenance, deterministic selection, credential-reference, admission and failure schemas; bind every credential reference to the selected provider and endpoint audience and reject a mismatch before secret resolution; preserve the protected credential store's permissions, locking, refresh and redaction rules; satisfy the local-runtime process boundary selected in D-061; provision one supported local stack; then run a productive Flow with network interfaces disabled and no remote authentication, licensing, telemetry or update dependency while requested remote-only actions fail clearly, sync reports offline/stale and waits resumably, and neither blocks unrelated local work.</p>
-      </article>
-      <article id="d-060" class="decision">
-        <h3>D-060 - Offline Approval And Revocation Authority</h3>
+      </details>
+      <details id="d-060" class="decision">
+        <summary><h3>D-060 - Offline Approval And Revocation Authority</h3></summary>
         <p><strong>Status:</strong> Open before an imported continuation can use approval-bearing Meta-Harness, Liquid or external actions while disconnected. This decision adds no Flow Agent Tool-approval prompt; ADR-0135 remains authoritative for assigned Tools.</p>
         <p><strong>Question:</strong> After an imported continuation reauthenticates locally, how may that destination approve sensitive work while it cannot learn later remote Role, policy or identity revocations?</p>
         <ul><li><strong>A:</strong> Require a fresh local approval for each sensitive action. Pro: smallest authority and clearest audit. Con: repetitive for long offline workflows.</li><li><strong>B:</strong> Let the destination issue a local, device-bound grant for an exact action set, resource set and short expiry. Pro: bounded offline automation. Con: expiry, one-use behavior and reconnect reconciliation need careful rules.</li><li><strong>C:</strong> Let an administrator pre-authorize a destination-local offline profile before disconnection. Pro: predictable unattended work. Con: broader stale authority and stronger provisioning/audit requirements.</li></ul>
         <p><strong>Recommendation:</strong> A initially; consider B only after a finite local key, replay and reconciliation design. The accepted boundary still forbids transferring prior approvals in a Conversation archive.</p>
         <p><strong>Acceptance criterion:</strong> Define actor/device identity, local grant scope, expiry, one-use behavior, audit records, reconnect reconciliation and the explicit limit that a disconnected device cannot observe later revocation; prove an imported archive alone authorizes no Workspace, Tool, config or external action.</p>
-      </article>
-      <article id="d-061" class="decision">
-        <h3>D-061 - Local Inference Process Trust Boundary</h3>
+      </details>
+      <details id="d-061" class="decision">
+        <summary><h3>D-061 - Local Inference Process Trust Boundary</h3></summary>
         <p><strong>Status:</strong> Open before D-059 can enable a productive local model runtime.</p>
         <p><strong>Question:</strong> What may executable local inference code access on the host while it receives model context outside the Tool Sandbox?</p>
         <ul><li><strong>A:</strong> Treat the runtime as part of Flow Agent's trusted computing base under the operator's OS identity. Pro: simplest integration and lowest IPC overhead. Con: it may read global config, credentials, sessions and Workspace bytes; signatures prove provenance, not confinement.</li><li><strong>B:</strong> Run it under a separate identity or enforceable Sandbox/service boundary with only a bounded authenticated inference channel and declared model/cache storage. Pro: contains filesystem, secret, process and network access. Con: substantial cross-platform packaging, accelerator and performance work.</li><li><strong>C:</strong> Link the runtime in-process. Pro: smallest transport overhead. Con: maximally expands Flow Agent's memory-safety, dependency and secret-access trust base.</li></ul>
         <p><strong>Recommendation:</strong> B for the supported offline claim. An explicit A installation may exist only with a clear no-isolation warning and no claim that signed artifacts are contained.</p>
         <p><strong>Acceptance criterion:</strong> For every option, record the process/identity, IPC, filesystem, credential, config, session, Workspace, model/cache, network, child-process, resource, crash and update boundaries per supported platform and enforce bounded request/result I/O. If B is selected, authenticate the channel and prove the runtime receives only admitted context/capabilities and cannot obtain protected stores or Workspace data outside that contract. If A or C is allowed, name the runtime and dependencies as trusted computing base, display the no-isolation status before use, make no secret/filesystem containment claim and test provenance, update and failure behavior under that stated trust model.</p>
-      </article>
-      <article id="d-062" class="decision">
-        <h3>D-062 - Portable Archive Authenticity Root</h3>
+      </details>
+      <details id="d-062" class="decision">
+        <summary><h3>D-062 - Portable Archive Authenticity Root</h3></summary>
         <p><strong>Status:</strong> Open before D-058 may call an imported checkpoint verified or executable.</p>
         <p><strong>Question:</strong> How does a destination authenticate an archive's root manifest and provenance when an attacker could otherwise rewrite content and recompute ordinary hashes?</p>
         <ul><li><strong>A:</strong> Sign the canonical root manifest with a source device/user key chained to a known identity. Pro: offline attribution and tamper evidence. Con: enrollment, rotation, revocation and lost-device handling are required.</li><li><strong>B:</strong> Authenticate the root with a shared user/Workspace archive key. Pro: compact offline verification across devices. Con: shared-secret distribution weakens sender attribution and increases compromise impact.</li><li><strong>C:</strong> Import as explicitly unauthenticated, non-executable evidence, require human review and let the destination re-seal a new local root before any continuation. Pro: no cross-device key infrastructure. Con: cannot preserve trusted provenance or automatic continuation.</li></ul>
         <p><strong>Recommendation:</strong> A; retain C as a clearly separate recovery path that never claims verified source history.</p>
         <p><strong>Acceptance criterion:</strong> For A/B, define canonical signed/MACed bytes, identity binding, key storage/rotation/revocation limits, replay/downgrade rules, attribution and verification errors; tampering with the authenticated root, content, branch links or version must fail before destination mutation or provider/Tool effects. For C, label every record unauthenticated, permit no Portable continuation or effects, define explicit human review and destination resealing as new local evidence, and never claim source attribution or source-history verification.</p>
-      </article>
+      </details>
     </div>
   </section>
 </main>
+<script>
+function revealDecision(hash) {
+  const decision = document.getElementById(hash.slice(1));
+  if (decision?.matches("details.decision")) {
+    decision.open = true;
+    decision.scrollIntoView();
+    return true;
+  }
+  return false;
+}
+addEventListener("hashchange", event => {
+  if (event.newURL === location.href) revealDecision(location.hash);
+});
+document.addEventListener("click", event => {
+  if (event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+  const link = event.target.closest('a[href^="#"]');
+  if (link && revealDecision(link.hash)) {
+    event.preventDefault();
+    if (location.hash !== link.hash) history.pushState(null, "", link.hash);
+  }
+});
+revealDecision(location.hash);
+</script>
 </body>
 </html>

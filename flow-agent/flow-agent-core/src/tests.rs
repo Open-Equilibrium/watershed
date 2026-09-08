@@ -1,7 +1,9 @@
 #[path = "../../tests/support.rs"]
 mod test_support;
+pub(crate) use test_support::empty_workspace;
 
 mod support;
+pub(crate) use support::run_isolated_test;
 
 mod helpers;
 
@@ -11,7 +13,9 @@ mod context;
 mod conversations;
 mod credential_store;
 mod deadlines;
+mod event_data_capacity;
 mod event_writer;
+mod executor;
 mod fixture_tools;
 mod fs_guards;
 mod live_events;
@@ -19,7 +23,6 @@ mod m11_budget_evidence;
 mod m11_runtime;
 mod oauth_credential;
 mod openai_codex;
-mod performance;
 mod planning;
 mod productive;
 mod productive_recovery_support;
@@ -27,7 +30,6 @@ mod protocol_lifecycle;
 mod protocol_payload;
 mod registry_runtime;
 mod responses;
-mod resume;
 mod run_attempts;
 mod run_input;
 mod runtime_capacity;
@@ -40,11 +42,9 @@ mod session_authority;
 mod session_bundle;
 mod session_cleanup;
 mod session_corruption;
-mod session_definition;
 mod session_lifecycle;
 mod session_lock;
 mod session_reservation;
-mod session_resume;
 mod session_store;
 mod surface_contracts;
 mod tool_runner;

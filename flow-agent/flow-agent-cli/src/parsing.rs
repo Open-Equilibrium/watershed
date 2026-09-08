@@ -1,4 +1,5 @@
 mod auth;
+mod executor;
 mod reconcile;
 mod resume;
 mod run;
@@ -6,6 +7,7 @@ mod sessions;
 mod tail;
 
 pub(crate) use auth::{AuthCommand, auth_args};
+pub(crate) use executor::{ExecutorCommand, executor_args};
 pub(crate) use reconcile::reconcile_tool_args;
 pub(crate) use resume::{ResumeCommand, resume_args};
 pub(crate) use run::run_args;
@@ -27,6 +29,9 @@ pub(crate) fn informational_output(args: &[String]) -> Option<String> {
         .is_some_and(|arg| matches!(arg.as_str(), "--version" | "-V"))
     {
         return Some(format!("flow {}\n", env!("CARGO_PKG_VERSION")));
+    }
+    if let Some(contents) = executor::executor_help(args) {
+        return Some(contents.to_owned());
     }
     match args {
         [help] if matches!(help.as_str(), "--help" | "-h") => Some(format!("{}\n", usage())),
@@ -141,10 +146,12 @@ pub(crate) fn usage() -> String {
             "Usage:\n",
             "  flow run <flow> [--inputs <file|->] [--emit jsonl]\n",
             "  flow init [--registry-root PATH]\n",
-            "  flow import <legacy-workspace>\n",
             "  flow validate [FLOW_REF]\n",
             "  flow create <tool|instruction|phase|flow> --help\n",
             "  {auth}\n",
+            "  flow executor check\n",
+            "  flow executor configure --path <absolute-path>\n",
+            "  flow executor configure --default\n",
             "  flow replay <conversation-id> <run-session-id> [--emit jsonl]\n",
             "  flow tail <conversation-id> <run-session-id> [--emit jsonl] [--no-follow] [--timeout-ms N]\n",
             "  {reconcile_tool}\n",

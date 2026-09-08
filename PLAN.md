@@ -1,6 +1,6 @@
 # Plan
 
-Implementation milestones with deliverables and a Definition of Done (DoD). Performance targets are canonical in `PERFORMANCE.md`.
+Implementation milestones with deliverables and a Definition of Done (DoD). Performance architecture and evidence are canonical in `PERFORMANCE.md`.
 
 Created: 2026-06-05
 
@@ -31,7 +31,7 @@ The initial adoption wedge is technical teams that need reusable, measurable, an
 
 **Decision state:** M0 and M1 are unblocked; accepted decisions are in [`ADR-LOG.md`](docs/adr/ADR-LOG.md).
 
-**DoD:** the scaffold compiles on Linux, macOS, and Windows; its canonical contracts and fixtures are sufficient to implement M1 without architectural guesses; and all M0 gates defined by the canonical test, security, and CI sources pass.
+**DoD:** the scaffold compiles for each implemented product's targets in [PLATFORMS.md](PLATFORMS.md); its canonical contracts and fixtures are sufficient to implement M1 without architectural guesses; and all M0 gates defined by the canonical test, security, and CI sources pass.
 
 ### M1 — Flow Agent deterministic runtime foundation
 
@@ -46,16 +46,16 @@ The initial adoption wedge is technical teams that need reusable, measurable, an
 - Fixture/stub execution only when the workspace explicitly selects the canonical fixture profile; other workspaces fail closed before provider or tool side effects.
 - Canonical Flow runtime events, append-only session history, replay, tail and resume.
 - Deterministic, cache-stable `flow-context-v0` compilation and reproducible context manifests.
-- Deterministic in-process policy enforcement/emulation for declared command, parameter, path, protected-path and deny-all network decisions.
-- Cross-platform functional, coverage and Linux performance gates defined by `TESTING.md`, `PERFORMANCE.md` and CI.
+- Deterministic in-process policy enforcement/emulation for declared command, parameter, exact-mount and deny-all network decisions.
+- Cross-platform functional and coverage gates plus Linux performance evidence defined by `TESTING.md`, `PERFORMANCE.md` and CI.
 
 M1 does not provide a real provider adapter, general external process execution, a complete POSIX shell, OS-enforced isolation, positive network grants, or public session export/delete/prune operations.
 
-**DoD:** a fixture-profile workspace runs multi-phase Flows and Subflows headlessly; planning is side-effect-free; each planned fixture side effect is applied at most once; non-fixture execution fails closed; canonical events and context manifests are persisted and replayed/tailed/resumed without repeating completed side effects; one host-local lease authorizes each active workspace/session pair, direct workspace-marker mutation cannot grant or revoke it, process exit releases it, and controlled returns preserve all operation, writer-finalization, marker-validation and lease-release failures plus valid artifacts; policy-emulation and sandbox-negative tests remain explicit about the absence of an OS boundary; and every M1 test, coverage and performance gate passes. Flow Agent remains standalone and has no Watershed-owned project-code VCS behavior.
+**DoD:** a fixture-profile workspace runs multi-phase Flows and Subflows headlessly; planning is side-effect-free; each planned fixture side effect is applied at most once; non-fixture execution fails closed; canonical events and context manifests are persisted and replayed/tailed/resumed without repeating completed side effects; one host-local lease authorizes each active workspace/session pair, direct workspace-marker mutation cannot grant or revoke it, process exit releases it, and controlled returns preserve all operation, writer-finalization, marker-validation and lease-release failures plus valid artifacts; policy-emulation and sandbox-negative tests remain explicit about the absence of an OS boundary; and every M1 test and coverage gate passes with complete performance evidence. Flow Agent remains standalone and has no Watershed-owned project-code VCS behavior.
 
 ### M1.1 — Flow Agent practical execution
 
-**Status:** The final M1.1 Maintainer decisions are implemented; repository closeout is in progress.
+**Status:** Complete.
 
 #### M1.1 entry criteria — architecture hardening
 
@@ -84,7 +84,7 @@ The M1 deterministic runtime foundation satisfies the following criteria. They r
 8. Phase-scoped Tool availability: the provider may request an available Tool zero or more times; a Tool reference never invokes it automatically.
 9. Provider-requested invocation parameters validated against each Tool's `allowed_parameters`, with canonical bounded Tool results for events and Run Logs.
 10. A general bounded external subprocess runner.
-11. Predefined commands launched by direct exec without shell parsing, PATH lookup or ambient environment inheritance.
+11. Predefined command identity and arguments resolved without shell parsing, `PATH` lookup or ambient environment inheritance; productive launch uses the Executor boundary.
 12. Own-script execution through one fixed runner with a bounded runtime and no implicit interpreter selection.
 13. Timeouts, cancellation and bounded stdout and stderr.
 14. Per-Tool Run Log projections plus actual `tool.timed_out` and Tool-failure events.
@@ -105,9 +105,9 @@ The M1 deterministic runtime foundation satisfies the following criteria. They r
 - Timeout, cancellation, output caps and Tool logs are tested.
 - Every Conversation branch remains navigable in one append-only history. Latest-entry continuation and explicit older-entry branching create new Runs from the selected terminal compact snapshot after registry-drift validation, never roll back filesystem or external effects, and retain descendants. Exact two-id recovery consumes the same bounded snapshot model without redispatching durable external results.
 - No capability depends on Meta-Harness or Liquid.
-- Current gates plus the M1.1 performance and security budgets decided before implementation pass.
+- Current gates and security boundaries pass; the fixed M1.1 performance evidence is complete and retained.
 
-**Explicit post-M1.1 Flow Agent work:** later milestones may add typed projections or mappings between Flow, Phase, Instruction, subflow, Tool and addressable artifact inputs/outputs; backward edges or an expression language; general retry/fallback policies; and automatic Tool imports referenced by Instructions. Dynamic proposals to add a Phase, child Phase or Flow at run time—including one-run versus persisted approval and an operator opt-out—also remain deferred. A durable ordered Conversation-status inventory may replace the query-only CV-03 admission bound when larger inventories are required; it must define transaction, recovery, migration and consistency rules without replacing Conversation or migration authority. Any future routing or proposal surface requires a finite schema, permissions, complete allowed/rejected matrix, provenance, replay and approval decision before enablement. The M1.1 routing boundary is canonical in `PROTOCOL.md`.
+**Explicit post-M1.1 Flow Agent work:** later milestones may add typed projections or mappings between Flow, Phase, Instruction, subflow, Tool and addressable artifact inputs/outputs; backward edges or an expression language; general retry/fallback policies; and automatic Tool imports referenced by Instructions. Dynamic proposals to add a Phase, child Phase or Flow at run time—including one-run versus persisted approval and an operator opt-out—also remain deferred. A durable ordered Conversation-status inventory may replace the query-only CV-03 admission bound when larger inventories are required; it must define transaction, recovery and consistency rules without replacing Conversation authority. Any future routing or proposal surface requires a finite schema, permissions, complete allowed/rejected matrix, provenance, replay and approval decision before enablement. The M1.1 routing boundary is canonical in `PROTOCOL.md`.
 
 #### Accepted post-M1.1 architecture corrections
 
@@ -121,27 +121,13 @@ No implementation or release claim follows from a documentation decision alone. 
 
 ### M1.2 — Flow Agent OS isolation
 
-**Purpose:** replace M1.1's productive direct-Tool path with a Flow-owned Executor boundary that enforces each declared Tool policy at the operating-system boundary while preserving deterministic fixture execution and a working default installation.
+**Status:** The native self-protection replacement is implemented in source; its Linux and macOS product acceptance and performance evidence remain pending. ADR-0166–ADR-0175 own the approved security and installation decisions. Configuration administration remains manual for the first Flow Agent release; deferred work and discussion context belong to the [later roadmap](#later-flow-agent-roadmap). Prebuilt download packaging, full KPI rounds, the unchanged-candidate convergence sweep and ordered repository closeout remain incomplete. This entry updates status, not the separate three-workstream development plan.
 
-**Deliverables:**
+**Current implementation:** One shared one-shot lifecycle uses Linux Bubblewrap/seccomp or macOS Seatbelt to protect this installation's Flow-owned objects. Tool commands and typed parameters, Ready/Start, durable intent, bounded results and self-protection receipts replace broad mount/profile/network/process-capacity policy. Schemas reject removed requirements rather than ignoring them. The wire contract is canonical in [PROTOCOL.md](PROTOCOL.md#m12-executor-protocol-adr-0146-adr-0160-adr-0161-adr-0162); [TESTING.md](TESTING.md#m12-transition-and-executor-evidence) owns executable evidence.
 
-1. A versioned one-shot Executor protocol for exactly one Tool invocation: Flow Agent owns policy validation, Executor selection and lifecycle, bounded request/result validation, durable attempt state and fail-closed errors. The companion process receives one JSON request on stdin, returns one JSON result on stdout and is resolved only from an administrator-configured absolute path. No daemon, socket, pool or remote transport is in M1.2.
-2. One official Default Sandbox Executor installed by the standard Flow Agent installation path. `--no-default-executor` is an explicit administrator opt-out; it preserves authoring, validation and fixture execution but leaves productive execution fail-closed until a Custom Executor is configured. Flow Agent provides the protocol, implementer documentation, actionable diagnostics and an advisory compatibility probe, but makes no third-party compatibility or security guarantee.
-3. Ubuntu 24.04 x64 enforcement through Bubblewrap namespaces/mounts plus seccomp, with inherited descendant confinement and deny-all Tool networking. There is no Landlock-only or unsandboxed fallback.
-4. macOS 26 arm64 enforcement through a native Seatbelt profile with semantic parity to the canonical policy and deny-all Tool networking, inherited by descendants.
-5. The unchanged deterministic Fixture executor and fake-Executor conformance fixtures, so M1/M1.1 contracts remain testable before, during and after backend implementation.
-6. A hostile escape matrix covering traversal, symlinks, hardlinks, rename/create races, interpreter escape, environment and credential leakage, child processes, direct and indirect network access, protected paths, process/session escape, timeout, cancellation and teardown.
+**Contract:** The [security contract](SECURITY.md#accepted-flow-agent-security-target) and [execution/security architecture](docs/concept/flow-agent-executor-architecture.md) define guarantees and Engineer responsibilities. The unreleased migration adds no compatibility aliases.
 
-**DoD:**
-
-- A standard supported-platform installation passes its readiness self-test and runs a productive Flow out of the box; both standard and opt-out installation paths have automated acceptance tests.
-- Real Tool processes cannot exceed declared read, write, deny-all network or process boundaries on every exact platform for which support is claimed. Provider traffic remains Flow Agent traffic outside the Tool Sandbox.
-- Protocol conformance tests cover success, unsupported versions and policy, malformed/oversized output, timeout, premature exit, missing evidence and unavailable configuration without spawning a Tool after failed preflight.
-- Negative tests exercise the official applied OS boundary, not M1 policy emulation, and demonstrate equivalence between canonical policy and applied restrictions.
-- Descendants inherit restrictions; backend, protocol or readiness failure never falls back to M1.1 direct execution; platform differences and tested coverage are explicit.
-- The architecture and plain-language comparison with Pi Coding Agent and Codex CLI remain visible in [`docs/concept/flow-agent-executor-architecture.md`](docs/concept/flow-agent-executor-architecture.md).
-
-**Explicit post-M1.2 work:** Windows productive execution remains disabled until [D-047](docs/decisions/open-decisions.html#d-047) selects and proves a boundary. Positive CIDR/port grants remain disabled until [D-046](docs/decisions/open-decisions.html#d-046) is decided and proven. OCI/Docker/Podman, Lima/Apple Container, Firecracker/Cloud Hypervisor, gVisor, Kata Containers and Gondolin are non-binding future integration candidates, not support promises. A later milestone may add an independently reviewed backend or Custom Executor without transferring Executor ownership to Meta-Harness or Liquid.
+**DoD:** Verify the accepted boundary on both native Flow Agent targets in [PLATFORMS.md](PLATFORMS.md), prove the prebuilt installation contract, and complete the canonical test, performance and review gates. Cross-compilation, historical isolation tests and mechanism experiments do not prove the replacement. Meta-Harness and Liquid never acquire ownership of Flow's Executor or Tool protection.
 
 ### M2 — Meta-Harness MVP + AgentPulse
 
@@ -216,3 +202,17 @@ The target product is canonical in [`docs/concept/V-Spec_Liquid.html`](docs/conc
 - Import/export paths let integrations become Apps for users and compact CLI actions for agents without exposing MCP concepts in normal UX.
 
 **M3d DoD:** an installed Block Registry package is isolated, upgradeable and responsive; an external MCP integration can be permissioned once, represented as an App or headless integration, and invoked through the same action contract from Liquid or an authorized agent.
+
+## Later Flow Agent roadmap
+
+These entries retain scope and decision context, not detailed future-feature specifications or release commitments.
+
+### Tool-initiated configuration changes
+
+**Deferred until after the first Flow Agent release (ADR-0173).** The purpose is to let Tools request limited configuration changes without direct access to Flow files. Manual administration is sufficient initially and avoids building a proposal protocol and approval UI before the core execution boundary is ready.
+
+**Prior discussion (ADR-0167/ADR-0168):** The approved direction was Flow-applied, scope-limited proposals with default denial, optional local-owner approval or preconfigured limited permission. The initial scope was model/context-budget settings, not credentials, executable selection or Tool permissions. Review after Tool completion, bounded waiting, exact non-reusable consent and changes affecting future Runs were intended to avoid self-escalation and accidental repeated changes. Revisit the useful scope, unattended operation, review experience and conflict/recovery handling when scheduling this feature; retain no detailed protocol or diagram in advance.
+
+### Protection of other independent Flow installations
+
+**Discussion only; no feature commitment (ADR-0174).** The first release protects this installation's required objects under [SECURITY.md](SECURITY.md#native-self-protection-and-its-limits). Multiple Runs can share that home. Earlier discussion considered an administrator-listed set of other homes: it could protect deliberately separate installations from each other's Tools, but adds discovery, publication coordination and maintenance complexity. First establish whether users need separate homes instead of shared-home Runs; decide whether to add this protection before specifying it. No automatic whole-disk discovery or future delivery is approved.

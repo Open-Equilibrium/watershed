@@ -1,269 +1,169 @@
-# Flow Agent executor and sandbox architecture
+# Flow Agent execution and security architecture
 
-This document explains the accepted M1.2 target in plain language and visualizes the reference architectures that informed it. Normative milestone scope lives in [`PLAN.md`](../../PLAN.md), security invariants in [`SECURITY.md`](../../SECURITY.md), the Executor contract in [`PROTOCOL.md`](../../PROTOCOL.md), test rules in [`TESTING.md`](../../TESTING.md), and canonical terms in [`GLOSSARY.md`](../../GLOSSARY.md).
+**Status: replacement integrated; native verification pending.** The [security contract](../../SECURITY.md#accepted-flow-agent-security-target) is normative. Linux Bubblewrap/seccomp and Mac Seatbelt now implement the narrow replacement, including selected-home protection and warned overlapping locations. The diagrams explain the required boundary; they are not full runtime verification. [TESTING.md](../../TESTING.md#m12-transition-and-executor-evidence) owns native results and gaps. Future features belong only to the [roadmap](../../PLAN.md#later-flow-agent-roadmap).
 
-## Decision in one minute
+## Responsibility and architecture
 
-Flow Agent owns the rules and the execution decision. An Executor understands those rules and turns one Tool request into a safely managed process. A Sandbox backend supplies the actual restricted working environment. These are separate responsibilities.
+Flow Agent controls the workflow; the Executor starts and supervises a Tool; the native boundary protects Flow-owned files from direct Tool/child writes. Engineers trust Tool code and everything it executes or delegates to. These are separate responsibilities, not interchangeable layers of certification.
 
-The standard M1.2 installation includes the official Default Sandbox Executor, so a new user can run a productive Flow immediately. An administrator may explicitly opt out and configure a Custom Executor. Flow Agent provides a versioned protocol, development documentation, actionable errors and an advisory compatibility probe; it does not certify third-party software.
-
-M1.2 is deliberately smaller than Codex's complete execution stack. It adds one narrow companion process and two official platform adapters, not a daemon, remote execution service, VM manager, container platform or third-party compatibility program. Meta-Harness and Liquid receive no Executor or Tool-Sandbox responsibility.
-
-## Glossary as one picture
-
-```mermaid
-flowchart TD
-  AE["Agentic Engineer"] -->|"configures"| BB["Building Blocks"]
-  OP["Operator"] -->|"runs a predefined Flow"| FA["Flow Agent"]
-  BB --> FA
-  FA --> ER["Execution request<br/>one Tool invocation"]
-  ER --> EX["Executor<br/>Default Sandbox Executor or Custom Executor"]
-  ADMIN["Administrator"] -->|"selects and operates"| EX
-  CP["Compatibility probe"] -. "advisory only" .-> EX
-  EX --> BE["Sandbox backend"]
-  BE --> OSI["OS isolation"]
-  OSI --> SB["Sandbox<br/>restricted working environment"]
-  SB --> TOOL["Tool process<br/>and descendants"]
-  BE -. "possible form" .-> CT["Container<br/>shared host kernel"]
-  BE -. "possible form" .-> VM["VM or micro-VM<br/>separate guest kernel"]
-  FA -. "deterministic tests" .-> FX["Fixture executor<br/>no real process"]
-  FX --> PE["Policy emulation<br/>correctness check, not isolation"]
-  MHX["Meta-Harness agent executor<br/>whole CLI processes only"] -. "may start or supervise" .-> FA
-```
-
-The easiest mental model is a restaurant: Flow Agent checks the order and chooses the kitchen; the Executor understands the order and manages the cooking; the Sandbox backend supplies the locked kitchen; the Tool does the work inside it. A VM, container or OS primitive is a type of kitchen, not the person translating the order. Meta-Harness's separately named agent executor only starts or supervises the whole restaurant; it never chooses or manages a Tool's locked kitchen.
-
-## Open-source references
-
-The diagrams below describe the cited source snapshots, not contracts Watershed promises to copy.
-
-### Pi Coding Agent
-
-```mermaid
-flowchart TD
-  ENTRY["Interactive terminal, print or JSON,<br/>RPC over JSONL, or embedded SDK"] --> SESSION["AgentSession and agent loop"]
-  SESSION <--> MODEL["Model provider"]
-  SESSION --> DISPATCH["Tool dispatch"]
-  DISPATCH --> BUILTIN["Built-in read, write, edit and bash Tools"]
-  BUILTIN --> HOST["Host OS with Pi process permissions"]
-  EXT["Optional TypeScript extension hooks"] -. "replace or reroute Tools" .-> DISPATCH
-  EXT -.-> OS_EXT["Example OS-sandbox extension"]
-  OS_EXT --> OS_BACKEND["Seatbelt on macOS or Bubblewrap on Linux"]
-  EXT -.-> GON_EXT["Example Gondolin integration"]
-  GON_EXT --> GON["Gondolin micro-VM"]
-  GON --> MOUNT["Mounted project workspace"]
-```
-
-Pi is a deliberately small, extension-first coding harness. Its built-in Tools run with the Pi process's user permissions, and its project-trust feature controls what configuration is loaded rather than sandboxing Tool effects. Optional extensions can replace Tool operations: one cited example wraps bash with OS sandbox primitives; another reroutes file and shell Tools into a Gondolin micro-VM.
-
-Gondolin is therefore an isolation technology and Pi integration, not a Flow Agent Executor. It could become the backend behind a future Custom Executor only if an administrator implements the Flow protocol and accepts responsibility for that integration.
-
-What Flow Agent adopts from Pi is the narrow, replaceable integration seam. It does not adopt Pi's default no-sandbox security posture because ordinary Flow users must receive a safe, working default.
-
-### Codex CLI
-
-```mermaid
-flowchart TD
-  subgraph Clients["Codex clients"]
-    CLI["CLI and TUI"]
-    APP["App-server clients"]
-    EXEC["Headless exec mode"]
-  end
-  CLI --> CORE["Codex core session and agent loop"]
-  APP --> CORE
-  EXEC --> CORE
-  CORE <--> MODEL["Model provider"]
-  CORE --> TOOL["Tool runtime"]
-  TOOL --> PA["Approval and permission policy"]
-  PA --> MANAGER["Sandbox orchestration and command transformation"]
-  MANAGER --> LINUX["Linux: Bubblewrap, seccomp and legacy Landlock path"]
-  MANAGER --> MAC["macOS: Seatbelt profiles"]
-  MANAGER --> WIN["Windows: restricted-token and elevated components"]
-  LINUX --> PROC["Managed Tool process"]
-  MAC --> PROC
-  WIN --> PROC
-```
-
-Codex owns an integrated product security stack: approval decisions, permission profiles, sandbox selection, command transformation, managed networking, process lifecycle and platform-specific helpers cooperate inside one project. The pinned Linux implementation prefers system Bubblewrap, can use a bundled copy, applies a seccomp network filter and retains an explicit legacy Landlock path. macOS and Windows have separate native implementations.
-
-This design supports Codex's broad interactive coding-agent surface, but its complexity is not the minimum required for M1.2. Flow Agent needs its own policy-aware Executor boundary and one supported backend per MVP platform; it does not need Codex's approval UX, managed proxy, remote exec server, interactive process multiplexing or Windows stack.
-
-### What the scope reduction really means
-
-The Executor protocol itself is a modest boundary; trustworthy OS enforcement, packaging and hostile tests are the expensive parts. M1.2 remains a security-critical milestone, but it avoids most of the surrounding product machinery visible in Codex.
-
-| Capability | Flow Agent M1.2 | Codex reference stack |
+| Component | Responsibility | Not its promise |
 |---|---|---|
-| Translate product policy into a process request | Required | Required |
-| Bound process I/O, timeout, cancellation and descendants | Required, reusing M1.1 lifecycle work where safe | Required with broader interactive modes |
-| Linux and macOS native isolation | Required | Required and more feature-rich |
-| Default packaging, readiness check and hostile matrix | Required | Required |
-| Interactive approval/escalation UX | Not included | Integrated |
-| PTY and long-lived interactive process multiplexing | Not included | Integrated |
-| Positive-domain managed network proxying | Not included; deny all | Integrated |
-| Remote execution/server variants | Not included | Present in the wider project |
-| Windows Sandbox implementation | Post-MVP | Integrated platform stack |
-| General container, VM or micro-VM management | Post-MVP integration | Outside the narrow comparison |
+| Engineer | Select Building Blocks, trustworthy code/dependencies and explicit permission scopes. | A Tool's description or marketplace listing proves safety. |
+| Flow Agent | Validate calls and transitions, retain Run authority and handle durable effects. Configuration administration remains manual for the first Flow Agent release. | Infer all effects of arbitrary commands or make Tool results truthful. |
+| Executor | Preserve the existing short-lived companion seam, prepare mandatory protection before launch, bound transport/waiting and report observed results and cleanup. | Decide permissions, approve configuration, or certify third-party executors. |
+| Native boundary | Block direct modifications of protected Flow objects by the Tool and its children. | Contain all other host effects, independent services or privileged actors. |
+| Tool and dependency chain | Implement the admitted action correctly even for hostile inputs. | Rely on Flow to repair unsafe path handling, shell construction or delegated authority. |
 
-The practical reduction is therefore substantial, but not “just call Bubblewrap.” Flow Agent avoids several independent subsystems and one MVP platform; it still must prove that every declared Building-Block restriction survives policy translation, process launch and descendant behavior on two exact targets. Security verification, rather than JSON plumbing, is likely to dominate M1.2 effort.
 
-## Flow Agent target architecture
+The `flow` / `flow-executor` separation remains. Flow admits the protected inventory once under publication leases and validates each invocation; the short-lived companion receives the exact resolved policy and establishes protection before the first Tool instruction. [PROTOCOL.md](../../PROTOCOL.md#m12-executor-protocol-adr-0146-adr-0160-adr-0161-adr-0162) owns descriptor, digest and receipt details. Configuration administration is manual. Administrator-selected Custom Executors remain trusted installation code and cannot serve as an automatic protection bypass; only explicit Custom selection permits an absent official sibling (ADR-0175).
+
+## Security case matrix
+
+The cases partition the supported authority paths and failure classes. They are not a claim to enumerate every possible exploit or prove that an OS primitive is correct. Native acceptance must establish the general boundary and then exercise representative operations, not keep searching for spelling variants of commands.
+
+| Case | Boundary and expected outcome |
+|---|---|
+| [1. Ordinary or invalid request](#1-ordinary-or-invalid-request) | Flow accepts only a valid in-scope invocation; trusted Tool code implements its effects. |
+| [2. Direct protected write](#2-direct-protected-write) | Native denial, including child processes; no escalation or automatic retry. |
+| [3. Compromised Tool](#3-compromised-tool) | Direct protected writes remain blocked; unrelated host effects and false results are not contained. |
+| [4. Compromised new helper](#4-compromised-new-helper) | Helper inherits direct-write protection; the trusted dependency assumption is nevertheless broken. |
+| [5. Independent third-party service](#5-independent-third-party-service) | Service acts with separate authority and may bypass Flow's local write guard. |
+| [6. Missing boundary or interrupted execution](#6-missing-boundary-or-interrupted-execution) | No unprotected launch; post-launch uncertainty is not success or permission to replay. |
+| [7. Parallel agents](#7-parallel-agents) | Separate Run ownership does not serialize shared project edits or reserve host resources. |
+| [8. External sandbox](#8-external-sandbox) | Extra containment is possible only when nested prerequisites work; no fallback. |
+
+### 1. Ordinary or invalid request
 
 ```mermaid
 flowchart TD
-  subgraph Owned["Owned by Flow Agent"]
-    FLOW["Flow Agent runtime"]
-    FLOW --> POLICY["Validate Tool call and compile canonical policy"]
-    POLICY --> SELECT["Select Executor and manage its lifecycle"]
-    SELECT --> REQUEST["Versioned Execution request and result validation"]
-    SELECT -. "fixture profile" .-> FIXTURE["Fixture executor"]
-    REQUEST --> DEFAULT["Official Default Sandbox Executor"]
-  end
-  AE["Agentic Engineer"] -->|"configures Building Blocks"| FLOW
-  USER["Business or ordinary user"] -->|"runs a predefined Flow"| FLOW
-  FLOW <--> PROVIDER["Model provider<br/>or local model endpoint"]
-  REQUEST -. "administrator choice" .-> CUSTOM["Custom Executor"]
-  ADMIN["Administrator"] -->|"installs, selects and operates"| CUSTOM
-  DEFAULT --> BACKEND["Official backend<br/>Bubblewrap and seccomp or Seatbelt"]
-  CUSTOM --> CUSTOM_BACKEND["Administrator-chosen backend"]
-  BACKEND --> TOOL["Per-Tool Sandbox<br/>one Tool process plus descendants"]
-  CUSTOM_BACKEND --> TOOL
+  Instructions["Editable Workspace AGENTS.md: context, not authority"] --> Input
+  Global["Protected global AGENTS.md: context, not authority"] --> Input
+  Input["Model requests Tool with parameters"] --> Check{"Available here and valid?"}
+  Check -->|No| Reject["Reject before Tool effects"]
+  Check -->|Yes| Ready{"Mandatory native boundary ready?"}
+  Ready -->|No| Stop["Fail before launch"]
+  Ready -->|Yes| Intent["Persist intent; retain same Executor after Ready"]
+  Intent --> Start["Commit tool.started; send matching Start"]
+  Start --> Run["Establish protection; execute trusted Tool"]
+  Run --> Result["Validate self-protection receipt; persist bounded result"]
 ```
 
-Provider traffic stays in Flow Agent, outside the Tool Sandbox. This permits remote providers and local model endpoints even while every Tool receives deny-all network access. Only the Tool process and its descendants cross the Executor boundary.
+A read Tool must enforce its own promised project scope, including links, replacement races and hostile path input relevant to its implementation. Flow's parameter validation does not inspect every later file operation. A build Tool's dependency chain includes build scripts, plugins and project code, including code the model may have edited. A correct implementation must not confuse untrusted text with new execution authority.
 
-The Fixture executor remains an in-process deterministic test double. It is not a production escape hatch and makes no OS-isolation claim.
+The [instruction-file exclusion](../../SECURITY.md#native-self-protection-and-its-limits) applies only to Workspace-local inputs; the global file stays protected. Changed local instructions may steer the model toward a harmful but authorized request; this diagram promises unchanged permission checks, not harmless intent.
 
-### Responsibility split
-
-| Owner | Must do | Must not claim or do |
-|---|---|---|
-| Agentic Engineer | Configure Building Blocks, Tool identities and least-capability boundaries. | Shift security choices to an ordinary Flow user. |
-| Ordinary user / Operator | Select and run a predefined Flow; see clear setup or execution failures. | Understand sandbox products before a standard installation can run. |
-| Flow Agent runtime | Validate Tool calls, compile policy, select and start the configured Executor, validate responses, persist lifecycle state and fail closed. | Provide the isolated filesystem/kernel itself or silently fall back to the M1.1 unsandboxed runner. |
-| Default Sandbox Executor | Validate one request, translate policy, invoke the supported backend, manage one process tree, bound I/O/time and return result plus enforcement evidence. | Become a long-lived daemon, general VM manager or remote job service in M1.2. |
-| Sandbox backend | Construct and enforce the filesystem, process and network boundary. | Interpret Building Blocks or decide Flow policy. |
-| Administrator using a Custom Executor | Install, configure, assess, secure, monitor and update that Executor and backend. | Treat a successful probe as certification by Flow Agent. |
-
-Meta-Harness may later start or observe the `flow` process like another CLI agent. It does not select, install, supervise or certify Flow Executors and does not manage Tool Sandboxes. Giving it that responsibility would make standalone Flow Agent less safe and would couple M1.2 to a later product. Liquid likewise remains outside this boundary.
-
-## One Tool invocation
+### 2. Direct protected write
 
 ```mermaid
 sequenceDiagram
-  participant P as Provider
+  participant T as Tool or new helper
+  participant G as Native boundary
+  participant P as Protected Flow files
   participant F as Flow Agent
-  participant S as Run store
-  participant E as Executor
-  participant B as Sandbox backend
-  participant T as Tool
-  P->>F: Request one declared Tool
-  F->>F: Validate parameters and compile policy
-  F->>S: Commit Tool intent
-  F->>E: Send one bounded Execution request
-  E->>E: Validate version, fields and supported policy
-  alt Request or backend is invalid
-    E-->>F: Stable setup or protocol failure
-    F->>S: Commit terminal failure
-  else Boundary is ready
-    E->>B: Create policy-bound Sandbox
-    B->>T: Start Tool in Sandbox
-    T-->>E: Bounded output and exit
-    E->>B: Terminate descendants and tear down
-    E-->>F: Result plus enforcement evidence
-    F->>F: Validate bounded result and evidence
-    F->>S: Commit terminal result
-    F-->>P: Return Tool result
-  end
+  T->>G: Write, delete or replace protected object
+  G-->>T: Denied, protected object unchanged
+  T-->>F: Tool result or failure
+  Note over F: No permission popup inferred from an OS error
+  Note over F: No restart with broader direct-write authority
 ```
 
-One Executor process handles one Tool invocation in M1.2. Communication is one versioned JSON request on standard input and one versioned JSON result on standard output; bounded standard error is diagnostic only. Flow Agent resolves the Executor to an administrator-configured absolute path, never through shell or workspace `PATH` lookup. There is no daemon, socket protocol, pooled guest or remote transport in the MVP.
+A direct-write block is not a whole-Tool rollback. The Tool may already have edited other files or contacted a service. A Tool may also catch an OS error and report success; the blocked write stays blocked, but Flow does not thereby know the Tool's result is truthful. Native acceptance must prove object identity and child inheritance for the integrated mechanism; a path match in command text is insufficient. No Tool permission lifts this guard.
 
-This narrow boundary contains the work difference versus Codex. Flow still has to implement policy translation, lifecycle control, diagnostics and hostile tests, but it does not have to reproduce a full interactive coding-agent execution subsystem.
-
-## M1.1 to M1.2 without losing testability
-
-```mermaid
-flowchart LR
-  M11F["M1.1 fixture profile<br/>Fixture executor"] -->|"preserved"| M12F["M1.2 fixture profile<br/>same deterministic contract"]
-  M11P["M1.1 productive profile<br/>bounded direct runner without isolation"] -->|"replaced"| M12P["M1.2 productive profile<br/>Executor protocol"]
-  M12P --> DS["Default Sandbox Executor"]
-  M12P -. "administrator choice" .-> CE["Custom Executor"]
-```
-
-Before M1.2 is complete, all M1 and M1.1 fixture and productive tests remain runnable under their current claims. During M1.2, the Executor protocol is developed against deterministic fake Executors before an OS backend is required. At M1.2 release, the fixture path remains independent of any installed Sandbox, while productive execution on claimed platforms fails closed unless a configured Executor proves basic readiness.
-
-The old M1.1 direct runner may remain as internal reused lifecycle code, but it is not a selectable productive fallback after M1.2. This prevents an installation or backend failure from quietly removing the promised boundary.
-
-## Installation contract
+### 3. Compromised Tool
 
 ```mermaid
 flowchart TD
-  START["Install Flow Agent"] --> CHOICE{"Use the standard installation?"}
-  CHOICE -->|"Yes"| BUNDLE["Install Flow Agent and Default Sandbox Executor"]
-  BUNDLE --> CHECK["Validate backend prerequisites and run readiness self-test"]
-  CHECK -->|"Pass"| READY["Productive Flows work out of the box"]
-  CHECK -->|"Fail"| STOP["Installation or execution fails with actionable diagnostics"]
-  CHOICE -->|"No: explicit --no-default-executor opt-out"| CORE["Install Flow Agent without Default Sandbox Executor"]
-  CORE --> EXT["Administrator installs and configures a Custom Executor"]
-  EXT --> PROBE["Run advisory compatibility probe"]
-  PROBE -->|"Known checks pass"| ADMIN_READY["Productive execution enabled under administrator responsibility"]
-  PROBE -->|"Mismatch or no Executor"| STOP
+  Tool["Compromised Tool inside native boundary"] --> FlowWrite["Direct write to protected Flow file"]
+  FlowWrite --> Denied["Blocked by mandatory native protection"]
+  Tool --> Project["Other host files or network effects"]
+  Project --> Authority["Possible within available OS authority"]
+  Tool --> Lie["False result returned to Flow"]
+  Lie --> Untrusted["Result is not proof of correctness"]
 ```
 
-`--no-default-executor` is the package-manager-independent semantic name for the explicit opt-out. Each eventual installer must expose that choice without making it the default. A standard installation is not successful until its supported backend is present and the readiness self-test passes. The opt-out installation may still validate, author and run fixture-profile Flows; productive execution gives a clear `executor_unavailable` failure until an Executor is selected with `flow executor configure --path <absolute-path>`. The selection is user-global administrator configuration, never a Workspace Building Block or provider decision.
+This violates the trusted-Tool assumption. The narrow direct-write guarantee still has to work within its declared scope, but it is not a certificate that running hostile code is safe. The Tool may damage project data, read accessible secrets, exhaust resources or lie. Flow does not automatically detect compromise. If the controller, installed enforcement component or OS itself is compromised, the enforcement assumption fails as well.
 
-## M1.2 supported matrix
+### 4. Compromised new helper
 
-| Target | Official backend | Network posture | Claim |
-|---|---|---|---|
-| Ubuntu 24.04 x64 | Bubblewrap namespaces and mounts plus seccomp | Tool network namespace isolated; deny all | Official Default Sandbox Executor target after the hostile matrix passes. No Landlock-only fallback. |
-| macOS 26 arm64 | Native Seatbelt profile | Deny all for Tool processes | Official Default Sandbox Executor target after semantic-parity and hostile tests pass. |
-| Windows | None in the MVP | Productive execution unavailable | Post-MVP decision and evidence; Windows does not drive the M1.2 design. |
-| Other systems or versions | None claimed | Fail closed | An administrator may attempt a Custom Executor without any Flow Agent guarantee. |
+```mermaid
+flowchart TD
+  Good["Correct Tool"] --> Launch["Starts a helper or executes project code"]
+  Launch --> Bad["Compromised code inherits native restriction"]
+  Bad --> Direct["Direct protected Flow write"]
+  Direct --> Denied["Blocked"]
+  Bad --> Other["Other effects or false output"]
+  Other --> Risk["Not generally contained by Flow"]
+```
 
-Positive CIDR/port egress grants remain disabled in M1.2. The future network decision must prove DNS, encrypted DNS, indirect connection and descendant behavior before any allow rule is advertised. Flow Agent's own provider connection is not a Tool egress grant.
+The parent being correct is insufficient: the complete executable chain must be trusted. The same reasoning applies to an imported library running inside the parent, an interpreter, a test runner or a dependency hook. A new process does not lose the direct-write restriction merely because another Tool launches it. A call to an independent service is different and belongs to case 5.
 
-### Possible later modules
+### 5. Independent third-party service
 
-The Executor protocol is intentionally backend-neutral. Potential later administrator or community integrations include OCI runtimes such as Docker or Podman; Lima or Apple Container; Firecracker or Cloud Hypervisor; gVisor; Kata Containers; and Gondolin. Bubblewrap and Seatbelt are the official initial backends. These names are research candidates, not a support roadmap, endorsement or compatibility statement. Each integration owner must evaluate platform fit, licensing, supply chain, policy equivalence, startup cost and escape evidence.
+```mermaid
+sequenceDiagram
+  participant T as Tool inside boundary
+  participant S as Independent local application or service
+  participant P as Host files including Flow files
+  T->>S: Request an action through an allowed integration
+  Note over S: Separate process authority, not a newly confined child
+  S->>P: Perform action with its own OS rights
+  Note over S,P: Flow's Tool write guard does not govern this access
+```
 
-## Test and error rules
+A trustworthy Tool can call a compromised service, or correctly request an intentionally powerful action from a trustworthy service. Either can affect Flow files if the service has the necessary local authority. Remote services can affect local files only through some local authority or access path; a remote request alone does not create local filesystem rights. The Engineer owns integration trust. Extending the guarantee to these actors would require another boundary decision, not a stronger warning message. An external sandbox may block the integration, but that is separate deployment protection.
 
-- Keep the fixture executor deterministic, in process and independent of OS Sandbox installation.
-- Test the Executor protocol first with fake companion processes: success, unknown version, malformed or oversized output, timeout, premature exit, unsupported policy and missing evidence.
-- Test both installation paths: the standard path is runnable after its readiness check; the explicit opt-out preserves authoring, validation and fixture execution while productive execution fails clearly until configured.
-- Run the full hostile escape matrix only against the official Default Sandbox Executor on each exact claimed target. It covers filesystem traversal, links and races, protected paths, interpreters, environment and credential exposure, direct and indirect network access, process/session escape, descendants, timeout, cancellation and teardown.
-- Prove that an unavailable or failed Executor never falls back to direct unsandboxed execution and never spawns the Tool when preflight fails.
-- Exercise Custom Executors only against the versioned protocol conformance suite. Passing that suite or the compatibility probe does not certify security, policy equivalence or production compatibility.
-- Error families distinguish installation/configuration (`executor_unavailable`), version/protocol (`executor_protocol_mismatch`, `executor_invalid_response`), policy/backend setup (`executor_policy_unsupported`, `sandbox_setup_failed`) and Tool runtime failures. Diagnostics are bounded and redact sensitive values.
+### 6. Missing boundary or interrupted execution
 
-## Trade-offs and quality goals
+```mermaid
+flowchart TD
+  Prepare["Prepare Tool execution"] --> Guard{"Required protection established?"}
+  Guard -->|No| Refuse["No Tool launch and no weaker fallback"]
+  Guard -->|Yes| Start["Durable authorization then Tool launch"]
+  Start --> Terminal{"Reliable terminal evidence?"}
+  Terminal -->|Yes| Record["Record observed outcome"]
+  Terminal -->|Missing after dispatch| Unknown["Stop further dispatch; preserve uncertainty"]
+  Unknown --> Cleanup["Attempt supported cleanup; report only what is known"]
+  Cleanup --> NoReplay["Do not automatically repeat uncertain effects"]
+```
 
-**Advantages**
+A timeout is not proof that every helper stopped. Removing hostile-descendant cleanup guarantees does not remove bounded waits, cancellation handling or honest recovery. A write restriction must survive in a child that outlives its parent for as long as that child can run; native acceptance must demonstrate that inheritance property. It does not promise that the child cannot keep changing its other admitted resources.
 
-- Ordinary users get a working, secure-by-default local installation.
-- Flow policy remains independent of any one sandbox vendor or virtualization product.
-- Administrators retain informed choice without transferring that decision to business users.
-- One-shot processes and a narrow JSON contract are easier to audit, test and replace than a daemon or remote service.
-- Linux and macOS local execution cover the first laptop/server use cases while preserving a future path to containers, VMs and local models.
+### 7. Parallel agents
 
-**Costs and residual risks**
+```mermaid
+flowchart TD
+  A["Flow Run A"] --> StoreA["Owned Run A state"]
+  B["Flow Run B"] --> StoreB["Owned Run B state"]
+  A --> Config["Same-user global configuration authority"]
+  B --> Config
+  A --> ToolA["Tool A"]
+  B --> ToolB["Tool B"]
+  ToolA --> Project["Shared writable project files"]
+  ToolB --> Project
+  Project --> Race["Concurrent edits need separate coordination"]
+  ToolA --> Host["Shared CPU, RAM, disk and GPU"]
+  ToolB --> Host
+```
 
-- Flow Agent still owns a security-sensitive Default Sandbox Executor, its policy mapping, packaging and regression matrix.
-- A versioned external protocol adds compatibility and diagnostic work even though Flow Agent makes no third-party guarantee.
-- Bubblewrap and Seatbelt differ, so equivalence must be proven at the capability level rather than by identical implementation.
-- Custom Executors join the administrator's trusted computing base and may falsely report enforcement evidence.
-- Deny-all Tool networking limits early use cases until a later positive-egress design is proven.
+Private Run ownership is not a per-Run OS identity. Twenty correctly implemented Tools can still conflict on one file or overcommit a laptop. ADR-0174 protects this installation's required objects; Tools from an independently configured home do not automatically protect another home. Shared-home Runs retain the same protected set, not mutual Run isolation. No project-code VCS, scheduler or new cross-agent locking product is introduced here.
 
-This split best matches the project KPIs: minimal one-shot protocol, maintainable ownership, modular backends, low steady-state overhead, scale through independent invocations, stable fail-closed behavior and security claims bounded by evidence.
+### 8. External sandbox
 
-## Pinned reference sources
+```mermaid
+flowchart TD
+  Outer["Optional deployment-owned sandbox"] --> Flow["Flow Agent and its Executor"]
+  Flow --> Ready{"Required inner protection and runtime access available?"}
+  Ready -->|No| Refuse["Reject unsupported deployment; no unprotected fallback"]
+  Ready -->|Yes| Inner["Native Flow-file protection"]
+  Inner --> Tool["Tool operates under both sets of restrictions"]
+```
 
-Research snapshot: 2026-08-17.
+An outer container, VM or sandbox can add filesystem, network or resource limits. It may also block the native mechanism, provider connection or intended Mac automation. Compatibility must be tested with real nested execution; there is no support promise for arbitrary sandbox products. A user-selected outer environment does not turn a Linux guest into native macOS Tool support or replace required native release evidence.
 
-- Pi Coding Agent, commit [`8720548`](https://github.com/earendil-works/pi/tree/87205484bf749c2140fef5d1bea68995d57e739c), MIT: [`README.md`, `security.md` and `rpc.md`](https://github.com/earendil-works/pi/tree/87205484bf749c2140fef5d1bea68995d57e739c/packages/coding-agent), the [`sandbox/index.ts` OS-sandbox example](https://github.com/earendil-works/pi/tree/87205484bf749c2140fef5d1bea68995d57e739c/packages/coding-agent/examples/extensions/sandbox), the [`gondolin/index.ts` Tool-routing example](https://github.com/earendil-works/pi/tree/87205484bf749c2140fef5d1bea68995d57e739c/packages/coding-agent/examples/extensions/gondolin), and the root `LICENSE` in the pinned snapshot.
-- OpenAI Codex CLI, commit [`21cfd36`](https://github.com/openai/codex/tree/21cfd369efca2df70c904c580b2e7e2e3eddb3c3), Apache-2.0: [`tools/sandboxing.rs` orchestration](https://github.com/openai/codex/tree/21cfd369efca2df70c904c580b2e7e2e3eddb3c3/codex-rs/core/src/tools), the [core execution adapter](https://github.com/openai/codex/tree/21cfd369efca2df70c904c580b2e7e2e3eddb3c3/codex-rs/core/src/sandboxing), [`manager.rs` and `seatbelt.rs` policy transformation](https://github.com/openai/codex/tree/21cfd369efca2df70c904c580b2e7e2e3eddb3c3/codex-rs/sandboxing/src), the [Linux helper and backend behavior](https://github.com/openai/codex/tree/21cfd369efca2df70c904c580b2e7e2e3eddb3c3/codex-rs/linux-sandbox), the [Windows sandbox implementation](https://github.com/openai/codex/tree/21cfd369efca2df70c904c580b2e7e2e3eddb3c3/codex-rs/windows-sandbox-rs/src), and the root `LICENSE` in the pinned snapshot.
+## Integration and native acceptance
 
-No source above is a Watershed dependency or support promise merely because it informed this decision. Any later dependency requires the repository's normal licensing, security and supply-chain review.
+The [native protection design](flow-agent-native-protection-proposal.md) owns protected-object discovery, alias/ancestor invariants and the historical App Sandbox comparison. Linux uses a host-root bind with targeted read-only protection, read-only `/proc`, private `/dev` and seccomp; Mac uses narrow parameter-bound Seatbelt rules. Neither enforces general network denial, runtime-read profiles or process/thread capacity. The invariant is mandatory direct-write protection of this installation's selected home, platform stores and required program objects, inherited by new helpers. Other homes and independent services remain outside it.
+
+Runtime, policy/schema, wire and fixtures have been migrated. The [native test matrix](../../TESTING.md#m12-transition-and-executor-evidence) and release-artifact acceptance are being migrated from the prior systemd/container gate to Ubuntu 24.04 x86_64 and macOS 26 ARM64. Native GREEN for this replacement is not available. Historical feasibility and passing Windows shared tests cannot establish complete protected-set admission, publication races, child lifetime or native installation correctness.
+
+Acceptance must retain ordinary shell/C, Python and npm build workloads with explicit allowed controls, alongside protected-write/alias/ancestry denial, global versus local instructions, missing protection, manual/internal publication, bounded output, cancellation and honest crash/recovery outcomes. [PERFORMANCE.md](../../PERFORMANCE.md) owns complete lifecycle observations. Standard Tools and the later marketplace remain [D-066](../decisions/open-decisions.html#d-066) and [D-067](../decisions/open-decisions.html#d-067).

@@ -30,7 +30,7 @@ fn replay_prefix(writer: &mut ConversationEventWriter, events: &[EventEnvelope])
     for event in events {
         let canonical = event.canonical_jsonl().expect("prefix event canonicalizes");
         writer
-            .commit(event, &canonical, None, None)
+            .commit(event, &canonical, None)
             .expect("event prefix replays");
     }
 }
@@ -66,7 +66,7 @@ fn rotated_context_checkpoint_retry_resyncs_segment_parent_before_success() {
             let checkpoint =
                 (event.event_type == EventType::MessageCompleted).then(|| prior_checkpoint.clone());
             writer
-                .commit(event, &line, checkpoint, None)
+                .commit(event, &line, checkpoint)
                 .expect("event/context prefix replays");
         }
     };
@@ -76,7 +76,7 @@ fn rotated_context_checkpoint_retry_resyncs_segment_parent_before_success() {
     replay_prefix(&mut writer);
     set_conversation_stream_parent_sync_error_for_path_for_test(&run, io::ErrorKind::Other);
     writer
-        .commit(&target, &canonical, Some(target_checkpoint.clone()), None)
+        .commit(&target, &canonical, Some(target_checkpoint.clone()))
         .expect_err("rotated context parent-sync failure is reported");
     assert_eq!(
         fs::read(&rotated_path).expect("empty rotated context segment reads"),
@@ -101,7 +101,7 @@ fn rotated_context_checkpoint_retry_resyncs_segment_parent_before_success() {
     replay_prefix(&mut recovered);
     reset_conversation_stream_parent_sync_count_for_path_for_test(&run);
     recovered
-        .commit(&target, &canonical, Some(target_checkpoint.clone()), None)
+        .commit(&target, &canonical, Some(target_checkpoint.clone()))
         .expect("exact context checkpoint retry succeeds");
     assert!(
         conversation_stream_parent_sync_count_for_path_for_test(&run) > 0,
@@ -146,7 +146,7 @@ fn exact_recovery_appends_the_event_missing_after_its_durable_context() {
 
     let canonical = event.canonical_jsonl().expect("completion canonicalizes");
     resumed
-        .commit(&event, &canonical, Some(checkpoint.clone()), None)
+        .commit(&event, &canonical, Some(checkpoint.clone()))
         .expect("missing event is repaired from the exact context checkpoint");
     resumed.finish().expect("recovery writer finishes");
 
@@ -190,7 +190,7 @@ fn failed_context_only_repair_sync_does_not_notify() {
     set_conversation_file_sync_error_for_path_for_test(&events_path, io::ErrorKind::Other);
     let canonical = event.canonical_jsonl().expect("completion canonicalizes");
     resumed
-        .commit(&event, &canonical, Some(checkpoint), None)
+        .commit(&event, &canonical, Some(checkpoint))
         .expect_err("repaired-event synchronization failure is reported");
 
     assert_eq!(
@@ -215,7 +215,7 @@ fn message_completion_syncs_context_before_event_append_and_recovers_the_context
     for event in &prefix {
         let canonical = event.canonical_jsonl().expect("prefix event canonicalizes");
         writer
-            .commit(event, &canonical, None, None)
+            .commit(event, &canonical, None)
             .expect("prefix event commits");
     }
     writer.finish().expect("prefix writer finishes");
@@ -235,7 +235,7 @@ fn message_completion_syncs_context_before_event_append_and_recovers_the_context
     set_conversation_file_sync_error_for_path_for_test(&contexts_path, io::ErrorKind::Other);
 
     let error = writer
-        .commit(&event, &canonical, Some(checkpoint.clone()), None)
+        .commit(&event, &canonical, Some(checkpoint.clone()))
         .expect_err("context synchronization failure rejects message completion");
     assert!(
         error
@@ -260,7 +260,7 @@ fn message_completion_syncs_context_before_event_append_and_recovers_the_context
             .expect("context-only recovery writer opens");
     replay_prefix(&mut recovered, &prefix);
     recovered
-        .commit(&event, &canonical, Some(checkpoint), None)
+        .commit(&event, &canonical, Some(checkpoint))
         .expect("recovery repairs the exact context-only tail");
     recovered.finish().expect("recovery writer finishes");
 
@@ -293,7 +293,7 @@ fn context_only_recovery_rejects_every_non_exact_pair_without_appending() {
                 .canonical_jsonl()
                 .expect("prefix event canonicalizes");
             resumed
-                .commit(prefix_event, &canonical, None, None)
+                .commit(prefix_event, &canonical, None)
                 .expect("event prefix replays");
         }
         let attempted_checkpoint = match case {
@@ -319,7 +319,7 @@ fn context_only_recovery_rejects_every_non_exact_pair_without_appending() {
         let canonical = event.canonical_jsonl().expect("attempt canonicalizes");
 
         resumed
-            .commit(&event, &canonical, attempted_checkpoint, None)
+            .commit(&event, &canonical, attempted_checkpoint)
             .expect_err("non-exact context/event pair fails closed");
         assert_eq!(
             fs::read(&events_path).expect("event stream reads after rejection"),
@@ -332,7 +332,7 @@ fn context_only_recovery_rejects_every_non_exact_pair_without_appending() {
                 .canonical_jsonl()
                 .expect("exact retry canonicalizes");
             resumed
-                .commit(&exact_event, &exact_canonical, Some(exact_checkpoint), None)
+                .commit(&exact_event, &exact_canonical, Some(exact_checkpoint))
                 .expect_err("a recovery error permanently closes the writer");
             resumed
                 .reserve_productive_dispatch(ProductiveDispatchReservation::default())
@@ -369,7 +369,7 @@ fn replayed_message_completion_requires_its_exact_context_checkpoint() {
     replay_prefix(&mut resumed, &prefix);
 
     resumed
-        .commit(&event, &canonical, None, None)
+        .commit(&event, &canonical, None)
         .expect_err("durable message.completed requires its paired checkpoint");
     resumed
         .finish()
@@ -426,7 +426,7 @@ fn conversation_lone_delta_uses_the_shared_batch_deadline() {
             .canonical_jsonl()
             .expect("setup event canonicalizes");
         writer
-            .commit(semantic, &canonical, None, None)
+            .commit(semantic, &canonical, None)
             .expect("setup event commits");
         expected.push_str(&canonical);
         receiver
@@ -435,7 +435,7 @@ fn conversation_lone_delta_uses_the_shared_batch_deadline() {
     }
 
     writer
-        .commit(&event, &canonical, None, None)
+        .commit(&event, &canonical, None)
         .expect("progress event enqueues");
     assert_eq!(
         receiver.highest_committed_sequence(),
@@ -495,7 +495,7 @@ fn conversation_progress_batch_keeps_its_durable_prefix_when_the_segment_limit_i
     for event in writer_events {
         let canonical = event.canonical_jsonl().expect("prefix event canonicalizes");
         writer
-            .commit(&event, &canonical, None, None)
+            .commit(&event, &canonical, None)
             .expect("prefix event commits");
         receiver
             .recv_timeout(Duration::from_millis(500))
@@ -503,10 +503,10 @@ fn conversation_progress_batch_keeps_its_durable_prefix_when_the_segment_limit_i
     }
 
     writer
-        .commit(&first, &first_canonical, None, None)
+        .commit(&first, &first_canonical, None)
         .expect("first delta enqueues");
     writer
-        .commit(&second, &second_canonical, None, None)
+        .commit(&second, &second_canonical, None)
         .expect("second delta enqueues");
     let error = writer
         .finish()
@@ -556,7 +556,7 @@ fn recovery_prefix_stays_silent_before_the_live_suffix_batches() {
     for event in &prefix {
         let canonical = event.canonical_jsonl().expect("prefix event canonicalizes");
         initial
-            .commit(event, &canonical, None, None)
+            .commit(event, &canonical, None)
             .expect("prefix event commits");
         expected.push_str(&canonical);
     }
@@ -583,7 +583,7 @@ fn recovery_prefix_stays_silent_before_the_live_suffix_batches() {
         .canonical_jsonl()
         .expect("suffix event canonicalizes");
     resumed
-        .commit(&suffix, &canonical, None, None)
+        .commit(&suffix, &canonical, None)
         .expect("live suffix enqueues");
     assert_eq!(
         receiver.highest_committed_sequence(),

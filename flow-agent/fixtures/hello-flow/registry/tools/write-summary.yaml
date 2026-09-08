@@ -7,7 +7,3 @@ tool:
   script_body: |
     printf '%s\n' "$SUMMARY" > out/summary.txt
   allowed_parameters: []
-  read_scope: ["workspace"]
-  write_scope: ["workspace/out"]
-  protected_path_grants: []
-  network: deny

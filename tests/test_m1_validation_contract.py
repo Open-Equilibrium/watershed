@@ -35,7 +35,7 @@ PROTECTED_SCAN_FILES = {
     "id_ed25519_sk",
 }
 DECISION_REFERENCE_PATTERN = re.compile(r"\bD-([0-9]{3})\b")
-DECISION_ANCHOR_PATTERN = re.compile(r'<article id="d-([0-9]{3})"')
+DECISION_ANCHOR_PATTERN = re.compile(r'<[a-z][^>]*\bid="d-([0-9]{3})"')
 
 
 def is_protected_validation_path(relative_path: Path) -> bool:

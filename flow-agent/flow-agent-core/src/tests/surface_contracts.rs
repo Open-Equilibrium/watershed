@@ -209,46 +209,10 @@ fn runtime_error_diagnostics_cover_every_controlled_failure_shape() {
 }
 
 #[test]
-fn tool_side_effect_modes_separate_planning_preflight_and_execution() {
+fn tool_side_effect_modes_separate_planning_and_execution() {
     assert!(ToolSideEffectMode::Apply.should_execute_tool(1));
     assert!(!ToolSideEffectMode::Plan.should_execute_tool(1));
-    assert!(
-        !ToolSideEffectMode::PreflightResume {
-            prefix_event_count: 1
-        }
-        .should_execute_tool(2)
-    );
-    assert!(
-        ToolSideEffectMode::Resume {
-            prefix_event_count: 1
-        }
-        .should_execute_tool(2)
-    );
-    assert!(
-        !ToolSideEffectMode::Resume {
-            prefix_event_count: 1
-        }
-        .should_execute_tool(1)
-    );
-    assert!(
-        ToolSideEffectMode::PreflightResume {
-            prefix_event_count: 1
-        }
-        .should_preflight_tool(2)
-    );
-    assert!(
-        !ToolSideEffectMode::PreflightResume {
-            prefix_event_count: 1
-        }
-        .should_preflight_tool(1)
-    );
-    for mode in [
-        ToolSideEffectMode::Apply,
-        ToolSideEffectMode::Plan,
-        ToolSideEffectMode::Resume {
-            prefix_event_count: 0,
-        },
-    ] {
+    for mode in [ToolSideEffectMode::Apply, ToolSideEffectMode::Plan] {
         assert!(!mode.should_preflight_tool(1));
     }
 }

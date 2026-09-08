@@ -25,7 +25,35 @@ pub(super) fn exchange_authorization_code_with_deadlines(
     redirect_uri: &str,
     deadlines: HttpDeadlines,
 ) -> Result<CredentialRecord, RuntimeError> {
+    exchange_authorization_code_for_endpoint(
+        OPENAI_TOKEN_URL,
+        code,
+        verifier,
+        redirect_uri,
+        deadlines,
+    )
+}
+
+#[cfg(test)]
+pub(crate) fn exchange_authorization_code_at(
+    endpoint: &str,
+    code: &str,
+    verifier: &str,
+    redirect_uri: &str,
+    deadlines: HttpDeadlines,
+) -> Result<CredentialRecord, RuntimeError> {
+    exchange_authorization_code_for_endpoint(endpoint, code, verifier, redirect_uri, deadlines)
+}
+
+fn exchange_authorization_code_for_endpoint(
+    endpoint: &str,
+    code: &str,
+    verifier: &str,
+    redirect_uri: &str,
+    deadlines: HttpDeadlines,
+) -> Result<CredentialRecord, RuntimeError> {
     let body = exchange_authorization_code_body_with_transport(
+        endpoint,
         code,
         verifier,
         redirect_uri,
@@ -36,6 +64,7 @@ pub(super) fn exchange_authorization_code_with_deadlines(
 }
 
 pub(crate) fn exchange_authorization_code_body_with_transport(
+    endpoint: &str,
     code: &str,
     verifier: &str,
     redirect_uri: &str,
@@ -43,7 +72,7 @@ pub(crate) fn exchange_authorization_code_body_with_transport(
     transport: impl FnOnce(&str, &[(&str, &str)], usize, HttpDeadlines) -> Result<Vec<u8>, RuntimeError>,
 ) -> Result<Vec<u8>, RuntimeError> {
     transport(
-        OPENAI_TOKEN_URL,
+        endpoint,
         &[
             ("grant_type", "authorization_code"),
             ("client_id", OPENAI_CODEX_CLIENT_ID),
@@ -60,16 +89,46 @@ pub(super) fn refresh_credential(
     prior: &CredentialRecord,
     now_epoch_milliseconds: u64,
 ) -> Result<CredentialRecord, RuntimeError> {
-    refresh_credential_with_transport(prior, now_epoch_milliseconds, post_form)
+    refresh_credential_for_endpoint(
+        OPENAI_TOKEN_URL,
+        prior,
+        now_epoch_milliseconds,
+        AUTH_HTTP_DEADLINES,
+    )
+}
+
+#[cfg(test)]
+pub(crate) fn refresh_credential_at(
+    endpoint: &str,
+    prior: &CredentialRecord,
+    now_epoch_milliseconds: u64,
+    deadlines: HttpDeadlines,
+) -> Result<CredentialRecord, RuntimeError> {
+    refresh_credential_for_endpoint(endpoint, prior, now_epoch_milliseconds, deadlines)
+}
+
+fn refresh_credential_for_endpoint(
+    endpoint: &str,
+    prior: &CredentialRecord,
+    now_epoch_milliseconds: u64,
+    deadlines: HttpDeadlines,
+) -> Result<CredentialRecord, RuntimeError> {
+    refresh_credential_with_transport(
+        endpoint,
+        prior,
+        now_epoch_milliseconds,
+        |endpoint, fields, maximum| post_form_with_deadlines(endpoint, fields, maximum, deadlines),
+    )
 }
 
 pub(crate) fn refresh_credential_with_transport(
+    endpoint: &str,
     prior: &CredentialRecord,
     now_epoch_milliseconds: u64,
     transport: impl FnOnce(&str, &[(&str, &str)], usize) -> Result<Vec<u8>, RuntimeError>,
 ) -> Result<CredentialRecord, RuntimeError> {
     let body = transport(
-        OPENAI_TOKEN_URL,
+        endpoint,
         &[
             ("grant_type", "refresh_token"),
             ("refresh_token", prior.refresh.as_str()),
@@ -78,14 +137,6 @@ pub(crate) fn refresh_credential_with_transport(
         MAX_OAUTH_TOKEN_BODY_BYTES,
     )?;
     protocol::parse_refresh_token_body(&body, prior, now_epoch_milliseconds)
-}
-
-fn post_form(
-    endpoint: &str,
-    fields: &[(&str, &str)],
-    maximum: usize,
-) -> Result<Vec<u8>, RuntimeError> {
-    post_form_with_deadlines(endpoint, fields, maximum, AUTH_HTTP_DEADLINES)
 }
 
 fn post_form_with_deadlines(

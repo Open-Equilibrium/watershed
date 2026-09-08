@@ -1,9 +1,4 @@
 use super::super::{helpers::empty_workspace, support::assert_denied};
-#[cfg(windows)]
-use crate::runtime::fs_guards::{
-    set_windows_directory_world_access_for_test, set_windows_file_current_user_only_for_test,
-    windows_file_is_current_user_only_for_test,
-};
 use crate::runtime::{
     fixture_tools::{
         anchored_workspace_write_path, replace_script_output_atomically,
@@ -17,7 +12,6 @@ use std::{fs, io, thread};
 
 mod target;
 
-#[cfg(unix)]
 #[test]
 fn rejects_existing_unix_target_without_changing_mode() {
     use std::os::unix::fs::PermissionsExt as _;
@@ -46,38 +40,6 @@ fn rejects_existing_unix_target_without_changing_mode() {
         .mode()
         & 0o777;
     assert_eq!(mode, 0o600);
-    assert_eq!(fs::read(output).expect("original output reads"), b"old");
-}
-
-#[cfg(windows)]
-#[test]
-fn rejects_existing_windows_target_without_changing_dacl() {
-    let workspace = empty_workspace("script-replacement-dacl");
-    set_windows_directory_world_access_for_test(&workspace).expect("broad parent DACL configured");
-    fs::create_dir(workspace.join("out")).expect("output directory created");
-    let output = workspace.join("out/result.txt");
-    fs::write(&output, "old").expect("original output written");
-    set_windows_file_current_user_only_for_test(&output)
-        .expect("restrictive output DACL configured");
-    assert!(
-        windows_file_is_current_user_only_for_test(&output).expect("original output DACL reads")
-    );
-    let target = anchored_workspace_write_path(&workspace, "out/result.txt", true)
-        .expect("target resolves")
-        .expect("target parent exists");
-
-    let err =
-        replace_script_output_atomically(&target, b"new").expect_err("existing output must reject");
-    assert_denied(
-        err,
-        core_policy::DenyReasonCode::WriteDenied,
-        "already exists",
-    );
-
-    assert!(
-        windows_file_is_current_user_only_for_test(&output).expect("original output DACL reads"),
-        "rejected output must retain its restrictive DACL"
-    );
     assert_eq!(fs::read(output).expect("original output reads"), b"old");
 }
 

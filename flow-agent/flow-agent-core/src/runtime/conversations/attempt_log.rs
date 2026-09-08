@@ -1,7 +1,7 @@
 use super::{run_log::RunAttemptLedger, run_objects::RunObjectStore};
 use crate::runtime::{
     context::ContextObject,
-    run_attempts::{ProductiveAttemptLog, RunAttemptIntent, RunAttemptKind, RunAttemptResult},
+    run_attempts::{ProductiveAttemptLog, RunAttemptIntent, RunAttemptResult},
     types::RuntimeError,
 };
 
@@ -39,21 +39,8 @@ impl ProductiveAttemptLog for ConversationAttemptLog {
         self.run_objects.persist(objects)
     }
 
-    fn intent(
-        &mut self,
-        kind: RunAttemptKind,
-        attempt_id: &str,
-        request_hash: &str,
-        tool_id: Option<&str>,
-        timestamp: &str,
-    ) -> Result<(), RuntimeError> {
-        self.ledger.append_intent(&RunAttemptIntent {
-            attempt_id: attempt_id.to_owned(),
-            attempt_kind: kind,
-            request_hash: request_hash.to_owned(),
-            tool_id: tool_id.map(str::to_owned),
-            timestamp: timestamp.to_owned(),
-        })
+    fn intent(&mut self, intent: &RunAttemptIntent) -> Result<(), RuntimeError> {
+        self.ledger.append_intent(intent)
     }
 
     fn terminal(&mut self, result: &RunAttemptResult) -> Result<(), RuntimeError> {

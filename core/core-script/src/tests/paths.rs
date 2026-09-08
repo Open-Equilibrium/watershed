@@ -1,35 +1,7 @@
 use super::super::paths::{
-    normalize_protected_path_pattern, normalize_safe_relative_path,
-    relative_path_has_windows_alias, relative_path_is_inside_scope,
+    normalize_safe_relative_path, relative_path_has_windows_alias, relative_path_is_inside_scope,
 };
 use proptest::prelude::*;
-
-#[test]
-fn protected_path_patterns_reject_nonportable_literal_characters() {
-    for pattern in [
-        "dir/file:stream",
-        "dir/NUL:stream",
-        "dir/a|b",
-        "dir/a<b",
-        "dir/a>b",
-        "dir/a\"b",
-        "dir/a\u{1}b",
-    ] {
-        assert_eq!(
-            normalize_protected_path_pattern(pattern),
-            None,
-            "{pattern:?}"
-        );
-    }
-
-    for pattern in ["workspace/*.env", "workspace/file?.txt", "workspace/**"] {
-        assert_eq!(
-            normalize_protected_path_pattern(pattern),
-            Some(pattern.to_owned()),
-            "{pattern:?}"
-        );
-    }
-}
 
 #[test]
 fn scope_containment_rejects_noncanonical_inputs() {

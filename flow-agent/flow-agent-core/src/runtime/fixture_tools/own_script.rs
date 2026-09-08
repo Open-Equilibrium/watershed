@@ -1,12 +1,7 @@
-use super::script_output::validate_script_write_target;
+use super::script_output::normalize_script_write_target;
 use crate::runtime::{execution_plan::ScriptWrite, types::RuntimeError};
-use core_policy::ProtectedPathMatchMode;
 
-pub fn plan_own_script(
-    tool: &core_script::ToolBlock,
-    protected_path_match_mode: ProtectedPathMatchMode,
-    policy: &core_policy::CommandPolicy,
-) -> Result<Option<ScriptWrite>, RuntimeError> {
+pub fn plan_own_script(tool: &core_script::ToolBlock) -> Result<Option<ScriptWrite>, RuntimeError> {
     if tool.script_runtime.as_ref() != Some(&core_script::ScriptRuntime::PosixSh) {
         return Err(RuntimeError::Protocol(format!(
             "tool {} must use script_runtime {}",
@@ -20,12 +15,10 @@ pub fn plan_own_script(
             tool.identity.id
         ))
     })?;
-    compile_own_script_operations(protected_path_match_mode, policy, script_body)
+    compile_own_script_operations(script_body)
 }
 
 pub fn compile_own_script_operations(
-    protected_path_match_mode: ProtectedPathMatchMode,
-    policy: &core_policy::CommandPolicy,
     script_body: &str,
 ) -> Result<Option<ScriptWrite>, RuntimeError> {
     let mut write = None;
@@ -40,7 +33,7 @@ pub fn compile_own_script_operations(
                     "own-script multiple write operations are not supported in M1".to_owned(),
                 ));
             }
-            let target = validate_script_write_target(protected_path_match_mode, policy, &target)?;
+            let target = normalize_script_write_target(&target)?;
             let contents = evaluate_script_command(&command)?;
             write = Some(ScriptWrite { contents, target });
         } else {

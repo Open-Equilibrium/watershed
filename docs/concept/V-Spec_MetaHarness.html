@@ -36,7 +36,7 @@
     <section id="purpose" class="section"><h2>1. Purpose & scope</h2><div class="body">
       <p><strong>Meta-Harness is a self-contained, host-scoped headless control plane.</strong> It centralizes configuration, starts and monitors CLI agents on its own host, normalizes their events, runs agent schedules and triggers, and computes AgentPulse metrics. External coding agents (Codex CLI, Claude Code and future agents) plug in through adapters — Codex is an adapter/target, not a Flow Agent base or fork (<a href="../adr/ADR-LOG.md">ADR-0028</a>).</p>
       <p>Meta-Harness is the Watershed platform's <strong>control layer</strong> and its team/control/governance wedge (see <a href="../../PLAN.md">PLAN.md</a> and <a href="../adr/ADR-LOG.md">ADR-0018</a>). Standalone job: <em>control, observe, measure, and govern many agents.</em> It is a vendor-neutral, self-hostable control plane for heterogeneous host-local CLI agents, not limited to Flow Agent.</p>
-      <p>The clean product model across the three Watershed tools:</p>
+      <p>Native targets and current availability follow <a href="../../PLATFORMS.md">PLATFORMS.md</a>. The clean product model across the three Watershed tools:</p>
       <pre><code>Flow Agent    = standalone agent runtime
 Meta-Harness  = standalone headless many-agent control plane
 Liquid        = standalone native workspace / app-building product</code></pre>

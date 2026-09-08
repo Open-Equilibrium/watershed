@@ -1,9 +1,5 @@
 mod own_script;
 
-#[cfg(windows)]
-use super::helpers::create_windows_junction;
-#[cfg(windows)]
-use super::support::assert_denied;
 use super::{
     helpers::{
         assert_invalid_stream, empty_workspace, fixture_runtime_policy, flow_id_for_definition,
@@ -20,7 +16,6 @@ use crate::runtime::{
     types::{EmitMode, EventClock, MAX_FLOW_INVOCATIONS, RuntimeError},
     validate::validate_session_log_text,
 };
-use core_policy::ProtectedPathMatchMode;
 use proto::{EventEnvelope, EventType};
 use std::{fs, path::Path};
 
@@ -40,7 +35,6 @@ fn registry_root_must_stay_inside_global_home() {
     assert!(!crate::tests::helpers::workspace_session_dir(&workspace).exists());
 }
 
-#[cfg(unix)]
 #[test]
 fn registry_root_rejects_symlinked_path_components() {
     use std::os::unix::fs::symlink;
@@ -69,49 +63,35 @@ fn registry_root_rejects_symlinked_path_components() {
     assert!(!crate::tests::helpers::workspace_session_dir(&workspace).exists());
 }
 
-#[cfg(windows)]
 #[test]
-fn registry_root_rejects_junction_path_components() {
-    let workspace = workspace_copy("smoke-flow");
-    let outside = empty_workspace("outside-registry-root-junction");
-    copy_dir(
-        &fixture_dir("smoke-flow").join("registry"),
-        &outside.join("registry"),
-    );
-    create_windows_junction(&session_home_path().join("link"), &outside);
-    fs::write(
-        session_home_path().join("config.yaml"),
-        "fixture_profile: stub-model\nregistry_root: link/registry\nstub_model: deterministic\n",
-    )
-    .expect("config rewrite succeeds");
+fn run_flow_rejects_legacy_isolation_settings_before_fixture_execution() {
+    for declaration in [
+        "read_only_mounts: [workspace]",
+        "writable_mounts: []",
+        "runtime_profile: exact",
+        "max_concurrent_processes_and_threads: 16",
+        "network: deny",
+        "network:\n    default: deny\n    allow:\n      - kind: cidr\n        transport: tcp\n        cidr: 192.0.2.0/24\n        port: 443",
+    ] {
+        let workspace = workspace_copy("smoke-flow");
+        replace_registry_text(
+            &workspace,
+            "tools/echo.yaml",
+            "  allowed_parameters: []\n",
+            &format!("  allowed_parameters: []\n  {declaration}\n"),
+        );
 
-    let err = run_flow(&workspace, "smoke-flow", EmitMode::Jsonl)
-        .expect_err("junction registry root component must fail");
+        let error = run_flow(&workspace, "smoke-flow", EmitMode::Jsonl)
+            .expect_err("legacy security settings must reject before fixture execution");
 
-    assert!(matches!(
-        err,
-        RuntimeError::Registry(core_script::RegistryError::UnsafePath { message, .. })
-            if message.contains("reparse")
-    ));
-    assert!(!crate::tests::helpers::workspace_session_dir(&workspace).exists());
-}
-
-#[cfg(target_os = "macos")]
-#[test]
-fn run_flow_accepts_reviewed_macos_network_allowlist() {
-    let workspace = workspace_copy("smoke-flow");
-    replace_registry_text(
-        &workspace,
-        "tools/echo.yaml",
-        "  network: deny\n",
-        "  network:\n    default: deny\n    allow:\n      - kind: cidr\n        transport: tcp\n        cidr: 192.0.2.0/24\n        port: 443\n",
-    );
-
-    let output = run_flow(&workspace, "smoke-flow", EmitMode::Jsonl)
-        .expect("macOS runtime compiles its target policy");
-
-    assert!(!output.failed);
-    assert!(output.stdout.contains("\"network_access\":\"declared\""));
+        let field = declaration
+            .split_once(':')
+            .expect("declaration has a field")
+            .0;
+        assert!(matches!(&error, RuntimeError::Registry(_)), "{error}");
+        assert!(error.to_string().contains(field), "{field}: {error}");
+        super::helpers::assert_no_session_artifacts(&workspace, "smoke-flow");
+    }
 }
 
 #[test]
@@ -255,10 +235,12 @@ fn cumulative_invocation_boundary_accepts_512_and_rejects_513() {
     );
     root_refs.push("smoke-flow");
     write_flow("budget-root", &root_refs);
-    assert!(matches!(
-        run_flow(&workspace, "budget-root", EmitMode::Jsonl),
-        Err(RuntimeError::Protocol(message)) if message.contains("flow invocation budget")
-    ));
+    let error = run_flow(&workspace, "budget-root", EmitMode::Jsonl)
+        .expect_err("513 cumulative invocations are rejected during preflight");
+    assert!(
+        matches!(&error, RuntimeError::Protocol(message) if message.contains("flow invocation budget")),
+        "unexpected 513-invocation error: {error:?}"
+    );
     assert!(
         !crate::tests::helpers::workspace_session_dir(&workspace)
             .join("budget-root-2.jsonl")
@@ -292,55 +274,6 @@ fn run_flow_rejects_unknown_predefined_command_without_side_effects() {
         !crate::tests::helpers::workspace_log_dir(&workspace)
             .join("smoke-flow.log")
             .exists()
-    );
-}
-
-#[cfg(windows)]
-#[test]
-fn run_flow_rejects_windows_short_alias_of_protected_directory() {
-    let workspace = workspace_copy("hello-flow");
-    fs::create_dir(workspace.join(".git")).expect("protected directory created");
-    assert!(
-        workspace.join("GIT~1").is_dir(),
-        "fixture requires the Windows short alias for .git"
-    );
-    fs::write(
-        session_home_path().join("registry/tools/write-summary.yaml"),
-        "tool:\n  id: write-summary\n  name: WriteSummary\n  tool_kind: own-script\n  command: script:write-summary\n  script_runtime: posix-sh\n  script_body: |\n    printf '%s\\n' \"$SUMMARY\" > GIT~1/config\n  allowed_parameters: []\n  read_scope: [\"workspace\"]\n  write_scope: [\"workspace\"]\n  protected_path_grants: []\n  network: deny\n",
-    )
-    .expect("alias write tool written");
-
-    let err = run_flow(&workspace, "hello-flow", EmitMode::Jsonl)
-        .expect_err("resolved protected directory alias must fail before execution");
-
-    assert_denied(
-        err,
-        core_policy::DenyReasonCode::ProtectedPathDenied,
-        "protected path",
-    );
-    assert!(
-        !workspace.join(".git/config").exists(),
-        "protected target must remain untouched"
-    );
-    assert!(
-        !crate::tests::helpers::workspace_session_dir(&workspace).exists(),
-        "protected alias must fail during preflight"
-    );
-}
-
-#[test]
-fn protected_path_modes_follow_policy_target() {
-    use core_policy::protected_path_match_mode_for_policy_target;
-
-    assert_eq!(
-        protected_path_match_mode_for_policy_target(
-            &core_policy::PolicyTarget::LinuxLandlockSeccomp
-        ),
-        ProtectedPathMatchMode::CaseSensitive
-    );
-    assert_eq!(
-        protected_path_match_mode_for_policy_target(&core_policy::PolicyTarget::MacosSeatbelt),
-        ProtectedPathMatchMode::CaseInsensitive
     );
 }
 

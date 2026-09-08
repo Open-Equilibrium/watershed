@@ -1,6 +1,6 @@
 use crate::runtime::{
     context::ContextObject,
-    run_attempts::{ProductiveAttemptLog, RunAttemptKind, RunAttemptResult},
+    run_attempts::{ProductiveAttemptLog, RunAttemptIntent, RunAttemptResult},
     types::RuntimeError,
 };
 
@@ -12,14 +12,7 @@ impl ProductiveAttemptLog for DiscardAttempts {
         Ok(())
     }
 
-    fn intent(
-        &mut self,
-        _kind: RunAttemptKind,
-        _attempt_id: &str,
-        _request_hash: &str,
-        _tool_id: Option<&str>,
-        _timestamp: &str,
-    ) -> Result<(), RuntimeError> {
+    fn intent(&mut self, _intent: &RunAttemptIntent) -> Result<(), RuntimeError> {
         Ok(())
     }
 

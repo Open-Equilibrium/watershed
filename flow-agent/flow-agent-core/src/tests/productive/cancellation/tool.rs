@@ -1,26 +1,80 @@
-#[cfg(unix)]
 use crate::runtime::{
-    fs_guards::AnchoredDir,
-    productive::{ProductiveToolExecutor, SystemProductiveToolExecutor},
-    tool_runner::ToolInvocation,
+    fs_guards::AnchoredDir, productive::SystemProductiveToolExecutor, tool_runner::ToolInvocation,
 };
 use crate::{
     runtime::{
+        productive::execute_productive_flow_with_tool_executor,
         run_attempts::{RunAttemptKind, RunAttemptOutcome},
         tool_runner::{ToolExecutionOutcome, ToolTerminalClassification},
         types::{CANCELLED_REASON, RUNTIME_ERROR_REASON, RuntimeError},
     },
     tests::{
         productive::support::{
+            FakeToolExecutor, InterruptingSink, MemoryAttempts, ScriptedProvider,
             assert_controlled_cancellation_lifecycle, execute_scripted_productive_case_with_tools,
-            single_tool_provider_turn,
+            single_tool_provider_turn, smoke_productive_execution_fixture,
         },
         support::run_isolated_test,
     },
 };
 use proto::EventType;
-#[cfg(unix)]
+use std::collections::VecDeque;
 use std::{path::Path, time::Duration};
+
+#[test]
+fn cancellation_after_tool_started_settles_without_dispatch() {
+    const CHILD_ENV: &str = "WATERSHED_TOOL_STARTED_CANCELLATION_CHILD";
+    if run_isolated_test(CHILD_ENV) {
+        return;
+    }
+
+    crate::begin_productive_operation().expect("Tool operation begins");
+    let (_workspace, fixture) = smoke_productive_execution_fixture();
+    let flow = fixture.smoke_flow();
+    let mut provider = ScriptedProvider {
+        bodies: Vec::new(),
+        turns: VecDeque::from([single_tool_provider_turn(
+            "response-tool-started-cancellation",
+            "call-tool-started-cancellation",
+        )]),
+    };
+    let mut attempts = MemoryAttempts::default();
+    let mut sink = InterruptingSink {
+        action: None,
+        events: Vec::new(),
+        trigger: EventType::ToolStarted,
+    };
+    let mut tools = FakeToolExecutor::default();
+
+    let execution = execute_productive_flow_with_tool_executor(
+        fixture.execution(flow, "tool-started-cancellation"),
+        &mut provider,
+        &mut attempts,
+        &mut sink,
+        &mut tools,
+    )
+    .expect("cancellation after ToolStarted closes the lifecycle");
+    crate::settle_productive_operation();
+
+    assert!(execution.failed);
+    assert!(matches!(
+        execution.terminal_error,
+        Some(RuntimeError::Cancelled)
+    ));
+    assert_eq!(tools.preflights, 1);
+    assert!(tools.invocations.is_empty());
+    assert_eq!(attempts.results.len(), 2);
+    assert_eq!(attempts.results[1].0, RunAttemptKind::Tool);
+    assert_eq!(attempts.results[1].2, CANCELLED_REASON);
+    assert_eq!(
+        attempts.durable_outputs[1],
+        Some(serde_json::json!({
+            "schema": "flow-attempt-cancelled-v0",
+        })),
+        "pre-Start cancellation remains reconstructable after a recovery write failure"
+    );
+    assert_controlled_cancellation_lifecycle(&sink.events);
+}
 
 #[test]
 fn cancellation_preserves_bounded_tool_cleanup_failures_and_evidence() {
@@ -181,7 +235,6 @@ fn tool_cancellation_persists_cancelled_attempt_and_lifecycle() {
     assert_controlled_cancellation_lifecycle(&sink.0);
 }
 
-#[cfg(unix)]
 #[test]
 fn system_productive_tool_executor_observes_process_cancellation() {
     const CHILD_ENV: &str = "WATERSHED_PRODUCTIVE_TOOL_CANCELLATION_CHILD";
@@ -202,7 +255,7 @@ fn system_productive_tool_executor_observes_process_cancellation() {
     let outcome = executor
         .execute(
             &ToolInvocation {
-                executable: "/bin/sh".to_owned(),
+                executable: proto::EXECUTOR_OWN_SCRIPT_EXECUTABLE_V0.to_owned(),
                 argv: vec![
                     "-c".to_owned(),
                     "/bin/sleep 5".to_owned(),

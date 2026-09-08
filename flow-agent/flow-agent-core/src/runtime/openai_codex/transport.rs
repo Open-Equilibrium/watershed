@@ -25,7 +25,7 @@ pub(crate) fn request_responses_at(
     )
 }
 
-pub(crate) fn request_responses_at_with_cancellation(
+fn request_responses_at_with_cancellation(
     endpoint: &str,
     credential: &crate::runtime::oauth_credential::CredentialRecord,
     body: &serde_json::Value,

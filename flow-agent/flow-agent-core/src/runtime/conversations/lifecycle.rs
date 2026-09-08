@@ -6,7 +6,7 @@ use crate::runtime::{stage_results::reconcile_cleanup_failures, types::RuntimeEr
 
 pub(super) use creation::conversation_candidate_is_occupied;
 pub(crate) use creation::create_unpublished_productive_conversation_run_with_model_profile;
-#[cfg(all(test, unix))]
+#[cfg(test)]
 pub(crate) use creation::set_run_creation_stage_observer;
 #[cfg(test)]
 pub(crate) use creation::{
@@ -50,9 +50,8 @@ fn observe_conversation_root_cleanup(path: &std::path::Path) {
 pub(super) fn reconcile_releases(
     run: Result<(), RuntimeError>,
     conversation: Result<(), RuntimeError>,
-    legacy: Result<(), RuntimeError>,
 ) -> Result<(), RuntimeError> {
-    reconcile_release_results([run, conversation, legacy])
+    reconcile_release_results([run, conversation])
 }
 
 fn reconcile_release_results(

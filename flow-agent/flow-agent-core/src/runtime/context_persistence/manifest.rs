@@ -157,7 +157,7 @@ impl ContextManifestWriter {
         )
     }
 
-    pub(crate) fn open_with_object_writer(
+    fn open_with_object_writer(
         path: &AnchoredFile,
         object_writer: Option<SessionObjectWriter>,
     ) -> Result<Self, RuntimeError> {

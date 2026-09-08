@@ -75,7 +75,7 @@ pub(crate) fn phase_should_repeat(result: &FlowValue, loop_config: Option<&Phase
     })
 }
 
-pub(crate) fn select_next_phase_index(
+fn select_next_phase_index(
     phase_refs: &[String],
     transitions: &[PhaseTransition],
     index: usize,

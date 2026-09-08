@@ -12,10 +12,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-#[cfg(unix)]
 fn shell_invocation(body: &str) -> ToolInvocation {
     ToolInvocation {
-        executable: "/bin/sh".to_owned(),
+        executable: proto::EXECUTOR_OWN_SCRIPT_EXECUTABLE_V0.to_owned(),
         argv: vec![
             "-c".to_owned(),
             body.to_owned(),
@@ -24,7 +23,6 @@ fn shell_invocation(body: &str) -> ToolInvocation {
     }
 }
 
-#[cfg(unix)]
 fn execute_tool_invocation(
     invocation: &ToolInvocation,
     workspace: &Path,
@@ -34,7 +32,6 @@ fn execute_tool_invocation(
     execute_anchored_tool_invocation(invocation, workspace.root(), control)
 }
 
-#[cfg(unix)]
 fn escaped_output_invocation(fixture: &str) -> ToolInvocation {
     let mut invocation = shell_invocation(
         "\"$1\" --exact \"$2\" --nocapture & printf leader-done; while [ ! -f escaped.filled ]; do /bin/sleep 0.01; done",
@@ -49,7 +46,6 @@ fn escaped_output_invocation(fixture: &str) -> ToolInvocation {
     invocation
 }
 
-#[cfg(unix)]
 fn run_escaped_output_fixture(marker: &str, write_cap: bool) -> bool {
     use std::io::Write as _;
 
@@ -71,12 +67,10 @@ fn run_escaped_output_fixture(marker: &str, write_cap: bool) -> bool {
     true
 }
 
-#[cfg(unix)]
 fn contains_bytes(bytes: &[u8], needle: &[u8]) -> bool {
     bytes.windows(needle.len()).any(|window| window == needle)
 }
 
-#[cfg(unix)]
 #[test]
 fn unix_runner_captures_both_streams_with_an_empty_environment() {
     let cancelled = AtomicBool::new(false);
@@ -110,7 +104,6 @@ fn unix_runner_captures_both_streams_with_an_empty_environment() {
     assert_eq!(outcome.stderr, b"stderr-value");
 }
 
-#[cfg(unix)]
 #[test]
 fn runner_pre_cancelled_before_spawn_does_not_launch() {
     let cancelled = AtomicBool::new(true);
@@ -136,7 +129,6 @@ fn runner_pre_cancelled_before_spawn_does_not_launch() {
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn runner_uses_the_retained_workspace_after_ambient_path_replacement() {
     let workspace = empty_workspace("runner-retained-workspace");
@@ -169,7 +161,6 @@ fn runner_uses_the_retained_workspace_after_ambient_path_replacement() {
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn runner_cancellation_lifecycle() {
     let workspace = empty_workspace("runner-cancelled-after-ready");
@@ -191,7 +182,6 @@ fn runner_cancellation_lifecycle() {
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn runner_omits_an_observed_exit_code_for_timeout_or_cancellation() {
     assert_eq!(visible_exit_code(&PrimaryTrigger::TimedOut, Some(0)), None);
@@ -202,7 +192,6 @@ fn runner_omits_an_observed_exit_code_for_timeout_or_cancellation() {
     );
 }
 
-#[cfg(unix)]
 fn stream_budget_fixture(body: &str) -> ToolExecutionOutcome {
     let cancelled = AtomicBool::new(false);
     execute_tool_invocation(
@@ -215,7 +204,6 @@ fn stream_budget_fixture(body: &str) -> ToolExecutionOutcome {
     )
 }
 
-#[cfg(unix)]
 #[test]
 fn runner_stdout_budget() {
     let exact = stream_budget_fixture("/usr/bin/head -c 4194304 /dev/zero");
@@ -234,7 +222,6 @@ fn runner_stdout_budget() {
     assert!(excess.stderr.is_empty());
 }
 
-#[cfg(unix)]
 #[test]
 fn runner_stderr_budget() {
     let exact = stream_budget_fixture("/usr/bin/head -c 4194304 /dev/zero >&2");
@@ -253,7 +240,6 @@ fn runner_stderr_budget() {
     assert!(excess.stdout.is_empty());
 }
 
-#[cfg(unix)]
 #[test]
 fn runner_cap_does_not_expose_an_exit_observed_during_cleanup() {
     let outcome =
@@ -267,7 +253,6 @@ fn runner_cap_does_not_expose_an_exit_observed_during_cleanup() {
     assert_eq!(outcome.exit_code, None);
 }
 
-#[cfg(unix)]
 #[test]
 fn runner_noop_lifecycle() {
     let cancelled = AtomicBool::new(false);
@@ -288,7 +273,6 @@ fn runner_noop_lifecycle() {
     }
 }
 
-#[cfg(unix)]
 #[test]
 fn runner_term_grace() {
     let cancelled = AtomicBool::new(false);
@@ -312,7 +296,6 @@ fn runner_term_grace() {
     assert!(started.elapsed() < Duration::from_secs(3));
 }
 
-#[cfg(unix)]
 #[test]
 fn runner_forced_reap() {
     force_reap_timeout_for_test(true);
@@ -337,7 +320,6 @@ fn runner_forced_reap() {
     assert!(started.elapsed() < Duration::from_secs(4));
 }
 
-#[cfg(unix)]
 #[test]
 fn runner_output_drain() {
     const FILTER: &str = "tests::tool_runner::unix_process::runner_output_drain";
@@ -367,7 +349,6 @@ fn runner_output_drain() {
     assert!(started.elapsed() < Duration::from_secs(3));
 }
 
-#[cfg(unix)]
 #[test]
 fn runner_output_drain_rejects_an_escaped_child_that_exceeds_the_stream_cap() {
     const FILTER: &str = "tests::tool_runner::unix_process::runner_output_drain_rejects_an_escaped_child_that_exceeds_the_stream_cap";

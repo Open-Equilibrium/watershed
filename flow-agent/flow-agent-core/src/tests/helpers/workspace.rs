@@ -1,6 +1,5 @@
 use crate::{
     runtime::{
-        execution_plan::runtime_policy_target,
         fs_guards::AnchoredWorkspace,
         session_authority::session_ownership_is_active,
         session_lock::SessionReservation,
@@ -53,8 +52,8 @@ pub(in crate::tests) fn fixture_runtime_policy(
 ) -> (core_script::ResolvedRegistry, core_policy::PolicyArtifact) {
     let workspace = fixture_dir(fixture);
     let registry = load_test_registry(&workspace, flow_id);
-    let policy = core_policy::compile_policy_artifact(&registry, flow_id, runtime_policy_target())
-        .expect("fixture policy compiles");
+    let policy =
+        core_policy::compile_policy_artifact(&registry, flow_id).expect("fixture policy compiles");
     (registry, policy)
 }
 
@@ -190,10 +189,6 @@ pub(in crate::tests) fn add_bad_write_tool_to_summarize(workspace: &Path, script
   script_body: |
     {script_body}
   allowed_parameters: []
-  read_scope: ["workspace"]
-  write_scope: ["workspace/out"]
-  protected_path_grants: []
-  network: deny
 "#
     );
     for root in [
@@ -244,51 +239,9 @@ pub(in crate::tests) fn workspace_with_later_invalid_own_script_path() -> TempWo
 }
 
 pub(in crate::tests) fn create_directory_alias(link: &Path, target: &Path) {
-    #[cfg(unix)]
     std::os::unix::fs::symlink(target, link).expect("directory alias is created");
-    #[cfg(windows)]
-    create_windows_junction(link, target);
-    #[cfg(not(any(unix, windows)))]
-    panic!("directory aliases are unsupported on this platform");
 }
 
 pub(in crate::tests) fn remove_directory_alias(link: &Path) {
-    #[cfg(unix)]
     fs::remove_file(link).expect("directory alias is removed");
-    #[cfg(windows)]
-    fs::remove_dir(link).expect("directory alias is removed");
-    #[cfg(not(any(unix, windows)))]
-    panic!("directory aliases are unsupported on this platform");
-}
-
-#[cfg(windows)]
-pub(in crate::tests) fn create_windows_junction(link: &Path, target: &Path) {
-    let link = cmd_compatible_windows_path(link);
-    let target = cmd_compatible_windows_path(target);
-    let output = std::process::Command::new("cmd")
-        .args(["/C", "mklink", "/J"])
-        .arg(&link)
-        .arg(&target)
-        .output()
-        .expect("mklink command runs");
-    assert!(
-        output.status.success(),
-        "junction creation failed for {} -> {}: stdout={} stderr={}",
-        link.display(),
-        target.display(),
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-}
-
-#[cfg(windows)]
-fn cmd_compatible_windows_path(path: &Path) -> PathBuf {
-    let text = path.as_os_str().to_string_lossy().replace('/', r"\");
-    if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
-        PathBuf::from(format!(r"\\{rest}"))
-    } else if let Some(rest) = text.strip_prefix(r"\\?\") {
-        PathBuf::from(rest)
-    } else {
-        PathBuf::from(text)
-    }
 }

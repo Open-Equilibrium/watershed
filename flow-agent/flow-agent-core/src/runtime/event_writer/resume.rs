@@ -19,8 +19,6 @@ use crate::runtime::{
     validate::validate_event_size,
 };
 use proto::EventEnvelope;
-#[cfg(test)]
-use std::time::Instant;
 
 fn resumed_event(
     event: &EventEnvelope,
@@ -69,7 +67,6 @@ impl RuntimeEventSink for RuntimePrefixSink {
         _event: &EventEnvelope,
         canonical_jsonl: &str,
         context_manifest: Option<ContextManifestCheckpoint>,
-        #[cfg(test)] _measurement_started_at: Option<Instant>,
     ) -> Result<(), RuntimeError> {
         if self.events.record_count < self.expected_events.record_count {
             self.events.push(canonical_jsonl.as_bytes());
@@ -225,7 +222,6 @@ impl RuntimeEventSink for ResumePreflightSink<'_> {
         event: &EventEnvelope,
         _canonical_jsonl: &str,
         context_manifest: Option<ContextManifestCheckpoint>,
-        #[cfg(test)] _measurement_started_at: Option<Instant>,
     ) -> Result<(), RuntimeError> {
         if event.sequence <= self.planned_event_count as u64 {
             return Ok(());
@@ -288,40 +284,21 @@ impl RuntimeEventSink for ResumePreflightSink<'_> {
 }
 
 impl RuntimeEventSink for ResumeEventSink<'_, '_> {
-    #[cfg(test)]
-    fn measurement_started_at(&self) -> Option<Instant> {
-        self.writer.measurement_started_at()
-    }
-
     fn commit(
         &mut self,
         event: &EventEnvelope,
         _canonical_jsonl: &str,
         context_manifest: Option<ContextManifestCheckpoint>,
-        #[cfg(test)] measurement_started_at: Option<Instant>,
     ) -> Result<(), RuntimeError> {
         if event.sequence <= self.planned_event_count as u64 {
             return Ok(());
         }
         if !self.marker_committed {
-            #[cfg(test)]
-            let marker_started_at = self.writer.measurement_started_at();
-            self.writer.commit(
-                &self.marker_event,
-                &self.marker_stream,
-                None,
-                #[cfg(test)]
-                marker_started_at,
-            )?;
+            self.writer
+                .commit(&self.marker_event, &self.marker_stream, None)?;
             self.marker_committed = true;
         }
         let (shifted, canonical) = resumed_event(event, self.resume_marker_count, self.clock)?;
-        self.writer.commit(
-            &shifted,
-            &canonical,
-            context_manifest,
-            #[cfg(test)]
-            measurement_started_at,
-        )
+        self.writer.commit(&shifted, &canonical, context_manifest)
     }
 }

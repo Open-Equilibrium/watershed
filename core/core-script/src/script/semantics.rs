@@ -1,12 +1,11 @@
 use crate::script::error::SemanticValidationError;
 use crate::script::model::{
     BlockIdentity, FlowBlock, InstructionBlock, MAX_BLOCK_NAME_CHARS, MAX_PHASE_LOOP_ITERATIONS,
-    MAX_REGISTRY_DEFINITION_BYTES, NetworkPolicy, ParameterValueType, PhaseBlock, RegistryBlock,
+    MAX_REGISTRY_DEFINITION_BYTES, ParameterValueType, PhaseBlock, RegistryBlock,
     RegistryBlockKind, ScriptRuntime, ToolBlock, ToolCommand, ToolKind,
 };
 use crate::script::paths::{
-    is_valid_allowed_parameter_name, is_valid_block_id, is_valid_canonical_cidr,
-    is_valid_command_id, normalize_protected_path_pattern, normalize_safe_relative_path,
+    is_valid_allowed_parameter_name, is_valid_block_id, is_valid_command_id,
 };
 use crate::script::values::{
     parameter_pattern_matches, validate_predicate_against_contract, validate_predicate_definition,
@@ -368,44 +367,6 @@ pub(super) fn validate_tool_semantics(tool: &ToolBlock) -> Result<(), SemanticVa
                 tool_id: tool.identity.id.clone(),
                 message: format!("integer parameter {} min must be <= max", parameter.name),
             });
-        }
-    }
-
-    for (field, scopes) in [
-        ("read_scope", &tool.read_scope),
-        ("write_scope", &tool.write_scope),
-    ] {
-        for scope in scopes {
-            if normalize_safe_relative_path(scope).is_none() {
-                return Err(invalid_tool(
-                    tool,
-                    &format!("{field} entry {scope:?} must be a safe relative path"),
-                ));
-            }
-        }
-    }
-    for grant in &tool.protected_path_grants {
-        if normalize_protected_path_pattern(grant).is_none() {
-            return Err(invalid_tool(
-                tool,
-                &format!(
-                    "protected_path_grants entry {grant:?} must be a safe relative path or pattern"
-                ),
-            ));
-        }
-    }
-
-    if let NetworkPolicy::Declared { allow, .. } = &tool.network {
-        for entry in allow {
-            if entry.port == 0 {
-                return Err(invalid_tool(tool, "network allow port must be at least 1"));
-            }
-            if !is_valid_canonical_cidr(&entry.cidr) {
-                return Err(SemanticValidationError::InvalidCanonicalCidr {
-                    cidr: entry.cidr.clone(),
-                    tool_id: tool.identity.id.clone(),
-                });
-            }
         }
     }
 

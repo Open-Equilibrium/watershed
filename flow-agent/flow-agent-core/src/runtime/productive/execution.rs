@@ -1,4 +1,5 @@
 use super::provider_turn::execute_leaf_turns;
+#[cfg(test)]
 use super::tool::SystemProductiveToolExecutor;
 use super::{
     CANCELLED_REASON, ProductiveContext, ProductiveExecution, ProductiveProvider,
@@ -48,6 +49,7 @@ where
     )
 }
 
+#[cfg(test)]
 pub(crate) fn execute_productive_flow_with_recovery<P, A, S>(
     execution: ProductiveExecution<'_>,
     provider: &mut P,

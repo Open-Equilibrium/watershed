@@ -100,23 +100,6 @@ pub(super) fn payload_cases() -> Vec<PayloadCase> {
             typed_field: "error",
         },
         PayloadCase {
-            event_type: EventType::StepStarted,
-            valid_payload: json!({
-                "step_id": "step-1",
-                "step_name": "Step",
-                "connection_ids": ["connection-1", "connection-2", "connection-3"],
-                "connection_kinds": ["data", "trigger", "refresh"]
-            }),
-            required_field: Some("step_id"),
-            typed_field: "step_id",
-        },
-        PayloadCase {
-            event_type: EventType::StepCompleted,
-            valid_payload: json!({"step_id": "step-1", "step_name": "Step"}),
-            required_field: Some("step_id"),
-            typed_field: "step_id",
-        },
-        PayloadCase {
             event_type: EventType::MessageDelta,
             valid_payload: json!({
                 "message_id": "message-1",
@@ -138,10 +121,7 @@ pub(super) fn payload_cases() -> Vec<PayloadCase> {
                 "tool_id": "tool-1",
                 "tool_name": "Tool",
                 "tool_kind": "predefined-command",
-                "read_scope": [],
-                "write_scope": [],
-                "allowed_parameters": [],
-                "network_access": "deny"
+                "allowed_parameters": []
             }),
             required_field: Some("tool_id"),
             typed_field: "tool_id",
@@ -202,6 +182,62 @@ pub(super) fn payload_cases() -> Vec<PayloadCase> {
 }
 
 #[test]
+fn tool_started_retains_exact_invocation_metadata() {
+    for tool_kind in ["predefined-command", "own-script"] {
+        for attempt_id in [None, Some("attempt-1")] {
+            let mut payload = json!({
+                "tool_id": "tool-1",
+                "tool_name": "Tool",
+                "tool_kind": tool_kind,
+                "allowed_parameters": ["path", "format"]
+            });
+            if let Some(attempt_id) = attempt_id {
+                payload["attempt_id"] = json!(attempt_id);
+            }
+            let mut event = EventEnvelope::new(
+                "evt-001",
+                EventType::ToolStarted,
+                "smoke001",
+                1,
+                "2026-01-01T00:00:00Z",
+                "flow-agent-cli",
+                payload.clone(),
+            );
+            event.flow_id = Some("flow-1".to_owned());
+            event.validate_v0().expect("invocation metadata is valid");
+            let jsonl = event.canonical_jsonl().expect("event serializes");
+            let decoded: EventEnvelope = serde_json::from_str(&jsonl).expect("event parses");
+            assert_eq!(decoded.payload, payload);
+
+            for (field, value) in [
+                ("read_only_mounts", json!(["workspace"])),
+                ("writable_mounts", json!([])),
+                ("runtime_profile", json!("exact")),
+                ("max_concurrent_processes_and_threads", json!(32)),
+                ("network_access", json!("deny")),
+                ("network", json!("deny")),
+                ("unknown_metadata", json!(true)),
+            ] {
+                let mut obsolete = event.clone();
+                obsolete.payload[field] = value;
+                assert_eq!(
+                    obsolete
+                        .validate_v0()
+                        .expect_err("undeclared invocation metadata must be rejected")
+                        .field(),
+                    format!("payload.{field}")
+                );
+                assert!(obsolete.canonical_jsonl().is_err());
+                assert!(serde_json::to_string(&obsolete).is_err());
+                let mut raw = serde_json::to_value(&event).expect("valid event serializes");
+                raw["payload"] = obsolete.payload;
+                assert!(serde_json::from_value::<EventEnvelope>(raw).is_err());
+            }
+        }
+    }
+}
+
+#[test]
 fn every_v0_event_payload_shape_round_trips_through_validated_boundaries() {
     for (index, case) in payload_cases().into_iter().enumerate() {
         let event_type = case.event_type;
@@ -247,12 +283,6 @@ fn every_v0_event_exposes_and_mutates_its_state_identifiers() {
         if event_type.requires_flow_id() {
             event.flow_id = Some(format!("flow-{index}"));
             event.parent_flow_id = Some(format!("parent-flow-{index}"));
-        }
-        if matches!(
-            event_type,
-            EventType::StepStarted | EventType::StepCompleted
-        ) {
-            event.payload["phase_id"] = json!(format!("phase-{index}"));
         }
         if matches!(
             event_type,
@@ -335,50 +365,13 @@ fn every_v0_event_exposes_and_mutates_its_state_identifiers() {
         u64::try_from(maximum_payload_identifiers).unwrap(),
         MAX_EVENT_PAYLOAD_STATE_IDENTIFIERS_V0
     );
-
-    let mut legacy_phase = payload_cases()
-        .into_iter()
-        .find(|case| case.event_type == EventType::PhaseEntered)
-        .expect("phase case exists")
-        .valid_payload;
-    for field in ["phase_execution_id", "phase_kind", "iteration"] {
-        legacy_phase.as_object_mut().unwrap().remove(field);
-    }
-    let mut legacy_phase = EventEnvelope::new(
-        "evt-legacy",
-        EventType::PhaseEntered,
-        "smoke001",
-        1,
-        "2026-01-01T00:00:00Z",
-        "flow-agent-cli",
-        legacy_phase,
-    );
-    legacy_phase.flow_id = Some("legacy-flow".to_owned());
-    legacy_phase.validate_v0().unwrap();
-    let mut legacy_kinds = Vec::new();
-    legacy_phase
-        .try_for_each_state_identifier::<()>(|kind, _| {
-            legacy_kinds.push(kind);
-            Ok(())
-        })
-        .unwrap();
-    assert_eq!(
-        legacy_kinds,
-        [
-            EventStateIdentifierKind::Event,
-            EventStateIdentifierKind::Flow,
-            EventStateIdentifierKind::Phase,
-        ]
-    );
 }
 
 fn expected_state_identifiers(
     event_type: EventType,
     index: usize,
 ) -> Vec<(EventStateIdentifierKind, String)> {
-    use EventStateIdentifierKind::{
-        Attempt, FlowDefinition, Message, Phase, PhaseExecution, Step, Tool,
-    };
+    use EventStateIdentifierKind::{Attempt, FlowDefinition, Message, Phase, PhaseExecution, Tool};
 
     let mut expected = vec![(EventStateIdentifierKind::Event, format!("evt-{index}"))];
     if event_type.requires_flow_id() {
@@ -410,10 +403,6 @@ fn expected_state_identifiers(
         EventType::PhaseFailed => vec![
             (PhaseExecution, "phase-execution-2".to_owned()),
             (Phase, "phase-1".to_owned()),
-        ],
-        EventType::StepStarted | EventType::StepCompleted => vec![
-            (Phase, format!("phase-{index}")),
-            (Step, "step-1".to_owned()),
         ],
         EventType::MessageDelta | EventType::MessageCompleted => {
             vec![(Message, "message-1".to_owned())]
@@ -491,17 +480,17 @@ fn event_specific_payload_invariants_are_bounded() {
         (EventType::PhaseEntered, "phase_kind", Some(json!("step"))),
         (EventType::PhaseEntered, "iteration", Some(json!(0))),
         (EventType::MessageDelta, "role", Some(json!("critic"))),
-        (EventType::ToolStarted, "read_scope", None),
+        (EventType::ToolStarted, "tool_name", None),
+        (EventType::ToolStarted, "tool_kind", None),
+        (EventType::ToolStarted, "allowed_parameters", None),
         (EventType::ToolStarted, "tool_kind", Some(json!("shell"))),
+        (EventType::ToolStarted, "attempt_id", Some(Value::Null)),
+        (EventType::ToolStarted, "attempt_id", Some(json!(""))),
+        (EventType::ToolStarted, "attempt_id", Some(json!(1))),
         (
             EventType::ToolStarted,
-            "network_access",
-            Some(json!("allow")),
-        ),
-        (
-            EventType::ToolStarted,
-            "read_scope",
-            Some(json!("workspace")),
+            "allowed_parameters",
+            Some(json!("path")),
         ),
         (
             EventType::ToolStarted,
@@ -553,36 +542,12 @@ fn event_specific_payload_invariants_are_bounded() {
 }
 
 #[test]
-fn phase_entered_execution_metadata_is_zero_or_all() {
+fn phase_entered_execution_metadata_is_required() {
     let complete_payload = payload_cases()
         .into_iter()
         .find(|case| case.event_type == EventType::PhaseEntered)
         .expect("phase entered has a payload case")
         .valid_payload;
-
-    let mut legacy_payload = complete_payload.clone();
-    for field in ["phase_execution_id", "phase_kind", "iteration"] {
-        legacy_payload
-            .as_object_mut()
-            .expect("payload is an object")
-            .remove(field);
-    }
-    let mut legacy_event = EventEnvelope::new(
-        "evt-001",
-        EventType::PhaseEntered,
-        "smoke001",
-        1,
-        "2026-01-01T00:00:00Z",
-        "flow-agent-cli",
-        legacy_payload,
-    );
-    legacy_event.flow_id = Some("flow-1".to_owned());
-    let canonical = legacy_event
-        .canonical_jsonl()
-        .expect("legacy phase entry is valid");
-    let parsed: EventEnvelope =
-        serde_json::from_str(canonical.trim()).expect("legacy phase entry round-trips");
-    assert_eq!(parsed, legacy_event);
 
     for missing_field in ["phase_execution_id", "phase_kind", "iteration"] {
         let mut partial_payload = complete_payload.clone();
@@ -607,71 +572,6 @@ fn phase_entered_execution_metadata_is_zero_or_all() {
                 .expect_err("partial execution metadata must be rejected")
                 .field(),
             format!("payload.{missing_field}")
-        );
-    }
-}
-
-#[test]
-fn step_connection_metadata_is_paired_and_bounded() {
-    let complete_payload = payload_cases()
-        .into_iter()
-        .find(|case| case.event_type == EventType::StepStarted)
-        .expect("step started has a payload case")
-        .valid_payload;
-    let cases = [
-        ("connection_ids", None, "connection_ids"),
-        ("connection_kinds", None, "connection_ids"),
-        (
-            "connection_ids",
-            Some(json!(["connection-1"])),
-            "connection_ids",
-        ),
-        (
-            "connection_ids",
-            Some(json!(["connection-1", 2, "connection-3"])),
-            "connection_ids",
-        ),
-        (
-            "connection_kinds",
-            Some(json!(["data", 2, "refresh"])),
-            "connection_kinds",
-        ),
-        (
-            "connection_kinds",
-            Some(json!(["data", "invalid", "refresh"])),
-            "connection_kinds",
-        ),
-    ];
-
-    for (modified_field, value, error_field) in cases {
-        let mut payload = complete_payload.clone();
-        match value {
-            Some(value) => payload[modified_field] = value,
-            None => {
-                payload
-                    .as_object_mut()
-                    .expect("payload is an object")
-                    .remove(modified_field);
-            }
-        }
-        let mut event = EventEnvelope::new(
-            "evt-001",
-            EventType::StepStarted,
-            "smoke001",
-            1,
-            "2026-01-01T00:00:00Z",
-            "flow-agent-cli",
-            payload,
-        );
-        event.flow_id = Some("flow-1".to_owned());
-
-        assert_eq!(
-            event
-                .validate_v0()
-                .expect_err("invalid connection metadata must be rejected")
-                .field(),
-            format!("payload.{error_field}"),
-            "modified {modified_field}"
         );
     }
 }

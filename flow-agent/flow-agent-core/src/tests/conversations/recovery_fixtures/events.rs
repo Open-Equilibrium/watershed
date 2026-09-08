@@ -46,7 +46,7 @@ pub(in crate::tests::conversations) fn write_large_multi_segment_event_prefix(
         );
         let canonical = event.canonical_jsonl().expect("event canonicalizes");
         writer
-            .commit(&event, &canonical, None, None)
+            .commit(&event, &canonical, None)
             .expect("event commits");
     }
     writer.finish().expect("event prefix finalizes");

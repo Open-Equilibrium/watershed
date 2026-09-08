@@ -79,7 +79,7 @@ impl ResolvedRegistry {
         Self::from_blocks(blocks).map(|_| ())
     }
 
-    pub(super) fn load_all_with_limits(
+    fn load_all_with_limits(
         workspace: &Path,
         registry_root: &Path,
         max_file_bytes: u64,
@@ -92,7 +92,7 @@ impl ResolvedRegistry {
         )
     }
 
-    pub(super) fn load_all_from_root_dir_with_limits(
+    fn load_all_from_root_dir_with_limits(
         root_dir: &Dir,
         root_path: &Path,
         registry_root: &Path,
@@ -186,7 +186,7 @@ impl ResolvedRegistry {
         )
     }
 
-    pub(super) fn load_for_flow_from_root_dir_with_limits(
+    fn load_for_flow_from_root_dir_with_limits(
         root_dir: &Dir,
         root_path: &Path,
         registry_root: &Path,

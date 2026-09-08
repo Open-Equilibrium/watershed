@@ -93,7 +93,7 @@ pub(in crate::runtime::conversations) fn append_anchored_canonical_jsonl_batch_w
     result
 }
 
-pub(super) fn validate_canonical_jsonl_line(line: &str) -> Result<(), RuntimeError> {
+fn validate_canonical_jsonl_line(line: &str) -> Result<(), RuntimeError> {
     if line.len().saturating_sub(usize::from(line.ends_with('\n'))) > MAX_CONVERSATION_RECORD_BYTES
         || !line.ends_with('\n')
         || line.as_bytes().contains(&b'\r')

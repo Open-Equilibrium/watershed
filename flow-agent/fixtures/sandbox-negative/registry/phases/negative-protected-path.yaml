@@ -1,7 +1,0 @@
-phase:
-  id: negative-protected-path
-  name: NegativeProtectedPath
-  instruction_refs: [deny-attempt]
-  tool_refs: [protected-path-tool]
-  output:
-    type: string

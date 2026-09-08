@@ -4,7 +4,7 @@ use crate::{
 };
 use serde_json::json;
 #[test]
-fn event_type_names_match_current_and_legacy_protocol_v0_sets_and_round_trip() {
+fn event_type_names_match_protocol_v0_and_round_trip() {
     let names = [
         "session.started",
         "session.paused",
@@ -17,8 +17,6 @@ fn event_type_names_match_current_and_legacy_protocol_v0_sets_and_round_trip() {
         "phase.entered",
         "phase.completed",
         "phase.failed",
-        "step.started",
-        "step.completed",
         "message.delta",
         "message.completed",
         "tool.started",
@@ -32,7 +30,7 @@ fn event_type_names_match_current_and_legacy_protocol_v0_sets_and_round_trip() {
         "error",
     ];
 
-    assert_eq!(names.len(), 24);
+    assert_eq!(names.len(), 22);
     assert!(names.contains(&"message.delta"));
     assert!(names.contains(&"tool.progress"));
     assert!(names.contains(&"attention.requested"));
