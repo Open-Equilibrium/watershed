@@ -17,7 +17,7 @@ pub(crate) use platform::{
 };
 #[cfg(test)]
 pub(crate) use storage::{
-    CREDENTIAL_LOCK_DEADLINE, StoreLock, credential_staging_path_for_test,
+    CREDENTIAL_LOCK_DEADLINE, credential_staging_path_for_test,
     set_credential_protection_error_for_test,
 };
 

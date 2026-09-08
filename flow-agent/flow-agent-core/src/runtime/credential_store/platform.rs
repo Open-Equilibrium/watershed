@@ -4,14 +4,14 @@ use crate::runtime::fs_guards::{AnchoredFile, open_anchored_file_for_read, path_
 use crate::runtime::types::RuntimeError;
 use std::{
     env,
-    fs::{File, OpenOptions},
+    fs::File,
     io,
     path::{Path, PathBuf},
 };
 
 use std::fs;
 use std::os::unix::fs::MetadataExt as _;
-use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
+use std::os::unix::fs::PermissionsExt as _;
 
 fn clear_inherited_file_acl_entries(file: &File) -> io::Result<()> {
     #[cfg(target_os = "macos")]
@@ -34,18 +34,6 @@ fn file_has_extended_acl_entries(file: &File) -> io::Result<bool> {
 fn harden_private_open_file(file: &File) -> io::Result<()> {
     file.set_permissions(fs::Permissions::from_mode(0o600))?;
     clear_inherited_file_acl_entries(file)
-}
-
-pub(super) fn open_lock_file(path: &Path) -> Result<File, RuntimeError> {
-    let file = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .mode(0o600)
-        .open(path)
-        .map_err(|error| store_io(path, error))?;
-    Ok(file)
 }
 
 pub(super) fn open_anchored_lock_file(path: &AnchoredFile) -> Result<File, RuntimeError> {
@@ -71,14 +59,6 @@ pub(super) fn open_anchored_lock_file(path: &AnchoredFile) -> Result<File, Runti
         .map_err(|error| path_io_error(path.diagnostic_path(), error))?;
     verify_private_open_file(path.diagnostic_path(), &file)?;
     Ok(file)
-}
-
-pub(super) fn create_new_file(path: &Path) -> io::Result<File> {
-    OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(path)
 }
 
 pub(super) fn private_create_new_anchored_file(path: &AnchoredFile) -> Result<File, RuntimeError> {
@@ -128,10 +108,6 @@ pub(crate) fn create_private_credential_file_for_test(path: &Path) -> Result<(),
     let leaf = path.file_name().ok_or_else(auth_store_failure)?;
     private_create_new_anchored_file(&parent.file(PathBuf::from(leaf)))?;
     Ok(())
-}
-
-pub(super) fn sync_credential_directory(path: &Path) -> Result<(), RuntimeError> {
-    crate::runtime::fs_guards::sync_directory(path)
 }
 
 pub(crate) fn default_credential_store_path() -> Result<PathBuf, RuntimeError> {

@@ -29,7 +29,7 @@ fn protected_credential_store_enforces_private_parent_and_file_modes() {
     let workspace = empty_workspace("credential-store-private-modes");
     let parent = workspace.join("private");
     let path = parent.join("credentials.json");
-    let store = CredentialStore::protected_at(path.clone());
+    let store = CredentialStore::at(path.clone());
     let current = credential(900_000);
     store.replace(&current).expect("private credential stores");
     assert_eq!(
@@ -64,7 +64,7 @@ fn protected_credential_store_rejects_an_extended_file_acl() {
 
     let workspace = empty_workspace("credential-store-extended-file-acl");
     let path = workspace.join("private/credentials.json");
-    let store = CredentialStore::protected_at(path.clone());
+    let store = CredentialStore::at(path.clone());
     let current = credential(900_000);
     store.replace(&current).expect("private credential stores");
     add_macos_acl(&path, "everyone allow read");
@@ -89,7 +89,7 @@ fn protected_credential_store_rejects_an_extended_parent_acl() {
     let workspace = empty_workspace("credential-store-extended-parent-acl");
     let parent = workspace.join("private");
     let path = parent.join("credentials.json");
-    let store = CredentialStore::protected_at(path);
+    let store = CredentialStore::at(path);
     store
         .replace(&credential(900_000))
         .expect("private credential stores");
@@ -129,7 +129,7 @@ fn protected_credential_store_removes_inherited_parent_acl_entries() {
     let parent = workspace.join("private");
     let path = parent.join("credentials.json");
 
-    CredentialStore::protected_at(path)
+    CredentialStore::at(path)
         .replace(&credential(900_000))
         .expect("private credential removes its inherited parent ACL");
 
@@ -179,7 +179,7 @@ fn protected_credential_store_normalizes_a_restrictive_creation_umask() {
     let workspace = empty_workspace("credential-store-restrictive-umask");
     let existing_parent = workspace.join("existing");
     let existing_path = existing_parent.join("credentials.json");
-    let existing = CredentialStore::protected_at(existing_path.clone());
+    let existing = CredentialStore::at(existing_path.clone());
     existing
         .replace(&credential(300_000))
         .expect("initial private credential stores");
@@ -204,7 +204,7 @@ fn protected_credential_store_normalizes_a_restrictive_creation_umask() {
 
     let fresh_parent = workspace.join("fresh");
     let fresh_path = fresh_parent.join("credentials.json");
-    CredentialStore::protected_at(fresh_path.clone())
+    CredentialStore::at(fresh_path.clone())
         .replace(&credential(1_000_000))
         .expect("fresh private credential stores under a restrictive umask");
     assert_eq!(
@@ -265,13 +265,13 @@ fn protected_credential_store_remains_bound_to_its_opened_private_parent() {
     let original = credential(900_000);
     let injected = credential(1_000_000);
     let updated = credential(1_100_000);
-    let store = CredentialStore::protected_at(path.clone());
+    let store = CredentialStore::at(path.clone());
 
     store
         .replace(&original)
         .expect("original credential stores");
     fs::rename(&parent, &retained).expect("private parent moves");
-    CredentialStore::protected_at(path.clone())
+    CredentialStore::at(path.clone())
         .replace(&injected)
         .expect("replacement namespace credential stores");
 
@@ -287,13 +287,13 @@ fn protected_credential_store_remains_bound_to_its_opened_private_parent() {
         Some(updated.clone())
     );
     assert_eq!(
-        CredentialStore::protected_at(path)
+        CredentialStore::at(path)
             .read()
             .expect("replacement namespace credential reads"),
         Some(injected)
     );
     assert_eq!(
-        CredentialStore::protected_at(retained.join("credentials.json"))
+        CredentialStore::at(retained.join("credentials.json"))
             .read()
             .expect("retained namespace credential reads"),
         Some(updated)
@@ -306,7 +306,7 @@ fn protected_credential_store_creates_a_missing_configuration_base() {
     let base = workspace.join("configuration");
     let parent = base.join("flow-agent");
     let path = parent.join("credentials.json");
-    let store = CredentialStore::protected_at(path.clone());
+    let store = CredentialStore::at(path.clone());
 
     store
         .replace(&credential(900_000))

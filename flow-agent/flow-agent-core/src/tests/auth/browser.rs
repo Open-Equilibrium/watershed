@@ -158,7 +158,7 @@ fn browser_login_does_not_claim_completion_before_exchange_succeeds() {
 #[test]
 fn auth_status_and_logout_are_redacted_store_operations() {
     let workspace = empty_workspace("redacted-auth-store");
-    let store = CredentialStore::at(workspace.join("credentials.json"));
+    let store = CredentialStore::at(workspace.join("private/credentials.json"));
 
     assert_eq!(
         auth_status_from_store(&store).expect("empty status"),
