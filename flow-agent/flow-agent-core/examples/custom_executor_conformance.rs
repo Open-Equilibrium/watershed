@@ -20,8 +20,12 @@ struct TempRoot(PathBuf);
 
 impl TempRoot {
     fn create() -> Result<Self, DynError> {
+        Self::create_in(&env::temp_dir())
+    }
+
+    fn create_in(base: &Path) -> Result<Self, DynError> {
         let nonce = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
-        let path = env::temp_dir().join(format!(
+        let path = fs::canonicalize(base)?.join(format!(
             "flow-custom-executor-conformance-{}-{nonce}",
             std::process::id()
         ));
@@ -89,13 +93,7 @@ fn run_isolated_check(executor: &Path) -> Result<(), DynError> {
     let session = TempRoot::create()?;
     let workspace = session.path().join("workspace");
     fs::create_dir(&workspace)?;
-    let child = Command::new(installed_controller::stage_controller(session.path())?)
-        .arg(CHILD_ARG)
-        .arg(executor)
-        .arg(&workspace)
-        .env("FLOW_AGENT_HOME", session.path().join(".flow"))
-        .env("XDG_CONFIG_HOME", session.path().join(".config"))
-        .output()?;
+    let child = isolated_child_command(session.path(), executor, &workspace)?.output()?;
     if !child.status.success() {
         return Err(io::Error::other(format!(
             "isolated conformance child failed: {}",
@@ -104,6 +102,23 @@ fn run_isolated_check(executor: &Path) -> Result<(), DynError> {
         .into());
     }
     Ok(())
+}
+
+fn isolated_child_command(
+    session: &Path,
+    executor: &Path,
+    workspace: &Path,
+) -> io::Result<Command> {
+    let mut command = Command::new(installed_controller::stage_controller(session)?);
+    command
+        .arg(CHILD_ARG)
+        .arg(executor)
+        .arg(workspace)
+        .env("FLOW_AGENT_HOME", session.join(".flow"))
+        .env("XDG_CONFIG_HOME", session.join(".config"));
+    #[cfg(target_os = "macos")]
+    command.env("HOME", session.join("home"));
+    Ok(command)
 }
 
 fn run_child_with(
@@ -159,8 +174,42 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::{ADVISORY, DynError, parse_args, run_child_with, run_with};
-    use std::{cell::Cell, io, path::PathBuf};
+    use super::{
+        ADVISORY, DynError, TempRoot, isolated_child_command, parse_args, run_child_with, run_with,
+    };
+    use std::{cell::Cell, fs, io, os::unix::fs::symlink, path::PathBuf};
+
+    #[test]
+    fn conformance_child_uses_canonical_synthetic_homes_without_rebinding_custom_path() {
+        let owner = TempRoot::create().unwrap();
+        let base = owner.path().join("base");
+        fs::create_dir(&base).unwrap();
+        let alias = owner.path().join("alias");
+        symlink(&base, &alias).unwrap();
+        let session = TempRoot::create_in(&alias).unwrap();
+        assert_eq!(session.path(), fs::canonicalize(session.path()).unwrap());
+        let executor = alias.join("supplied-custom-executor");
+        let workspace = session.path().join("workspace");
+        let command = isolated_child_command(session.path(), &executor, &workspace).unwrap();
+        assert_eq!(command.get_args().nth(1).unwrap(), executor);
+        for (variable, leaf) in [
+            ("FLOW_AGENT_HOME", ".flow"),
+            ("XDG_CONFIG_HOME", ".config"),
+            #[cfg(target_os = "macos")]
+            ("HOME", "home"),
+        ] {
+            let expected = session.path().join(leaf);
+            assert_eq!(
+                command
+                    .get_envs()
+                    .find(|(key, _)| key == &variable)
+                    .unwrap()
+                    .1,
+                Some(expected.as_os_str()),
+                "child must override {variable} before configuration",
+            );
+        }
+    }
 
     fn executor_path() -> PathBuf {
         PathBuf::from("/trusted/flow-executor")

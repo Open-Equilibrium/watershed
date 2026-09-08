@@ -19,8 +19,12 @@ pub(crate) struct TempRoot(PathBuf);
 
 impl TempRoot {
     pub(crate) fn create(prefix: &str) -> Result<Self, DynError> {
+        Self::create_in(&env::temp_dir(), prefix)
+    }
+
+    fn create_in(base: &Path, prefix: &str) -> Result<Self, DynError> {
         let nonce = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
-        let path = env::temp_dir().join(format!("{prefix}-{}-{nonce}", std::process::id()));
+        let path = fs::canonicalize(base)?.join(format!("{prefix}-{}-{nonce}", std::process::id()));
         fs::create_dir(&path)?;
         Ok(Self(path))
     }
@@ -178,7 +182,20 @@ pub(crate) mod test {
 
 #[cfg(test)]
 mod tests {
-    use super::percentile;
+    use super::{TempRoot, percentile};
+    use std::{fs, os::unix::fs::symlink};
+
+    #[test]
+    fn measurement_roots_resolve_existing_temporary_directory_aliases() {
+        let owner = TempRoot::create("flow-evidence-root-test").unwrap();
+        let base = owner.path().join("base");
+        fs::create_dir(&base).unwrap();
+        let alias = owner.path().join("alias");
+        symlink(&base, &alias).unwrap();
+        let session = TempRoot::create_in(&alias, "measurement").unwrap();
+        assert_eq!(session.path(), fs::canonicalize(session.path()).unwrap());
+        assert!(session.path().starts_with(fs::canonicalize(base).unwrap()));
+    }
 
     #[test]
     fn nearest_rank_percentile_is_deterministic() {

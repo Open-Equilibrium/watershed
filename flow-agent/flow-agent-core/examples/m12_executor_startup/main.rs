@@ -26,7 +26,12 @@ const MAX_MEASUREMENT_CHILD_BYTES: usize = 256;
 const MAX_CHILD_DIAGNOSTIC_BYTES: usize = 1_024;
 const MEASUREMENT_CHILD_ARG: &str = "--measure-child";
 const MEASUREMENT_CHILD_SCHEMA: &str = "flow-m12-executor-startup-sample-v0";
-const XDG_CONFIG_HOME: (&str, &str) = ("XDG_CONFIG_HOME", ".config");
+const ISOLATED_HOMES: &[(&str, &str)] = &[
+    FLOW_AGENT_HOME,
+    ("XDG_CONFIG_HOME", ".config"),
+    #[cfg(target_os = "macos")]
+    ("HOME", "home"),
+];
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct Config {
@@ -83,7 +88,7 @@ fn fresh_child_measurement(executor: &Path) -> Result<ChildMeasurement, DynError
         &session_root,
         &installed_controller::stage_controller(session_root.path())?,
         [OsStr::new(MEASUREMENT_CHILD_ARG), executor.as_os_str()],
-        &[FLOW_AGENT_HOME, XDG_CONFIG_HOME],
+        ISOLATED_HOMES,
     )?;
     if !output.status.success() {
         return Err(io::Error::other(format!(
@@ -161,12 +166,53 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::{ChildMeasurement, Config, DynError, MEASUREMENT_CHILD_SCHEMA, parse_args};
+    use super::{
+        ChildMeasurement, Config, DynError, ISOLATED_HOMES, MEASUREMENT_CHILD_SCHEMA, parse_args,
+    };
     use crate::{
-        evidence_support::test::FlushTrackingWriter, report::write_report_with_measurement,
+        evidence_support::{TempRoot, launch_measurement_child, test::FlushTrackingWriter},
+        report::write_report_with_measurement,
     };
     use serde_json::Value;
-    use std::{io, path::PathBuf};
+    use std::{
+        ffi::OsStr,
+        io,
+        path::{Path, PathBuf},
+    };
+
+    #[test]
+    fn measurement_child_overrides_platform_storage_without_accessing_ambient_configuration() {
+        let session = TempRoot::create("flow-m12-home-test").unwrap();
+        let flow = session.path().join(".flow");
+        let config = session.path().join(".config");
+        let home = session.path().join("home");
+        let script = if cfg!(target_os = "macos") {
+            r#"test "$FLOW_AGENT_HOME" = "$1" && test "$XDG_CONFIG_HOME" = "$2" && test "$HOME" = "$3""#
+        } else {
+            r#"test "$FLOW_AGENT_HOME" = "$1" && test "$XDG_CONFIG_HOME" = "$2""#
+        };
+        let output = launch_measurement_child(
+            &session,
+            Path::new("/bin/sh"),
+            [
+                OsStr::new("-c"),
+                OsStr::new(script),
+                OsStr::new("home-check"),
+                flow.as_os_str(),
+                config.as_os_str(),
+                home.as_os_str(),
+            ],
+            ISOLATED_HOMES,
+        )
+        .unwrap();
+        assert!(
+            output.status.success(),
+            "child inherited an ambient storage home"
+        );
+        assert!(output.stdout.is_empty());
+        assert!(output.stderr.is_empty());
+        assert!(!flow.exists() && !config.exists() && !home.exists());
+    }
 
     fn executor_path() -> PathBuf {
         PathBuf::from("/flow-executor")
