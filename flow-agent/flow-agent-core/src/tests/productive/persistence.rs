@@ -154,26 +154,54 @@ fn executor_readiness_failure_precedes_new_run_reservation() {
     );
 }
 
-#[cfg(target_os = "macos")]
 #[test]
-fn macos_tool_preflight_fails_before_provider_dispatch_or_run_reservation() {
+fn missing_selected_executor_fails_before_provider_dispatch_or_run_reservation() {
+    if crate::tests::test_support::run_current_test_isolated_session_home() {
+        return;
+    }
     let (workspace, fixture) = smoke_productive_execution_fixture();
+    // This exact-test child owns its environment; never touch the operator's
+    // platform configuration while staging the missing selected executable.
+    #[cfg(target_os = "linux")]
+    unsafe {
+        std::env::set_var("XDG_CONFIG_HOME", workspace.join("platform-config"));
+    }
+    #[cfg(target_os = "macos")]
+    unsafe {
+        std::env::set_var("HOME", &*workspace);
+    }
+    let missing_executor = workspace.join("removed-custom-executor");
+    crate::runtime::executor::ExecutorConfigStore::platform_default()
+        .expect("isolated Executor configuration opens")
+        .configure(&missing_executor)
+        .expect("a persisted selection can outlive its installed executable");
     let mut provider = FakeProvider::default();
 
-    let error = run_default_smoke_productive_session(&workspace, &fixture, &mut provider)
-        .expect_err("macOS must reject productive Tool execution before reservation");
+    let error = run_default_smoke_productive_session_with_credential_resolver(
+        &workspace,
+        &fixture,
+        || panic!("missing Executor must fail before credential resolution"),
+        &mut provider,
+    )
+    .expect_err("missing selected Executor must reject execution before reservation");
 
     assert!(matches!(
         error,
         RuntimeError::Executor(ref failure)
-            if failure.code() == proto::ExecutorErrorCodeV0::PolicyUnsupported
+            if failure.code() == proto::ExecutorErrorCodeV0::Unavailable
     ));
+    assert!(
+        error
+            .to_string()
+            .contains("executable is missing or unsafe"),
+        "{error}"
+    );
     assert!(provider.bodies.is_empty(), "the provider must not dispatch");
     assert!(
         !crate::tests::helpers::workspace_session_dir(&workspace)
             .join("conversation")
             .exists(),
-        "platform rejection must not create a durable conversation reservation"
+        "missing Executor must not create a durable conversation reservation"
     );
 }
 

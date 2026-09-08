@@ -29,7 +29,9 @@ struct OwnedTempWorkspace {
 
 impl TempWorkspace {
     pub(crate) fn fresh(prefix: &str) -> Self {
-        Self::fresh_under(&std::env::temp_dir(), prefix)
+        let parent = fs::canonicalize(std::env::temp_dir())
+            .expect("platform temporary directory canonicalizes");
+        Self::fresh_under(&parent, prefix)
     }
 
     fn fresh_under(parent: &Path, prefix: &str) -> Self {
