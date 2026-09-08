@@ -106,6 +106,7 @@ fn fresh_child_measurement(
     let iteration = iteration.to_string();
     let output = launch_measurement_child(
         &session_root,
+        &env::current_exe()?,
         ["--measure-child", workload.name(), &iteration],
         &[FLOW_AGENT_HOME],
     )?;

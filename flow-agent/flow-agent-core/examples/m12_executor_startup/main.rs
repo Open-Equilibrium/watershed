@@ -1,5 +1,7 @@
 #[path = "../evidence_support/mod.rs"]
 mod evidence_support;
+#[path = "../evidence_support/installed_controller.rs"]
+mod installed_controller;
 mod report;
 
 use evidence_support::{
@@ -65,6 +67,7 @@ fn fresh_child_measurement(executor: &Path) -> Result<ChildMeasurement, DynError
     let session_root = TempRoot::create("flow-m12-startup")?;
     let output = launch_measurement_child(
         &session_root,
+        &installed_controller::stage_controller(session_root.path())?,
         [OsStr::new(MEASUREMENT_CHILD_ARG), executor.as_os_str()],
         &[FLOW_AGENT_HOME, XDG_CONFIG_HOME],
     )?;

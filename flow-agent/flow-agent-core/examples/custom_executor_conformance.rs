@@ -1,3 +1,6 @@
+#[path = "evidence_support/installed_controller.rs"]
+mod installed_controller;
+
 use std::{
     env,
     error::Error,
@@ -86,7 +89,7 @@ fn run_isolated_check(executor: &Path) -> Result<(), DynError> {
     let session = TempRoot::create()?;
     let workspace = session.path().join("workspace");
     fs::create_dir(&workspace)?;
-    let child = Command::new(env::current_exe()?)
+    let child = Command::new(installed_controller::stage_controller(session.path())?)
         .arg(CHILD_ARG)
         .arg(executor)
         .arg(&workspace)

@@ -38,6 +38,7 @@ impl Drop for TempRoot {
 
 pub(crate) fn launch_measurement_child<I, S>(
     session_root: &TempRoot,
+    executable: &Path,
     args: I,
     isolated_homes: &[(&str, &str)],
 ) -> Result<Output, DynError>
@@ -45,7 +46,7 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
-    let mut command = Command::new(env::current_exe()?);
+    let mut command = Command::new(executable);
     command.args(args);
     for (variable, leaf) in isolated_homes {
         command.env(variable, session_root.path().join(leaf));
