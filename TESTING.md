@@ -79,7 +79,7 @@ sequenceDiagram
 |---|---|---|
 | Previous baseline `54ebc88`, [run 34231319294](https://github.com/Open-Equilibrium/watershed/actions/runs/34231319294) | Passed native baseline. | Evidence for that previous implementation only. |
 | Raw replacement `e001542`, [run 34232272591](https://github.com/Open-Equilibrium/watershed/actions/runs/34232272591) | RED on Linux and macOS; Windows shared tests pass. | Not new native GREEN or complete runtime verification. |
-| Integrated replacement `fccce24`, [run 34241806417](https://github.com/Open-Equilibrium/watershed/actions/runs/34241806417) | Windows shared gates pass; native gates remain RED (Mac installer checks and Linux CLI diagnostic assertion). | The early failures leave most native runtime tests and release-artifact acceptance unverified. |
+| Integrated replacement `e3296a9`, [run 34243131561](https://github.com/Open-Equilibrium/watershed/actions/runs/34243131561) | Linux: 1,153 tests, 1,143 passed, 10 failed, none skipped; nextest exit 100. Golden outputs pass unchanged. Windows shared gates pass. Mac installer remains RED. | Linux failures cover stale companion platform fixtures, readiness diagnostics and native Tool startup. Complete native runtime, release-artifact, coverage and performance acceptance remain outstanding. |
 
 The old systemd/container gate and its broad-isolation assertions no longer define release acceptance. Native tests must run on Ubuntu 24.04 x86_64 and macOS 26 ARM64. Record actual command exits, runner identity and tested artifact; source inspection, cross-builds and Windows shared tests cannot fill missing native evidence.
 

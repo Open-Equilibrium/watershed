@@ -36,7 +36,7 @@ pub(crate) fn run_with_diagnostics(
     match arguments {
         [mode] if mode == "--probe" => write_probe(crate::backend::probe(), output, diagnostics),
         [] => execute_request(input, output),
-        [mode, status_fd] if mode == "--inner" => crate::backend::run_inner(status_fd),
+        [mode, status_fd] if mode == "--inner" => crate::backend::run_inner(status_fd, input),
         [mode] if mode == "--inner-self-test" => Ok(()),
         _ => Err("usage: flow-executor [--probe]".to_owned()),
     }

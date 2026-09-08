@@ -139,14 +139,14 @@ pub(super) fn apply_inner_status(
     Ok(())
 }
 
-pub(crate) fn run_inner(status_descriptor: &str) -> Result<(), String> {
+pub(crate) fn run_inner(status_descriptor: &str, input: impl Read) -> Result<(), String> {
     let descriptor = status_descriptor
         .parse::<i32>()
         .map_err(|_| "invalid inner status descriptor".to_owned())?;
     let descriptor = protection::borrow_descriptor(descriptor)?;
     let mut status_file = std::fs::File::from(protection::retain_descriptor(descriptor)?);
     let mut bytes = Vec::new();
-    std::io::stdin()
+    input
         .take(proto::MAX_EXECUTOR_REQUEST_BYTES_V0 as u64 + 1)
         .read_to_end(&mut bytes)
         .map_err(|error| format!("failed to read inner request: {error}"))?;
@@ -211,9 +211,15 @@ pub(super) fn checked_output(mut command: Command) -> Result<String, BackendErro
         .stderr(Stdio::piped());
     let outcome = supervision::run_bounded(command, 2_000, 1024, 1024, Vec::new(), Vec::new())?;
     if outcome.classification.is_some() {
-        return Err(BackendError::unavailable(
-            "native backend readiness command failed",
-        ));
+        let status = match outcome.status.and_then(|status| status.code()) {
+            Some(code) => format!("exit code {code}"),
+            None => format!("{:?}", outcome.classification),
+        };
+        let diagnostic = String::from_utf8_lossy(&outcome.stderr);
+        let diagnostic = &diagnostic[..diagnostic.floor_char_boundary(1024)];
+        return Err(BackendError::unavailable(format!(
+            "native backend readiness command failed ({status}): {diagnostic}",
+        )));
     }
     String::from_utf8(outcome.stdout)
         .map_err(|_| BackendError::unavailable("native backend version is not UTF-8"))

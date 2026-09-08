@@ -33,6 +33,10 @@ use std::{
 const REQUEST_ID: &str = "fake-companion-request";
 const REDACTED_DIAGNOSTIC: &str = "private-fixture-diagnostic";
 const FAKE_EXECUTOR_SOURCE: &str = include_str!("fake_companion_fixture.rs");
+#[cfg(target_os = "linux")]
+const EXPECTED_PLATFORM: &str = "ubuntu-24.04-x86_64";
+#[cfg(target_os = "macos")]
+const EXPECTED_PLATFORM: &str = "macos-26-aarch64";
 
 #[test]
 fn controller_admission_rejects_a_protected_home_file_with_an_outside_alias() {
@@ -167,10 +171,7 @@ fn fake_companions_cover_the_closed_executor_protocol_matrix() {
         execution.enforcement.backend,
         format!("fake-{}-{}", env::consts::OS, env::consts::ARCH)
     );
-    assert_eq!(
-        execution.enforcement.platform,
-        format!("{}-{}", env::consts::OS, env::consts::ARCH)
-    );
+    assert_eq!(execution.enforcement.platform, EXPECTED_PLATFORM);
     let (request, request_bytes) = captured_request(&root.join("fake-executor-valid"));
     assert_eq!(request.resolved_policy.executable, "/bin/echo");
     assert_eq!(
@@ -419,10 +420,7 @@ fn productive_session_uses_the_selected_executor_and_persists_its_receipt() {
         durable_output["enforcement"]["backend"],
         format!("fake-{}-{}", env::consts::OS, env::consts::ARCH)
     );
-    assert_eq!(
-        durable_output["enforcement"]["platform"],
-        format!("{}-{}", env::consts::OS, env::consts::ARCH)
-    );
+    assert_eq!(durable_output["enforcement"]["platform"], EXPECTED_PLATFORM);
     assert_eq!(
         durable_output["enforcement"]["self_protection_active"],
         true

@@ -6,12 +6,19 @@ use std::{
     time::Duration,
 };
 
-fn platform() -> String {
-    format!("{}-{}", env::consts::OS, env::consts::ARCH)
+fn platform() -> &'static str {
+    #[cfg(target_os = "linux")]
+    {
+        "ubuntu-24.04-x86_64"
+    }
+    #[cfg(target_os = "macos")]
+    {
+        "macos-26-aarch64"
+    }
 }
 
 fn backend() -> String {
-    format!("fake-{}", platform())
+    format!("fake-{}-{}", env::consts::OS, env::consts::ARCH)
 }
 
 fn probe() -> String {

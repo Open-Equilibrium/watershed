@@ -451,9 +451,8 @@ class CiWorkflowContractTest(unittest.TestCase):
         output: str,
     ) -> None:
         host_condition = NATIVE if milestone == "M1.2" else UBUNTU
-        condition = f"{host_condition} && !cancelled()" if milestone == "M1.2" else host_condition
         run_lines = assert_step_state(
-            self, workflow, run_name, condition=condition, continue_on_error=True
+            self, workflow, run_name, condition=host_condition, continue_on_error=True
         )
         self.assertIn(f"        id: {run_id}", run_lines)
         run = step_run(workflow, run_name)
