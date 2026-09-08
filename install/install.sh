@@ -273,8 +273,9 @@ if [ "$install_executor" -eq 1 ]; then
     /usr/bin/setsid "$@" /bin/sh -c '
         umask 077
         PATH=
-        HOME=$1
-        XDG_CONFIG_HOME=$1
+        HOME=$(cd "$1" && /bin/pwd -P) || exit 1
+        [ "$HOME" -ef "$1" ] || exit 1
+        XDG_CONFIG_HOME=$HOME
         export PATH HOME XDG_CONFIG_HOME
         if cd / && "$2" executor check </dev/null; then
             readiness_status=0

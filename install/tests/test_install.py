@@ -67,6 +67,8 @@ class PrefixInstallerTest(unittest.TestCase):
             "test \"$1 $2\" = \"executor check\" || exit 64\n"
             "test -n \"$XDG_CONFIG_HOME\" || exit 65\n"
             "test \"$HOME\" = \"$XDG_CONFIG_HOME\" || exit 65\n"
+            "physical_home=$(cd \"$HOME\" && /bin/pwd -P) || exit 65\n"
+            "test \"$HOME\" = \"$physical_home\" || exit 65\n"
             "test ! -e \"$XDG_CONFIG_HOME/flow-agent/executor.json\" || exit 65\n"
             "probe=$(\"${0%/*}/flow-executor\" --probe) || exit 65\n"
             f"expected='{PROBE_DOCUMENT}'\n"
