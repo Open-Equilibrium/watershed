@@ -736,6 +736,43 @@ mod tests {
     }
 
     #[test]
+    fn protected_descriptor_remapping_preserves_spawn_failure() {
+        use std::{fs, os::unix::fs::PermissionsExt as _};
+
+        let root = crate::tests::empty_workspace();
+        let path = root.join("non-executable");
+        fs::write(&path, b"not executable\n").expect("unlaunchable image is staged");
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600))
+            .expect("image has no execution permission");
+        let executor = File::open(&path).expect("unlaunchable image opens");
+        let (request, protected_descriptors) = one_shot_request();
+        let mut pressure = Vec::new();
+        loop {
+            let file = File::open("/dev/null").expect("descriptor pressure source");
+            let descriptor = file.as_raw_fd();
+            assert!(descriptor <= 21, "isolated fixture needs free low descriptors");
+            pressure.push(file);
+            if descriptor == 21 {
+                break;
+            }
+        }
+
+        let error = match preflight_one_shot(
+            &executor,
+            &protected_descriptors,
+            &request,
+            b"no request may reach an unlaunchable image\n",
+        ) {
+            Err(error) => error,
+            Ok(_) => panic!("unlaunchable image cannot reach preflight"),
+        };
+        assert!(
+            error.to_string().contains("process could not start"),
+            "spawn failure must survive descriptor remapping: {error}"
+        );
+    }
+
+    #[test]
     fn one_shot_completion_cleans_its_process_group_once() {
         use std::{fs, os::unix::fs::PermissionsExt as _};
 
