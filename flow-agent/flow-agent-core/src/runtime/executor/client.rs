@@ -803,6 +803,51 @@ mod tests {
     }
 
     #[test]
+    fn protected_descriptor_remapping_preserves_inherited_socket_destination() {
+        const CHILD_ENV: &str = "WATERSHED_EXECUTOR_INHERITED_SOCKET_DESTINATION_CHILD";
+        if crate::tests::run_isolated_test(CHILD_ENV) {
+            return;
+        }
+
+        let (request, protected_descriptors) = one_shot_request();
+        let target = i32::try_from(proto::EXECUTOR_PROTECTED_DESCRIPTOR_BASE_V0)
+            .expect("protected descriptor base fits i32");
+        let (socket, _peer) =
+            std::os::unix::net::UnixStream::pair().expect("inherited socket fixture opens");
+        let destination = rustix::io::fcntl_dupfd_cloexec(&socket, target)
+            .expect("inherited socket duplicates into the protected destination");
+        assert_eq!(
+            destination.as_raw_fd(),
+            target,
+            "isolated fixture needs the first protected destination free"
+        );
+
+        let response = proto::canonical_executor_preflight_v0(&proto::ExecutorPreflightV0::Error {
+            code: proto::ExecutorErrorCodeV0::Unavailable,
+            message: "fixture rejection".to_owned(),
+            request_id: request.request_id.clone(),
+            schema: proto::EXECUTOR_PREFLIGHT_SCHEMA_V0.to_owned(),
+        })
+        .expect("response is canonical");
+        let script = format!(
+            "printf '%s' '{}'\n",
+            String::from_utf8(response).expect("response is UTF-8")
+        );
+        let shell = File::open("/bin/sh").expect("shell executor opens");
+
+        assert!(matches!(
+            preflight_one_shot(
+                (&shell, Path::new("/bin/sh")),
+                &protected_descriptors,
+                &request,
+                script.as_bytes()
+            )
+            .expect("inherited destination does not prevent valid preflight traffic"),
+            ExecutorPreflightProcess::Rejected(proto::ExecutorErrorCodeV0::Unavailable)
+        ));
+    }
+
+    #[test]
     fn one_shot_completion_cleans_its_process_group_once() {
         use std::{fs, os::unix::fs::PermissionsExt as _};
 

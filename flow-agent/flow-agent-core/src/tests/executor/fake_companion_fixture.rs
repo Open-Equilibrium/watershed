@@ -2,9 +2,15 @@ use std::{
     env, fs,
     io::{self, BufRead as _, BufReader, Write as _},
     path::Path,
-    process, thread,
+    process::{self, Command},
+    thread,
     time::Duration,
 };
+
+#[cfg(unix)]
+unsafe extern "C" {
+    fn setsid() -> i32;
+}
 
 fn platform() -> &'static str {
     #[cfg(target_os = "linux")]
@@ -79,9 +85,52 @@ fn completed(request: &str, mode: &str) -> String {
     )
 }
 
+#[cfg(unix)]
+fn hold_escaped_probe_output(executable: &Path) {
+    // The child must not remain in the controller-killed Executor process group.
+    assert_ne!(
+        unsafe { setsid() },
+        -1,
+        "fixture child starts its own session"
+    );
+    fs::write(
+        executable.with_extension("escaped-probe.pid"),
+        process::id().to_string(),
+    )
+    .expect("escaped probe child PID is recorded");
+    let release = executable.with_extension("release-escaped-probe-output");
+    while !release.exists() {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+#[cfg(unix)]
+fn spawn_escaped_probe_output(executable: &Path) {
+    let mut child = Command::new(executable)
+        .arg("--hold-probe-output")
+        .spawn()
+        .expect("escaped probe child starts");
+    let pid_path = executable.with_extension("escaped-probe.pid");
+    for _ in 0..100 {
+        if pid_path.exists() {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let _ = child.kill();
+    panic!("escaped probe child did not record its PID");
+}
+
 fn main() {
     let executable = env::current_exe().expect("fake Executor resolves itself");
     let mode = mode(&executable);
+    if env::args().nth(1).as_deref() == Some("--hold-probe-output") {
+        #[cfg(unix)]
+        hold_escaped_probe_output(&executable);
+        #[cfg(not(unix))]
+        process::exit(2);
+        return;
+    }
     if env::args().nth(1).as_deref() == Some("--probe") {
         let probe = probe();
         match mode {
@@ -104,6 +153,11 @@ fn main() {
             "probe-stderr" => {
                 eprintln!("private-fixture-diagnostic");
                 process::exit(1);
+            }
+            "probe-escaped-output" => {
+                #[cfg(unix)]
+                spawn_escaped_probe_output(&executable);
+                print!("{probe}");
             }
             _ => print!("{probe}"),
         }

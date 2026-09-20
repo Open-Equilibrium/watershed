@@ -490,7 +490,7 @@ fn captured_request(executor: &Path) -> (proto::ExecutorRequestV0, Vec<u8>) {
     (request, bytes)
 }
 
-fn isolate_executor_configuration(root: &Path) {
+pub(super) fn isolate_executor_configuration(root: &Path) {
     // Cargo's exact-test child and nextest both give this test exclusive process state.
     #[cfg(target_os = "linux")]
     unsafe {
@@ -507,7 +507,7 @@ fn isolate_executor_configuration(root: &Path) {
     }
 }
 
-fn compile_fake_executor(root: &Path) -> PathBuf {
+pub(super) fn compile_fake_executor(root: &Path) -> PathBuf {
     let source = root.join("fake_executor.rs");
     let executable = root.join("fake-executor-fixture");
     fs::write(&source, FAKE_EXECUTOR_SOURCE).expect("fake companion source is staged");
@@ -522,7 +522,7 @@ fn compile_fake_executor(root: &Path) -> PathBuf {
     executable
 }
 
-fn stage_case(fixture: &Path, root: &Path, mode: &str) -> PathBuf {
+pub(super) fn stage_case(fixture: &Path, root: &Path, mode: &str) -> PathBuf {
     let executor = root.join(format!("fake-executor-{mode}"));
     fs::copy(fixture, &executor).expect("fake companion case is staged");
     fs::set_permissions(&executor, fs::Permissions::from_mode(0o700))

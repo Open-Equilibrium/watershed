@@ -16,6 +16,7 @@ fn private_configuration_workspace(label: &str) -> crate::tests::test_support::T
 }
 
 mod conformance;
+mod probe_lifecycle;
 
 #[test]
 fn default_executor_is_the_flow_binary_sibling() {
