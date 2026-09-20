@@ -750,7 +750,10 @@ mod tests {
         loop {
             let file = File::open("/dev/null").expect("descriptor pressure source");
             let descriptor = file.as_raw_fd();
-            assert!(descriptor <= 21, "isolated fixture needs free low descriptors");
+            assert!(
+                descriptor <= 21,
+                "isolated fixture needs free low descriptors"
+            );
             pressure.push(file);
             if descriptor == 21 {
                 break;
