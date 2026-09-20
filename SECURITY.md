@@ -6,7 +6,7 @@ Product targets, available capabilities and native release requirements are cano
 
 ## Accepted Flow Agent security target
 
-**ADR-0166–ADR-0175 define the integrated replacement; native verification is pending.** This section owns the Flow Agent security contract. The checked-in runtime, invocation policy and Executor wire now use trusted Tools with mandatory native self-protection on Linux and macOS. CI and installation acceptance are being migrated to that contract. Integration and passing Windows shared tests do not establish native protection or release readiness; [TESTING.md](TESTING.md#m12-transition-and-executor-evidence) owns the previous baseline, red replacement run and outstanding native proof. Mac Executor launch is currently blocked on [D-069](docs/decisions/open-decisions.html#d-069); its proposed installation-trust change is not an accepted guarantee.
+**ADR-0166–ADR-0175 define the integrated replacement; ADR-0176 settles installation trust and launch. Native verification remains pending.** This section owns the Flow Agent security contract. The checked-in runtime, invocation policy and Executor wire now use trusted Tools with mandatory native self-protection on Linux and macOS. CI and installation acceptance are being migrated to that contract. Integration and passing Windows shared tests do not establish native protection or release readiness; [TESTING.md](TESTING.md#m12-transition-and-executor-evidence) owns the previous baseline, red replacement run and outstanding native proof.
 
 ### Guarantees and owners
 
@@ -23,6 +23,8 @@ Product targets, available capabilities and native release requirements are cano
 Flow's own configuration, context, provider and storage operations are internal runtime responsibilities, not model-selected Tools. The promise is **controlled invocations and workflows with trusted Tool implementations**, not that every runtime file access appears as a Building Block command.
 
 ### Native self-protection and its limits
+
+ADR-0176 sets identical public installation guarantees for Linux and macOS. Direct Tool/child writes, deletion and replacement of this installation's protected objects remain blocked. Administrators must not exchange or modify the active installation during Runs. Both OSes require no-follow ownership/identity admission, complete inventory and alias checks, and reject detected installation changes without fallback. Mac starts the outer Executor and its inner Seatbelt process from the checked native installation path; Linux may retain descriptor execution, but that implementation detail grants no stronger public promise. Neither OS promises atomic check-to-exec protection against other unconfined host-authority writers; repeated identity checks do not close that interval. [PROTOCOL.md](PROTOCOL.md#process-and-framing-contract) owns the launch checks.
 
 ADR-0171, corrected by the maintainer on 2026-09-08, excludes only Workspace-local `AGENTS.md` instruction inputs from Flow-owned write protection. They remain editable when the configured Tool permits it. The global `AGENTS.md` inside `FLOW_AGENT_HOME` stays protected with that home; a Workspace pointing at the global home does not turn it into an editable local exception. Neither instruction source grants technical authority, and editable local instructions can still influence model behavior. The filename does not exempt an alias of a protected object. Native acceptance must distinguish editable local instructions from the protected global file and enforce ADR-0169 alias rules.
 

@@ -66,14 +66,13 @@ impl ExecutorSelection {
             .probe
     }
 
-    pub(crate) fn executable(&self) -> &File {
-        &self
-            .validated
+    pub(crate) fn executable(&self) -> Result<(&File, &Path), RuntimeError> {
+        self.validated
             .as_ref()
             .expect("resolved Executor selection carries its validated executable")
             .programs
             .selected
-            .image
+            .launch_target()
     }
 
     pub(super) fn programs(&self) -> impl Iterator<Item = &super::probe::InstalledProgram> {
@@ -193,8 +192,15 @@ mod tests {
             .sibling
             .as_ref()
             .expect("present sibling is retained");
+        assert_eq!(
+            selection
+                .executable()
+                .expect("unchanged installation is admitted")
+                .1,
+            custom
+        );
         for (index, (image, retained)) in [
-            (&custom, selection.executable()),
+            (&custom, &retained_programs.selected.image),
             (&flow, &retained_programs.flow.image),
             (&path, &sibling.image),
         ]
@@ -204,6 +210,8 @@ mod tests {
             fs::rename(image, root.join(format!("validated-{index}")))
                 .expect("validated inode is retained");
             fs::write(image, b"replacement").expect("path is replaced");
+            fs::set_permissions(image, fs::Permissions::from_mode(0o700))
+                .expect("replacement is otherwise admissible");
             let mut bytes = Vec::new();
             retained
                 .try_clone()
@@ -213,5 +221,9 @@ mod tests {
             assert_eq!(bytes, b"validated");
             assert_eq!(fs::read(image).expect("replacement reads"), b"replacement");
         }
+        let error = selection
+            .executable()
+            .expect_err("replaced installation is rejected");
+        assert!(error.to_string().contains("changed after admission"));
     }
 }

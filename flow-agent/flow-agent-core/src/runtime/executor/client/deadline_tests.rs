@@ -58,7 +58,7 @@ fn expired_preflight_rejects_available_ready_and_error_records() {
         let deadline_crossed = Cell::new(false);
 
         let outcome = preflight_one_shot_at_deadline(
-            &executor,
+            (&executor, Path::new("/bin/sh")),
             &protected_descriptors,
             &request,
             script.as_bytes(),
@@ -182,8 +182,13 @@ fn waiting_executor(
         marker = marker.display(),
     );
     let executor = File::open("/bin/sh").expect("shell executor opens");
-    match preflight_one_shot(&executor, protected_descriptors, request, script.as_bytes())
-        .expect("fake Executor reaches readiness")
+    match preflight_one_shot(
+        (&executor, Path::new("/bin/sh")),
+        protected_descriptors,
+        request,
+        script.as_bytes(),
+    )
+    .expect("fake Executor reaches readiness")
     {
         ExecutorPreflightProcess::Ready(waiting) => waiting,
         ExecutorPreflightProcess::Rejected(code) => panic!("unexpected rejection: {code:?}"),

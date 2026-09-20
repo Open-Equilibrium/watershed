@@ -81,14 +81,17 @@ pub(super) fn terminate_child_or_fail_stop(child: &mut std::process::Child) {
     }
 }
 
-pub(super) fn executor_image_path(descriptor: i32) -> String {
+pub(super) fn executor_image_path(
+    _descriptor: i32,
+    _installed_path: &std::path::Path,
+) -> std::path::PathBuf {
     #[cfg(target_os = "linux")]
     {
-        format!("/proc/self/fd/{descriptor}")
+        format!("/proc/self/fd/{_descriptor}").into()
     }
     #[cfg(target_os = "macos")]
     {
-        format!("/dev/fd/{descriptor}")
+        _installed_path.to_owned()
     }
 }
 

@@ -98,7 +98,7 @@ impl PreparedExecutor {
         prepared: PreparedExecutorTool,
     ) -> Result<ExecutorPreflightOutcome, RuntimeError> {
         let process = preflight_one_shot(
-            self.selection.executable(),
+            self.selection.executable()?,
             &prepared.protected_descriptors,
             &prepared.request,
             &prepared.request_bytes,
@@ -476,7 +476,7 @@ mod tests {
         let executor = File::open("/bin/sh").expect("shell executor opens");
 
         let response = preflight_one_shot(
-            &executor,
+            (&executor, Path::new("/bin/sh")),
             &protected_descriptors,
             &request,
             script.as_bytes(),
@@ -564,7 +564,7 @@ mod tests {
 
         let executor = File::open("/bin/sh").expect("shell executor opens");
         let preflight = preflight_one_shot(
-            &executor,
+            (&executor, Path::new("/bin/sh")),
             &protected_descriptors,
             &request,
             script.as_bytes(),
@@ -761,7 +761,7 @@ mod tests {
         }
 
         let error = match preflight_one_shot(
-            &executor,
+            (&executor, &path),
             &protected_descriptors,
             &request,
             b"no request may reach an unlaunchable image\n",
@@ -770,9 +770,33 @@ mod tests {
             Ok(_) => panic!("unlaunchable image cannot reach preflight"),
         };
         assert!(
-            error.to_string().contains("process could not start"),
+            error
+                .to_string()
+                .contains("process could not start (OS error Some(13))"),
             "spawn failure must survive descriptor remapping: {error}"
         );
+        let response = proto::canonical_executor_preflight_v0(&proto::ExecutorPreflightV0::Error {
+            code: proto::ExecutorErrorCodeV0::Unavailable,
+            message: "fixture rejection".to_owned(),
+            request_id: request.request_id.clone(),
+            schema: proto::EXECUTOR_PREFLIGHT_SCHEMA_V0.to_owned(),
+        })
+        .expect("response is canonical");
+        let script = format!(
+            "printf '%s' '{}'\n",
+            String::from_utf8(response).expect("response is UTF-8")
+        );
+        let shell = File::open("/bin/sh").expect("shell opens under the same descriptor pressure");
+        assert!(matches!(
+            preflight_one_shot(
+                (&shell, Path::new("/bin/sh")),
+                &protected_descriptors,
+                &request,
+                script.as_bytes()
+            )
+            .expect("valid protocol traffic survives remapping"),
+            ExecutorPreflightProcess::Rejected(proto::ExecutorErrorCodeV0::Unavailable)
+        ));
     }
 
     #[test]
@@ -801,15 +825,20 @@ mod tests {
         let parent_flags =
             rustix::io::fcntl_getfd(&executor).expect("parent descriptor flags read");
         assert!(parent_flags.contains(rustix::io::FdFlags::CLOEXEC));
-        fs::rename(&path, root.join("retained-executor"))
-            .expect("opened shell executor is renamed");
-        fs::write(&path, b"invalid replacement executable\n").expect("old path is replaced");
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o600))
-            .expect("replacement is not executable");
+        #[cfg(target_os = "linux")]
+        {
+            // Linux can retain an image across rename; this implementation detail
+            // does not extend the shared administrator-owned installation contract.
+            fs::rename(&path, root.join("retained-executor"))
+                .expect("opened shell executor is renamed");
+            fs::write(&path, b"invalid replacement executable\n").expect("old path is replaced");
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o600))
+                .expect("replacement is not executable");
+        }
 
         assert!(matches!(
             preflight_without_wall_clock_deadline(
-                &executor,
+                (&executor, &path),
                 &protected_descriptors,
                 &request,
                 &request_bytes
@@ -840,7 +869,7 @@ mod tests {
             let executor = File::open("/bin/sh").expect("shell executor opens");
             let request_bytes = writer.as_bytes();
             let error = match preflight_without_wall_clock_deadline(
-                &executor,
+                (&executor, Path::new("/bin/sh")),
                 &protected_descriptors,
                 &request,
                 request_bytes,
@@ -858,7 +887,7 @@ mod tests {
     }
 
     fn preflight_without_wall_clock_deadline(
-        executor: &File,
+        executor: (&File, &Path),
         protected_descriptors: &[OwnedFd],
         request: &proto::ExecutorRequestV0,
         request_bytes: &[u8],

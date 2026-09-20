@@ -7,9 +7,10 @@ use std::{
     fs::File,
     io::{Read, Write as _},
     os::{
-        fd::{AsRawFd as _, OwnedFd},
+        fd::{AsRawFd as _, FromRawFd as _, OwnedFd},
         unix::process::CommandExt as _,
     },
+    path::Path,
     process::{Child, Command, Stdio},
     thread,
     time::{Duration, Instant},
@@ -80,7 +81,7 @@ impl Drop for ChildGuard {
 }
 
 pub(super) fn preflight_one_shot(
-    executable: &File,
+    executable: (&File, &Path),
     protected_descriptors: &[OwnedFd],
     request: &proto::ExecutorRequestV0,
     request_bytes: &[u8],
@@ -98,7 +99,7 @@ pub(super) fn preflight_one_shot(
 }
 
 fn preflight_one_shot_with_deadline(
-    executable: &File,
+    executable: (&File, &Path),
     protected_descriptors: &[OwnedFd],
     request: &proto::ExecutorRequestV0,
     request_bytes: &[u8],
@@ -106,8 +107,9 @@ fn preflight_one_shot_with_deadline(
     after_request: impl FnOnce(&mut Child) -> Result<(), RuntimeError>,
     now: &impl Fn() -> Instant,
 ) -> Result<ExecutorPreflightProcess, RuntimeError> {
-    let executor = duplicate_executor_descriptor(executable)?;
-    let inherited_path = super::super::process::executor_image_path(executor.as_raw_fd());
+    let executor = duplicate_executor_descriptor(executable.0)?;
+    let inherited_path =
+        super::super::process::executor_image_path(executor.as_raw_fd(), executable.1);
     let high_base = executor
         .as_raw_fd()
         .checked_add(1)
@@ -122,19 +124,23 @@ fn preflight_one_shot_with_deadline(
         .zip(&request.resolved_policy.protected_objects)
         .map(|(source, object)| (source.as_raw_fd(), object.descriptor as i32))
         .collect::<Vec<_>>();
-    let reserve_standard_descriptor = || {
-        File::open("/dev/null").map_err(|_| {
+    // Keep every currently free destination slot occupied until spawn has
+    // allocated its stdio and error channels. This is bounded by the wire schema.
+    let last_target = remaps.iter().map(|(_, target)| *target).max().unwrap_or(2);
+    let mut reservations = Vec::new();
+    loop {
+        let reservation = File::open("/dev/null").map_err(|_| {
             super::executor_error(
                 proto::ExecutorErrorCodeV0::Unavailable,
-                "one-shot Executor process could not reserve standard descriptors",
+                "one-shot Executor process could not reserve protected descriptor slots",
             )
-        })
-    };
-    let _standard_descriptor_reservations = [
-        reserve_standard_descriptor()?,
-        reserve_standard_descriptor()?,
-        reserve_standard_descriptor()?,
-    ];
+        })?;
+        let complete = reservation.as_raw_fd() > last_target;
+        reservations.push(reservation);
+        if complete {
+            break;
+        }
+    }
     let mut command = Command::new(inherited_path);
     command
         .env_clear()
@@ -146,6 +152,24 @@ fn preflight_one_shot_with_deadline(
         command.pre_exec(move || {
             configure_executor_child(expected_parent)?;
             for &(source, target) in &remaps {
+                // A parent thread can close an occupied slot after reservation.
+                // Never overwrite a pipe/socket that spawn may have put there.
+                let current = c_dup(target);
+                if current >= 0 {
+                    let current = OwnedFd::from_raw_fd(current);
+                    let stat = rustix::fs::fstat(&current)?;
+                    let kind = rustix::fs::FileType::from_raw_mode(stat.st_mode);
+                    if kind == rustix::fs::FileType::Fifo || kind == rustix::fs::FileType::Socket {
+                        return Err(std::io::Error::from_raw_os_error(
+                            rustix::io::Errno::BUSY.raw_os_error(),
+                        ));
+                    }
+                } else {
+                    let error = std::io::Error::last_os_error();
+                    if error.raw_os_error() != Some(rustix::io::Errno::BADF.raw_os_error()) {
+                        return Err(error);
+                    }
+                }
                 if c_dup2(source, target) < 0 {
                     return Err(std::io::Error::last_os_error());
                 }
@@ -163,6 +187,9 @@ fn preflight_one_shot_with_deadline(
             ),
         )
     })?;
+    drop(reservations);
+    drop(inherited);
+    drop(executor);
     let mut child = ChildGuard::new(child);
     let stdin = child
         .child_mut()
@@ -492,7 +519,7 @@ fn before_executor_deadline<T>(
 
 #[cfg(test)]
 pub(super) fn preflight_one_shot_at_deadline(
-    executable: &File,
+    executable: (&File, &Path),
     protected_descriptors: &[OwnedFd],
     request: &proto::ExecutorRequestV0,
     request_bytes: &[u8],
@@ -565,6 +592,9 @@ fn read_available(reader: &mut impl Read, output: &mut BoundedRead) -> std::io::
 }
 
 unsafe extern "C" {
+    #[link_name = "dup"]
+    fn c_dup(fd: i32) -> i32;
+
     #[cfg(test)]
     #[link_name = "close"]
     pub(super) fn c_close(fd: i32) -> i32;

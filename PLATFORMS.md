@@ -4,6 +4,8 @@ Support is a product-and-capability contract, not a workspace-wide compilation c
 
 Flow Agent's accepted replacement boundary is [trusted Tools with mandatory native self-protection](SECURITY.md#accepted-flow-agent-security-target) (ADR-0166), not general hostile-Tool containment. ADR-0174 limits first-release protection to this installation's required objects, not additional independent Flow homes. The replacement is integrated, while native execution and release-artifact acceptance are being migrated. No new native GREEN result is available; implementation is not support proof.
 
+Linux and macOS share the same [public installation guarantee and maintenance limits](SECURITY.md#native-self-protection-and-its-limits) (ADR-0176). Their different [launch mechanics](PROTOCOL.md#process-and-framing-contract) do not establish stronger Linux protection against unconfined host-authority writers.
+
 | Product / capability | Release 1 native targets | Current implementation |
 |---|---|---|
 | Flow Agent authoring, Fixture execution and provider-only Flows | Linux x86_64; macOS ARM64 | Implemented; productive provider execution is restricted to Ubuntu 24.04 and macOS 26. |

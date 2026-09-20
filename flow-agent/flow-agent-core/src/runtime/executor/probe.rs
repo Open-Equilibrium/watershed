@@ -35,6 +35,25 @@ pub(super) struct InstalledProgram {
     pub(super) image: File,
 }
 
+impl InstalledProgram {
+    pub(super) fn launch_target(&self) -> Result<(&File, &Path), RuntimeError> {
+        let path = self.path.diagnostic_path();
+        let current = open_program(path)?;
+        let identity = |image: &File| {
+            image
+                .metadata()
+                .map(|metadata| (metadata.dev(), metadata.ino()))
+                .map_err(|_| executor_unavailable("Executor image identity is unavailable"))
+        };
+        if identity(&current.image)? != identity(&self.image)? {
+            return Err(executor_unavailable(
+                "Executor installation changed after admission",
+            ));
+        }
+        Ok((&self.image, path))
+    }
+}
+
 #[derive(Debug)]
 pub(super) struct InstalledPrograms {
     pub(super) selected: InstalledProgram,
@@ -73,7 +92,8 @@ fn probe_native_executor(
 ) -> Result<ProbedExecutor, RuntimeError> {
     let programs = open_validated_executable(selection, installation_flow)?;
     programs.verify_aliases(protected_directories)?;
-    let inherited_path = super::process::executor_image_path(programs.selected.image.as_raw_fd());
+    let (image, path) = programs.selected.launch_target()?;
+    let inherited_path = super::process::executor_image_path(image.as_raw_fd(), path);
     let mut command = Command::new(inherited_path);
     command
         .arg("--probe")
