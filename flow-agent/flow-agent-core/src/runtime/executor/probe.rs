@@ -16,7 +16,6 @@ use std::{
         unix::process::CommandExt as _,
     },
     process::{Command, Stdio},
-    sync::mpsc,
     thread,
     time::{Duration, Instant},
 };
@@ -115,30 +114,68 @@ fn probe_native_executor(
             error.raw_os_error()
         ))
     })?;
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| executor_unavailable("Executor readiness stdout is unavailable"))?;
-    let stderr = child
-        .stderr
-        .take()
-        .ok_or_else(|| executor_unavailable("Executor readiness stderr is unavailable"))?;
-    // A faulty companion may exit while a descendant still holds a pipe. Keep the
-    // readiness deadline independent from those readers.
-    let (stdout_sender, stdout_receiver) = mpsc::sync_channel(1);
-    let _ = thread::spawn(move || {
-        let _ = stdout_sender.send(read_bounded(stdout, proto::MAX_EXECUTOR_PROBE_BYTES_V0));
-    });
-    let (stderr_sender, stderr_receiver) = mpsc::sync_channel(1);
-    let _ = thread::spawn(move || {
-        let _ = stderr_sender.send(read_bounded(stderr, MAX_PROBE_STDERR_BYTES));
-    });
+    let stdout = match child.stdout.take() {
+        Some(stdout) => stdout,
+        None => {
+            terminate_child_or_fail_stop(&mut child);
+            return Err(executor_unavailable(
+                "Executor readiness stdout is unavailable",
+            ));
+        }
+    };
+    let stderr = match child.stderr.take() {
+        Some(stderr) => stderr,
+        None => {
+            terminate_child_or_fail_stop(&mut child);
+            return Err(executor_unavailable(
+                "Executor readiness stderr is unavailable",
+            ));
+        }
+    };
+    if set_nonblocking(&stdout).is_err() || set_nonblocking(&stderr).is_err() {
+        terminate_child_or_fail_stop(&mut child);
+        return Err(executor_unavailable(
+            "Executor readiness output could not become nonblocking",
+        ));
+    }
+    let mut stdout = stdout;
+    let mut stderr = stderr;
+    let mut stdout_read = BoundedRead::new(proto::MAX_EXECUTOR_PROBE_BYTES_V0);
+    let mut stderr_read = BoundedRead::new(MAX_PROBE_STDERR_BYTES);
+    let mut stdout_eof = false;
+    let mut stderr_eof = false;
     let started = Instant::now();
-    loop {
+    let status = loop {
+        let made_progress = match drain_probe_output(
+            &mut stdout,
+            &mut stdout_eof,
+            &mut stdout_read,
+            &mut stderr,
+            &mut stderr_eof,
+            &mut stderr_read,
+        ) {
+            Ok(progress) => progress,
+            Err(message) => {
+                terminate_child_or_fail_stop(&mut child);
+                return Err(executor_unavailable(message));
+            }
+        };
         match child_exited_without_reaping(&child) {
-            Ok(true) => break,
+            Ok(true) => {
+                terminate_child_or_fail_stop(&mut child);
+                break child
+                    .try_wait()
+                    .map_err(|_| {
+                        executor_unavailable("Executor readiness process could not be reaped")
+                    })?
+                    .ok_or_else(|| {
+                        executor_unavailable("Executor readiness exit status is unavailable")
+                    })?;
+            }
             Ok(false) if started.elapsed() < PROBE_TIMEOUT => {
-                thread::sleep(Duration::from_millis(10))
+                if !made_progress {
+                    thread::sleep(Duration::from_millis(10));
+                }
             }
             Ok(false) => {
                 terminate_child_or_fail_stop(&mut child);
@@ -151,16 +188,28 @@ fn probe_native_executor(
                 ));
             }
         }
+    };
+    while !stdout_eof || !stderr_eof {
+        if started.elapsed() >= PROBE_TIMEOUT {
+            return Err(executor_unavailable(
+                "Executor readiness output did not close",
+            ));
+        }
+        let made_progress = drain_probe_output(
+            &mut stdout,
+            &mut stdout_eof,
+            &mut stdout_read,
+            &mut stderr,
+            &mut stderr_eof,
+            &mut stderr_read,
+        )
+        .map_err(executor_unavailable)?;
+        if !made_progress && (!stdout_eof || !stderr_eof) {
+            thread::sleep(Duration::from_millis(10));
+        }
     }
-    terminate_child_or_fail_stop(&mut child);
-    let status = child
-        .try_wait()
-        .map_err(|_| executor_unavailable("Executor readiness process could not be reaped"))?
-        .ok_or_else(|| executor_unavailable("Executor readiness exit status is unavailable"))?;
-    let stdout = receive_bounded_read(stdout_receiver, started, "stdout")?;
-    let stderr = receive_bounded_read(stderr_receiver, started, "stderr")?;
     if !status.success() {
-        let diagnostic = String::from_utf8_lossy(&stderr.bytes);
+        let diagnostic = String::from_utf8_lossy(&stderr_read.bytes);
         let diagnostic = diagnostic.trim();
         return Err(executor_unavailable(if diagnostic.is_empty() {
             "Executor readiness failed"
@@ -168,42 +217,26 @@ fn probe_native_executor(
             "Executor readiness failed with bounded diagnostics"
         }));
     }
-    if stdout.overflowed {
+    if stdout_read.overflowed {
         return Err(protocol_failure(
             proto::ExecutorErrorCodeV0::InvalidResponse,
             "Executor readiness response exceeded its byte limit",
         ));
     }
-    let probe = proto::parse_executor_probe_v0(&stdout.bytes).map_err(|_| {
+    let probe = proto::parse_executor_probe_v0(&stdout_read.bytes).map_err(|_| {
         protocol_failure(
             proto::ExecutorErrorCodeV0::InvalidResponse,
             "Executor readiness response is invalid",
         )
     })?;
-    let readiness_diagnostic = (!stderr.overflowed).then(|| String::from_utf8_lossy(&stderr.bytes));
+    let readiness_diagnostic =
+        (!stderr_read.overflowed).then(|| String::from_utf8_lossy(&stderr_read.bytes));
     let readiness_diagnostic = readiness_diagnostic
         .as_deref()
         .map(str::trim)
         .filter(|diagnostic| !diagnostic.is_empty());
     validate_probe(selection, &probe, readiness_diagnostic)?;
     Ok(ProbedExecutor { programs, probe })
-}
-
-fn receive_bounded_read(
-    receiver: mpsc::Receiver<io::Result<BoundedRead>>,
-    started: Instant,
-    stream: &str,
-) -> Result<BoundedRead, RuntimeError> {
-    receiver
-        .recv_timeout(PROBE_TIMEOUT.saturating_sub(started.elapsed()))
-        .map_err(|_| executor_unavailable("Executor readiness output did not close"))?
-        .map_err(|_| {
-            executor_unavailable(if stream == "stdout" {
-                "Executor readiness stdout failed"
-            } else {
-                "Executor readiness stderr failed"
-            })
-        })
 }
 
 fn validate_probe(
@@ -266,23 +299,70 @@ fn host_identity() -> (&'static str, &'static str) {
 
 struct BoundedRead {
     bytes: Vec<u8>,
+    limit: usize,
     overflowed: bool,
 }
 
-fn read_bounded(mut reader: impl Read, limit: usize) -> io::Result<BoundedRead> {
-    let mut bytes = Vec::with_capacity(limit.min(8 * 1024));
-    let mut buffer = [0_u8; 8 * 1024];
-    let mut overflowed = false;
-    loop {
-        let read = reader.read(&mut buffer)?;
-        if read == 0 {
-            break;
+impl BoundedRead {
+    fn new(limit: usize) -> Self {
+        Self {
+            bytes: Vec::with_capacity(limit.min(8 * 1024)),
+            limit,
+            overflowed: false,
         }
-        let remaining = limit.saturating_sub(bytes.len());
-        bytes.extend_from_slice(&buffer[..read.min(remaining)]);
-        overflowed |= read > remaining;
     }
-    Ok(BoundedRead { bytes, overflowed })
+}
+
+fn set_nonblocking(descriptor: &impl std::os::fd::AsFd) -> io::Result<()> {
+    let flags = rustix::fs::fcntl_getfl(descriptor)
+        .map_err(|error| io::Error::from_raw_os_error(error.raw_os_error()))?;
+    rustix::fs::fcntl_setfl(descriptor, flags | rustix::fs::OFlags::NONBLOCK)
+        .map_err(|error| io::Error::from_raw_os_error(error.raw_os_error()))
+}
+
+fn read_bounded_available(
+    reader: &mut impl Read,
+    output: &mut BoundedRead,
+) -> io::Result<(bool, bool)> {
+    let mut buffer = [0_u8; 8 * 1024];
+    match reader.read(&mut buffer) {
+        Ok(0) => Ok((true, false)),
+        Ok(read) => {
+            let remaining = output.limit.saturating_sub(output.bytes.len());
+            output
+                .bytes
+                .extend_from_slice(&buffer[..read.min(remaining)]);
+            output.overflowed |= read > remaining;
+            Ok((false, true))
+        }
+        Err(error) if error.kind() == io::ErrorKind::WouldBlock => Ok((false, false)),
+        Err(error) if error.kind() == io::ErrorKind::Interrupted => Ok((false, false)),
+        Err(error) => Err(error),
+    }
+}
+
+fn drain_probe_output(
+    stdout: &mut impl Read,
+    stdout_eof: &mut bool,
+    stdout_read: &mut BoundedRead,
+    stderr: &mut impl Read,
+    stderr_eof: &mut bool,
+    stderr_read: &mut BoundedRead,
+) -> Result<bool, &'static str> {
+    let mut made_progress = false;
+    if !*stdout_eof {
+        let (eof, progress) = read_bounded_available(stdout, stdout_read)
+            .map_err(|_| "Executor readiness stdout failed")?;
+        *stdout_eof = eof;
+        made_progress |= progress;
+    }
+    if !*stderr_eof {
+        let (eof, progress) = read_bounded_available(stderr, stderr_read)
+            .map_err(|_| "Executor readiness stderr failed")?;
+        *stderr_eof = eof;
+        made_progress |= progress;
+    }
+    Ok(made_progress)
 }
 
 pub(super) fn open_validated_executable(
