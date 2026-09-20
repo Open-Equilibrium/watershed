@@ -286,8 +286,8 @@ jobs:
         if: steps.scope.outputs.product == 'true' && (matrix.os != 'windows-latest')
         shell: bash
         run: |
-          cargo llvm-cov clean --workspace
           eval "$(cargo llvm-cov show-env --sh)"
+          cargo llvm-cov clean --workspace
           cargo build --locked -p flow-agent-cli -p flow-agent-executor
           export M12_COVERAGE_BIN_DIR="$CARGO_LLVM_COV_TARGET_DIR/debug"
           /bin/sh scripts/run-m12-installer-acceptance.sh

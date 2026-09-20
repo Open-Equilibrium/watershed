@@ -292,6 +292,8 @@ class CiWorkflowContractTest(unittest.TestCase):
             workflow.replace("--test native_contract", "--test absent", 1),
             workflow.replace("--test native_self_protection", "--test absent", 1),
             workflow.replace("cargo llvm-cov show-env --sh", "true", 1),
+            workflow.replace('eval "$(cargo llvm-cov show-env --sh)"\n          cargo llvm-cov clean --workspace',
+                             'cargo llvm-cov clean --workspace\n          eval "$(cargo llvm-cov show-env --sh)"', 1),
             workflow.replace("cargo llvm-cov report", "true", 1),
             workflow.replace('export M12_COVERAGE_BIN_DIR="$CARGO_LLVM_COV_TARGET_DIR/debug"',
                              'export M12_COVERAGE_BIN_DIR="target/m12-standard/release"', 1),
@@ -393,8 +395,8 @@ class CiWorkflowContractTest(unittest.TestCase):
         self.assertIn("        shell: bash", native_lines)
         native = step_run(workflow, "Check native coverage and installation acceptance")
         ordered = (
-            "cargo llvm-cov clean --workspace",
             'eval "$(cargo llvm-cov show-env --sh)"',
+            "cargo llvm-cov clean --workspace",
             "cargo build --locked -p flow-agent-cli -p flow-agent-executor",
             'export M12_COVERAGE_BIN_DIR="$CARGO_LLVM_COV_TARGET_DIR/debug"',
             "/bin/sh scripts/run-m12-installer-acceptance.sh",
