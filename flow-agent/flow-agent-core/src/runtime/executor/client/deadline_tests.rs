@@ -37,9 +37,11 @@ fn expired_preflight_rejects_available_ready_and_error_records() {
         let tool_started = workspace.join(format!("{name}-tool-started"));
         let response = canonical_preflight(&response);
         let script = format!(
-            "printf '%s' '{response}'\n\
+            "{{\n\
+             printf '%s' '{response}'\n\
              printf ready > '{response_ready}'\n\
-             {after_response}\n",
+             {after_response}\n\
+             }}\n",
             response_ready = response_ready.display(),
             after_response = if wait_for_exit {
                 "exit 0".to_owned()
@@ -174,11 +176,14 @@ fn waiting_executor(
         .expect("terminal response is canonical"),
     )
     .expect("terminal response is UTF-8");
+    // Parse the entire fixture before read consumes the subsequent Start record.
     let script = format!(
-        "printf '%s' '{preflight}'\n\
-         IFS= read -r _start\n\
+        "{{\n\
+         printf '%s' '{preflight}'\n\
+         IFS= read -r _start || exit 1\n\
          printf started > '{marker}'\n\
-         printf '%s' '{response}'\n",
+         printf '%s' '{response}'\n\
+         }}\n",
         marker = marker.display(),
     );
     let executor = File::open("/bin/sh").expect("shell executor opens");
@@ -190,7 +195,10 @@ fn waiting_executor(
     )
     .expect("fake Executor reaches readiness")
     {
-        ExecutorPreflightProcess::Ready(waiting) => waiting,
+        ExecutorPreflightProcess::Ready(waiting) => {
+            assert!(!marker.exists(), "fixture executed before Start");
+            waiting
+        }
         ExecutorPreflightProcess::Rejected(code) => panic!("unexpected rejection: {code:?}"),
     }
 }

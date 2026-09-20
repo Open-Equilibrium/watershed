@@ -533,13 +533,16 @@ mod tests {
             .expect("preflight is canonical"),
         )
         .expect("preflight is UTF-8");
+        // Keep shell parsing separate from the Start record on the same pipe.
         let script = format!(
-            "printf '%s' '{preflight}'\n\
-             IFS= read -r _start\n\
+            "{{\n\
+             printf '%s' '{preflight}'\n\
+             IFS= read -r _start || exit 1\n\
              trap \"/bin/sleep 0.1; /bin/cat -- '{response}'; exit 0\" TERM\n\
              (trap \"printf signalled > '{child_signalled}'; exit 0\" TERM; while :; do /bin/sleep 1; done) &\n\
              printf ready > '{ready}'\n\
-             while :; do /bin/sleep 1; done\n",
+             while :; do /bin/sleep 1; done\n\
+             }}\n",
             response = response_path.display(),
             preflight = preflight,
             child_signalled = child_signalled.display(),
