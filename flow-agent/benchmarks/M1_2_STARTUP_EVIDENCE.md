@@ -1,6 +1,6 @@
 # M1.2 Executor Startup Evidence
 
-**Migration status:** The workload/report consumer follows the accepted own-file protection contract in [SECURITY.md](../../SECURITY.md#accepted-flow-agent-security-target). Linux replacement observations are available below; Mac observations and the complete native acceptance gates remain pending. Historical container observations measure the legacy boundary, not the replacement guard.
+**Migration status:** The workload/report consumer follows the accepted own-file protection contract in [SECURITY.md](../../SECURITY.md#accepted-flow-agent-security-target). Linux and Mac replacement observations are available below; the complete native acceptance gates remain pending. Historical container observations measure the legacy boundary, not the replacement guard.
 
 This file is the single source for the M1.2 startup workload, evidence and regression policy. Protocol, security and platform behavior remain canonical in `PROTOCOL.md`, `SECURITY.md` and `TESTING.md`.
 
@@ -33,7 +33,7 @@ Replacement observations remain separate for each host:
 | Host | CI artifact | Observation |
 | --- | --- | --- |
 | Ubuntu 24.04 x64 | `m12-executor-startup-evidence-ubuntu-24.04` | Complete samples in the two runs below; not complete product acceptance. |
-| macOS 26 ARM64 | `m12-executor-startup-evidence-macos-26` | Pending |
+| macOS 26 ARM64 | `m12-executor-startup-evidence-macos-26` | Complete samples at `8725a1c` below; not complete product acceptance. |
 
 Retain each host's raw samples and distribution separately; do not pool them or treat one as evidence for the other. Compare only like-for-like host observations. Compile checks and legacy measurements do not supply replacement timing or native protection evidence.
 
@@ -45,6 +45,8 @@ Both Linux reports use Rust 1.98.1, five warmups, 30 fresh-child samples and `co
 | `b04f9eb`, [35538252515](https://github.com/Open-Equilibrium/watershed/actions/runs/35538252515) | `20260907.300.1`, Intel Xeon 6973P-C | 52,210,434 | 100,226,036 | 173,744,825 |
 
 The median is similar; tail observations are higher in the second run. Its M1.1 artifact also records longer tails in unchanged authoring/status workloads. Changed hardware and runner images prevent attributing the difference solely to Executor changes. Keep the unadjusted samples and compare the next native candidate; this is neither a threshold failure nor an established architectural cause. Native gate failures are tracked in [TESTING.md](../../TESTING.md#native-verification-status).
+
+The first complete Mac replacement report, `8725a1c` in [run 35541356501](https://github.com/Open-Equilibrium/watershed/actions/runs/35541356501), uses Rust 1.98.1, runner image `20260907.0351.1` and three logical CPUs; CPU model and memory are unavailable. Five warmups precede 30 samples, all with `self_protection_active: true`, followed by `complete: true`. The unadjusted distribution is p50 **255,014,583 ns**, p95 **358,342,750 ns**, maximum **381,888,041 ns**. There is no prior comparable Mac replacement distribution; Linux timings are not its regression baseline.
 
 ### Historical container observations
 
