@@ -117,6 +117,7 @@ test ! -e "$config/flow-agent/executor.json"
 node scripts/run-python.mjs - "$agent_home" "$expected_platform" "$expected_backend" <<'PY'
 import json
 import pathlib
+import re
 import sys
 
 home = pathlib.Path(sys.argv[1])
@@ -162,7 +163,7 @@ assert set(receipt) == {"applied_policy_digest", "backend", "backend_version",
 assert receipt["self_protection_active"] is True, receipt
 assert receipt["platform"] == sys.argv[2], receipt
 assert receipt["backend"] == sys.argv[3], receipt
-assert receipt["applied_policy_digest"].startswith("sha256:"), receipt
+assert re.fullmatch(r"[0-9a-f]{64}", receipt["applied_policy_digest"]), receipt
 PY
 set +e
 productive_unavailable=$(run_in_workspace "$unavailable_workspace" /usr/bin/env FLOW_AGENT_HOME="$agent_home" "$custom_prefix/bin/flow" run smoke-flow 2>&1)

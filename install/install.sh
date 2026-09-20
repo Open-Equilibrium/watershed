@@ -189,6 +189,8 @@ readiness_group_has_descendant() {
 wait_for_readiness_group() {
     wait_attempts=20
     while readiness_group_has_descendant; do
+        # An unavailable scanner cannot observe progress; escalate immediately.
+        [ -x "$readiness_scanner" ] || return 1
         [ "$wait_attempts" -gt 0 ] || return 1
         /bin/sleep 0.05
         wait_attempts=$((wait_attempts - 1))
