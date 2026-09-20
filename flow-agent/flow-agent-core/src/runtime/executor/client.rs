@@ -198,7 +198,7 @@ mod tests {
     use super::response::{decode_tool_outcome, validate_receipt_identity};
     use super::transport::{
         ExecutorPreflightProcess, c_close, preflight_one_shot, preflight_one_shot_at_deadline,
-        start_one_shot,
+        preflight_one_shot_with_deadline, start_one_shot,
     };
     use super::{ExecutorSelection, PreparedExecutor};
     use crate::runtime::run_attempts::{RunAttemptOutcome, ToolTerminalClassification};
@@ -809,18 +809,47 @@ mod tests {
             return;
         }
 
+        let (socket, _peer) =
+            std::os::unix::net::UnixStream::pair().expect("inherited socket fixture opens");
+        let (replacement, _replacement_peer) =
+            std::os::unix::net::UnixStream::pair().expect("replacement socket fixture opens");
+        assert_inherited_destination_remapping(socket.into(), replacement.into());
+    }
+
+    #[test]
+    fn protected_descriptor_remapping_preserves_inherited_pipe_destination() {
+        const CHILD_ENV: &str = "WATERSHED_EXECUTOR_INHERITED_PIPE_DESTINATION_CHILD";
+        if crate::tests::run_isolated_test(CHILD_ENV) {
+            return;
+        }
+
+        let (pipe, _writer) = std::io::pipe().expect("inherited pipe fixture opens");
+        let (replacement, _replacement_writer) =
+            std::io::pipe().expect("replacement pipe fixture opens");
+        assert_inherited_destination_remapping(pipe.into(), replacement.into());
+    }
+
+    fn assert_inherited_destination_remapping(source: OwnedFd, replacement: OwnedFd) {
         let (request, protected_descriptors) = one_shot_request();
         let target = i32::try_from(proto::EXECUTOR_PROTECTED_DESCRIPTOR_BASE_V0)
             .expect("protected descriptor base fits i32");
-        let (socket, _peer) =
-            std::os::unix::net::UnixStream::pair().expect("inherited socket fixture opens");
-        let destination = rustix::io::fcntl_dupfd_cloexec(&socket, target)
-            .expect("inherited socket duplicates into the protected destination");
+        let mut destination = rustix::io::fcntl_dupfd_cloexec(&source, target)
+            .expect("inherited descriptor duplicates into the protected destination");
         assert_eq!(
             destination.as_raw_fd(),
             target,
             "isolated fixture needs the first protected destination free"
         );
+        let identity = |descriptor: &OwnedFd| {
+            let stat = rustix::fs::fstat(descriptor).expect("descriptor identity reads");
+            (
+                stat.st_dev,
+                stat.st_ino,
+                rustix::fs::FileType::from_raw_mode(stat.st_mode),
+            )
+        };
+        let original_identity = identity(&destination);
+        let parent_flags = rustix::io::fcntl_getfd(&destination).expect("parent flags read");
 
         let response = proto::canonical_executor_preflight_v0(&proto::ExecutorPreflightV0::Error {
             code: proto::ExecutorErrorCodeV0::Unavailable,
@@ -845,6 +874,40 @@ mod tests {
             .expect("inherited destination does not prevent valid preflight traffic"),
             ExecutorPreflightProcess::Rejected(proto::ExecutorErrorCodeV0::Unavailable)
         ));
+        assert_eq!(identity(&destination), original_identity);
+        assert_eq!(
+            rustix::io::fcntl_getfd(&destination).expect("parent flags remain readable"),
+            parent_flags,
+            "child remapping must leave the parent descriptor unchanged"
+        );
+
+        let replacement_identity = identity(&replacement);
+        assert_ne!(original_identity, replacement_identity);
+        let error = match preflight_one_shot_with_deadline(
+            (&shell, Path::new("/bin/sh")),
+            &protected_descriptors,
+            &request,
+            script.as_bytes(),
+            || {
+                // Deterministically replace a destination after its snapshot, as
+                // another parent thread or spawn's channel allocation can do.
+                rustix::io::dup2(&replacement, &mut destination)
+                    .expect("destination is replaced before spawn");
+                Ok(Instant::now() + Duration::from_secs(5))
+            },
+            |_| Ok(()),
+            &Instant::now,
+        ) {
+            Err(error) => error,
+            Ok(_) => panic!("a new channel must not be overwritten during remapping"),
+        };
+        assert!(
+            error
+                .to_string()
+                .contains("process could not start (OS error Some(16))"),
+            "a replacement channel must retain collision protection: {error}"
+        );
+        assert_eq!(identity(&destination), replacement_identity);
     }
 
     #[test]

@@ -42,6 +42,27 @@ fn set_nonblocking(descriptor: &impl std::os::fd::AsFd) -> Result<(), RuntimeErr
         .map_err(runtime_open_error)
 }
 
+fn retain_remap_destination(target: i32, minimum: i32) -> std::io::Result<Option<OwnedFd>> {
+    #[cfg(target_os = "linux")]
+    const F_DUPFD_CLOEXEC: i32 = 1030;
+    #[cfg(target_os = "macos")]
+    const F_DUPFD_CLOEXEC: i32 = 67;
+
+    // The raw slot may be closed concurrently, so it cannot be borrowed as an
+    // AsFd. Duplicate atomically with CLOEXEC, outside the remap destinations.
+    let retained = unsafe { c_fcntl(target, F_DUPFD_CLOEXEC, minimum) };
+    if retained >= 0 {
+        Ok(Some(unsafe { OwnedFd::from_raw_fd(retained) }))
+    } else {
+        let error = std::io::Error::last_os_error();
+        if error.raw_os_error() == Some(rustix::io::Errno::BADF.raw_os_error()) {
+            Ok(None)
+        } else {
+            Err(error)
+        }
+    }
+}
+
 struct ChildGuard {
     child: Option<Child>,
 }
@@ -98,7 +119,7 @@ pub(super) fn preflight_one_shot(
     )
 }
 
-fn preflight_one_shot_with_deadline(
+pub(super) fn preflight_one_shot_with_deadline(
     executable: (&File, &Path),
     protected_descriptors: &[OwnedFd],
     request: &proto::ExecutorRequestV0,
@@ -141,6 +162,16 @@ fn preflight_one_shot_with_deadline(
             break;
         }
     }
+    let originals = remaps
+        .iter()
+        .map(|&(_, target)| retain_remap_destination(target, high_base))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| {
+            super::executor_error(
+                proto::ExecutorErrorCodeV0::Unavailable,
+                "one-shot Executor process could not retain protected descriptor destinations",
+            )
+        })?;
     let mut command = Command::new(inherited_path);
     command
         .env_clear()
@@ -151,23 +182,24 @@ fn preflight_one_shot_with_deadline(
     unsafe {
         command.pre_exec(move || {
             configure_executor_child(expected_parent)?;
-            for &(source, target) in &remaps {
+            for (&(source, target), original) in remaps.iter().zip(&originals) {
                 // A parent thread can close an occupied slot after reservation.
-                // Never overwrite a pipe/socket that spawn may have put there.
-                let current = c_dup(target);
-                if current >= 0 {
-                    let current = OwnedFd::from_raw_fd(current);
+                // Only replace a pipe/socket retained before spawn allocated its
+                // channels. Holding the duplicate prevents object recycling.
+                if let Some(current) = retain_remap_destination(target, high_base)? {
                     let stat = rustix::fs::fstat(&current)?;
                     let kind = rustix::fs::FileType::from_raw_mode(stat.st_mode);
                     if kind == rustix::fs::FileType::Fifo || kind == rustix::fs::FileType::Socket {
-                        return Err(std::io::Error::from_raw_os_error(
-                            rustix::io::Errno::BUSY.raw_os_error(),
-                        ));
-                    }
-                } else {
-                    let error = std::io::Error::last_os_error();
-                    if error.raw_os_error() != Some(rustix::io::Errno::BADF.raw_os_error()) {
-                        return Err(error);
+                        let original = original.as_ref().map(rustix::fs::fstat).transpose()?;
+                        if !original.is_some_and(|original| {
+                            original.st_dev == stat.st_dev
+                                && original.st_ino == stat.st_ino
+                                && rustix::fs::FileType::from_raw_mode(original.st_mode) == kind
+                        }) {
+                            return Err(std::io::Error::from_raw_os_error(
+                                rustix::io::Errno::BUSY.raw_os_error(),
+                            ));
+                        }
                     }
                 }
                 if c_dup2(source, target) < 0 {
@@ -187,6 +219,7 @@ fn preflight_one_shot_with_deadline(
             ),
         )
     })?;
+    drop(command);
     drop(reservations);
     drop(inherited);
     drop(executor);
@@ -592,8 +625,8 @@ fn read_available(reader: &mut impl Read, output: &mut BoundedRead) -> std::io::
 }
 
 unsafe extern "C" {
-    #[link_name = "dup"]
-    fn c_dup(fd: i32) -> i32;
+    #[link_name = "fcntl"]
+    fn c_fcntl(fd: i32, command: i32, ...) -> i32;
 
     #[cfg(test)]
     #[link_name = "close"]
