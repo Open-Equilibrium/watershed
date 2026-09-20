@@ -51,6 +51,7 @@ class NativeObservation(unittest.TestCase):
             environment = {"PATH": str(Path(host["node"]).parent) + os.pathsep + os.defpath}
             if "SystemRoot" in os.environ:
                 environment["SystemRoot"] = os.environ["SystemRoot"]
+                environment["ComSpec"] = str(Path(os.environ["SystemRoot"]) / "System32" / "cmd.exe")
                 environment["PATH"] += os.pathsep + str(Path(os.environ["SystemRoot"]) / "System32")
             # App Sandbox changes the initial directory; npm must select the fixture explicitly.
             result = subprocess.run(command, cwd=root, env=environment, capture_output=True, text=True, timeout=30)
