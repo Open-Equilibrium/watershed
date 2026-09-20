@@ -14,8 +14,7 @@ pub use canonical::{canonical_json, parse_unique_json};
 pub use error::{CanonicalJsonError, EventValidationError};
 pub use event::{
     EventEnvelope, EventStateIdentifierKind, MAX_EVENT_PAYLOAD_STATE_IDENTIFIERS_V0,
-    MAX_EVENT_STATE_IDENTIFIERS_V0, PhaseKind, ToolKind, ToolNetworkAccess, UnknownPhaseKind,
-    UnknownToolKind, UnknownToolNetworkAccess,
+    MAX_EVENT_STATE_IDENTIFIERS_V0, PhaseKind, ToolKind, UnknownPhaseKind, UnknownToolKind,
 };
 pub use executor::{
     EXECUTOR_FEATURE_SELF_PROTECTION_V0, EXECUTOR_NAME_V0, EXECUTOR_OWN_SCRIPT_EXECUTABLE_V0,

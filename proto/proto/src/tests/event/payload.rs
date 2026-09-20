@@ -2,7 +2,6 @@ use crate::{
     EventEnvelope, EventStateIdentifierKind, EventType, FLOW_VALUE_MAX_BYTES_V0,
     FLOW_VALUE_MAX_DEPTH_V0, FLOW_VALUE_MAX_KEY_CHARS_V0, FLOW_VALUE_MAX_MEMBERS_V0,
     MAX_EVENT_PAYLOAD_STATE_IDENTIFIERS_V0, MAX_EVENT_STATE_IDENTIFIERS_V0, PhaseKind, ToolKind,
-    ToolNetworkAccess,
 };
 use serde_json::{Value, json};
 
@@ -660,20 +659,6 @@ fn assert_tool_started_tokens_are_canonical() {
         );
     }
     assert!(ToolKind::try_from("shell").is_err());
-
-    for (network_access, name) in [
-        (ToolNetworkAccess::Deny, "deny"),
-        (ToolNetworkAccess::Declared, "declared"),
-    ] {
-        assert_eq!(ToolNetworkAccess::try_from(name), Ok(network_access));
-        assert_eq!(network_access.as_str(), name);
-        assert_eq!(serde_json::to_value(network_access).unwrap(), json!(name));
-        assert_eq!(
-            serde_json::from_value::<ToolNetworkAccess>(json!(name)).unwrap(),
-            network_access
-        );
-    }
-    assert!(ToolNetworkAccess::try_from("allow").is_err());
 }
 
 #[test]

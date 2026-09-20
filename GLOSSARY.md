@@ -113,7 +113,6 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **Golden flow** — A checked-in flow fixture with a deterministic expected event stream used for capture-and-diff validation.
 - **Golden event stream** — A checked-in JSONL event stream with fixed fixture IDs, timestamps, sequence values and canonical event JSONL bytes per `PROTOCOL.md`.
 - **Environment allowlist** — A tool-scoped policy-artifact field; its M1 availability and restrictions are defined in [`SECURITY.md`](SECURITY.md).
-- **Network allow entry** — A typed CIDR/IP egress rule with transport and port; the only v0 way to declare network access. The current legacy Linux-target policy rejects non-empty allowlists. General egress enforcement is not part of the approved replacement target.
 - **Smoke-flow** — The smallest golden flow: one phase, one tool and one instruction, used as the first localizable gate.
 - **Hello-flow** — The showcase golden flow that exercises multiple Phases, scoped Instructions/Tools and subflow reuse.
 - **Sandbox-negative fixture** — A tiny flow that intentionally attempts a forbidden operation and must be rejected.

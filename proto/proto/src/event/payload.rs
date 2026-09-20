@@ -136,21 +136,6 @@ payload_token_enum! {
     }
 }
 
-payload_token_enum! {
-    /// Canonical v0 `tool.started` network-access policies.
-    pub enum ToolNetworkAccess;
-    /// Error returned when a string is not a canonical v0 `tool.started` network-access policy.
-    error UnknownToolNetworkAccess;
-    label "tool.started network-access policy";
-    count 2;
-    {
-        /// Network access is denied.
-        Deny => "deny",
-        /// Only the Registry-declared network scope is available.
-        Declared => "declared",
-    }
-}
-
 pub(super) fn validate_event_payload(
     event_type: EventType,
     payload: &Value,
