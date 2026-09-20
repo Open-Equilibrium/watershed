@@ -21,7 +21,7 @@ ACTION_PINS = {
     "actions/checkout": "3d3c42e5aac5ba805825da76410c181273ba90b1",
     "actions/setup-node": "820762786026740c76f36085b0efc47a31fe5020",
     "actions/upload-artifact": "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
-    "taiki-e/install-action": "7b8d4719ee4aaa279bdf55df38dacb9ebfe12a6c",
+    "taiki-e/install-action": "94c31af3204a9f15ab40b35ad084410b905bbc73",
 }
 TOPIC_BRANCH_TYPES = ("feat", "fix", "docs", "test", "ci", "chore", "refactor")
 UBUNTU = "matrix.os == 'ubuntu-24.04'"
@@ -293,7 +293,7 @@ class CiWorkflowContractTest(unittest.TestCase):
             workflow.replace("--test native_self_protection", "--test absent", 1),
             workflow.replace("cargo llvm-cov show-env --sh", "true", 1),
             workflow.replace("cargo llvm-cov report", "true", 1),
-            workflow.replace('export M12_COVERAGE_BIN_DIR="$CARGO_TARGET_DIR/debug"',
+            workflow.replace('export M12_COVERAGE_BIN_DIR="$CARGO_LLVM_COV_TARGET_DIR/debug"',
                              'export M12_COVERAGE_BIN_DIR="target/m12-standard/release"', 1),
             workflow.replace('/bin/sh scripts/run-m12-readiness-negatives.sh', "true", 1),
             workflow.replace("install.tests.test_install install.tests.test_readiness",
@@ -396,7 +396,7 @@ class CiWorkflowContractTest(unittest.TestCase):
             "cargo llvm-cov clean --workspace",
             'eval "$(cargo llvm-cov show-env --sh)"',
             "cargo build --locked -p flow-agent-cli -p flow-agent-executor",
-            'export M12_COVERAGE_BIN_DIR="$CARGO_TARGET_DIR/debug"',
+            'export M12_COVERAGE_BIN_DIR="$CARGO_LLVM_COV_TARGET_DIR/debug"',
             "/bin/sh scripts/run-m12-installer-acceptance.sh",
             "cargo nextest run",
             "/bin/sh scripts/run-m12-readiness-negatives.sh",
