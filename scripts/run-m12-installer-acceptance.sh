@@ -33,8 +33,10 @@ case "$(/usr/bin/uname -s)" in
   *) printf 'native installer acceptance requires Linux or macOS\n' >&2; exit 1 ;;
 esac
 bundle_version=$(node scripts/run-python.mjs -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["workspace"]["package"]["version"])')
-download=$(cd target/m12-download && /bin/pwd -P)
 archive="flow-agent-$bundle_version-$expected_platform.tar.gz"
+download="$acceptance_root/download"
+mkdir "$download"
+cp "target/m12-download/$archive" target/m12-download/SHA256SUMS "$download/"
 bundle="$acceptance_root/${archive%.tar.gz}"
 verify_download() {
   case "$expected_platform" in
@@ -42,20 +44,41 @@ verify_download() {
     macos-*) /usr/bin/shasum -a 256 --check SHA256SUMS ;;
   esac
 }
+mac_metadata() {
+  printf 'Mac metadata: %s: %s\n' "$1" "$2"
+  /usr/bin/xattr -l "$2"
+}
+mac_assessment() {
+  /usr/bin/codesign --verify --strict "$1"
+  printf 'Code signature integrity: exit 0: %s\n' "$1"
+  assessment_status=0
+  /usr/sbin/spctl --assess --type execute --verbose=2 "$1" || assessment_status=$?
+  # Preserve the diagnostic and exact exit: nonzero is not an approval, and
+  # must be reviewed as policy rejection or assessment failure, not conflated.
+  printf 'Gatekeeper assessment: exit %s: %s\n' "$assessment_status" "$1"
+}
+if [ "$expected_platform" = macos-26-aarch64 ]; then
+  gatekeeper_status=0
+  /usr/sbin/spctl --status || gatekeeper_status=$?
+  printf 'Gatekeeper status command: exit %s; disabled policy cannot prove enforcement\n' "$gatekeeper_status"
+  mac_metadata archive-initial "$download/$archive"
+  /usr/bin/xattr -w com.apple.quarantine '0083;00000000;WatershedDownloadAcceptance;' "$download/$archive"
+  mac_metadata archive-synthetic-quarantine "$download/$archive"
+fi
 # Use only OS tools for the documented pre-execution verification/extraction.
 (cd "$download" && verify_download)
 /usr/bin/tar -xzf "$download/$archive" -C "$acceptance_root"
 printf '%s\n' "$bundle_version" "$expected_platform" | /usr/bin/cmp - "$bundle/bundle-info"
 if [ "$expected_platform" = macos-26-aarch64 ]; then
-  # Simulate downloaded-file metadata on private fixtures, not browser trust or
-  # Developer ID approval. Record host assessment state without changing it.
-  /usr/sbin/spctl --status
+  # Observe actual extraction first, then strengthen the private fixture.
+  # Neither step establishes browser transport or Developer ID approval.
   for artifact in install.sh flow flow-executor; do
+    mac_metadata extracted "$bundle/$artifact"
     /usr/bin/xattr -w com.apple.quarantine '0083;00000000;WatershedDownloadAcceptance;' "$bundle/$artifact"
-    /usr/bin/xattr -p com.apple.quarantine "$bundle/$artifact"
+    mac_metadata extracted-synthetic-quarantine "$bundle/$artifact"
   done
-  /usr/bin/codesign --verify --strict "$bundle/flow"
-  /usr/bin/codesign --verify --strict "$bundle/flow-executor"
+  mac_assessment "$bundle/flow"
+  mac_assessment "$bundle/flow-executor"
 fi
 tampered="$acceptance_root/tampered"
 mkdir "$tampered"
@@ -88,8 +111,20 @@ install -m 0755 target/m12-standard/release/flow-executor "$acceptance_bundle/fl
 (cd / && PATH= HOME="$home" XDG_CONFIG_HOME="$config" /bin/sh "$bundle/install.sh" --prefix "$standard_prefix")
 test -x "$standard_prefix/bin/flow"
 test -x "$standard_prefix/bin/flow-executor"
+for artifact in flow flow-executor; do
+  /usr/bin/cmp "$bundle/$artifact" "$standard_prefix/bin/$artifact"
+  if [ "$expected_platform" = macos-26-aarch64 ]; then
+    mac_metadata installed-after-installer-readiness "$standard_prefix/bin/$artifact"
+    mac_assessment "$standard_prefix/bin/$artifact"
+  fi
+done
 test "$(run_local "$standard_prefix/bin/flow" --version)" = "flow $bundle_version"
 run_local "$standard_prefix/bin/flow" executor check </dev/null
+if [ "$expected_platform" = macos-26-aarch64 ]; then
+  for artifact in flow flow-executor; do
+    mac_metadata installed-after-explicit-readiness "$standard_prefix/bin/$artifact"
+  done
+fi
 (cd / && PATH= HOME="$home" XDG_CONFIG_HOME="$config" /bin/sh "$acceptance_bundle/install.sh" --prefix "$acceptance_prefix")
 test -x "$acceptance_prefix/bin/flow"
 test -x "$acceptance_prefix/bin/flow-executor"
