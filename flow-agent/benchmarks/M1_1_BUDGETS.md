@@ -98,16 +98,16 @@ Stream caps count raw bytes read from each pipe before UTF-8 classification.
 
 ## Authoring
 
-Definition and registry sizes count raw file bytes. Generated maximum-size definitions are real one-block UTF-8 YAML documents; semantically ignored trailing YAML comments provide exact byte padding. A maximum registry has 1,024 valid one-block entries padded to exactly 16 MiB total, with no file above 128 KiB.
+Definition and registry sizes count raw file bytes. Generated maximum-size definitions are real one-block UTF-8 YAML documents; semantically ignored trailing YAML comments provide exact byte padding. A maximum registry has 1,024 valid one-block definition files padded to exactly 16 MiB total, with no file above 128 KiB. Traversal separately permits up to 1,024 non-definition entries per root; these do not consume the definition-file allowance.
 
 | ID | Selected contract | Exact fixture and functional proof | Performance observation or exclusion |
 |---|---|---|---|
 | AU-01 | Definition file: 128 KiB | `F:authoring_definition_budget`; Create and Validate accept a valid 131,072-byte definition and reject 131,073 while reading. | `P:authoring_max_definition_transaction` uses the valid 128 KiB Tool definition. |
 | AU-02 | Registry bytes: 16 MiB | `F:authoring_registry_byte_budget`; Validate accepts 16,777,216 total bytes and rejects one additional byte before retaining more source. | `P:authoring_max_registry_validate` uses the exact 16 MiB registry. |
-| AU-03 | Registry entries: 1,024 | `F:authoring_registry_entry_budget`; Validate accepts 1,024 minimal entries and rejects entry 1,025. | `P:authoring_max_registry_validate` uses exactly 1,024 entries. |
+| AU-03 | Per registry root: 1,024 definition files and independently 1,024 non-definition entries | `F:authoring_registry_entry_budget` proves the definition cap; `registry_loader_bounds_definition_and_non_definition_entries_independently` proves both independent caps. | `P:authoring_max_registry_validate` uses exactly 1,024 definitions. Non-definition admission is F-only. |
 | AU-04 | Maximum-definition transaction | `F:authoring_transaction_roundtrip`; stage, sync, no-replace publish, reload and semantic round-trip preserve exact bytes. | `P:authoring_max_definition_transaction` observes the complete transaction. |
 | AU-06 | Initialization | `F:authoring_init_transaction`; one empty workspace reaches the complete durable initialized state and recovers each transition. | `P:authoring_init` observes one empty workspace and default registry root per sample. |
-| AU-08 | Maximum-registry validation | Covered by AU-01 through AU-03. | `P:authoring_max_registry_validate` observes the exact 1,024-entry/16 MiB registry. |
+| AU-08 | Maximum-registry validation | Covered by AU-01 through AU-03. | `P:authoring_max_registry_validate` observes the exact 1,024-definition/16 MiB registry. |
 
 ## Conversations and Run Logs
 
