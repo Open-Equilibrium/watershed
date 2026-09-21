@@ -52,19 +52,7 @@ pub fn canonical_executor_request_v0(
     request: &ExecutorRequestV0,
 ) -> Result<Vec<u8>, ExecutorProtocolError> {
     validate_request(request)?;
-    let value = serde_json::to_value(request).map_err(|error| {
-        ExecutorProtocolError::new(format!("invalid Executor request: {error}"))
-    })?;
-    let mut bytes = canonical_json(&value)
-        .map_err(|error| ExecutorProtocolError::new(format!("invalid Executor request: {error}")))?
-        .into_bytes();
-    bytes.push(b'\n');
-    if bytes.len() > MAX_EXECUTOR_REQUEST_BYTES_V0 {
-        return Err(ExecutorProtocolError::new(
-            "Executor request exceeds its byte limit",
-        ));
-    }
-    Ok(bytes)
+    canonical_document(request, MAX_EXECUTOR_REQUEST_BYTES_V0, "request")
 }
 
 /// Serializes and validates one canonical Executor preflight response plus LF.
