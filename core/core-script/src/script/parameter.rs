@@ -1,4 +1,18 @@
 use super::model::{AllowedParameter, ParameterValueType};
+use serde::{Deserialize, Deserializer, de::Error};
+
+pub(super) fn deserialize_allowed_values<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let values = Vec::<String>::deserialize(deserializer)?;
+    if values.is_empty() {
+        return Err(D::Error::custom(
+            "allowed_values must not be empty when present",
+        ));
+    }
+    Ok(values)
+}
 
 impl AllowedParameter {
     /// Validates a Tool parameter declaration before compilation or invocation.

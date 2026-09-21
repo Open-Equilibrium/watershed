@@ -237,7 +237,11 @@ pub struct AllowedParameter {
     /// Whether the parameter is required.
     pub required: bool,
     /// Allowed enum values when [`ParameterValueType::Enum`] is used.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        deserialize_with = "super::parameter::deserialize_allowed_values"
+    )]
     pub allowed_values: Vec<String>,
     /// Pattern: required for string values, optional for workspace-relative paths.
     #[serde(default, skip_serializing_if = "Option::is_none")]

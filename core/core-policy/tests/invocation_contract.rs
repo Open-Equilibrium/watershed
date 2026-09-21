@@ -1,7 +1,7 @@
 use core_policy::{
     EnvironmentDefault, PolicyArtifact, canonical_artifact_json, compile_policy_artifact,
 };
-use core_script::{ResolvedRegistry, parse_registry_block};
+use core_script::{ParameterValueType, ResolvedRegistry, parse_registry_block};
 use serde_json::{Value, json};
 
 fn invocation_policy() -> Value {
@@ -49,26 +49,51 @@ fn invocation_contract_compiles_availability_parameters_environment_and_runtime_
 }
 
 #[test]
-fn invocation_contract_matches_definition_validation_for_enum_values() {
-    for (value, valid) in [("safe", true), ("unsafe\0value", false)] {
-        let parameter = json!({
-            "name": "--mode", "required": true, "value_type": "enum",
-            "allowed_values": [value]
-        });
-        let source = json!({"tool": {
-            "id": "echo", "name": "Echo", "tool_kind": "predefined-command",
-            "command": {"command_id": "agent-echo", "argv": []},
-            "allowed_parameters": [parameter.clone()]
-        }})
-        .to_string();
-        let definition = parse_registry_block("enum.yaml", &source)
-            .and_then(|block| ResolvedRegistry::from_blocks([block]));
-        assert_eq!(definition.is_ok(), valid, "definition: {value:?}");
+fn invocation_contract_matches_definition_parameter_validation() {
+    for value_type in ParameterValueType::ALL {
+        for values in [
+            None,
+            Some(json!([])),
+            Some(json!(["safe"])),
+            Some(json!(["unsafe\0value"])),
+        ] {
+            let valid = match value_type {
+                ParameterValueType::Enum => values == Some(json!(["safe"])),
+                _ => values.is_none(),
+            };
+            let mut parameter = json!({
+                "name": "--mode", "required": true, "value_type": value_type.as_str()
+            });
+            if let Some(values) = &values {
+                parameter["allowed_values"] = values.clone();
+            }
+            if value_type == ParameterValueType::String {
+                parameter["value_pattern"] = json!(".*");
+                parameter["max_length"] = json!(64);
+            }
+            let source = json!({"tool": {
+                "id": "echo", "name": "Echo", "tool_kind": "predefined-command",
+                "command": {"command_id": "agent-echo", "argv": []},
+                "allowed_parameters": [parameter.clone()]
+            }})
+            .to_string();
+            let definition = parse_registry_block("parameter.yaml", &source)
+                .and_then(|block| ResolvedRegistry::from_blocks([block]));
+            assert_eq!(
+                definition.is_ok(),
+                valid,
+                "definition: {value_type:?}, {values:?}"
+            );
 
-        let mut artifact = invocation_policy();
-        artifact["commands"][0]["allowed_parameters"] = json!([parameter]);
-        let artifact: PolicyArtifact = serde_json::from_value(artifact).expect("policy shape");
-        assert_eq!(artifact.validate().is_ok(), valid, "policy: {value:?}");
+            let mut artifact = invocation_policy();
+            artifact["commands"][0]["allowed_parameters"] = json!([parameter]);
+            let artifact = serde_json::from_value::<PolicyArtifact>(artifact);
+            assert_eq!(
+                artifact.is_ok_and(|artifact| artifact.validate().is_ok()),
+                valid,
+                "policy: {value_type:?}, {values:?}"
+            );
+        }
     }
 }
 
