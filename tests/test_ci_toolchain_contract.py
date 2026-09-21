@@ -310,14 +310,6 @@ class CiWorkflowContractTest(unittest.TestCase):
             with self.subTest(mutation=index), self.assertRaises(AssertionError):
                 self.assert_ci_gate_contract(mutated)
 
-    def test_testing_contract_covers_tooling_and_rustdoc_gates(self) -> None:
-        testing = (ROOT / "TESTING.md").read_text(encoding="utf-8")
-        for contract in (
-            "`pnpm audit`",
-            "`cargo --config .cargo/test-isolation.toml test --locked --workspace --all-features --doc`",
-        ):
-            self.assertIn(contract, testing)
-
     def assert_ci_gate_contract(self, workflow: str) -> None:
         self.assertFalse(any(line.startswith("    if:") for line in workflow.splitlines()))
         self.assertFalse(

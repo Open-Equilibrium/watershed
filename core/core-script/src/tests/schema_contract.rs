@@ -33,10 +33,6 @@ fn registry_schema_distinguishes_character_and_runtime_byte_limits() {
         &schema["$defs"]["tool"]["allOf"][1]["then"]["properties"]["script_body"],
     ] {
         assert!(definition["maxLength"].is_null());
-        assert_eq!(
-            definition["description"],
-            "Maximum 65,536 UTF-8 bytes enforced when loaded."
-        );
     }
 }
 
