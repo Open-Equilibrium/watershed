@@ -124,7 +124,7 @@ pub(in crate::runtime) fn initialize_global_config_at(
 ) -> Result<(), RuntimeError> {
     let registry_root = registry_root.unwrap_or(DEFAULT_REGISTRY_ROOT);
     let registry_path = normalize_registry_root(registry_root)?;
-    let home = open_flow_agent_home_at(home_path, true, false)?
+    let home = open_flow_agent_home_at(home_path, true)?
         .expect("the requested global Flow home is created or opened");
     let transaction = InitTransaction {
         version: INIT_TRANSACTION_VERSION.to_owned(),

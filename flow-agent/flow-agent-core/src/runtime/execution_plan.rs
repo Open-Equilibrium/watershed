@@ -4,7 +4,6 @@ use crate::runtime::{
     stream_signature::{FlowInvocation, RuntimeStreamSignature, RuntimeStreamSignatureBuilder},
     types::{EventClock, RuntimeError},
 };
-use core_policy::ProtectedPathMatchMode;
 use proto::EventEnvelope;
 use std::sync::Arc;
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -16,8 +15,6 @@ pub struct ScriptWrite {
 #[derive(Debug)]
 pub struct RuntimeExecution {
     pub(crate) context_manifests: RuntimeStreamSignature,
-    #[cfg(test)]
-    pub(crate) event_transition_nanos: Vec<u128>,
     pub(crate) events: RuntimeStreamSignature,
     pub(crate) failed: bool,
     pub(crate) failure_status: Option<String>,
@@ -33,7 +30,7 @@ impl RuntimeExecution {
             && self.failed == plan.execution.failed
             && self.failure_status == plan.execution.failure_status
             && self.tool_intents == plan.execution.tool_intents
-            && self.actions == plan.actions
+            && self.actions == plan.execution.actions
             && FlowExecutionPlan::signature_for(self) == plan.signature
     }
 }
@@ -86,7 +83,6 @@ pub struct PlannedFixtureAction {
     pub(crate) completion_sequence: u64,
     pub(crate) effect: PlannedFixtureEffect,
     pub(crate) failure_transition: PlannedFailureTransition,
-    pub(crate) protected_path_match_mode: ProtectedPathMatchMode,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -104,7 +100,6 @@ pub enum FlowExecutionAction {
 }
 
 pub struct FlowExecutionPlan {
-    pub(crate) actions: Arc<Vec<FlowExecutionAction>>,
     pub(crate) execution: RuntimeExecution,
     pub(crate) signature: RuntimeStreamSignature,
     workspace_identity: AnchoredDirectoryIdentity,
@@ -116,16 +111,14 @@ impl FlowExecutionPlan {
         workspace_identity: AnchoredDirectoryIdentity,
     ) -> Self {
         let signature = Self::signature_for(&execution);
-        let actions = Arc::clone(&execution.actions);
         Self {
-            actions,
             execution,
             signature,
             workspace_identity,
         }
     }
 
-    pub(crate) fn signature_for(execution: &RuntimeExecution) -> RuntimeStreamSignature {
+    fn signature_for(execution: &RuntimeExecution) -> RuntimeStreamSignature {
         let mut signature = RuntimeStreamSignatureBuilder::new(FLOW_EXECUTION_PLAN_DOMAIN);
         signature.push(&execution.events.digest);
         signature.push(&execution.context_manifests.digest);
@@ -209,7 +202,6 @@ impl FlowExecutionPlan {
                                 "contents": write.as_ref().map(|write| write.contents.as_slice()),
                             }),
                         },
-                        "protected_path_match_mode": action.protected_path_match_mode.as_str(),
                         "phase_failure_payload": action.failure_transition.phase_failure_payload,
                     }))
                     .expect("typed fixture plan snapshot is canonical JSON");
@@ -221,9 +213,7 @@ impl FlowExecutionPlan {
     }
 
     pub(crate) fn validate_integrity(&self) -> Result<(), RuntimeError> {
-        if self.actions != self.execution.actions
-            || Self::signature_for(&self.execution) != self.signature
-        {
+        if Self::signature_for(&self.execution) != self.signature {
             return Err(RuntimeError::Protocol(
                 "flow execution plan signature is invalid".to_owned(),
             ));
@@ -248,7 +238,6 @@ pub struct RuntimeFailure {
 #[derive(Clone, Copy)]
 pub struct RuntimeToolPolicy<'a> {
     pub(crate) command: &'a core_policy::CommandPolicy,
-    pub(crate) protected_path_match_mode: ProtectedPathMatchMode,
     pub(crate) stub_model_fixture_profile: bool,
 }
 
@@ -315,28 +304,4 @@ impl FlowExecutionOptions {
         self.root_input = Some(input);
         self
     }
-}
-
-#[cfg(target_os = "macos")]
-pub fn runtime_policy_target() -> core_policy::PolicyTarget {
-    core_policy::PolicyTarget::MacosSeatbelt
-}
-
-#[cfg(not(target_os = "macos"))]
-pub fn runtime_policy_target() -> core_policy::PolicyTarget {
-    core_policy::PolicyTarget::LinuxLandlockSeccomp
-}
-
-#[cfg(windows)]
-pub fn runtime_protected_path_match_mode(
-    _target: &core_policy::PolicyTarget,
-) -> ProtectedPathMatchMode {
-    ProtectedPathMatchMode::CaseInsensitive
-}
-
-#[cfg(not(windows))]
-pub fn runtime_protected_path_match_mode(
-    target: &core_policy::PolicyTarget,
-) -> ProtectedPathMatchMode {
-    core_policy::protected_path_match_mode_for_policy_target(target)
 }

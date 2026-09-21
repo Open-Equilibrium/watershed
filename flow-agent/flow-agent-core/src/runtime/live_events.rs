@@ -16,7 +16,7 @@ pub enum LiveEventNotifyStatus {
 /// A best-effort wake-up for events already committed to one session log.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LiveEventNotification {
-    /// Conversation owning a nested run; absent for a flat session.
+    /// Conversation owning a productive Run; absent for an explicit fixture session.
     pub conversation_id: Option<String>,
     /// Session whose committed log should be read.
     pub session_id: String,
@@ -60,13 +60,6 @@ pub struct LiveEventNotifier {
 }
 
 impl LiveEventNotifier {
-    pub(crate) fn duplicate_for_same_operation(&self) -> Self {
-        Self {
-            sender: self.sender.clone(),
-            state: self.state.clone(),
-        }
-    }
-
     /// Advances the committed high-watermark and attempts a wake-up without waiting.
     ///
     /// Call this only after `committed_sequence` is readable from the authoritative session
@@ -108,12 +101,12 @@ impl LiveEventNotifier {
 
 /// Receiver side of one bounded, caller-owned live-event notification channel.
 ///
-/// On wake-up, read committed events after the caller's last processed sequence with
-/// [`crate::SessionEventReader::read_incremental_after`]. Advance that cursor only after processing
-/// each event, then drain another wake-up before waiting again. After the producer closes, use
-/// [`crate::SessionEventReader::read_after`] once to verify the complete authoritative log. This closes
-/// the replay/live race because a commit either advances the observed high-watermark or leaves
-/// another wake-up queued.
+/// On wake-up, visit committed events after the caller's last processed sequence through
+/// [`Self::highest_committed_sequence`] with [`crate::SessionEventReader::visit_incremental_after`].
+/// Advance that cursor only after processing each event, then drain another wake-up before waiting
+/// again. After the producer closes, use [`crate::SessionEventReader::visit_verified_after`] once to
+/// verify the complete authoritative log. This closes the replay/live race because a commit either
+/// advances the observed high-watermark or leaves another wake-up queued.
 pub struct LiveEventReceiver {
     pub(crate) receiver: std::sync::mpsc::Receiver<(Option<String>, String, u64)>,
     pub(crate) state: std::sync::Arc<LiveEventState>,

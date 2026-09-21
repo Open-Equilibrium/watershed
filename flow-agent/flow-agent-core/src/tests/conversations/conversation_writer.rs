@@ -94,7 +94,7 @@ fn conversation_writer_rejects_a_replaced_event_stream_without_mutating_its_targ
     );
     let canonical = event.canonical_jsonl().expect("event canonicalizes");
     writer
-        .commit(&event, &canonical, None, None)
+        .commit(&event, &canonical, None)
         .expect_err("a replaced event stream fails closed");
     assert_eq!(
         fs::read(&outside).expect("outside target reads"),
@@ -133,7 +133,7 @@ fn conversation_writer_rejects_jsonl_for_a_different_event_without_mutation() {
         .expect("different event canonicalizes");
 
     let error = writer
-        .commit(&event, &different_jsonl, None, None)
+        .commit(&event, &different_jsonl, None)
         .expect_err("event and canonical JSONL must match");
 
     assert!(error.to_string().contains("canonical JSONL"), "{error}");
@@ -155,7 +155,7 @@ fn conversation_writer_rejects_an_out_of_band_append_between_commits() {
     let [first, second, _] = message_prefix_events();
     let first_canonical = first.canonical_jsonl().expect("first event canonicalizes");
     writer
-        .commit(&first, &first_canonical, None, None)
+        .commit(&first, &first_canonical, None)
         .expect("first event commits");
 
     let second_canonical = second
@@ -167,7 +167,7 @@ fn conversation_writer_rejects_an_out_of_band_append_between_commits() {
     );
 
     writer
-        .commit(&second, &second_canonical, None, None)
+        .commit(&second, &second_canonical, None)
         .expect_err("an out-of-band append fails closed");
     assert_eq!(
         fs::read_to_string(&events_path).expect("event stream reads after rejection"),
@@ -188,7 +188,7 @@ fn conversation_writer_rejects_an_out_of_band_segment_between_commits() {
     let [first, second, _] = message_prefix_events();
     let first_canonical = first.canonical_jsonl().expect("first event canonicalizes");
     writer
-        .commit(&first, &first_canonical, None, None)
+        .commit(&first, &first_canonical, None)
         .expect("first event commits");
     fs::write(&unexpected_segment, b"external\n").expect("external segment writes");
 
@@ -196,7 +196,7 @@ fn conversation_writer_rejects_an_out_of_band_segment_between_commits() {
         .canonical_jsonl()
         .expect("second event canonicalizes");
     let error = writer
-        .commit(&second, &second_canonical, None, None)
+        .commit(&second, &second_canonical, None)
         .expect_err("an out-of-band segment fails closed");
 
     assert!(
@@ -226,7 +226,7 @@ fn conversation_writer_finish_preserves_an_all_committed_batch_failure_and_final
     for event in message_prefix_events() {
         let canonical = event.canonical_jsonl().expect("prefix event canonicalizes");
         writer
-            .commit(&event, &canonical, None, None)
+            .commit(&event, &canonical, None)
             .expect("prefix event commits");
     }
 
@@ -234,10 +234,10 @@ fn conversation_writer_finish_preserves_an_all_committed_batch_failure_and_final
     set_conversation_batch_append_error_after_commit_for_path_for_test(&events_path);
     set_conversation_file_sync_error_for_path_for_test(&events_path, io::ErrorKind::Other);
     writer
-        .commit(&first, &first_canonical, None, None)
+        .commit(&first, &first_canonical, None)
         .expect("first delta enqueues");
     writer
-        .commit(&second, &second_canonical, None, None)
+        .commit(&second, &second_canonical, None)
         .expect("second delta enqueues");
 
     let error = writer
@@ -417,7 +417,7 @@ fn assert_inventoried_object_sync_failure_is_retryable(
     for event in &prefix {
         let canonical = event.canonical_jsonl().expect("prefix event canonicalizes");
         initial
-            .commit(event, &canonical, None, None)
+            .commit(event, &canonical, None)
             .expect("prefix event commits");
     }
     initial.finish().expect("prefix writer finishes");
@@ -438,12 +438,12 @@ fn assert_inventoried_object_sync_failure_is_retryable(
             for event in &prefix {
                 let canonical = event.canonical_jsonl().expect("prefix event canonicalizes");
                 writer
-                    .commit(event, &canonical, None, None)
+                    .commit(event, &canonical, None)
                     .expect("event prefix replays");
             }
             set_conversation_file_sync_error_for_path_for_test(&object_path, io::ErrorKind::Other);
             let error = writer
-                .commit(&event, &canonical, Some(checkpoint.clone()), None)
+                .commit(&event, &canonical, Some(checkpoint.clone()))
                 .expect_err("an inventoried object is durable before its first reference");
             assert!(
                 error
@@ -507,11 +507,11 @@ fn assert_inventoried_object_sync_failure_is_retryable(
     for event in &prefix {
         let canonical = event.canonical_jsonl().expect("prefix event canonicalizes");
         retry
-            .commit(event, &canonical, None, None)
+            .commit(event, &canonical, None)
             .expect("event prefix replays for retry");
     }
     retry
-        .commit(&event, &canonical, Some(checkpoint.clone()), None)
+        .commit(&event, &canonical, Some(checkpoint.clone()))
         .expect("the exact inventoried object remains retryable");
     retry.finish().expect("retry writer finishes");
     assert_eq!(
@@ -597,7 +597,7 @@ fn conversation_live_notification_locates_its_exact_nested_run() {
     let canonical = event.canonical_jsonl().expect("event canonicalizes");
     let (mut writer, receiver) = open_notified_review_writer(&workspace);
     writer
-        .commit(&event, &canonical, None, None)
+        .commit(&event, &canonical, None)
         .expect("event commits");
     writer.finish().expect("conversation writer finishes");
     drop(writer);

@@ -1,8 +1,9 @@
 use super::super::load::parse_registry_block;
 use super::super::model::{
     BlockIdentity, FlowBlock, FlowValue, MAX_FLOW_VALUE_BYTES, MAX_FLOW_VALUE_DEPTH,
-    MAX_FLOW_VALUE_MEMBERS, PhaseBlock, PhaseTransition, RegistryBlock, ResolvedRegistry,
-    ValueContract, ValueFieldContract, ValuePathSegment, ValuePredicate,
+    MAX_FLOW_VALUE_KEY_CHARS, MAX_FLOW_VALUE_MEMBERS, MAX_FLOW_VALUE_NODES, PhaseBlock,
+    PhaseTransition, RegistryBlock, ResolvedRegistry, ValueContract, ValueFieldContract,
+    ValuePathSegment, ValuePredicate,
 };
 use super::super::values::{
     predicate_matches, validate_flow_value, validate_flow_value_against_contract,
@@ -127,50 +128,104 @@ fn m11_runtime_value_contract_covers_every_recursive_shape_and_bound() {
         );
     }
 
-    let mut too_deep = FlowValue::Boolean(true);
-    for _ in 0..MAX_FLOW_VALUE_DEPTH {
-        too_deep = FlowValue::List(vec![too_deep]);
-    }
+    let exact_depth = (1..MAX_FLOW_VALUE_DEPTH).fold(FlowValue::Boolean(true), |value, _| {
+        FlowValue::List(vec![value])
+    });
+    validate_flow_value(&exact_depth).expect("exact depth limit is valid");
     assert!(
-        validate_flow_value(&too_deep)
-            .expect_err("runtime value depth is bounded")
+        validate_flow_value(&FlowValue::List(vec![exact_depth]))
+            .expect_err("one-past depth limit is rejected")
             .to_string()
             .contains("depth")
     );
+
+    validate_flow_value(&FlowValue::List(vec![
+        FlowValue::Boolean(true);
+        MAX_FLOW_VALUE_MEMBERS
+    ]))
+    .expect("exact list member limit is valid");
     assert!(
         validate_flow_value(&FlowValue::List(vec![
             FlowValue::Boolean(true);
             MAX_FLOW_VALUE_MEMBERS + 1
         ]))
-        .expect_err("list member count is bounded")
+        .expect_err("one-past list member limit is rejected")
         .to_string()
         .contains("member count")
     );
-    let too_many_map_members = (0..=MAX_FLOW_VALUE_MEMBERS)
+    let mut map_members = (0..MAX_FLOW_VALUE_MEMBERS)
         .map(|index| (format!("field-{index}"), FlowValue::Boolean(true)))
-        .collect();
+        .collect::<std::collections::BTreeMap<_, _>>();
+    validate_flow_value(&FlowValue::Map(map_members.clone()))
+        .expect("exact map member limit is valid");
+    map_members.insert("one-past".to_owned(), FlowValue::Boolean(true));
     assert!(
-        validate_flow_value(&FlowValue::Map(too_many_map_members))
-            .expect_err("map member count is bounded")
+        validate_flow_value(&FlowValue::Map(map_members))
+            .expect_err("one-past map member limit is rejected")
             .to_string()
             .contains("member count")
     );
-    let node_heavy = FlowValue::List(
-        (0..MAX_FLOW_VALUE_MEMBERS)
-            .map(|_| FlowValue::List(vec![FlowValue::Boolean(true); MAX_FLOW_VALUE_MEMBERS]))
-            .collect(),
-    );
+
+    let remaining_nodes = MAX_FLOW_VALUE_NODES - 1;
+    let container_count = remaining_nodes.div_ceil(MAX_FLOW_VALUE_MEMBERS + 1);
+    assert!(container_count <= MAX_FLOW_VALUE_MEMBERS);
+    let mut leaf_count = remaining_nodes - container_count;
+    let mut exact_nodes = (0..container_count)
+        .map(|_| {
+            let current_leaf_count = leaf_count.min(MAX_FLOW_VALUE_MEMBERS);
+            leaf_count -= current_leaf_count;
+            FlowValue::List(vec![FlowValue::Boolean(true); current_leaf_count])
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(leaf_count, 0);
+    let exact_node_error = validate_flow_value(&FlowValue::List(exact_nodes.clone()))
+        .expect_err("the tighter canonical byte limit rejects this exact-node fixture");
+    assert!(!exact_node_error.to_string().contains("node count"));
+    assert!(exact_node_error.to_string().contains("canonical JSON"));
+    let Some(FlowValue::List(final_nodes)) = exact_nodes.iter_mut().find(
+        |value| matches!(value, FlowValue::List(nodes) if nodes.len() < MAX_FLOW_VALUE_MEMBERS),
+    ) else {
+        panic!("node fixture has capacity for one more leaf");
+    };
+    final_nodes.push(FlowValue::Boolean(true));
     assert!(
-        validate_flow_value(&node_heavy)
-            .expect_err("runtime value node count is bounded")
+        validate_flow_value(&FlowValue::List(exact_nodes))
+            .expect_err("one-past node limit is rejected")
             .to_string()
             .contains("node count")
     );
+
+    let empty_string_bytes = serde_json::to_vec(&FlowValue::String(String::new()))
+        .expect("empty string fixture serializes")
+        .len();
+    validate_flow_value(&FlowValue::String(
+        "x".repeat(MAX_FLOW_VALUE_BYTES - empty_string_bytes),
+    ))
+    .expect("exact canonical byte limit is valid");
     assert!(
-        validate_flow_value(&FlowValue::String("x".repeat(MAX_FLOW_VALUE_BYTES)))
-            .expect_err("canonical runtime value byte count is bounded")
-            .to_string()
-            .contains("canonical JSON")
+        validate_flow_value(&FlowValue::String(
+            "x".repeat(MAX_FLOW_VALUE_BYTES - empty_string_bytes + 1)
+        ))
+        .expect_err("one-past canonical byte limit is rejected")
+        .to_string()
+        .contains("canonical JSON")
+    );
+
+    validate_flow_value(&FlowValue::Integer(i64::MAX.to_string()))
+        .expect("exact signed integer limit is valid");
+    validate_flow_value(&FlowValue::Map(std::collections::BTreeMap::from([(
+        "x".repeat(MAX_FLOW_VALUE_KEY_CHARS),
+        FlowValue::Boolean(true),
+    )])))
+    .expect("exact key character limit is valid");
+    assert!(
+        validate_flow_value(&FlowValue::Map(std::collections::BTreeMap::from([(
+            "x".repeat(MAX_FLOW_VALUE_KEY_CHARS + 1),
+            FlowValue::Boolean(true),
+        )])))
+        .expect_err("one-past key character limit is rejected")
+        .to_string()
+        .contains("must contain 1 to")
     );
 
     let contract = ValueContract::Map {

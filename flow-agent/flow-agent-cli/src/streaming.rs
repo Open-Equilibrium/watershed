@@ -12,8 +12,15 @@ use std::{
 
 #[cfg(test)]
 std::thread_local! {
+    static LIVE_DRAIN_OBSERVER: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
+        std::cell::RefCell::new(None);
     static FINAL_DRAIN_OBSERVER: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
         std::cell::RefCell::new(None);
+}
+
+#[cfg(test)]
+pub(crate) fn set_live_drain_observer(observer: impl FnOnce() + 'static) {
+    LIVE_DRAIN_OBSERVER.with_borrow_mut(|slot| *slot = Some(Box::new(observer)));
 }
 
 #[cfg(test)]
@@ -50,23 +57,14 @@ pub(crate) fn stream_conversation_replay(
 
 pub(crate) fn stream_live_operation<F>(
     workspace: PathBuf,
-    mut reader: Option<SessionEventReader>,
     operation: F,
 ) -> Result<RunOutput, RuntimeError>
 where
     F: FnOnce(LiveEventNotifier) -> Result<RunOutput, RuntimeError> + Send + 'static,
 {
     let (notifier, receiver) = flow_agent_core::live_event_channel();
-    let mut cursor = if let Some(reader) = &mut reader {
-        let mut cursor = 0;
-        reader.visit_verified_after(0, u64::MAX, |event, _line| {
-            cursor = event.sequence;
-            Ok(())
-        })?;
-        cursor
-    } else {
-        0
-    };
+    let mut reader: Option<SessionEventReader> = None;
+    let mut cursor = 0;
     let mut observed_high_watermark = cursor;
     let mut first_committed_sequence = None;
     let worker = thread::Builder::new()
@@ -111,7 +109,14 @@ where
                     &notification,
                     &mut stdout,
                 ) {
-                    Ok(true) => {}
+                    Ok(true) => {
+                        #[cfg(test)]
+                        LIVE_DRAIN_OBSERVER.with_borrow_mut(|slot| {
+                            if let Some(observer) = slot.take() {
+                                observer();
+                            }
+                        });
+                    }
                     Ok(false) => break,
                     Err(err) => {
                         output_error = Some(err);
@@ -143,7 +148,7 @@ where
     result
 }
 
-pub(crate) fn write_new_events(
+fn write_new_events(
     reader: &mut SessionEventReader,
     cursor: &mut u64,
     first_committed_sequence: &mut Option<u64>,
@@ -167,7 +172,7 @@ pub(crate) fn write_new_events(
     Ok(output_open)
 }
 
-pub(crate) fn write_verified_events(
+fn write_verified_events(
     reader: &mut SessionEventReader,
     cursor: &mut u64,
     through_sequence: u64,
@@ -262,7 +267,14 @@ mod tests {
         .expect("session start serializes");
         fs::write(&base_path, &started).expect("session start writes");
         let mut reader = SessionEventReader::open(&workspace, session_id).expect("session opens");
-        assert_eq!(reader.read_after(0).expect("session start reads").len(), 1);
+        let mut initial_events = 0usize;
+        reader
+            .visit_verified_after(0, u64::MAX, |_event, _line| {
+                initial_events = initial_events.saturating_add(1);
+                Ok(())
+            })
+            .expect("session start reads");
+        assert_eq!(initial_events, 1);
 
         let mut segment_ordinal = 1usize;
         let mut segment_bytes = started.len();

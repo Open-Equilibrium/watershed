@@ -1,0 +1,1 @@
+{"filesystem":{"read_only_mounts":["workspace"],"writable_mounts":[]},"max_concurrent_processes_and_threads":16,"network":{"allow":[],"default":"deny"},"runtime_profile":"exact","target":"linux-bubblewrap-seccomp"}

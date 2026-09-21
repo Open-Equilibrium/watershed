@@ -2,13 +2,10 @@ pub(super) mod run_status_mutation;
 mod summary;
 mod transaction;
 
-pub(crate) use summary::{
-    ConversationStatusSummary, MAX_CONVERSATION_STATUS_SUMMARY_BYTES, STATUS_SUMMARY_SCHEMA,
-};
-pub(super) use summary::{
-    create_bounded_canonical_json_file, create_initial_status_summary, read_status_summary,
-    status_summary_file,
-};
+pub(crate) use summary::MAX_CONVERSATION_STATUS_SUMMARY_BYTES;
+#[cfg(any(test, feature = "m11-budget-evidence"))]
+pub(crate) use summary::{ConversationStatusSummary, STATUS_SUMMARY_SCHEMA};
+pub(super) use summary::{create_initial_status_summary, read_status_summary, status_summary_file};
 
 #[cfg(test)]
 pub(super) use transaction::status_run_mutation_checkpoint;

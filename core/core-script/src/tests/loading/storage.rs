@@ -418,10 +418,6 @@ tool:
   script_body: |
     echo outside
   allowed_parameters: []
-  read_scope: []
-  write_scope: []
-  protected_path_grants: []
-  network: deny
 "#,
     )
     .expect("outside registry file written");

@@ -4,7 +4,7 @@ mod tool;
 use super::super::support::run_isolated_test;
 use super::support::{
     CompletionBoundaryRecordingRecovery, DefinitiveFailureProvider, FakeProvider, FakeToolExecutor,
-    InterruptingSink, MemoryAttempts, MemorySink, ScriptedProvider,
+    InjectedAttemptRecovery, InterruptingSink, MemoryAttempts, MemorySink, ScriptedProvider,
     assert_controlled_cancellation_lifecycle, execute_scripted_productive_case,
     execute_scripted_productive_case_with_tools,
     execute_scripted_productive_case_with_tools_and_recovery, single_tool_provider_turn,
@@ -19,8 +19,10 @@ use crate::runtime::{
         execute_productive_flow_with_tool_executor, set_productive_completion_commit_observer,
         set_productive_result_persist_observer,
     },
-    run_attempts::{ProductiveAttemptLog, RunAttemptKind, RunAttemptOutcome, RunAttemptResult},
-    types::{CANCELLED_REASON, RuntimeError},
+    run_attempts::{
+        ProductiveAttemptLog, RunAttemptIntent, RunAttemptKind, RunAttemptOutcome, RunAttemptResult,
+    },
+    types::{CANCELLED_REASON, RUNTIME_ERROR_REASON, RuntimeError},
 };
 
 #[derive(Default)]
@@ -34,16 +36,8 @@ impl ProductiveAttemptLog for InterruptingFailureAttempts {
         self.inner.persist_objects(objects)
     }
 
-    fn intent(
-        &mut self,
-        kind: RunAttemptKind,
-        attempt_id: &str,
-        request_hash: &str,
-        tool_id: Option<&str>,
-        timestamp: &str,
-    ) -> Result<(), RuntimeError> {
-        self.inner
-            .intent(kind, attempt_id, request_hash, tool_id, timestamp)
+    fn intent(&mut self, intent: &RunAttemptIntent) -> Result<(), RuntimeError> {
+        self.inner.intent(intent)
     }
 
     fn terminal(&mut self, result: &RunAttemptResult) -> Result<(), RuntimeError> {
@@ -377,7 +371,7 @@ fn definitive_provider_failure_linearizes_before_attempt_persistence() {
 }
 
 #[test]
-fn cancellation_winning_provider_and_tool_errors_persist_cancelled_attempts() {
+fn cancellation_only_closes_attempts_with_definitive_terminal_evidence() {
     const CHILD_ENV: &str = "WATERSHED_EXTERNAL_ERROR_CANCELLATION_CHILD";
     if run_isolated_test(CHILD_ENV) {
         return;
@@ -427,7 +421,7 @@ fn cancellation_winning_provider_and_tool_errors_persist_cancelled_attempts() {
         |_| {},
         |tools| tools.error_after_interrupt = true,
     )
-    .expect("Tool error after cancellation becomes a terminal failed run");
+    .expect("Tool error after cancellation fails the run without inventing a terminal result");
     crate::settle_productive_operation();
 
     assert!(execution.failed);
@@ -436,18 +430,50 @@ fn cancellation_winning_provider_and_tool_errors_persist_cancelled_attempts() {
         Some(RuntimeError::Cancelled)
     ));
     assert_eq!(tools.invocations.len(), 1);
-    assert_eq!(attempts.results.len(), 2);
-    assert_eq!(attempts.results[1].0, RunAttemptKind::Tool);
-    assert_eq!(attempts.results[1].2, CANCELLED_REASON);
-    assert_eq!(attempts.results[1].3.as_deref(), Some(CANCELLED_REASON));
+    assert_eq!(attempts.intents.len(), 2);
+    assert_eq!(
+        attempts.results.len(),
+        1,
+        "a dispatched Tool without terminal Executor evidence must remain uncertain"
+    );
     assert_eq!(
         sink.0
             .iter()
             .find(|event| event.event_type == EventType::ToolFailed)
-            .expect("cancelled Tool emits ToolFailed")
+            .expect("uncertain Tool emits ToolFailed")
             .payload["error"],
-        CANCELLED_REASON
+        RUNTIME_ERROR_REASON
     );
+
+    crate::begin_productive_operation().expect("Tool recovery operation begins");
+    let mut recovery = InjectedAttemptRecovery::ToolResult(RunAttemptResult {
+        attempt_id: "tool-000001".to_owned(),
+        attempt_kind: RunAttemptKind::Tool,
+        outcome: RunAttemptOutcome::Cancelled,
+        classification: Some(CANCELLED_REASON.to_owned()),
+        exit_code: None,
+        timestamp: "2026-07-30T12:00:00Z".to_owned(),
+        durable_output: None,
+    });
+    let (execution, _, _, sink, tools) = execute_scripted_productive_case_with_tools_and_recovery(
+        "tool-error-cancellation-recovery-fixture",
+        [single_tool_provider_turn(
+            "response-tool-error-cancellation-recovery",
+            "call-tool-error-cancellation-recovery",
+        )],
+        |_| {},
+        |_| {},
+        &mut recovery,
+    )
+    .expect("receipt-less cancelled Tool recovery closes without redispatch");
+    crate::settle_productive_operation();
+
+    assert!(execution.failed);
+    assert!(matches!(
+        execution.terminal_error,
+        Some(RuntimeError::Cancelled)
+    ));
+    assert!(tools.invocations.is_empty(), "recovery must not redispatch");
     assert_controlled_cancellation_lifecycle(&sink.0);
 }
 

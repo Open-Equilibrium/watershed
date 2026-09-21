@@ -1,10 +1,9 @@
 use super::super::model::{
-    FlowValue, MAX_PHASE_LOOP_ITERATIONS, NetworkAllowEntry, NetworkAllowKind, NetworkDefault,
-    NetworkPolicy, NetworkTransport, PhaseBlock, PhaseLoop, PhaseTransition, RegistryBlock,
+    FlowValue, MAX_PHASE_LOOP_ITERATIONS, PhaseBlock, PhaseLoop, PhaseTransition, RegistryBlock,
     ValuePathSegment, ValuePredicate,
 };
-use super::super::semantics::{validate_registry_block_semantics, validate_tool_semantics};
-use super::{own_script_tool, test_flow, test_phase, true_predicate};
+use super::super::semantics::validate_registry_block_semantics;
+use super::{test_flow, test_phase, true_predicate};
 
 #[test]
 fn m11_phase_and_flow_semantics_reject_invalid_control_shapes() {
@@ -108,16 +107,4 @@ fn m11_phase_and_flow_semantics_reject_invalid_control_shapes() {
     for flow in [empty_flow, empty_flow_transition, invalid_flow_predicate] {
         assert!(validate_registry_block_semantics(&RegistryBlock::Flow(flow)).is_err());
     }
-
-    let mut zero_port = own_script_tool("network-tool", "script:network-tool");
-    zero_port.network = NetworkPolicy::Declared {
-        default: NetworkDefault::Deny,
-        allow: vec![NetworkAllowEntry {
-            kind: NetworkAllowKind::Cidr,
-            transport: NetworkTransport::Tcp,
-            cidr: "127.0.0.1/32".to_owned(),
-            port: 0,
-        }],
-    };
-    assert!(validate_tool_semantics(&zero_port).is_err());
 }

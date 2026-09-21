@@ -17,7 +17,6 @@ use crate::runtime::{
 };
 use std::{fs, io, path::Path};
 
-#[cfg(unix)]
 use crate::runtime::conversations::set_run_creation_stage_observer;
 
 fn create_oversized_model_run(workspace: &Path) -> Result<(), RuntimeError> {
@@ -41,7 +40,6 @@ fn create_oversized_model_run(workspace: &Path) -> Result<(), RuntimeError> {
     )
 }
 
-#[cfg(unix)]
 #[test]
 fn run_creation_keeps_staging_writes_bound_after_stage_path_replacement() {
     use std::os::unix::fs::symlink;

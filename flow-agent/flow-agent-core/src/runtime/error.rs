@@ -3,6 +3,29 @@ use std::{fmt, io, path::PathBuf};
 pub(crate) const MAX_PROVIDER_ERROR_MESSAGE_CHARS: usize = 4_000;
 pub(crate) const PROVIDER_ERROR_REASON: &str = "provider_error";
 
+/// Stable bounded failure at the private Executor integration boundary.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ExecutorFailure {
+    code: proto::ExecutorErrorCodeV0,
+    message: String,
+}
+
+impl ExecutorFailure {
+    pub(crate) fn new(code: proto::ExecutorErrorCodeV0, message: impl Into<String>) -> Self {
+        let message = message
+            .into()
+            .chars()
+            .take(MAX_PROVIDER_ERROR_MESSAGE_CHARS)
+            .collect();
+        Self { code, message }
+    }
+
+    /// Returns the stable private Executor failure family.
+    pub fn code(&self) -> proto::ExecutorErrorCodeV0 {
+        self.code
+    }
+}
+
 /// A bounded provider failure reported without rewriting the provider's message.
 #[derive(Debug)]
 pub struct ProviderFailure {
@@ -106,6 +129,8 @@ pub enum RuntimeError {
     ProductiveExecutionUnavailable,
     /// A provider rejected or could not conclusively finish an attempted request.
     Provider(ProviderFailure),
+    /// Executor selection, framing or Sandbox preparation failed.
+    Executor(ExecutorFailure),
     /// The active productive CLI operation was cancelled by the user.
     Cancelled,
     /// The per-session event writer failed after event construction.
@@ -232,6 +257,10 @@ impl RuntimeError {
         }
     }
 
+    pub(crate) fn executor(code: proto::ExecutorErrorCodeV0, message: impl Into<String>) -> Self {
+        Self::Executor(ExecutorFailure::new(code, message))
+    }
+
     fn active_session_message(lock_path: &std::path::Path, session_id: &str) -> String {
         format!(
             "session {session_id} is already active under a host-local ownership lease; {} is its non-authoritative workspace marker. Retry after the owning Flow Agent process exits.",
@@ -316,6 +345,17 @@ impl fmt::Display for RuntimeError {
                 if let Some(status) = failure.http_status {
                     write!(f, " (HTTP {status})")?;
                 }
+                if !failure.message.is_empty() {
+                    write!(f, ": {}", failure.message)?;
+                }
+                Ok(())
+            }
+            Self::Executor(failure) => {
+                let code = serde_json::to_value(failure.code)
+                    .ok()
+                    .and_then(|value| value.as_str().map(str::to_owned))
+                    .unwrap_or_else(|| "executor_invalid_response".to_owned());
+                write!(f, "{code}")?;
                 if !failure.message.is_empty() {
                     write!(f, ": {}", failure.message)?;
                 }
@@ -410,6 +450,7 @@ impl std::error::Error for RuntimeError {
             | Self::ExecutionBackendUnavailable
             | Self::ProductiveExecutionUnavailable
             | Self::Provider(_)
+            | Self::Executor(_)
             | Self::Cancelled
             | Self::GlobalConfigAlreadyInitialized { .. }
             | Self::DefinitionExists { .. }

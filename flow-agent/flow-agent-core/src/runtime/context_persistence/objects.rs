@@ -353,7 +353,7 @@ impl SessionObjectWriter {
                         drop(temp_file);
                         write_new(temp_path, &object.object.bytes)?;
                         ensure_anchored_new_leaf_available(&path)?;
-                        temp_path.rename_to(&path)
+                        temp_path.rename_to(&path.leaf)
                     })?;
                     self.record_publication(object.digest, object.object_bytes);
                     sync_parent = true;
@@ -405,11 +405,6 @@ impl SessionObjectWriter {
         }
         self.object_count = self.objects.len();
         self.preflight_object_count = self.object_count;
-    }
-
-    #[cfg(test)]
-    pub(crate) fn seed_published_inventory_for_memory_test(&mut self) {
-        self.seed_published_inventory_for_test(crate::runtime::types::MAX_SESSION_OBJECTS, None);
     }
 }
 

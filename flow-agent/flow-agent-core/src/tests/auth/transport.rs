@@ -3,11 +3,11 @@ use crate::{
     runtime::{
         auth::{
             DevicePoll, MAX_OAUTH_DEVICE_POLL_BODY_BYTES, MAX_OAUTH_TOKEN_BODY_BYTES,
-            MAX_OAUTH_USER_CODE_BODY_BYTES, base64url_encode,
+            MAX_OAUTH_USER_CODE_BODY_BYTES, base64url_encode, exchange_authorization_code_at,
             exchange_authorization_code_body_with_transport, parse_device_authorization_body,
             parse_device_poll_body, parse_token_body,
             poll_device_authorization_body_with_transport, post_json_with_deadlines,
-            read_loopback_callback, refresh_credential_with_transport,
+            read_loopback_callback, refresh_credential_at, refresh_credential_with_transport,
             request_device_authorization_body_with_transport, send_auth_request_async,
         },
         deadlines::{AUTH_HTTP_DEADLINES, HttpDeadlines, build_http_client},
@@ -21,7 +21,7 @@ use crate::{
 };
 use std::{
     cell::Cell,
-    io::{Read, Write},
+    io::{BufRead, BufReader, Read, Write},
     net::{TcpListener, TcpStream},
     thread,
     time::Duration,
@@ -35,6 +35,49 @@ fn padded_json(mut prefix: String, target: usize) -> Vec<u8> {
     prefix.push_str(suffix);
     assert_eq!(prefix.len(), target);
     prefix.into_bytes()
+}
+
+fn read_form_body(stream: &mut TcpStream) -> String {
+    stream
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .expect("request read timeout configures");
+    let mut reader = BufReader::new(stream.try_clone().expect("request stream clones"));
+    let mut line = String::new();
+    reader.read_line(&mut line).expect("request line reads");
+    assert_eq!(line, "POST /oauth/token HTTP/1.1\r\n");
+    let mut content_length = None;
+    let mut form_content_type = false;
+    loop {
+        line.clear();
+        reader.read_line(&mut line).expect("request header reads");
+        if line == "\r\n" {
+            break;
+        }
+        let lower = line.to_ascii_lowercase();
+        if let Some(value) = lower.strip_prefix("content-length:") {
+            content_length = Some(
+                value
+                    .trim()
+                    .parse::<usize>()
+                    .expect("content length is numeric"),
+            );
+        }
+        form_content_type |= lower.contains("content-type: application/x-www-form-urlencoded");
+    }
+    assert!(form_content_type);
+    let mut body = vec![0; content_length.expect("request has a content length")];
+    reader.read_exact(&mut body).expect("request body reads");
+    String::from_utf8(body).expect("request body is UTF-8")
+}
+
+fn write_json_response(stream: &mut TcpStream, body: &[u8]) {
+    write!(
+        stream,
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        body.len()
+    )
+    .expect("response head writes");
+    stream.write_all(body).expect("response body writes");
 }
 
 #[test]
@@ -155,6 +198,7 @@ fn oauth_token_body_budget() {
     for (body, accepted) in [(exact, true), (oversized, false)] {
         let delivered = Cell::new(false);
         let result = exchange_authorization_code_body_with_transport(
+            "https://auth.openai.com/oauth/token",
             "code",
             "verifier",
             "https://auth.openai.com/deviceauth/callback",
@@ -209,28 +253,96 @@ fn oauth_refresh_body_budget() {
 
     for (body, accepted) in [(exact, true), (oversized, false)] {
         let delivered = Cell::new(false);
-        let result = refresh_credential_with_transport(&prior, 0, |endpoint, fields, maximum| {
-            assert_eq!(endpoint, "https://auth.openai.com/oauth/token");
-            assert_eq!(
-                fields,
-                [
-                    ("grant_type", "refresh_token"),
-                    ("refresh_token", prior.refresh.as_str()),
-                    ("client_id", "app_EMoamEEZ73f0CkXaXp7hrann"),
-                ]
-            );
-            assert_eq!(maximum, MAX_OAUTH_TOKEN_BODY_BYTES);
-            if body.len() > maximum {
-                return Err(RuntimeError::Protocol(
-                    "fixture response exceeds selected maximum".to_owned(),
-                ));
-            }
-            delivered.set(true);
-            Ok(body)
-        });
+        let result = refresh_credential_with_transport(
+            "https://auth.openai.com/oauth/token",
+            &prior,
+            0,
+            |endpoint, fields, maximum| {
+                assert_eq!(endpoint, "https://auth.openai.com/oauth/token");
+                assert_eq!(
+                    fields,
+                    [
+                        ("grant_type", "refresh_token"),
+                        ("refresh_token", prior.refresh.as_str()),
+                        ("client_id", "app_EMoamEEZ73f0CkXaXp7hrann"),
+                    ]
+                );
+                assert_eq!(maximum, MAX_OAUTH_TOKEN_BODY_BYTES);
+                if body.len() > maximum {
+                    return Err(RuntimeError::Protocol(
+                        "fixture response exceeds selected maximum".to_owned(),
+                    ));
+                }
+                delivered.set(true);
+                Ok(body)
+            },
+        );
         assert_eq!(result.is_ok(), accepted);
         assert_eq!(delivered.get(), accepted);
     }
+}
+
+#[test]
+fn oauth_form_transport_exchanges_and_refreshes_tokens_over_loopback() {
+    let initial_body = serde_json::to_vec(&serde_json::json!({
+        "access_token": "initial-access",
+        "id_token": jwt_with_account("account"),
+        "expires_in": 60,
+        "refresh_token": "refresh+initial",
+    }))
+    .expect("initial token JSON");
+    let refresh_body = serde_json::to_vec(&serde_json::json!({
+        "access_token": "refreshed-access",
+        "expires_in": 120,
+        "refresh_token": "refresh-final",
+    }))
+    .expect("refresh token JSON");
+    let listener = TcpListener::bind("127.0.0.1:0").expect("fake OAuth server binds");
+    let endpoint = format!("http://{}/oauth/token", listener.local_addr().unwrap());
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("authorization exchange connects");
+        let body = read_form_body(&mut stream);
+        assert_eq!(
+            body,
+            "grant_type=authorization_code&client_id=app_EMoamEEZ73f0CkXaXp7hrann&code=code%2Bvalue&code_verifier=verifier%2Fvalue&redirect_uri=http%3A%2F%2F127.0.0.1%3A1455%2Fauth%2Fcallback"
+        );
+        write_json_response(&mut stream, &initial_body);
+
+        let (mut stream, _) = listener.accept().expect("refresh connects");
+        let body = read_form_body(&mut stream);
+        assert_eq!(
+            body,
+            "grant_type=refresh_token&refresh_token=refresh%2Binitial&client_id=app_EMoamEEZ73f0CkXaXp7hrann"
+        );
+        write_json_response(&mut stream, &refresh_body);
+    });
+    let deadlines = HttpDeadlines {
+        connect: Duration::from_secs(1),
+        header: Duration::from_secs(1),
+        read: Duration::from_secs(1),
+        overall: Duration::from_secs(2),
+    };
+
+    let initial = exchange_authorization_code_at(
+        &endpoint,
+        "code+value",
+        "verifier/value",
+        "http://127.0.0.1:1455/auth/callback",
+        deadlines,
+    )
+    .expect("authorization code exchanges");
+    assert_eq!(initial.access, "initial-access");
+    assert_eq!(initial.refresh, "refresh+initial");
+    assert_eq!(initial.account_id, "account");
+    assert!(initial.expires > 0);
+
+    let refreshed =
+        refresh_credential_at(&endpoint, &initial, 1_000, deadlines).expect("credential refreshes");
+    server.join().expect("fake OAuth server completes");
+    assert_eq!(refreshed.access, "refreshed-access");
+    assert_eq!(refreshed.refresh, "refresh-final");
+    assert_eq!(refreshed.expires, 121_000);
+    assert_eq!(refreshed.account_id, "account");
 }
 
 #[test]
@@ -245,7 +357,15 @@ fn oauth_refresh_requires_a_replacement_access_token() {
     };
 
     for body in [b"{}".as_slice(), br#"{"expires_in":3600}"#] {
-        assert!(refresh_credential_with_transport(&prior, 0, |_, _, _| Ok(body.to_vec())).is_err());
+        assert!(
+            refresh_credential_with_transport(
+                "https://auth.openai.com/oauth/token",
+                &prior,
+                0,
+                |_, _, _| Ok(body.to_vec()),
+            )
+            .is_err()
+        );
     }
 }
 
@@ -267,8 +387,13 @@ fn oauth_refresh_uses_returned_access_expiry_and_id_token_routing() {
     }))
     .expect("refresh JSON");
 
-    let refreshed = refresh_credential_with_transport(&prior, 1_000, |_, _, _| Ok(body))
-        .expect("returned refresh fields replace prior values");
+    let refreshed = refresh_credential_with_transport(
+        "https://auth.openai.com/oauth/token",
+        &prior,
+        1_000,
+        |_, _, _| Ok(body),
+    )
+    .expect("returned refresh fields replace prior values");
 
     assert_eq!(refreshed.access, access);
     assert_eq!(refreshed.refresh, prior.refresh);
@@ -280,7 +405,13 @@ fn oauth_refresh_uses_returned_access_expiry_and_id_token_routing() {
     }))
     .expect("changed-account JSON");
     assert!(
-        refresh_credential_with_transport(&prior, 1_000, |_, _, _| Ok(changed_account)).is_err()
+        refresh_credential_with_transport(
+            "https://auth.openai.com/oauth/token",
+            &prior,
+            1_000,
+            |_, _, _| Ok(changed_account),
+        )
+        .is_err()
     );
 }
 
@@ -301,8 +432,12 @@ fn oauth_refresh_access_expiry_fallback_obeys_the_one_day_budget() {
         let body =
             serde_json::to_vec(&serde_json::json!({"access_token": access})).expect("refresh JSON");
 
-        let refreshed =
-            refresh_credential_with_transport(&prior, 1_000, |_, _, _| Ok(body.clone()));
+        let refreshed = refresh_credential_with_transport(
+            "https://auth.openai.com/oauth/token",
+            &prior,
+            1_000,
+            |_, _, _| Ok(body.clone()),
+        );
 
         assert_eq!(refreshed.is_ok(), accepted, "expiry {expiry_seconds}");
     }

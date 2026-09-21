@@ -432,7 +432,7 @@ fn responses_overall_deadline() {
         for _ in 0..17 {
             tokio::time::advance(Duration::from_secs(100)).await;
             send_scripted_http_bytes(&writes, &written, ": progress\n\n");
-            assert_pending(&request).await;
+            settle_pending(&request).await;
         }
         tokio::time::advance(Duration::from_secs(100) - Duration::from_nanos(1)).await;
         assert_pending(&request).await;

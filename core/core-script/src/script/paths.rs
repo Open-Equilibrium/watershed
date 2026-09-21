@@ -1,24 +1,3 @@
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-
-/// Root of the logical workspace scope namespace.
-pub const WORKSPACE_SCOPE_ROOT: &str = "workspace";
-
-/// Builds a logical workspace scope from a root-relative path.
-pub fn workspace_scope_path(relative: &str) -> String {
-    if relative.is_empty() {
-        WORKSPACE_SCOPE_ROOT.to_owned()
-    } else {
-        format!("{WORKSPACE_SCOPE_ROOT}/{relative}")
-    }
-}
-
-/// Strips the logical workspace scope from a nested path.
-pub fn strip_workspace_scope(path: &str) -> Option<&str> {
-    path.strip_prefix(WORKSPACE_SCOPE_ROOT)?
-        .strip_prefix('/')
-        .filter(|relative| !relative.is_empty())
-}
-
 /// Returns whether `value` is a valid v0 block id.
 pub fn is_valid_block_id(value: &str) -> bool {
     proto::is_valid_session_id(value)
@@ -43,36 +22,6 @@ pub fn is_valid_allowed_parameter_name(value: &str) -> bool {
         && bytes.all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
 }
 
-/// Returns whether `value` is a canonical IPv4 or IPv6 CIDR.
-pub fn is_valid_canonical_cidr(value: &str) -> bool {
-    let Some((addr, prefix)) = value.split_once('/') else {
-        return false;
-    };
-    if prefix.len() > 1 && prefix.starts_with('0') {
-        return false;
-    }
-    if value.matches('/').count() != 1 {
-        return false;
-    }
-
-    let Ok(prefix) = prefix.parse::<u8>() else {
-        return false;
-    };
-    match addr.parse::<IpAddr>() {
-        Ok(IpAddr::V4(addr)) => {
-            prefix <= 32
-                && host_bits_are_zero_v4(addr, prefix)
-                && value == format!("{addr}/{prefix}")
-        }
-        Ok(IpAddr::V6(addr)) => {
-            prefix <= 128
-                && host_bits_are_zero_v6(addr, prefix)
-                && value == format!("{addr}/{prefix}")
-        }
-        Err(_) => false,
-    }
-}
-
 /// Normalizes a safe slash-separated relative path or rejects unsafe aliases.
 pub fn normalize_safe_relative_path(value: &str) -> Option<String> {
     if value.is_empty()
@@ -94,32 +43,6 @@ pub fn normalize_safe_relative_path(value: &str) -> Option<String> {
         }
     }
     Some(value.to_owned())
-}
-
-/// Normalizes a safe slash-separated relative protected-path pattern.
-pub fn normalize_protected_path_pattern(value: &str) -> Option<String> {
-    let normalized = value.replace('\\', "/");
-    if normalized.is_empty()
-        || normalized.starts_with('/')
-        || normalized.contains('$')
-        || has_windows_drive_prefix(&normalized)
-        || normalized.split('/').any(|segment| {
-            segment == "."
-                || segment == ".."
-                || segment.contains("**") && segment != "**"
-                || path_component_has_windows_alias(segment)
-                || path_pattern_component_has_windows_invalid_character(segment)
-        })
-    {
-        return None;
-    }
-    Some(
-        normalized
-            .split('/')
-            .filter(|segment| !segment.is_empty())
-            .collect::<Vec<_>>()
-            .join("/"),
-    )
 }
 
 /// Returns whether `path` is equal to or contained under `scope`.
@@ -172,40 +95,10 @@ fn path_component_has_windows_invalid_character(component: &str) -> bool {
         .any(|byte| byte < b' ' || matches!(byte, b'<' | b'>' | b':' | b'"' | b'|' | b'?' | b'*'))
 }
 
-fn path_pattern_component_has_windows_invalid_character(component: &str) -> bool {
-    component
-        .bytes()
-        .any(|byte| byte < b' ' || matches!(byte, b'<' | b'>' | b':' | b'"' | b'|'))
-}
-
 fn matches_lower_token(value: &str, min_len: usize, max_len: usize) -> bool {
     value.len() >= min_len
         && value.len() <= max_len
         && value.bytes().all(|byte| {
             byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_' || byte == b'-'
         })
-}
-
-fn host_bits_are_zero_v4(addr: Ipv4Addr, prefix: u8) -> bool {
-    let value = u32::from(addr);
-    match 32 - prefix {
-        0 => true,
-        32 => value == 0,
-        host_bits => {
-            let host_mask = (1u32 << host_bits) - 1;
-            value & host_mask == 0
-        }
-    }
-}
-
-fn host_bits_are_zero_v6(addr: Ipv6Addr, prefix: u8) -> bool {
-    let value = u128::from(addr);
-    match 128 - prefix {
-        0 => true,
-        128 => value == 0,
-        host_bits => {
-            let host_mask = (1u128 << host_bits) - 1;
-            value & host_mask == 0
-        }
-    }
 }

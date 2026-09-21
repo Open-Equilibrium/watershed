@@ -144,15 +144,6 @@ pub fn escape_human_failure_text(text: &str) -> String {
     text.chars().flat_map(char::escape_debug).collect()
 }
 
-#[cfg(test)]
-pub fn human_failure_status(events: &[EventEnvelope]) -> Option<String> {
-    let mut status = HumanFailureStatus::default();
-    for event in events {
-        status.observe(event);
-    }
-    status.into_status()
-}
-
 #[derive(Default)]
 pub(crate) struct HumanFailureStatus {
     error_messages: BTreeMap<String, String>,
@@ -204,15 +195,6 @@ pub fn render_human_failure_status(reason: &str, message: Option<&str>) -> Strin
         || format!("failed ({reason})"),
         |message| format!("failed ({reason}): {}", escape_human_failure_text(message)),
     )
-}
-
-#[cfg(test)]
-pub fn human_session_status_from_failure(
-    session_id: &str,
-    action: &str,
-    failure: Option<&str>,
-) -> String {
-    human_status_from_failure("session", session_id, action, failure)
 }
 
 pub fn human_run_status_from_failure(

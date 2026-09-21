@@ -1,10 +1,10 @@
 use super::{
     flow_command,
-    process::{wait_with_input_and_output_before, wait_with_output_before},
-    test_support::{copy_dir, empty_workspace, fixture_dir, session_home_path},
+    process::{cli_child_watchdog, wait_with_input_and_output_before, wait_with_output_before},
+    test_support::{empty_workspace, session_home_path},
 };
 use core_script::{RegistryBlock, ToolCommand, parse_registry_block};
-use std::{fs, path::Path, process::Stdio, time::Duration};
+use std::{fs, path::Path, process::Stdio};
 
 fn initialize_default_workspace(workspace: &Path) {
     let output = flow_command()
@@ -17,42 +17,6 @@ fn initialize_default_workspace(workspace: &Path) {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-}
-
-#[test]
-fn import_requires_one_explicit_legacy_workspace_and_publishes_globally() {
-    let source = empty_workspace();
-    let fixture = fixture_dir("smoke-flow");
-    fs::create_dir(source.join(".flow")).expect("legacy config directory is staged");
-    fs::copy(
-        fixture.join(".flow/config.yaml"),
-        source.join(".flow/config.yaml"),
-    )
-    .expect("legacy config is staged");
-    copy_dir(&fixture.join("registry"), &source.join("registry"));
-    let harness_workspace = empty_workspace();
-    let global_home = harness_workspace.join("import-home");
-
-    let output = flow_command()
-        .env("FLOW_AGENT_HOME", &global_home)
-        .current_dir(&harness_workspace)
-        .args([
-            "import",
-            source.to_str().expect("fixture path is valid UTF-8"),
-        ])
-        .output()
-        .expect("explicit import should run");
-
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert_eq!(output.stdout, b"imported\n");
-    assert!(global_home.join("config.yaml").is_file());
-    assert!(global_home.join("registry/flows/smoke-flow.yaml").is_file());
-    assert!(!harness_workspace.join(".flow").exists());
-    assert!(source.join(".flow/config.yaml").is_file());
 }
 
 #[test]
@@ -157,34 +121,6 @@ fn init_create_and_validate_custom_recursive_flow() {
             "--parameter-max-length",
             "128",
             "--end-parameter",
-            "--read-scope",
-            "workspace",
-            "--write-scope",
-            "reports",
-            "--protected-path-grant",
-            ".flow/reports/**",
-            "--network-default",
-            "deny",
-            "--network-allow",
-            "--network-kind",
-            "cidr",
-            "--network-transport",
-            "tcp",
-            "--network-cidr",
-            "127.0.0.1/32",
-            "--network-port",
-            "443",
-            "--end-network-allow",
-            "--network-allow",
-            "--network-kind",
-            "cidr",
-            "--network-transport",
-            "udp",
-            "--network-cidr",
-            "::1/128",
-            "--network-port",
-            "53",
-            "--end-network-allow",
         ],
         vec![
             "create",
@@ -197,8 +133,6 @@ fn init_create_and_validate_custom_recursive_flow() {
             "own-script",
             "--script-body-file",
             "report.sh",
-            "--network-default",
-            "deny",
         ],
         vec![
             "create",
@@ -423,7 +357,7 @@ fn custom_registry_root_accepts_instruction_and_script_stdin_sources() {
     let instruction = wait_with_input_and_output_before(
         instruction,
         b"Review the selected project.",
-        Duration::from_secs(10),
+        cli_child_watchdog(),
     );
     assert!(
         instruction.status.success(),
@@ -443,19 +377,14 @@ fn custom_registry_root_accepts_instruction_and_script_stdin_sources() {
             "--tool-kind",
             "own-script",
             "--script-body-stdin",
-            "--network",
-            "deny",
         ])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .expect("Tool create should start");
-    let tool = wait_with_input_and_output_before(
-        tool,
-        b"printf '%s' stdin-script",
-        Duration::from_secs(10),
-    );
+    let tool =
+        wait_with_input_and_output_before(tool, b"printf '%s' stdin-script", cli_child_watchdog());
     assert!(
         tool.status.success(),
         "{}",
@@ -542,7 +471,7 @@ fn duplicate_prompt_source_is_rejected_without_reading_stdin() {
         .spawn()
         .expect("instruction create should start");
 
-    let output = wait_with_output_before(child, Duration::from_millis(500));
+    let output = wait_with_output_before(child, cli_child_watchdog());
 
     assert!(!output.status.success());
     assert!(
@@ -585,8 +514,6 @@ fn invalid_stdin_sources_are_rejected_without_reading_stdin() {
                 "--command-id",
                 "agent-report",
                 "--script-body-stdin",
-                "--network",
-                "deny",
             ],
             "script body is invalid for predefined-command",
         ),
@@ -600,7 +527,7 @@ fn invalid_stdin_sources_are_rejected_without_reading_stdin() {
             .spawn()
             .expect("invalid authoring command should start");
 
-        let output = wait_with_output_before(child, Duration::from_millis(500));
+        let output = wait_with_output_before(child, cli_child_watchdog());
 
         assert!(!output.status.success());
         assert!(
@@ -641,8 +568,6 @@ fn invalid_stdin_backed_identities_are_rejected_before_reading_stdin() {
                 "--tool-kind",
                 "own-script",
                 "--script-body-stdin",
-                "--network",
-                "deny",
             ],
         ),
     ] {
@@ -655,7 +580,7 @@ fn invalid_stdin_backed_identities_are_rejected_before_reading_stdin() {
             .spawn()
             .expect("invalid authoring command should start");
 
-        let output = wait_with_output_before(child, Duration::from_millis(500));
+        let output = wait_with_output_before(child, cli_child_watchdog());
         let stderr = String::from_utf8(output.stderr).expect("stderr should be UTF-8");
         assert_eq!(output.status.code(), Some(65), "{kind}: {stderr}");
         assert!(stderr.contains("invalid_definition"), "{kind}: {stderr}");
@@ -671,11 +596,16 @@ fn invalid_stdin_backed_identities_are_rejected_before_reading_stdin() {
 }
 
 #[test]
-fn tool_argv_preserves_literal_help_flags() {
+fn tool_argv_preserves_literal_help_flags_and_environment_tokens() {
     let workspace = empty_workspace();
     initialize_default_workspace(&workspace);
 
-    for (id, literal) in [("long-help", "--help"), ("short-help", "-h")] {
+    for (id, literal) in [
+        ("long-help", "--help"),
+        ("short-help", "-h"),
+        ("environment", "$TOOL_INPUT"),
+        ("legacy-literal", "--network"),
+    ] {
         let create = flow_command()
             .current_dir(&workspace)
             .args([
@@ -689,8 +619,6 @@ fn tool_argv_preserves_literal_help_flags() {
                 "predefined-command",
                 "--command-id",
                 "agent-echo",
-                "--network",
-                "deny",
                 "--argv",
                 literal,
             ])
@@ -761,9 +689,9 @@ fn authoring_help_exposes_each_complete_block_grammar() {
                 "--script-body-file",
                 "--parameter-value-type",
                 "--end-parameter",
-                "--network deny",
-                "--network-allow",
-                "--end-network-allow",
+                "--argv",
+                "--script-body-stdin",
+                "--parameter-max-length",
             ][..],
         ),
     ] {
@@ -783,7 +711,65 @@ fn authoring_help_exposes_each_complete_block_grammar() {
                 "{kind} help lacks {fragment}: {stdout}"
             );
         }
+        if kind == "tool" {
+            for flag in LEGACY_TOOL_FLAGS {
+                assert!(!stdout.contains(flag), "obsolete flag in Tool help: {flag}");
+            }
+        }
         assert!(output.stderr.is_empty(), "{kind}");
+    }
+}
+
+const LEGACY_TOOL_FLAGS: [&str; 12] = [
+    "--max-concurrent-processes-and-threads",
+    "--runtime-profile",
+    "--read-only-mount",
+    "--writable-mount",
+    "--network",
+    "--network-default",
+    "--network-allow",
+    "--network-kind",
+    "--network-transport",
+    "--network-cidr",
+    "--network-port",
+    "--end-network-allow",
+];
+
+#[test]
+fn legacy_tool_flags_reject_before_stdin_and_never_publish() {
+    let workspace = empty_workspace();
+    initialize_default_workspace(&workspace);
+    let definition = session_home_path().join("registry/tools/legacy-tool.yaml");
+
+    for flag in LEGACY_TOOL_FLAGS {
+        let child = flow_command()
+            .current_dir(&workspace)
+            .args([
+                "create",
+                "tool",
+                "--id",
+                "legacy-tool",
+                "--name",
+                "LegacyTool",
+                "--tool-kind",
+                "own-script",
+                "--script-body-stdin",
+                flag,
+            ])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("legacy authoring command should start");
+        let output = wait_with_output_before(child, cli_child_watchdog());
+        let stderr = String::from_utf8(output.stderr).expect("stderr should be UTF-8");
+        assert_eq!(output.status.code(), Some(64), "{flag}: {stderr}");
+        assert!(
+            stderr.contains(&format!(r#"unknown argument \"{flag}\""#)),
+            "{flag}: {stderr}"
+        );
+        assert!(output.stdout.is_empty(), "{flag}");
+        assert!(!definition.exists(), "{flag} must not publish a definition");
     }
 }
 
@@ -823,8 +809,6 @@ fn authoring_public_diagnostics_and_exit_classes_are_stable() {
         "predefined-command",
         "--command-id",
         "agent-echo",
-        "--network",
-        "deny",
     ];
     let created = flow_command()
         .current_dir(&workspace)
@@ -851,8 +835,6 @@ fn authoring_public_diagnostics_and_exit_classes_are_stable() {
             "predefined-command",
             "--command-id",
             "agent-echo",
-            "--network",
-            "deny",
         ],
         65,
         "invalid_definition",

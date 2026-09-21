@@ -23,8 +23,6 @@ use crate::runtime::{
 };
 use proto::{EventEnvelope, EventType};
 use std::path::{Path, PathBuf};
-#[cfg(test)]
-use std::time::Instant;
 
 pub(crate) struct ConversationEventWriter {
     capture: Option<String>,
@@ -322,7 +320,6 @@ impl RuntimeEventSink for ConversationEventWriter {
         event: &EventEnvelope,
         canonical_jsonl: &str,
         context_manifest: Option<ContextManifestCheckpoint>,
-        #[cfg(test)] _measurement_started_at: Option<Instant>,
     ) -> Result<(), RuntimeError> {
         if self.failed {
             return Err(prior_conversation_writer_failure());

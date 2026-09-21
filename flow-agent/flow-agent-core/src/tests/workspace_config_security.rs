@@ -3,10 +3,7 @@ use super::{
     test_support::{absent_global_home, session_home_path, workspace_copy},
 };
 use crate::runtime::{
-    config_io::{
-        ExecutionBackend, GlobalConfig, load_global_config, require_execution_backend,
-        require_fixture_execution_backend, resume_event_clock,
-    },
+    config_io::{ExecutionBackend, GlobalConfig, load_global_config, require_execution_backend},
     context::{CONTEXT_SAFETY_MARGIN, ContextModelProfile, OPERATOR_MODEL_PROFILE_ID},
     fs_guards::AnchoredWorkspace,
     instructions::read_applicable_agent_instructions,
@@ -43,7 +40,7 @@ fn global_configuration_is_the_only_implicit_flow_authority() {
         "model: forbidden\ncredentials: forbidden\n",
     )
     .expect("workspace instructions are written");
-    let home = open_flow_agent_home(false, true)
+    let home = open_flow_agent_home(false)
         .expect("global home opens")
         .expect("global home exists");
     let anchored_workspace = AnchoredWorkspace::open(&workspace).expect("workspace anchors");
@@ -95,7 +92,6 @@ fn unfinished_global_initialization_fails_before_session_mutation() {
     assert!(!crate::tests::helpers::workspace_session_dir(&workspace).exists());
 }
 
-#[cfg(unix)]
 #[test]
 fn inaccessible_ambient_workspace_config_is_never_probed() {
     use std::os::unix::fs::PermissionsExt as _;
@@ -111,7 +107,6 @@ fn inaccessible_ambient_workspace_config_is_never_probed() {
     assert!(!output.failed);
 }
 
-#[cfg(unix)]
 #[test]
 fn inaccessible_global_config_fails_before_session_mutation() {
     use std::os::unix::fs::PermissionsExt as _;
@@ -397,10 +392,13 @@ fn fixture_global_config_rejects_productive_backend_fields() {
 }
 
 #[test]
-fn execution_backend_helpers_preserve_fixture_and_productive_boundaries() {
+fn execution_backend_preserves_fixture_and_productive_boundaries() {
     let _workspace = workspace_copy("smoke-flow");
     let fixture = load_global_config().expect("fixture config loads");
-    require_fixture_execution_backend(&fixture).expect("fixture backend is accepted");
+    assert_eq!(
+        require_execution_backend(&fixture).expect("fixture backend is accepted"),
+        ExecutionBackend::Fixture
+    );
 
     fs::write(
         global_config_path(),
@@ -409,18 +407,9 @@ fn execution_backend_helpers_preserve_fixture_and_productive_boundaries() {
     .expect("productive config writes");
     let productive = load_global_config().expect("productive config loads");
     assert!(matches!(
-        require_fixture_execution_backend(&productive),
-        Err(RuntimeError::ExecutionBackendUnavailable)
+        require_execution_backend(&productive),
+        Ok(ExecutionBackend::OpenAiCodex { .. })
     ));
-
-    let fixture_clock = EventClock::fixed_fixture();
-    let recorded_clock = EventClock {
-        base_unix_seconds: 1_700_000_000,
-    };
-    assert_eq!(
-        resume_event_clock(&fixture, recorded_clock).expect("fixture resume clock resolves"),
-        fixture_clock
-    );
 }
 
 #[test]
@@ -504,7 +493,6 @@ fn global_config_missing_fails_closed() {
     assert!(!crate::tests::helpers::workspace_session_dir(&workspace).exists());
 }
 
-#[cfg(unix)]
 #[test]
 fn global_config_rejects_symlinked_config_file() {
     use std::os::unix::fs::symlink;
@@ -521,7 +509,6 @@ fn global_config_rejects_symlinked_config_file() {
     assert!(matches!(err, RuntimeError::Protocol(message) if message.contains("symlink")));
 }
 
-#[cfg(any(unix, windows))]
 #[test]
 fn global_config_rejects_hardlinked_config_file() {
     let _workspace = workspace_copy("hello-flow");
@@ -540,7 +527,6 @@ fn global_config_rejects_hardlinked_config_file() {
     );
 }
 
-#[cfg(any(unix, windows))]
 #[test]
 fn global_config_rejects_linked_home_directory() {
     let global_home = absent_global_home();

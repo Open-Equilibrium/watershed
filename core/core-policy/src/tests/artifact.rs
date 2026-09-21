@@ -1,14 +1,11 @@
 use crate::{
-    AllowedParameterPolicy, CommandPolicy, DEFAULT_PROTECTED_PATHS, EnvironmentDefault,
-    EnvironmentPolicy, FilesystemPolicy, NetworkAllowEntry, NetworkAllowKind, NetworkDefault,
-    NetworkPolicy, NetworkTransport, POLICY_VERSION_V0, ParameterValueType, PhaseScope,
-    PolicyArtifact, PolicyTarget, RuntimeLimits, ToolKind, canonical_artifact_json,
+    AllowedParameterPolicy, CommandPolicy, EnvironmentDefault, EnvironmentPolicy,
+    POLICY_VERSION_V0, ParameterValueType, PhaseScope, PolicyArtifact, RuntimeLimits, ToolKind,
+    canonical_artifact_json,
 };
 
 mod command;
 mod environment;
-mod filesystem;
-mod network;
 
 #[test]
 fn policy_artifact_rejects_unsupported_policy_version() {
@@ -48,8 +45,6 @@ fn policy_artifact_rejects_unknown_nested_capability_fields() {
         "/phase_scope/0",
         "/runtime_limits",
         "/commands/0/environment",
-        "/commands/0/filesystem",
-        "/commands/0/network",
     ] {
         let mut value = serde_json::to_value(valid_policy_artifact("unknown-nested-field"))
             .expect("policy artifact serializes");
@@ -168,12 +163,8 @@ fn policy_artifact_rejects_duplicate_identities() {
 fn policy_artifact_canonical_json_sorts_schema_arrays() {
     let artifact = PolicyArtifact {
         commands: vec![
-            command_policy("z-tool", vec!["z", "a"], vec!["workspace/z", "workspace/a"]),
-            command_policy(
-                "a-tool",
-                vec!["beta", "alpha"],
-                vec!["workspace/b", "workspace/a"],
-            ),
+            command_policy("z-tool", vec!["z", "a"]),
+            command_policy("a-tool", vec!["beta", "alpha"]),
         ],
         phase_scope: vec![
             PhaseScope {
@@ -191,7 +182,6 @@ fn policy_artifact_canonical_json_sorts_schema_arrays() {
             timeout_ms: 1000,
         },
         source_flow_definition_id: "sort-flow".to_owned(),
-        target: PolicyTarget::LinuxLandlockSeccomp,
     };
 
     let json = canonical_artifact_json(&artifact).expect("canonical JSON");
@@ -219,23 +209,6 @@ fn policy_artifact_canonical_json_sorts_schema_arrays() {
         vec!["alpha", "beta"]
     );
     assert_eq!(
-        canonical.commands[0].filesystem.read_roots,
-        vec!["workspace/a", "workspace/b"]
-    );
-    assert_eq!(
-        canonical.commands[0].filesystem.protected_path_grants,
-        vec!["workspace/a.env", "workspace/z.env"]
-    );
-    assert_eq!(
-        canonical.commands[0].filesystem.protected_paths,
-        vec!["**/.env", "**/.ssh"]
-    );
-    assert_eq!(
-        canonical.commands[0].filesystem.write_roots,
-        vec!["workspace/a-out", "workspace/z-out"]
-    );
-    assert_eq!(canonical.commands[0].network.allow[0].cidr, "10.0.0.0/24");
-    assert_eq!(
         canonical.commands[0].environment.allow,
         vec!["LANG", "TERM"]
     );
@@ -250,11 +223,7 @@ fn policy_artifact_canonical_json_sorts_schema_arrays() {
     assert_eq!(canonical.phase_scope[0].tool_ids, vec!["a-tool", "z-tool"]);
 }
 
-fn command_policy(
-    tool_id: &str,
-    allowed_values: Vec<&str>,
-    read_roots: Vec<&str>,
-) -> CommandPolicy {
+fn command_policy(tool_id: &str, allowed_values: Vec<&str>) -> CommandPolicy {
     CommandPolicy {
         allowed_parameters: vec![
             AllowedParameterPolicy {
@@ -288,29 +257,6 @@ fn command_policy(
             default: EnvironmentDefault::Clear,
         },
         executable: format!("/bin/{tool_id}"),
-        filesystem: FilesystemPolicy {
-            protected_path_grants: vec!["workspace/z.env".to_owned(), "workspace/a.env".to_owned()],
-            protected_paths: vec!["**/.ssh".to_owned(), "**/.env".to_owned()],
-            read_roots: read_roots.iter().map(|root| (*root).to_owned()).collect(),
-            write_roots: vec!["workspace/z-out".to_owned(), "workspace/a-out".to_owned()],
-        },
-        network: NetworkPolicy {
-            allow: vec![
-                NetworkAllowEntry {
-                    cidr: "10.0.1.0/24".to_owned(),
-                    kind: NetworkAllowKind::Cidr,
-                    port: 443,
-                    transport: NetworkTransport::Udp,
-                },
-                NetworkAllowEntry {
-                    cidr: "10.0.0.0/24".to_owned(),
-                    kind: NetworkAllowKind::Cidr,
-                    port: 80,
-                    transport: NetworkTransport::Tcp,
-                },
-            ],
-            default: NetworkDefault::Deny,
-        },
         script_runtime: None,
         tool_id: tool_id.to_owned(),
         tool_kind: ToolKind::PredefinedCommand,
@@ -330,20 +276,13 @@ fn valid_policy_artifact(tool_id: &str) -> PolicyArtifact {
             timeout_ms: 1000,
         },
         source_flow_definition_id: format!("{tool_id}-flow"),
-        target: PolicyTarget::LinuxLandlockSeccomp,
     }
 }
 
 fn valid_command_policy(tool_id: &str) -> CommandPolicy {
-    let mut command = command_policy(tool_id, vec!["a"], vec!["workspace"]);
+    let mut command = command_policy(tool_id, vec!["a"]);
     command.command_id = "agent-echo".to_owned();
     command.executable = "registry:agent-echo".to_owned();
-    command.filesystem.write_roots = vec!["workspace".to_owned()];
-    command.filesystem.protected_paths = DEFAULT_PROTECTED_PATHS
-        .iter()
-        .map(|path| (*path).to_owned())
-        .collect();
-    command.network.allow.clear();
     command
 }
 

@@ -26,11 +26,10 @@ pub(crate) fn load_global_config_authority_at(
     home_path: &std::path::Path,
 ) -> Result<GlobalConfigAuthority, RuntimeError> {
     let config_path = home_path.join(GLOBAL_CONFIG_LEAF);
-    let home =
-        open_flow_agent_home_at(home_path, false, true)?.ok_or_else(|| RuntimeError::Io {
-            path: config_path,
-            source: io::Error::from(io::ErrorKind::NotFound),
-        })?;
+    let home = open_flow_agent_home_at(home_path, false)?.ok_or_else(|| RuntimeError::Io {
+        path: config_path,
+        source: io::Error::from(io::ErrorKind::NotFound),
+    })?;
     ensure_global_config_settled(&home)?;
     let config = load_global_config_from(&home)?;
     Ok(GlobalConfigAuthority { config, home })
@@ -55,7 +54,7 @@ pub fn load_global_config() -> Result<GlobalConfig, RuntimeError> {
     load_global_config_authority().map(|authority| authority.config)
 }
 
-pub(crate) fn load_global_config_from(home: &AnchoredDir) -> Result<GlobalConfig, RuntimeError> {
+fn load_global_config_from(home: &AnchoredDir) -> Result<GlobalConfig, RuntimeError> {
     let text = read_global_config_to_string_from(home)?;
     parse_global_config_from_text(&text)
 }

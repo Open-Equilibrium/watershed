@@ -85,7 +85,6 @@ fn conversation_status_rejects_oversized_and_unknown_summaries() {
     }
 }
 
-#[cfg(unix)]
 #[test]
 fn conversation_status_rejects_unsafe_summary_artifact() {
     use std::os::unix::fs::symlink;

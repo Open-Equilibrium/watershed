@@ -9,6 +9,8 @@ import time
 import unittest
 from pathlib import Path
 
+from test_ci_toolchain_contract import step_run, workflow_text
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -24,6 +26,11 @@ class TrackedFileContractTest(unittest.TestCase):
                 "-leading.md",
                 "unicodé.md",
                 "ignored.txt",
+                "AGENTS.md",
+                ".agents/skills/fixture/SKILL.md",
+                ".codex/agents/fixture.md",
+                "docs/AGENTS.md",
+                "docs/page.html",
             ]
             if os.name != "nt":
                 tracked_paths.append("line\nbreak.md")
@@ -57,11 +64,27 @@ class TrackedFileContractTest(unittest.TestCase):
                 encoding="utf-8",
                 capture_output=True,
             )
+            link_step = step_run(workflow_text(), "Check documentation links")
+            manifest_line = next(
+                line for line in link_step.splitlines()
+                if line.startswith("$docsJson = node ")
+            )
+            manifest_args = shlex.split(manifest_line.removeprefix("$docsJson = node "))
+            manifest_args[0] = str(ROOT / manifest_args[0])
+            product_docs = subprocess.run(
+                ["node", *manifest_args], cwd=repo, encoding="utf-8", capture_output=True
+            )
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertCountEqual(
             json.loads(result.stdout),
             [path for path in tracked_paths if path.endswith(".md")],
+        )
+        self.assertEqual(product_docs.returncode, 0, product_docs.stderr)
+        self.assertCountEqual(
+            json.loads(product_docs.stdout),
+            ["-leading.md", "unicodé.md", "docs/AGENTS.md", "docs/page.html"]
+            + (["line\nbreak.md"] if os.name != "nt" else []),
         )
 
     def test_tracked_file_listing_forwards_complete_git_failure(self) -> None:

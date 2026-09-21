@@ -1,10 +1,10 @@
 use super::super::test_support::workspace_copy;
 use super::support::{
-    DefinitiveFailureProvider, FailingRecoveryBoundary, FakeProvider, FakeToolExecutor,
-    MemoryAttempts, MemorySink, ScriptedProvider, UnsupportedToolExecutor,
+    DefinitiveFailureProvider, FailingRecoveryBoundary, FakeProvider, FakeToolExecutionFault,
+    FakeToolExecutor, MemoryAttempts, MemorySink, ScriptedProvider, UnsupportedToolExecutor,
     disabled_smoke_productive_execution_fixture, execute_failing_recovery_case,
-    execute_scripted_productive_case, load_productive_execution_fixture_for_flow,
-    smoke_productive_execution_fixture,
+    execute_scripted_productive_case, execute_scripted_productive_case_with_tools,
+    load_productive_execution_fixture_for_flow, smoke_productive_execution_fixture,
 };
 use crate::runtime::{
     context::{CONTEXT_SAFETY_MARGIN, ContextHistory, ContextModelProfile},
@@ -15,6 +15,7 @@ use crate::runtime::{
     },
     run_attempts::{RunAttemptKind, RunAttemptOutcome},
     tool_runner::{ToolExecutionOutcome, ToolTerminalClassification},
+    types::{HumanFailureStatus, RuntimeError},
     validate::validate_protocol_jsonl_text,
 };
 use proto::{EventEnvelope, EventType};
@@ -97,6 +98,48 @@ fn productive_provider_rejects_undeclared_tool_arguments_before_execution() {
         "unexpected terminal error: {:?}",
         execution.terminal_error
     );
+    assert_eq!(
+        attempts.intents.len(),
+        1,
+        "only the provider attempt commits"
+    );
+    assert!(tools.invocations.is_empty());
+    assert!(
+        !sink
+            .0
+            .iter()
+            .any(|event| event.event_type == EventType::ToolStarted)
+    );
+}
+
+#[test]
+fn productive_tool_prepare_failure_stops_before_attempt_or_dispatch() {
+    let turn = ProviderTurn {
+        token_usage: None,
+        response_id: "response-tool-prepare-failure".to_owned(),
+        output_text: String::new(),
+        retained_items: Vec::new(),
+        tool_calls: vec![ProviderToolCall {
+            call_id: "call-tool-prepare-failure".to_owned(),
+            name: "echo".to_owned(),
+            arguments: "{}".to_owned(),
+        }],
+    };
+
+    let (execution, _, attempts, sink, tools) = execute_scripted_productive_case_with_tools(
+        "productive-tool-prepare-failure",
+        [turn],
+        |_| {},
+        |tools| tools.fault = FakeToolExecutionFault::PrepareError,
+    )
+    .expect("Tool preparation failure becomes a typed failed run");
+
+    assert!(execution.failed);
+    assert!(execution.terminal_error.as_ref().is_some_and(|error| {
+        error
+            .to_string()
+            .contains("fixture Executor preparation failure")
+    }));
     assert_eq!(
         attempts.intents.len(),
         1,
@@ -591,10 +634,7 @@ fn accumulated_provider_input_overflow_stops_before_another_dispatch() {
     assert_eq!(attempts.results[tool_attempt].2, "completed");
     assert_eq!(
         attempts.durable_outputs[tool_attempt],
-        Some(serde_json::json!({
-            "schema": "flow-tool-attempt-output-v0",
-            "tool_result": tool_result,
-        })),
+        Some(super::support::fake_tool_attempt_output(tool_result)),
         "the actual Tool result is durable before the model-input boundary stops the Run"
     );
     let tool_completed = sink
@@ -672,6 +712,49 @@ fn productive_provider_turn_rejects_retained_input_that_exceeds_the_model_budget
     );
     assert_eq!(provider.bodies.len(), 1, "no over-budget provider dispatch");
     assert_eq!(tools.invocations.len(), 1, "the first Tool remains durable");
+    let Some(RuntimeError::ContextBudgetExceeded {
+        input_budget_tokens,
+        required_bytes,
+    }) = execution.terminal_error.as_ref()
+    else {
+        panic!("the retained input must fail at the model budget boundary");
+    };
+    let error = sink
+        .0
+        .iter()
+        .find(|event| event.event_type == EventType::Error)
+        .expect("the context budget diagnostic is durable");
+    assert_eq!(
+        error.payload,
+        serde_json::json!({
+            "code": "context_budget_exceeded",
+            "message": "mandatory context exceeds the model input budget",
+            "data": {
+                "input_budget_tokens": input_budget_tokens,
+                "required_bytes": required_bytes,
+            },
+        })
+    );
+    for (event_type, reason_key) in [
+        (EventType::PhaseFailed, "error"),
+        (EventType::FlowFailed, "error"),
+        (EventType::SessionFailed, "reason"),
+    ] {
+        let terminal = sink
+            .0
+            .iter()
+            .find(|event| event.event_type == event_type)
+            .expect("the active execution boundary closes with a failure");
+        assert_eq!(terminal.payload[reason_key], "context_budget_exceeded");
+    }
+    let mut replay_status = HumanFailureStatus::default();
+    for event in &sink.0 {
+        replay_status.observe(event);
+    }
+    assert_eq!(
+        replay_status.status(),
+        Some("failed (context_budget_exceeded): mandatory context exceeds the model input budget")
+    );
 }
 
 #[test]
@@ -711,7 +794,9 @@ fn productive_failed_tool_closes_the_active_execution_without_another_provider_t
     let mut tools = FakeToolExecutor {
         cancel_before_outcome: false,
         error_after_interrupt: false,
+        fault: Default::default(),
         invocations: Vec::new(),
+        preflights: 0,
         outcome: ToolExecutionOutcome {
             status: RunAttemptOutcome::Failed,
             classification: Some(ToolTerminalClassification::NonzeroExit),

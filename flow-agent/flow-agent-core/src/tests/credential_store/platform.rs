@@ -1,5 +1,4 @@
 use super::super::helpers::empty_workspace;
-#[cfg(any(unix, windows))]
 use super::super::support::run_isolated_test;
 use super::support::credential;
 use crate::runtime::credential_store::CredentialStore;
@@ -7,15 +6,8 @@ use crate::runtime::credential_store::CredentialStore;
 use crate::runtime::credential_store::{
     create_private_credential_file_for_test, macos_credential_path_has_acl_entries_for_test,
 };
-#[cfg(windows)]
-use crate::runtime::credential_store::{
-    default_credential_store_path, set_windows_credential_world_access_for_test,
-    windows_credential_directory_is_current_user_only_for_test,
-    windows_credential_file_is_current_user_only_for_test,
-};
-#[cfg(any(unix, windows))]
 use std::fs;
-#[cfg(any(windows, target_os = "macos"))]
+#[cfg(target_os = "macos")]
 use std::path::Path;
 #[cfg(target_os = "macos")]
 use std::process::Command;
@@ -30,94 +22,6 @@ fn add_macos_acl(path: &Path, entry: &str) {
     assert!(status.success(), "macOS extended ACL is installed");
 }
 
-#[cfg(windows)]
-#[test]
-fn default_windows_credential_path_uses_the_absolute_user_configuration_root() {
-    let path = default_credential_store_path().expect("Windows credential path resolves");
-
-    assert!(path.is_absolute());
-    assert!(path.ends_with(Path::new("flow-agent").join("credentials.json")));
-    assert!(CredentialStore::platform_default().is_ok());
-}
-
-#[cfg(windows)]
-#[test]
-fn protected_windows_credential_store_enforces_current_user_only_dacls() {
-    let workspace = empty_workspace("credential-store-private-dacls");
-    let parent = workspace.join("private");
-    let path = parent.join("credentials.json");
-    let lock = path.with_extension("lock");
-    let store = CredentialStore::protected_at(path.clone());
-    let current = credential(900_000);
-
-    store.replace(&current).expect("private credential stores");
-    assert!(
-        windows_credential_directory_is_current_user_only_for_test(&parent)
-            .expect("private parent DACL reads")
-    );
-    assert!(
-        windows_credential_file_is_current_user_only_for_test(&path)
-            .expect("private credential DACL reads")
-    );
-    assert!(
-        windows_credential_file_is_current_user_only_for_test(&lock)
-            .expect("private lock DACL reads")
-    );
-
-    set_windows_credential_world_access_for_test(&path)
-        .expect("credential DACL grants world access");
-    assert!(
-        store.read().is_err(),
-        "a world-accessible credential file must be rejected"
-    );
-
-    let parent_workspace = empty_workspace("credential-store-private-parent-dacl");
-    let parent = parent_workspace.join("private");
-    let path = parent.join("credentials.json");
-    let store = CredentialStore::protected_at(path);
-    store.replace(&current).expect("private credential stores");
-    set_windows_credential_world_access_for_test(&parent)
-        .expect("credential parent DACL grants world access");
-    assert!(
-        store.read().is_err(),
-        "a world-accessible credential parent must be rejected"
-    );
-}
-
-#[cfg(windows)]
-#[test]
-fn platform_windows_credential_store_blocks_private_parent_replacement() {
-    const CHILD_ENV: &str = "FLOW_AGENT_TEST_WINDOWS_CREDENTIAL_PARENT_REPLACEMENT";
-    if run_isolated_test(CHILD_ENV) {
-        return;
-    }
-
-    let workspace = empty_workspace("credential-store-windows-retained-parent");
-    let configuration = workspace.join("configuration");
-    fs::create_dir(&configuration).expect("configuration ancestor creates");
-    set_windows_credential_world_access_for_test(&configuration)
-        .expect("configuration ancestor becomes broadly writable");
-    unsafe { std::env::set_var("APPDATA", &configuration) };
-    let store = CredentialStore::platform_default().expect("credential path resolves");
-    let original = credential(900_000);
-    let parent = configuration.join("flow-agent");
-    let replacement = configuration.join("replacement");
-
-    store
-        .replace(&original)
-        .expect("original credential stores");
-    assert!(
-        fs::rename(&parent, &replacement).is_err(),
-        "the retained private parent must deny directory-entry replacement"
-    );
-    assert_eq!(
-        store.read().expect("original credential reads"),
-        Some(original)
-    );
-    assert!(!replacement.exists());
-}
-
-#[cfg(unix)]
 #[test]
 fn protected_credential_store_enforces_private_parent_and_file_modes() {
     use std::os::unix::fs::PermissionsExt as _;
@@ -125,7 +29,7 @@ fn protected_credential_store_enforces_private_parent_and_file_modes() {
     let workspace = empty_workspace("credential-store-private-modes");
     let parent = workspace.join("private");
     let path = parent.join("credentials.json");
-    let store = CredentialStore::protected_at(path.clone());
+    let store = CredentialStore::at(path.clone());
     let current = credential(900_000);
     store.replace(&current).expect("private credential stores");
     assert_eq!(
@@ -160,7 +64,7 @@ fn protected_credential_store_rejects_an_extended_file_acl() {
 
     let workspace = empty_workspace("credential-store-extended-file-acl");
     let path = workspace.join("private/credentials.json");
-    let store = CredentialStore::protected_at(path.clone());
+    let store = CredentialStore::at(path.clone());
     let current = credential(900_000);
     store.replace(&current).expect("private credential stores");
     add_macos_acl(&path, "everyone allow read");
@@ -185,7 +89,7 @@ fn protected_credential_store_rejects_an_extended_parent_acl() {
     let workspace = empty_workspace("credential-store-extended-parent-acl");
     let parent = workspace.join("private");
     let path = parent.join("credentials.json");
-    let store = CredentialStore::protected_at(path);
+    let store = CredentialStore::at(path);
     store
         .replace(&credential(900_000))
         .expect("private credential stores");
@@ -225,7 +129,7 @@ fn protected_credential_store_removes_inherited_parent_acl_entries() {
     let parent = workspace.join("private");
     let path = parent.join("credentials.json");
 
-    CredentialStore::protected_at(path)
+    CredentialStore::at(path)
         .replace(&credential(900_000))
         .expect("private credential removes its inherited parent ACL");
 
@@ -254,7 +158,6 @@ fn protected_credential_store_removes_inherited_file_acl_entries() {
     assert!(!macos_credential_path_has_acl_entries_for_test(&path).expect("credential ACL reads"));
 }
 
-#[cfg(unix)]
 #[test]
 fn protected_credential_store_normalizes_a_restrictive_creation_umask() {
     const CHILD_ENV: &str = "FLOW_AGENT_TEST_RESTRICTIVE_CREDENTIAL_UMASK";
@@ -276,7 +179,7 @@ fn protected_credential_store_normalizes_a_restrictive_creation_umask() {
     let workspace = empty_workspace("credential-store-restrictive-umask");
     let existing_parent = workspace.join("existing");
     let existing_path = existing_parent.join("credentials.json");
-    let existing = CredentialStore::protected_at(existing_path.clone());
+    let existing = CredentialStore::at(existing_path.clone());
     existing
         .replace(&credential(300_000))
         .expect("initial private credential stores");
@@ -301,7 +204,7 @@ fn protected_credential_store_normalizes_a_restrictive_creation_umask() {
 
     let fresh_parent = workspace.join("fresh");
     let fresh_path = fresh_parent.join("credentials.json");
-    CredentialStore::protected_at(fresh_path.clone())
+    CredentialStore::at(fresh_path.clone())
         .replace(&credential(1_000_000))
         .expect("fresh private credential stores under a restrictive umask");
     assert_eq!(
@@ -322,7 +225,6 @@ fn protected_credential_store_normalizes_a_restrictive_creation_umask() {
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn platform_credential_store_rejects_an_untrusted_writable_configuration_ancestor() {
     const CHILD_ENV: &str = "FLOW_AGENT_TEST_UNTRUSTED_CREDENTIAL_ANCESTOR";
@@ -354,7 +256,6 @@ fn platform_credential_store_rejects_an_untrusted_writable_configuration_ancesto
     assert!(!configuration.join("flow-agent").exists());
 }
 
-#[cfg(unix)]
 #[test]
 fn protected_credential_store_remains_bound_to_its_opened_private_parent() {
     let workspace = empty_workspace("credential-store-retained-parent");
@@ -364,13 +265,13 @@ fn protected_credential_store_remains_bound_to_its_opened_private_parent() {
     let original = credential(900_000);
     let injected = credential(1_000_000);
     let updated = credential(1_100_000);
-    let store = CredentialStore::protected_at(path.clone());
+    let store = CredentialStore::at(path.clone());
 
     store
         .replace(&original)
         .expect("original credential stores");
     fs::rename(&parent, &retained).expect("private parent moves");
-    CredentialStore::protected_at(path.clone())
+    CredentialStore::at(path.clone())
         .replace(&injected)
         .expect("replacement namespace credential stores");
 
@@ -386,13 +287,13 @@ fn protected_credential_store_remains_bound_to_its_opened_private_parent() {
         Some(updated.clone())
     );
     assert_eq!(
-        CredentialStore::protected_at(path)
+        CredentialStore::at(path)
             .read()
             .expect("replacement namespace credential reads"),
         Some(injected)
     );
     assert_eq!(
-        CredentialStore::protected_at(retained.join("credentials.json"))
+        CredentialStore::at(retained.join("credentials.json"))
             .read()
             .expect("retained namespace credential reads"),
         Some(updated)
@@ -405,7 +306,7 @@ fn protected_credential_store_creates_a_missing_configuration_base() {
     let base = workspace.join("configuration");
     let parent = base.join("flow-agent");
     let path = parent.join("credentials.json");
-    let store = CredentialStore::protected_at(path.clone());
+    let store = CredentialStore::at(path.clone());
 
     store
         .replace(&credential(900_000))

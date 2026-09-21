@@ -174,7 +174,7 @@ fn replace_status_summary(
     create_bounded_canonical_json_file(&staged, summary, "staged conversation status summary")?;
     #[cfg(test)]
     status_transaction_checkpoint(StatusTransactionCrashPoint::SummaryStaged)?;
-    staged.rename_to(&target)?;
+    staged.rename_to(&target.leaf)?;
     sync_anchored_directory(conversation)
 }
 
@@ -335,7 +335,7 @@ fn record_status_transaction(
         transaction,
         "staged conversation status transaction",
     )?;
-    staged.rename_to(&target)?;
+    staged.rename_to(&target.leaf)?;
     sync_anchored_directory(conversation)
 }
 
@@ -694,8 +694,7 @@ struct StatusAppendRequest<'a> {
 fn append_jsonl_with_status_inner(
     request: StatusAppendRequest<'_>,
     value: &impl Serialize,
-    plan: impl FnOnce(&[u8]) -> Result<(u32, u64), RuntimeError>,
-    append: impl FnOnce(&[u8]) -> Result<(), RuntimeError>,
+    base: &AnchoredFile,
 ) -> Result<(), RuntimeError> {
     let StatusAppendRequest {
         conversation,
@@ -733,7 +732,7 @@ fn append_jsonl_with_status_inner(
                 .ok_or_else(|| protocol("uncertain attempt count is inconsistent"))?;
         }
     }
-    let (segment_ordinal, prior_bytes) = plan(&line)?;
+    let (segment_ordinal, prior_bytes) = planned_anchored_status_append(base, &line)?;
     let transaction = ConversationStatusTransaction {
         schema: STATUS_TRANSACTION_SCHEMA.to_owned(),
         conversation_id: conversation_id.to_owned(),
@@ -751,7 +750,7 @@ fn append_jsonl_with_status_inner(
     record_status_transaction(conversation, &transaction)?;
     #[cfg(test)]
     status_transaction_checkpoint(StatusTransactionCrashPoint::TransactionRecorded)?;
-    match append(&line) {
+    match append_anchored_status_line(base, &line) {
         Ok(()) => {
             #[cfg(test)]
             status_transaction_checkpoint(StatusTransactionCrashPoint::CanonicalMutationApplied)?;
@@ -782,8 +781,7 @@ pub(in crate::runtime::conversations) fn append_jsonl_with_status(
             latest_entry_id,
         },
         value,
-        |line| planned_anchored_status_append(base, line),
-        |line| append_anchored_status_line(base, line),
+        base,
     )
 }
 
@@ -804,8 +802,7 @@ pub(in crate::runtime::conversations) fn append_anchored_jsonl_with_status(
             latest_entry_id: None,
         },
         value,
-        |line| planned_anchored_status_append(base, line),
-        |line| append_anchored_status_line(base, line),
+        base,
     )
 }
 

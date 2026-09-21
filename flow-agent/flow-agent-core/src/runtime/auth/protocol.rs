@@ -11,9 +11,7 @@ use crate::runtime::{
     types::RuntimeError,
 };
 use serde::Deserialize;
-#[cfg(unix)]
 use std::fs::File;
-#[cfg(unix)]
 use std::io::Read;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -23,32 +21,10 @@ pub(crate) fn random_url_token(bytes: usize) -> Result<String, RuntimeError> {
     Ok(base64url_encode(&random))
 }
 
-#[cfg(unix)]
 fn fill_random(bytes: &mut [u8]) -> Result<(), RuntimeError> {
     File::open("/dev/urandom")
         .and_then(|mut file| file.read_exact(bytes))
         .map_err(|_| auth_protocol())
-}
-
-#[cfg(windows)]
-fn fill_random(bytes: &mut [u8]) -> Result<(), RuntimeError> {
-    use windows_sys::Win32::Security::Cryptography::{
-        BCRYPT_USE_SYSTEM_PREFERRED_RNG, BCryptGenRandom,
-    };
-    let length = u32::try_from(bytes.len()).map_err(|_| auth_protocol())?;
-    let status = unsafe {
-        BCryptGenRandom(
-            std::ptr::null_mut(),
-            bytes.as_mut_ptr(),
-            length,
-            BCRYPT_USE_SYSTEM_PREFERRED_RNG,
-        )
-    };
-    if status == 0 {
-        Ok(())
-    } else {
-        Err(auth_protocol())
-    }
 }
 
 pub(crate) fn percent_encode(value: &str) -> String {

@@ -7,8 +7,6 @@ use crate::runtime::{
     session_bundle::SessionBundlePaths,
     types::{MAX_SESSION_METADATA_BYTES, RuntimeError},
 };
-#[cfg(test)]
-use crate::runtime::{fs_guards::open_runtime_dir, types::LOG_STORAGE_DIR};
 use std::{io, path::Path};
 
 pub struct SessionDefinitionMetadata {
@@ -27,7 +25,6 @@ pub struct SessionLogMetadata {
     pub(crate) model_context_limit: Option<usize>,
     pub(crate) output_reserve: Option<usize>,
     pub(crate) safety_margin: Option<usize>,
-    pub(crate) legacy_definition: bool,
 }
 
 pub fn resumable_flow_id(
@@ -67,21 +64,6 @@ pub fn session_definition_metadata(
 
 pub fn sha256_hash_text(bytes: &[u8]) -> String {
     prefixed_sha256_hex(bytes)
-}
-
-#[cfg(test)]
-pub fn verify_resume_definition_metadata(
-    workspace: &Path,
-    session_id: &str,
-    registry: &core_script::ResolvedRegistry,
-    flow_block: &core_script::FlowBlock,
-) -> Result<(), RuntimeError> {
-    // WHY: resume hashes bind a partial session to the registry definitions that produced
-    // it; incomplete metadata cannot prove the prefix matches the current registry.
-    let logs = open_runtime_dir(workspace, LOG_STORAGE_DIR)?
-        .ok_or_else(|| missing_definition_metadata(session_id))?;
-    let metadata = require_anchored_session_log_metadata(&logs, session_id)?;
-    verify_resume_definition_metadata_values(session_id, &metadata, registry, flow_block)
 }
 
 pub fn verify_resume_definition_metadata_values(
@@ -167,7 +149,7 @@ pub fn ascii_case_alias(path: &AnchoredFile) -> Result<Option<AnchoredFile>, Run
     Ok(None)
 }
 
-pub fn map_missing_definition_metadata(error: RuntimeError, session_id: &str) -> RuntimeError {
+fn map_missing_definition_metadata(error: RuntimeError, session_id: &str) -> RuntimeError {
     if matches!(
         &error,
         RuntimeError::Io { source, .. } if source.kind() == io::ErrorKind::NotFound
@@ -184,7 +166,7 @@ pub fn missing_definition_metadata(session_id: &str) -> RuntimeError {
     ))
 }
 
-pub fn parse_session_log_metadata(text: &str) -> Result<SessionLogMetadata, RuntimeError> {
+fn parse_session_log_metadata(text: &str) -> Result<SessionLogMetadata, RuntimeError> {
     let mut metadata = SessionLogMetadata::default();
     for (line_number, line) in text.lines().enumerate() {
         let Some((key, value)) = line.split_once('=') else {

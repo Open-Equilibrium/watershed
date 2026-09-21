@@ -15,7 +15,7 @@ use std::{
         Arc, Mutex,
         atomic::{AtomicUsize, Ordering},
     },
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 struct BatchProbeAppender {
@@ -42,7 +42,6 @@ pub(in crate::tests) fn reserved_writer_start<'a>(
         validation: SessionAppendValidationState::empty(&reservation.session_id),
         commit_reservation: Some(reservation),
         notifier,
-        timings: None,
     }
 }
 
@@ -172,7 +171,6 @@ pub(in crate::tests) fn progress_writer_with_sync_probe<'a>(
             validation,
             commit_reservation: None,
             notifier: Some(notifier),
-            timings: None,
         },
         BatchProbeAppender {
             appends,
@@ -192,7 +190,7 @@ pub(in crate::tests) fn enqueue_test_event(
 ) -> String {
     let jsonl = event.canonical_jsonl().expect("event serializes");
     writer
-        .commit(event, &jsonl, None, Some(Instant::now()))
+        .commit(event, &jsonl, None)
         .expect("event enqueue succeeds");
     jsonl
 }

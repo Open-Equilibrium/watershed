@@ -1,4 +1,5 @@
 use super::super::contract::protocol;
+use super::model::INDEX_IO_BUFFER_BYTES;
 use crate::runtime::{
     digest::{is_lowercase_sha256_hex, sha256_hex},
     fs_guards::{
@@ -19,7 +20,7 @@ use std::{
 };
 use std::{
     fs::{self, File},
-    io::Write,
+    io::{BufWriter, Write},
     path::Path,
     sync::atomic::{AtomicU64, Ordering},
     time::{SystemTime, UNIX_EPOCH},
@@ -29,7 +30,6 @@ const INDEX_SCHEMA: &str = "flow-conversation-history-validation-v1";
 const INDEX_MARKER_LIMIT: u64 = 4096;
 const LEASE_LEAF: &str = "lease";
 const MARKER_LEAF: &str = "marker.json";
-pub(super) const ANCESTRY_LEAF: &str = "ancestry.bin";
 const INDEX_RUN_PREFIX: &str = "g";
 const EVENT_POINTER_RUN_PREFIX: &str = "pointer-";
 const EVENT_IDENTIFIER_RUN_PREFIX: &str = "event-ident-";
@@ -121,7 +121,7 @@ impl HistoryScratch {
         Self::create_in_root(root, conversation_id, limit)
     }
 
-    pub(super) fn create_in_root(
+    fn create_in_root(
         root: AnchoredDir,
         conversation_id: &str,
         limit: u64,
@@ -194,7 +194,7 @@ impl HistoryScratch {
 
     pub(super) fn write(
         &mut self,
-        file: &mut File,
+        file: &mut impl Write,
         path: &AnchoredFile,
         bytes: &[u8],
     ) -> Result<(), RuntimeError> {
@@ -290,17 +290,29 @@ pub(super) fn write_sorted_scratch_run<T: AsRef<[u8]>>(
     leaf: &str,
 ) -> Result<(), RuntimeError> {
     let path = scratch.dir.file(leaf);
-    let mut file = create_scratch_file(&scratch.dir, leaf)?;
+    let mut file = BufWriter::with_capacity(
+        INDEX_IO_BUFFER_BYTES,
+        create_scratch_file(&scratch.dir, leaf)?,
+    );
     for record in chunk.iter() {
         scratch.write(&mut file, &path, record.as_ref())?;
     }
-    file.sync_all()
-        .map_err(|source| path_io_error(path.diagnostic_path(), source))?;
+    finish_scratch_run(&mut file, &path)?;
     chunk.clear();
     Ok(())
 }
 
-pub(super) fn cleanup_stale_scratch(root: &AnchoredDir) -> Result<(), RuntimeError> {
+pub(super) fn finish_scratch_run(
+    writer: &mut BufWriter<File>,
+    path: &AnchoredFile,
+) -> Result<(), RuntimeError> {
+    writer
+        .flush()
+        .and_then(|()| writer.get_ref().sync_all())
+        .map_err(|source| path_io_error(path.diagnostic_path(), source))
+}
+
+fn cleanup_stale_scratch(root: &AnchoredDir) -> Result<(), RuntimeError> {
     for_each_scratch_leaf(root, |leaf| {
         let _ = validate_inactive_scratch(root, leaf)?;
         Ok(())
@@ -625,8 +637,7 @@ fn remove_empty_scratch_dir(
         ));
     }
     drop(rebound);
-    root.dir
-        .remove_dir(leaf)
+    root.remove_dir(leaf)
         .map_err(|source| path_io_error(&root.path.join(leaf), source))
 }
 
@@ -638,7 +649,6 @@ fn valid_scratch_leaf(leaf: &str) -> bool {
 fn valid_scratch_member(member: &str) -> bool {
     member == MARKER_LEAF
         || member == LEASE_LEAF
-        || member == ANCESTRY_LEAF
         || valid_scratch_run_member(member)
         || member
             .strip_prefix(EVENT_POINTER_RUN_PREFIX)
@@ -825,7 +835,6 @@ fn open_scratch_file_for_update(path: &AnchoredFile) -> Result<(File, fs::Metada
     open_anchored_file_for_update(path)
 }
 
-#[cfg(unix)]
 fn available_space(path: &Path) -> Result<u64, RuntimeError> {
     #[cfg(test)]
     if let Some(bytes) = AVAILABLE_SPACE_OVERRIDE.with(Cell::get) {
@@ -842,38 +851,79 @@ fn available_space(path: &Path) -> Result<u64, RuntimeError> {
         .ok_or_else(|| protocol("available scratch space overflow"))
 }
 
-#[cfg(windows)]
-fn available_space(path: &Path) -> Result<u64, RuntimeError> {
-    #[cfg(test)]
-    if let Some(bytes) = AVAILABLE_SPACE_OVERRIDE.with(Cell::get) {
-        return Ok(bytes);
-    }
-    use std::os::windows::ffi::OsStrExt as _;
-    use windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
-    let wide = path
-        .as_os_str()
-        .encode_wide()
-        .chain(std::iter::once(0))
-        .collect::<Vec<_>>();
-    let mut available = 0u64;
-    let result = unsafe {
-        GetDiskFreeSpaceExW(
-            wide.as_ptr(),
-            &mut available,
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-        )
-    };
-    if result == 0 {
-        Err(path_io_error(path, std::io::Error::last_os_error()))
-    } else {
-        Ok(available)
-    }
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::BufWriter;
 
-#[cfg(not(any(unix, windows)))]
-fn available_space(_path: &Path) -> Result<u64, RuntimeError> {
-    Err(protocol(
-        "history validation scratch space cannot be admitted on this platform",
-    ))
+    #[test]
+    fn buffered_scratch_admission_counts_pending_bytes_and_flushes_the_tail() {
+        let workspace = crate::tests::empty_workspace();
+        let mut scratch = HistoryScratch::create(&workspace, "review", INDEX_WORK_RESERVE)
+            .expect("scratch creates");
+        let initial = scratch.current;
+        let leaf = index_run_leaf(0, 0);
+        let path = scratch.dir.file(&leaf);
+        let file = create_scratch_file(&scratch.dir, &leaf).expect("run creates");
+        let mut writer = BufWriter::with_capacity(INDEX_IO_BUFFER_BYTES, file);
+        scratch.limit = initial + 6;
+        scratch
+            .write(&mut writer, &path, b"abc")
+            .expect("first record fits");
+        scratch
+            .write(&mut writer, &path, b"def")
+            .expect("second record fits");
+        let error = scratch
+            .write(&mut writer, &path, b"g")
+            .expect_err("pending bytes consume the scratch budget");
+        assert!(error.to_string().contains("scratch exceeds its budget"));
+        assert_eq!(scratch.current, initial + 6);
+        finish_scratch_run(&mut writer, &path).expect("tail flushes before sync");
+        drop(writer);
+        assert_eq!(fs::read(&path.path).expect("run reads"), b"abcdef");
+        scratch.remove_file(&leaf).expect("run removes");
+        assert_eq!(scratch.current, initial);
+        scratch.cleanup().expect("scratch cleans");
+    }
+
+    #[test]
+    fn sorted_scratch_run_publishes_records_across_the_buffer_boundary() {
+        let workspace = crate::tests::empty_workspace();
+        let mut scratch = HistoryScratch::create(&workspace, "review", INDEX_WORK_RESERVE)
+            .expect("scratch creates");
+        let leaf = index_run_leaf(0, 0);
+        let mut records = vec![*b"abc"; INDEX_IO_BUFFER_BYTES / 3 + 2];
+        let expected = records.concat();
+        write_sorted_scratch_run(&mut scratch, &mut records, &leaf).expect("run writes");
+        assert!(records.is_empty());
+        assert_eq!(
+            fs::read(&scratch.dir.file(&leaf).path).expect("run reads"),
+            expected
+        );
+        scratch.cleanup().expect("scratch cleans");
+    }
+
+    #[test]
+    fn scratch_finish_propagates_a_deferred_write_failure() {
+        let workspace = crate::tests::empty_workspace();
+        let scratch = HistoryScratch::create(&workspace, "review", INDEX_WORK_RESERVE)
+            .expect("scratch creates");
+        let leaf = index_run_leaf(0, 0);
+        let path = scratch.dir.file(&leaf);
+        drop(create_scratch_file(&scratch.dir, &leaf).expect("run creates"));
+        let file = open_anchored_file_for_read(&path)
+            .expect("read-only run opens")
+            .0;
+        let mut writer = BufWriter::with_capacity(INDEX_IO_BUFFER_BYTES, file);
+        writer.write_all(b"abc").expect("small write is deferred");
+        let error = finish_scratch_run(&mut writer, &path)
+            .expect_err("deferred write failure must not be reported as success");
+        assert!(
+            matches!(error, RuntimeError::Io { path: ref diagnostic, .. }
+            if diagnostic == path.diagnostic_path())
+        );
+        drop(writer);
+        assert!(fs::read(&path.path).expect("run reads").is_empty());
+        scratch.cleanup().expect("scratch cleans");
+    }
 }

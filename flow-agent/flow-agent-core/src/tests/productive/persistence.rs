@@ -3,9 +3,11 @@ use super::super::{
     productive_recovery_support::{InterruptingProductiveRecovery, ProductiveInterruptionPoint},
     support::run_isolated_test,
 };
-#[cfg(unix)]
 use super::support::FakeToolExecutor;
-use super::support::{FakeProvider, ScriptedProvider, disabled_smoke_productive_execution_fixture};
+use super::support::{
+    FakeProvider, ScriptedProvider, UnsupportedToolExecutor,
+    disabled_smoke_productive_execution_fixture, smoke_productive_execution_fixture,
+};
 use crate::runtime::{
     config_io::load_global_config,
     context::{
@@ -25,19 +27,18 @@ use crate::runtime::{
     },
     session::{
         continue_conversation_with_provider, execute_reserved_productive_recovery,
-        run_productive_session_with_provider, set_productive_pre_run_create_observer,
-        set_productive_pre_run_publish_observer, set_productive_run_commit_observer,
+        run_productive_session_with_provider, set_productive_executor_readiness_observer,
+        set_productive_pre_run_create_observer, set_productive_pre_run_publish_observer,
+        set_productive_run_commit_observer,
     },
     session_definition::{SessionDefinitionMetadata, session_definition_metadata},
     types::{RunOutput, RuntimeError},
 };
-#[cfg(unix)]
 use crate::runtime::{
     openai_codex::{ProviderToolCall, ProviderTurn},
     productive::execute_productive_flow_with_tool_executor_and_recovery,
     run_attempts::RunAttemptKind,
 };
-#[cfg(unix)]
 use crate::tests::helpers::configured_smoke_productive_execution_fixture;
 use std::{collections::VecDeque, fs, path::Path};
 
@@ -86,6 +87,24 @@ fn run_default_smoke_productive_session<P: ProductiveProvider>(
     fixture: &ProductiveExecutionFixture,
     provider: &mut P,
 ) -> Result<RunOutput, RuntimeError> {
+    run_default_smoke_productive_session_with_credential_resolver(
+        workspace,
+        fixture,
+        || Ok(fixture.credential().clone()),
+        provider,
+    )
+}
+
+fn run_default_smoke_productive_session_with_credential_resolver<P, C>(
+    workspace: &Path,
+    fixture: &ProductiveExecutionFixture,
+    resolve_credential: C,
+    provider: &mut P,
+) -> Result<RunOutput, RuntimeError>
+where
+    P: ProductiveProvider,
+    C: FnOnce() -> Result<crate::runtime::oauth_credential::CredentialRecord, RuntimeError>,
+{
     let config = load_global_config()?;
     run_productive_session_with_provider(
         workspace,
@@ -98,18 +117,117 @@ fn run_default_smoke_productive_session<P: ProductiveProvider>(
         &fixture.policy,
         None,
         false,
-        fixture.credential(),
+        resolve_credential,
         "",
         None,
         provider,
     )
 }
 
-fn recover_interrupted_productive_run<P: ProductiveProvider>(
+#[test]
+fn executor_readiness_failure_precedes_new_run_reservation() {
+    let (workspace, fixture) = smoke_productive_execution_fixture();
+    set_productive_executor_readiness_observer(|| {
+        Err(RuntimeError::executor(
+            proto::ExecutorErrorCodeV0::Unavailable,
+            "injected Executor readiness failure",
+        ))
+    });
+    let error = run_default_smoke_productive_session_with_credential_resolver(
+        &workspace,
+        &fixture,
+        || panic!("credential resolution must follow Executor readiness"),
+        &mut FakeProvider::default(),
+    )
+    .expect_err("failed readiness must stop before reservation");
+
+    assert!(matches!(
+        error,
+        RuntimeError::Executor(ref failure)
+            if failure.code() == proto::ExecutorErrorCodeV0::Unavailable
+    ));
+    assert!(
+        !crate::tests::helpers::workspace_session_dir(&workspace)
+            .join("conversation")
+            .exists(),
+        "readiness failure must not create a durable conversation reservation"
+    );
+}
+
+#[test]
+fn missing_selected_executor_fails_before_provider_dispatch_or_run_reservation() {
+    if crate::tests::test_support::run_current_test_isolated_session_home() {
+        return;
+    }
+    let (workspace, fixture) = smoke_productive_execution_fixture();
+    // This exact-test child owns its environment; never touch the operator's
+    // platform configuration while staging the missing selected executable.
+    #[cfg(target_os = "linux")]
+    unsafe {
+        std::env::set_var("XDG_CONFIG_HOME", workspace.join("platform-config"));
+    }
+    #[cfg(target_os = "macos")]
+    unsafe {
+        std::env::set_var("HOME", &*workspace);
+    }
+    let missing_executor = workspace.join("removed-custom-executor");
+    crate::runtime::executor::ExecutorConfigStore::platform_default()
+        .expect("isolated Executor configuration opens")
+        .configure(&missing_executor)
+        .expect("a persisted selection can outlive its installed executable");
+    let mut provider = FakeProvider::default();
+
+    let error = run_default_smoke_productive_session_with_credential_resolver(
+        &workspace,
+        &fixture,
+        || panic!("missing Executor must fail before credential resolution"),
+        &mut provider,
+    )
+    .expect_err("missing selected Executor must reject execution before reservation");
+
+    assert!(matches!(
+        error,
+        RuntimeError::Executor(ref failure)
+            if failure.code() == proto::ExecutorErrorCodeV0::Unavailable
+    ));
+    assert!(
+        error
+            .to_string()
+            .contains("executable is missing or unsafe"),
+        "{error}"
+    );
+    assert!(provider.bodies.is_empty(), "the provider must not dispatch");
+    assert!(
+        !crate::tests::helpers::workspace_session_dir(&workspace)
+            .join("conversation")
+            .exists(),
+        "missing Executor must not create a durable conversation reservation"
+    );
+}
+
+#[test]
+fn provider_only_new_run_does_not_probe_an_executor() {
+    let (workspace, fixture) = disabled_smoke_productive_execution_fixture();
+    set_productive_executor_readiness_observer(|| {
+        panic!("provider-only policy must not inspect Executor readiness")
+    });
+    let output =
+        run_default_smoke_productive_session(&workspace, &fixture, &mut FakeProvider::default())
+            .expect("provider-only productive Run succeeds without an Executor");
+
+    assert!(!output.failed);
+}
+
+fn recover_interrupted_productive_run<P, T>(
     workspace: &Path,
     execution: ProductiveExecution<'_>,
     provider: &mut P,
-) -> RunOutput {
+    tool_executor: &mut T,
+) -> RunOutput
+where
+    P: ProductiveProvider,
+    T: crate::runtime::productive::ProductiveToolExecutor,
+{
     let reservation = reserve_conversation_run_recovery(workspace, "conversation", "run")
         .expect("interrupted run reserves for exact recovery");
     let output = execute_reserved_productive_recovery(
@@ -124,6 +242,7 @@ fn recover_interrupted_productive_run<P: ProductiveProvider>(
         execution.credential,
         execution.agent_instructions,
         provider,
+        tool_executor,
         &reservation,
         None,
     )
@@ -221,7 +340,7 @@ fn productive_session_entrypoint_persists_a_resumable_conversation() {
         &fixture.policy,
         Some(core_script::FlowValue::String("root input".to_owned())),
         true,
-        fixture.credential(),
+        || Ok(fixture.credential().clone()),
         "Agent guidance.",
         None,
         &mut provider,
@@ -263,7 +382,7 @@ fn productive_session_entrypoint_persists_a_resumable_conversation() {
         None,
         Some(notifier),
         false,
-        fixture.credential(),
+        || Ok(fixture.credential().clone()),
         &mut continuation_provider,
     )
     .expect("live continuation completes");
@@ -397,6 +516,7 @@ fn productive_recovery_reuses_committed_provider_attempt_without_redispatch() {
     assert_eq!(initial_provider.bodies.len(), 1);
 
     let mut recovery_provider = FakeProvider::default();
+    let mut tool_executor = UnsupportedToolExecutor;
     let output = recover_interrupted_productive_run(
         &workspace,
         ProductiveExecution {
@@ -404,6 +524,7 @@ fn productive_recovery_reuses_committed_provider_attempt_without_redispatch() {
             ..fixture.execution(flow, "run")
         },
         &mut recovery_provider,
+        &mut tool_executor,
     );
 
     assert!(!output.failed);
@@ -425,7 +546,6 @@ fn productive_recovery_reuses_committed_provider_attempt_without_redispatch() {
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn productive_recovery_reuses_committed_tool_attempt_without_redispatch() {
     let (workspace, fixture) = configured_smoke_productive_execution_fixture();
@@ -504,6 +624,7 @@ fn productive_recovery_reuses_committed_tool_attempt_without_redispatch() {
             ..fixture.execution(flow, "run")
         },
         &mut recovery_provider,
+        &mut tools,
     );
 
     assert!(!output.failed);
@@ -511,6 +632,7 @@ fn productive_recovery_reuses_committed_tool_attempt_without_redispatch() {
         recovery_provider.bodies.is_empty(),
         "provider must not rerun"
     );
+    assert_eq!(tools.invocations.len(), 1, "Tool must not rerun");
     let recovered_attempts =
         inspect_run_attempts(&workspace, "conversation", "run").expect("attempts");
     assert_eq!(recovered_attempts.len(), 3);

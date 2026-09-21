@@ -125,7 +125,7 @@ fn authoring_publishes_each_approved_block_kind_and_validates_a_selected_flow() 
     let definitions = [
         (
             "tool.yaml",
-            "tool:\n  id: inspect\n  name: Inspect\n  tool_kind: predefined-command\n  command:\n    command_id: agent-echo\n    argv: [inspect]\n  allowed_parameters: []\n  read_scope: [workspace]\n  write_scope: []\n  protected_path_grants: []\n  network: deny\n",
+            "tool:\n  id: inspect\n  name: Inspect\n  tool_kind: predefined-command\n  command:\n    command_id: agent-echo\n    argv: [inspect]\n  allowed_parameters: []\n",
         ),
         (
             "instruction.yaml",
@@ -180,7 +180,6 @@ fn authoring_uninitialized_global_config_uses_runtime_exit_class() {
     assert!(!workspace.join(".flow").exists());
 }
 
-#[cfg(any(unix, windows))]
 #[test]
 fn authoring_rejects_a_hardlinked_global_config_before_publication() {
     let workspace = authoring_workspace("authoring-hardlinked-config");

@@ -1,12 +1,12 @@
 use super::productive_run::execute_reserved_productive_session;
 use super::{
-    RecordedProductivePreflight, prepare_recorded_productive_preflight,
-    reconcile_productive_preflight,
+    RecordedProductivePreflight, prepare_productive_tool_executor,
+    prepare_recorded_productive_preflight, reconcile_productive_preflight,
 };
 use crate::runtime::{
     auth::resolve_openai_codex_credential,
     config_io::{ExecutionBackend, load_global_config_authority, require_execution_backend},
-    conversations::{migrate_legacy_session_if_present, reserve_conversation_continuation},
+    conversations::{read_conversation_continuation_definition, reserve_conversation_continuation},
     fs_guards::AnchoredWorkspace,
     live_events::LiveEventNotifier,
     openai_codex::OPENAI_CODEX_PROVIDER_ID,
@@ -147,36 +147,36 @@ where
     };
     let _activation = activate(true)?;
     reconcile_productive_preflight(platform_preflight())?;
-    reconcile_productive_preflight(migrate_legacy_session_if_present(
-        workspace,
-        conversation_id,
-    ))?;
+    let (recorded_run_session_id, recorded_definition) = reconcile_productive_preflight(
+        read_conversation_continuation_definition(workspace, conversation_id, from_entry_id),
+    )?;
+    let RecordedProductivePreflight {
+        registry,
+        flow_ref,
+        policy,
+        agent_instructions,
+    } = prepare_recorded_productive_preflight(
+        &execution_workspace,
+        &authority,
+        &recorded_run_session_id,
+        &recorded_definition,
+        "continuation lacks Flow id",
+        &model,
+        model_profile,
+    )?;
+    let mut tool_executor = prepare_productive_tool_executor(&policy)?;
+    let credential = reconcile_productive_preflight(resolve_credential())?;
     let reservation = reconcile_productive_preflight(reserve_conversation_continuation(
         workspace,
         conversation_id,
         from_entry_id,
     ))?;
     let operation = (|| {
-        let recorded =
-            reconcile_productive_preflight(reservation.recorded_definition().ok_or_else(|| {
-                RuntimeError::Protocol("continuation lacks run definition".to_owned())
-            }))?;
-        let RecordedProductivePreflight {
-            registry,
-            flow_ref,
-            policy,
-            credential,
-            agent_instructions,
-        } = prepare_recorded_productive_preflight(
-            &execution_workspace,
-            &authority,
-            reservation.run_session_id(),
-            recorded,
-            "continuation lacks Flow id",
-            &model,
-            model_profile,
-            resolve_credential,
-        )?;
+        if reservation.recorded_definition() != Some(&recorded_definition) {
+            return Err(RuntimeError::Protocol(
+                "continuation definition changed during preflight".to_owned(),
+            ));
+        }
         let flow_block = registry
             .flow_block(&flow_ref)
             .expect("recorded productive preflight verified the Flow");
@@ -195,6 +195,7 @@ where
             &agent_instructions,
             notifier,
             provider,
+            &mut tool_executor,
             &reservation,
         )
     })();
@@ -204,16 +205,20 @@ where
 
 #[cfg(test)]
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn continue_conversation_with_provider<P: ProductiveProvider>(
+pub(crate) fn continue_conversation_with_provider<P, C>(
     workspace: impl AsRef<Path>,
     conversation_id: &str,
     from_entry_id: Option<&str>,
     root_input: Option<core_script::FlowValue>,
     notifier: Option<LiveEventNotifier>,
     capture_jsonl: bool,
-    credential: &crate::runtime::oauth_credential::CredentialRecord,
+    resolve_credential: C,
     provider: &mut P,
-) -> Result<RunOutput, RuntimeError> {
+) -> Result<RunOutput, RuntimeError>
+where
+    P: ProductiveProvider,
+    C: FnOnce() -> Result<crate::runtime::oauth_credential::CredentialRecord, RuntimeError>,
+{
     continue_conversation_internal_with_provider(
         workspace,
         conversation_id,
@@ -224,6 +229,6 @@ pub(crate) fn continue_conversation_with_provider<P: ProductiveProvider>(
         |_| Ok(()),
         || Ok(()),
         provider,
-        || Ok(credential.clone()),
+        resolve_credential,
     )
 }

@@ -8,8 +8,6 @@ use crate::runtime::validate::validate_session_log_text;
 use proto::EventType;
 use std::path::Path;
 
-mod legacy;
-
 #[test]
 fn session_lifecycle_accepts_terminal_phase_without_kind() {
     let started = base_event().canonical_jsonl().expect("started serializes");

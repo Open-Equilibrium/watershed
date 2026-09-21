@@ -249,7 +249,6 @@ fn remove_lifecycle_root_contents(
         remove_lifecycle_runs(&runs)?;
         drop(runs);
         conversation
-            .dir
             .remove_dir(CONVERSATION_RUNS_DIR)
             .map_err(|source| {
                 path_io_error(&conversation.path.join(CONVERSATION_RUNS_DIR), source)
@@ -294,8 +293,7 @@ fn remove_lifecycle_runs(runs: &AnchoredDir) -> Result<(), RuntimeError> {
                 objects.file(object).remove()?;
             }
             drop(objects);
-            run.dir
-                .remove_dir(RUN_OBJECTS_DIR)
+            run.remove_dir(RUN_OBJECTS_DIR)
                 .map_err(|source| path_io_error(&run.path.join(RUN_OBJECTS_DIR), source))?;
         }
         for run_leaf in &run_entries {
@@ -310,8 +308,7 @@ fn remove_lifecycle_runs(runs: &AnchoredDir) -> Result<(), RuntimeError> {
             run.file(&run_marker).remove()?;
         }
         drop(run);
-        runs.dir
-            .remove_dir(&leaf)
+        runs.remove_dir(&leaf)
             .map_err(|source| path_io_error(&runs.path.join(&leaf), source))?;
     }
     sync_anchored_directory(runs)
@@ -334,7 +331,6 @@ fn remove_verified_conversation(
     drop(current);
     drop(conversation);
     sessions
-        .dir
         .remove_dir(conversation_id)
         .map_err(|source| path_io_error(&sessions.path.join(conversation_id), source))?;
     sync_anchored_directory(sessions)

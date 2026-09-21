@@ -12,7 +12,8 @@ fn read_productive_recovery_snapshot(path: &AnchoredFile) -> Result<Vec<u8>, Run
 }
 
 pub(crate) use reservation::{
-    ProductiveConversationReservation, reserve_conversation_continuation,
+    ProductiveConversationReservation, read_conversation_continuation_definition,
+    read_conversation_recovery_definition, reserve_conversation_continuation,
     reserve_conversation_run_recovery, reserve_new_conversation_run,
     with_conversation_run_ownership,
 };

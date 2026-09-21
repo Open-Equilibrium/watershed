@@ -16,10 +16,7 @@ use std::collections::BTreeMap;
 
 mod payload;
 
-pub use payload::{
-    PhaseKind, ToolKind, ToolNetworkAccess, UnknownPhaseKind, UnknownToolKind,
-    UnknownToolNetworkAccess,
-};
+pub use payload::{PhaseKind, ToolKind, UnknownPhaseKind, UnknownToolKind};
 
 /// Identifier classes retained or compared across valid v0 events.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -36,8 +33,6 @@ pub enum EventStateIdentifierKind {
     PhaseExecution,
     /// Phase definition identifier.
     Phase,
-    /// Legacy Step identifier.
-    Step,
     /// Tool definition identifier.
     Tool,
     /// Tool attempt identifier.

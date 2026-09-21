@@ -75,7 +75,7 @@ impl LiveFlowInvocations {
             prefix_event_count,
             tracks_events: true,
         };
-        for action in plan.actions.iter() {
+        for action in plan.execution.actions.iter() {
             let FlowExecutionAction::Event(action) = action else {
                 continue;
             };

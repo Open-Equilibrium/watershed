@@ -21,7 +21,7 @@ pub fn read_flow_run_input_file(
     parse_flow_run_input(&text)
 }
 
-/// Parses one canonical, duplicate-free [`FLOW_RUN_INPUT_SCHEMA_V0`] document.
+/// Parses one canonical, duplicate-free `FLOW_RUN_INPUT_SCHEMA_V0` document.
 pub fn parse_flow_run_input(source: &str) -> Result<core_script::FlowValue, RuntimeError> {
     if source.len() > MAX_FLOW_RUN_INPUT_BYTES {
         return Err(input_error(format!(

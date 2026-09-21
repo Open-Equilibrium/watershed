@@ -102,7 +102,6 @@ fn segmented_stream_consumers_reject_high_ordinals_and_rollback_preserves_foreig
     }
 }
 
-#[cfg(any(unix, windows))]
 #[test]
 fn rotated_stream_segments_and_objects_reject_hardlinks() {
     for kind in ["event", "context", "object"] {
@@ -244,7 +243,7 @@ fn segmented_stream_rejects_case_aliased_names() {
                 .to_string_lossy()
                 .to_ascii_uppercase(),
         );
-        if base_alias && cfg!(any(windows, target_os = "macos")) {
+        if base_alias && cfg!(target_os = "macos") {
             fs::rename(canonical.diagnostic_path(), &alias).expect("case-aliased base renamed");
         } else {
             fs::write(&alias, b"\n").expect("case-aliased stream file written");
