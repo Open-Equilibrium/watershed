@@ -10,7 +10,6 @@ shift
 acceptance_root=$(mktemp -d "$RUNNER_TEMP/m12-installer.XXXXXX")
 acceptance_root=$(cd "$acceptance_root" && /bin/pwd -P)
 
-bundle="$acceptance_root/m12-install-bundle"
 acceptance_bundle="$acceptance_root/m12-acceptance-install-bundle"
 acceptance_prefix="$acceptance_root/m12-acceptance-prefix"
 standard_prefix="$acceptance_root/m12-standard-prefix"
@@ -33,6 +32,33 @@ case "$(/usr/bin/uname -s)" in
     ;;
   *) printf 'native installer acceptance requires Linux or macOS\n' >&2; exit 1 ;;
 esac
+bundle_version=$(node scripts/run-python.mjs -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["workspace"]["package"]["version"])')
+download=$(cd target/m12-download && /bin/pwd -P)
+archive="flow-agent-$bundle_version-$expected_platform.tar.gz"
+bundle="$acceptance_root/${archive%.tar.gz}"
+verify_download() {
+  case "$expected_platform" in
+    ubuntu-*) /usr/bin/sha256sum --check SHA256SUMS ;;
+    macos-*) /usr/bin/shasum -a 256 --check SHA256SUMS ;;
+  esac
+}
+# Use only OS tools for the documented pre-execution verification/extraction.
+(cd "$download" && verify_download)
+/usr/bin/tar -xzf "$download/$archive" -C "$acceptance_root"
+printf '%s\n' "$bundle_version" "$expected_platform" | /usr/bin/cmp - "$bundle/bundle-info"
+tampered="$acceptance_root/tampered"
+mkdir "$tampered"
+cp "$download/$archive" "$download/SHA256SUMS" "$tampered/"
+printf 'altered' >> "$tampered/$archive"
+if (cd "$tampered" && verify_download); then
+  printf 'altered download passed verification\n' >&2
+  exit 1
+fi
+rm "$tampered/SHA256SUMS"
+if (cd "$tampered" && verify_download); then
+  printf 'download without verification data passed\n' >&2
+  exit 1
+fi
 run_local() {
   /usr/bin/env PATH= HOME="$home" XDG_CONFIG_HOME="$config" "$@"
 }
@@ -42,17 +68,16 @@ run_in_workspace() {
   run_local /bin/sh -c 'cd "$1" && shift && exec "$@"' \
     flow-workspace "$workspace" "$@"
 }
-install -d -m 0755 "$bundle" "$acceptance_bundle"
+install -d -m 0755 "$acceptance_bundle"
 install -d -m 0700 "$config" "$home" "$agent_home" "$fixture_home" "$fixture_workspace" "$productive_workspace" "$unavailable_workspace"
-install -m 0755 install/install.sh "$bundle/install.sh"
-install -m 0755 target/m12-standard/release/flow "$bundle/flow"
-install -m 0755 target/m12-standard/release/flow-executor "$bundle/flow-executor"
 install -m 0755 install/install.sh "$acceptance_bundle/install.sh"
+install -m 0644 "$bundle/bundle-info" "$acceptance_bundle/bundle-info"
 install -m 0755 target/m12-acceptance/release/flow "$acceptance_bundle/flow"
 install -m 0755 target/m12-standard/release/flow-executor "$acceptance_bundle/flow-executor"
 (cd / && PATH= HOME="$home" XDG_CONFIG_HOME="$config" /bin/sh "$bundle/install.sh" --prefix "$standard_prefix")
 test -x "$standard_prefix/bin/flow"
 test -x "$standard_prefix/bin/flow-executor"
+test "$(run_local "$standard_prefix/bin/flow" --version)" = "flow $bundle_version"
 run_local "$standard_prefix/bin/flow" executor check </dev/null
 (cd / && PATH= HOME="$home" XDG_CONFIG_HOME="$config" /bin/sh "$acceptance_bundle/install.sh" --prefix "$acceptance_prefix")
 test -x "$acceptance_prefix/bin/flow"
@@ -227,6 +252,7 @@ if [ -n "${M12_COVERAGE_BIN_DIR:-}" ]; then
   custom_prefix="$acceptance_root/m12-coverage-custom"
   install -d -m 0755 "$coverage_bundle"
   install -m 0755 install/install.sh "$coverage_bundle/install.sh"
+  install -m 0644 "$bundle/bundle-info" "$coverage_bundle/bundle-info"
   install -m 0755 "$coverage_flow" "$coverage_bundle/flow"
   install -m 0755 "$coverage_executor" "$coverage_bundle/flow-executor"
   bundle=$coverage_bundle

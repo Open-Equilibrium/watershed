@@ -82,6 +82,28 @@ esac
 [ ! -L "$installer" ] || fail 'installer must not be a symbolic link'
 bundle=${installer%/*}
 [ "$bundle" != "$installer" ] || fail 'installer bundle is unavailable'
+[ -f "$bundle/bundle-info" ] && [ ! -L "$bundle/bundle-info" ] \
+    || fail 'missing regular bundle-info; extract the complete verified download'
+{
+    IFS= read -r bundle_version && IFS= read -r bundle_platform && ! IFS= read -r extra && [ -z "$extra" ]
+} < "$bundle/bundle-info" || fail 'invalid bundle-info'
+printf '%s\n' "$bundle_version" | /usr/bin/grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$' \
+    || fail 'invalid bundle version'
+machine=$(/usr/bin/uname -m) || fail 'cannot identify bundle target architecture'
+case "$bundle_platform:$host:$machine" in
+    ubuntu-24.04-x86_64:Linux:x86_64)
+        /usr/bin/grep -Eq '^ID=("ubuntu"|ubuntu)$' /etc/os-release && \
+        /usr/bin/grep -Eq '^VERSION_ID=("24\.04"|24\.04)$' /etc/os-release \
+            || fail 'bundle requires Ubuntu 24.04 x86_64'
+        ;;
+    macos-26-aarch64:Darwin:arm64)
+        case "$(/usr/bin/sw_vers -productVersion)" in
+            26|26.*) ;;
+            *) fail 'bundle requires macOS 26 ARM64' ;;
+        esac
+        ;;
+    *) fail "bundle target $bundle_platform does not match $host $machine" ;;
+esac
 exec 3<"$bundle" || fail 'cannot open installer bundle'
 bundle_fd=$descriptor_root/3
 [ -d "$bundle_fd" ] || fail 'installer bundle is not a directory'
@@ -348,4 +370,4 @@ verify_bin_binding
 installation_committed=1
 trap - EXIT HUP INT TERM
 exec 6<&-
-printf '%s\n' "installed flow in $bin"
+printf '%s\n' "installed flow $bundle_version ($bundle_platform) in $bin"

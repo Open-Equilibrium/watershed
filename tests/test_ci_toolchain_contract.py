@@ -539,8 +539,11 @@ class CiWorkflowContractTest(unittest.TestCase):
             self.assertNotIn(forbidden, workflow)
 
         installer = M12_INSTALLER_ACCEPTANCE.read_text(encoding="utf-8")
-        for required in ('target/m12-standard/release/flow "$bundle/flow"',
-                         f'{M12_EXECUTOR} "$bundle/flow-executor"',
+        for required in ('download=$(cd target/m12-download && /bin/pwd -P)',
+                         '/usr/bin/tar -xzf "$download/$archive" -C "$acceptance_root"',
+                         '(cd "$download" && verify_download)',
+                         '/usr/bin/sha256sum --check SHA256SUMS',
+                         '/usr/bin/shasum -a 256 --check SHA256SUMS',
                          'target/m12-acceptance/release/flow "$acceptance_bundle/flow"',
                          f'{M12_EXECUTOR} "$acceptance_bundle/flow-executor"',
                          'install -m 0755 "$coverage_flow" "$coverage_bundle/flow"',
@@ -550,6 +553,16 @@ class CiWorkflowContractTest(unittest.TestCase):
                          'executor configure --default',
                          'assert receipt["self_protection_active"] is True'):
             self.assertIn(required, installer)
+        self.assertLess(installer.index('(cd "$download" && verify_download)'),
+                        installer.index('/usr/bin/tar -xzf'))
+        assert_step_state(self, workflow, "Package native download", condition=NATIVE)
+        package = step_run(workflow, "Package native download")
+        self.assertIn("scripts/package_flow_agent.py", package)
+        self.assertIn("--binaries target/m12-standard/release", package)
+        self.assertIn("--output target/m12-download", package)
+        retained = assert_step_state(self, workflow, "Retain tested native download", condition=NATIVE)
+        self.assertIn("          path: target/m12-download/", retained)
+        self.assertIn("          if-no-files-found: error", retained)
         coverage = installer.index('if [ -n "${M12_COVERAGE_BIN_DIR:-}" ]')
         self.assertIn('check_custom_selection\n', installer[:coverage])
         self.assertIn('check_custom_selection\n', installer[coverage:])

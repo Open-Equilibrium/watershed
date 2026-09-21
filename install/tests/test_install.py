@@ -59,6 +59,8 @@ class PrefixInstallerTest(unittest.TestCase):
         bundle = root / "bundle"
         bundle.mkdir(mode=0o755, parents=True)
         shutil.copy2(INSTALLER, bundle / "install.sh")
+        platform = "macos-26-aarch64" if sys.platform == "darwin" else "ubuntu-24.04-x86_64"
+        (bundle / "bundle-info").write_text(f"0.0.0\n{platform}\n", encoding="ascii")
         flow = bundle / "flow"
         flow.write_text(
             "#!/bin/sh\n"
@@ -84,6 +86,29 @@ class PrefixInstallerTest(unittest.TestCase):
         for path in (bundle / "install.sh", flow, executor):
             path.chmod(0o755)
         return bundle
+
+    def test_missing_malformed_or_wrong_target_bundle_is_rejected_before_program_execution(self):
+        for contents in (None, "0.0.0\n", "0.0.0\nunsupported-platform\n",
+                         "0.0.0\nmacos-26-aarch64\n" if sys.platform == "linux"
+                         else "0.0.0\nubuntu-24.04-x86_64\n"):
+            with self.subTest(contents=contents), tempfile.TemporaryDirectory() as temporary:
+                root = pathlib.Path(temporary)
+                bundle = self.bundle(root)
+                manifest = bundle / "bundle-info"
+                if contents is None:
+                    manifest.unlink()
+                else:
+                    manifest.write_text(contents, encoding="ascii")
+                marker = root / "executed"
+                (bundle / "flow").write_text(
+                    f"#!/bin/sh\n: > {shlex.quote(str(marker))}\n", encoding="utf-8")
+                prefix = root / "prefix"
+                for options in ((), ("--no-default-executor",)):
+                    result = self.install(bundle, prefix, *options)
+                    self.assertEqual(result.returncode, 1, result.stderr)
+                    self.assertIn(b"bundle", result.stderr)
+                    self.assertFalse(marker.exists(), result.stderr)
+                    self.assertFalse(prefix.exists(), result.stderr)
 
     def install(self, bundle: pathlib.Path, prefix: pathlib.Path, *args: str):
         unrelated_cwd = prefix.parent / "unrelated-cwd"

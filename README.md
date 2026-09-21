@@ -33,20 +33,33 @@ cargo build --locked --workspace
 cargo nextest run --config 'target."cfg(all())".runner = ["node", "../../scripts/run-isolated-rust-test.mjs"]' --locked --workspace --all-targets
 ```
 
-### Developer/test installation on Linux or macOS
+### Download installation on Linux or macOS
 
-The end-user distribution must follow the [prebuilt-artifact installation contract](SECURITY.md#m12-tool-execution-trust-boundary). Download packaging remains pending. For local staging on a supported native host, build a private bundle from the repository root:
+Download distribution is implemented; publication and final acceptance are still pending. Once a version is published, download its platform-specific `.tar.gz` and `SHA256SUMS` from the official [GitHub Releases page](https://github.com/Open-Equilibrium/watershed/releases) in a browser. Stop on any browser HTTPS/certificate warning; do not use mirrors or disable verification. No compiler, Node or Python is needed to install. The [download trust contract](SECURITY.md#m12-tool-execution-trust-boundary) explains what the checksum does and does not prove.
+
+In the download directory, set the exact selected release version and platform (`ubuntu-24.04-x86_64` or `macos-26-aarch64`). Run this verification before extracting or executing anything from the download; any failure stops the sequence:
 
 ```sh
-cargo build --locked --release -p flow-agent-cli -p flow-agent-executor
-install_bundle=$(mktemp -d)
-install -m 0755 install/install.sh target/release/flow \
-  target/release/flow-executor "$install_bundle/"
+set -eu
+version=0.0.0 # Replace with the selected published version.
+platform=ubuntu-24.04-x86_64 # Or macos-26-aarch64.
+archive="flow-agent-$version-$platform.tar.gz"
+case "$platform" in
+  ubuntu-24.04-x86_64)
+    awk -v file="$archive" '$2 == file {print}' SHA256SUMS | sha256sum --check - ;;
+  macos-26-aarch64)
+    awk -v file="$archive" '$2 == file {print}' SHA256SUMS | shasum -a 256 --check - ;;
+  *) exit 1 ;;
+esac
+unpack=$(mktemp -d)
+tar -xzf "$archive" -C "$unpack"
+install_bundle="$unpack/${archive%.tar.gz}"
+printf '%s\n' "$version" "$platform" | cmp - "$install_bundle/bundle-info"
 /bin/sh "$install_bundle/install.sh" --prefix "$HOME/.local/watershed"
 "$HOME/.local/watershed/bin/flow" executor check
 ```
 
-Use a fresh prefix: the installer never upgrades existing binaries. It checks the Default Executor as the intended unprivileged user. Missing host prerequisites are errors; it does not update a kernel, change system security policy or start a privileged service. See [PLATFORMS.md](PLATFORMS.md) for native prerequisites and verification.
+Use a fresh prefix: the installer never upgrades existing binaries. It rejects incompatible bundle/host targets before installing or executing a program, then checks the Default Executor as the intended unprivileged user. Missing host prerequisites are errors; it does not update a kernel, change system security policy or start a privileged service. See [PLATFORMS.md](PLATFORMS.md) for native prerequisites and verification. Mac quarantine/signing acceptance remains a release gate; do not remove quarantine attributes or disable Gatekeeper to bypass a failure.
 
 Alternatively, omit the Default Executor explicitly and select an administrator-reviewed Custom Executor as the operating-system account that will run Flow:
 
@@ -58,6 +71,19 @@ Alternatively, omit the Default Executor explicitly and select an administrator-
 ```
 
 `/bin/sh install/install.sh --help` is the canonical option summary. Custom Executor readiness validates the protocol boundary but is not a compatibility or security certification; see the [Executor architecture](docs/concept/flow-agent-executor-architecture.md).
+
+### Developer/test installation on Linux or macOS
+
+From the repository root on a supported native host, build and package the normal release binaries. Select the matching platform from the download instructions above; `target/local-download` must not already exist:
+
+```sh
+cargo build --locked --release -p flow-agent-cli -p flow-agent-executor
+node scripts/run-python.mjs scripts/package_flow_agent.py \
+  --binaries target/release --platform "$platform" --output target/local-download
+cd target/local-download
+```
+
+Then use the same verification and installation sequence above with the workspace version in `Cargo.toml`. The packager only archives supplied binaries and rejects a mismatched executable architecture; it does not build, sign or publish. Complete any required Mac signing before packaging. CI retains each platform's tested archive and checksum file; these are test artifacts, not authorized public releases.
 
 Set `FLOW_AGENT_HOME` to an unused absolute path before exercising local authoring or runtime state. Workspace layout is illustrated in [`docs/concept/V-Spec_FlowAgent.html`](docs/concept/V-Spec_FlowAgent.html). [`PROTOCOL.md`](PROTOCOL.md) defines Registry authoring; the [registry schema](core/core-script/schemas/registry-block.schema.json) documents its intended field/type shape. Checked-in deterministic examples live under [`flow-agent/fixtures/`](flow-agent/fixtures/) and make no provider, subprocess or isolation claim.
 

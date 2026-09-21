@@ -10,6 +10,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import tomllib
 
 
 def linux_fault_filter(fault):
@@ -111,6 +112,8 @@ def readiness_negatives():
                              ("flow-executor", artifacts / "flow-executor")):
             shutil.copyfile(source, bundle / name)
             (bundle / name).chmod(0o755)
+        version = tomllib.loads((repository / "Cargo.toml").read_text())["workspace"]["package"]["version"]
+        (bundle / "bundle-info").write_text(f"{version}\n{platform}\n", encoding="ascii")
         home = root / "home"
         home.mkdir(mode=0o700)
         config = home / "Library/Application Support" if sys.platform == "darwin" else root / "config"
