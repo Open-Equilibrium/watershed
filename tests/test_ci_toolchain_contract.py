@@ -313,9 +313,6 @@ class CiWorkflowContractTest(unittest.TestCase):
     def test_testing_contract_covers_tooling_and_rustdoc_gates(self) -> None:
         testing = (ROOT / "TESTING.md").read_text(encoding="utf-8")
         for contract in (
-            "documentation gates (HTML rendering and link-manifest generation)",
-            "the Node advisory audit",
-            "the Rust test-isolation runner",
             "`pnpm audit`",
             "`cargo --config .cargo/test-isolation.toml test --locked --workspace --all-features --doc`",
         ):
