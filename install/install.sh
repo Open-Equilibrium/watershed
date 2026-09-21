@@ -144,6 +144,7 @@ validate_source() {
 flow_source_name=$bundle/flow
 flow_source_entry=$bundle/flow
 [ ! -L "$flow_source_entry" ] || fail "linked bundle artifact is unsafe: $flow_source_name"
+[ -f "$flow_source_entry" ] || fail "missing regular bundle artifact: $flow_source_name"
 exec 4<"$flow_source_entry" || fail "missing regular bundle artifact: $flow_source_name"
 flow_source=$descriptor_root/4
 validate_source "$flow_source" "$flow_source_name"
@@ -151,6 +152,7 @@ if [ "$install_executor" -eq 1 ]; then
     executor_source_name=$bundle/flow-executor
     executor_source_entry=$bundle/flow-executor
     [ ! -L "$executor_source_entry" ] || fail "linked bundle artifact is unsafe: $executor_source_name"
+    [ -f "$executor_source_entry" ] || fail "missing regular bundle artifact: $executor_source_name"
     exec 5<"$executor_source_entry" || fail "missing regular bundle artifact: $executor_source_name"
     executor_source=$descriptor_root/5
     validate_source "$executor_source" "$executor_source_name"
@@ -183,8 +185,10 @@ executor_target=./flow-executor
 [ ! -e "$flow_target" ] && [ ! -L "$flow_target" ] || fail 'existing installation is not upgraded'
 [ ! -e "$executor_target" ] && [ ! -L "$executor_target" ] || fail 'existing installation is not upgraded'
 
-flow_stage=./.flow.install.$$
-executor_stage=./.flow-executor.install.$$
+stage_directory=./.flow.install.$$
+stage_created=0
+flow_stage=$stage_directory/flow
+executor_stage=$stage_directory/flow-executor
 readiness_config=./.flow-readiness-config.$$
 readiness_status_file=$readiness_config/status
 published_flow=0
@@ -257,7 +261,7 @@ cleanup() {
     if [ "$readiness_config_created" -eq 1 ]; then
         /bin/rm -rf -- "$readiness_config" || :
     fi
-    if [ "$installation_committed" -eq 0 ]; then
+    if [ "$installation_committed" -eq 0 ] && [ "$stage_created" -eq 1 ]; then
         if [ "$published_executor" -eq 1 ] || {
             [ -e "$executor_stage" ] && [ "$executor_stage" -ef "$executor_target" ]
         }; then
@@ -269,7 +273,10 @@ cleanup() {
             /bin/rm -f -- "$flow_target" || :
         fi
     fi
-    /bin/rm -f -- "$flow_stage" "$executor_stage" || :
+    if [ "$stage_created" -eq 1 ]; then
+        /bin/rm -f -- "$flow_stage" "$executor_stage" || :
+        /bin/rmdir -- "$stage_directory" || :
+    fi
 }
 signal_exit() {
     signal_status=$1
@@ -297,6 +304,8 @@ verify_bin_binding() {
 verify_bundle_binding
 verify_bin_binding
 
+/bin/mkdir -m 0700 -- "$stage_directory" || fail 'cannot create installation staging directory'
+stage_created=1
 (umask 077; set -C; /bin/cat <&4 > "$flow_stage") \
     || fail 'cannot stage flow'
 /bin/chmod 0755 "$flow_stage" || fail 'cannot protect staged flow'
@@ -367,6 +376,7 @@ if [ "$install_executor" -eq 1 ]; then
 fi
 
 verify_bin_binding
+/bin/rmdir -- "$stage_directory" || fail 'cannot remove installation staging directory'
 installation_committed=1
 trap - EXIT HUP INT TERM
 exec 6<&-

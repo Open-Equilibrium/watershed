@@ -126,6 +126,7 @@ class PrefixInstallerTest(unittest.TestCase):
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             check=False,
+            timeout=15,
         )
 
     def pause_installer_after_validation(
@@ -229,6 +230,7 @@ class PrefixInstallerTest(unittest.TestCase):
                 ("non-executable", b"bundle artifact is not executable:"),
                 ("writable", b"writable bundle artifact is unsafe:"),
                 ("hardlink", b"hard-linked bundle artifact is unsafe:"),
+                ("fifo", b"missing regular bundle artifact:"),
             )
         ] + [
             ("bundle", "writable", b"installer bundle is writable by other users"),
@@ -247,6 +249,9 @@ class PrefixInstallerTest(unittest.TestCase):
                     target.mkdir(parents=True)
                 if mutation == "hardlink":
                     os.link(target, root / "artifact-alias")
+                elif mutation == "fifo":
+                    target.unlink()
+                    os.mkfifo(target)
                 else:
                     target.chmod(0o644 if mutation == "non-executable" else 0o775)
 
@@ -258,6 +263,26 @@ class PrefixInstallerTest(unittest.TestCase):
                 self.assertIn(diagnostic, rejected.stderr)
                 if (prefix / "bin").exists():
                     self.assertEqual(list((prefix / "bin").iterdir()), [])
+
+    def test_staging_collision_preserves_preexisting_file(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            bundle = self.bundle(root)
+            prefix = root / "prefix"
+            bin_directory = prefix / "bin"
+            bin_directory.mkdir(parents=True)
+            result = subprocess.run(
+                ["/bin/sh", "-c",
+                 'printf sentinel > "$1/bin/.flow.install.$$" || exit 90\n'
+                 'exec /bin/sh "$2" --prefix "$1" --no-default-executor',
+                 "collision", str(prefix), str(bundle / "install.sh")],
+                env={"PATH": ""}, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                timeout=15,
+            )
+            self.assertEqual(result.returncode, 1, result.stderr)
+            entries = list(bin_directory.iterdir())
+            self.assertEqual(len(entries), 1, result.stderr)
+            self.assertEqual(entries[0].read_bytes(), b"sentinel")
 
     def test_installed_files_are_regular_executable_siblings(self):
         with tempfile.TemporaryDirectory() as temporary:
