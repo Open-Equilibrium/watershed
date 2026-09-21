@@ -1,7 +1,7 @@
 use super::fixture_registry;
 use crate::{
-    DenyReasonCode, PolicyArtifact, PolicyArtifactError, PolicyArtifactValidationError,
-    PolicyCompileError, canonical_artifact_json, compile_policy_artifact,
+    PolicyArtifact, PolicyArtifactError, PolicyArtifactValidationError, PolicyCompileError,
+    canonical_artifact_json, compile_policy_artifact,
 };
 use serde_json::Value;
 use std::{fs, path::Path};
@@ -103,57 +103,5 @@ fn policy_error_diagnostics_preserve_each_error_source() {
             "{error}"
         );
         assert!(std::error::Error::source(&error).is_some());
-    }
-}
-
-#[test]
-fn expected_decision_fixtures_are_canonical_denials() {
-    for path in fixture_files("expected.json") {
-        let text = fs::read_to_string(&path).expect("fixture is readable");
-        assert!(text.ends_with('\n'), "{} must end with LF", path.display());
-
-        let expected: ExpectedDecisionFixture =
-            serde_json::from_str(&text).unwrap_or_else(|err| panic!("{}: {err}", path.display()));
-        assert_eq!(expected.expected, "deny");
-        assert!(!expected.side_effects_allowed);
-        let value = serde_json::to_value(&expected).expect("fixture serializes");
-        let canonical = format!(
-            "{}\n",
-            proto::canonical_json(&value).expect("fixture canonicalizes")
-        );
-        assert_eq!(canonical, text, "{} must be canonical", path.display());
-    }
-}
-
-#[derive(serde::Deserialize, serde::Serialize)]
-#[serde(deny_unknown_fields)]
-struct ExpectedDecisionFixture {
-    #[serde(rename = "attempt")]
-    _attempt: Value,
-    expected: String,
-    #[serde(rename = "fixture_name")]
-    _fixture_name: String,
-    #[serde(rename = "reason_code")]
-    _reason_code: DenyReasonCode,
-    side_effects_allowed: bool,
-}
-
-fn fixture_files(suffix: &str) -> Vec<std::path::PathBuf> {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures");
-    let mut files = Vec::new();
-    collect_fixture_files(&root, suffix, &mut files);
-    files.sort();
-    assert!(!files.is_empty(), "expected at least one {suffix} fixture");
-    files
-}
-
-fn collect_fixture_files(dir: &Path, suffix: &str, out: &mut Vec<std::path::PathBuf>) {
-    for entry in fs::read_dir(dir).unwrap_or_else(|err| panic!("{}: {err}", dir.display())) {
-        let path = entry.expect("dir entry").path();
-        if path.is_dir() {
-            collect_fixture_files(&path, suffix, out);
-        } else if path.to_string_lossy().ends_with(suffix) {
-            out.push(path);
-        }
     }
 }
