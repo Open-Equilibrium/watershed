@@ -46,6 +46,17 @@ verify_download() {
 (cd "$download" && verify_download)
 /usr/bin/tar -xzf "$download/$archive" -C "$acceptance_root"
 printf '%s\n' "$bundle_version" "$expected_platform" | /usr/bin/cmp - "$bundle/bundle-info"
+if [ "$expected_platform" = macos-26-aarch64 ]; then
+  # Simulate downloaded-file metadata on private fixtures, not browser trust or
+  # Developer ID approval. Record host assessment state without changing it.
+  /usr/sbin/spctl --status
+  for artifact in install.sh flow flow-executor; do
+    /usr/bin/xattr -w com.apple.quarantine '0083;00000000;WatershedDownloadAcceptance;' "$bundle/$artifact"
+    /usr/bin/xattr -p com.apple.quarantine "$bundle/$artifact"
+  done
+  /usr/bin/codesign --verify --strict "$bundle/flow"
+  /usr/bin/codesign --verify --strict "$bundle/flow-executor"
+fi
 tampered="$acceptance_root/tampered"
 mkdir "$tampered"
 cp "$download/$archive" "$download/SHA256SUMS" "$tampered/"
