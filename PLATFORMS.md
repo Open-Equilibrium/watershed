@@ -17,6 +17,8 @@ Linux ARM64 and Windows 11 ARM64 are deferred beyond Release 1. Earlier Windows 
 
 Ubuntu 24.04 x86_64 and macOS 26 ARM64 are the current concrete Flow verification targets. Other Linux distributions or OS versions do not acquire a support claim from sharing an architecture or passing compilation. Liquid and Meta-Harness must establish their own runtime evidence, not inherit Flow's verification results.
 
+Productive execution, the Default Executor and installation use the same release admission: Ubuntu metadata must contain exactly one `ID=ubuntu` and one `VERSION_ID=24.04`, with unquoted, double-quoted or single-quoted values; macOS must report a dotted numeric version beginning with `26`. Missing, contradictory or malformed release identification is rejected without changing the host. Rust consumers share [the release predicate](flow-agent/release.rs); the standalone installer applies the same finite grammar without executing metadata as shell code.
+
 ## Execution and development boundaries
 
 Watershed development targets native Linux x86_64 and macOS ARM64. A Mac can run native development and macOS verification while Linux CI supplies Linux evidence; no local Linux computer is required. Cross-compilation, containers sharing a host kernel, and platform-independent tests do not replace native executor tests on both release targets.

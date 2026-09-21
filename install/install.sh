@@ -18,6 +18,33 @@ usage() {
         '  -h, --help                  Show this help.'
 }
 
+release_supported() {
+    case "$1:$2" in
+        Linux:x86_64)
+            /usr/bin/awk '
+                function exact(value, literal) {
+                    return value == literal || value == "\"" literal "\"" ||
+                        value == "\047" literal "\047"
+                }
+                /^ID=/ { ids++; id = substr($0, 4) }
+                /^VERSION_ID=/ { versions++; version = substr($0, 12) }
+                END { exit !(ids == 1 && versions == 1 &&
+                    exact(id, "ubuntu") && exact(version, "24.04")) }
+            '
+            ;;
+        Darwin:arm64)
+            /usr/bin/awk '
+                { release = release $0 "\n" }
+                END {
+                    gsub(/^[[:space:]]+|[[:space:]]+$/, "", release)
+                    exit (release !~ /^26(\.[0-9]+)+$/)
+                }
+            '
+            ;;
+        *) return 1 ;;
+    esac
+}
+
 prefix=
 install_executor=1
 while [ "$#" -gt 0 ]; do
@@ -92,15 +119,13 @@ printf '%s\n' "$bundle_version" | /usr/bin/grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0
 machine=$(/usr/bin/uname -m) || fail 'cannot identify bundle target architecture'
 case "$bundle_platform:$host:$machine" in
     ubuntu-24.04-x86_64:Linux:x86_64)
-        /usr/bin/grep -Eq '^ID=("ubuntu"|ubuntu)$' /etc/os-release && \
-        /usr/bin/grep -Eq '^VERSION_ID=("24\.04"|24\.04)$' /etc/os-release \
+        release_supported "$host" "$machine" < /etc/os-release \
             || fail 'bundle requires Ubuntu 24.04 x86_64'
         ;;
     macos-26-aarch64:Darwin:arm64)
-        case "$(/usr/bin/sw_vers -productVersion)" in
-            26|26.*) ;;
-            *) fail 'bundle requires macOS 26 ARM64' ;;
-        esac
+        release=$(/usr/bin/sw_vers -productVersion) || fail 'cannot identify macOS release'
+        printf '%s\n' "$release" | release_supported "$host" "$machine" \
+            || fail 'bundle requires macOS 26 ARM64'
         ;;
     *) fail "bundle target $bundle_platform does not match $host $machine" ;;
 esac

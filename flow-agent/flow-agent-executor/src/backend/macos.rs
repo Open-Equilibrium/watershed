@@ -23,11 +23,7 @@ pub(super) fn readiness() -> Result<String, BackendError> {
     command.arg("-productVersion");
     let version = native::checked_output(command)?;
     let version = version.trim();
-    if version.split('.').next() != Some("26")
-        || !version
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || byte == b'.')
-    {
+    if !crate::platform::supported_release("macos", "aarch64", version) {
         return Err(BackendError::unavailable(
             "productive Executor support requires macOS 26 ARM64",
         ));

@@ -1,18 +1,13 @@
 use super::RuntimeError;
 
+#[path = "../../../../release.rs"]
 mod releases;
-use releases::{
-    productive_execution_supported_release, productive_tool_execution_supported_release,
-};
+use releases::supported_release;
 
 pub(crate) fn ensure_productive_execution_platform() -> Result<(), RuntimeError> {
     let release = current_productive_execution_release();
     if release.as_deref().is_some_and(|release| {
-        productive_execution_supported_release(
-            std::env::consts::OS,
-            std::env::consts::ARCH,
-            release,
-        )
+        supported_release(std::env::consts::OS, std::env::consts::ARCH, release)
     }) {
         Ok(())
     } else {
@@ -23,11 +18,7 @@ pub(crate) fn ensure_productive_execution_platform() -> Result<(), RuntimeError>
 pub(crate) fn ensure_productive_tool_execution_platform() -> Result<(), RuntimeError> {
     let release = current_productive_execution_release();
     if release.as_deref().is_some_and(|release| {
-        productive_tool_execution_supported_release(
-            std::env::consts::OS,
-            std::env::consts::ARCH,
-            release,
-        )
+        supported_release(std::env::consts::OS, std::env::consts::ARCH, release)
     }) {
         Ok(())
     } else {

@@ -1,16 +1,29 @@
+#[path = "../../release.rs"]
+mod releases;
+pub(crate) use releases::supported_release;
+
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 pub(crate) fn official_host() -> bool {
     let Ok(release) = std::fs::read_to_string("/etc/os-release") else {
         return false;
     };
-    let mut id = None;
-    let mut version = None;
-    for line in release.lines() {
-        if let Some(value) = line.strip_prefix("ID=") {
-            id = Some(value.trim_matches('"'));
-        } else if let Some(value) = line.strip_prefix("VERSION_ID=") {
-            version = Some(value.trim_matches('"'));
+    supported_release("linux", "x86_64", &release)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn ubuntu_release_requires_unambiguous_exact_fields() {
+        for (release, expected) in [
+            ("ID='ubuntu'\nVERSION_ID='24.04'\n", true),
+            ("ID=debian\nID=ubuntu\nVERSION_ID=24.04\n", false),
+            ("ID=ubuntu\nVERSION_ID=24.04\nVERSION_ID=24.04\n", false),
+        ] {
+            assert_eq!(
+                super::supported_release("linux", "x86_64", release),
+                expected,
+                "{release:?}"
+            );
         }
     }
-    id == Some("ubuntu") && version == Some("24.04")
 }

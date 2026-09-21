@@ -27,6 +27,37 @@ PROBE_DOCUMENT = (
     "requires a native Linux or macOS host",
 )
 class PrefixInstallerTest(unittest.TestCase):
+    def test_release_admission_matches_runtime(self):
+        declarations, separator, _ = INSTALLER.read_text(encoding="utf-8").partition("\nprefix=")
+        self.assertTrue(separator, "installer declarations must precede installation")
+        cases = [
+            ("Linux", "x86_64", f"ID={a}ubuntu{a}\nVERSION_ID={b}24.04{b}\n", True)
+            for a in ("", '"', "'") for b in ("", '"', "'")
+        ]
+        cases += [("Linux", "x86_64", release, False) for release in (
+            "ID=debian\nVERSION_ID=24.04\n", "ID=ubuntu\n", "VERSION_ID=24.04\n",
+            "ID=ubuntu\nVERSION_ID=24.10\n", "ID=ubuntu\nVERSION_ID='24.10'\n",
+            "ID=debian\nID=ubuntu\nVERSION_ID=24.04\n",
+            "ID=ubuntu\nID=ubuntu\nVERSION_ID=24.04\n",
+            "ID=ubuntu\nVERSION_ID=24.04\nVERSION_ID=24.04\n",
+            'ID="ubuntu\nVERSION_ID=24.04\n',
+        )]
+        cases += [("Darwin", "arm64", version, accepted) for version, accepted in (
+            ("26.0", True), ("26.6.2\n", True), ("25.9", False),
+            ("27.0", False), ("260", False), ("26", False),
+            ("26..0", False), ("26.0.beta", False), ("26.0\n26.1", False),
+        )]
+        cases += [("Linux", "arm64", "ID=ubuntu\nVERSION_ID=24.04\n", False),
+                  ("Darwin", "x86_64", "26.0", False)]
+        for host, machine, release, accepted in cases:
+            with self.subTest(host=host, machine=machine, release=release):
+                result = subprocess.run(
+                    ["/bin/sh", "-c", declarations + '\nrelease_supported "$1" "$2"\n',
+                     "release-test", host, machine], input=release, text=True,
+                    capture_output=True, timeout=5, check=False,
+                )
+                self.assertEqual(result.returncode, 0 if accepted else 1, result.stderr)
+
     def test_help_succeeds_without_installing(self):
         expected = (
             "Usage: install.sh --prefix <absolute-prefix> [--no-default-executor]\n"
