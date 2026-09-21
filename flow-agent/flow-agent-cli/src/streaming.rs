@@ -12,8 +12,15 @@ use std::{
 
 #[cfg(test)]
 std::thread_local! {
+    static LIVE_DRAIN_OBSERVER: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
+        std::cell::RefCell::new(None);
     static FINAL_DRAIN_OBSERVER: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
         std::cell::RefCell::new(None);
+}
+
+#[cfg(test)]
+pub(crate) fn set_live_drain_observer(observer: impl FnOnce() + 'static) {
+    LIVE_DRAIN_OBSERVER.with_borrow_mut(|slot| *slot = Some(Box::new(observer)));
 }
 
 #[cfg(test)]
@@ -50,23 +57,14 @@ pub(crate) fn stream_conversation_replay(
 
 pub(crate) fn stream_live_operation<F>(
     workspace: PathBuf,
-    mut reader: Option<SessionEventReader>,
     operation: F,
 ) -> Result<RunOutput, RuntimeError>
 where
     F: FnOnce(LiveEventNotifier) -> Result<RunOutput, RuntimeError> + Send + 'static,
 {
     let (notifier, receiver) = flow_agent_core::live_event_channel();
-    let mut cursor = if let Some(reader) = &mut reader {
-        let mut cursor = 0;
-        reader.visit_verified_after(0, u64::MAX, |event, _line| {
-            cursor = event.sequence;
-            Ok(())
-        })?;
-        cursor
-    } else {
-        0
-    };
+    let mut reader: Option<SessionEventReader> = None;
+    let mut cursor = 0;
     let mut observed_high_watermark = cursor;
     let mut first_committed_sequence = None;
     let worker = thread::Builder::new()
@@ -111,7 +109,14 @@ where
                     &notification,
                     &mut stdout,
                 ) {
-                    Ok(true) => {}
+                    Ok(true) => {
+                        #[cfg(test)]
+                        LIVE_DRAIN_OBSERVER.with_borrow_mut(|slot| {
+                            if let Some(observer) = slot.take() {
+                                observer();
+                            }
+                        });
+                    }
                     Ok(false) => break,
                     Err(err) => {
                         output_error = Some(err);

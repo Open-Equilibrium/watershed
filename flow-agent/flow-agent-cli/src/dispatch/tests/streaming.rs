@@ -1,23 +1,17 @@
-use crate::{streaming::stream_live_operation, test_support};
-use flow_agent_core::{
-    EmitMode, LiveEventNotifyStatus, RunOutput, RuntimeError, SessionEventReader,
+use crate::{
+    streaming::{set_final_drain_observer, set_live_drain_observer, stream_live_operation},
+    test_support,
 };
-use std::path::PathBuf;
+use flow_agent_core::{EmitMode, LiveEventNotifyStatus, RunOutput, RuntimeError};
+use std::{path::PathBuf, sync::mpsc, time::Duration};
 
-fn committed_stream_fixture() -> (
-    test_support::TempWorkspace,
-    SessionEventReader,
-    PathBuf,
-    RunOutput,
-) {
+fn committed_stream_fixture() -> (test_support::TempWorkspace, PathBuf, RunOutput) {
     let workspace = test_support::workspace_copy("smoke-flow");
     let output = flow_agent_core::run_flow(&workspace, "smoke-flow", EmitMode::Jsonl)
         .expect("fixture session runs");
-    let reader =
-        SessionEventReader::open(&workspace, &output.session_id).expect("fixture reader opens");
     let events_path = test_support::workspace_session_dir(&workspace)
         .join(format!("{}.jsonl", output.session_id));
-    (workspace, reader, events_path, output)
+    (workspace, events_path, output)
 }
 
 #[test]
@@ -27,7 +21,7 @@ fn live_streaming_reports_a_missing_committed_session_log() {
     }
 
     let workspace = test_support::workspace_copy("smoke-flow");
-    let error = stream_live_operation(workspace.to_path_buf(), None, move |notifier| {
+    let error = stream_live_operation(workspace.to_path_buf(), move |notifier| {
         assert_eq!(
             notifier.try_notify("missing001", 1),
             LiveEventNotifyStatus::Queued
@@ -72,7 +66,7 @@ fn live_streaming_opens_the_exact_notified_conversation_run() {
     .expect("nested event log is written");
     let operation_workspace = workspace.clone();
 
-    let output = stream_live_operation(workspace.to_path_buf(), None, move |notifier| {
+    let output = stream_live_operation(workspace.to_path_buf(), move |notifier| {
         assert_eq!(
             notifier.try_notify_conversation_run(conversation_id, run_session_id, 1),
             LiveEventNotifyStatus::Queued
@@ -97,10 +91,8 @@ fn live_streaming_converts_a_worker_panic_to_a_stable_error() {
     }
 
     let workspace = test_support::workspace_copy("smoke-flow");
-    let error = stream_live_operation(workspace.to_path_buf(), None, |_| {
-        panic!("deliberate test panic")
-    })
-    .expect_err("worker panic becomes a runtime error");
+    let error = stream_live_operation(workspace.to_path_buf(), |_| panic!("deliberate test panic"))
+        .expect_err("worker panic becomes a runtime error");
 
     assert!(matches!(
         error,
@@ -114,15 +106,22 @@ fn live_streaming_rejects_a_corrupt_initial_session_log() {
         return;
     }
 
-    let (workspace, reader, events_path, _) = committed_stream_fixture();
+    let (workspace, events_path, output) = committed_stream_fixture();
     std::fs::write(events_path, b"not-json\n").expect("fixture log is corrupted");
 
-    let error = stream_live_operation(workspace.to_path_buf(), Some(reader), |_| {
-        Err(RuntimeError::Protocol("operation must not run".to_owned()))
+    let error = stream_live_operation(workspace.to_path_buf(), move |notifier| {
+        assert_eq!(
+            notifier.try_notify(&output.session_id, 1),
+            LiveEventNotifyStatus::Queued
+        );
+        Err(RuntimeError::Protocol("operation failed".to_owned()))
     })
-    .expect_err("corrupt initial log is rejected before the operation starts");
+    .expect_err("corrupt initial log is rejected on the first notification");
 
-    assert!(matches!(error, RuntimeError::Protocol(_)));
+    assert!(matches!(
+        error,
+        RuntimeError::Protocol(message) if message.contains("invalid JSON")
+    ));
 }
 
 #[test]
@@ -131,17 +130,23 @@ fn live_streaming_verifies_the_session_log_after_the_worker_finishes() {
         return;
     }
 
-    let (workspace, reader, events_path, _) = committed_stream_fixture();
+    let (workspace, events_path, output) = committed_stream_fixture();
+    set_final_drain_observer(move || {
+        std::fs::write(events_path, b"").expect("fixture log is replaced after the worker joins");
+    });
 
-    let error = stream_live_operation(workspace.to_path_buf(), Some(reader), move |_| {
-        std::fs::write(events_path, b"").expect("fixture log is replaced");
+    let error = stream_live_operation(workspace.to_path_buf(), move |notifier| {
+        assert_eq!(
+            notifier.try_notify(&output.session_id, output.event_count as u64),
+            LiveEventNotifyStatus::Queued
+        );
         Err(RuntimeError::Protocol("operation failed".to_owned()))
     })
     .expect_err("post-operation verification rejects the replaced log");
 
     assert!(matches!(
         error,
-        RuntimeError::Protocol(message) if message != "operation failed"
+        RuntimeError::Protocol(message) if message.contains("empty without active session ownership")
     ));
 }
 
@@ -151,12 +156,30 @@ fn live_streaming_rejects_a_rewritten_log_during_incremental_delivery() {
         return;
     }
 
-    let (workspace, reader, events_path, output) = committed_stream_fixture();
+    let (workspace, events_path, output) = committed_stream_fixture();
     let session_id = output.session_id;
     let claimed_sequence = u64::try_from(output.event_count).expect("event count fits") + 1;
+    let restore_path = events_path.clone();
+    let (drained, first_drain) = mpsc::sync_channel(1);
+    set_live_drain_observer(move || {
+        std::fs::write(events_path, b"").expect("already observed log is replaced");
+        drained
+            .send(())
+            .expect("worker is waiting for the first drain");
+    });
+    set_final_drain_observer(move || {
+        // Final verification must not mask a missing incremental corruption check.
+        std::fs::write(restore_path, output.stdout).expect("fixture log is restored");
+    });
 
-    let error = stream_live_operation(workspace.to_path_buf(), Some(reader), move |notifier| {
-        std::fs::write(events_path, b"").expect("fixture log is replaced");
+    let error = stream_live_operation(workspace.to_path_buf(), move |notifier| {
+        assert_eq!(
+            notifier.try_notify(&session_id, claimed_sequence - 1),
+            LiveEventNotifyStatus::Queued
+        );
+        first_drain
+            .recv_timeout(Duration::from_secs(5))
+            .expect("first notification opens and drains the reader");
         assert_eq!(
             notifier.try_notify(&session_id, claimed_sequence),
             LiveEventNotifyStatus::Queued
@@ -167,6 +190,6 @@ fn live_streaming_rejects_a_rewritten_log_during_incremental_delivery() {
 
     assert!(matches!(
         error,
-        RuntimeError::Protocol(message) if message != "operation failed"
+        RuntimeError::Protocol(message) if message.contains("changed outside append-only session semantics")
     ));
 }

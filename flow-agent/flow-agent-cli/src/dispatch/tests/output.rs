@@ -4,7 +4,7 @@ use crate::{
     streaming::{set_final_drain_observer, stream_live_operation},
     test_support,
 };
-use flow_agent_core::EmitMode;
+use flow_agent_core::{EmitMode, LiveEventNotifyStatus};
 
 #[test]
 fn productive_registration_remains_active_through_human_stdout() {
@@ -36,8 +36,6 @@ fn productive_registration_remains_active_through_jsonl_final_drain() {
     let workspace = test_support::workspace_copy("smoke-flow");
     let output = flow_agent_core::run_flow(&workspace, "smoke-flow", EmitMode::Jsonl)
         .expect("fixture session runs");
-    let reader = flow_agent_core::SessionEventReader::open(&workspace, &output.session_id)
-        .expect("fixture reader opens");
     let coordinator = InterruptCoordinator::new();
     let operation = coordinator.operation();
     let worker_operation = operation.clone();
@@ -49,8 +47,12 @@ fn productive_registration_remains_active_through_jsonl_final_drain() {
         );
     });
 
-    let drained = stream_live_operation(workspace.to_path_buf(), Some(reader), move |_| {
+    let drained = stream_live_operation(workspace.to_path_buf(), move |notifier| {
         worker_operation.activate().expect("operation activates");
+        assert_eq!(
+            notifier.try_notify(&output.session_id, output.event_count as u64),
+            LiveEventNotifyStatus::Queued
+        );
         Ok(output)
     })
     .expect("live output drains");
