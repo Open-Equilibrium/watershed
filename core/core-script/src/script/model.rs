@@ -228,6 +228,7 @@ impl_token_serde!(ScriptRuntime, "script runtime");
 
 /// Tool parameter contract.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AllowedParameter {
     /// Exact parameter name, including the leading `--`.
     pub name: String,

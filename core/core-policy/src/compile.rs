@@ -1,8 +1,8 @@
 use crate::{
     OWN_SCRIPT_RUNNER_POSIX_SH, POLICY_VERSION_V0, TrustedPredefinedCommand,
     artifact::{
-        AllowedParameterPolicy, CommandPolicy, EnvironmentDefault, EnvironmentPolicy, PhaseScope,
-        PolicyArtifact, PolicyArtifactValidationError, RuntimeLimits, policy_artifact_error,
+        CommandPolicy, EnvironmentDefault, EnvironmentPolicy, PhaseScope, PolicyArtifact,
+        PolicyArtifactValidationError, RuntimeLimits, policy_artifact_error,
     },
 };
 use std::{
@@ -190,11 +190,7 @@ fn command_policy_from_tool(
     };
 
     Ok(CommandPolicy {
-        allowed_parameters: tool
-            .allowed_parameters
-            .iter()
-            .map(allowed_parameter_policy)
-            .collect(),
+        allowed_parameters: tool.allowed_parameters.clone(),
         argv,
         command_id,
         environment: EnvironmentPolicy {
@@ -206,17 +202,4 @@ fn command_policy_from_tool(
         tool_id: tool.identity.id.clone(),
         tool_kind: tool.tool_kind.clone(),
     })
-}
-
-fn allowed_parameter_policy(parameter: &core_script::AllowedParameter) -> AllowedParameterPolicy {
-    AllowedParameterPolicy {
-        name: parameter.name.clone(),
-        required: parameter.required,
-        max: parameter.max,
-        max_length: parameter.max_length,
-        min: parameter.min,
-        value_pattern: parameter.value_pattern.clone(),
-        value_type: parameter.value_type.clone(),
-        allowed_values: parameter.allowed_values.clone(),
-    }
 }

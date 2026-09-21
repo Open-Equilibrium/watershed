@@ -49,6 +49,30 @@ fn invocation_contract_compiles_availability_parameters_environment_and_runtime_
 }
 
 #[test]
+fn invocation_contract_matches_definition_validation_for_enum_values() {
+    for (value, valid) in [("safe", true), ("unsafe\0value", false)] {
+        let parameter = json!({
+            "name": "--mode", "required": true, "value_type": "enum",
+            "allowed_values": [value]
+        });
+        let source = json!({"tool": {
+            "id": "echo", "name": "Echo", "tool_kind": "predefined-command",
+            "command": {"command_id": "agent-echo", "argv": []},
+            "allowed_parameters": [parameter.clone()]
+        }})
+        .to_string();
+        let definition = parse_registry_block("enum.yaml", &source)
+            .and_then(|block| ResolvedRegistry::from_blocks([block]));
+        assert_eq!(definition.is_ok(), valid, "definition: {value:?}");
+
+        let mut artifact = invocation_policy();
+        artifact["commands"][0]["allowed_parameters"] = json!([parameter]);
+        let artifact: PolicyArtifact = serde_json::from_value(artifact).expect("policy shape");
+        assert_eq!(artifact.validate().is_ok(), valid, "policy: {value:?}");
+    }
+}
+
+#[test]
 fn invocation_contract_rejects_legacy_policy_requirements() {
     let legacy: serde_json::Map<String, Value> =
         serde_json::from_str(include_str!("../fixtures/legacy-policy-requirements.json"))

@@ -1,14 +1,12 @@
 use crate::script::error::SemanticValidationError;
 use crate::script::model::{
     BlockIdentity, FlowBlock, InstructionBlock, MAX_BLOCK_NAME_CHARS, MAX_PHASE_LOOP_ITERATIONS,
-    MAX_REGISTRY_DEFINITION_BYTES, ParameterValueType, PhaseBlock, RegistryBlock,
-    RegistryBlockKind, ScriptRuntime, ToolBlock, ToolCommand, ToolKind,
+    MAX_REGISTRY_DEFINITION_BYTES, PhaseBlock, RegistryBlock, RegistryBlockKind, ScriptRuntime,
+    ToolBlock, ToolCommand, ToolKind,
 };
-use crate::script::paths::{
-    is_valid_allowed_parameter_name, is_valid_block_id, is_valid_command_id,
-};
+use crate::script::paths::{is_valid_block_id, is_valid_command_id};
 use crate::script::values::{
-    parameter_pattern_matches, validate_predicate_against_contract, validate_predicate_definition,
+    validate_predicate_against_contract, validate_predicate_definition,
     validate_value_contract_definition,
 };
 use std::collections::BTreeSet;
@@ -296,12 +294,9 @@ pub(super) fn validate_tool_semantics(tool: &ToolBlock) -> Result<(), SemanticVa
 
     let mut parameter_names = BTreeSet::new();
     for parameter in &tool.allowed_parameters {
-        if !is_valid_allowed_parameter_name(&parameter.name) {
-            return Err(invalid_tool(
-                tool,
-                "allowed_parameters.name must be a valid allowed-parameter name",
-            ));
-        }
+        parameter
+            .validate()
+            .map_err(|message| invalid_tool(tool, &message))?;
         if !parameter_names.insert(parameter.name.as_str()) {
             return Err(invalid_tool(
                 tool,
@@ -310,63 +305,6 @@ pub(super) fn validate_tool_semantics(tool: &ToolBlock) -> Result<(), SemanticVa
                     parameter.name
                 ),
             ));
-        }
-        let has_values = !parameter.allowed_values.is_empty();
-        let has_string_bounds = parameter.value_pattern.is_some() || parameter.max_length.is_some();
-        let has_integer_bounds = parameter.min.is_some() || parameter.max.is_some();
-        let value_type = parameter.value_type.as_str();
-        let valid_shape = match parameter.value_type {
-            ParameterValueType::String => {
-                !has_values
-                    && parameter.value_pattern.is_some()
-                    && parameter.max_length.is_some()
-                    && !has_integer_bounds
-            }
-            ParameterValueType::Enum => has_values && !has_string_bounds && !has_integer_bounds,
-            ParameterValueType::Integer => !has_values && !has_string_bounds,
-            ParameterValueType::None => !has_values && !has_string_bounds && !has_integer_bounds,
-            ParameterValueType::WorkspaceRelativePath => !has_values && !has_integer_bounds,
-        };
-        if !valid_shape {
-            return Err(invalid_tool(
-                tool,
-                &format!(
-                    "allowed parameter {} has fields incompatible with value_type {value_type}",
-                    parameter.name,
-                ),
-            ));
-        }
-        if parameter
-            .allowed_values
-            .iter()
-            .any(|value| value.contains('\0'))
-        {
-            return Err(invalid_tool(
-                tool,
-                &format!(
-                    "allowed parameter {} allowed_values must not contain NUL",
-                    parameter.name
-                ),
-            ));
-        }
-        if let Some(pattern) = &parameter.value_pattern
-            && let Err(error) = parameter_pattern_matches(pattern, "")
-        {
-            return Err(invalid_tool(
-                tool,
-                &format!(
-                    "allowed parameter {} value_pattern is invalid: {error}",
-                    parameter.name
-                ),
-            ));
-        }
-        if matches!(parameter.value_type, ParameterValueType::Integer)
-            && matches!((parameter.min, parameter.max), (Some(min), Some(max)) if min > max)
-        {
-            return Err(SemanticValidationError::InvalidToolDefinition {
-                tool_id: tool.identity.id.clone(),
-                message: format!("integer parameter {} min must be <= max", parameter.name),
-            });
         }
     }
 

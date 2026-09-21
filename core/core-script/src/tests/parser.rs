@@ -148,7 +148,7 @@ fn parser_enforces_registry_schema() {
     for (name, source) in cases {
         let error = parse_registry_block(name, &source).expect_err(name);
         assert!(
-            name != "missing-string-bound.yaml" || error.to_string().contains("value_type string"),
+            name != "missing-string-bound.yaml" || error.to_string().contains("max_length"),
             "{name}: {error}"
         );
     }
