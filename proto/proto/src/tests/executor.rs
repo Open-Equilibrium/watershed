@@ -275,12 +275,13 @@ fn executor_start_is_one_closed_bounded_record_bound_to_the_request() {
         start
     );
     assert!(parse_executor_start_v0(&wire, "other-request").is_err());
+    let mut open = serde_json::to_value(&start).unwrap();
+    open["start"] = serde_json::Value::Bool(true);
     assert!(
-        parse_executor_start_v0(
-            br#"{"request_id":"request-1","schema":"flow-executor-start-v0","start":true}\n"#,
-            "request-1"
-        )
-        .is_err()
+        parse_executor_start_v0(&canonical_wire(&open), "request-1")
+            .unwrap_err()
+            .to_string()
+            .contains("unknown field `start`")
     );
 }
 
