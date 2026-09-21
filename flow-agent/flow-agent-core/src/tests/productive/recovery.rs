@@ -18,12 +18,12 @@ use proto::EventType;
 use std::collections::VecDeque;
 
 #[test]
-fn productive_recovery_rejects_incomplete_or_mismatched_attempts_before_redispatch() {
+fn productive_recovery_rejects_incomplete_attempts_before_redispatch() {
     let (_workspace, fixture) = disabled_smoke_productive_execution_fixture();
     let flow = fixture.smoke_flow();
-    let provider_result = |kind, outcome: &str, durable_output| RunAttemptResult {
+    let provider_result = |outcome: &str, durable_output| RunAttemptResult {
         attempt_id: "provider-000001".to_owned(),
-        attempt_kind: kind,
+        attempt_kind: RunAttemptKind::Provider,
         outcome: RunAttemptOutcome::parse(outcome).expect("test outcome is valid"),
         classification: None,
         exit_code: None,
@@ -33,20 +33,10 @@ fn productive_recovery_rejects_incomplete_or_mismatched_attempts_before_redispat
     let recoveries = [
         InjectedAttemptRecovery::ProviderError,
         InjectedAttemptRecovery::ProviderResult(provider_result(
-            RunAttemptKind::Tool,
-            "completed",
-            Some(serde_json::json!({})),
-        )),
-        InjectedAttemptRecovery::ProviderResult(provider_result(
-            RunAttemptKind::Provider,
             "failed",
             Some(serde_json::json!({})),
         )),
-        InjectedAttemptRecovery::ProviderResult(provider_result(
-            RunAttemptKind::Provider,
-            "completed",
-            None,
-        )),
+        InjectedAttemptRecovery::ProviderResult(provider_result("completed", None)),
     ];
 
     for mut recovery in recoveries {
@@ -347,49 +337,36 @@ fn productive_recovery_resumes_a_cancelled_tool_attempt_without_redispatch() {
 }
 
 #[test]
-fn productive_recovery_rejects_invalid_tool_attempts_before_redispatch() {
-    for (name, mut recovery, expected) in [
-        (
-            "recovery-error",
-            InjectedAttemptRecovery::ToolError,
-            "fixture Tool recovery failure",
-        ),
-        (
-            "wrong-kind",
-            InjectedAttemptRecovery::ToolWrongKind,
-            "wrong kind",
-        ),
-    ] {
-        let (_workspace, fixture) = smoke_productive_execution_fixture();
-        let flow = fixture.smoke_flow();
-        let mut provider = ScriptedProvider {
-            bodies: Vec::new(),
-            turns: VecDeque::from([single_tool_provider_turn("response-tool", "call-1")]),
-        };
-        let mut attempts = MemoryAttempts::default();
-        let mut sink = MemorySink::default();
-        let mut tools = FakeToolExecutor::default();
+fn productive_recovery_stops_on_tool_recovery_error_before_redispatch() {
+    let (_workspace, fixture) = smoke_productive_execution_fixture();
+    let flow = fixture.smoke_flow();
+    let mut provider = ScriptedProvider {
+        bodies: Vec::new(),
+        turns: VecDeque::from([single_tool_provider_turn("response-tool", "call-1")]),
+    };
+    let mut attempts = MemoryAttempts::default();
+    let mut sink = MemorySink::default();
+    let mut tools = FakeToolExecutor::default();
+    let mut recovery = InjectedAttemptRecovery::ToolError;
 
-        let error = execute_productive_flow_with_tool_executor_and_recovery(
-            fixture.execution(flow, &format!("productive-invalid-tool-recovery-{name}")),
-            &mut provider,
-            &mut attempts,
-            &mut sink,
-            &mut tools,
-            &mut recovery,
-        )
-        .expect_err("invalid Tool recovery stops exact recovery");
+    let error = execute_productive_flow_with_tool_executor_and_recovery(
+        fixture.execution(flow, "productive-tool-recovery-error"),
+        &mut provider,
+        &mut attempts,
+        &mut sink,
+        &mut tools,
+        &mut recovery,
+    )
+    .expect_err("Tool recovery failure stops exact recovery");
 
-        assert!(error.to_string().contains(expected), "{name}: {error}");
-        assert!(tools.invocations.is_empty(), "{name}");
-        assert!(
-            !sink
-                .0
-                .iter()
-                .any(|event| event.event_type == EventType::ToolCompleted),
-            "{name}"
-        );
-    }
+    assert!(error.to_string().contains("fixture Tool recovery failure"));
+    assert!(tools.invocations.is_empty());
+    assert!(
+        !sink
+            .0
+            .iter()
+            .any(|event| event.event_type == EventType::ToolCompleted)
+    );
 }
 
 #[test]

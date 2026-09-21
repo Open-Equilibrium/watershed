@@ -7,7 +7,6 @@ use std::{
     time::Duration,
 };
 
-#[cfg(unix)]
 unsafe extern "C" {
     fn setsid() -> i32;
 }
@@ -85,7 +84,6 @@ fn completed(request: &str, mode: &str) -> String {
     )
 }
 
-#[cfg(unix)]
 fn hold_escaped_probe_output(executable: &Path) {
     // The child must not remain in the controller-killed Executor process group.
     assert_ne!(
@@ -104,7 +102,6 @@ fn hold_escaped_probe_output(executable: &Path) {
     }
 }
 
-#[cfg(unix)]
 fn spawn_escaped_probe_output(executable: &Path) {
     let mut child = Command::new(executable)
         .arg("--hold-probe-output")
@@ -125,10 +122,7 @@ fn main() {
     let executable = env::current_exe().expect("fake Executor resolves itself");
     let mode = mode(&executable);
     if env::args().nth(1).as_deref() == Some("--hold-probe-output") {
-        #[cfg(unix)]
         hold_escaped_probe_output(&executable);
-        #[cfg(not(unix))]
-        process::exit(2);
         return;
     }
     if env::args().nth(1).as_deref() == Some("--probe") {
@@ -155,7 +149,6 @@ fn main() {
                 process::exit(1);
             }
             "probe-escaped-output" => {
-                #[cfg(unix)]
                 spawn_escaped_probe_output(&executable);
                 print!("{probe}");
             }

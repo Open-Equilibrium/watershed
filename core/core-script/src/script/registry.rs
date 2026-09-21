@@ -74,9 +74,6 @@ impl ResolvedRegistry {
         registry.name_ids = name_ids;
 
         registry.validate_references()?;
-        if registry.phases.is_empty() && registry.flows.is_empty() {
-            return Ok(registry);
-        }
         Ok(registry.with_canonical_references())
     }
 

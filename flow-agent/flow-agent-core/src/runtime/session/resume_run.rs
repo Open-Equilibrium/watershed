@@ -9,7 +9,6 @@ use crate::runtime::{
     conversations::{read_conversation_recovery_definition, reserve_conversation_run_recovery},
     fs_guards::AnchoredWorkspace,
     live_events::LiveEventNotifier,
-    openai_codex::OPENAI_CODEX_PROVIDER_ID,
     productive::{OpenAiCodexProvider, ProductiveProvider, ensure_productive_execution_platform},
     resume::resume_fixture_session_internal,
     stage_results::reconcile_controlled_stages,
@@ -117,22 +116,24 @@ where
     let config = &authority.config;
     let backend = reconcile_productive_preflight(require_execution_backend(config))?;
     let _activation = activate(matches!(&backend, ExecutionBackend::OpenAiCodex { .. }))?;
-    if matches!(backend, ExecutionBackend::Fixture) {
-        if conversation_id != run_session_id {
-            return Err(RuntimeError::Usage(
-                "Fixture resume requires identical conversation and run ids".to_owned(),
-            ));
+    let (model, model_profile) = match backend {
+        ExecutionBackend::Fixture => {
+            if conversation_id != run_session_id {
+                return Err(RuntimeError::Usage(
+                    "Fixture resume requires identical conversation and run ids".to_owned(),
+                ));
+            }
+            return resume_fixture_session_internal(
+                workspace,
+                run_session_id,
+                notifier,
+                capture_jsonl,
+            );
         }
-        return resume_fixture_session_internal(workspace, run_session_id, notifier, capture_jsonl);
-    }
-    let ExecutionBackend::OpenAiCodex {
-        model,
-        model_profile,
-    } = backend
-    else {
-        return Err(RuntimeError::Usage(format!(
-            "productive run recovery requires provider {OPENAI_CODEX_PROVIDER_ID}"
-        )));
+        ExecutionBackend::OpenAiCodex {
+            model,
+            model_profile,
+        } => (model, model_profile),
     };
     reconcile_productive_preflight(platform_preflight())?;
     let recorded_definition = reconcile_productive_preflight(
