@@ -61,9 +61,6 @@ pub fn decode_executor_stream_v0(encoded: &str) -> Result<Vec<u8>, ExecutorProto
             }
         }
     }
-    if encode_executor_stream_v0(&decoded) != encoded {
-        return Err(invalid_base64());
-    }
     Ok(decoded)
 }
 
