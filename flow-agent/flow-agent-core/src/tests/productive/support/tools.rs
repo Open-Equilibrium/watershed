@@ -29,10 +29,6 @@ pub(in super::super) enum FakeToolExecutionFault {
     PolicyRejected,
     StartedExecutorError,
     ExecutorError,
-    InvalidTerminal,
-    RequestHashMismatch,
-    ReceiptMismatch,
-    InactiveSelfProtection,
 }
 
 impl Default for FakeToolExecutor {
@@ -133,36 +129,11 @@ impl ProductiveToolExecutor for FakeToolExecutor {
                 proto::ExecutorErrorCodeV0::SandboxSetupFailed,
             ));
         }
-        let policy_digest = if matches!(self.fault, FakeToolExecutionFault::ReceiptMismatch) {
-            "2".repeat(64)
-        } else {
-            prepared.policy_digest
-        };
-        let request_hash = if matches!(self.fault, FakeToolExecutionFault::RequestHashMismatch) {
-            crate::runtime::session_definition::sha256_hash_text(b"mismatched fake Tool request")
-        } else {
-            prepared.request_hash
-        };
-        let outcome = if matches!(self.fault, FakeToolExecutionFault::InvalidTerminal) {
-            ToolExecutionOutcome {
-                status: RunAttemptOutcome::Completed,
-                classification: None,
-                exit_code: Some(7),
-                stdout: Vec::new(),
-                stderr: Vec::new(),
-            }
-        } else {
-            self.outcome.clone()
-        };
-        let mut enforcement = test_enforcement_receipt(policy_digest);
-        if matches!(self.fault, FakeToolExecutionFault::InactiveSelfProtection) {
-            enforcement.self_protection_active = false;
-        }
         Ok(ExecutorDispatchOutcome::Completed(Box::new(
             ExecutorToolExecution {
-                enforcement,
-                outcome,
-                request_hash,
+                enforcement: test_enforcement_receipt(prepared.policy_digest),
+                outcome: self.outcome.clone(),
+                request_hash: prepared.request_hash,
             },
         )))
     }
