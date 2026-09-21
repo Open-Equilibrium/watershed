@@ -6,7 +6,7 @@ use crate::runtime::{
     },
     execution_plan::{
         PlannedFailureTransition, PlannedFlowFailureBoundary, PlannedToolContext, RuntimeFailure,
-        RuntimeToolPolicy, ToolSideEffectMode,
+        RuntimeToolPolicy,
     },
     failures::{
         emit_runtime_error_failure, emit_runtime_failure, emit_runtime_flow_failure,
@@ -26,19 +26,8 @@ mod stub_provider;
 
 use stub_provider::{emit_stub_provider_turn, stub_phase_result, stub_provider_requests_tools};
 
-fn should_terminalize_runtime_error(side_effect_mode: ToolSideEffectMode) -> bool {
-    side_effect_mode == ToolSideEffectMode::Apply
-}
-
-pub(super) fn should_terminalize_error(
-    side_effect_mode: ToolSideEffectMode,
-    err: &RuntimeError,
-) -> bool {
-    !matches!(
-        err,
-        RuntimeError::EventWriter(_) | RuntimeError::EventWriterFailures(_)
-    ) && (should_terminalize_runtime_error(side_effect_mode)
-        || matches!(err, RuntimeError::ContextBudgetExceeded { .. }))
+pub(super) fn should_terminalize_error(err: &RuntimeError) -> bool {
+    matches!(err, RuntimeError::ContextBudgetExceeded { .. })
 }
 
 pub enum ExecutionOutcome {
@@ -65,7 +54,6 @@ fn emit_tool_progress(
 pub struct FlowEmitContext<'a> {
     pub(crate) registry: &'a core_script::ResolvedRegistry,
     pub(crate) policy: &'a core_policy::PolicyArtifact,
-    pub(crate) side_effect_mode: ToolSideEffectMode,
     pub(crate) stub_model_fixture_profile: bool,
 }
 
@@ -113,7 +101,7 @@ pub fn emit_flow_block(
             emit_runtime_failure(flow_block, &invocation, &failure, builder)?;
             return Ok(ExecutionOutcome::Failed(failure));
         }
-        Err(err) if should_terminalize_error(context.side_effect_mode, &err) => {
+        Err(err) if should_terminalize_error(&err) => {
             emit_runtime_error_failure(flow_block, &invocation, &err, builder)?;
             return Err(err);
         }
@@ -140,7 +128,7 @@ pub fn emit_flow_block(
                 return Ok(ExecutionOutcome::Failed(failure));
             }
             Ok(ExecutionOutcome::Completed(subflow_result)) => result = subflow_result,
-            Err(err) if should_terminalize_error(context.side_effect_mode, &err) => {
+            Err(err) if should_terminalize_error(&err) => {
                 let reason = runtime_failure_for_unhandled_error(&err).reason;
                 emit_runtime_flow_failure(flow_block, &invocation, &reason, builder)?;
                 return Err(err);
@@ -321,12 +309,6 @@ fn emit_phase_iteration(
                     return Ok(ExecutionOutcome::Failed(failure));
                 }
                 Ok(None) => {}
-                Err(err) if should_terminalize_runtime_error(context.side_effect_mode) => {
-                    let mut failure = runtime_failure_for_unhandled_error(&err);
-                    failure.tool_id = Some(tool.identity.id.clone());
-                    emit_runtime_tool_failure(invocation, &failure, builder)?;
-                    return Err(err);
-                }
                 Err(err) => return Err(err),
             }
         }
