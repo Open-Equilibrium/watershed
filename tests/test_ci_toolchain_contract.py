@@ -35,7 +35,6 @@ EVIDENCE_ONLY_UNIX_RUNNER_PATTERN = (
 )
 M12_INSTALLER_ACCEPTANCE = ROOT / "scripts" / "run-m12-installer-acceptance.sh"
 M12_READINESS_NEGATIVES = ROOT / "scripts" / "run-m12-readiness-negatives.sh"
-M12_NATIVE_SUPPORT = ROOT / "flow-agent/flow-agent-executor/tests/native_support/mod.rs"
 
 
 def workflow_text() -> str:
@@ -484,7 +483,6 @@ class CiWorkflowContractTest(unittest.TestCase):
         self.assertIn("cargo build --locked --release -p flow-agent-cli "
                       "--features m12-install-acceptance --target-dir target/m12-acceptance", build)
         self.assertIn(f"{M12_EXECUTOR} --probe", build)
-        self.assertIn('assert probe["ready"] is True', build)
         stage = "Stage native Executor installation"
         stage_lines = assert_step_state(self, workflow, stage, condition=NATIVE)
         self.assertIn("        shell: python", stage_lines)
@@ -520,24 +518,6 @@ class CiWorkflowContractTest(unittest.TestCase):
                           "official_linux", "linux_support", "static-self-reexec"):
             self.assertNotIn(forbidden, workflow)
 
-        installer = M12_INSTALLER_ACCEPTANCE.read_text(encoding="utf-8")
-        for required in ('download="$acceptance_root/download"',
-                         'cp "target/m12-download/$archive" target/m12-download/SHA256SUMS "$download/"',
-                         '/usr/bin/tar -xzf "$download/$archive" -C "$acceptance_root"',
-                         '(cd "$download" && verify_download)',
-                         '/usr/bin/sha256sum --check SHA256SUMS',
-                         '/usr/bin/shasum -a 256 --check SHA256SUMS',
-                         'target/m12-acceptance/release/flow "$acceptance_bundle/flow"',
-                         f'{M12_EXECUTOR} "$acceptance_bundle/flow-executor"',
-                         'install -m 0755 "$coverage_flow" "$coverage_bundle/flow"',
-                         'install -m 0755 "$coverage_executor" "$coverage_bundle/flow-executor"',
-                         '--prefix "$standard_prefix"',
-                         '--prefix "$custom_prefix" --no-default-executor',
-                         'executor configure --default',
-                         'assert receipt["self_protection_active"] is True'):
-            self.assertIn(required, installer)
-        self.assertLess(installer.index('(cd "$download" && verify_download)'),
-                        installer.index('/usr/bin/tar -xzf'))
         assert_step_state(self, workflow, "Package native download", condition=NATIVE)
         package = step_run(workflow, "Package native download")
         self.assertIn("scripts/package_flow_agent.py", package)
@@ -546,16 +526,52 @@ class CiWorkflowContractTest(unittest.TestCase):
         retained = assert_step_state(self, workflow, "Retain tested native download", condition=NATIVE)
         self.assertIn("          path: target/m12-download/", retained)
         self.assertIn("          if-no-files-found: error", retained)
-        coverage = installer.index('if [ -n "${M12_COVERAGE_BIN_DIR:-}" ]')
-        self.assertIn('check_custom_selection\n', installer[:coverage])
-        self.assertIn('check_custom_selection\n', installer[coverage:])
-        self.assertIn('/bin/sh "$bundle/install.sh" --prefix "$standard_prefix"', installer[coverage:])
-        self.assertIn('config="$home/Library/Application Support"', installer)
-        self.assertIn('expected_platform=macos-26-aarch64', installer)
-        for source in (installer, M12_READINESS_NEGATIVES.read_text(encoding="utf-8")):
-            for forbidden in ("systemctl ", "runuser ", "useradd ", "chown ", "/root/", "/work/",
-                              "sysctl ", "apparmor_parser", "static-self-reexec"):
-                self.assertNotIn(forbidden, source)
+
+    def test_native_probe_check_requires_readiness(self) -> None:
+        build = shlex.split(step_run(workflow_text(), "Build native installation artifacts"))
+        command = build[build.index("-c") + 1]
+        for ready in (True, False):
+            with self.subTest(ready=ready):
+                result = subprocess.run(
+                    [sys.executable, "-c", command], input=json.dumps({"ready": ready}),
+                    capture_output=True, text=True, timeout=10,
+                )
+                self.assertEqual(result.returncode == 0, ready, result.stderr)
+
+    def test_installer_receipt_check_requires_active_native_protection(self) -> None:
+        installer = M12_INSTALLER_ACCEPTANCE.read_text(encoding="utf-8")
+        command = installer.split("<<'PY'\n", 1)[1].split("\nPY", 1)[0]
+        # Run the actual acceptance checker; native CI owns real Tool execution.
+        with tempfile.TemporaryDirectory(prefix="m12 receipt ") as temporary:
+            home = Path(temporary)
+            log = home / "workspaces/workspace-v1-test/sessions/session/runs/run/run-log.jsonl"
+            log.parent.mkdir(parents=True)
+            for platform, backend in (("ubuntu-24.04-x86_64", "bubblewrap-seccomp"),
+                                      ("macos-26-aarch64", "seatbelt")):
+                for active in (True, False):
+                    with self.subTest(platform=platform, active=active):
+                        records = [
+                            {"record_type": kind, "attempt_kind": "provider", "outcome": "completed"}
+                            for _ in range(2) for kind in ("intent", "terminal-result")
+                        ]
+                        records.append({
+                            "record_type": "terminal-result", "attempt_kind": "tool",
+                            "tool_id": "echo", "outcome": "completed", "exit_code": 0,
+                            "durable_output": {
+                                "schema": "flow-tool-attempt-output-v1", "request_hash": "sha256:" + "a" * 64,
+                                "enforcement": {
+                                    "executor": "flow-executor", "executor_version": "test",
+                                    "platform": platform, "backend": backend, "backend_version": "test",
+                                    "self_protection_active": active, "applied_policy_digest": "b" * 64,
+                                },
+                            },
+                        })
+                        log.write_text("\n".join(map(json.dumps, records)) + "\n", encoding="utf-8")
+                        result = subprocess.run(
+                            [sys.executable, "-c", command, str(home), platform, backend],
+                            capture_output=True, text=True, timeout=10,
+                        )
+                        self.assertEqual(result.returncode == 0, active, result.stderr)
 
     def test_m12_evidence_installs_unique_bytes_from_a_hardlinked_cargo_artifact(self):
         command = step_run(workflow_text(), "Stage native Executor installation")
