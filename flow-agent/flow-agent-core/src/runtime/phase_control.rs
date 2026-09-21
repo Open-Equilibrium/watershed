@@ -35,9 +35,8 @@ impl PhaseSequenceState {
         if result_from == Some(phase_ref.as_str()) {
             self.selected_result = Some(result.clone());
         }
-        self.next_input = Some(result.clone());
-
         let next = select_next_phase_index(phase_refs, transitions, self.index, &result);
+        self.next_input = Some(result);
         if let Some(result_from) = result_from
             && self.selected_result.is_none()
             && phase_refs
