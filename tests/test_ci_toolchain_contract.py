@@ -2,6 +2,7 @@ import json
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -607,27 +608,34 @@ class CiWorkflowContractTest(unittest.TestCase):
             for target in installed:
                 self.assertEqual(target.read_bytes(), b"synthetic release executable\x00\xff")
 
-    def test_m12_installer_acceptance_prepares_fixture_home_before_init(self):
-        installer_acceptance = M12_INSTALLER_ACCEPTANCE.read_text(encoding="utf-8")
-        fixture_home_setup = (
-            'install -d -m 0700 "$config" "$home" "$agent_home" '
-            '"$fixture_home" "$fixture_workspace"'
-        )
-        fixture_init = (
-            'run_in_workspace "$fixture_workspace" /usr/bin/env '
-            'FLOW_AGENT_HOME="$fixture_home" "$custom_prefix/bin/flow" init'
-        )
-
-        setup = installer_acceptance.index(fixture_home_setup)
-        initialization = installer_acceptance.index(fixture_init)
-        self.assertLess(setup, initialization)
-        self.assertIn('mktemp -d "$RUNNER_TEMP/m12-installer.XXXXXX"', installer_acceptance)
-
-    def test_m12_acceptance_entrypoints_use_bounded_helper(self) -> None:
-        installer = M12_INSTALLER_ACCEPTANCE.read_text(encoding="utf-8")
-        readiness = M12_READINESS_NEGATIVES.read_text(encoding="utf-8")
-        self.assertIn('exec node scripts/run-python.mjs scripts/m12_native.py acceptance "$0"', installer)
-        self.assertIn("exec node scripts/run-python.mjs scripts/m12_native.py readiness", readiness)
+    def test_m12_acceptance_entrypoints_dispatch_helper_and_propagate_exit(self) -> None:
+        shell = "/bin/sh" if os.name == "posix" else shutil.which("sh")
+        if shell is None:
+            self.skipTest("requires a POSIX shell; native CI always runs this boundary")
+        # Native acceptance owns real fixture initialization; NativeProcessTest
+        # owns helper deadlines and cleanup. Here only the shell handoff is doubled.
+        with tempfile.TemporaryDirectory(prefix="m12 entrypoints ") as temporary:
+            root = Path(temporary)
+            node = root / "node"
+            node.write_text('#!/bin/sh\nprintf "%s\\n" "$@"\nexit "$M12_TEST_EXIT"\n',
+                            encoding="utf-8", newline="\n")
+            node.chmod(0o755)
+            for script, arguments in (
+                (M12_INSTALLER_ACCEPTANCE, ["acceptance", M12_INSTALLER_ACCEPTANCE.as_posix()]),
+                (M12_READINESS_NEGATIVES, ["readiness"]),
+            ):
+                for code in (0, 7):
+                    with self.subTest(script=script.name, code=code):
+                        result = subprocess.run(
+                            [shell, script.as_posix()], cwd=ROOT,
+                            env={**os.environ, "PATH": str(root), "RUNNER_TEMP": str(root),
+                                 "M12_TEST_EXIT": str(code)},
+                            capture_output=True, text=True, timeout=10,
+                        )
+                        self.assertEqual(result.stdout.splitlines(),
+                                         ["scripts/run-python.mjs", "scripts/m12_native.py", *arguments])
+                        self.assertEqual(result.returncode, code, result.stderr)
+                        self.assertEqual(result.stderr, "")
 
 
 if __name__ == "__main__":
