@@ -251,6 +251,7 @@ document.addEventListener("click", event => {
   const link = event.target.closest('a[href^="#"]');
   if (link && revealDecision(link.hash)) {
     event.preventDefault();
+    document.getElementById(link.hash.slice(1)).querySelector("summary").focus({ preventScroll: true });
     if (location.hash !== link.hash) history.pushState(null, "", link.hash);
   }
 });
