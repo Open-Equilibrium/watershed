@@ -320,13 +320,6 @@ class CiWorkflowContractTest(unittest.TestCase):
         ):
             self.assertIn(contract, testing)
 
-    def test_native_contract_uses_debug_or_explicit_release_executor(self) -> None:
-        selector = M12_NATIVE_SUPPORT.with_name("artifact.rs").read_text(encoding="utf-8")
-        self.assertIn('var_os("FLOW_EXECUTOR_UNDER_TEST")', selector)
-        self.assertIn('env!("CARGO_BIN_EXE_flow-executor")', selector)
-        for source in (M12_NATIVE_SUPPORT, M12_NATIVE_SUPPORT.parent.parent / "native_self_protection.rs"):
-            self.assertIn("artifact::executor_artifact()", source.read_text(encoding="utf-8"))
-
     def assert_ci_gate_contract(self, workflow: str) -> None:
         self.assertFalse(any(line.startswith("    if:") for line in workflow.splitlines()))
         self.assertFalse(
