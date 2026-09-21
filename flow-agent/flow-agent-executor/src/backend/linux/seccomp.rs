@@ -136,39 +136,86 @@ fn filter_instructions() -> Vec<Instruction> {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        BPF_JMP_JEQ_K, BPF_JMP_JSET_K, BPF_LD_W_ABS, BPF_RET_K, CLONE_NAMESPACE_FLAGS,
-        CLONE_SYSCALL, CLONE3_SYSCALL, DENY_EPERM_SYSCALLS, ENOSYS, EPERM, Instruction,
-        SECCOMP_RET_ALLOW, SECCOMP_RET_ERRNO, filter_bytes, filter_instructions,
-    };
+    use super::{Instruction, filter_bytes, filter_instructions};
     use std::{fs::File, io::Read};
 
-    #[test]
-    fn filter_encodes_the_complete_boundary_rule_set() {
-        let program = filter_instructions();
-        let mut cursor = 6;
-        for syscall in DENY_EPERM_SYSCALLS {
-            assert_eq!(
-                &program[cursor..cursor + 2],
-                &[
-                    Instruction::jump(BPF_JMP_JEQ_K, syscall, 0, 1),
-                    Instruction::statement(BPF_RET_K, SECCOMP_RET_ERRNO | EPERM),
-                ]
-            );
-            cursor += 2;
+    // Only the forward-only BPF operations used by this filter are needed.
+    fn decision(program: &[Instruction], arch: u32, syscall: u32, flags: u32) -> u32 {
+        let mut accumulator = 0;
+        let mut cursor = 0;
+        while let Some(instruction) = program.get(cursor) {
+            match instruction.code {
+                0x20 => {
+                    accumulator = match instruction.value {
+                        0 => syscall,
+                        4 => arch,
+                        16 => flags,
+                        offset => panic!("unexpected seccomp data offset {offset}"),
+                    };
+                }
+                0x15 | 0x45 => {
+                    let matches = if instruction.code == 0x15 {
+                        accumulator == instruction.value
+                    } else {
+                        accumulator & instruction.value != 0
+                    };
+                    cursor += usize::from(if matches {
+                        instruction.jump_true
+                    } else {
+                        instruction.jump_false
+                    });
+                }
+                0x06 => return instruction.value,
+                code => panic!("unexpected BPF operation {code:#x}"),
+            }
+            cursor += 1;
         }
-        assert_eq!(
-            &program[cursor..],
-            &[
-                Instruction::jump(BPF_JMP_JEQ_K, CLONE_SYSCALL, 0, 3),
-                Instruction::statement(BPF_LD_W_ABS, 16),
-                Instruction::jump(BPF_JMP_JSET_K, CLONE_NAMESPACE_FLAGS, 0, 1),
-                Instruction::statement(BPF_RET_K, SECCOMP_RET_ERRNO | EPERM),
-                Instruction::jump(BPF_JMP_JEQ_K, CLONE3_SYSCALL, 0, 1),
-                Instruction::statement(BPF_RET_K, SECCOMP_RET_ERRNO | ENOSYS),
-                Instruction::statement(BPF_RET_K, SECCOMP_RET_ALLOW),
-            ]
-        );
+        panic!("filter did not return a decision");
+    }
+
+    #[test]
+    fn filter_enforces_the_boundary_without_blocking_ordinary_processes() {
+        let program = filter_instructions();
+        // Keep syscall numbers, ABI values and outcomes independent of production constants.
+        let check = |arch, syscall, flags, expected| {
+            assert_eq!(
+                decision(&program, arch, syscall, flags),
+                expected,
+                "arch={arch:#x}, syscall={syscall}, flags={flags:#x}"
+            );
+        };
+        for syscall in [
+            101, 155, 165, 166, 248, 249, 250, 272, 308, 425, 428, 429, 430, 431, 432, 433, 442,
+        ] {
+            check(0xc000_003e, syscall, 0, 0x0005_0001); // EPERM
+        }
+        for syscall in [0, 1, 41, 42, 57, 58, 59, 102] {
+            check(0xc000_003e, syscall, 0, 0x7fff_0000); // ALLOW
+        }
+        for flags in [0, 17, 0x0000_0100, 0x0001_0f00] {
+            check(0xc000_003e, 56, flags, 0x7fff_0000); // Ordinary clone
+        }
+        for namespace in [
+            0x0002_0000,
+            0x0200_0000,
+            0x0400_0000,
+            0x0800_0000,
+            0x1000_0000,
+            0x2000_0000,
+            0x4000_0000,
+            0x7e02_0000,
+        ] {
+            check(0xc000_003e, 56, namespace | 17, 0x0005_0001);
+        }
+        check(0xc000_003e, 435, 0, 0x0005_0026); // clone3 -> ENOSYS
+        for syscall in [0, 56, 101, 435] {
+            check(0xc000_003e, syscall | 0x4000_0000, 0, 0x0005_0001); // x32
+        }
+        for arch in [0x4000_0003, 0xc000_00b7] {
+            for syscall in [0, 101, 0x4000_0000] {
+                check(arch, syscall, 0, 0x8000_0000); // KILL_PROCESS before syscall checks
+            }
+        }
     }
 
     #[test]
