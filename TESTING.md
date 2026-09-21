@@ -110,7 +110,7 @@ Accepted integration changes and finite regression boundaries:
 - **Coverage preparation:** select artifacts through the target directory exported by `cargo llvm-cov show-env`. Load that environment **before** workspace cleanup, as required by the tool's [external-test instructions](https://github.com/taiki-e/cargo-llvm-cov/blob/v0.9.1/README.md#get-coverage-of-external-tests); otherwise cleanup targets `llvm-cov-target` while external builds use the ordinary target. The ordering regression fails before the workflow correction and passes afterward (14 contract tests, exits 1 then 0). The results above retain the unchanged coverage threshold and exclusions.
 - **Dependency security:** the earlier RustSec gate reported `RUSTSEC-2026-0285` in `rustls 0.23.43`, requiring at least `0.23.45`. The refreshed lockfile selects the fixed release without suppression. Local `cargo audit`, `cargo deny check` and `pnpm audit` exit 0; Linux/macOS cross-target Clippy passes with the updated consumers. Windows shared CI passes at `55657be`; full native consumer gates remain required.
 
-The requested KPI review rounds, unchanged-candidate convergence sweep and ordered repository closeout remain incomplete. No partial review or passing stage establishes completion.
+Review-round, convergence and repository-closeout status is canonical in [PLAN.md](PLAN.md#m12--flow-agent-os-isolation). No partial review or passing stage establishes completion.
 
 ### Authorized Mac feasibility evaluation (ADR-0167)
 
