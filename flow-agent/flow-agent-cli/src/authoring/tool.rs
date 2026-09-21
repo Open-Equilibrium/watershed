@@ -245,7 +245,7 @@ mod tests {
     }
 
     #[test]
-    fn parameter_groups_follow_top_level_occurrence_order() {
+    fn parameter_groups_preserve_occurrence_order_with_order_independent_bounds() {
         let mut arguments = args(&[
             "--parameter",
             "--parameter-name",
@@ -269,6 +269,9 @@ mod tests {
             "integer",
             "--parameter-required",
             "false",
+        ]));
+        let bounds_start = arguments.len();
+        arguments.extend(args(&[
             "--parameter-min",
             "-1",
             "--parameter-max",
@@ -289,6 +292,17 @@ mod tests {
         assert!(!tool.allowed_parameters[1].required);
         assert_eq!(tool.allowed_parameters[1].min, Some(-1));
         assert_eq!(tool.allowed_parameters[1].max, Some(2));
+        tool.allowed_parameters[1]
+            .validate()
+            .expect("min-before-max parameter is valid");
+
+        arguments[bounds_start..bounds_start + 4].rotate_left(2);
+        let reversed =
+            parse(Path::new("."), &arguments).expect("max-before-min constraints are accepted");
+        reversed.allowed_parameters[1]
+            .validate()
+            .expect("max-before-min parameter is valid");
+        assert_eq!(reversed, tool);
     }
 
     #[test]
