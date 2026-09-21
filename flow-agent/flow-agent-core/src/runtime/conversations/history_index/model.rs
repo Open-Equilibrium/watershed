@@ -18,6 +18,7 @@ pub(super) const EVENT_POINTER_RECORD_BYTES: usize =
     EVENT_POINTER_SEQUENCE_OFFSET + std::mem::size_of::<u64>();
 pub(super) const INDEX_SORT_BYTES: usize = 16 * 1024 * 1024;
 pub(super) const INDEX_MERGE_FAN_IN: u64 = 64;
+pub(super) const INDEX_IO_BUFFER_BYTES: usize = 8 * 1024;
 
 pub(super) type IndexRecord = [u8; INDEX_RECORD_BYTES];
 pub(super) type EventPointerRecord = [u8; EVENT_POINTER_RECORD_BYTES];

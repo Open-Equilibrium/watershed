@@ -2,8 +2,8 @@ use super::super::contract::protocol;
 use super::model::{
     ConversationEntry, EVENT_POINTER_RECORD_BYTES, EVENT_POINTER_SEQUENCE_OFFSET,
     EventPointerRecord, INDEX_ENTRY_ID_OFFSET, INDEX_EVENT_SEQUENCE_OFFSET, INDEX_ID_FIELD_BYTES,
-    INDEX_ORDINAL_OFFSET, INDEX_PARENT_ID_OFFSET, INDEX_RECORD_BYTES, INDEX_RUN_SESSION_ID_OFFSET,
-    IndexRecord, MAX_HISTORY_INDEX_ID_BYTES, WorkBudget,
+    INDEX_IO_BUFFER_BYTES, INDEX_ORDINAL_OFFSET, INDEX_PARENT_ID_OFFSET, INDEX_RECORD_BYTES,
+    INDEX_RUN_SESSION_ID_OFFSET, IndexRecord, MAX_HISTORY_INDEX_ID_BYTES, WorkBudget,
 };
 use crate::runtime::{
     fs_guards::{AnchoredFile, open_anchored_file_for_read, path_io_error},
@@ -12,7 +12,7 @@ use crate::runtime::{
 use std::{
     cmp::Ordering as CmpOrdering,
     fs::File,
-    io::{Read, Seek, SeekFrom},
+    io::{BufReader, Read, Seek, SeekFrom},
     path::PathBuf,
 };
 
@@ -25,7 +25,8 @@ pub(super) fn validate_sorted_index(
     if usize::try_from(entries).is_ok_and(|entries| entries <= chunk.capacity()) {
         return validate_sorted_index_in_memory(path, entries, chunk, work);
     }
-    let (mut sequential, _) = open_anchored_file_for_read(path)?;
+    let mut sequential =
+        BufReader::with_capacity(INDEX_IO_BUFFER_BYTES, open_anchored_file_for_read(path)?.0);
     let mut lookup = open_anchored_file_for_read(path)?.0;
     let mut prior: Option<[u8; INDEX_ID_FIELD_BYTES]> = None;
     for _ in 0..entries {
@@ -60,7 +61,8 @@ fn validate_sorted_index_in_memory(
     records: &mut Vec<IndexRecord>,
     work: &mut WorkBudget,
 ) -> Result<(), RuntimeError> {
-    let (mut file, _) = open_anchored_file_for_read(path)?;
+    let mut file =
+        BufReader::with_capacity(INDEX_IO_BUFFER_BYTES, open_anchored_file_for_read(path)?.0);
     for _ in 0..entries {
         records.push(
             read_index_record(&mut file)?
@@ -240,7 +242,7 @@ fn encode_id_bytes(id: &[u8]) -> Result<[u8; INDEX_ID_FIELD_BYTES], RuntimeError
     Ok(encoded)
 }
 
-pub(super) fn read_index_record(file: &mut File) -> Result<Option<IndexRecord>, RuntimeError> {
+pub(super) fn read_index_record(file: &mut impl Read) -> Result<Option<IndexRecord>, RuntimeError> {
     read_fixed_record(
         file,
         "conversation history index record is truncated",
@@ -249,7 +251,7 @@ pub(super) fn read_index_record(file: &mut File) -> Result<Option<IndexRecord>, 
 }
 
 pub(super) fn read_event_pointer_record(
-    file: &mut File,
+    file: &mut impl Read,
 ) -> Result<Option<EventPointerRecord>, RuntimeError> {
     read_fixed_record(
         file,
@@ -259,7 +261,7 @@ pub(super) fn read_event_pointer_record(
 }
 
 pub(super) fn read_fixed_record<const N: usize>(
-    file: &mut File,
+    file: &mut impl Read,
     truncated: &'static str,
     diagnostic_path: &'static str,
 ) -> Result<Option<[u8; N]>, RuntimeError> {
@@ -279,4 +281,65 @@ pub(super) fn read_fixed_record<const N: usize>(
         }
     }
     Ok(Some(record))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{self, BufReader, Cursor};
+
+    struct ShortReader<R>(R);
+
+    impl<R: Read> Read for ShortReader<R> {
+        fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
+            let length = bytes.len().min(2);
+            self.0.read(&mut bytes[..length])
+        }
+    }
+
+    #[test]
+    fn fixed_records_preserve_framing_across_short_reads_and_buffer_boundaries() {
+        for tail in [b"".as_slice(), b"x", b"xy"] {
+            let bytes = [b"abcdef".as_slice(), tail].concat();
+            let mut reader = BufReader::with_capacity(5, ShortReader(Cursor::new(bytes)));
+            for expected in [*b"abc", *b"def"] {
+                assert_eq!(
+                    read_fixed_record::<3>(&mut reader, "truncated", "test index")
+                        .expect("complete record reads"),
+                    Some(expected)
+                );
+            }
+            let end = read_fixed_record::<3>(&mut reader, "truncated", "test index");
+            if tail.is_empty() {
+                assert_eq!(end.expect("record-aligned EOF succeeds"), None);
+            } else {
+                assert!(
+                    end.expect_err("partial record fails")
+                        .to_string()
+                        .contains("truncated")
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn fixed_record_read_error_is_not_eof_or_truncation() {
+        struct FailedRead;
+        impl Read for FailedRead {
+            fn read(&mut self, _: &mut [u8]) -> io::Result<usize> {
+                Err(io::Error::other("synthetic read failure"))
+            }
+        }
+        let mut reader = BufReader::with_capacity(5, Cursor::new(b"a").chain(FailedRead));
+        let error = read_fixed_record::<3>(&mut reader, "truncated", "test index")
+            .expect_err("I/O failure after a partial record propagates");
+        match error {
+            RuntimeError::Io { path, source } => {
+                assert_eq!(path, PathBuf::from("test index"));
+                assert_eq!(source.kind(), io::ErrorKind::Other);
+                assert_eq!(source.to_string(), "synthetic read failure");
+            }
+            other => panic!("expected the original I/O error, got {other}"),
+        }
+    }
 }

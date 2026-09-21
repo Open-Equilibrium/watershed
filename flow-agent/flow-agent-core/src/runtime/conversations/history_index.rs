@@ -44,7 +44,10 @@ use model::EventPointerMetrics;
 #[cfg(any(test, feature = "m11-budget-evidence"))]
 pub(crate) use model::MAX_HISTORY_INDEX_ID_BYTES;
 pub(crate) use model::{ConversationEntry, ConversationEntryType};
-use model::{INDEX_MERGE_FAN_IN, INDEX_RECORD_BYTES, INDEX_SORT_BYTES, IndexRecord, WorkBudget};
+use model::{
+    INDEX_IO_BUFFER_BYTES, INDEX_MERGE_FAN_IN, INDEX_RECORD_BYTES, INDEX_SORT_BYTES, IndexRecord,
+    WorkBudget,
+};
 use records::{encode_record, find_record, validate_sorted_index};
 use scratch::{HistoryScratch, INDEX_WORK_RESERVE, create_scratch_file, index_run_leaf};
 #[cfg(test)]
@@ -61,7 +64,8 @@ const INDEX_SCRATCH_PER_ENTRY: u64 = 1024;
 const HISTORY_INDEX_MEMORY_BOUND: u64 = MAX_CONVERSATION_SCAN_BYTES
     + INDEX_SORT_BYTES as u64
     + 2 * 1024 * 1024
-    + INDEX_MERGE_FAN_IN * INDEX_RECORD_BYTES as u64;
+    + INDEX_MERGE_FAN_IN * INDEX_RECORD_BYTES as u64
+    + (INDEX_MERGE_FAN_IN + 1) * INDEX_IO_BUFFER_BYTES as u64;
 const INDEX_MEMORY_BOUND: u64 = if HISTORY_INDEX_MEMORY_BOUND > EVENT_IDENTIFIER_MEMORY_BOUND {
     HISTORY_INDEX_MEMORY_BOUND
 } else {

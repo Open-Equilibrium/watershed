@@ -2,7 +2,7 @@ use super::super::contract::{CONVERSATION_RUNS_DIR, RUN_EVENTS_LEAF, protocol};
 use super::external_sort::{
     event_pointer_sort_record_limit, merge_all_event_pointer_runs, write_sorted_event_pointer_run,
 };
-use super::model::{EventPointerMetrics, EventPointerRecord, WorkBudget};
+use super::model::{EventPointerMetrics, EventPointerRecord, INDEX_IO_BUFFER_BYTES, WorkBudget};
 use super::records::{
     decode_index_id, encode_event_pointer_record, event_pointer_id, event_pointer_sequence,
     read_event_pointer_record, read_fixed_record, read_index_record,
@@ -27,7 +27,6 @@ use sha2::{Digest, Sha256};
 use std::{
     cell::{Cell, RefCell},
     cmp::Ordering as CmpOrdering,
-    fs::File,
     io::{BufRead, BufReader, Read, Seek, SeekFrom},
 };
 
@@ -49,11 +48,13 @@ const EVENT_IDENTIFIER_TOKEN_BYTES: u64 =
 const EVENT_IDENTIFIER_BUILD_MEMORY_BOUND: u64 = EVENT_IDENTIFIER_SORT_BYTES
     + EVENT_IDENTIFIER_TOKEN_BYTES
     + MAX_CANONICAL_EVENT_BYTES as u64
-    + EVENT_TRANSIENT_MEMORY_RESERVE;
+    + EVENT_TRANSIENT_MEMORY_RESERVE
+    + 2 * INDEX_IO_BUFFER_BYTES as u64;
 const EVENT_IDENTIFIER_VALIDATION_MEMORY_BOUND: u64 = EVENT_IDENTIFIER_TOKEN_BYTES
     + MAX_FLOW_EVENTS * EVENT_STATE_BYTES_PER_EVENT_BOUND
     + MAX_CANONICAL_EVENT_BYTES as u64
-    + EVENT_TRANSIENT_MEMORY_RESERVE;
+    + EVENT_TRANSIENT_MEMORY_RESERVE
+    + 2 * INDEX_IO_BUFFER_BYTES as u64;
 pub(super) const EVENT_IDENTIFIER_MEMORY_BOUND: u64 =
     if EVENT_IDENTIFIER_BUILD_MEMORY_BOUND > EVENT_IDENTIFIER_VALIDATION_MEMORY_BOUND {
         EVENT_IDENTIFIER_BUILD_MEMORY_BOUND
@@ -177,7 +178,8 @@ pub(super) fn validate_history_event_pointers(
     chunk
         .try_reserve_exact(sort_record_limit)
         .map_err(|_| protocol("conversation history pointer sort memory admission failed"))?;
-    let (mut source, _) = open_anchored_file_for_read(index)?;
+    let mut source =
+        BufReader::with_capacity(INDEX_IO_BUFFER_BYTES, open_anchored_file_for_read(index)?.0);
     let mut pointer_count = 0u64;
     let mut run_count = 0u64;
     for _ in 0..entries {
@@ -196,6 +198,7 @@ pub(super) fn validate_history_event_pointers(
     if read_index_record(&mut source)?.is_some() {
         return Err(protocol("conversation history index has trailing records"));
     }
+    drop(source);
     if pointer_count != entries {
         return Err(protocol(
             "conversation history changed while its event pointers were validated",
@@ -227,7 +230,8 @@ fn validate_sorted_event_pointers(
     scratch: &mut HistoryScratch,
     work: &mut WorkBudget,
 ) -> Result<EventPointerMetrics, RuntimeError> {
-    let (mut pointers, _) = open_anchored_file_for_read(path)?;
+    let mut pointers =
+        BufReader::with_capacity(INDEX_IO_BUFFER_BYTES, open_anchored_file_for_read(path)?.0);
     let mut run_id: Option<Vec<u8>> = None;
     let mut max_sequence = 0u64;
     let mut metrics: EventPointerMetrics = Default::default();
@@ -559,7 +563,7 @@ fn write_event_identifier_sorted_run(
 }
 
 fn read_event_identifier_record(
-    reader: &mut File,
+    reader: &mut impl Read,
 ) -> Result<Option<EventIdentifierRecord>, RuntimeError> {
     read_fixed_record(
         reader,
@@ -575,7 +579,8 @@ fn assign_event_identifier_tokens(
     next_token: &mut u32,
     work: &mut WorkBudget,
 ) -> Result<(), RuntimeError> {
-    let (mut file, _) = open_anchored_file_for_read(path)?;
+    let mut file =
+        BufReader::with_capacity(INDEX_IO_BUFFER_BYTES, open_anchored_file_for_read(path)?.0);
     let mut group = Vec::<EventIdentifierRecord>::new();
     while let Some(record) = read_event_identifier_record(&mut file)? {
         if group
@@ -600,16 +605,18 @@ fn assign_event_identifier_group(
     next_token: &mut u32,
     work: &mut WorkBudget,
 ) -> Result<(), RuntimeError> {
-    let first_kind = identifier_record_kind(&group[0])?;
-    let first_value = source.identifier(identifier_record_offset(&group[0]), first_kind)?;
     let mut collision = false;
-    for record in &group[1..] {
-        work.add(1)?;
-        let kind = identifier_record_kind(record)?;
-        let value = source.identifier(identifier_record_offset(record), kind)?;
-        if value != first_value {
-            collision = true;
-            break;
+    if group.len() > 1 {
+        let first_kind = identifier_record_kind(&group[0])?;
+        let first_value = source.identifier(identifier_record_offset(&group[0]), first_kind)?;
+        for record in &group[1..] {
+            work.add(1)?;
+            let kind = identifier_record_kind(record)?;
+            let value = source.identifier(identifier_record_offset(record), kind)?;
+            if value != first_value {
+                collision = true;
+                break;
+            }
         }
     }
     if !collision {
