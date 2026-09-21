@@ -33,6 +33,7 @@ pub(crate) enum ExecutorPreflightOutcome {
 pub(crate) struct ExecutorToolExecution {
     pub(crate) enforcement: proto::EnforcementReceiptV0,
     pub(crate) outcome: ToolExecutionOutcome,
+    #[cfg(any(test, feature = "m12-startup-evidence"))]
     pub(crate) request_hash: String,
 }
 
@@ -131,6 +132,7 @@ impl PreparedExecutor {
                     ExecutorToolExecution {
                         enforcement,
                         outcome: decode_tool_outcome(tool_result)?,
+                        #[cfg(any(test, feature = "m12-startup-evidence"))]
                         request_hash: prepared.request_hash,
                     },
                 )))

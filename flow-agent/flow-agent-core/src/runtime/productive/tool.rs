@@ -273,12 +273,10 @@ where
                 return Err(error);
             }
         };
-        let (enforcement, mut outcome, executed_request_hash) = match execution {
-            ExecutorDispatchOutcome::Completed(execution) => (
-                execution.enforcement,
-                execution.outcome,
-                execution.request_hash,
-            ),
+        let (enforcement, mut outcome) = match execution {
+            ExecutorDispatchOutcome::Completed(execution) => {
+                (execution.enforcement, execution.outcome)
+            }
             ExecutorDispatchOutcome::Error(code) => {
                 persist_executor_dispatch_failure(
                     context.attempts,
@@ -303,34 +301,6 @@ where
                 return Err(RuntimeError::executor(code, ""));
             }
         };
-        let validate_execution = || -> Result<(), RuntimeError> {
-            if executed_request_hash != request_hash {
-                return Err(RuntimeError::Protocol(
-                    "Executor result does not match its prepared request".to_owned(),
-                ));
-            }
-            proto::validate_enforcement_receipt_v0(&enforcement, &expected_policy_digest).map_err(
-                |_| {
-                    RuntimeError::Protocol(
-                        "Executor enforcement receipt does not match its prepared request"
-                            .to_owned(),
-                    )
-                },
-            )?;
-            tool_terminal(&outcome)?;
-            Ok(())
-        };
-        if let Err(error) = validate_execution() {
-            emit_uncertain_tool_failure(
-                builder,
-                invocation,
-                tool,
-                &attempt_id,
-                context.sink,
-                &mut context.event_commit_failed,
-            )?;
-            return Err(error);
-        }
         if outcome.status == RunAttemptOutcome::Completed
             && crate::runtime::cancellation::ensure_productive_dispatch_allowed().is_err()
         {

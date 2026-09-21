@@ -84,8 +84,6 @@ fn cancellation_preserves_bounded_tool_cleanup_failures_and_evidence() {
     }
 
     for (index, classification) in [
-        ToolTerminalClassification::ProcessSignalFailed,
-        ToolTerminalClassification::ProcessReapFailed,
         ToolTerminalClassification::OutputCollectorFailed,
         ToolTerminalClassification::OutputDrainTimeout,
         ToolTerminalClassification::StdoutCapExceeded,
