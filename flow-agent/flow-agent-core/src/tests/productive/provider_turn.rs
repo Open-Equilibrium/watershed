@@ -15,6 +15,7 @@ use crate::runtime::{
     },
     run_attempts::{RunAttemptKind, RunAttemptOutcome},
     tool_runner::{ToolExecutionOutcome, ToolTerminalClassification},
+    types::{HumanFailureStatus, RuntimeError},
     validate::validate_protocol_jsonl_text,
 };
 use proto::{EventEnvelope, EventType};
@@ -711,6 +712,49 @@ fn productive_provider_turn_rejects_retained_input_that_exceeds_the_model_budget
     );
     assert_eq!(provider.bodies.len(), 1, "no over-budget provider dispatch");
     assert_eq!(tools.invocations.len(), 1, "the first Tool remains durable");
+    let Some(RuntimeError::ContextBudgetExceeded {
+        input_budget_tokens,
+        required_bytes,
+    }) = execution.terminal_error.as_ref()
+    else {
+        panic!("the retained input must fail at the model budget boundary");
+    };
+    let error = sink
+        .0
+        .iter()
+        .find(|event| event.event_type == EventType::Error)
+        .expect("the context budget diagnostic is durable");
+    assert_eq!(
+        error.payload,
+        serde_json::json!({
+            "code": "context_budget_exceeded",
+            "message": "mandatory context exceeds the model input budget",
+            "data": {
+                "input_budget_tokens": input_budget_tokens,
+                "required_bytes": required_bytes,
+            },
+        })
+    );
+    for (event_type, reason_key) in [
+        (EventType::PhaseFailed, "error"),
+        (EventType::FlowFailed, "error"),
+        (EventType::SessionFailed, "reason"),
+    ] {
+        let terminal = sink
+            .0
+            .iter()
+            .find(|event| event.event_type == event_type)
+            .expect("the active execution boundary closes with a failure");
+        assert_eq!(terminal.payload[reason_key], "context_budget_exceeded");
+    }
+    let mut replay_status = HumanFailureStatus::default();
+    for event in &sink.0 {
+        replay_status.observe(event);
+    }
+    assert_eq!(
+        replay_status.status(),
+        Some("failed (context_budget_exceeded): mandatory context exceeds the model input budget")
+    );
 }
 
 #[test]
