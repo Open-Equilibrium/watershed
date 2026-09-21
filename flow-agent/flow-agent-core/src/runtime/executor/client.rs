@@ -120,20 +120,23 @@ impl PreparedExecutor {
         &self,
         waiting: PreparedExecutorWaiting,
     ) -> Result<ExecutorDispatchOutcome, RuntimeError> {
-        let PreparedExecutorWaiting { prepared, process } = waiting;
+        let PreparedExecutorWaiting {
+            prepared: _prepared,
+            process,
+        } = waiting;
         match start_one_shot(process)? {
             proto::ExecutorResponseV0::Completed {
                 enforcement,
                 tool_result,
                 ..
             } => {
-                self.validate_prepared_receipt(&prepared, &enforcement)?;
+                validate_receipt_identity(&enforcement, self.selection.probe())?;
                 Ok(ExecutorDispatchOutcome::Completed(Box::new(
                     ExecutorToolExecution {
                         enforcement,
                         outcome: decode_tool_outcome(tool_result)?,
                         #[cfg(any(test, feature = "m12-startup-evidence"))]
-                        request_hash: prepared.request_hash,
+                        request_hash: _prepared.request_hash,
                     },
                 )))
             }
