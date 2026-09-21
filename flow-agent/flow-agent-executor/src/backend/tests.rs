@@ -247,6 +247,38 @@ fn bounded_output_classifies_each_stream_and_preserves_its_exact_prefix() {
 }
 
 #[test]
+fn output_drain_timeout_preserves_prefixes_after_root_exit() {
+    if crate::tests::run_isolated("WATERSHED_EXECUTOR_DRAIN_PREFIX_CHILD") {
+        return;
+    }
+    // The finite-lived descendant holds both pipes beyond the drain deadline.
+    let outcome = run_bounded(
+        shell("printf abcd; printf wxyz >&2; /bin/sleep 10 & exit 0"),
+        2_000,
+        4,
+        4,
+        Vec::new(),
+        Vec::new(),
+        None,
+    )
+    .expect("root exit with open descendant pipes returns a bounded result");
+    assert_eq!(outcome.status.and_then(|status| status.code()), Some(0));
+    let result = tool_result(&outcome);
+    assert_eq!(
+        result.classification,
+        Some(Classification::OutputDrainTimeout)
+    );
+    assert_eq!(
+        proto::decode_executor_stream_v0(&result.stdout_base64).unwrap(),
+        b"abcd"
+    );
+    assert_eq!(
+        proto::decode_executor_stream_v0(&result.stderr_base64).unwrap(),
+        b"wxyz"
+    );
+}
+
+#[test]
 fn timeout_reaps_a_noncooperative_root_without_reporting_a_cleanup_exit_code() {
     if crate::tests::run_isolated("WATERSHED_EXECUTOR_ROOT_TIMEOUT_CHILD") {
         return;

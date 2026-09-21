@@ -6,7 +6,7 @@ use proto::{
     ExecutorToolClassificationV0, ExecutorToolResultV0, ExecutorToolStatusV0,
     encode_executor_stream_v0,
 };
-use rustix::fd::OwnedFd;
+use rustix::fd::{AsFd, OwnedFd};
 use std::{
     io::{Read, Write},
     os::unix::net::UnixStream,
@@ -14,7 +14,6 @@ use std::{
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
-        mpsc,
     },
     thread,
     time::{Duration, Instant},
@@ -32,17 +31,6 @@ pub(super) struct ProcessOutcome {
     pub(super) classification: Option<ExecutorToolClassificationV0>,
     pub(super) stdout: Vec<u8>,
     pub(super) stderr: Vec<u8>,
-}
-
-#[derive(Clone, Copy)]
-enum StreamKind {
-    Stdout,
-    Stderr,
-}
-
-enum StreamEvent {
-    Overflow(StreamKind),
-    Done(StreamKind, Result<Vec<u8>, Vec<u8>>),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -126,44 +114,25 @@ pub(super) fn run_bounded(
         .stderr
         .take()
         .expect("sandbox command configures stderr as piped before spawn");
-    let (sender, receiver) = mpsc::channel();
-    bounded_reader(stdout, stdout_limit, StreamKind::Stdout, sender.clone());
-    bounded_reader(stderr, stderr_limit, StreamKind::Stderr, sender);
+    let mut stdout = OutputCollector::new(stdout);
+    let mut stderr = OutputCollector::new(stderr);
 
     let mut primary = None;
     let mut status = None;
     let mut status_before_cleanup = None;
-    let mut stdout = None;
-    let mut stderr = None;
-    let mut stdout_overflow = false;
-    let mut stderr_overflow = false;
     let mut cleanup = None;
     loop {
-        for event in receiver.try_iter() {
-            match event {
-                StreamEvent::Overflow(StreamKind::Stdout) => {
-                    stdout_overflow = true;
-                    select_primary(&mut primary, PrimaryTrigger::StdoutCap);
-                }
-                StreamEvent::Overflow(StreamKind::Stderr) => {
-                    stderr_overflow = true;
-                    select_primary(&mut primary, PrimaryTrigger::StderrCap);
-                }
-                StreamEvent::Done(StreamKind::Stdout, result) => match result {
-                    Ok(output) => stdout = Some(output),
-                    Err(output) => {
-                        stdout = Some(output);
-                        select_primary(&mut primary, PrimaryTrigger::CollectorFailed);
-                    }
-                },
-                StreamEvent::Done(StreamKind::Stderr, result) => match result {
-                    Ok(output) => stderr = Some(output),
-                    Err(output) => {
-                        stderr = Some(output);
-                        select_primary(&mut primary, PrimaryTrigger::CollectorFailed);
-                    }
-                },
-            }
+        // One bounded read per stream keeps cancellation and deadlines responsive.
+        let stdout_progress = stdout.poll(stdout_limit);
+        let stderr_progress = stderr.poll(stderr_limit);
+        if stdout.overflow {
+            select_primary(&mut primary, PrimaryTrigger::StdoutCap);
+        }
+        if stderr.overflow {
+            select_primary(&mut primary, PrimaryTrigger::StderrCap);
+        }
+        if stdout.failed || stderr.failed {
+            select_primary(&mut primary, PrimaryTrigger::CollectorFailed);
         }
         if primary.is_none() && cancelled.load(Ordering::Acquire) {
             select_primary(&mut primary, PrimaryTrigger::Cancelled);
@@ -199,7 +168,7 @@ pub(super) fn run_bounded(
             cleanup = Some(CleanupController::new(Instant::now()));
         }
         if let Some(controller) = cleanup.as_mut() {
-            let output_drained = stdout.is_some() && stderr.is_some();
+            let output_drained = stdout.input.is_none() && stderr.input.is_none();
             match controller.advance(Instant::now(), status.is_some(), output_drained) {
                 CleanupAction::Wait => {}
                 CleanupAction::ForceKill => {
@@ -213,13 +182,15 @@ pub(super) fn run_bounded(
                     return Ok(ProcessOutcome {
                         status: status_before_cleanup,
                         classification: Some(ExecutorToolClassificationV0::OutputDrainTimeout),
-                        stdout: stdout.unwrap_or_default(),
-                        stderr: stderr.unwrap_or_default(),
+                        stdout: stdout.output,
+                        stderr: stderr.output,
                     });
                 }
             }
         }
-        thread::sleep(Duration::from_millis(5));
+        if !stdout_progress && !stderr_progress {
+            thread::sleep(Duration::from_millis(5));
+        }
     }
     let classification = match primary.expect("an observed process always has a terminal trigger") {
         PrimaryTrigger::Cancelled => Some(ExecutorToolClassificationV0::Cancelled),
@@ -228,7 +199,7 @@ pub(super) fn run_bounded(
             Some(ExecutorToolClassificationV0::OutputCollectorFailed)
         }
         PrimaryTrigger::StdoutCap | PrimaryTrigger::StderrCap => {
-            Some(match (stdout_overflow, stderr_overflow) {
+            Some(match (stdout.overflow, stderr.overflow) {
                 (true, true) => ExecutorToolClassificationV0::StdoutStderrCapExceeded,
                 (true, false) => ExecutorToolClassificationV0::StdoutCapExceeded,
                 (false, true) => ExecutorToolClassificationV0::StderrCapExceeded,
@@ -240,8 +211,8 @@ pub(super) fn run_bounded(
     Ok(ProcessOutcome {
         status: status_before_cleanup,
         classification,
-        stdout: stdout.unwrap_or_default(),
-        stderr: stderr.unwrap_or_default(),
+        stdout: stdout.output,
+        stderr: stderr.output,
     })
 }
 
@@ -260,36 +231,54 @@ pub(super) fn classify_exit(status: Option<ExitStatus>) -> Option<ExecutorToolCl
     )
 }
 
-fn bounded_reader(
-    mut input: impl Read + Send + 'static,
-    limit: u64,
-    kind: StreamKind,
-    sender: mpsc::Sender<StreamEvent>,
-) {
-    thread::spawn(move || {
-        let mut output = Vec::new();
+struct OutputCollector<R> {
+    input: Option<R>,
+    output: Vec<u8>,
+    overflow: bool,
+    failed: bool,
+}
+
+impl<R: AsFd> OutputCollector<R> {
+    fn new(input: R) -> Self {
+        let ready = rustix::fs::fcntl_getfl(&input)
+            .and_then(|flags| rustix::fs::fcntl_setfl(&input, flags | rustix::fs::OFlags::NONBLOCK))
+            .is_ok();
+        Self {
+            input: ready.then_some(input),
+            output: Vec::new(),
+            overflow: false,
+            failed: !ready,
+        }
+    }
+}
+
+impl<R: Read> OutputCollector<R> {
+    fn poll(&mut self, limit: u64) -> bool {
+        let Some(input) = self.input.as_mut() else {
+            return false;
+        };
         let mut buffer = [0_u8; 8192];
-        let mut reported = false;
-        loop {
-            let count = match input.read(&mut buffer) {
-                Ok(count) => count,
-                Err(_) => {
-                    let _ = sender.send(StreamEvent::Done(kind, Err(output)));
-                    return;
-                }
-            };
-            if count == 0 {
-                break;
+        match input.read(&mut buffer) {
+            Ok(0) => self.input = None,
+            Ok(count) => {
+                let remaining = limit.saturating_sub(self.output.len() as u64) as usize;
+                self.output
+                    .extend_from_slice(&buffer[..count.min(remaining)]);
+                self.overflow |= count > remaining;
+                return true;
             }
-            let remaining = limit.saturating_sub(output.len() as u64) as usize;
-            output.extend_from_slice(&buffer[..count.min(remaining)]);
-            if count > remaining && !reported {
-                let _ = sender.send(StreamEvent::Overflow(kind));
-                reported = true;
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted
+                ) => {}
+            Err(_) => {
+                self.failed = true;
+                self.input = None;
             }
         }
-        let _ = sender.send(StreamEvent::Done(kind, Ok(output)));
-    });
+        false
+    }
 }
 
 pub(super) fn tool_result(outcome: &ProcessOutcome) -> ExecutorToolResultV0 {
