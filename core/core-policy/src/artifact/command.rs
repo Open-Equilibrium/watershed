@@ -54,15 +54,13 @@ impl CommandPolicy {
                         self.tool_id, self.command_id
                     )));
                 }
-                if TrustedPredefinedCommand::parse(&self.command_id).is_none() {
+                let Some(command) = TrustedPredefinedCommand::parse(&self.command_id) else {
                     return Err(policy_artifact_error(format!(
                         "predefined-command tool {} references unknown trusted command {:?}",
                         self.tool_id, self.command_id
                     )));
-                }
-                let expected_executable = TrustedPredefinedCommand::parse(&self.command_id)
-                    .expect("trusted command was validated")
-                    .executable();
+                };
+                let expected_executable = command.executable();
                 if self.executable != expected_executable {
                     return Err(policy_artifact_error(format!(
                         "predefined-command tool {} executable must be {}",

@@ -171,13 +171,6 @@ impl SessionLifecycleState {
             }
             EventType::FlowCompleted | EventType::FlowFailed => {
                 let flow_id = require_lifecycle_flow_id(path, line_number, event)?;
-                if !self.flows.is_started(&flow_id) {
-                    return Err(RuntimeError::Protocol(format!(
-                        "{} line {line_number} {} must follow flow.started for flow_id {flow_id:?}",
-                        path.display(),
-                        event.event_type.as_str()
-                    )));
-                }
                 let flow_definition_id = lifecycle_payload_string(event, "flow_definition_id");
                 if self.flow_definition_ids.get(&flow_id) != Some(&flow_definition_id) {
                     return Err(RuntimeError::Protocol(format!(
