@@ -2,6 +2,7 @@ mod acceptance;
 mod artifact;
 pub mod builds;
 mod lifetime;
+mod process;
 mod pty;
 
 use proto::{ExecutorLimitsV0, ExecutorRequestV0, ExecutorResponseV0};
@@ -369,26 +370,27 @@ impl Running {
     }
 
     pub fn finish(&mut self, request: &ExecutorRequestV0) -> ExecutorResponseV0 {
-        proto::parse_executor_response_v0(
+        let response = proto::parse_executor_response_v0(
             format!("{}\n", self.record()).as_bytes(),
             &request.request_id,
             &request.policy_digest,
         )
-        .unwrap()
+        .unwrap();
+        self.exited();
+        response
+    }
+
+    pub fn exited(&mut self) {
+        // A terminal record precedes process finalization, including coverage output.
+        let status = process::wait_for_exit(&mut self.child).unwrap();
+        assert!(status.success(), "Executor exit: {status}");
     }
 }
 
 impl Drop for Running {
     fn drop(&mut self) {
         let _ = self.child.kill();
-        let deadline = Instant::now() + Duration::from_secs(2);
-        while self.child.try_wait().unwrap().is_none() {
-            assert!(
-                Instant::now() < deadline,
-                "test Executor could not be reaped"
-            );
-            thread::sleep(Duration::from_millis(5));
-        }
+        process::wait_for_exit(&mut self.child).unwrap();
     }
 }
 

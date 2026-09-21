@@ -77,7 +77,7 @@ fn a_mismatched_protected_descriptor_is_rejected_before_ready() {
     let mut request = fixture.request("printf executed > marker", limits(1024, 1024, 2000));
     request.resolved_policy.protected_objects[0].identity.inode += 1;
     request.policy_digest = proto::resolved_policy_digest_v0(&request.resolved_policy).unwrap();
-    let running = fixture.spawn(&request);
+    let mut running = fixture.spawn(&request);
     assert!(matches!(
         proto::parse_executor_preflight_v0(
             format!("{}\n", running.record()).as_bytes(),
@@ -86,6 +86,7 @@ fn a_mismatched_protected_descriptor_is_rejected_before_ready() {
         .unwrap(),
         proto::ExecutorPreflightV0::Error { .. }
     ));
+    running.exited();
     assert!(!fixture.project.join("marker").exists());
 }
 

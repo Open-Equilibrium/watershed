@@ -5,6 +5,8 @@
 
 #[path = "native_support/artifact.rs"]
 mod artifact;
+#[path = "native_support/process.rs"]
+mod process;
 
 use sha2::{Digest, Sha256};
 use std::{
@@ -195,10 +197,16 @@ fn native_executor_protects_own_files_and_leaves_project_work_available() {
                 "native protected execution did not complete: {terminal}"
             ));
         }
+        let status = process::wait_for_exit(&mut child).map_err(|error| error.to_string())?;
+        if !status.success() {
+            return Err(format!("Executor exit: {status}"));
+        }
         Ok(())
     })();
-    let _ = child.kill();
-    let _ = child.wait();
+    if result.is_err() {
+        let _ = child.kill();
+        let _ = process::wait_for_exit(&mut child);
+    }
     drop(receiver);
     // A failed Executor may leave an inherited pipe open; the test's response
     // deadline, not joining that pipe reader, must bound the failure report.
