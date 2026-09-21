@@ -1,22 +1,3 @@
-/// Root of the logical workspace scope namespace.
-pub const WORKSPACE_SCOPE_ROOT: &str = "workspace";
-
-/// Builds a logical workspace scope from a root-relative path.
-pub fn workspace_scope_path(relative: &str) -> String {
-    if relative.is_empty() {
-        WORKSPACE_SCOPE_ROOT.to_owned()
-    } else {
-        format!("{WORKSPACE_SCOPE_ROOT}/{relative}")
-    }
-}
-
-/// Strips the logical workspace scope from a nested path.
-pub fn strip_workspace_scope(path: &str) -> Option<&str> {
-    path.strip_prefix(WORKSPACE_SCOPE_ROOT)?
-        .strip_prefix('/')
-        .filter(|relative| !relative.is_empty())
-}
-
 /// Returns whether `value` is a valid v0 block id.
 pub fn is_valid_block_id(value: &str) -> bool {
     proto::is_valid_session_id(value)

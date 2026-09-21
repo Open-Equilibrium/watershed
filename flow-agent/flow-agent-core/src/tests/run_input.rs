@@ -44,6 +44,7 @@ fn selected_root_flow_input_is_typed_canonical_and_enters_the_first_phase() {
     let plan = plan_flow(&workspace, &registry, &policy, flow, "typed-input", options)
         .expect("typed input plans");
     let provider_context = plan
+        .execution
         .actions
         .iter()
         .find_map(|action| match action {

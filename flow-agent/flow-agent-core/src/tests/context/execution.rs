@@ -203,10 +203,14 @@ fn planning_terminalizes_context_budget_failure_as_typed_events() {
         plan.execution.terminal_error,
         Some(RuntimeError::ContextBudgetExceeded { .. })
     ));
-    let mut planned_events = plan.actions.iter().filter_map(|action| match action {
-        FlowExecutionAction::Event(action) => Some(&action.event),
-        FlowExecutionAction::Fixture(_) => None,
-    });
+    let mut planned_events = plan
+        .execution
+        .actions
+        .iter()
+        .filter_map(|action| match action {
+            FlowExecutionAction::Event(action) => Some(&action.event),
+            FlowExecutionAction::Fixture(_) => None,
+        });
     assert!(planned_events.clone().any(|event| {
         event.event_type == EventType::Error && event.payload["code"] == "context_budget_exceeded"
     }));

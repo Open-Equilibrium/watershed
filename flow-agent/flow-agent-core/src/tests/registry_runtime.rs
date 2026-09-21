@@ -112,6 +112,7 @@ fn runtime_executes_subflows_after_all_parent_phases() {
     )
     .expect("hello flow executes");
     let events = plan
+        .execution
         .actions
         .iter()
         .filter_map(|action| match action {

@@ -14,12 +14,11 @@ unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage)'] }
 
 [dependencies]
 proto.workspace = true
-serde_json.workspace = true
 rustix = { workspace = true, features = ["std"] }
 signal-hook.workspace = true
 
 [dev-dependencies]
-core-policy.workspace = true
+serde_json.workspace = true
 sha2.workspace = true
 
 [[bin]]

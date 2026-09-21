@@ -26,8 +26,6 @@ impl PreparedExecution {
 }
 
 pub(super) fn preflight(request: ExecutorRequestV0) -> Result<PreparedExecution, BackendError> {
-    proto::canonical_executor_request_v0(&request)
-        .map_err(|error| BackendError::unsupported(error.to_string()))?;
     protection::verify_objects(&request).map_err(BackendError::unsupported)?;
     Instant::now()
         .checked_add(Duration::from_millis(

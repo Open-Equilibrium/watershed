@@ -274,7 +274,6 @@ dependencies = [
 name = "flow-agent-executor"
 version = "0.0.0"
 dependencies = [
- "core-policy",
  "proto",
  "rustix",
  "serde_json",

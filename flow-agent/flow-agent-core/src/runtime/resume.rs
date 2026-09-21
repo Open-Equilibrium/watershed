@@ -121,7 +121,7 @@ pub(crate) fn resume_fixture_session_internal(
                 config.stub_model_fixture_profile,
             ),
         )?;
-        for action in plan.actions.iter() {
+        for action in plan.execution.actions.iter() {
             if let FlowExecutionAction::Event(action) = action {
                 prefix_sink.commit(
                     &action.event,

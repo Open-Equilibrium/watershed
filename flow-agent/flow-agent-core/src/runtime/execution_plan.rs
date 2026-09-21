@@ -30,7 +30,7 @@ impl RuntimeExecution {
             && self.failed == plan.execution.failed
             && self.failure_status == plan.execution.failure_status
             && self.tool_intents == plan.execution.tool_intents
-            && self.actions == plan.actions
+            && self.actions == plan.execution.actions
             && FlowExecutionPlan::signature_for(self) == plan.signature
     }
 }
@@ -100,7 +100,6 @@ pub enum FlowExecutionAction {
 }
 
 pub struct FlowExecutionPlan {
-    pub(crate) actions: Arc<Vec<FlowExecutionAction>>,
     pub(crate) execution: RuntimeExecution,
     pub(crate) signature: RuntimeStreamSignature,
     workspace_identity: AnchoredDirectoryIdentity,
@@ -112,9 +111,7 @@ impl FlowExecutionPlan {
         workspace_identity: AnchoredDirectoryIdentity,
     ) -> Self {
         let signature = Self::signature_for(&execution);
-        let actions = Arc::clone(&execution.actions);
         Self {
-            actions,
             execution,
             signature,
             workspace_identity,
@@ -216,9 +213,7 @@ impl FlowExecutionPlan {
     }
 
     pub(crate) fn validate_integrity(&self) -> Result<(), RuntimeError> {
-        if self.actions != self.execution.actions
-            || Self::signature_for(&self.execution) != self.signature
-        {
+        if Self::signature_for(&self.execution) != self.signature {
             return Err(RuntimeError::Protocol(
                 "flow execution plan signature is invalid".to_owned(),
             ));

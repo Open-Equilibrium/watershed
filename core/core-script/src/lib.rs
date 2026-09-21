@@ -25,9 +25,8 @@ pub use script::model::{
 };
 pub use script::parser::parse_safe_yaml_config;
 pub use script::paths::{
-    WORKSPACE_SCOPE_ROOT, is_valid_allowed_parameter_name, is_valid_block_id, is_valid_command_id,
+    is_valid_allowed_parameter_name, is_valid_block_id, is_valid_command_id,
     normalize_safe_relative_path, relative_path_has_windows_alias, relative_path_is_inside_scope,
-    strip_workspace_scope, workspace_scope_path,
 };
 pub use script::validate_block_identity;
 pub use script::values::{

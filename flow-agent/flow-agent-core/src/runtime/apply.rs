@@ -56,7 +56,7 @@ fn validate_flow_application(application: &FlowApplication<'_>) -> Result<(), Ru
             "flow apply cannot use ToolSideEffectMode::Plan".to_owned(),
         ));
     }
-    application.plan.validate_integrity()
+    Ok(())
 }
 
 pub(crate) fn preflight_flow_execution_plan(
@@ -66,7 +66,7 @@ pub(crate) fn preflight_flow_execution_plan(
 ) -> Result<(), RuntimeError> {
     plan.validate_integrity()?;
     execution_workspace.verify_identity(plan.workspace_identity())?;
-    for action in plan.actions.iter() {
+    for action in plan.execution.actions.iter() {
         if let FlowExecutionAction::Fixture(action) = action
             && (side_effect_mode.should_execute_tool(action.completion_sequence)
                 || side_effect_mode.should_preflight_tool(action.completion_sequence))
@@ -89,6 +89,7 @@ fn apply_flow_with_workspace(
     )?;
     let planned_session_id = application
         .plan
+        .execution
         .actions
         .iter()
         .find_map(|action| match action {
@@ -108,7 +109,7 @@ fn apply_flow_with_workspace(
     let mut sink = sink;
     let mut event_signature = RuntimeStreamSignatureBuilder::new(EVENT_PLAN_DOMAIN);
     let mut context_signature = RuntimeStreamSignatureBuilder::new(CONTEXT_PLAN_DOMAIN);
-    for action in application.plan.actions.iter() {
+    for action in application.plan.execution.actions.iter() {
         match action {
             FlowExecutionAction::Event(action) => {
                 if action.event.event_type == EventType::FlowStarted
@@ -188,7 +189,7 @@ fn apply_flow_with_workspace(
     }
     debug_assert!(live_invocations.is_empty());
     Ok(RuntimeExecution {
-        actions: application.plan.actions.clone(),
+        actions: application.plan.execution.actions.clone(),
         context_manifests: context_signature.signature(),
         events: event_signature.signature(),
         failed: application.plan.execution.failed,
@@ -278,7 +279,7 @@ fn terminalize_planned_fixture_error(
         Some(failure.message),
     ));
     Ok(RuntimeExecution {
-        actions: application.plan.actions.clone(),
+        actions: application.plan.execution.actions.clone(),
         context_manifests: context_signature.signature(),
         events: event_signature.signature(),
         failed: true,
@@ -315,7 +316,7 @@ fn terminalize_live_invocation_error(
     };
     commit_constructed_transition(&alternative.events, &mut transition_state)?;
     Ok(RuntimeExecution {
-        actions: application.plan.actions.clone(),
+        actions: application.plan.execution.actions.clone(),
         context_manifests: context_signature.signature(),
         events: event_signature.signature(),
         failed: true,
