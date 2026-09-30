@@ -202,18 +202,9 @@ pub fn human_run_status_from_failure(
     action: &str,
     failure: Option<&str>,
 ) -> String {
-    human_status_from_failure("run", run_session_id, action, failure)
-}
-
-fn human_status_from_failure(
-    subject: &str,
-    id: &str,
-    action: &str,
-    failure: Option<&str>,
-) -> String {
     failure.map_or_else(
-        || format!("{subject} {id} {action}\n"),
-        |failure| format!("{subject} {id} {action}: {failure}\n"),
+        || format!("run {run_session_id} {action}\n"),
+        |failure| format!("run {run_session_id} {action}: {failure}\n"),
     )
 }
 
