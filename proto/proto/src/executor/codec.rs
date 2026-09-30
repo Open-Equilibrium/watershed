@@ -1,16 +1,15 @@
 use super::validation::{
-    validate_receipt, validate_request, validate_schema, validate_text, validate_tool_result,
+    validate_preflight, validate_probe, validate_receipt, validate_request, validate_response,
+    validate_start,
 };
 use super::{
-    EXECUTOR_PREFLIGHT_SCHEMA_V0, EXECUTOR_PROBE_SCHEMA_V0, EXECUTOR_RESPONSE_SCHEMA_V0,
-    EXECUTOR_START_SCHEMA_V0, EnforcementReceiptV0, ExecutorErrorCodeV0, ExecutorPreflightV0,
-    ExecutorProbeV0, ExecutorProtocolError, ExecutorRequestV0, ExecutorResolvedPolicyV0,
-    ExecutorResponseV0, ExecutorStartV0, MAX_ERROR_MESSAGE_CHARS, MAX_EXECUTOR_CONTROL_BYTES_V0,
-    MAX_EXECUTOR_PROBE_BYTES_V0, MAX_EXECUTOR_REQUEST_BYTES_V0, MAX_EXECUTOR_RESPONSE_BYTES_V0,
-    MAX_FEATURES, MAX_ID_CHARS, MAX_NAME_CHARS,
+    EnforcementReceiptV0, ExecutorPreflightV0, ExecutorProbeV0, ExecutorProtocolError,
+    ExecutorRequestV0, ExecutorResolvedPolicyV0, ExecutorResponseV0, ExecutorStartV0,
+    MAX_EXECUTOR_CONTROL_BYTES_V0, MAX_EXECUTOR_PROBE_BYTES_V0, MAX_EXECUTOR_REQUEST_BYTES_V0,
+    MAX_EXECUTOR_RESPONSE_BYTES_V0,
 };
-use crate::{canonical_json, parse_unique_json};
-use serde::Serialize;
+use crate::{canonical::nfc_json_string_values, canonical_json, parse_unique_json};
+use serde::{Serialize, de::DeserializeOwned};
 use sha2::{Digest, Sha256};
 
 /// Returns the lowercase SHA-256 of the canonical resolved target policy plus its required LF.
@@ -33,18 +32,7 @@ pub fn validate_enforcement_receipt_v0(
     receipt: &EnforcementReceiptV0,
     expected_policy_digest: &str,
 ) -> Result<(), ExecutorProtocolError> {
-    validate_receipt(receipt)?;
-    if receipt.applied_policy_digest != expected_policy_digest {
-        return Err(ExecutorProtocolError::new(
-            "Executor applied the wrong policy digest",
-        ));
-    }
-    if !receipt.self_protection_active {
-        return Err(ExecutorProtocolError::new(
-            "Executor self-protection was not active",
-        ));
-    }
-    Ok(())
+    validate_receipt(receipt, expected_policy_digest)
 }
 
 /// Serializes and validates one canonical Executor request plus LF.
@@ -52,7 +40,7 @@ pub fn canonical_executor_request_v0(
     request: &ExecutorRequestV0,
 ) -> Result<Vec<u8>, ExecutorProtocolError> {
     validate_request(request)?;
-    canonical_document(request, MAX_EXECUTOR_REQUEST_BYTES_V0, "request")
+    canonical_document(request, MAX_EXECUTOR_REQUEST_BYTES_V0, "request").map(|(bytes, _)| bytes)
 }
 
 /// Serializes and validates one canonical Executor preflight response plus LF.
@@ -63,8 +51,9 @@ pub fn canonical_executor_preflight_v0(
         ExecutorPreflightV0::Ready { request_id, .. }
         | ExecutorPreflightV0::Error { request_id, .. } => request_id,
     };
-    let bytes = canonical_document(preflight, MAX_EXECUTOR_CONTROL_BYTES_V0, "preflight")?;
-    parse_executor_preflight_v0(&bytes, request_id)?;
+    let (bytes, value) = canonical_document(preflight, MAX_EXECUTOR_CONTROL_BYTES_V0, "preflight")?;
+    let preflight = decode_document(nfc_json_string_values(value), "preflight")?;
+    validate_preflight(&preflight, request_id)?;
     Ok(bytes)
 }
 
@@ -72,8 +61,9 @@ pub fn canonical_executor_preflight_v0(
 pub fn canonical_executor_start_v0(
     start: &ExecutorStartV0,
 ) -> Result<Vec<u8>, ExecutorProtocolError> {
-    let bytes = canonical_document(start, MAX_EXECUTOR_CONTROL_BYTES_V0, "start")?;
-    parse_executor_start_v0(&bytes, &start.request_id)?;
+    let (bytes, value) = canonical_document(start, MAX_EXECUTOR_CONTROL_BYTES_V0, "start")?;
+    let normalized = decode_document(nfc_json_string_values(value), "start")?;
+    validate_start(&normalized, &start.request_id)?;
     Ok(bytes)
 }
 
@@ -92,8 +82,9 @@ pub fn canonical_executor_response_v0(
         ),
         ExecutorResponseV0::Error { request_id, .. } => (request_id.as_str(), ""),
     };
-    let bytes = canonical_document(response, MAX_EXECUTOR_RESPONSE_BYTES_V0, "response")?;
-    parse_executor_response_v0(&bytes, request_id, policy_digest)?;
+    let (bytes, value) = canonical_document(response, MAX_EXECUTOR_RESPONSE_BYTES_V0, "response")?;
+    let response = decode_document(nfc_json_string_values(value), "response")?;
+    validate_response(&response, request_id, policy_digest)?;
     Ok(bytes)
 }
 
@@ -101,17 +92,16 @@ pub fn canonical_executor_response_v0(
 pub fn canonical_executor_probe_v0(
     probe: &ExecutorProbeV0,
 ) -> Result<Vec<u8>, ExecutorProtocolError> {
-    let bytes = canonical_document(probe, MAX_EXECUTOR_PROBE_BYTES_V0, "probe")?;
-    parse_executor_probe_v0(&bytes)?;
+    let (bytes, value) = canonical_document(probe, MAX_EXECUTOR_PROBE_BYTES_V0, "probe")?;
+    let probe = decode_document(nfc_json_string_values(value), "probe")?;
+    validate_probe(&probe)?;
     Ok(bytes)
 }
 
 /// Parses one exact canonical LF-terminated Executor request.
 pub fn parse_executor_request_v0(bytes: &[u8]) -> Result<ExecutorRequestV0, ExecutorProtocolError> {
     let value = parse_canonical_document(bytes, MAX_EXECUTOR_REQUEST_BYTES_V0, "request")?;
-    let request: ExecutorRequestV0 = serde_json::from_value(value).map_err(|error| {
-        ExecutorProtocolError::new(format!("invalid Executor request: {error}"))
-    })?;
+    let request = decode_document(value, "request")?;
     validate_request(&request)?;
     Ok(request)
 }
@@ -122,33 +112,8 @@ pub fn parse_executor_preflight_v0(
     expected_request_id: &str,
 ) -> Result<ExecutorPreflightV0, ExecutorProtocolError> {
     let value = parse_canonical_document(bytes, MAX_EXECUTOR_CONTROL_BYTES_V0, "preflight")?;
-    let preflight: ExecutorPreflightV0 = serde_json::from_value(value).map_err(|error| {
-        ExecutorProtocolError::new(format!("invalid Executor preflight: {error}"))
-    })?;
-    let (schema, request_id) = match &preflight {
-        ExecutorPreflightV0::Ready { schema, request_id }
-        | ExecutorPreflightV0::Error {
-            schema, request_id, ..
-        } => (schema, request_id),
-    };
-    validate_schema(schema, EXECUTOR_PREFLIGHT_SCHEMA_V0, "preflight")?;
-    validate_text(request_id, "request_id", MAX_ID_CHARS)?;
-    if request_id != expected_request_id {
-        return Err(ExecutorProtocolError::new(
-            "Executor preflight request id does not match",
-        ));
-    }
-    if let ExecutorPreflightV0::Error { code, message, .. } = &preflight {
-        if !matches!(
-            code,
-            ExecutorErrorCodeV0::Unavailable | ExecutorErrorCodeV0::PolicyUnsupported
-        ) {
-            return Err(ExecutorProtocolError::new(
-                "Executor preflight error code is invalid",
-            ));
-        }
-        validate_text(message, "error message", MAX_ERROR_MESSAGE_CHARS)?;
-    }
+    let preflight = decode_document(value, "preflight")?;
+    validate_preflight(&preflight, expected_request_id)?;
     Ok(preflight)
 }
 
@@ -158,15 +123,8 @@ pub fn parse_executor_start_v0(
     expected_request_id: &str,
 ) -> Result<ExecutorStartV0, ExecutorProtocolError> {
     let value = parse_canonical_document(bytes, MAX_EXECUTOR_CONTROL_BYTES_V0, "start")?;
-    let start: ExecutorStartV0 = serde_json::from_value(value)
-        .map_err(|error| ExecutorProtocolError::new(format!("invalid Executor start: {error}")))?;
-    validate_schema(&start.schema, EXECUTOR_START_SCHEMA_V0, "start")?;
-    validate_text(&start.request_id, "request_id", MAX_ID_CHARS)?;
-    if start.request_id != expected_request_id {
-        return Err(ExecutorProtocolError::new(
-            "Executor start request id does not match",
-        ));
-    }
+    let start = decode_document(value, "start")?;
+    validate_start(&start, expected_request_id)?;
     Ok(start)
 }
 
@@ -177,76 +135,25 @@ pub fn parse_executor_response_v0(
     expected_policy_digest: &str,
 ) -> Result<ExecutorResponseV0, ExecutorProtocolError> {
     let value = parse_canonical_document(bytes, MAX_EXECUTOR_RESPONSE_BYTES_V0, "response")?;
-    let response: ExecutorResponseV0 = serde_json::from_value(value).map_err(|error| {
-        ExecutorProtocolError::new(format!("invalid Executor response: {error}"))
-    })?;
-    let (schema, request_id) = match &response {
-        ExecutorResponseV0::Completed {
-            schema, request_id, ..
-        }
-        | ExecutorResponseV0::Error {
-            schema, request_id, ..
-        } => (schema, request_id),
-    };
-    validate_schema(schema, EXECUTOR_RESPONSE_SCHEMA_V0, "response")?;
-    validate_text(request_id, "request_id", MAX_ID_CHARS)?;
-    if request_id != expected_request_id {
-        return Err(ExecutorProtocolError::new(
-            "Executor response request id does not match",
-        ));
-    }
-    match &response {
-        ExecutorResponseV0::Completed {
-            enforcement,
-            tool_result,
-            ..
-        } => {
-            validate_enforcement_receipt_v0(enforcement, expected_policy_digest)?;
-            validate_tool_result(tool_result)?;
-        }
-        ExecutorResponseV0::Error { code, message, .. } => {
-            if *code != ExecutorErrorCodeV0::SandboxSetupFailed {
-                return Err(ExecutorProtocolError::new(
-                    "Executor terminal error code is invalid",
-                ));
-            }
-            validate_text(message, "error message", MAX_ERROR_MESSAGE_CHARS)?;
-        }
-    }
+    let response = decode_document(value, "response")?;
+    validate_response(&response, expected_request_id, expected_policy_digest)?;
     Ok(response)
 }
 
 /// Parses and validates one canonical Executor readiness response.
 pub fn parse_executor_probe_v0(bytes: &[u8]) -> Result<ExecutorProbeV0, ExecutorProtocolError> {
     let value = parse_canonical_document(bytes, MAX_EXECUTOR_PROBE_BYTES_V0, "probe")?;
-    let probe: ExecutorProbeV0 = serde_json::from_value(value)
-        .map_err(|error| ExecutorProtocolError::new(format!("invalid Executor probe: {error}")))?;
-    validate_schema(&probe.schema, EXECUTOR_PROBE_SCHEMA_V0, "probe")?;
-    for (name, value) in [
-        ("executor", &probe.executor),
-        ("executor_version", &probe.executor_version),
-        ("backend", &probe.backend),
-        ("backend_version", &probe.backend_version),
-        ("platform", &probe.platform),
-    ] {
-        validate_text(value, name, MAX_NAME_CHARS)?;
-    }
-    if probe.protocol_versions.is_empty()
-        || probe.protocol_versions.len() > MAX_FEATURES
-        || probe.supported_policy_features.len() > MAX_FEATURES
-    {
-        return Err(ExecutorProtocolError::new(
-            "Executor probe list bounds are invalid",
-        ));
-    }
-    for value in probe
-        .protocol_versions
-        .iter()
-        .chain(&probe.supported_policy_features)
-    {
-        validate_text(value, "probe feature", MAX_NAME_CHARS)?;
-    }
+    let probe = decode_document(value, "probe")?;
+    validate_probe(&probe)?;
     Ok(probe)
+}
+
+fn decode_document<T: DeserializeOwned>(
+    value: serde_json::Value,
+    kind: &str,
+) -> Result<T, ExecutorProtocolError> {
+    serde_json::from_value(value)
+        .map_err(|error| ExecutorProtocolError::new(format!("invalid Executor {kind}: {error}")))
 }
 
 fn parse_canonical_document(
@@ -282,7 +189,7 @@ fn canonical_document<T: Serialize>(
     document: &T,
     limit: usize,
     kind: &str,
-) -> Result<Vec<u8>, ExecutorProtocolError> {
+) -> Result<(Vec<u8>, serde_json::Value), ExecutorProtocolError> {
     let value = serde_json::to_value(document)
         .map_err(|error| ExecutorProtocolError::new(format!("invalid Executor {kind}: {error}")))?;
     let mut bytes = canonical_json(&value)
@@ -294,5 +201,5 @@ fn canonical_document<T: Serialize>(
             "Executor {kind} exceeds its byte limit"
         )));
     }
-    Ok(bytes)
+    Ok((bytes, value))
 }

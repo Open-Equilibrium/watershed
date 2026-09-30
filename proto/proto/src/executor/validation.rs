@@ -1,11 +1,14 @@
 use super::codec::resolved_policy_digest_v0;
 use super::stream::decode_executor_stream_v0;
 use super::{
-    EXECUTOR_PROTECTED_DESCRIPTOR_BASE_V0, EXECUTOR_REQUEST_SCHEMA_V0, EnforcementReceiptV0,
-    ExecutorExecVectorErrorV0, ExecutorProtocolError, ExecutorRequestV0,
+    EXECUTOR_PREFLIGHT_SCHEMA_V0, EXECUTOR_PROBE_SCHEMA_V0, EXECUTOR_PROTECTED_DESCRIPTOR_BASE_V0,
+    EXECUTOR_REQUEST_SCHEMA_V0, EXECUTOR_RESPONSE_SCHEMA_V0, EXECUTOR_START_SCHEMA_V0,
+    EnforcementReceiptV0, ExecutorErrorCodeV0, ExecutorExecVectorErrorV0, ExecutorPreflightV0,
+    ExecutorProbeV0, ExecutorProtocolError, ExecutorRequestV0, ExecutorResponseV0, ExecutorStartV0,
     ExecutorToolClassificationV0, ExecutorToolResultV0, ExecutorToolStatusV0,
-    MAX_ENVIRONMENT_ENTRIES, MAX_EXECUTOR_PROTECTED_OBJECTS_V0, MAX_EXECUTOR_TOOL_STREAM_BYTES_V0,
-    MAX_ID_CHARS, MAX_NAME_CHARS, MAX_PATH_CHARS, validate_executor_exec_vector_v0,
+    MAX_ENVIRONMENT_ENTRIES, MAX_ERROR_MESSAGE_CHARS, MAX_EXECUTOR_PROTECTED_OBJECTS_V0,
+    MAX_EXECUTOR_TOOL_STREAM_BYTES_V0, MAX_FEATURES, MAX_ID_CHARS, MAX_NAME_CHARS, MAX_PATH_CHARS,
+    validate_executor_exec_vector_v0,
 };
 use crate::session_object::decode_lowercase_sha256_hex;
 
@@ -96,8 +99,124 @@ pub(super) fn validate_request(request: &ExecutorRequestV0) -> Result<(), Execut
     Ok(())
 }
 
+pub(super) fn validate_preflight(
+    preflight: &ExecutorPreflightV0,
+    expected_request_id: &str,
+) -> Result<(), ExecutorProtocolError> {
+    let (schema, request_id) = match preflight {
+        ExecutorPreflightV0::Ready { schema, request_id }
+        | ExecutorPreflightV0::Error {
+            schema, request_id, ..
+        } => (schema, request_id),
+    };
+    validate_schema(schema, EXECUTOR_PREFLIGHT_SCHEMA_V0, "preflight")?;
+    validate_text(request_id, "request_id", MAX_ID_CHARS)?;
+    if request_id != expected_request_id {
+        return Err(ExecutorProtocolError::new(
+            "Executor preflight request id does not match",
+        ));
+    }
+    if let ExecutorPreflightV0::Error { code, message, .. } = preflight {
+        if !matches!(
+            code,
+            ExecutorErrorCodeV0::Unavailable | ExecutorErrorCodeV0::PolicyUnsupported
+        ) {
+            return Err(ExecutorProtocolError::new(
+                "Executor preflight error code is invalid",
+            ));
+        }
+        validate_text(message, "error message", MAX_ERROR_MESSAGE_CHARS)?;
+    }
+    Ok(())
+}
+
+pub(super) fn validate_start(
+    start: &ExecutorStartV0,
+    expected_request_id: &str,
+) -> Result<(), ExecutorProtocolError> {
+    validate_schema(&start.schema, EXECUTOR_START_SCHEMA_V0, "start")?;
+    validate_text(&start.request_id, "request_id", MAX_ID_CHARS)?;
+    if start.request_id != expected_request_id {
+        return Err(ExecutorProtocolError::new(
+            "Executor start request id does not match",
+        ));
+    }
+    Ok(())
+}
+
+pub(super) fn validate_response(
+    response: &ExecutorResponseV0,
+    expected_request_id: &str,
+    expected_policy_digest: &str,
+) -> Result<(), ExecutorProtocolError> {
+    let (schema, request_id) = match response {
+        ExecutorResponseV0::Completed {
+            schema, request_id, ..
+        }
+        | ExecutorResponseV0::Error {
+            schema, request_id, ..
+        } => (schema, request_id),
+    };
+    validate_schema(schema, EXECUTOR_RESPONSE_SCHEMA_V0, "response")?;
+    validate_text(request_id, "request_id", MAX_ID_CHARS)?;
+    if request_id != expected_request_id {
+        return Err(ExecutorProtocolError::new(
+            "Executor response request id does not match",
+        ));
+    }
+    match response {
+        ExecutorResponseV0::Completed {
+            enforcement,
+            tool_result,
+            ..
+        } => {
+            validate_receipt(enforcement, expected_policy_digest)?;
+            validate_tool_result(tool_result)?;
+        }
+        ExecutorResponseV0::Error { code, message, .. } => {
+            if *code != ExecutorErrorCodeV0::SandboxSetupFailed {
+                return Err(ExecutorProtocolError::new(
+                    "Executor terminal error code is invalid",
+                ));
+            }
+            validate_text(message, "error message", MAX_ERROR_MESSAGE_CHARS)?;
+        }
+    }
+    Ok(())
+}
+
+pub(super) fn validate_probe(probe: &ExecutorProbeV0) -> Result<(), ExecutorProtocolError> {
+    validate_schema(&probe.schema, EXECUTOR_PROBE_SCHEMA_V0, "probe")?;
+    for (name, value) in [
+        ("executor", &probe.executor),
+        ("executor_version", &probe.executor_version),
+        ("backend", &probe.backend),
+        ("backend_version", &probe.backend_version),
+        ("platform", &probe.platform),
+    ] {
+        validate_text(value, name, MAX_NAME_CHARS)?;
+    }
+    if probe.protocol_versions.is_empty()
+        || probe.protocol_versions.len() > MAX_FEATURES
+        || probe.supported_policy_features.len() > MAX_FEATURES
+    {
+        return Err(ExecutorProtocolError::new(
+            "Executor probe list bounds are invalid",
+        ));
+    }
+    for value in probe
+        .protocol_versions
+        .iter()
+        .chain(&probe.supported_policy_features)
+    {
+        validate_text(value, "probe feature", MAX_NAME_CHARS)?;
+    }
+    Ok(())
+}
+
 pub(super) fn validate_receipt(
     receipt: &EnforcementReceiptV0,
+    expected_policy_digest: &str,
 ) -> Result<(), ExecutorProtocolError> {
     validate_digest(&receipt.applied_policy_digest, "applied_policy_digest")?;
     for (name, value) in [
@@ -108,6 +227,16 @@ pub(super) fn validate_receipt(
         ("platform", &receipt.platform),
     ] {
         validate_text(value, name, MAX_NAME_CHARS)?;
+    }
+    if receipt.applied_policy_digest != expected_policy_digest {
+        return Err(ExecutorProtocolError::new(
+            "Executor applied the wrong policy digest",
+        ));
+    }
+    if !receipt.self_protection_active {
+        return Err(ExecutorProtocolError::new(
+            "Executor self-protection was not active",
+        ));
     }
     Ok(())
 }

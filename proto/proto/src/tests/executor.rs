@@ -286,6 +286,117 @@ fn executor_start_is_one_closed_bounded_record_bound_to_the_request() {
 }
 
 #[test]
+fn executor_generated_records_bind_normalized_ids_to_the_original_request() {
+    let request_id = "e\u{301}".to_owned();
+    for (kind, result) in [
+        (
+            "preflight",
+            canonical_executor_preflight_v0(&ExecutorPreflightV0::Ready {
+                request_id: request_id.clone(),
+                schema: EXECUTOR_PREFLIGHT_SCHEMA_V0.to_owned(),
+            }),
+        ),
+        (
+            "start",
+            canonical_executor_start_v0(&ExecutorStartV0 {
+                request_id: request_id.clone(),
+                schema: EXECUTOR_START_SCHEMA_V0.to_owned(),
+            }),
+        ),
+        (
+            "response",
+            canonical_executor_response_v0(&ExecutorResponseV0::Error {
+                code: ExecutorErrorCodeV0::SandboxSetupFailed,
+                message: "setup failed".to_owned(),
+                request_id,
+                schema: EXECUTOR_RESPONSE_SCHEMA_V0.to_owned(),
+            }),
+        ),
+    ] {
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            format!("Executor {kind} request id does not match")
+        );
+    }
+}
+
+#[test]
+fn executor_generated_diagnostics_enforce_the_normalized_character_bound() {
+    for count in [4_000, 4_001] {
+        let preflight = ExecutorPreflightV0::Error {
+            code: ExecutorErrorCodeV0::Unavailable,
+            message: "e\u{301}".repeat(count),
+            request_id: "request-1".to_owned(),
+            schema: EXECUTOR_PREFLIGHT_SCHEMA_V0.to_owned(),
+        };
+        let response = ExecutorResponseV0::Error {
+            code: ExecutorErrorCodeV0::SandboxSetupFailed,
+            message: "e\u{301}".repeat(count),
+            request_id: "request-1".to_owned(),
+            schema: EXECUTOR_RESPONSE_SCHEMA_V0.to_owned(),
+        };
+        for (result, wire) in [
+            (
+                canonical_executor_preflight_v0(&preflight),
+                canonical_wire(&preflight),
+            ),
+            (
+                canonical_executor_response_v0(&response),
+                canonical_wire(&response),
+            ),
+        ] {
+            if count == 4_000 {
+                assert_eq!(result.unwrap(), wire);
+            } else {
+                assert_eq!(
+                    result.unwrap_err().to_string(),
+                    "Executor error message is invalid"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn executor_generated_identity_enforces_the_normalized_character_bound() {
+    for count in [256, 257] {
+        let mut probe = probe();
+        probe.backend = "e\u{301}".repeat(count);
+        let response = ExecutorResponseV0::Completed {
+            schema: EXECUTOR_RESPONSE_SCHEMA_V0.to_owned(),
+            request_id: "request-1".to_owned(),
+            enforcement: EnforcementReceiptV0 {
+                backend: probe.backend.clone(),
+                ..receipt()
+            },
+            tool_result: ExecutorToolResultV0 {
+                classification: None,
+                exit_code: Some(0),
+                status: ExecutorToolStatusV0::Completed,
+                stderr_base64: String::new(),
+                stdout_base64: String::new(),
+            },
+        };
+        for (result, wire) in [
+            (canonical_executor_probe_v0(&probe), canonical_wire(&probe)),
+            (
+                canonical_executor_response_v0(&response),
+                canonical_wire(&response),
+            ),
+        ] {
+            if count == 256 {
+                assert_eq!(result.unwrap(), wire);
+            } else {
+                assert_eq!(
+                    result.unwrap_err().to_string(),
+                    "Executor backend is invalid"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn executor_response_is_closed_and_bound_to_request_and_policy() {
     let response = ExecutorResponseV0::Completed {
         schema: EXECUTOR_RESPONSE_SCHEMA_V0.to_owned(),
