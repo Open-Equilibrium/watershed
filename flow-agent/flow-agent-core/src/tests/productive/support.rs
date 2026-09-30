@@ -29,7 +29,7 @@ pub(super) use sinks::{
 pub(super) use tools::{FakeToolExecutionFault, FakeToolExecutor, UnsupportedToolExecutor};
 
 fn fake_tool_request_hash() -> String {
-    crate::runtime::session_definition::sha256_hash_text(b"fake Tool request")
+    crate::runtime::digest::prefixed_sha256_hex(b"fake Tool request")
 }
 
 pub(super) fn fake_tool_attempt_output(tool_result: serde_json::Value) -> serde_json::Value {

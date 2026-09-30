@@ -57,13 +57,9 @@ pub fn session_definition_metadata(
     })?;
     Ok(SessionDefinitionMetadata {
         flow_definition_id: flow_block.identity.id.clone(),
-        registry_hash: sha256_hash_text(registry_json.as_bytes()),
-        flow_definition_hash: sha256_hash_text(flow_json.as_bytes()),
+        registry_hash: prefixed_sha256_hex(registry_json.as_bytes()),
+        flow_definition_hash: prefixed_sha256_hex(flow_json.as_bytes()),
     })
-}
-
-pub fn sha256_hash_text(bytes: &[u8]) -> String {
-    prefixed_sha256_hex(bytes)
 }
 
 pub fn verify_resume_definition_metadata_values(

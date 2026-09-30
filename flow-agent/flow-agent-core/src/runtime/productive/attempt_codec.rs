@@ -1,10 +1,10 @@
 use super::tool_result::{parse_tool_result, validate_tool_result_streams};
 use crate::runtime::{
+    digest::prefixed_sha256_hex,
     run_attempts::{
         ProductiveRecovery, RunAttemptOutcome, RunAttemptResult, ToolTerminalClassification,
         resolve_tool_terminal,
     },
-    session_definition::sha256_hash_text,
     types::RuntimeError,
 };
 use proto::EventType;
@@ -24,7 +24,7 @@ pub(super) enum ExecutorAttemptStage {
 pub(super) fn canonical_request_hash(value: &serde_json::Value) -> Result<String, RuntimeError> {
     let bytes = proto::canonical_json(value)
         .map_err(|error| RuntimeError::Protocol(format!("request hashing failed: {error}")))?;
-    Ok(sha256_hash_text(bytes.as_bytes()))
+    Ok(prefixed_sha256_hex(bytes.as_bytes()))
 }
 
 pub(super) fn cancelled_attempt_output() -> serde_json::Value {
