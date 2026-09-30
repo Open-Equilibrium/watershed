@@ -126,33 +126,6 @@ fn tool_results_enforce_their_durable_value_contracts() {
     })
     .expect("one binary Tool stream becomes one session object");
     assert_eq!(one_binary_stream.objects.len(), 1);
-
-    for result in [
-        attempt_result("completed", None),
-        attempt_result(
-            "completed",
-            Some({
-                let mut output =
-                    attempt_output(serde_json::json!({"type": "string", "value": "value"}));
-                output["schema"] = "wrong".into();
-                output
-            }),
-        ),
-        attempt_result(
-            "completed",
-            Some(attempt_output(
-                serde_json::json!({"type": "integer", "value": "01"}),
-            )),
-        ),
-        attempt_result(
-            "completed",
-            Some(attempt_output(serde_json::json!({
-                "type": "string", "value": "not a Tool result envelope"
-            }))),
-        ),
-    ] {
-        assert!(recovered_tool_value(&result, &DefaultRecovery).is_err());
-    }
 }
 
 #[test]
@@ -295,7 +268,7 @@ fn recovered_tool_results_reject_semantically_inconsistent_durable_values() {
     .expect("valid Tool result becomes durable");
     let valid_output =
         attempt_output(serde_json::to_value(durable.value).expect("Tool value serializes"));
-    let cases: [(&str, RecoveredToolMutation, &str); 6] = [
+    let cases: [(&str, RecoveredToolMutation, &str); 7] = [
         (
             "outer-schema",
             |output| output["schema"] = "wrong".into(),
@@ -331,6 +304,11 @@ fn recovered_tool_results_reject_semantically_inconsistent_durable_values() {
             "exit-code",
             |output| output["tool_result"]["value"]["exit_code"]["value"] = "7".into(),
             "exit code does not match",
+        ),
+        (
+            "canonical-integer",
+            |output| output["tool_result"]["value"]["exit_code"]["value"] = "00".into(),
+            "canonical decimal",
         ),
     ];
 
