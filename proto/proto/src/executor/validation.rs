@@ -1,4 +1,3 @@
-use super::codec::resolved_policy_digest_v0;
 use super::stream::decode_executor_stream_v0;
 use super::{
     EXECUTOR_PREFLIGHT_SCHEMA_V0, EXECUTOR_PROBE_SCHEMA_V0, EXECUTOR_PROTECTED_DESCRIPTOR_BASE_V0,
@@ -8,7 +7,7 @@ use super::{
     ExecutorToolClassificationV0, ExecutorToolResultV0, ExecutorToolStatusV0,
     MAX_ENVIRONMENT_ENTRIES, MAX_ERROR_MESSAGE_CHARS, MAX_EXECUTOR_PROTECTED_OBJECTS_V0,
     MAX_EXECUTOR_TOOL_STREAM_BYTES_V0, MAX_FEATURES, MAX_ID_CHARS, MAX_NAME_CHARS, MAX_PATH_CHARS,
-    validate_executor_exec_vector_v0,
+    resolved_policy_digest_v0, validate_executor_exec_vector_v0,
 };
 use crate::session_object::decode_lowercase_sha256_hex;
 

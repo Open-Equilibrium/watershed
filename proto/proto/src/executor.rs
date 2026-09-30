@@ -1,3 +1,5 @@
+use crate::canonical_json;
+use sha2::{Digest, Sha256};
 use std::{collections::BTreeMap, fmt, time::Duration};
 
 mod codec;
@@ -61,6 +63,21 @@ const MAX_PATH_CHARS: usize = 4_096;
 const MAX_ENVIRONMENT_ENTRIES: usize = 256;
 const MAX_FEATURES: usize = 256;
 const MAX_ERROR_MESSAGE_CHARS: usize = 4_000;
+
+/// Returns the lowercase SHA-256 of the canonical resolved target policy plus its required LF.
+pub fn resolved_policy_digest_v0(
+    policy: &ExecutorResolvedPolicyV0,
+) -> Result<String, ExecutorProtocolError> {
+    let value = serde_json::to_value(policy).map_err(|error| {
+        ExecutorProtocolError::new(format!("invalid resolved Executor policy: {error}"))
+    })?;
+    let mut canonical = canonical_json(&value).map_err(|error| {
+        ExecutorProtocolError::new(format!("invalid resolved Executor policy: {error}"))
+    })?;
+    canonical.push('\n');
+    let digest = Sha256::digest(canonical.as_bytes());
+    Ok(digest.iter().map(|byte| format!("{byte:02x}")).collect())
+}
 
 /// Reason a process execution vector violates its v0 protocol bound.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

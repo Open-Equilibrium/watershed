@@ -4,31 +4,14 @@ use super::validation::{
 };
 use super::{
     EnforcementReceiptV0, ExecutorPreflightV0, ExecutorProbeV0, ExecutorProtocolError,
-    ExecutorRequestV0, ExecutorResolvedPolicyV0, ExecutorResponseV0, ExecutorStartV0,
-    MAX_EXECUTOR_CONTROL_BYTES_V0, MAX_EXECUTOR_PROBE_BYTES_V0, MAX_EXECUTOR_REQUEST_BYTES_V0,
-    MAX_EXECUTOR_RESPONSE_BYTES_V0,
+    ExecutorRequestV0, ExecutorResponseV0, ExecutorStartV0, MAX_EXECUTOR_CONTROL_BYTES_V0,
+    MAX_EXECUTOR_PROBE_BYTES_V0, MAX_EXECUTOR_REQUEST_BYTES_V0, MAX_EXECUTOR_RESPONSE_BYTES_V0,
 };
 use crate::{
     canonical::{nfc_json_string_values, nfc_string},
     canonical_json, parse_unique_json,
 };
 use serde::{Serialize, de::DeserializeOwned};
-use sha2::{Digest, Sha256};
-
-/// Returns the lowercase SHA-256 of the canonical resolved target policy plus its required LF.
-pub fn resolved_policy_digest_v0(
-    policy: &ExecutorResolvedPolicyV0,
-) -> Result<String, ExecutorProtocolError> {
-    let value = serde_json::to_value(policy).map_err(|error| {
-        ExecutorProtocolError::new(format!("invalid resolved Executor policy: {error}"))
-    })?;
-    let mut canonical = canonical_json(&value).map_err(|error| {
-        ExecutorProtocolError::new(format!("invalid resolved Executor policy: {error}"))
-    })?;
-    canonical.push('\n');
-    let digest = Sha256::digest(canonical.as_bytes());
-    Ok(digest.iter().map(|byte| format!("{byte:02x}")).collect())
-}
 
 /// Validates active self-protection and the digest of the complete policy Flow requested.
 pub fn validate_enforcement_receipt_v0(
