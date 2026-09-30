@@ -7,12 +7,14 @@ use crate::runtime::{
     conversations::{
         ConversationAttemptLog, MAX_CONVERSATION_RECORD_BYTES, MAX_CONVERSATION_STATUS_BYTES,
         RunLogProjectionPage, RunLogRecord, append_jsonl, canonical_json, inspect_run_attempts,
-        project_tool_run_log, project_tool_run_log_page, read_jsonl,
+        project_tool_run_log, project_tool_run_log_page, read_conversation_recovery_definition,
+        read_jsonl,
     },
     run_attempts::{
         ProductiveAttemptLog, RunAttemptIntent, RunAttemptKind, RunAttemptOutcome,
         ToolEnforcementExpectation,
     },
+    types::MAX_SESSION_METADATA_BYTES,
 };
 use std::fs;
 
@@ -52,6 +54,72 @@ fn projection_workspace(name: &str) -> TempWorkspace {
     let workspace = empty_workspace(name);
     create_review_run(&workspace);
     workspace
+}
+
+#[test]
+fn productive_run_log_reads_admit_aggregate_metadata_capacity() {
+    let workspace = empty_workspace("productive-run-log-read-capacity");
+    super::recovery_fixtures::standard_review_recovery_writer(
+        &workspace,
+        None,
+        &Default::default(),
+    );
+    let run = crate::tests::helpers::workspace_session_dir(&workspace).join("review/runs/review-1");
+    let log = run.join("run-log.jsonl");
+    let recovery = run.join("recovery.jsonl");
+    let recovery_bytes = fs::read(&recovery).expect("recovery header reads");
+    let mut remaining = usize::try_from(MAX_SESSION_METADATA_BYTES).unwrap()
+        - recovery_bytes.len()
+        - usize::try_from(fs::metadata(&log).unwrap().len()).unwrap();
+    let mut count = 0;
+    while remaining > 0 {
+        count += 1;
+        let intent = intent_record(count);
+        let intent_bytes = canonical_json(&intent).unwrap().len() + 1;
+        let terminal_bytes = canonical_json(&terminal_record(count, 0)).unwrap().len() + 1;
+        let stored_terminal_bytes = (remaining - intent_bytes).min(MAX_CONVERSATION_RECORD_BYTES);
+        assert!(stored_terminal_bytes >= terminal_bytes);
+        let terminal = terminal_record(count, stored_terminal_bytes - terminal_bytes);
+        append_jsonl(&log, &intent).expect("capacity fixture intent appends");
+        append_jsonl(&log, &terminal).expect("capacity fixture result appends");
+        remaining -= intent_bytes + stored_terminal_bytes;
+    }
+    assert_eq!(
+        fs::metadata(&log).unwrap().len() + u64::try_from(recovery_bytes.len()).unwrap(),
+        MAX_SESSION_METADATA_BYTES
+    );
+    assert_eq!(
+        inspect_run_attempts(&workspace, "review", "review-1")
+            .expect("exact aggregate metadata capacity reads")
+            .len(),
+        count
+    );
+    read_conversation_recovery_definition(&workspace, "review", "review-1")
+        .expect("exact aggregate metadata capacity permits definition selection");
+
+    let mut oversized_recovery = recovery_bytes.clone();
+    oversized_recovery.push(b' ');
+    fs::write(&recovery, oversized_recovery).expect("one additional recovery byte writes");
+    let error = read_conversation_recovery_definition(&workspace, "review", "review-1")
+        .expect_err("definition selection rejects one additional metadata byte");
+    assert!(
+        error
+            .to_string()
+            .contains("metadata exceeds its byte limit"),
+        "{error}"
+    );
+
+    fs::write(&recovery, recovery_bytes).expect("exact recovery header restores");
+    append_jsonl(&log, &intent_record(count + 1)).expect("next intent appends");
+    append_jsonl(
+        &log,
+        &terminal_record(count + 1, MAX_CONVERSATION_RECORD_BYTES - 1024),
+    )
+    .expect("next result rotates the Run Log");
+    assert!(run.join("run-log.000002.jsonl").exists());
+    let error = inspect_run_attempts(&workspace, "review", "review-1")
+        .expect_err("inspection rejects the oversized aggregate Run Log");
+    assert!(error.to_string().contains("exceeds max"), "{error}");
 }
 
 #[test]

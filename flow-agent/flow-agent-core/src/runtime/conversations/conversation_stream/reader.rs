@@ -1,7 +1,8 @@
 use super::super::contract::{
     MAX_CONVERSATION_IO_BUFFER_BYTES, MAX_CONVERSATION_RECORD_BYTES, MAX_CONVERSATION_SCAN_BYTES,
-    MAX_CONVERSATION_SCAN_RECORDS, protocol,
+    MAX_CONVERSATION_SCAN_RECORDS, RUN_LOG_LEAF, protocol,
 };
+use super::super::productive_storage::productive_metadata_usage;
 use super::super::storage::{
     ConversationScanQuantum, canonical_json, record_conversation_read_request,
 };
@@ -176,10 +177,16 @@ pub(crate) fn read_anchored_jsonl<T>(path: &AnchoredFile) -> Result<Vec<T>, Runt
 where
     T: Serialize + for<'de> Deserialize<'de>,
 {
+    let maximum_total_bytes = if path.leaf == Path::new(RUN_LOG_LEAF) {
+        Some(productive_metadata_usage(&path.parent)?.run_log_byte_limit)
+    } else {
+        None
+    };
     let mut records = Vec::new();
     let mut cursor = None;
     loop {
-        let (mut quantum, next) = read_anchored_jsonl_quantum(path, cursor)?;
+        let (mut quantum, next) =
+            read_anchored_jsonl_quantum_with_limit(path, cursor, maximum_total_bytes)?;
         records.append(&mut quantum);
         let Some(next) = next else { break };
         cursor = Some(next);
@@ -193,6 +200,7 @@ pub(crate) struct JsonlQuantumCursor {
     segment_count: usize,
     byte_offset: u64,
     snapshot_bytes: u64,
+    total_bytes: u64,
 }
 
 pub(crate) fn validate_jsonl_segment_snapshot(
@@ -220,6 +228,7 @@ pub(crate) fn validate_jsonl_segment_snapshot(
 fn read_jsonl_quantum_from_segments<T>(
     segment_count: usize,
     cursor: Option<JsonlQuantumCursor>,
+    maximum_total_bytes: Option<u64>,
     mut open_segment: impl FnMut(usize) -> Result<(File, PathBuf), RuntimeError>,
 ) -> Result<(Vec<T>, Option<JsonlQuantumCursor>), RuntimeError>
 where
@@ -230,6 +239,7 @@ where
         segment_count,
         byte_offset: 0,
         snapshot_bytes: 0,
+        total_bytes: 0,
     });
     if cursor.segment_count != segment_count {
         return Err(protocol("conversation stream changed while it was scanned"));
@@ -256,6 +266,11 @@ where
         file.seek(SeekFrom::Start(cursor.byte_offset))
             .map_err(|source| path_io_error(&path, source))?;
         let remaining = segment_bytes.saturating_sub(cursor.byte_offset);
+        if maximum_total_bytes
+            .is_some_and(|limit| cursor.total_bytes.saturating_add(remaining) > limit)
+        {
+            return Err(protocol("productive metadata exceeds its byte limit"));
+        }
         let mut reader =
             BufReader::with_capacity(MAX_CONVERSATION_IO_BUFFER_BYTES, file.take(remaining));
         let mut line = Vec::with_capacity(MAX_CONVERSATION_RECORD_BYTES.saturating_add(1));
@@ -309,6 +324,7 @@ where
             records.push(value);
             stored_bytes = stored_bytes.saturating_add(read);
             cursor.byte_offset = cursor.byte_offset.saturating_add(read);
+            cursor.total_bytes = cursor.total_bytes.saturating_add(read);
         }
         if cursor.byte_offset != segment_bytes {
             return Err(protocol(format!(
@@ -335,7 +351,7 @@ where
         Some(cursor) => cursor.segment_count,
         None => conversation_segment_inventory(path)?,
     };
-    read_jsonl_quantum_from_segments(segment_count, cursor, |segment_index| {
+    read_jsonl_quantum_from_segments(segment_count, cursor, None, |segment_index| {
         let segment = conversation_segment_path_for_ordinal(path, segment_index + 1)?;
         let file = File::open(&segment).map_err(|source| path_io_error(&segment, source))?;
         Ok((file, segment))
@@ -345,6 +361,17 @@ where
 pub(crate) fn read_anchored_jsonl_quantum<T>(
     path: &AnchoredFile,
     cursor: Option<JsonlQuantumCursor>,
+) -> Result<(Vec<T>, Option<JsonlQuantumCursor>), RuntimeError>
+where
+    T: Serialize + for<'de> Deserialize<'de>,
+{
+    read_anchored_jsonl_quantum_with_limit(path, cursor, None)
+}
+
+fn read_anchored_jsonl_quantum_with_limit<T>(
+    path: &AnchoredFile,
+    cursor: Option<JsonlQuantumCursor>,
+    maximum_total_bytes: Option<u64>,
 ) -> Result<(Vec<T>, Option<JsonlQuantumCursor>), RuntimeError>
 where
     T: Serialize + for<'de> Deserialize<'de>,
@@ -359,17 +386,22 @@ where
             },
         )?,
     };
-    read_jsonl_quantum_from_segments(segment_count, cursor, |segment_index| {
-        let segment = segmented_jsonl_path(
-            path,
-            u64::try_from(segment_index.saturating_add(1)).unwrap_or(u64::MAX),
-        )?;
-        let (file, metadata) = open_anchored_file_for_read(&segment)?;
-        if metadata.len() > MAX_SESSION_SEGMENT_BYTES {
-            return Err(protocol(
-                "conversation stream segment exceeds its byte limit",
-            ));
-        }
-        Ok((file, segment.diagnostic_path().to_owned()))
-    })
+    read_jsonl_quantum_from_segments(
+        segment_count,
+        cursor,
+        maximum_total_bytes,
+        |segment_index| {
+            let segment = segmented_jsonl_path(
+                path,
+                u64::try_from(segment_index.saturating_add(1)).unwrap_or(u64::MAX),
+            )?;
+            let (file, metadata) = open_anchored_file_for_read(&segment)?;
+            if metadata.len() > MAX_SESSION_SEGMENT_BYTES {
+                return Err(protocol(
+                    "conversation stream segment exceeds its byte limit",
+                ));
+            }
+            Ok((file, segment.diagnostic_path().to_owned()))
+        },
+    )
 }
