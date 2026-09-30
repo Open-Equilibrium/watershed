@@ -128,6 +128,18 @@ fn fake_companions_cover_the_closed_executor_protocol_matrix() {
         ("probe-stderr", proto::ExecutorErrorCodeV0::Unavailable),
     ] {
         let executor = stage_case(&fixture, &root, mode);
+        if mode == "closed-schema" {
+            let probe = Command::new(&executor)
+                .arg("--probe")
+                .output()
+                .expect("closed-schema probe runs");
+            assert!(probe.status.success());
+            let error = proto::parse_executor_probe_v0(&probe.stdout).unwrap_err();
+            assert!(
+                error.to_string().contains("unknown field `unexpected`"),
+                "closed-schema must reach schema validation: {error}"
+            );
+        }
         let marker = executor.with_extension("tool-spawned");
         let error = configure_executor_path(&executor)
             .expect_err("invalid preflight companion must fail closed");

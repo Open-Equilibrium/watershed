@@ -166,15 +166,15 @@ flow run hello-flow --emit jsonl</code></pre><p>The CLI owns stdout and streams 
       <ol>
         <li>base runtime and security instructions;</li>
         <li>optional global-home then harness-start Workspace <code>AGENTS.md</code> guidance;</li>
+        <li>the <code>active-flow-instructions</code> slot, empty because M1.1 has no Flow-scoped prompt field;</li>
         <li>active leaf-Phase Instructions with validated parameter substitution;</li>
         <li>only Tool definitions available to the active leaf Phase;</li>
         <li>a compact snapshot of current FSM and Flow state;</li>
-        <li>the canonical selected-root-Flow input and the validated result handed off by the previous Phase;</li>
-        <li>the current user input;</li>
+        <li>the current Phase input: the selected-root-Flow input or the complete validated result handed off by the previous Phase, with explicit absence when neither exists;</li>
         <li>unresolved call/result state required to continue the turn.</li>
       </ol>
       <p>The <code>AGENTS.md</code> item is a bounded instruction/context channel, not Flow configuration. The local file has later context precedence; neither file's content can select or alter providers, models, registries, Runtime bindings, credentials or resource policy. Project-specific executable composition remains an explicitly selected Flow from the global registry.</p>
-      <p>Resolved declaration order is preserved for Instructions, Tools and child Phases; canonical maps sort keys. Inactive Instructions, unavailable Tools, unrelated outputs and incidental volatility such as collection iteration order are excluded. The first five, scope-stable sections form the longest reusable provider-cache prefix; turn-specific state and inputs follow, then Tier 1. Cache-boundary metadata is deterministic and recorded in the manifest. Provider-specific cache hints may annotate those boundaries but must not reorder content, alter the logical context or change its context hash.</p>
+      <p>Resolved declaration order is preserved for Instructions, Tools and child Phases; canonical maps sort keys. Inactive Instructions, unavailable Tools, unrelated outputs and incidental volatility such as collection iteration order are excluded. The first five, scope-stable sections, ending at available Tools, form the longest reusable provider-cache prefix; turn-specific state and inputs follow, then Tier 1. Cache-boundary metadata is deterministic and recorded in the manifest. Provider-specific cache hints may annotate those boundaries but must not reorder content, alter the logical context or change its context hash.</p>
       <p>M1.1 passes the complete validated result of one successful Phase to its next selected sibling. Ordered inline Transitions may select a later sibling through exact typed equality, but cannot project or remap the result. A leaf Phase exposes its declared Tools to the provider loop; merely referencing a Tool never invokes it. The finite grammar is recorded in <a href="../adr/ADR-LOG.md">ADR-0110</a>. Arbitrary projections, mappings, expression languages, backward edges and failure routing remain explicitly deferred.</p>
       <p>All Tier 0 content is mandatory. If it exceeds the input budget, Flow Agent emits the existing typed <code>error</code> event with code <code>context_budget_exceeded</code> and fails before contacting the provider. It never silently drops mandatory content or relies on provider-side truncation.</p>
       <h4>Tier 1: bounded continuity</h4>

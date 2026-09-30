@@ -131,10 +131,7 @@ fn main() {
             "unknown-version" => print!("{}", probe.replace("[\"0\"]", "[\"1\"]")),
             "closed-schema" => print!(
                 "{}",
-                probe.replace(
-                    ",\"supported_policy_features\"",
-                    ",\"unexpected\":true,\"supported_policy_features\""
-                )
+                probe.replace("}\n", ",\"unexpected\":true}\n")
             ),
             "duplicate-member" => print!(
                 "{}",

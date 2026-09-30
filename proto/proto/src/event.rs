@@ -139,7 +139,12 @@ impl Serialize for EventEnvelope {
         S: Serializer,
     {
         self.validate_v0().map_err(S::Error::custom)?;
+        self.serialize_fields(serializer)
+    }
+}
 
+impl EventEnvelope {
+    fn serialize_fields<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         let optional_fields = usize::from(self.correlation_id.is_some())
             + usize::from(self.flow_id.is_some())
             + usize::from(self.parent_flow_id.is_some());
@@ -167,9 +172,7 @@ impl Serialize for EventEnvelope {
         map.serialize_entry("timestamp", &self.timestamp)?;
         map.end()
     }
-}
 
-impl EventEnvelope {
     /// Builds a v0 event envelope with no flow, parent-flow or correlation id.
     pub fn new(
         event_id: impl Into<String>,
@@ -264,7 +267,9 @@ impl EventEnvelope {
         self.validate_v0()
             .map_err(CanonicalJsonError::InvalidEvent)?;
 
-        let value = serde_json::to_value(self).map_err(CanonicalJsonError::Serialize)?;
+        let value = self
+            .serialize_fields(serde_json::value::Serializer)
+            .map_err(CanonicalJsonError::Serialize)?;
         let mut out = canonical_json(&value)?;
         out.push('\n');
         Ok(out)

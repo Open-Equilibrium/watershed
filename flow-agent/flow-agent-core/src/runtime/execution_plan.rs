@@ -212,15 +212,6 @@ impl FlowExecutionPlan {
         signature.signature()
     }
 
-    pub(crate) fn validate_integrity(&self) -> Result<(), RuntimeError> {
-        if Self::signature_for(&self.execution) != self.signature {
-            return Err(RuntimeError::Protocol(
-                "flow execution plan signature is invalid".to_owned(),
-            ));
-        }
-        Ok(())
-    }
-
     pub(crate) fn workspace_identity(&self) -> AnchoredDirectoryIdentity {
         self.workspace_identity
     }

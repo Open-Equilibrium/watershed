@@ -64,7 +64,6 @@ pub(crate) fn preflight_flow_execution_plan(
     execution_workspace: &AnchoredWorkspace,
     side_effect_mode: ToolSideEffectMode,
 ) -> Result<(), RuntimeError> {
-    plan.validate_integrity()?;
     execution_workspace.verify_identity(plan.workspace_identity())?;
     for action in plan.execution.actions.iter() {
         if let FlowExecutionAction::Fixture(action) = action
