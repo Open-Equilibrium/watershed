@@ -304,7 +304,7 @@ fn emit_and_commit<S: crate::runtime::event_writer::RuntimeEventSink>(
     builder.emit(invocation, event_type, payload)?;
     let crate::runtime::execution_plan::FlowExecutionAction::Event(action) = builder
         .actions
-        .last()
+        .pop()
         .expect("emitting an event records an action")
     else {
         unreachable!("emitting an event cannot record a fixture action")
@@ -312,7 +312,7 @@ fn emit_and_commit<S: crate::runtime::event_writer::RuntimeEventSink>(
     let result = sink.commit(
         &action.event,
         &action.canonical_jsonl,
-        action.context_checkpoint.clone(),
+        action.context_checkpoint,
     );
     if result.is_err() {
         *event_commit_failed = true;
@@ -406,4 +406,106 @@ pub(crate) struct ProductiveExecution<'a> {
     pub(crate) root_input: Option<core_script::FlowValue>,
     pub(crate) session_id: &'a str,
     pub(crate) workspace: &'a AnchoredWorkspace,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{EventClock, RuntimeError, emit_and_commit};
+    use crate::runtime::{
+        context::{ContextManifest, ContextManifestCheckpoint, ContextObject},
+        event_construction::RuntimeEventBuilder,
+        event_writer::RuntimeEventSink,
+        stream_signature::{CONTEXT_PLAN_DOMAIN, EVENT_PLAN_DOMAIN, RuntimeStreamSignatureBuilder},
+    };
+
+    #[test]
+    fn productive_commits_release_delivered_events_and_context_objects() {
+        struct StreamingSink {
+            events: RuntimeStreamSignatureBuilder,
+            contexts: RuntimeStreamSignatureBuilder,
+            reject_next: bool,
+        }
+
+        impl RuntimeEventSink for StreamingSink {
+            fn commit(
+                &mut self,
+                event: &proto::EventEnvelope,
+                canonical_jsonl: &str,
+                context: Option<ContextManifestCheckpoint>,
+            ) -> Result<(), RuntimeError> {
+                if self.reject_next {
+                    return Err(RuntimeError::Protocol("fixture commit rejected".to_owned()));
+                }
+                assert_eq!(event.sequence as usize, self.events.record_count + 1);
+                self.events.push(canonical_jsonl.as_bytes());
+                let context = context.expect("message completion delivers its context");
+                assert_eq!(context.ordinal, self.contexts.record_count + 1);
+                self.contexts.push(context.manifest.line.as_bytes());
+                let object = &context.objects[0];
+                assert_eq!(object.bytes, vec![event.sequence as u8; 64 * 1024]);
+                Ok(())
+            }
+        }
+
+        let mut builder = RuntimeEventBuilder::with_clock(
+            "streaming-fixture".to_owned(),
+            EventClock::fixed_fixture(),
+            false,
+        );
+        let mut sink = StreamingSink {
+            events: RuntimeStreamSignatureBuilder::new(EVENT_PLAN_DOMAIN),
+            contexts: RuntimeStreamSignatureBuilder::new(CONTEXT_PLAN_DOMAIN),
+            reject_next: false,
+        };
+        let invocation = builder.next_flow_invocation(None).expect("Flow invocation");
+        let mut commit_failed = false;
+        for sequence in 1..=64 {
+            let bytes = vec![sequence as u8; 64 * 1024];
+            let object = ContextObject {
+                digest: crate::runtime::digest::sha256_hex(&bytes),
+                bytes,
+            };
+            builder
+                .record_context_manifest(
+                    ContextManifest {
+                        line: format!(
+                            "{{\"checkpoint\":{sequence},\"object_uri\":\"session-object:sha256:{}\"}}\n",
+                            object.digest
+                        ),
+                    },
+                    vec![object],
+                )
+                .expect("context checkpoint is staged");
+            emit_and_commit(
+                &mut builder,
+                Some(&invocation),
+                proto::EventType::MessageCompleted,
+                serde_json::json!({"message_id": format!("msg-{sequence}"), "role": "assistant"}),
+                &mut sink,
+                &mut commit_failed,
+            )
+            .expect("event and context commit");
+            assert!(builder.actions.is_empty(), "delivered history is released");
+        }
+        assert!(!commit_failed);
+        assert_eq!(builder.events.signature(), sink.events.signature());
+        assert_eq!(
+            builder.context_manifests.signature(),
+            sink.contexts.signature()
+        );
+        sink.reject_next = true;
+        let error = emit_and_commit(
+            &mut builder,
+            None,
+            proto::EventType::SessionCompleted,
+            serde_json::json!({}),
+            &mut sink,
+            &mut commit_failed,
+        )
+        .expect_err("sink rejection stops commit");
+        assert!(error.to_string().contains("fixture commit rejected"));
+        assert!(commit_failed);
+        assert!(builder.actions.is_empty());
+        assert_eq!(sink.events.record_count, 64);
+    }
 }
