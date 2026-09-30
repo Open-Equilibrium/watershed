@@ -165,15 +165,28 @@ fn parser_enforces_document_and_depth_budgets() {
     assert_eq!(at_limit.len(), MAX_YAML_BYTES);
     assert!(parse_registry_block("at-limit.yaml", &at_limit).is_ok());
 
-    let oversized = format!("{PREFIX}{}\n", "x".repeat(MAX_YAML_BYTES));
-    assert!(parse_registry_block("oversized.yaml", &oversized).is_err());
-
-    let nested = format!(
-        "instruction:\n  id: inspect\n  name: Inspect\n  prompt: Inspect\n  extra: {}x{}\n",
-        "[".repeat(MAX_YAML_DEPTH + 1),
-        "]".repeat(MAX_YAML_DEPTH + 1)
+    let oversized = format!("{at_limit} ");
+    let error = parse_registry_block("oversized.yaml", &oversized)
+        .expect_err("one additional byte exceeds the document budget");
+    assert!(
+        error
+            .to_string()
+            .contains("document exceeds maximum length")
     );
-    assert!(parse_registry_block("deep.yaml", &nested).is_err());
+
+    for depth in [MAX_YAML_DEPTH, MAX_YAML_DEPTH + 1] {
+        let nested = format!("{}x{}", "[".repeat(depth), "]".repeat(depth));
+        let result = parse_safe_yaml_config::<serde_json::Value>("nested.yaml", &nested);
+        if depth == MAX_YAML_DEPTH {
+            assert!(result.is_ok(), "{result:?}");
+        } else {
+            let error = result.expect_err("one additional sequence exceeds the depth budget");
+            assert!(
+                error.to_string().contains("recursion depth limit exceeded"),
+                "{error}"
+            );
+        }
+    }
 }
 
 #[test]
