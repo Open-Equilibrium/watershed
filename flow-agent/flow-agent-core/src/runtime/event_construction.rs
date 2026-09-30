@@ -144,13 +144,8 @@ impl RuntimeEventBuilder {
         policy: RuntimeToolPolicy<'_>,
         completion_sequence: u64,
         effect: PlannedFixtureEffect,
-    ) -> PlannedFixtureAction {
-        let ordinal = self
-            .actions
-            .iter()
-            .filter(|action| matches!(action, FlowExecutionAction::Fixture(_)))
-            .count()
-            .saturating_add(1);
+    ) {
+        let ordinal = self.tool_intents.len();
         let action = PlannedFixtureAction {
             action_id: format!("fixture-{ordinal:06}"),
             command_policy: policy.command.clone(),
@@ -159,8 +154,7 @@ impl RuntimeEventBuilder {
             failure_transition,
         };
         self.actions
-            .push(FlowExecutionAction::Fixture(Box::new(action.clone())));
-        action
+            .push(FlowExecutionAction::Fixture(Box::new(action)));
     }
 
     pub(crate) fn validate_alternative_transition(

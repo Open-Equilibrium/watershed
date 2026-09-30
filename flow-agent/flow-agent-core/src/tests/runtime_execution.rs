@@ -7,7 +7,7 @@ use super::{
 };
 use crate::runtime::{
     apply::{FlowApplication, apply_flow_with_sink},
-    execution_plan::{FlowExecutionOptions, ToolSideEffectMode},
+    execution_plan::{FlowExecutionAction, FlowExecutionOptions, ToolSideEffectMode},
     fixture_effects::{
         fixture_tool_applied_ids, fixture_tool_apply_count, reset_fixture_tool_apply_count,
     },
@@ -41,6 +41,23 @@ fn deterministic_plan_and_checked_execution_match_planned_signatures() {
     assert_eq!(fixture_tool_apply_count(), 0);
     assert!(plan.execution.events.record_count > 0);
     assert!(plan.execution.context_manifests.record_count > 0);
+    assert_eq!(
+        plan.execution
+            .actions
+            .iter()
+            .filter_map(|action| match action {
+                FlowExecutionAction::Fixture(action) => Some(action.action_id.clone()),
+                FlowExecutionAction::Event(_) => None,
+            })
+            .collect::<Vec<_>>(),
+        [
+            "fixture-000001",
+            "fixture-000002",
+            "fixture-000003",
+            "fixture-000004"
+        ],
+        "Fixture actions preserve contiguous Tool identity despite interleaved Events"
+    );
     let mut original = RuntimeStreamSignatureBuilder::new(EVENT_PLAN_DOMAIN);
     original.push(b"a");
     original.push(b"bc");
