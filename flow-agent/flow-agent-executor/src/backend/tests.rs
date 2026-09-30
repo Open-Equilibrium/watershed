@@ -1,9 +1,9 @@
 use super::{
-    native::{apply_inner_status, checked_output},
+    native::apply_inner_status,
     protection,
     supervision::{
-        PrimaryTrigger, ProcessOutcome, classify_exit, reportable_status, run_bounded,
-        select_primary, terminate_and_reap, tool_result,
+        PrimaryTrigger, ProcessOutcome, checked_output, classify_exit, reportable_status,
+        run_bounded, select_primary, terminate_and_reap, tool_result,
     },
 };
 use proto::ExecutorToolClassificationV0 as Classification;

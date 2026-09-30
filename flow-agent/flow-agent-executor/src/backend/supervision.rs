@@ -10,7 +10,7 @@ use rustix::fd::{AsFd, OwnedFd};
 use std::{
     io::{Read, Write},
     os::unix::net::UnixStream,
-    process::{Child, Command, ExitStatus},
+    process::{Child, Command, ExitStatus, Stdio},
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -80,6 +80,28 @@ pub(super) fn terminate_and_reap(child: &mut Child) -> ExitStatus {
 fn fail_closed_unreaped_child() -> ! {
     // No receipt may claim a reaped root when bounded supervision cannot prove it.
     std::process::exit(1)
+}
+
+pub(super) fn checked_output(mut command: Command) -> Result<String, BackendError> {
+    command
+        .env_clear()
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let outcome = run_bounded(command, 2_000, 1024, 1024, Vec::new(), Vec::new(), None)?;
+    if outcome.classification.is_some() {
+        let status = match outcome.status.and_then(|status| status.code()) {
+            Some(code) => format!("exit code {code}"),
+            None => format!("{:?}", outcome.classification),
+        };
+        let diagnostic = String::from_utf8_lossy(&outcome.stderr);
+        let diagnostic = &diagnostic[..diagnostic.floor_char_boundary(1024)];
+        return Err(BackendError::unavailable(format!(
+            "native backend readiness command failed ({status}): {diagnostic}",
+        )));
+    }
+    String::from_utf8(outcome.stdout)
+        .map_err(|_| BackendError::unavailable("native backend version is not UTF-8"))
 }
 
 pub(super) fn run_bounded(

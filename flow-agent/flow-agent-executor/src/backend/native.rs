@@ -216,29 +216,6 @@ pub(crate) fn run_inner(status_descriptor: &str, input: impl Read) -> Result<(),
     }
 }
 
-pub(super) fn checked_output(mut command: Command) -> Result<String, BackendError> {
-    command
-        .env_clear()
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    let outcome =
-        supervision::run_bounded(command, 2_000, 1024, 1024, Vec::new(), Vec::new(), None)?;
-    if outcome.classification.is_some() {
-        let status = match outcome.status.and_then(|status| status.code()) {
-            Some(code) => format!("exit code {code}"),
-            None => format!("{:?}", outcome.classification),
-        };
-        let diagnostic = String::from_utf8_lossy(&outcome.stderr);
-        let diagnostic = &diagnostic[..diagnostic.floor_char_boundary(1024)];
-        return Err(BackendError::unavailable(format!(
-            "native backend readiness command failed ({status}): {diagnostic}",
-        )));
-    }
-    String::from_utf8(outcome.stdout)
-        .map_err(|_| BackendError::unavailable("native backend version is not UTF-8"))
-}
-
 pub(super) fn readiness() -> Result<String, BackendError> {
     let version = platform_backend::readiness()?;
     let (mut command, inherited) = platform_backend::command(&[])?;

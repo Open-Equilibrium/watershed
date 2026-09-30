@@ -1,4 +1,4 @@
-use super::{BackendError, native, protection};
+use super::{BackendError, protection, supervision};
 use proto::{ExecutorObjectKindV0, ExecutorProtectedObjectV0};
 use rustix::fd::OwnedFd;
 use std::{
@@ -21,7 +21,7 @@ pub(super) fn readiness() -> Result<String, BackendError> {
     }
     let mut command = Command::new("/usr/bin/sw_vers");
     command.arg("-productVersion");
-    let version = native::checked_output(command)?;
+    let version = supervision::checked_output(command)?;
     let version = version.trim();
     if !crate::platform::supported_release("macos", "aarch64", version) {
         return Err(BackendError::unavailable(

@@ -1,6 +1,6 @@
 mod seccomp;
 
-use super::{BackendError, native, protection};
+use super::{BackendError, protection, supervision};
 use proto::ExecutorProtectedObjectV0;
 use rustix::fd::{AsRawFd, OwnedFd};
 use std::{
@@ -29,7 +29,7 @@ pub(super) fn readiness() -> Result<String, BackendError> {
     }
     let mut command = Command::new(BUBBLEWRAP);
     command.arg("--version");
-    let output = native::checked_output(command)?;
+    let output = supervision::checked_output(command)?;
     let version = output
         .trim()
         .strip_prefix("bubblewrap ")
