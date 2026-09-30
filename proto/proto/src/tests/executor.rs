@@ -570,6 +570,51 @@ fn executor_request_preserves_literal_argument_strings() {
     assert_eq!(parse_executor_request_v0(&bytes).unwrap(), request);
 }
 
+fn assert_normalized_environment_bound(field: &str, limit: usize) {
+    for suffix in ["", "x"] {
+        let expanding = format!("{}{suffix}", "\u{344}".repeat(limit / 2));
+        let mut candidate = request();
+        candidate.resolved_policy.environment = BTreeMap::from([if field == "name" {
+            (expanding, "value".to_owned())
+        } else {
+            ("X".to_owned(), expanding)
+        }]);
+        refresh_policy_digest(&mut candidate);
+        let result = canonical_executor_request_v0(&candidate);
+        if suffix.is_empty() {
+            let bytes = result.expect("the exact normalized bound is valid");
+            assert_eq!(bytes, canonical_wire(&candidate));
+            let parsed = parse_executor_request_v0(&bytes).expect("generated request is valid");
+            let (name, value) = parsed
+                .resolved_policy
+                .environment
+                .first_key_value()
+                .unwrap();
+            assert_eq!(
+                if field == "name" { name } else { value }.chars().count(),
+                limit
+            );
+        } else {
+            assert_eq!(
+                result
+                    .expect_err("one normalized scalar over the bound must be rejected")
+                    .to_string(),
+                format!("Executor environment {field} is invalid")
+            );
+        }
+    }
+}
+
+#[test]
+fn executor_request_enforces_normalized_environment_name_bound() {
+    assert_normalized_environment_bound("name", 256);
+}
+
+#[test]
+fn executor_request_enforces_normalized_environment_value_bound() {
+    assert_normalized_environment_bound("value", 4_096);
+}
+
 #[test]
 fn executor_request_enforces_complete_exec_vector_entry_boundary() {
     let mut exact = request();

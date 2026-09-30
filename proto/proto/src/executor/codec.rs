@@ -8,7 +8,10 @@ use super::{
     MAX_EXECUTOR_CONTROL_BYTES_V0, MAX_EXECUTOR_PROBE_BYTES_V0, MAX_EXECUTOR_REQUEST_BYTES_V0,
     MAX_EXECUTOR_RESPONSE_BYTES_V0,
 };
-use crate::{canonical::nfc_json_string_values, canonical_json, parse_unique_json};
+use crate::{
+    canonical::{nfc_json_string_values, nfc_string},
+    canonical_json, parse_unique_json,
+};
 use serde::{Serialize, de::DeserializeOwned};
 use sha2::{Digest, Sha256};
 
@@ -40,7 +43,18 @@ pub fn canonical_executor_request_v0(
     request: &ExecutorRequestV0,
 ) -> Result<Vec<u8>, ExecutorProtocolError> {
     validate_request(request)?;
-    canonical_document(request, MAX_EXECUTOR_REQUEST_BYTES_V0, "request").map(|(bytes, _)| bytes)
+    let (bytes, value) = canonical_document(request, MAX_EXECUTOR_REQUEST_BYTES_V0, "request")?;
+    let mut normalized: ExecutorRequestV0 =
+        decode_document(nfc_json_string_values(value), "request")?;
+    // Canonical serialization already rejects colliding normalized environment names.
+    normalized.resolved_policy.environment = normalized
+        .resolved_policy
+        .environment
+        .into_iter()
+        .map(|(name, value)| (nfc_string(name), value))
+        .collect();
+    validate_request(&normalized)?;
+    Ok(bytes)
 }
 
 /// Serializes and validates one canonical Executor preflight response plus LF.
