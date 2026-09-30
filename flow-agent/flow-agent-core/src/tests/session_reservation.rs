@@ -11,14 +11,15 @@ use crate::runtime::{
         set_owned_file_remove_observer, start_directory_sync_trace_for_test,
         take_directory_sync_trace_for_test,
     },
-    session::run_flow,
+    session::{run_flow, set_run_pre_plan_observer},
     session_authority::{SessionOwnershipLease, session_ownership_is_active},
     session_candidates::suffixed_session_id,
     session_definition::SessionDefinitionMetadata,
     session_reservation::{
         materialize_session_candidate, reserve_anchored_session_lock_file,
         reserve_unique_session_candidate_with_anchored_workspace, session_log_metadata_text,
-        set_metadata_pre_activation_observer_for_test, write_reserved_session_metadata,
+        set_candidate_pre_lease_observer_for_test, set_metadata_pre_activation_observer_for_test,
+        write_reserved_session_metadata,
     },
     session_store::workspace_store_leaf,
     types::{EmitMode, RuntimeError},
@@ -85,6 +86,74 @@ fn run_flow_allocates_next_session_id_when_base_log_is_corrupt() {
         before
     );
     assert!(session_dir.join("smoke-flow-2.jsonl").is_file());
+}
+
+#[test]
+fn run_flow_rechecks_a_free_candidate_after_a_cooperating_run_completes() {
+    use std::{cell::RefCell, rc::Rc, sync::mpsc, thread, time::Duration};
+
+    let workspace = workspace_copy("smoke-flow");
+    let first_workspace = workspace.clone();
+    let (planning, waiting_for_plan) = mpsc::channel();
+    let (finish_first, resume_first) = mpsc::channel();
+    let first = thread::spawn(move || {
+        set_run_pre_plan_observer(move || {
+            planning.send(()).expect("first Run holds its candidate");
+            resume_first
+                .recv_timeout(Duration::from_secs(10))
+                .expect("second Run has reached its pre-lease barrier");
+        });
+        run_flow(&first_workspace, "smoke-flow", EmitMode::Jsonl)
+    });
+    waiting_for_plan
+        .recv_timeout(Duration::from_secs(10))
+        .expect("first Run reaches planning while holding the base lease");
+    let sessions = crate::tests::helpers::workspace_session_dir(&workspace);
+    assert!(
+        !sessions.exists(),
+        "neither Run has published session files"
+    );
+    assert!(
+        session_ownership_is_active(&workspace, "smoke-flow").expect("first Run ownership reads")
+    );
+
+    let first_output = Rc::new(RefCell::new(None));
+    let captured_first = Rc::clone(&first_output);
+    let observer_workspace = workspace.clone();
+    set_candidate_pre_lease_observer_for_test(move || {
+        finish_first.send(()).expect("first Run may publish");
+        *captured_first.borrow_mut() = Some(
+            first
+                .join()
+                .expect("first Run thread joins")
+                .expect("first Run completes before the second acquires its lease"),
+        );
+        assert!(
+            !session_ownership_is_active(&observer_workspace, "smoke-flow")
+                .expect("completed Run ownership reads")
+        );
+    });
+
+    let second = run_flow(&workspace, "smoke-flow", EmitMode::Jsonl)
+        .expect("second Run skips the base published after its availability snapshot");
+    let first = first_output
+        .borrow_mut()
+        .take()
+        .expect("first Run captured");
+
+    for (run, session_id) in [(&first, "smoke-flow"), (&second, "smoke-flow-2")] {
+        assert!(!run.failed);
+        assert_eq!(run.session_id, session_id);
+        assert_eq!(
+            fs::read(sessions.join(format!("{session_id}.jsonl")))
+                .expect("each completed Run retains its own stream"),
+            run.stdout.as_bytes()
+        );
+        assert!(
+            !session_ownership_is_active(&workspace, session_id)
+                .expect("completed Run ownership reads")
+        );
+    }
 }
 
 #[test]

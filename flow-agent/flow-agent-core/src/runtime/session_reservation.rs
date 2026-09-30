@@ -30,6 +30,13 @@ use std::{
 std::thread_local! {
     static METADATA_PRE_ACTIVATION_OBSERVER: RefCell<Option<Box<dyn FnOnce()>>> =
         RefCell::new(None);
+    static CANDIDATE_PRE_LEASE_OBSERVER: RefCell<Option<Box<dyn FnOnce()>>> =
+        RefCell::new(None);
+}
+
+#[cfg(test)]
+pub(crate) fn set_candidate_pre_lease_observer_for_test(observer: impl FnOnce() + 'static) {
+    CANDIDATE_PRE_LEASE_OBSERVER.with_borrow_mut(|slot| *slot = Some(Box::new(observer)));
 }
 
 #[cfg(test)]
@@ -90,8 +97,25 @@ pub(crate) fn reserve_unique_session_candidate_with_anchored_workspace(
         let marker_path = workspace_store_path(workspace)?
             .join(SESSION_STORAGE_DIR)
             .join(SessionBundlePaths::lock_leaf(&session_id));
+        #[cfg(test)]
+        if let Some(observer) = CANDIDATE_PRE_LEASE_OBSERVER.with_borrow_mut(Option::take) {
+            observer();
+        }
         match SessionOwnershipLease::acquire_anchored(workspace, &session_id, &marker_path) {
             Ok(ownership) => {
+                if let Some(sessions) = open_anchored_runtime_dir(workspace, SESSION_STORAGE_DIR)? {
+                    match ensure_anchored_session_file_available(
+                        &SessionBundlePaths::events_in(&sessions, &session_id),
+                        &session_id,
+                    ) {
+                        Ok(()) => {}
+                        Err(RuntimeError::SessionLogExists(_)) => {
+                            ownership.release()?;
+                            continue;
+                        }
+                        Err(error) => return Err(error),
+                    }
+                }
                 return Ok(SessionCandidateReservation {
                     ownership,
                     session_id,
