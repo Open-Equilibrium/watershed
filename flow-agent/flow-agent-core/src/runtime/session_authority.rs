@@ -237,17 +237,13 @@ fn append_length_prefixed(target: &mut Vec<u8>, value: &[u8]) {
 }
 
 fn open_or_create_authority_file(path: &AnchoredFile) -> Result<fs::File, RuntimeError> {
-    match create_authority_file(path) {
+    match create_anchored_file_for_update(path) {
         Ok(file) => Ok(file),
         Err(RuntimeError::Io { source, .. }) if source.kind() == io::ErrorKind::AlreadyExists => {
             open_existing_authority_file(path)
         }
         Err(error) => Err(error),
     }
-}
-
-fn create_authority_file(path: &AnchoredFile) -> Result<fs::File, RuntimeError> {
-    create_anchored_file_for_update(path)
 }
 
 fn open_existing_authority_file(path: &AnchoredFile) -> Result<fs::File, RuntimeError> {

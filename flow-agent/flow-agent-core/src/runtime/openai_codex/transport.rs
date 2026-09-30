@@ -17,26 +17,12 @@ pub(crate) fn request_responses_at(
     credential: &crate::runtime::oauth_credential::CredentialRecord,
     body: &serde_json::Value,
 ) -> Result<ProviderTurn, RuntimeError> {
-    request_responses_at_with_cancellation(
-        endpoint,
-        credential,
-        body,
-        crate::runtime::cancellation::productive_cancellation(),
-    )
-}
-
-fn request_responses_at_with_cancellation(
-    endpoint: &str,
-    credential: &crate::runtime::oauth_credential::CredentialRecord,
-    body: &serde_json::Value,
-    cancelled: &AtomicBool,
-) -> Result<ProviderTurn, RuntimeError> {
     request_responses_at_with_deadlines_and_cancellation(
         endpoint,
         credential,
         body,
         RESPONSES_HTTP_DEADLINES,
-        cancelled,
+        crate::runtime::cancellation::productive_cancellation(),
     )
 }
 

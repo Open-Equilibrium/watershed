@@ -81,14 +81,6 @@ pub(super) fn probe_executor(
     installation_flow: &Path,
     protected_directories: &[AnchoredDir],
 ) -> Result<ProbedExecutor, RuntimeError> {
-    probe_native_executor(selection, installation_flow, protected_directories)
-}
-
-fn probe_native_executor(
-    selection: &ExecutorSelection,
-    installation_flow: &Path,
-    protected_directories: &[AnchoredDir],
-) -> Result<ProbedExecutor, RuntimeError> {
     let programs = open_validated_executable(selection, installation_flow)?;
     programs.verify_aliases(protected_directories)?;
     let (image, path) = programs.selected.launch_target()?;

@@ -89,7 +89,7 @@ impl ExecutorSelection {
 
 /// Performs the no-Tool-spawn readiness check and returns the effective selection.
 pub fn executor_check() -> Result<ExecutorSelection, RuntimeError> {
-    resolve_executor()
+    resolve_executor_with_roots(&protected_directories(false)?)
 }
 
 /// Validates and atomically selects an administrator-supplied absolute Executor.
@@ -109,10 +109,6 @@ pub fn configure_executor_path(path: &Path) -> Result<ExecutorSelection, Runtime
 /// Removes only the protected custom override and restores default sibling selection.
 pub fn configure_default_executor() -> Result<bool, RuntimeError> {
     ExecutorConfigStore::platform_default()?.configure_default()
-}
-
-fn resolve_executor() -> Result<ExecutorSelection, RuntimeError> {
-    resolve_executor_with_roots(&protected_directories(false)?)
 }
 
 pub(super) fn protected_directories(create: bool) -> Result<Vec<AnchoredDir>, RuntimeError> {
