@@ -171,7 +171,7 @@ class CiWorkflowContractTest(unittest.TestCase):
             (ROOT / ".node-version").read_text(encoding="utf-8"),
             f"{NODE_VERSION}\n",
         )
-        self.assertEqual(PACKAGE["engines"]["node"], ">=24.2.0")
+        self.assertEqual(PACKAGE["engines"]["node"], ">=24.15.0")
         self.assertGreaterEqual(
             tuple(map(int, NODE_VERSION.split("."))),
             tuple(map(int, PACKAGE["engines"]["node"][2:].split("."))),
