@@ -281,8 +281,9 @@ fn runner_owns_completed_leader_until_final_group_signal() {
         static LOST_OWNERSHIP: Cell<bool> = const { Cell::new(false) };
         static LAST_SIGNAL_COMPLETED: Cell<bool> = const { Cell::new(false) };
         static LAST_SIGNAL_EXIT: Cell<Option<i32>> = const { Cell::new(None) };
+        static LAST_SIGNAL: Cell<Option<rustix::process::Signal>> = const { Cell::new(None) };
     }
-    fn observe_owned_leader(pid: rustix::process::Pid) {
+    fn observe_owned_leader(pid: rustix::process::Pid, signal: rustix::process::Signal) {
         // Only the controller can verify that this exact child remains waitable.
         // NOWAIT leaves ownership intact through the signal that follows.
         let status = rustix::process::waitid(
@@ -299,41 +300,47 @@ fn runner_owns_completed_leader_until_final_group_signal() {
                 .flatten()
                 .and_then(|status| status.exit_status()),
         );
+        LAST_SIGNAL.set(Some(signal));
     }
 
-    for (body, deadline, classification, expected_exit, last_signal_exit) in [
+    for (body, deadline, classification, expected_exit, last_signal_exit, needs_kill) in [
         (
             "exit 17",
             Duration::from_secs(5),
             ToolTerminalClassification::NonzeroExit,
             Some(17),
             Some(17),
+            false,
         ),
         (
-            "(trap '' TERM; while :; do :; done) & exit 17",
+            "trap '' TERM; (while :; do :; done) & exit 17",
             Duration::from_secs(5),
             ToolTerminalClassification::NonzeroExit,
             Some(17),
             Some(17),
+            true,
         ),
         (
-            "(trap '' TERM; while :; do :; done) & kill -TERM $$",
+            "trap '' TERM; (while :; do :; done) & trap - TERM; kill -TERM $$",
             Duration::from_secs(5),
             ToolTerminalClassification::SignalTermination,
             None,
             None,
+            true,
         ),
         (
-            "trap 'exit 17' TERM; (trap '' TERM; while :; do :; done) & printf ready; while :; do :; done",
+            "trap '' TERM; (while :; do :; done) & trap 'exit 17' TERM; printf ready; while :; do :; done",
             Duration::from_millis(100),
             ToolTerminalClassification::ToolTimedOut,
             None,
             Some(17),
+            true,
         ),
     ] {
         LOST_OWNERSHIP.set(false);
         LAST_SIGNAL_COMPLETED.set(false);
         LAST_SIGNAL_EXIT.set(None);
+        LAST_SIGNAL.set(None);
         observe_group_signals_for_test(Some(observe_owned_leader));
         let cancelled = AtomicBool::new(false);
         let outcome = execute_tool_invocation(
@@ -361,6 +368,9 @@ fn runner_owns_completed_leader_until_final_group_signal() {
         );
         assert_eq!(outcome.classification, Some(classification));
         assert_eq!(outcome.exit_code, expected_exit);
+        if needs_kill {
+            assert_eq!(LAST_SIGNAL.get(), Some(rustix::process::Signal::KILL));
+        }
     }
 }
 

@@ -70,9 +70,12 @@ impl CleanupDeadline {
 }
 
 #[cfg(test)]
+type GroupSignalObserver = fn(rustix::process::Pid, rustix::process::Signal);
+
+#[cfg(test)]
 thread_local! {
     static FORCE_REAP_TIMEOUT: Cell<bool> = const { Cell::new(false) };
-    static GROUP_SIGNAL_OBSERVER: Cell<Option<fn(rustix::process::Pid)>> = const { Cell::new(None) };
+    static GROUP_SIGNAL_OBSERVER: Cell<Option<GroupSignalObserver>> = const { Cell::new(None) };
 }
 
 #[cfg(test)]
@@ -81,7 +84,7 @@ pub(crate) fn force_reap_timeout_for_test(enabled: bool) {
 }
 
 #[cfg(test)]
-pub(crate) fn observe_group_signals_for_test(observer: Option<fn(rustix::process::Pid)>) {
+pub(crate) fn observe_group_signals_for_test(observer: Option<GroupSignalObserver>) {
     GROUP_SIGNAL_OBSERVER.set(observer);
 }
 
@@ -179,6 +182,13 @@ pub(crate) enum PrimaryTrigger {
 enum CleanupFailure {
     Signal,
     Reap,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+enum TerminationGraceEnd {
+    GroupUnavailable,
+    LeaderExited,
+    Deadline,
 }
 
 fn execute_unix_tool(
@@ -388,7 +398,9 @@ fn cleanup_process_group(
         return Ok(observed_exit_code);
     }
     let grace_deadline = CleanupDeadline::schedule(CleanupDeadlineKind::TerminationGrace);
-    if wait_for_process_group(child, process_group, grace_deadline, stdout, stderr)? {
+    if wait_for_process_group(child, process_group, grace_deadline, stdout, stderr)?
+        == TerminationGraceEnd::GroupUnavailable
+    {
         finish_process_group_cleanup(
             child,
             process_group,
@@ -461,7 +473,7 @@ fn wait_for_process_group(
     deadline: CleanupDeadline,
     stdout: &mut OutputCollector,
     stderr: &mut OutputCollector,
-) -> Result<bool, CleanupFailure> {
+) -> Result<TerminationGraceEnd, CleanupFailure> {
     loop {
         stdout.drain_available();
         stderr.drain_available();
@@ -474,13 +486,16 @@ fn wait_for_process_group(
             Err(rustix::io::Errno::SRCH | rustix::io::Errno::PERM) if leader_exited => {
                 // Stop signalling before reaping a possible Darwin zombie-only
                 // group. The caller must still verify disappearance afterward.
-                return Ok(true);
+                return Ok(TerminationGraceEnd::GroupUnavailable);
             }
             Err(rustix::io::Errno::SRCH | rustix::io::Errno::PERM) => {}
             Err(_) => return Err(CleanupFailure::Signal),
         }
+        if leader_exited {
+            return Ok(TerminationGraceEnd::LeaderExited);
+        }
         if deadline.reached() {
-            return Ok(false);
+            return Ok(TerminationGraceEnd::Deadline);
         }
         thread::sleep(CONTROLLER_POLL_INTERVAL);
     }
@@ -559,7 +574,7 @@ fn signal_process_group(
     loop {
         #[cfg(test)]
         if let Some(observer) = GROUP_SIGNAL_OBSERVER.get() {
-            observer(process_group);
+            observer(process_group, signal);
         }
         match rustix::process::kill_process_group(process_group, signal) {
             Ok(()) => return Ok(true),
@@ -584,4 +599,79 @@ fn signal_process_group(
             Err(_) => return Err(CleanupFailure::Signal),
         }
     }
+}
+
+#[test]
+fn root_completion_ends_term_grace_with_a_live_group() {
+    let (stdout_reader, stdout_writer) = UnixStream::pair().expect("stdout pair opens");
+    let (stderr_reader, stderr_writer) = UnixStream::pair().expect("stderr pair opens");
+    let mut stdout = OutputCollector::new(stdout_reader).expect("stdout collector opens");
+    let mut stderr = OutputCollector::new(stderr_reader).expect("stderr collector opens");
+    let stdout_writer: OwnedFd = stdout_writer.into();
+    let stderr_writer: OwnedFd = stderr_writer.into();
+    let mut command = Command::new(proto::EXECUTOR_OWN_SCRIPT_EXECUTABLE_V0);
+    command
+        .args([
+            "-c",
+            "trap 'exit 17' TERM; (trap '' TERM; printf ready; while :; do :; done) & while :; do :; done",
+        ])
+        .env_clear()
+        .stdin(Stdio::null())
+        .stdout(Stdio::from(stdout_writer))
+        .stderr(Stdio::from(stderr_writer))
+        .process_group(0);
+    let mut child = command.spawn().expect("root fixture starts");
+    drop(command);
+    let process_group = rustix::process::Pid::from_child(&child);
+    let ready_deadline = Instant::now() + Duration::from_secs(5);
+    while stdout.bytes != b"ready" {
+        stdout.drain_available();
+        stderr.drain_available();
+        if Instant::now() >= ready_deadline {
+            let _ = signal_process_group(&mut child, process_group, rustix::process::Signal::KILL);
+            let _ = child.wait();
+            panic!("TERM-ignoring descendant did not become ready");
+        }
+        thread::sleep(CONTROLLER_POLL_INTERVAL);
+    }
+
+    assert!(matches!(leader_exit(&child), Ok(None)));
+    assert!(matches!(
+        signal_process_group(&mut child, process_group, rustix::process::Signal::TERM),
+        Ok(true)
+    ));
+    let grace_end = wait_for_process_group(
+        &mut child,
+        process_group,
+        CleanupDeadline::schedule(CleanupDeadlineKind::TerminationGrace),
+        &mut stdout,
+        &mut stderr,
+    )
+    .map_err(|_| "grace observation failed");
+    let retained_exit = leader_exit(&child)
+        .expect("completed root remains owned")
+        .and_then(|status| status.exit_status());
+    let group_remains_signalable = rustix::process::test_kill_process_group(process_group).is_ok();
+    let final_signal =
+        signal_process_group(&mut child, process_group, rustix::process::Signal::KILL);
+    let cleanup = finish_process_group_cleanup(
+        &mut child,
+        process_group,
+        CleanupDeadline::schedule(CleanupDeadlineKind::ForcedReap),
+        &mut stdout,
+        &mut stderr,
+        false,
+    );
+
+    assert!(matches!(final_signal, Ok(true)));
+    assert!(
+        cleanup.is_ok(),
+        "the signalled group must close after root reap"
+    );
+    assert_eq!(retained_exit, Some(17));
+    assert!(
+        group_remains_signalable,
+        "the descendant keeps the group live"
+    );
+    assert_eq!(grace_end, Ok(TerminationGraceEnd::LeaderExited));
 }
