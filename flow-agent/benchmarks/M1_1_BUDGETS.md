@@ -156,6 +156,15 @@ The reference remains Ubuntu 24.04 x64 with the existing sampling, schema and ob
 
 RSS includes preparation. These warm-cache observations establish neither a supported inventory maximum nor cold-cache/concurrent-admission performance; they do not prove native write protection.
 
+At `2b59f10`, [native Linux job 110523397292](https://github.com/Open-Equilibrium/watershed/actions/runs/36908028880/job/110523397292) retained artifact `11186626527`: all 16 workloads complete, with five warmups and 30 samples each, including successful RSS detection. The 498-record payload and recomputed aggregates agree. Rust 1.99.0, image `20260927.320.1`, four logical Intel Xeon 6973P-C CPUs and 16,765,374,464 bytes of memory produced these observations under the same inventory inputs:
+
+| Single-link files | p50 (ns) | p95 (ns) | Maximum (ns) | Maximum RSS growth (bytes) |
+|---|---:|---:|---:|---:|
+| 512 | 715,343 | 987,316 | 1,072,898 | 1,355,776 |
+| 16,384 | 25,214,552 | 26,060,090 | 26,132,819 | 1,396,736 |
+
+Toolchain, hardware and image changes prevent attributing differences solely to code. [TESTING.md](../../TESTING.md#native-verification-status) owns the tested-tree binding and full native acceptance.
+
 ## Completion criterion
 
 The matrix is finite: every hard selected contract has a named functional proof, and the 16 fixed observational workloads including the RSS detection fixture cover the representative paths above. A new hard boundary requires a maintainer decision; an evidence-workload change must remain fixed and documented.

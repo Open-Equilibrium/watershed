@@ -32,9 +32,20 @@ Replacement observations remain separate for each host:
 
 | Host | CI artifact | Observation |
 | --- | --- | --- |
-| Ubuntu 24.04 x64 | `m12-executor-startup-evidence-ubuntu-24.04` | Complete samples in the five runs below; acceptance is recorded in TESTING.md. |
-| macOS 27 ARM64 | `m12-executor-startup-evidence-xcode-27` | Complete samples at `6689775` below. |
+| Ubuntu 24.04 x64 | `m12-executor-startup-evidence-ubuntu-24.04` | Complete samples below; acceptance is recorded in TESTING.md. |
+| macOS 27 ARM64 | `m12-executor-startup-evidence-xcode-27` | Complete samples below. |
 | macOS 26 ARM64 (historical) | `m12-executor-startup-evidence-macos-26` | Complete samples at `8725a1c` and `6af7296` below; not proof for macOS 27. |
+
+The following reports use Rust 1.99.0, five warmups and 30 samples each, all with active protection and `complete: true`. Retained raw payloads and recomputed aggregates agree:
+
+| Revision / native job | Artifact | p50 (ns) | p95 (ns) | Maximum (ns) |
+|---|---:|---:|---:|---:|
+| `eefdeb7`, [Linux 110508208303](https://github.com/Open-Equilibrium/watershed/actions/runs/36903510544/job/110508208303) | `11184656929` | 52,030,949 | 52,204,917 | 52,273,626 |
+| `eefdeb7`, [Mac 110508208694](https://github.com/Open-Equilibrium/watershed/actions/runs/36903510544/job/110508208694) | `11183421690` | 352,462,667 | 464,932,542 | 479,309,584 |
+| `2b59f10`, [Linux 110523397292](https://github.com/Open-Equilibrium/watershed/actions/runs/36908028880/job/110523397292) | `11185539504` | 51,728,796 | 51,897,403 | 52,003,125 |
+| `2b59f10`, [Mac 110523397025](https://github.com/Open-Equilibrium/watershed/actions/runs/36908028880/job/110523397025) | `11186380547` | 324,787,542 | 438,812,250 | 463,842,959 |
+
+Both Linux jobs use image `20260927.320.1` and four logical CPUs: AMD EPYC 7763 with 16,766,414,848 bytes of memory at `eefdeb7`, Intel Xeon 6973P-C with 16,765,374,464 bytes at `2b59f10`. Both Mac jobs use image `20260928.0222.1` and three logical CPUs; CPU model and memory remain unavailable. Compare platforms separately; hardware differences and unavailable metadata prevent attributing changes solely to code. [TESTING.md](../../TESTING.md#native-verification-status) owns tested-tree bindings and native acceptance.
 
 The macOS 27.0 ARM64 report in [PR run 36861751848, job 110367390216](https://github.com/Open-Equilibrium/watershed/actions/runs/36861751848/job/110367390216) tested merge `7bfa9ad42091dcff13cbd1af15b88f0503c4f75f`, whose tree `12db4ba2985eb57609853eccce35dc3715703188` matches topic `6689775`. Rust 1.98.1 and runner image `20260928.0222.1` used three logical CPUs; CPU model and memory were unavailable. Five warmups precede 30 samples, all with active protection: p50 `305,895,708 ns`, p95 `455,016,166 ns`, maximum `491,701,792 ns`, and `complete: true`. Artifact `11162997193` retains all samples and verified aggregates. This is startup evidence for that tree; [TESTING.md](../../TESTING.md#native-verification-status) owns full native acceptance.
 

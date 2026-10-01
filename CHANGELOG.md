@@ -30,5 +30,5 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: [S
 - M1 is the Flow Agent deterministic runtime foundation: fixture-bounded execution and in-process policy emulation are explicit; real providers and tools belong to M1.1, and OS isolation belongs to M1.2 (ADR-0075, ADR-0076).
 - The complete unreleased execution domain uses Flow Agent, Flow, Subflow, `flow.*`, `flow_id`, `flow-context-v0`, `flow-agent*`, `flow-agent-cli`, `flow` and `.flow`, without legacy terminology aliases or vocabulary migration (ADR-0074).
 - Canonical registry serialization is deterministic UTF-8 JSON of the validated, resolved building-block model.
-- CI actions are pinned, Windows is included, and release-mode performance observations are retained without estimated timing or RSS gates.
+- CI actions are pinned; native gates follow [TESTING.md](TESTING.md), and retained performance observations follow [PERFORMANCE.md](PERFORMANCE.md).
 - Licensing is `AGPL-3.0-only`; contributions use DCO without a CLA.
