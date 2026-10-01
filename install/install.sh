@@ -366,11 +366,11 @@ readiness_shell='
         fi
     }
     wait_for_readiness_group() {
-        wait_attempts=20
+        wait_attempts=10
         while readiness_group_has_descendant; do
             [ -x "$readiness_scanner" ] || return 1
             [ "$wait_attempts" -gt 0 ] || return 1
-            /bin/sleep 0.05
+            /bin/sleep 0.1
             wait_attempts=$((wait_attempts - 1))
         done
     }
@@ -411,11 +411,11 @@ readiness_shell='
     exec /bin/kill -KILL -- "-$readiness_pgid" 2>/dev/null
 '
 wait_for_readiness_status() {
-    # Six seconds permits the five-second checker timeout plus reporting overhead.
-    readiness_attempts=120
+    # Request six seconds of sleep for the five-second checker and reporting.
+    readiness_attempts=60
     while [ ! -e "$readiness_status_file" ] && [ ! -L "$readiness_status_file" ]; do
         [ "$readiness_attempts" -gt 0 ] || return 1
-        /bin/sleep 0.05
+        /bin/sleep 0.1
         readiness_attempts=$((readiness_attempts - 1))
     done
     [ -f "$readiness_status_file" ] && [ ! -L "$readiness_status_file" ] || return 1
