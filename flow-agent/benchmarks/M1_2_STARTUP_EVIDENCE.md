@@ -33,8 +33,10 @@ Replacement observations remain separate for each host:
 | Host | CI artifact | Observation |
 | --- | --- | --- |
 | Ubuntu 24.04 x64 | `m12-executor-startup-evidence-ubuntu-24.04` | Complete samples in the four runs below; not complete product acceptance. |
-| macOS 27 ARM64 | `m12-executor-startup-evidence-xcode-27` | Current target; complete native startup evidence outstanding. |
+| macOS 27 ARM64 | `m12-executor-startup-evidence-xcode-27` | Complete samples at `6689775` below. |
 | macOS 26 ARM64 (historical) | `m12-executor-startup-evidence-macos-26` | Complete samples at `8725a1c` and `6af7296` below; not proof for macOS 27. |
+
+The macOS 27.0 ARM64 report in [PR run 36861751848, job 110367390216](https://github.com/Open-Equilibrium/watershed/actions/runs/36861751848/job/110367390216) tested merge `7bfa9ad42091dcff13cbd1af15b88f0503c4f75f`, whose tree `12db4ba2985eb57609853eccce35dc3715703188` matches topic `6689775`. Rust 1.98.1 and runner image `20260928.0222.1` used three logical CPUs; CPU model and memory were unavailable. Five warmups precede 30 samples, all with active protection: p50 `305,895,708 ns`, p95 `455,016,166 ns`, maximum `491,701,792 ns`, and `complete: true`. Artifact `11162997193` retains all samples and verified aggregates. This is startup evidence for that tree; [TESTING.md](../../TESTING.md#native-verification-status) owns full native acceptance.
 
 Retain each host's raw samples and distribution separately; do not pool them or treat one as evidence for the other. Compare only like-for-like host observations. Compile checks and legacy measurements do not supply replacement timing or native protection evidence.
 
@@ -49,7 +51,7 @@ All four Linux reports use Rust 1.98.1, five warmups, 30 fresh-child samples and
 
 The medians are similar; tail observations vary between runs. The second run's M1.1 artifact also records longer tails in unchanged authoring/status workloads. Changed hardware and runner images prevent attributing the differences solely to Executor changes. Keep the unadjusted samples; this is neither a threshold failure nor an established architectural cause. Native gate results are tracked in [TESTING.md](../../TESTING.md#native-verification-status).
 
-Both Mac reports use Rust 1.98.1, runner image `20260907.0351.1` and three logical CPUs; CPU model and memory are unavailable. Five warmups precede 30 samples, all with `self_protection_active: true`, followed by `complete: true`:
+Both historical macOS 26 reports use Rust 1.98.1, runner image `20260907.0351.1` and three logical CPUs; CPU model and memory are unavailable. Five warmups precede 30 samples, all with `self_protection_active: true`, followed by `complete: true`:
 
 | Revision / CI run | p50 (ns) | p95 (ns) | Maximum (ns) |
 |---|---:|---:|---:|
