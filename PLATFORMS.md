@@ -29,7 +29,7 @@ On Windows 11 x86_64, users may access a supported remote host or use a Linux x8
 
 ## Installation prerequisites
 
-On macOS, installation requires Apple's `/usr/bin/osascript -l JavaScript` and its built-in JavaScript/Objective-C bridge for bounded ACL checks on held objects (ADR-0178), including with `--no-default-executor`. Unsafe mutation grants, unavailable queries or missing bridge components stop installation before publication or payload execution; harmless access and trusted-user grants remain admissible. This requires no compiler, additional runtime or application automation and does not change administrator ACLs or host policy.
+On macOS, installation requires Apple's `/usr/bin/osascript -l JavaScript` and its built-in JavaScript/Objective-C bridge for bounded [ACL](GLOSSARY.md#flow-agent-runtime-surfaces) checks on held objects (ADR-0178), including with `--no-default-executor`. Unsafe mutation grants, unavailable queries or missing bridge components stop installation; harmless access and owner/root/current-user grants remain admissible. This requires no compiler, additional runtime or application automation and does not change existing administrator ACLs or host policy.
 
 ## Native Executor prerequisites
 

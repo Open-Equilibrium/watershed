@@ -1,3 +1,4 @@
+import ctypes
 import os
 import pathlib
 import shlex
@@ -27,6 +28,267 @@ PROBE_DOCUMENT = (
     "requires a native Linux or macOS host",
 )
 class PrefixInstallerTest(unittest.TestCase):
+    @unittest.skipUnless(sys.platform == "darwin", "requires Darwin ACL metadata")
+    def test_macos_acl_admission_checks_held_source_and_directory_metadata(self):
+        source = INSTALLER.read_text(encoding="utf-8")
+        declarations = source.partition("\nprefix=")[0]
+        metadata = "metadata() {" + source.partition("\nmetadata() {")[2].partition('\ncase "$0" in')[0]
+        bundle_checks = 'exec 3<"$bundle"' + source.partition('exec 3<"$bundle"')[2].partition("\nreadiness_owner=$current_owner")[0]
+        source_checks = "validate_source() {" + source.partition("\nvalidate_source() {")[2].partition("\nflow_source_name=")[0]
+        bin_checks = 'exec 6<"$bin"' + source.partition('exec 6<"$bin"')[2].partition("\n# The working directory")[0]
+        admission = (
+            declarations + "\nhost=Darwin\ndescriptor_root=/dev/fd\n" + metadata +
+            '\nbundle=$1\nbin=$2\nimage=$3\nmarker=$4\n' + bundle_checks +
+            "\n" + source_checks + '\nexec 4<"$image"\nvalidate_source /dev/fd/4 "$image"\n' +
+            bin_checks + '\n: > "$marker"\n'
+        )
+        owner = subprocess.check_output(["/usr/bin/id", "-un"], text=True).strip()
+        cases = [
+            ("image", ["everyone allow write"], False),
+            ("bundle", ["everyone allow add_file,delete_child"], False),
+            ("bin", ["everyone allow delete_child"], False),
+            ("image", ["everyone allow read,execute"], True),
+            ("bundle", ["everyone allow list,search"], True),
+            ("image", ["everyone deny write", "everyone allow write"], True),
+            ("image", ["everyone allow write", "everyone deny write"], False),
+            ("image", ["group:staff allow write"], False),
+            ("image", ["group:staff deny write", "group:staff allow write"], True),
+            ("image", ["user:root deny write", "group:staff allow write"], False),
+            ("image", [f"user:{owner} allow write,writesecurity"], True),
+            ("image", ["user:root allow write,writesecurity"], True),
+            ("inherited", ["everyone allow write,file_inherit,only_inherit"], False),
+        ]
+        if os.geteuid() != 0:
+            cases.append(("image", [f"user:{owner} deny readsecurity"], False))
+        for target_name, entries, safe in cases:
+            with self.subTest(target=target_name, entries=entries), tempfile.TemporaryDirectory() as temporary:
+                root = pathlib.Path(temporary)
+                bundle = root / "bundle"
+                bundle.mkdir(mode=0o755)
+                bin_path = root / "bin"
+                bin_path.mkdir(mode=0o755)
+                image = bundle / "flow"
+                image.write_bytes(b"synthetic source image")
+                image.chmod(0o755)
+                target = {"image": image, "bundle": bundle, "bin": bin_path,
+                          "inherited": bin_path}[target_name]
+                for index, entry in enumerate(entries):
+                    subprocess.run(["/bin/chmod", "+a#", str(index), entry, str(target)], check=True)
+                if target_name == "inherited":
+                    image = bin_path / "inherited-image"
+                    image.write_bytes(b"synthetic staged image")
+                    image.chmod(0o755)
+                if safe:
+                    expected_acl = subprocess.check_output(["/bin/ls", "-lde", str(target)]).splitlines()[1:]
+                marker = root / "publication-permitted"
+                result = subprocess.run(
+                    ["/bin/sh", "-c", admission, "acl-admission", str(bundle), str(bin_path),
+                     str(image), str(marker)], env={"PATH": ""}, capture_output=True, timeout=15,
+                )
+                self.assertEqual(result.returncode, 0 if safe else 1, result.stderr)
+                self.assertEqual(marker.exists(), safe, result.stderr)
+                if safe:
+                    self.assertEqual(subprocess.check_output(["/bin/ls", "-lde", str(target)]).splitlines()[1:], expected_acl)
+
+    @unittest.skipUnless(sys.platform == "darwin", "requires Darwin ACL metadata")
+    def test_macos_inherited_staging_acl_is_checked_before_publication(self):
+        source = INSTALLER.read_text(encoding="utf-8")
+        declarations = source.partition("\nprefix=")[0]
+        metadata = "metadata() {" + source.partition("\nmetadata() {")[2].partition('\ncase "$0" in')[0]
+        source_checks = "validate_source() {" + source.partition("\nvalidate_source() {")[2].partition("\nflow_source_name=")[0]
+        binding_checks = "verify_bundle_binding() {" + source.partition("\nverify_bundle_binding() {")[2].partition("\nverify_bundle_binding\nverify_bin_binding\n")[0]
+        staging = source.partition("\nverify_bundle_binding\nverify_bin_binding\n")[2].partition('\n/bin/ln -- "$flow_stage"')[0]
+        owner = subprocess.check_output(["/usr/bin/id", "-un"], text=True).strip()
+        cases = [
+            ("everyone allow write,file_inherit,directory_inherit,only_inherit", False),
+            ("everyone allow add_file,directory_inherit,only_inherit", False),
+            ("everyone allow read,file_inherit,directory_inherit,only_inherit", True),
+            (f"user:{owner} allow write,writesecurity,file_inherit,directory_inherit,only_inherit", True),
+            ("stage-file-only", False),
+        ]
+        for entry, safe in cases:
+            with self.subTest(entry=entry), tempfile.TemporaryDirectory() as temporary:
+                root = pathlib.Path(temporary)
+                bundle = root / "bundle"
+                bundle.mkdir(mode=0o755)
+                image = bundle / "flow"
+                image.write_bytes(b"synthetic source image")
+                image.chmod(0o755)
+                bin_path = root / "bin"
+                bin_path.mkdir(mode=0o755)
+                staging_body = staging
+                if entry == "stage-file-only":
+                    # The directory grant is inactive, but its new file inherits mutation.
+                    staging_body = staging.replace('stage_created=1\n',
+                        'stage_created=1\n/bin/chmod +a "everyone allow write,file_inherit,only_inherit" "$stage_directory"\n', 1)
+                else:
+                    subprocess.run(["/bin/chmod", "+a", entry, str(bin_path)], check=True)
+                marker = root / "publication-permitted"
+                admission = (
+                    declarations + "\nhost=Darwin\ndescriptor_root=/dev/fd\n" + metadata +
+                    "\n" + source_checks + "\n" + binding_checks +
+                    '\nbundle=$1\nbin=$2\nflow_source_entry=$3\nmarker=$4\n'
+                    'current_owner=$(/usr/bin/id -u)\ninstall_executor=0\n'
+                    'exec 3<"$bundle"\nbundle_fd=/dev/fd/3\n'
+                    'exec 4<"$flow_source_entry"\nflow_source=/dev/fd/4\n'
+                    'exec 6<"$bin"\nbin_fd=/dev/fd/6\ncd "$bin"\n'
+                    'stage_directory=./stage\nflow_stage=$stage_directory/flow\n' +
+                    staging_body + '\n: > "$marker"\n'
+                )
+                result = subprocess.run(
+                    ["/bin/sh", "-c", admission, "staging-admission", str(bundle), str(bin_path),
+                     str(image), str(marker)], env={"PATH": ""}, capture_output=True, timeout=15,
+                )
+                self.assertEqual(result.returncode, 0 if safe else 1, result.stderr)
+                self.assertEqual(marker.exists(), safe, result.stderr)
+
+    @unittest.skipUnless(sys.platform == "darwin", "requires Darwin ACL metadata")
+    def test_macos_readiness_directory_hardens_safe_inherited_acl_before_use(self):
+        source = INSTALLER.read_text(encoding="utf-8")
+        declarations = source.partition("\nprefix=")[0]
+        metadata = "metadata() {" + source.partition("\nmetadata() {")[2].partition('\ncase "$0" in')[0]
+        creation = '/bin/mkdir -m 0700 -- "$readiness_config"' + source.partition(
+            '/bin/mkdir -m 0700 -- "$readiness_config"')[2].partition(
+            '    if [ "$host" = Darwin ]; then\n        # macOS /bin/sh supports job control')[0]
+        libc = ctypes.CDLL(None, use_errno=True)
+        libc.acl_get_fd_np.argtypes = [ctypes.c_int, ctypes.c_int]
+        libc.acl_get_fd_np.restype = ctypes.c_void_p
+        libc.acl_get_entry.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.POINTER(ctypes.c_void_p)]
+        libc.acl_free.argtypes = [ctypes.c_void_p]
+
+        def has_acl(path):
+            descriptor = os.open(path, os.O_RDONLY)
+            try:
+                acl = libc.acl_get_fd_np(descriptor, 256)
+                if not acl:
+                    self.assertEqual(ctypes.get_errno(), 2)
+                    return False
+                try:
+                    result = libc.acl_get_entry(acl, 0, ctypes.byref(ctypes.c_void_p()))
+                    if result == -1:
+                        self.assertEqual(ctypes.get_errno(), 22)
+                        return False
+                    self.assertEqual(result, 0)
+                    return True
+                finally:
+                    libc.acl_free(acl)
+            finally:
+                os.close(descriptor)
+
+        owner = subprocess.check_output(["/usr/bin/id", "-un"], text=True).strip()
+        cases = [(None, True),
+                 ("everyone allow read,search,directory_inherit,only_inherit", True),
+                 (f"user:{owner} allow write,writesecurity,directory_inherit,only_inherit", True),
+                 ("everyone allow add_file,directory_inherit,only_inherit", False)]
+        for entry, safe in cases:
+            with self.subTest(entry=entry), tempfile.TemporaryDirectory() as temporary:
+                root = pathlib.Path(temporary)
+                if entry:
+                    subprocess.run(["/bin/chmod", "+a", entry, str(root)], check=True)
+                parent_acl = subprocess.check_output(["/bin/ls", "-lde", str(root)]).splitlines()[1:]
+                marker = root / "readiness-permitted"
+                admission = (
+                    declarations + "\nhost=Darwin\ndescriptor_root=/dev/fd\n" + metadata +
+                    '\nreadiness_config=$1\nmarker=$2\ncurrent_owner=$(/usr/bin/id -u)\n'
+                    'readiness_owner=$current_owner\nreadiness_group=$(/usr/bin/id -g)\n' +
+                    creation + '\n: > "$marker"\n'
+                )
+                result = subprocess.run(
+                    ["/bin/sh", "-c", admission, "readiness-admission", str(root / "readiness"),
+                     str(marker)], env={"PATH": ""}, capture_output=True, timeout=15,
+                )
+                self.assertEqual(result.returncode, 0 if safe else 1, result.stderr)
+                self.assertEqual(marker.exists(), safe, result.stderr)
+                self.assertEqual(has_acl(root / "readiness"), not safe)
+                self.assertEqual(subprocess.check_output(["/bin/ls", "-lde", str(root)]).splitlines()[1:], parent_acl)
+
+    @unittest.skipUnless(sys.platform == "darwin", "requires Darwin ACL metadata")
+    def test_macos_acl_rejection_cleanup_preserves_foreign_entries(self):
+        source = INSTALLER.read_text(encoding="utf-8")
+        declarations = source.partition("\nprefix=")[0]
+        metadata = "metadata() {" + source.partition("\nmetadata() {")[2].partition('\ncase "$0" in')[0]
+        cleanup = "stop_readiness() {" + source.partition("\nstop_readiness() {")[2].partition("\nsignal_exit() {")[0]
+        stage = source.partition("\nverify_bundle_binding\nverify_bin_binding\n")[2].partition('\n/bin/ln -- "$flow_stage"')[0]
+        readiness = '/bin/mkdir -m 0700 -- "$readiness_config"' + source.partition(
+            '/bin/mkdir -m 0700 -- "$readiness_config"')[2].partition(
+            '    if [ "$host" = Darwin ]; then\n        # macOS /bin/sh supports job control')[0]
+        for kind in ("stage", "stage-linked", "readiness"):
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as temporary:
+                root = pathlib.Path(temporary)
+                subprocess.run([
+                    "/bin/chmod", "+a", "everyone allow add_file,directory_inherit,only_inherit",
+                    str(root),
+                ], check=True)
+                setup = (
+                    '\ncurrent_owner=$(/usr/bin/id -u)\ninstall_executor=0\n'
+                    'stage_directory=$1/stage\nflow_stage=$stage_directory/flow\n'
+                    'executor_stage=$stage_directory/flow-executor\nflow_target=$1/flow\n'
+                    'executor_target=$1/flow-executor\nreadiness_config=$1/readiness\n'
+                    'stage_created=0\nstage_admitted=0\nreadiness_config_created=0\n'
+                    'readiness_config_admitted=0\ninstallation_committed=0\n'
+                    'published_flow=0\npublished_executor=0\nreadiness_pid=\ntrap cleanup EXIT\n'
+                )
+                if kind.startswith("stage"):
+                    # A synthetic peer entry appears during the inherited unsafe interval.
+                    body = stage.replace('stage_created=1\n', 'stage_created=1\nprintf foreign > "$flow_stage"\n', 1)
+                    foreign = root / "stage" / "flow"
+                    if kind == "stage-linked":
+                        body = body.replace('printf foreign > "$flow_stage"\n',
+                                            'printf foreign > "$flow_target"\n/bin/ln "$flow_target" "$flow_stage"\n', 1)
+                else:
+                    body = readiness.replace('readiness_config_created=1\n',
+                                             'readiness_config_created=1\nprintf foreign > "$readiness_config/status"\n', 1)
+                    foreign = root / "readiness" / "status"
+                admission = declarations + "\nhost=Darwin\ndescriptor_root=/dev/fd\n" + metadata + "\n" + cleanup + setup + body
+                result = subprocess.run(
+                    ["/bin/sh", "-c", admission, "rejected-cleanup", str(root)],
+                    env={"PATH": ""}, capture_output=True, timeout=15,
+                )
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertIn(b"unsafe or unavailable macOS ACL", result.stderr)
+                self.assertTrue(foreign.exists(), result.stderr)
+                self.assertEqual(foreign.read_bytes(), b"foreign")
+                if kind == "stage-linked":
+                    self.assertTrue((root / "flow").exists(), result.stderr)
+                    self.assertEqual((root / "flow").read_bytes(), b"foreign")
+
+    @unittest.skipUnless(sys.platform == "darwin", "requires Darwin ACL metadata")
+    def test_macos_acl_prerequisite_and_held_descriptor_errors_fail_closed(self):
+        declarations = INSTALLER.read_text(encoding="utf-8").partition("\nprefix=")[0]
+        owner = subprocess.check_output(["/usr/bin/id", "-un"], text=True).strip()
+        cases = ["missing-bridge", "closed-descriptor"]
+        if os.geteuid() != 0:
+            cases.append("unreadable-acl")
+        for fault in cases:
+            with self.subTest(fault=fault), tempfile.TemporaryDirectory() as temporary:
+                root = pathlib.Path(temporary)
+                image = root / "image"
+                image.write_bytes(b"synthetic opened image")
+                marker = root / "effect-permitted"
+                functions = declarations
+                setup = 'exec 7<"$1"\n'
+                if fault == "missing-bridge":
+                    functions = functions.replace("/usr/bin/osascript", str(root / "missing-osascript"))
+                elif fault == "closed-descriptor":
+                    setup += "exec 7<&-\n"
+                else:
+                    setup += '/bin/chmod +a "$3" "$1"\n'
+                admission = (
+                    functions + '\nhost=Darwin\ncurrent_owner=$(/usr/bin/id -u)\n' + setup +
+                    'validate_acl /dev/fd/7 "opened image"\n: > "$2"\n'
+                )
+                result = subprocess.run(
+                    ["/bin/sh", "-c", admission, "acl-fault", str(image), str(marker),
+                     f"user:{owner} deny readsecurity"], env={"PATH": ""}, capture_output=True,
+                    timeout=15,
+                )
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertFalse(marker.exists(), result.stderr)
+                if fault == "missing-bridge":
+                    self.assertIn(b"requires", result.stderr)
+                elif fault == "unreadable-acl":
+                    self.assertIn(b"ACL metadata unavailable: 13", result.stderr)
+
     def test_release_admission_matches_runtime(self):
         declarations, separator, _ = INSTALLER.read_text(encoding="utf-8").partition("\nprefix=")
         self.assertTrue(separator, "installer declarations must precede installation")

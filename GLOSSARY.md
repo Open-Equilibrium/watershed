@@ -75,6 +75,8 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 
 ## Flow Agent runtime surfaces
 
+- **Access-control list (ACL)** — Operating-system permission entries that grant or deny named users or groups access beyond ordinary file-mode permissions. Installation prerequisites are in [PLATFORMS.md](PLATFORMS.md#installation-prerequisites).
+
 - **flow-value-v0** — The closed, explicitly tagged and provider-neutral M1.1 value contract shared by root input, Phase input/results, Instruction parameters, Tool parameters and Tool outputs. It permits no implicit coercion or floating-point values; large or binary values use immutable session-object references (ADR-0092, ADR-0098).
 - **flow-run-input-v0** — The versioned run-input document containing one complete `flow-value-v0` value for the selected root Flow; its canonical contract is in `PROTOCOL.md`.
 - **flow-tool-result-v0** — The fixed Tool-result envelope for status, stdout and stderr flow values, with exit code only when observed; its canonical contract is in `PROTOCOL.md`.
