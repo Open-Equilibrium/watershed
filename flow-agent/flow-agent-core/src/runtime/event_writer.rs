@@ -1,7 +1,7 @@
 use crate::runtime::{
     context::ContextManifestCheckpoint,
     context_persistence::{ContextManifestWriter, validate_context_manifest_pairing},
-    event_construction::RuntimeEventAlternative,
+    event_construction::{ConstructedRuntimeEvent, RuntimeEventAlternative},
     fs_guards::AnchoredFile,
     live_events::LiveEventNotifier,
     productive_capacity::ProductiveDispatchReservation,
@@ -48,6 +48,18 @@ pub(crate) fn post_writer_finish_observer(path: &AnchoredFile) {
 }
 
 pub trait RuntimeEventSink {
+    fn commit_constructed(
+        &mut self,
+        constructed: &ConstructedRuntimeEvent,
+        context_manifest: Option<ContextManifestCheckpoint>,
+    ) -> Result<(), RuntimeError> {
+        self.commit(
+            constructed.event(),
+            constructed.canonical_jsonl(),
+            context_manifest,
+        )
+    }
+
     fn commit(
         &mut self,
         event: &EventEnvelope,

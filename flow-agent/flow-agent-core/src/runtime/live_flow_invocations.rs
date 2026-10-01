@@ -79,10 +79,10 @@ impl LiveFlowInvocations {
             let FlowExecutionAction::Event(action) = action else {
                 continue;
             };
-            if action.event.sequence > prefix_event_count {
+            if action.event.event().sequence > prefix_event_count {
                 break;
             }
-            tracker.reconstruct_prefix_event(&action.event)?;
+            tracker.reconstruct_prefix_event(action.event.event())?;
         }
         if tracker.acquire_slots {
             for active in &mut tracker.active {

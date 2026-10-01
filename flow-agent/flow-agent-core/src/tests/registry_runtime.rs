@@ -116,7 +116,7 @@ fn runtime_executes_subflows_after_all_parent_phases() {
         .actions
         .iter()
         .filter_map(|action| match action {
-            FlowExecutionAction::Event(action) => Some(action.event.clone()),
+            FlowExecutionAction::Event(action) => Some(action.event.event().clone()),
             FlowExecutionAction::Fixture(_) => None,
         })
         .collect::<Vec<_>>();

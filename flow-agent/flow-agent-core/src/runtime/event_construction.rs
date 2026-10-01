@@ -24,15 +24,39 @@ pub(crate) use payload::{
     phase_kind, tool_started_payload,
 };
 pub(crate) use transition::{
-    ConstructedRuntimeEvent, PlannedRuntimeEvent, RuntimeEventAlternative,
-    construct_runtime_transition, fixture_failure_transition_events,
-    live_invocation_failure_transition_events, validate_runtime_transition_capacity,
+    PlannedRuntimeEvent, RuntimeEventAlternative, construct_runtime_transition,
+    fixture_failure_transition_events, live_invocation_failure_transition_events,
+    validate_runtime_transition_capacity,
 };
 
 pub(crate) const FLOW_AGENT_EVENT_SOURCE: &str = "flow-agent-cli";
 
 pub(crate) fn runtime_event_id(sequence: u64) -> String {
     format!("evt-{sequence:03}")
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct ConstructedRuntimeEvent {
+    canonical_jsonl: String,
+    event: EventEnvelope,
+}
+
+impl ConstructedRuntimeEvent {
+    pub(crate) fn new(event: EventEnvelope) -> Result<Self, proto::CanonicalJsonError> {
+        let canonical_jsonl = event.canonical_jsonl()?;
+        Ok(Self {
+            canonical_jsonl,
+            event,
+        })
+    }
+
+    pub(crate) fn event(&self) -> &EventEnvelope {
+        &self.event
+    }
+
+    pub(crate) fn canonical_jsonl(&self) -> &str {
+        &self.canonical_jsonl
+    }
 }
 
 pub struct RuntimeEventBuilder {
@@ -193,8 +217,8 @@ impl RuntimeEventBuilder {
             for event in lifecycle_example.as_deref().unwrap_or_default() {
                 validation.validate_constructed_event(
                     Path::new("runtime.jsonl"),
-                    &event.event,
-                    event.canonical_jsonl.len(),
+                    event.event(),
+                    event.canonical_jsonl().len(),
                 )?;
             }
         }
@@ -242,9 +266,11 @@ impl RuntimeEventBuilder {
             event.flow_id = Some(invocation.flow_id.clone());
             event.parent_flow_id = invocation.parent_flow_id.clone();
         }
-        let event_bytes = event.canonical_jsonl().map_err(|err| {
+        let constructed = ConstructedRuntimeEvent::new(event).map_err(|err| {
             RuntimeError::Protocol(format!("failed to serialize runtime event: {err}"))
         })?;
+        let event = constructed.event();
+        let event_bytes = constructed.canonical_jsonl();
         let context_manifest = if event.event_type == EventType::MessageCompleted {
             let (manifest, objects) = self.pending_context_manifest.take().ok_or_else(|| {
                 RuntimeError::Protocol(
@@ -262,25 +288,18 @@ impl RuntimeEventBuilder {
         if let Some(validation) = self.validation.as_mut() {
             validation.validate_constructed_event(
                 Path::new("runtime.jsonl"),
-                &event,
+                event,
                 event_bytes.len(),
             )?;
         }
-        self.failure_status.observe(&event);
+        self.failure_status.observe(event);
         self.events.push(event_bytes.as_bytes());
         if let Some(checkpoint) = context_manifest.as_ref() {
             self.context_manifests
                 .push(checkpoint.manifest.line.as_bytes());
         }
-        self.actions
-            .push(FlowExecutionAction::Event(Box::new(PlannedEventAction {
-                action_id: format!("event-{sequence:06}"),
-                canonical_jsonl: event_bytes,
-                context_checkpoint: context_manifest,
-                event: event.clone(),
-            })));
         self.sequence = sequence;
-        self.history.record(&event);
+        self.history.record(event);
         if let Some(invocation) = invocation {
             match event.event_type {
                 EventType::PhaseEntered => {
@@ -300,6 +319,12 @@ impl RuntimeEventBuilder {
                 _ => {}
             }
         }
+        self.actions
+            .push(FlowExecutionAction::Event(Box::new(PlannedEventAction {
+                action_id: format!("event-{sequence:06}"),
+                context_checkpoint: context_manifest,
+                event: constructed,
+            })));
         Ok(())
     }
 

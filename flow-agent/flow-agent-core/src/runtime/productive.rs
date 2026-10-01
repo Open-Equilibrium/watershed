@@ -309,11 +309,7 @@ fn emit_and_commit<S: crate::runtime::event_writer::RuntimeEventSink>(
     else {
         unreachable!("emitting an event cannot record a fixture action")
     };
-    let result = sink.commit(
-        &action.event,
-        &action.canonical_jsonl,
-        action.context_checkpoint,
-    );
+    let result = sink.commit_constructed(&action.event, action.context_checkpoint);
     if result.is_err() {
         *event_commit_failed = true;
     }

@@ -123,11 +123,7 @@ pub(crate) fn resume_fixture_session_internal(
         )?;
         for action in plan.execution.actions.iter() {
             if let FlowExecutionAction::Event(action) = action {
-                prefix_sink.commit(
-                    &action.event,
-                    &action.canonical_jsonl,
-                    action.context_checkpoint.clone(),
-                )?;
+                prefix_sink.commit_constructed(&action.event, action.context_checkpoint.clone())?;
             }
         }
         if inspection.completed_turns > plan.execution.context_manifests.record_count

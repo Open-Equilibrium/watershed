@@ -1,10 +1,10 @@
 use crate::runtime::{
     context::ContextManifestCheckpoint,
+    event_construction::ConstructedRuntimeEvent,
     fs_guards::AnchoredDirectoryIdentity,
     stream_signature::{FlowInvocation, RuntimeStreamSignature, RuntimeStreamSignatureBuilder},
     types::{EventClock, RuntimeError},
 };
-use proto::EventEnvelope;
 use std::sync::Arc;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ScriptWrite {
@@ -88,9 +88,8 @@ pub struct PlannedFixtureAction {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PlannedEventAction {
     pub(crate) action_id: String,
-    pub(crate) canonical_jsonl: String,
     pub(crate) context_checkpoint: Option<ContextManifestCheckpoint>,
-    pub(crate) event: EventEnvelope,
+    pub(crate) event: ConstructedRuntimeEvent,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -155,7 +154,7 @@ impl FlowExecutionPlan {
                 FlowExecutionAction::Event(action) => {
                     signature.push(b"event");
                     signature.push(action.action_id.as_bytes());
-                    signature.push(action.canonical_jsonl.as_bytes());
+                    signature.push(action.event.canonical_jsonl().as_bytes());
                     if let Some(checkpoint) = &action.context_checkpoint {
                         signature.push(checkpoint.manifest.line.as_bytes());
                         for object in &checkpoint.objects {

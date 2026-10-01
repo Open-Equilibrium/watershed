@@ -92,7 +92,7 @@ fn apply_flow_with_workspace(
         .actions
         .iter()
         .find_map(|action| match action {
-            FlowExecutionAction::Event(action) => Some(action.event.session_id.as_str()),
+            FlowExecutionAction::Event(action) => Some(action.event.event().session_id.as_str()),
             FlowExecutionAction::Fixture(_) => None,
         })
         .ok_or_else(|| RuntimeError::Protocol("flow execution plan has no events".to_owned()))?;
@@ -111,8 +111,9 @@ fn apply_flow_with_workspace(
     for action in application.plan.execution.actions.iter() {
         match action {
             FlowExecutionAction::Event(action) => {
-                if action.event.event_type == EventType::FlowStarted
-                    && live_invocations.should_process(&action.event)
+                let event = action.event.event();
+                if event.event_type == EventType::FlowStarted
+                    && live_invocations.should_process(event)
                 {
                     preflight_live_invocation_failure_transition(
                         &application,
@@ -121,7 +122,7 @@ fn apply_flow_with_workspace(
                         &live_invocations,
                     )?;
                 }
-                if let Err(error) = live_invocations.before_event(&action.event) {
+                if let Err(error) = live_invocations.before_event(event) {
                     return terminalize_live_invocation_error(
                         &application,
                         error,
@@ -131,20 +132,16 @@ fn apply_flow_with_workspace(
                         &mut live_invocations,
                     );
                 }
-                if live_invocations.should_process(&action.event)
+                if live_invocations.should_process(event)
                     && let Some(sink) = sink.as_deref_mut()
                 {
-                    sink.commit(
-                        &action.event,
-                        &action.canonical_jsonl,
-                        action.context_checkpoint.clone(),
-                    )?;
+                    sink.commit_constructed(&action.event, action.context_checkpoint.clone())?;
                 }
-                event_signature.push(action.canonical_jsonl.as_bytes());
+                event_signature.push(action.event.canonical_jsonl().as_bytes());
                 if let Some(checkpoint) = &action.context_checkpoint {
                     context_signature.push(checkpoint.manifest.line.as_bytes());
                 }
-                live_invocations.after_event(&action.event);
+                live_invocations.after_event(event);
             }
             FlowExecutionAction::Fixture(action)
                 if application
@@ -362,14 +359,14 @@ fn commit_constructed_transition(
     state: &mut PlannedTransitionState<'_, '_>,
 ) -> Result<(), RuntimeError> {
     for constructed in events {
-        state.live_invocations.before_event(&constructed.event)?;
+        state.live_invocations.before_event(constructed.event())?;
         if let Some(sink) = state.sink.as_deref_mut() {
-            sink.commit(&constructed.event, &constructed.canonical_jsonl, None)?;
+            sink.commit_constructed(constructed, None)?;
         }
         state
             .event_signature
-            .push(constructed.canonical_jsonl.as_bytes());
-        state.live_invocations.after_event(&constructed.event);
+            .push(constructed.canonical_jsonl().as_bytes());
+        state.live_invocations.after_event(constructed.event());
     }
     Ok(())
 }

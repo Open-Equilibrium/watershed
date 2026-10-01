@@ -256,7 +256,7 @@ impl RuntimeEventSink for ResumePreflightSink<'_> {
             let mut events = self.events.clone();
             for event in &alternative.events {
                 let (shifted, canonical) =
-                    resumed_event(&event.event, self.resume_marker_count, self.clock)?;
+                    resumed_event(event.event(), self.resume_marker_count, self.clock)?;
                 if shifted.sequence > MAX_FLOW_EVENTS {
                     return Err(RuntimeError::Protocol(format!(
                         "{} event budget exceeded: prospective event count {} exceeds max {MAX_FLOW_EVENTS}",
