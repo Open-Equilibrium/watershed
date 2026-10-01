@@ -44,6 +44,7 @@ static INDEX_NONCE: AtomicU64 = AtomicU64::new(0);
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum HistoryScratchStage {
     ActiveScratchSkipped,
+    BeforeCleanup,
     DirectoryCreated,
     RootLeaseContended,
     StaleSweep,
@@ -239,6 +240,8 @@ impl HistoryScratch {
             lease,
             ..
         } = self;
+        #[cfg(test)]
+        observe_history_scratch_stage(HistoryScratchStage::BeforeCleanup);
         let _root_lease = HistoryScratchRootLease::acquire(&root)?;
         lease
             .unlock()
@@ -268,8 +271,7 @@ impl HistoryScratchRootLease {
             Err(fs::TryLockError::WouldBlock) => {
                 #[cfg(test)]
                 observe_history_scratch_stage(HistoryScratchStage::RootLeaseContended);
-                file.lock()
-                    .map_err(|source| path_io_error(path.diagnostic_path(), source))?;
+                return Err(protocol("history validation scratch is active"));
             }
             Err(fs::TryLockError::Error(source)) => {
                 return Err(path_io_error(path.diagnostic_path(), source));

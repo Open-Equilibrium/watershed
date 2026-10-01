@@ -1,7 +1,7 @@
 use super::super::helpers::empty_workspace;
 use super::{
-    FLOW_HASH, REGISTRY_HASH, create_review_run, create_terminal_review_run, entry,
-    file_tree_bytes,
+    FLOW_HASH, REGISTRY_HASH, append_uncertain_provider_intent, create_review_run,
+    create_terminal_review_run, entry, file_tree_bytes,
     history_support::{
         assert_history_validation_scratch_is_empty, history_validation_root,
         stale_history_validation_scratch, write_history_records,
@@ -12,20 +12,24 @@ use crate::runtime::{
     conversations::{
         HistoryScratchFault, HistoryScratchMemberStage, HistoryScratchStage,
         MAX_CONVERSATION_SCAN_RECORDS, abandon_history_index_scratch_for_test,
-        abandon_history_index_scratches_for_test, complete_history_index_scratch_for_test,
-        create_conversation_run, history_index_limits_for_test, read_conversation_history,
+        abandon_history_index_scratches_for_test, append_run_attempt_result,
+        complete_history_index_scratch_for_test, create_conversation_run,
+        history_index_limits_for_test, read_conversation_history,
         reserve_conversation_continuation, set_history_index_available_space_for_test,
         set_history_index_sort_record_limit_for_test, set_history_scratch_fault_for_test,
         take_history_index_metrics_for_test, with_history_scratch_member_observer_for_test,
         with_history_scratch_stage_observer_for_test,
     },
+    run_attempts::{RunAttemptKind, RunAttemptOutcome, RunAttemptResult},
     session_authority::SessionOwnershipLease,
+    types::RuntimeError,
 };
 use std::{
     fs::{self},
     path::Path,
     sync::mpsc,
     thread,
+    time::Duration,
 };
 
 #[test]
@@ -318,6 +322,129 @@ fn history_scratch_removal_excludes_a_peer_stale_sweep() {
 }
 
 #[test]
+fn history_scratch_cleanup_returns_while_a_peer_holds_the_root_lease() {
+    for invalid_history in [false, true] {
+        let workspace = empty_workspace(&format!("history-scratch-busy-cleanup-{invalid_history}"));
+        create_terminal_review_run(&workspace);
+        append_uncertain_provider_intent(&workspace);
+        append_run_attempt_result(
+            &workspace,
+            "review",
+            "review-1",
+            &RunAttemptResult {
+                attempt_id: "provider-001".to_owned(),
+                attempt_kind: RunAttemptKind::Provider,
+                outcome: RunAttemptOutcome::Completed,
+                classification: None,
+                exit_code: None,
+                timestamp: "2026-07-30T12:00:01Z".to_owned(),
+                durable_output: None,
+            },
+        )
+        .expect("Run completion commits before history validation");
+        let mut records = vec![entry("root", None, "review-1", 1)];
+        if invalid_history {
+            records.push(entry("root", Some("root"), "review-1", 1));
+        }
+        write_history_records(&workspace, "review", &records);
+        let conversation = crate::tests::helpers::workspace_session_dir(&workspace).join("review");
+        let durable_before = file_tree_bytes(&conversation);
+        let root = history_validation_root(&workspace);
+        let worker_workspace = workspace.to_path_buf();
+        let (before_cleanup, before_cleanup_rx) = mpsc::channel();
+        let (resume_cleanup, resume_cleanup_rx) = mpsc::channel();
+        let (completed, completed_rx) = mpsc::channel();
+        let worker = thread::spawn(move || {
+            let result = with_history_scratch_stage_observer_for_test(
+                move |stage| {
+                    if stage == HistoryScratchStage::BeforeCleanup {
+                        before_cleanup.send(()).expect("cleanup boundary reports");
+                        resume_cleanup_rx.recv().expect("cleanup boundary releases");
+                    }
+                },
+                || read_conversation_history(&worker_workspace, "review"),
+            );
+            completed.send(()).expect("cleanup completion reports");
+            result
+        });
+        before_cleanup_rx.recv().expect("worker reaches cleanup");
+        let root_lease = fs::File::options()
+            .read(true)
+            .write(true)
+            .open(root.join("lease"))
+            .expect("peer opens the root lease");
+        root_lease
+            .try_lock()
+            .expect("live peer holds the root lease");
+        let scratch_before = file_tree_bytes(&root);
+        resume_cleanup.send(()).expect("worker attempts cleanup");
+        let completed_while_held = completed_rx.recv_timeout(Duration::from_secs(5));
+        let scratch_after = file_tree_bytes(&root);
+        drop(root_lease);
+        let result = worker.join().expect("cleanup worker joins");
+
+        assert!(
+            completed_while_held.is_ok(),
+            "cleanup must return while the live peer retains its root lease"
+        );
+        assert_eq!(
+            scratch_after, scratch_before,
+            "busy cleanup preserves scratch"
+        );
+        let error = result.expect_err("busy cleanup returns an error");
+        if invalid_history {
+            let RuntimeError::ControlledStageFailures {
+                operation: Some(operation),
+                cleanup: Some(cleanup),
+                ..
+            } = error
+            else {
+                panic!("history validation and cleanup errors must both remain");
+            };
+            assert!(operation.to_string().contains("duplicated"));
+            assert!(
+                cleanup
+                    .to_string()
+                    .contains("history validation scratch is active")
+            );
+        } else {
+            assert!(
+                error
+                    .to_string()
+                    .contains("history validation scratch is active")
+            );
+        }
+        assert_eq!(
+            file_tree_bytes(&conversation),
+            durable_before,
+            "cleanup contention preserves durable Run and history bytes"
+        );
+        let scratch = fs::read_dir(&root)
+            .expect("scratch root reads")
+            .map(|entry| entry.expect("scratch entry reads").path())
+            .find(|path| path.is_dir())
+            .expect("marked scratch remains for stale recovery");
+        assert!(scratch.join("marker.json").is_file());
+        let lease = fs::File::options()
+            .read(true)
+            .write(true)
+            .open(scratch.join("lease"))
+            .expect("per-command lease remains");
+        lease
+            .try_lock()
+            .expect("failed cleanup releases the owned lease");
+        drop(lease);
+        if invalid_history {
+            write_history_records(&workspace, "review", &records[..1]);
+        }
+        read_conversation_history(&workspace, "review")
+            .expect("later retry reclaims scratch after the peer releases");
+        assert!(!scratch.exists());
+        assert_history_validation_scratch_is_empty(&workspace);
+    }
+}
+
+#[test]
 fn active_history_scratch_member_removal_does_not_race_a_peer_sweep() {
     #[derive(Clone, Copy)]
     enum PeerEvent {
@@ -434,7 +561,7 @@ fn active_history_scratch_member_removal_does_not_race_a_peer_sweep() {
         )
     });
 
-    match peer_event_rx
+    let peer_skipped_active = match peer_event_rx
         .recv()
         .expect("peer sweep reaches active scratch")
     {
@@ -449,7 +576,7 @@ fn active_history_scratch_member_removal_does_not_race_a_peer_sweep() {
                 selected_exists,
                 "peer sweep leaves the active scratch untouched"
             );
-            release_owner.send(()).expect("owner removal releases");
+            true
         }
         PeerEvent::MutableMemberInspected => {
             release_owner.send(()).expect("owner removal releases");
@@ -457,16 +584,19 @@ fn active_history_scratch_member_removal_does_not_race_a_peer_sweep() {
                 .recv()
                 .expect("owner removes the enumerated member normally");
             release_peer.send(()).expect("peer inspection releases");
+            false
         }
+    };
+    let peer_result = peer.join().expect("peer thread joins");
+    if peer_skipped_active {
+        release_owner.send(()).expect("owner removal releases");
     }
 
     owner
         .join()
         .expect("owner thread joins")
         .expect("owner history build succeeds");
-    peer.join()
-        .expect("peer thread joins")
-        .expect("peer history build succeeds");
+    peer_result.expect("peer history build succeeds");
     assert_history_validation_scratch_is_empty(&workspace);
 }
 
@@ -489,11 +619,14 @@ fn assert_history_scratch_root_serializes(label: &str, owner_boundary: HistorySc
     owner_staged_rx
         .recv()
         .expect("owner pauses at the selected root boundary");
+    let root = history_validation_root(&workspace);
+    let before = file_tree_bytes(&root);
 
     let peer_workspace = workspace.to_path_buf();
     let (peer_stage, peer_stage_rx) = std::sync::mpsc::channel();
+    let (peer_completed, peer_completed_rx) = mpsc::channel();
     let peer = thread::spawn(move || {
-        with_history_scratch_stage_observer_for_test(
+        let result = with_history_scratch_stage_observer_for_test(
             move |stage| {
                 if matches!(
                     stage,
@@ -503,18 +636,34 @@ fn assert_history_scratch_root_serializes(label: &str, owner_boundary: HistorySc
                 }
             },
             || complete_history_index_scratch_for_test(&peer_workspace, "review-b"),
-        )
+        );
+        peer_completed.send(()).expect("peer completion reports");
+        result
     });
     let observed = peer_stage_rx
         .recv()
         .expect("peer reaches the serialized root boundary");
+    let completed_while_held = peer_completed_rx.recv_timeout(Duration::from_secs(5));
+    let after = file_tree_bytes(&root);
     release_owner.send(()).expect("owner boundary releases");
     let owner_result = owner.join().expect("owner joins");
     let peer_result = peer.join().expect("peer joins");
 
     assert_eq!(observed, HistoryScratchStage::RootLeaseContended);
+    assert!(
+        completed_while_held.is_ok(),
+        "create must return while the live owner retains its root lease"
+    );
+    assert_eq!(after, before, "busy creation preserves the owner's scratch");
     owner_result.expect("owner scratch lifecycle completes");
-    peer_result.expect("peer scratch lifecycle completes");
+    assert!(
+        peer_result
+            .expect_err("busy creation returns an error")
+            .to_string()
+            .contains("history validation scratch is active")
+    );
+    complete_history_index_scratch_for_test(&workspace, "review-b")
+        .expect("peer retries after the owner releases");
     assert_history_validation_scratch_is_empty(&workspace);
 }
 
