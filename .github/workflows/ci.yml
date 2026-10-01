@@ -25,21 +25,12 @@ permissions:
 
 jobs:
   m1:
-    name: ${{ matrix.product }} gates (${{ matrix.os }}) [${{ github.event_name }}]
+    name: Flow Agent gates (${{ matrix.os }}) [${{ github.event_name }}]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: ubuntu-24.04
-            packages: --workspace
-            product: Flow Agent
-          - os: xcode-27
-            packages: --workspace
-            product: Flow Agent
-          - os: windows-latest
-            packages: -p core-script -p core-policy -p proto
-            product: Shared contracts
+        os: [ubuntu-24.04, xcode-27]
 
     steps:
       - name: Checkout
@@ -110,11 +101,11 @@ jobs:
         run: python3 scripts/probe-macos-app-sandbox.py
 
       - name: Run M1.2 installer contract tests
-        if: steps.scope.outputs.product == 'true' && (matrix.os != 'windows-latest')
+        if: steps.scope.outputs.product == 'true'
         run: node scripts/run-python.mjs -m unittest install.tests.test_install install.tests.test_readiness
 
       - name: Run privileged M1.2 installer acceptance
-        if: steps.scope.outputs.product == 'true' && (matrix.os != 'windows-latest')
+        if: steps.scope.outputs.product == 'true'
         timeout-minutes: 2
         run: >-
           sudo -n -- /usr/bin/env PATH="$PATH" SUDO_USER="$(id -un)"
@@ -172,7 +163,7 @@ jobs:
 
       - name: Check lints
         if: steps.scope.outputs.product == 'true'
-        run: cargo clippy --locked ${{ matrix.packages }} --all-targets --all-features -- -D warnings
+        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 
       - name: Run tests
         if: steps.scope.outputs.product == 'true'
@@ -181,7 +172,7 @@ jobs:
           --no-fail-fast
           --config 'target."cfg(all())".runner = ["node", "../../scripts/run-isolated-rust-test.mjs"]'
           --locked
-          ${{ matrix.packages }}
+          --workspace
           --all-targets
           --all-features
 
@@ -190,12 +181,12 @@ jobs:
         run: >-
           cargo --config .cargo/test-isolation.toml test
           --locked
-          ${{ matrix.packages }}
+          --workspace
           --all-features
           --doc
 
       - name: Build native installation artifacts
-        if: steps.scope.outputs.product == 'true' && (matrix.os != 'windows-latest')
+        if: steps.scope.outputs.product == 'true'
         shell: bash
         run: |
           cargo build --locked --release -p flow-agent-cli -p flow-agent-executor --target-dir target/m12-standard
@@ -204,7 +195,7 @@ jobs:
             python3 -c 'import json, sys; probe=json.load(sys.stdin); assert probe["ready"] is True, probe'
 
       - name: Package native download
-        if: steps.scope.outputs.product == 'true' && (matrix.os != 'windows-latest')
+        if: steps.scope.outputs.product == 'true'
         shell: bash
         run: |
           case "$(uname -s)" in
@@ -217,7 +208,7 @@ jobs:
             --output target/m12-download
 
       - name: Stage native Executor installation
-        if: steps.scope.outputs.product == 'true' && (matrix.os != 'windows-latest')
+        if: steps.scope.outputs.product == 'true'
         shell: python
         run: |
           import os, pathlib, shutil, tempfile
@@ -231,14 +222,14 @@ jobs:
               environment.write(f"M12_INSTALLED_EXECUTOR={executor}\n")
 
       - name: Run native release Executor acceptance
-        if: steps.scope.outputs.product == 'true' && (matrix.os != 'windows-latest')
+        if: steps.scope.outputs.product == 'true'
         shell: bash
         run: |
           FLOW_EXECUTOR_UNDER_TEST="$M12_INSTALLED_EXECUTOR" \
             cargo nextest run --locked -p flow-agent-executor --test native_contract --test native_self_protection
 
       - name: Run public Custom Executor conformance
-        if: steps.scope.outputs.product == 'true' && (matrix.os != 'windows-latest')
+        if: steps.scope.outputs.product == 'true'
         shell: bash
         run: |
           cargo run --locked -p flow-agent-core --features m12-startup-evidence \
@@ -271,7 +262,7 @@ jobs:
 
       - name: Run M1.2 executor startup evidence
         id: m12_startup_evidence
-        if: steps.scope.outputs.product == 'true' && (matrix.os != 'windows-latest')
+        if: steps.scope.outputs.product == 'true'
         continue-on-error: true
         shell: bash
         run: |
@@ -282,7 +273,7 @@ jobs:
             > target/m12-startup/m12-executor-startup.jsonl
 
       - name: Upload M1.2 executor startup evidence
-        if: steps.scope.outputs.product == 'true' && (matrix.os != 'windows-latest' && always())
+        if: steps.scope.outputs.product == 'true' && (always())
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: m12-executor-startup-evidence-${{ matrix.os }}
@@ -290,25 +281,12 @@ jobs:
           if-no-files-found: error
 
       - name: Enforce M1.2 executor startup evidence
-        if: steps.scope.outputs.product == 'true' && (matrix.os != 'windows-latest' && always() && steps.m12_startup_evidence.outcome != 'success')
+        if: steps.scope.outputs.product == 'true' && (always() && steps.m12_startup_evidence.outcome != 'success')
         shell: bash
         run: exit 1
 
-      - name: Check shared Windows line coverage
-        if: steps.scope.outputs.product == 'true' && (matrix.os == 'windows-latest')
-        run: >-
-          cargo llvm-cov nextest
-          --config 'target."cfg(all())".runner = ["node", "../../scripts/run-isolated-rust-test.mjs"]'
-          --locked
-          ${{ matrix.packages }}
-          --all-targets
-          --all-features
-          --fail-under-lines 90
-          --ignore-filename-regex '((^|[\\/])(tests?|src[\\/]tests\.rs)([\\/]|$)|flow-agent[\\/]flow-agent-cli[\\/]src[\\/](main|parsing)\.rs$|flow-agent[\\/]flow-agent-core[\\/]src[\\/]runtime[\\/](m11_budget_evidence|m12_startup_evidence)(\.rs|[\\/])|flow-agent[\\/]flow-agent-core[\\/]src[\\/]runtime[\\/]tool_runner[\\/]unix_process(\.rs|[\\/]))'
-          --show-missing-lines
-
       - name: Check native coverage and installation acceptance
-        if: steps.scope.outputs.product == 'true' && (matrix.os != 'windows-latest')
+        if: steps.scope.outputs.product == 'true'
         shell: bash
         run: |
           eval "$(cargo llvm-cov show-env --sh)"
@@ -325,7 +303,7 @@ jobs:
             --show-missing-lines
 
       - name: Retain tested native download
-        if: steps.scope.outputs.product == 'true' && (matrix.os != 'windows-latest')
+        if: steps.scope.outputs.product == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: flow-agent-download-${{ matrix.os }}
@@ -347,7 +325,7 @@ jobs:
           $toolsRoot = Join-Path $env:RUNNER_TEMP watershed-node-tools
           npm install --global --prefix $toolsRoot corepack@0.36.0
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $toolsBin = if ($IsWindows) { $toolsRoot } else { Join-Path $toolsRoot bin }
+          $toolsBin = Join-Path $toolsRoot bin
           $toolsBin | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
 
       - name: Enable Corepack
