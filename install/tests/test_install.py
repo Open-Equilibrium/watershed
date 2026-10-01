@@ -128,10 +128,10 @@ class PrefixInstallerTest(unittest.TestCase):
                 admission = (
                     declarations + "\nhost=Darwin\ndescriptor_root=/dev/fd\n" + metadata +
                     "\n" + source_checks + "\n" + binding_checks +
-                    '\nbundle=$1\nbin=$2\nflow_source_entry=$3\nmarker=$4\n'
+                    '\nbundle=$1\nbin=$2\nflow_source_name=$3\nmarker=$4\n'
                     'current_owner=$(/usr/bin/id -u)\ninstall_executor=0\n'
                     'exec 3<"$bundle"\nbundle_fd=/dev/fd/3\n'
-                    'exec 4<"$flow_source_entry"\nflow_source=/dev/fd/4\n'
+                    'exec 4<"$flow_source_name"\nflow_source=/dev/fd/4\n'
                     'exec 6<"$bin"\nbin_fd=/dev/fd/6\ncd "$bin"\n'
                     'stage_directory=./stage\nflow_stage=$stage_directory/flow\n' +
                     staging_body + '\n: > "$marker"\n'

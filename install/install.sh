@@ -274,18 +274,16 @@ validate_source() {
 }
 
 flow_source_name=$bundle/flow
-flow_source_entry=$bundle/flow
-[ ! -L "$flow_source_entry" ] || fail "linked bundle artifact is unsafe: $flow_source_name"
-[ -f "$flow_source_entry" ] || fail "missing regular bundle artifact: $flow_source_name"
-exec 4<"$flow_source_entry" || fail "missing regular bundle artifact: $flow_source_name"
+[ ! -L "$flow_source_name" ] || fail "linked bundle artifact is unsafe: $flow_source_name"
+[ -f "$flow_source_name" ] || fail "missing regular bundle artifact: $flow_source_name"
+exec 4<"$flow_source_name" || fail "missing regular bundle artifact: $flow_source_name"
 flow_source=$descriptor_root/4
 validate_source "$flow_source" "$flow_source_name"
 if [ "$install_executor" -eq 1 ]; then
     executor_source_name=$bundle/flow-executor
-    executor_source_entry=$bundle/flow-executor
-    [ ! -L "$executor_source_entry" ] || fail "linked bundle artifact is unsafe: $executor_source_name"
-    [ -f "$executor_source_entry" ] || fail "missing regular bundle artifact: $executor_source_name"
-    exec 5<"$executor_source_entry" || fail "missing regular bundle artifact: $executor_source_name"
+    [ ! -L "$executor_source_name" ] || fail "linked bundle artifact is unsafe: $executor_source_name"
+    [ -f "$executor_source_name" ] || fail "missing regular bundle artifact: $executor_source_name"
+    exec 5<"$executor_source_name" || fail "missing regular bundle artifact: $executor_source_name"
     executor_source=$descriptor_root/5
     validate_source "$executor_source" "$executor_source_name"
 fi
@@ -481,9 +479,9 @@ trap 'signal_exit 143' TERM
 
 verify_bundle_binding() {
     matches_descriptor "$bundle" "$bundle_fd" || fail 'installer bundle path changed during installation'
-    matches_descriptor "$flow_source_entry" "$flow_source" || fail 'flow bundle artifact changed during installation'
+    matches_descriptor "$flow_source_name" "$flow_source" || fail 'flow bundle artifact changed during installation'
     if [ "$install_executor" -eq 1 ]; then
-        matches_descriptor "$executor_source_entry" "$executor_source" \
+        matches_descriptor "$executor_source_name" "$executor_source" \
             || fail 'flow-executor bundle artifact changed during installation'
     fi
 }
