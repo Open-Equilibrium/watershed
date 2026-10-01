@@ -485,25 +485,29 @@ class PrefixInstallerTest(unittest.TestCase):
                     self.assertFalse(marker.exists(), result.stderr)
                     self.assertFalse(prefix.exists(), result.stderr)
 
-    def install(self, bundle: pathlib.Path, prefix: pathlib.Path, *args: str):
+    def install(self, bundle: pathlib.Path, prefix: pathlib.Path, *args: str, observe_timeout=False):
         unrelated_cwd = prefix.parent / "unrelated-cwd"
         unrelated_cwd.mkdir(exist_ok=True)
-        result = subprocess.run(
-            [
-                "/bin/sh",
-                str(bundle / "install.sh"),
-                "--prefix",
-                str(prefix),
-                *args,
-            ],
+        command = [
+            "/bin/sh", str(bundle / "install.sh"), "--prefix", str(prefix), *args,
+        ]
+        options = dict(
             cwd=unrelated_cwd,
             env={**self.readiness_environment(),
                  "FLOW_AGENT_HOME": str(unrelated_cwd / "ignored-flow-home")},
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            check=False,
-            timeout=15,
         )
+        if observe_timeout:
+            from install.tests.test_readiness import _captured_readiness, _capture_timeout_note
+
+            with _captured_readiness(command, **options) as (process, notice):
+                try:
+                    stdout, stderr = process.communicate(timeout=15)
+                except subprocess.TimeoutExpired as error:
+                    _capture_timeout_note(error, process, notice)
+                    raise
+                result = subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
+        else:
+            result = subprocess.run(command, **options, capture_output=True, check=False, timeout=15)
         if "--no-default-executor" not in args:
             self.assert_privileged_supervision(bundle)
         return result
@@ -967,12 +971,15 @@ class PrefixInstallerTest(unittest.TestCase):
                 else:
                     source = source.replace('readiness_group=$(/bin/ps -o pgid= -p "$$")',
                                             'readiness_group=$installer_pgid', 1)
+                # Trace only this disposable refusal copy; failure notes retain its tail.
+                source = source.replace("set -eu\n", 'set -eu\nPS4="+fixture-pid=$$ "\nset -x\n', 1)
+                source = source.replace("readiness_shell='\n", 'readiness_shell=\'\n    PS4="+fixture-pid=$$ "\n    set -x\n', 1)
                 installer.write_text(source, encoding="utf-8")
                 marker = root / "checker-started"
                 (bundle / "flow").write_text(f"#!/bin/sh\n: > {shlex.quote(str(marker))}\n", encoding="utf-8")
                 prefix = root / "prefix"
 
-                result = self.install(bundle, prefix)
+                result = self.install(bundle, prefix, observe_timeout=True)
 
                 self.assertEqual(result.returncode, 1, result.stderr)
                 self.assertIn(b"did not report readiness", result.stderr)

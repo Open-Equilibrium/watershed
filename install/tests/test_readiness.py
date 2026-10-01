@@ -1,7 +1,11 @@
+import array
+import contextlib
 import json
 import os
 import pathlib
+import select
 import signal
+import socket
 import subprocess
 import sys
 import tempfile
@@ -9,6 +13,172 @@ import time
 import unittest
 
 from scripts.m12_native import linux_fault_filter, validate_probe
+
+
+class _UnreapedExit:
+    def __init__(self, child):
+        self.child = child
+        self.seen = False
+        self.queue = select.kqueue() if sys.platform == "darwin" else None
+        if self.queue is not None:
+            try:
+                self.queue.control([select.kevent(child.pid, filter=select.KQ_FILTER_PROC,
+                    flags=select.KQ_EV_ADD | select.KQ_EV_ENABLE | select.KQ_EV_ONESHOT,
+                    fflags=select.KQ_NOTE_EXIT)], 0, 0)
+            except BaseException:
+                self.queue.close()
+                raise
+
+    def exited(self):
+        if self.child.returncode is not None:
+            return True
+        if self.queue is not None:
+            self.seen |= bool(self.queue.control(None, 1, 0))
+        else:
+            self.seen |= os.waitid(os.P_PID, self.child.pid,
+                os.WEXITED | os.WNOHANG | os.WNOWAIT) is not None
+        return self.seen
+
+    def close(self):
+        if self.queue is not None:
+            self.queue.close()
+
+
+def _terminate_owned_group(child, notice=None):
+    # Only the original, still-unreaped start_new_session child owns this group.
+    if child.returncode is not None:
+        raise AssertionError("fixture group was already reaped")
+    primary = None
+    try:
+        os.killpg(child.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    except PermissionError as error:
+        # Darwin excludes zombies from group signaling and returns EPERM when
+        # none remain. These fixture groups cannot change UID; keep live errors.
+        if sys.platform != "darwin" or notice is None or not notice.exited():
+            primary = error
+    except BaseException as error:
+        primary = error
+    try:
+        child.wait(timeout=2)
+    except BaseException as error:
+        _cleanup_errors(primary, [error])
+    if primary is not None:
+        raise primary
+
+
+def _cleanup_errors(primary, errors):
+    if not errors:
+        return
+    if primary is None:
+        primary = errors.pop(0)
+        for error in errors:
+            primary.add_note(f"fixture teardown: {error!r}")
+        raise primary
+    for error in errors:
+        primary.add_note(f"fixture teardown: {error!r}")
+
+
+def _capture_timeout_note(error, child, notice):
+    try:
+        error.add_note(f"root_exit_observed_without_reaping={notice.exited()}")
+    except Exception as diagnostic_error:
+        error.add_note(f"root exit observation failed: {diagnostic_error!r}")
+    for name in ("stdout", "stderr"):
+        stream = getattr(child, name)
+        tail = getattr(error, "output" if name == "stdout" else "stderr") or b""
+        residual = bytearray()
+        state = "closed"
+        try:
+            if stream is not None and not stream.closed:
+                os.set_blocking(stream.fileno(), False)
+                state = "64KiB cap; EOF inconclusive"
+                while len(residual) < 65536:
+                    try:
+                        chunk = os.read(stream.fileno(), min(4096, 65536 - len(residual)))
+                    except BlockingIOError:
+                        state = "EAGAIN; writer remains"
+                        break
+                    if not chunk:
+                        state = "EOF"
+                        break
+                    residual.extend(chunk)
+        except Exception as diagnostic_error:
+            state = f"snapshot failed: {diagnostic_error!r}"
+        error.add_note(f"{name}: {state}; tail:\n"
+                       + (tail + residual)[-16384:].decode("utf-8", errors="replace"))
+
+
+@contextlib.contextmanager
+def _captured_readiness(command, **options):
+    child = subprocess.Popen(command, start_new_session=True,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, **options)
+    notice = None
+    try:
+        notice = _UnreapedExit(child)
+        yield child, notice
+    finally:
+        primary, errors = sys.exc_info()[1], []
+        try:
+            if child.returncode is None:
+                _terminate_owned_group(child, notice)
+        except BaseException as error:
+            errors.append(error)
+        for stream in (child.stdin, child.stdout, child.stderr):
+            if stream is not None:
+                try:
+                    stream.close()
+                except BaseException as error:
+                    errors.append(error)
+        if notice is not None:
+            try:
+                notice.close()
+            except BaseException as error:
+                errors.append(error)
+        _cleanup_errors(primary, errors)
+
+
+def _receive_inner(server, deadline):
+    # Keep the real inner argv/control/capture descriptors, but own its sole wait.
+    server.settimeout(max(0, deadline - time.monotonic()))
+    peer, _ = server.accept()
+    descriptors = array.array("i")
+    try:
+        peer.settimeout(max(0, deadline - time.monotonic()))
+        request, ancillary, flags, _ = peer.recvmsg(65536,
+            socket.CMSG_SPACE(3 * descriptors.itemsize))
+        for level, kind, payload in ancillary:
+            if level == socket.SOL_SOCKET and kind == socket.SCM_RIGHTS:
+                descriptors.frombytes(payload[:len(payload) // descriptors.itemsize * descriptors.itemsize])
+        if flags & socket.MSG_CTRUNC or len(descriptors) != 3:
+            raise AssertionError("inner fixture must transfer exactly three descriptors")
+        while not request.endswith(b"\n"):
+            peer.settimeout(max(0, deadline - time.monotonic()))
+            extra = peer.recv(65536 - len(request))
+            if not extra:
+                raise AssertionError("incomplete inner fixture request")
+            request += extra
+        child = subprocess.Popen(json.loads(request), start_new_session=True,
+            stdin=descriptors[0], stdout=descriptors[1], stderr=descriptors[2], env={"PATH": ""})
+        try:
+            peer.sendall(b"S")
+        except BaseException as primary:
+            try:
+                _terminate_owned_group(child)
+            except BaseException as error:
+                primary.add_note(f"fixture teardown: {error!r}")
+            raise
+        return child, peer
+    except BaseException as primary:
+        try:
+            peer.close()
+        except BaseException as error:
+            primary.add_note(f"fixture teardown: {error!r}")
+        raise
+    finally:
+        for descriptor in descriptors:
+            os.close(descriptor)
 
 
 def filter_result(program, syscall, argument=0):
@@ -137,52 +307,90 @@ class ReadinessContractTest(unittest.TestCase):
                 flow.write_text("#!/bin/sh\nexit 65\n")
                 flow.chmod(0o755)
                 helper = (
-                    "import pathlib, signal, subprocess, sys, time\n"
-                    "phase, separate, marker = sys.argv[1:4]\n"
+                    "import array, json, pathlib, signal, socket, subprocess, sys, time\n"
+                    "phase, separate, marker, owner = sys.argv[1:5]\n"
                     "if phase == 'failed': sys.exit(65)\n"
                     "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
                     "if phase == 'after-inner':\n"
-                    "    child = subprocess.Popen(sys.argv[4:], start_new_session=separate == 'True')\n"
+                    "    if separate == 'True':\n"
+                    "        channel = socket.socket(socket.AF_UNIX)\n"
+                    "        channel.settimeout(10)\n"
+                    "        channel.connect(owner)\n"
+                    "        request = (json.dumps(sys.argv[5:]) + '\\n').encode()\n"
+                    "        sent = channel.sendmsg([request], [(socket.SOL_SOCKET, socket.SCM_RIGHTS, array.array('i', [0, 1, 2]))])\n"
+                    "        channel.sendall(request[sent:])\n"
+                    "        assert channel.recv(1) == b'S'\n"
+                    "    else: child = subprocess.Popen(sys.argv[5:])\n"
                     "pathlib.Path(marker).touch()\n"
-                    "if phase == 'after-inner': child.wait()\n"
+                    "if phase == 'after-inner':\n"
+                    "    if separate == 'True':\n"
+                    "        try: channel.recv(1)\n"
+                    "        except socket.timeout: pass\n"
+                    "        sys.exit(0)\n"
+                    "    child.wait()\n"
                     "time.sleep(10)\n"
                 )
-                process = subprocess.Popen(
-                    ["/bin/sh", "-c", body, "flow-readiness", "outer", str(home), str(flow),
-                     str(home / "status"), str(channel), str(os.getpgrp()), scanner, body,
-                     sys.executable, "-c", helper, phase, str(separate_group), str(ready)],
-                    start_new_session=True, stdin=subprocess.PIPE,
-                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, env={"PATH": ""},
-                )
-                self.assertNotEqual(process.pid, os.getpgrp())
-                try:
-                    process.stdin.write(b"start\n")
-                    process.stdin.flush()
-                    if phase != "failed":
-                        for _ in range(200):
-                            if ready.exists() and (phase != "after-inner" or (home / "status").exists()):
-                                break
-                            self.assertIsNone(process.poll(), "outer exited before helper admission")
-                            time.sleep(0.01)
-                        else:
-                            self.fail("helper did not reach its cleanup boundary")
-                    started = time.monotonic()
-                    process.stdin.close()
-                    process.stdin = None
-                    _, stderr = process.communicate(timeout=5)
-                    self.assertLess(time.monotonic() - started, 5, stderr)
-                    self.assertIn(process.returncode, (0, -signal.SIGKILL), stderr)
-                    if phase == "after-inner":
-                        self.assertEqual((home / "status").read_text(), "65\n")
-                    else:
-                        self.assertFalse((home / "status").exists())
-                finally:
-                    if process.stdin is not None:
-                        process.stdin.close()
-                        process.stdin = None
-                    if process.poll() is None:
-                        process.kill()
-                        process.communicate(timeout=5)
+                owner = root / "inner-owner"
+                with contextlib.ExitStack() as resources:
+                    server = resources.enter_context(socket.socket(socket.AF_UNIX)) if separate_group else None
+                    if server is not None:
+                        server.bind(str(owner))
+                        server.listen(1)
+                    with _captured_readiness(
+                        ["/bin/sh", "-c", body, "flow-readiness", "outer", str(home), str(flow),
+                         str(home / "status"), str(channel), str(os.getpgrp()), scanner, body,
+                         sys.executable, "-c", helper, phase, str(separate_group), str(ready), str(owner)],
+                        stdin=subprocess.PIPE, env={"PATH": ""},
+                    ) as (process, notice):
+                        self.assertNotEqual(process.pid, os.getpgrp())
+                        inner = peer = inner_notice = None
+                        try:
+                            process.stdin.write(b"start\n")
+                            process.stdin.flush()
+                            admission_deadline = time.monotonic() + 2
+                            if server is not None:
+                                inner, peer = _receive_inner(server, admission_deadline)
+                                inner_notice = _UnreapedExit(inner)
+                            if phase != "failed":
+                                while time.monotonic() < admission_deadline:
+                                    if ready.exists() and (phase != "after-inner" or (home / "status").exists()):
+                                        break
+                                    self.assertFalse(notice.exited(), "outer exited before helper admission")
+                                    time.sleep(0.01)
+                                else:
+                                    self.fail("helper did not reach its cleanup boundary")
+                            started = time.monotonic()
+                            process.stdin.close()
+                            process.stdin = None
+                            try:
+                                _, stderr = process.communicate(timeout=5)
+                            except subprocess.TimeoutExpired as error:
+                                _capture_timeout_note(error, process, notice)
+                                raise
+                            self.assertLess(time.monotonic() - started, 5, stderr)
+                            self.assertIn(process.returncode, (0, -signal.SIGKILL), stderr)
+                            if phase == "after-inner":
+                                self.assertEqual((home / "status").read_text(), "65\n")
+                            else:
+                                self.assertFalse((home / "status").exists())
+                        finally:
+                            primary, errors = sys.exc_info()[1], []
+                            if inner is not None:
+                                try:
+                                    _terminate_owned_group(inner, inner_notice)
+                                except BaseException as error:
+                                    errors.append(error)
+                            if peer is not None:
+                                try:
+                                    peer.close()  # The helper receives our owned shutdown EOF.
+                                except BaseException as error:
+                                    errors.append(error)
+                            if inner_notice is not None:
+                                try:
+                                    inner_notice.close()
+                                except BaseException as error:
+                                    errors.append(error)
+                            _cleanup_errors(primary, errors)
 
     def test_probe_has_only_retained_native_metadata(self):
         probe = dict(backend="seatbelt", backend_version="27.0",
