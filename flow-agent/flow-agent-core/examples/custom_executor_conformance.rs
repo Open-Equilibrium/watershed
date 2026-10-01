@@ -1,5 +1,9 @@
 #[path = "evidence_support/installed_controller.rs"]
 mod installed_controller;
+#[path = "evidence_support/temp_root.rs"]
+mod temp_root;
+
+use temp_root::TempRoot;
 
 use std::{
     env,
@@ -8,41 +12,13 @@ use std::{
     io::{self, Write},
     path::{Path, PathBuf},
     process::Command,
-    time::{SystemTime, UNIX_EPOCH},
 };
 
 const ADVISORY: &str = "Advisory only: passing does not certify compatibility, policy equivalence, security, or operations.";
 const CHILD_ARG: &str = "--conformance-child";
 const MAX_CHILD_DIAGNOSTIC_BYTES: usize = 1_024;
+const TEMP_ROOT_PREFIX: &str = "flow-custom-executor-conformance";
 type DynError = Box<dyn Error + Send + Sync>;
-
-struct TempRoot(PathBuf);
-
-impl TempRoot {
-    fn create() -> Result<Self, DynError> {
-        Self::create_in(&env::temp_dir())
-    }
-
-    fn create_in(base: &Path) -> Result<Self, DynError> {
-        let nonce = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
-        let path = fs::canonicalize(base)?.join(format!(
-            "flow-custom-executor-conformance-{}-{nonce}",
-            std::process::id()
-        ));
-        fs::create_dir(&path)?;
-        Ok(Self(path))
-    }
-
-    fn path(&self) -> &Path {
-        &self.0
-    }
-}
-
-impl Drop for TempRoot {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
-    }
-}
 
 fn parse_args<I, S>(args: I) -> Result<PathBuf, DynError>
 where
@@ -90,7 +66,7 @@ fn bounded_diagnostic(bytes: &[u8]) -> String {
 }
 
 fn run_isolated_check(executor: &Path) -> Result<(), DynError> {
-    let session = TempRoot::create()?;
+    let session = TempRoot::create(TEMP_ROOT_PREFIX)?;
     let workspace = session.path().join("workspace");
     fs::create_dir(&workspace)?;
     let child = isolated_child_command(session.path(), executor, &workspace)?.output()?;
@@ -175,18 +151,19 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::{
-        ADVISORY, DynError, TempRoot, isolated_child_command, parse_args, run_child_with, run_with,
+        ADVISORY, DynError, TEMP_ROOT_PREFIX, TempRoot, isolated_child_command, parse_args,
+        run_child_with, run_with,
     };
     use std::{cell::Cell, fs, io, os::unix::fs::symlink, path::PathBuf};
 
     #[test]
     fn conformance_child_uses_canonical_synthetic_homes_without_rebinding_custom_path() {
-        let owner = TempRoot::create().unwrap();
+        let owner = TempRoot::create(TEMP_ROOT_PREFIX).unwrap();
         let base = owner.path().join("base");
         fs::create_dir(&base).unwrap();
         let alias = owner.path().join("alias");
         symlink(&base, &alias).unwrap();
-        let session = TempRoot::create_in(&alias).unwrap();
+        let session = TempRoot::create_in(&alias, TEMP_ROOT_PREFIX).unwrap();
         assert_eq!(session.path(), fs::canonicalize(session.path()).unwrap());
         let executor = alias.join("supplied-custom-executor");
         let workspace = session.path().join("workspace");

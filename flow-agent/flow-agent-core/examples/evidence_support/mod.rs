@@ -1,44 +1,24 @@
+mod temp_root;
+
+pub(crate) use temp_root::TempRoot;
+
 use serde::Serialize;
+#[cfg(target_os = "linux")]
+use std::fs;
 use std::{
     env,
     error::Error,
     ffi::OsStr,
-    fs,
     io::Write,
-    path::{Path, PathBuf},
+    path::Path,
     process::{Command, Output},
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::Duration,
 };
 
 pub(crate) const FLOW_AGENT_HOME: (&str, &str) = ("FLOW_AGENT_HOME", ".flow");
 const MAX_SAMPLE_COUNT: usize = 1_000;
 
 pub(crate) type DynError = Box<dyn Error + Send + Sync>;
-
-pub(crate) struct TempRoot(PathBuf);
-
-impl TempRoot {
-    pub(crate) fn create(prefix: &str) -> Result<Self, DynError> {
-        Self::create_in(&env::temp_dir(), prefix)
-    }
-
-    fn create_in(base: &Path, prefix: &str) -> Result<Self, DynError> {
-        let nonce = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
-        let path = fs::canonicalize(base)?.join(format!("{prefix}-{}-{nonce}", std::process::id()));
-        fs::create_dir(&path)?;
-        Ok(Self(path))
-    }
-
-    pub(crate) fn path(&self) -> &Path {
-        &self.0
-    }
-}
-
-impl Drop for TempRoot {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
-    }
-}
 
 pub(crate) fn launch_measurement_child<I, S>(
     session_root: &TempRoot,
