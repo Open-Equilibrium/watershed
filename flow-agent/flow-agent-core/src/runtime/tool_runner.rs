@@ -9,7 +9,8 @@ pub(crate) use invocation::{build_tool_invocation, validate_parameter_value};
 pub(crate) use invocation::{encoded_exec_vector_bytes, validate_tool_invocation};
 #[cfg(test)]
 pub(crate) use unix_process::{
-    PrimaryTrigger, READY_CANCELLATION_MARKER, force_reap_timeout_for_test, visible_exit_code,
+    PrimaryTrigger, READY_CANCELLATION_MARKER, force_reap_timeout_for_test,
+    observe_group_signals_for_test, visible_exit_code,
 };
 #[cfg(any(test, feature = "m11-budget-evidence"))]
 pub(crate) use unix_process::{

@@ -3,7 +3,7 @@ use crate::runtime::tool_runner::{
     MAX_TOOL_STREAM_BYTES, PrimaryTrigger, READY_CANCELLATION_MARKER, ToolExecutionOutcome,
     ToolInvocation, ToolRunControl, ToolTerminalClassification,
     execute_tool_invocation as execute_anchored_tool_invocation, force_reap_timeout_for_test,
-    measure_ready_tool_cancellation, visible_exit_code,
+    measure_ready_tool_cancellation, observe_group_signals_for_test, visible_exit_code,
 };
 use crate::runtime::{fs_guards::AnchoredWorkspace, run_attempts::RunAttemptOutcome};
 use std::{
@@ -270,6 +270,97 @@ fn runner_noop_lifecycle() {
         );
         assert_eq!(outcome.status, RunAttemptOutcome::Completed);
         assert_eq!(outcome.exit_code, Some(0));
+    }
+}
+
+#[test]
+fn runner_owns_completed_leader_until_final_group_signal() {
+    use std::cell::Cell;
+
+    thread_local! {
+        static LOST_OWNERSHIP: Cell<bool> = const { Cell::new(false) };
+        static LAST_SIGNAL_COMPLETED: Cell<bool> = const { Cell::new(false) };
+        static LAST_SIGNAL_EXIT: Cell<Option<i32>> = const { Cell::new(None) };
+    }
+    fn observe_owned_leader(pid: rustix::process::Pid) {
+        // Only the controller can verify that this exact child remains waitable.
+        // NOWAIT leaves ownership intact through the signal that follows.
+        let status = rustix::process::waitid(
+            rustix::process::WaitId::Pid(pid),
+            rustix::process::WaitIdOptions::EXITED
+                | rustix::process::WaitIdOptions::NOHANG
+                | rustix::process::WaitIdOptions::NOWAIT,
+        );
+        LOST_OWNERSHIP.set(LOST_OWNERSHIP.get() || status.is_err());
+        LAST_SIGNAL_COMPLETED.set(status.as_ref().is_ok_and(Option::is_some));
+        LAST_SIGNAL_EXIT.set(
+            status
+                .ok()
+                .flatten()
+                .and_then(|status| status.exit_status()),
+        );
+    }
+
+    for (body, deadline, classification, expected_exit, last_signal_exit) in [
+        (
+            "exit 17",
+            Duration::from_secs(5),
+            ToolTerminalClassification::NonzeroExit,
+            Some(17),
+            Some(17),
+        ),
+        (
+            "(trap '' TERM; while :; do :; done) & exit 17",
+            Duration::from_secs(5),
+            ToolTerminalClassification::NonzeroExit,
+            Some(17),
+            Some(17),
+        ),
+        (
+            "(trap '' TERM; while :; do :; done) & kill -TERM $$",
+            Duration::from_secs(5),
+            ToolTerminalClassification::SignalTermination,
+            None,
+            None,
+        ),
+        (
+            "trap 'exit 17' TERM; (trap '' TERM; while :; do :; done) & printf ready; while :; do :; done",
+            Duration::from_millis(100),
+            ToolTerminalClassification::ToolTimedOut,
+            None,
+            Some(17),
+        ),
+    ] {
+        LOST_OWNERSHIP.set(false);
+        LAST_SIGNAL_COMPLETED.set(false);
+        LAST_SIGNAL_EXIT.set(None);
+        observe_group_signals_for_test(Some(observe_owned_leader));
+        let cancelled = AtomicBool::new(false);
+        let outcome = execute_tool_invocation(
+            &shell_invocation(body),
+            Path::new("."),
+            ToolRunControl {
+                cancelled: &cancelled,
+                deadline: Instant::now() + deadline,
+            },
+        );
+        observe_group_signals_for_test(None);
+
+        assert!(
+            !LOST_OWNERSHIP.get(),
+            "a group signal must retain ownership of its original leader"
+        );
+        assert!(
+            LAST_SIGNAL_COMPLETED.get(),
+            "the completed leader must remain waitable at the final signal"
+        );
+        assert_eq!(
+            LAST_SIGNAL_EXIT.get(),
+            last_signal_exit,
+            "the retained leader must preserve its actual terminal status"
+        );
+        assert_eq!(outcome.classification, Some(classification));
+        assert_eq!(outcome.exit_code, expected_exit);
     }
 }
 
