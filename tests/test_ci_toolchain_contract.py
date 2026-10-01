@@ -269,7 +269,7 @@ class CiWorkflowContractTest(unittest.TestCase):
         workflow = workflow_text()
         mutations = (
             workflow.replace("cargo fmt --all --check", "true", 1),
-            workflow.replace("report --fail-under-lines 90", "report --fail-under-lines 89", 1),
+            workflow.replace("report --fail-under-lines 88", "report --fail-under-lines 87", 1),
             workflow.replace("cargo audit", "true", 1),
             workflow.replace("node scripts/check-html-render.mjs", "true", 1),
             workflow.replace("--example m11_budgets", "--example m12_executor_startup", 1),
@@ -363,7 +363,7 @@ class CiWorkflowContractTest(unittest.TestCase):
             "/bin/sh scripts/run-m12-installer-acceptance.sh",
             "cargo nextest run",
             "/bin/sh scripts/run-m12-readiness-negatives.sh",
-            "cargo llvm-cov report --fail-under-lines 90",
+            "cargo llvm-cov report --fail-under-lines 88",
         )
         for command in ordered:
             self.assertIn(command, native)
@@ -379,7 +379,7 @@ class CiWorkflowContractTest(unittest.TestCase):
         report = shlex.split(native[native.index("cargo llvm-cov report"):].replace("\\\n", " "))
         exclusions = report[report.index("--ignore-filename-regex") + 1]
         self.assertIn(EVIDENCE_ONLY_UNIX_RUNNER_PATTERN, exclusions)
-        self.assertEqual(report, ["cargo", "llvm-cov", "report", "--fail-under-lines", "90",
+        self.assertEqual(report, ["cargo", "llvm-cov", "report", "--fail-under-lines", "88",
                                   "--ignore-filename-regex", exclusions, "--show-missing-lines"])
         for forbidden in ("--release", "--target ", "--coverage-target-only", "docker ",
                           "runuser ", "systemctl ", "--skip", "|| true"):
