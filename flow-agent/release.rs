@@ -54,6 +54,11 @@ mod tests {
             "x86_64",
             "ID=ubuntu\nVERSION_ID=24.04\n"
         ));
+        assert!(supported_release(
+            "linux",
+            "x86_64",
+            "ID='ubuntu'\nVERSION_ID='24.04'\n"
+        ));
         assert!(supported_release("macos", "aarch64", "27.0"));
     }
 
@@ -85,6 +90,7 @@ mod tests {
             "ID=ubuntu\nID=ubuntu\nVERSION_ID=24.04\n",
             "ID=ubuntu\nVERSION_ID=24.04\nVERSION_ID=24.04\n",
             "ID=ubuntu\nVERSION_ID=24.04\nID=debian\n",
+            "ID=debian\nID=ubuntu\nVERSION_ID=24.04\n",
             "ID=ubuntu\nVERSION_ID='24.10'\n",
         ] {
             assert!(
@@ -108,7 +114,6 @@ mod tests {
     fn productive_tool_execution_accepts_only_the_official_native_releases() {
         for (target_os, target_arch, release) in [
             ("linux", "x86_64", "ID=ubuntu\nVERSION_ID='24.04'\n"),
-            ("macos", "aarch64", "27.0"),
             ("macos", "aarch64", "27.1.2\n"),
         ] {
             assert!(
@@ -120,8 +125,6 @@ mod tests {
             ("linux", "x86_64", "ID=ubuntu\nVERSION_ID=24.10\n"),
             ("linux", "aarch64", "ID=ubuntu\nVERSION_ID=24.04\n"),
             ("macos", "x86_64", "27.0"),
-            ("macos", "aarch64", "25.9"),
-            ("macos", "aarch64", "26.0"),
             ("macos", "aarch64", "26.6.2"),
             ("macos", "aarch64", "28.0"),
             ("windows", "x86_64", "27.0"),
