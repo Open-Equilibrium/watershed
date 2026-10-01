@@ -63,7 +63,7 @@ fn finalize_productive_run(
         timestamp,
     )?;
     let stdout = if finalization.capture_jsonl {
-        writer.captured_jsonl().unwrap_or_default().to_owned()
+        writer.take_captured_jsonl().unwrap_or_default()
     } else {
         let outcome = if runtime.failed {
             "failed"

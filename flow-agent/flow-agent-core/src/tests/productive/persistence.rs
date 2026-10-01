@@ -353,6 +353,10 @@ fn productive_session_entrypoint_persists_a_resumable_conversation() {
             .stdout
             .contains("\"event_type\":\"session.completed\"")
     );
+    assert_eq!(
+        output.stdout,
+        fs::read_to_string(&output.session_path).expect("persisted event output")
+    );
     assert_eq!(provider.bodies.len(), 1);
     let page = conversation_status_page(&workspace, None).expect("conversation status");
     assert_eq!(page.conversations.len(), 1);

@@ -193,8 +193,13 @@ impl ConversationEventWriter {
         self.event_prefix.retained_payload_bytes() + self.context_prefix.retained_payload_bytes()
     }
 
+    #[cfg(test)]
     pub(crate) fn captured_jsonl(&self) -> Option<&str> {
         self.capture.as_deref()
+    }
+
+    pub(crate) fn take_captured_jsonl(&mut self) -> Option<String> {
+        self.capture.take()
     }
 
     pub(crate) fn last_checkpoint(&self) -> Option<(u64, &str)> {
