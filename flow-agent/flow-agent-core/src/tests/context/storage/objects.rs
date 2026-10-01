@@ -9,9 +9,10 @@ use crate::runtime::{
     context::{ContextManifest, ContextManifestCheckpoint, ContextObject},
     context_persistence::{ContextManifestWriter, SessionObjectWriter, ensure_session_object_size},
     digest::sha256_hex,
-    fs_guards::{ensure_runtime_dirs, open_anchored_session_log_append_file, path_io_error},
+    fs_guards::{open_anchored_session_log_append_file, path_io_error},
     session::run_flow,
     session_bundle::ensure_session_object_total,
+    session_store::ensure_runtime_dirs,
     types::{
         EmitMode, MAX_SESSION_OBJECT_BYTES, MAX_SESSION_OBJECT_TOTAL_BYTES, MAX_SESSION_OBJECTS,
     },

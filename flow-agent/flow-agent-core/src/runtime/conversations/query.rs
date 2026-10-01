@@ -7,8 +7,9 @@ use super::{
     storage::{canonical_json, required_child},
 };
 use crate::runtime::{
-    fs_guards::{AnchoredDir, AnchoredWorkspace, ensure_anchored_runtime_dirs, path_io_error},
+    fs_guards::{AnchoredDir, AnchoredWorkspace, path_io_error},
     session_authority::{SessionOwnershipLease, conversation_ownership_key},
+    session_store::ensure_anchored_runtime_dirs,
     stage_results::reconcile_controlled_stages,
     types::{EmitMode, RuntimeError},
 };

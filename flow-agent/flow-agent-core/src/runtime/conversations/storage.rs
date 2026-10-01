@@ -4,9 +4,10 @@ use super::contract::{
 };
 use crate::runtime::{
     fs_guards::{
-        AnchoredDir, AnchoredWorkspace, DirectoryErrorMode, RuntimeDirs,
-        ensure_anchored_runtime_dirs, open_anchored_file_for_read, path_io_error,
+        AnchoredDir, AnchoredWorkspace, DirectoryErrorMode, open_anchored_file_for_read,
+        path_io_error,
     },
+    session_store::{RuntimeDirs, ensure_anchored_runtime_dirs},
     types::RuntimeError,
 };
 use serde::Serialize;

@@ -1,8 +1,6 @@
 use super::super::contract::protocol;
 use crate::runtime::types::RuntimeError;
-use serde::{Deserialize, Serialize};
 
-pub(crate) const CONVERSATION_ENTRY_SCHEMA_V1: &str = "flow-conversation-entry-v1";
 pub(crate) const MAX_HISTORY_INDEX_ID_BYTES: usize = proto::MAX_SESSION_ID_BYTES;
 pub(super) const INDEX_ID_FIELD_BYTES: usize = MAX_HISTORY_INDEX_ID_BYTES + 1;
 pub(super) const INDEX_ENTRY_ID_OFFSET: usize = 0;
@@ -22,26 +20,6 @@ pub(super) const INDEX_IO_BUFFER_BYTES: usize = 8 * 1024;
 
 pub(super) type IndexRecord = [u8; INDEX_RECORD_BYTES];
 pub(super) type EventPointerRecord = [u8; EVENT_POINTER_RECORD_BYTES];
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub(crate) enum ConversationEntryType {
-    Checkpoint,
-    Continuation,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct ConversationEntry {
-    pub(crate) schema: String,
-    pub(crate) entry_id: String,
-    pub(crate) parent_entry_id: Option<String>,
-    pub(crate) recovery_snapshot_hash: String,
-    pub(crate) run_session_id: String,
-    pub(crate) event_sequence: u64,
-    pub(crate) entry_type: ConversationEntryType,
-    pub(crate) timestamp: String,
-}
 
 #[derive(Clone, Copy)]
 pub(super) struct WorkBudget {

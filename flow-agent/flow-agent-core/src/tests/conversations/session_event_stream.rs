@@ -8,9 +8,10 @@ use super::super::{
 };
 use crate::runtime::types::EventClock;
 use crate::runtime::{
-    fs_guards::{AnchoredWorkspace, ensure_runtime_dirs, segmented_jsonl_path},
+    fs_guards::{AnchoredWorkspace, segmented_jsonl_path},
     session_reading::SessionEventReader,
     session_reservation::acquire_anchored_session_lock,
+    session_store::ensure_runtime_dirs,
     types::{EVENT_STREAM_LIMITS, MAX_SESSION_SEGMENT_BYTES, RuntimeError},
 };
 use proto::{EventEnvelope, EventType};

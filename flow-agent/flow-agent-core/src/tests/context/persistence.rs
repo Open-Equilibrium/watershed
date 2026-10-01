@@ -2,7 +2,7 @@ use crate::{
     runtime::{
         context::ContextManifestSourceRecord,
         context_persistence::verify_context_manifest_objects,
-        fs_guards::ensure_runtime_dirs,
+        session_store::ensure_runtime_dirs,
         types::{MAX_SESSION_OBJECT_TOTAL_BYTES, MAX_SESSION_OBJECTS, RuntimeError},
     },
     tests::helpers::empty_workspace,

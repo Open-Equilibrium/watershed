@@ -7,7 +7,7 @@ use super::{
 };
 use crate::runtime::{
     fs_guards::{
-        AnchoredWorkspace, ensure_runtime_dirs, set_directory_sync_error_for_path_for_test,
+        AnchoredWorkspace, set_directory_sync_error_for_path_for_test,
         set_owned_file_remove_observer, start_directory_sync_trace_for_test,
         take_directory_sync_trace_for_test,
     },
@@ -21,7 +21,7 @@ use crate::runtime::{
         set_candidate_pre_lease_observer_for_test, set_metadata_pre_activation_observer_for_test,
         write_reserved_session_metadata,
     },
-    session_store::workspace_store_leaf,
+    session_store::{ensure_runtime_dirs, workspace_store_leaf},
     types::{EmitMode, RuntimeError},
 };
 #[cfg(not(target_os = "macos"))]

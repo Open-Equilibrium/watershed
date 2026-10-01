@@ -1,9 +1,10 @@
 use crate::runtime::{
     digest::is_lowercase_sha256_hex,
     fs_guards::{
-        AnchoredDir, AnchoredFile, RuntimeDirs, open_anchored_file_for_read, path_io_error,
+        AnchoredDir, AnchoredFile, open_anchored_file_for_read, path_io_error,
         segmented_jsonl_files, segmented_jsonl_leaf, segmented_jsonl_leaf_stem,
     },
+    session_store::RuntimeDirs,
     types::{
         CONTEXT_MANIFEST_STREAM_LIMITS, EVENT_STREAM_LIMITS, MAX_SESSION_BUNDLE_BYTES,
         MAX_SESSION_CONTEXT_MANIFEST_BYTES, MAX_SESSION_EVENT_BYTES, MAX_SESSION_METADATA_BYTES,

@@ -1,8 +1,7 @@
 use super::{helpers::empty_workspace, support::assert_active_session};
 use crate::runtime::{
-    fs_guards::{AnchoredWorkspace, ensure_runtime_dirs},
-    session_authority::session_ownership_is_active,
-    session_reservation::acquire_anchored_session_lock,
+    fs_guards::AnchoredWorkspace, session_authority::session_ownership_is_active,
+    session_reservation::acquire_anchored_session_lock, session_store::ensure_runtime_dirs,
     types::RuntimeError,
 };
 use std::fs;

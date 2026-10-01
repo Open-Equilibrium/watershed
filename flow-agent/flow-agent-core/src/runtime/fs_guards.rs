@@ -57,14 +57,6 @@ pub(crate) use durability::{
 };
 pub(crate) use durability::{sync_directory, sync_retained_directory as sync_anchored_directory};
 
-mod runtime_dirs;
-pub use runtime_dirs::RuntimeDirs;
-#[cfg(test)]
-pub use runtime_dirs::ensure_runtime_dirs;
-#[cfg(test)]
-pub use runtime_dirs::open_runtime_dir;
-pub(crate) use runtime_dirs::{ensure_anchored_runtime_dirs, open_anchored_runtime_dir};
-
 #[cfg(test)]
 pub(crate) fn test_path_key(path: &Path) -> PathBuf {
     let mut existing = path;

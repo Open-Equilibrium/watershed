@@ -11,9 +11,7 @@ use crate::runtime::{
         SerialSessionWriter, SerialWriterStart,
     },
     execution_plan::{FlowExecutionAction, FlowExecutionOptions, ToolSideEffectMode},
-    fs_guards::{
-        AnchoredWorkspace, ensure_anchored_non_hardlinked_file, open_anchored_runtime_dir,
-    },
+    fs_guards::{AnchoredWorkspace, ensure_anchored_non_hardlinked_file},
     live_events::LiveEventNotifier,
     planning::plan_flow_with_workspace,
     resume_inspection::{
@@ -27,7 +25,7 @@ use crate::runtime::{
         verify_resume_definition_metadata_values,
     },
     session_reservation::acquire_anchored_session_lock,
-    session_store::workspace_store_path,
+    session_store::{open_anchored_runtime_dir, workspace_store_path},
     stage_results::reconcile_controlled_stages,
     types::{
         LOG_STORAGE_DIR, RunOutput, RuntimeError, SESSION_STORAGE_DIR,

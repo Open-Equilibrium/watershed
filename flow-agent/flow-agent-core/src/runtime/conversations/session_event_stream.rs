@@ -6,13 +6,12 @@ use super::{
 use crate::runtime::{
     fs_guards::{
         AnchoredDir, AnchoredDirectoryIdentity, AnchoredFile, AnchoredWorkspace,
-        DirectoryErrorMode, ensure_anchored_real_file, open_anchored_file_for_read,
-        open_anchored_runtime_dir, path_io_error, retry_event_segment_discovery,
-        segmented_jsonl_files, segmented_jsonl_path,
+        DirectoryErrorMode, ensure_anchored_real_file, open_anchored_file_for_read, path_io_error,
+        retry_event_segment_discovery, segmented_jsonl_files, segmented_jsonl_path,
     },
     session_authority::{SessionOwnershipObserver, run_ownership_key},
     session_bundle::SessionBundlePaths,
-    session_store::workspace_store_path,
+    session_store::{open_anchored_runtime_dir, workspace_store_path},
     stream_signature::{EVENT_PLAN_DOMAIN, RuntimeStreamSignature, RuntimeStreamSignatureBuilder},
     types::{
         EVENT_STREAM_LIMITS, MAX_CANONICAL_EVENT_BYTES, MAX_SESSION_EVENT_BYTES,

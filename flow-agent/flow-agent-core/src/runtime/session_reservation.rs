@@ -2,10 +2,9 @@ use crate::runtime::session_lock::{SessionLockGuard, open_or_create_anchored_ses
 use crate::runtime::{
     fs_guards::{
         AnchoredDir, AnchoredDirectoryIdentity, AnchoredFile, AnchoredFileIdentity,
-        AnchoredWorkspace, RuntimeDirs, anchored_file_identity, canonical_segmented_jsonl_sibling,
-        create_anchored_file, ensure_anchored_non_hardlinked_file, ensure_anchored_runtime_dirs,
-        for_each_segmented_jsonl_member, open_anchored_file_for_read, open_anchored_runtime_dir,
-        path_io_error, reserve_new_anchored_file, sync_directory,
+        AnchoredWorkspace, anchored_file_identity, canonical_segmented_jsonl_sibling,
+        create_anchored_file, ensure_anchored_non_hardlinked_file, for_each_segmented_jsonl_member,
+        open_anchored_file_for_read, path_io_error, reserve_new_anchored_file, sync_directory,
     },
     session_authority::SessionOwnershipLease,
     session_bundle::SessionBundlePaths,
@@ -15,7 +14,9 @@ use crate::runtime::{
     },
     session_definition::{SessionDefinitionMetadata, ascii_case_alias},
     session_lock::SessionReservation,
-    session_store::workspace_store_path,
+    session_store::{
+        RuntimeDirs, ensure_anchored_runtime_dirs, open_anchored_runtime_dir, workspace_store_path,
+    },
     stage_results::reconcile_controlled_stages,
     types::{LOG_STORAGE_DIR, RuntimeError, SESSION_STORAGE_DIR},
 };

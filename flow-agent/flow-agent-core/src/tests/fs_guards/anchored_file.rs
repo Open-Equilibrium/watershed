@@ -2,9 +2,10 @@ use super::super::helpers::empty_workspace;
 use crate::runtime::{
     fixture_tools::{anchored_workspace_write_path, replace_script_output_atomically},
     fs_guards::{
-        create_anchored_file_for_update, ensure_runtime_dirs,
-        open_anchored_session_log_append_file, with_anchored_replacement_temp,
+        create_anchored_file_for_update, open_anchored_session_log_append_file,
+        with_anchored_replacement_temp,
     },
+    session_store::ensure_runtime_dirs,
     types::RuntimeError,
 };
 

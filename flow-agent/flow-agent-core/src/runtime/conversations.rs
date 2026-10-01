@@ -14,15 +14,13 @@ pub(crate) use contract::{MAX_CONVERSATION_RECORD_BYTES, RUN_EVENTS_LEAF};
 
 mod history_index;
 mod session_event_stream;
+#[cfg(any(test, feature = "m11-budget-evidence"))]
+pub(crate) use contract::{CONVERSATION_ENTRY_SCHEMA_V1, ConversationEntry, ConversationEntryType};
 #[cfg(test)]
 pub(crate) use history_index::append_conversation_entry;
 pub(crate) use history_index::append_productive_run_checkpoint;
 #[cfg(test)]
 pub(crate) use history_index::read_conversation_history;
-#[cfg(any(test, feature = "m11-budget-evidence"))]
-pub(crate) use history_index::{
-    CONVERSATION_ENTRY_SCHEMA_V1, ConversationEntry, ConversationEntryType,
-};
 #[cfg(test)]
 pub(crate) use history_index::{
     HistoryScratchFault, HistoryScratchMemberStage, HistoryScratchStage,

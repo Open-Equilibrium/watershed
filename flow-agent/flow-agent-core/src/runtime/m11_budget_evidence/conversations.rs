@@ -6,7 +6,8 @@ mod status;
 
 use crate::runtime::{
     conversations::{RUN_LOG_RECORD_SCHEMA_V1, RunLogRecord},
-    fs_guards::{AnchoredWorkspace, ensure_anchored_runtime_dirs},
+    fs_guards::AnchoredWorkspace,
+    session_store::ensure_anchored_runtime_dirs,
 };
 use std::path::{Path, PathBuf};
 

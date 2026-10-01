@@ -1,8 +1,9 @@
 use super::{
     contract::{
-        CONVERSATION_HISTORY_LEAF, MAX_CONVERSATION_RECORD_BYTES, MAX_CONVERSATION_SCAN_BYTES,
-        MAX_CONVERSATION_SCAN_RECORDS, MAX_CONVERSATION_SEGMENT_BYTES, protocol, validate_digest,
-        validate_id, validate_timestamp,
+        CONVERSATION_ENTRY_SCHEMA_V1, CONVERSATION_HISTORY_LEAF, ConversationEntry,
+        ConversationEntryType, MAX_CONVERSATION_RECORD_BYTES, MAX_CONVERSATION_SCAN_BYTES,
+        MAX_CONVERSATION_SCAN_RECORDS, MAX_CONVERSATION_SEGMENT_BYTES, protocol,
+        validate_conversation_entry, validate_digest, validate_id,
     },
     conversation_stream::{read_anchored_jsonl_quantum, validate_jsonl_segment_snapshot},
     status::{StatusAppendKind, append_jsonl_with_status},
@@ -38,12 +39,10 @@ use event_identifiers::{
     validate_history_event_pointers,
 };
 use external_sort::{index_sort_record_limit, merge_all_runs, write_sorted_run};
-pub(crate) use model::CONVERSATION_ENTRY_SCHEMA_V1;
 #[cfg(test)]
 use model::EventPointerMetrics;
 #[cfg(any(test, feature = "m11-budget-evidence"))]
 pub(crate) use model::MAX_HISTORY_INDEX_ID_BYTES;
-pub(crate) use model::{ConversationEntry, ConversationEntryType};
 use model::{
     INDEX_IO_BUFFER_BYTES, INDEX_MERGE_FAN_IN, INDEX_RECORD_BYTES, INDEX_SORT_BYTES, IndexRecord,
     WorkBudget,
@@ -268,41 +267,6 @@ pub(crate) fn validate_conversation_history_for_budget(
         None,
         |_index, summary| Ok(summary.entry_count),
     )
-}
-
-pub(super) fn validate_conversation_entry(entry: &ConversationEntry) -> Result<(), RuntimeError> {
-    if entry.schema != CONVERSATION_ENTRY_SCHEMA_V1 {
-        return Err(protocol("conversation entry has an unsupported schema"));
-    }
-    validate_digest(
-        &entry.recovery_snapshot_hash,
-        "conversation recovery snapshot hash",
-    )?;
-    let expected_type = if entry.parent_entry_id.is_some() {
-        ConversationEntryType::Continuation
-    } else {
-        ConversationEntryType::Checkpoint
-    };
-    if entry.entry_type != expected_type {
-        return Err(protocol(
-            "conversation entry type does not match its ancestry",
-        ));
-    }
-    validate_id(&entry.entry_id, "conversation entry")?;
-    if entry
-        .parent_entry_id
-        .as_deref()
-        .is_some_and(|id| !proto::is_valid_session_id(id))
-    {
-        return Err(protocol("conversation entry has an invalid parent id"));
-    }
-    validate_id(&entry.run_session_id, "run session")?;
-    if entry.event_sequence == 0 {
-        return Err(protocol(
-            "conversation entry event_sequence must be positive",
-        ));
-    }
-    validate_timestamp(&entry.timestamp)
 }
 
 pub(super) fn with_conversation_history_index<T>(

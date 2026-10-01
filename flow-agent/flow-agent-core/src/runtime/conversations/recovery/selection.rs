@@ -1,9 +1,9 @@
 use super::super::{
     contract::{
-        RUN_OBJECTS_DIR, RUN_RECOVERY_LEAF, protocol, validate_hash, validate_record_schema,
+        ConversationEntry, RUN_OBJECTS_DIR, RUN_RECOVERY_LEAF, protocol, validate_hash,
+        validate_record_schema,
     },
     conversation_stream::read_anchored_jsonl,
-    history_index::ConversationEntry,
     recovery_record::ProductiveRecoveryRecord,
     run_log::{RunLogRecord, inspect_run_attempts},
     storage::{existing_anchored_run, required_child},

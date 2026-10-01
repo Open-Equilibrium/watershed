@@ -1,11 +1,11 @@
 use super::super::{
     contract::{
-        CONVERSATION_HISTORY_LEAF, CONVERSATION_RUNS_DIR, MAX_CONVERSATION_RECORD_BYTES,
-        MAX_CONVERSATION_SEGMENT_BYTES, RUN_LOG_LEAF, protocol, validate_digest, validate_id,
+        CONVERSATION_HISTORY_LEAF, CONVERSATION_RUNS_DIR, ConversationEntry,
+        MAX_CONVERSATION_RECORD_BYTES, MAX_CONVERSATION_SEGMENT_BYTES, RUN_LOG_LEAF, protocol,
+        validate_conversation_entry, validate_digest, validate_id,
         validate_run_creation_identity_marker_name,
     },
     conversation_stream::{append_anchored_canonical_jsonl_batch, sync_anchored_stream},
-    history_index::{ConversationEntry, validate_conversation_entry},
     storage::{canonical_json, required_child},
 };
 use super::{

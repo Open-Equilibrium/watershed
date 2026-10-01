@@ -3,11 +3,12 @@ use super::{
     support::assert_active_session,
 };
 use crate::runtime::{
-    fs_guards::{AnchoredWorkspace, ensure_runtime_dirs},
+    fs_guards::AnchoredWorkspace,
     session_authority::{
         SessionOwnershipLease, SessionOwnershipObserver, stable_native_path_bytes,
     },
     session_reservation::{acquire_anchored_session_lock, write_reserved_session_metadata},
+    session_store::ensure_runtime_dirs,
 };
 use std::{
     fs,

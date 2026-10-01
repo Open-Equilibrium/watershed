@@ -5,7 +5,9 @@ use crate::runtime::{
     types::RuntimeError,
 };
 use proto::decode_lowercase_sha256_hex;
+use serde::{Deserialize, Serialize};
 
+pub(crate) const CONVERSATION_ENTRY_SCHEMA_V1: &str = "flow-conversation-entry-v1";
 pub(crate) const MAX_CONVERSATION_RECORD_BYTES: usize = 256 * 1024;
 pub(crate) const MAX_CONVERSATION_IO_BUFFER_BYTES: usize = 1024 * 1024;
 pub(crate) const MAX_CONVERSATION_STATUS_RECORDS: usize = 100;
@@ -30,6 +32,26 @@ pub(crate) const RUN_LOG_RECORD_SCHEMA_V1: &str = "flow-run-log-record-v1";
 pub(super) const UNPUBLISHED_PRODUCTIVE_RUN_MARKER: &str = ".unpublished-productive-run";
 const RUN_CREATION_STAGE_MARKER_PREFIX: &str = ".run-creation-identity-";
 const CONVERSATION_LIFECYCLE_MARKER_PREFIX: &str = ".conversation-lifecycle-identity-";
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum ConversationEntryType {
+    Checkpoint,
+    Continuation,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ConversationEntry {
+    pub(crate) schema: String,
+    pub(crate) entry_id: String,
+    pub(crate) parent_entry_id: Option<String>,
+    pub(crate) recovery_snapshot_hash: String,
+    pub(crate) run_session_id: String,
+    pub(crate) event_sequence: u64,
+    pub(crate) entry_type: ConversationEntryType,
+    pub(crate) timestamp: String,
+}
 
 pub(super) fn conversation_lifecycle_identity_marker_name(
     identity: AnchoredDirectoryIdentity,
@@ -72,6 +94,41 @@ fn valid_identity_marker_name(marker: &str, prefix: &str) -> bool {
                     .bytes()
                     .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
         })
+}
+
+pub(super) fn validate_conversation_entry(entry: &ConversationEntry) -> Result<(), RuntimeError> {
+    if entry.schema != CONVERSATION_ENTRY_SCHEMA_V1 {
+        return Err(protocol("conversation entry has an unsupported schema"));
+    }
+    validate_digest(
+        &entry.recovery_snapshot_hash,
+        "conversation recovery snapshot hash",
+    )?;
+    let expected_type = if entry.parent_entry_id.is_some() {
+        ConversationEntryType::Continuation
+    } else {
+        ConversationEntryType::Checkpoint
+    };
+    if entry.entry_type != expected_type {
+        return Err(protocol(
+            "conversation entry type does not match its ancestry",
+        ));
+    }
+    validate_id(&entry.entry_id, "conversation entry")?;
+    if entry
+        .parent_entry_id
+        .as_deref()
+        .is_some_and(|id| !proto::is_valid_session_id(id))
+    {
+        return Err(protocol("conversation entry has an invalid parent id"));
+    }
+    validate_id(&entry.run_session_id, "run session")?;
+    if entry.event_sequence == 0 {
+        return Err(protocol(
+            "conversation entry event_sequence must be positive",
+        ));
+    }
+    validate_timestamp(&entry.timestamp)
 }
 
 pub(super) fn validate_timestamp(timestamp: &str) -> Result<(), RuntimeError> {

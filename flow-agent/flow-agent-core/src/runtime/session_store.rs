@@ -4,7 +4,7 @@ use crate::runtime::{
 };
 use crate::runtime::{
     fs_guards::{AnchoredDir, AnchoredWorkspace, DirectoryErrorMode},
-    types::{GLOBAL_WORKSPACES_DIR, RuntimeError},
+    types::{GLOBAL_WORKSPACES_DIR, LOG_STORAGE_DIR, RuntimeError, SESSION_STORAGE_DIR},
 };
 use std::{
     fs,
@@ -144,4 +144,46 @@ pub(crate) fn stable_native_path_bytes(path: &Path) -> Vec<u8> {
     use std::os::unix::ffi::OsStrExt as _;
 
     path.as_os_str().as_bytes().to_vec()
+}
+
+pub struct RuntimeDirs {
+    pub(crate) logs: AnchoredDir,
+    pub(crate) sessions: AnchoredDir,
+}
+
+#[cfg(test)]
+pub fn ensure_runtime_dirs(workspace: &Path) -> Result<RuntimeDirs, RuntimeError> {
+    let workspace = AnchoredWorkspace::open(workspace)?;
+    ensure_anchored_runtime_dirs(&workspace)
+}
+
+pub(crate) fn ensure_anchored_runtime_dirs(
+    workspace: &AnchoredWorkspace,
+) -> Result<RuntimeDirs, RuntimeError> {
+    let store = WorkspaceStore::open(workspace, true)?.expect("created workspace store is present");
+    let sessions = store
+        .child(SESSION_STORAGE_DIR, true)?
+        .expect("created session directory is present");
+    sync_anchored_directory(store.root())?;
+    let logs = store
+        .child(LOG_STORAGE_DIR, true)?
+        .expect("created log directory is present");
+    sync_anchored_directory(store.root())?;
+    Ok(RuntimeDirs { logs, sessions })
+}
+
+#[cfg(test)]
+pub fn open_runtime_dir(workspace: &Path, leaf: &str) -> Result<Option<AnchoredDir>, RuntimeError> {
+    let workspace = AnchoredWorkspace::open(workspace)?;
+    open_anchored_runtime_dir(&workspace, leaf)
+}
+
+pub(crate) fn open_anchored_runtime_dir(
+    workspace: &AnchoredWorkspace,
+    leaf: &str,
+) -> Result<Option<AnchoredDir>, RuntimeError> {
+    let Some(store) = WorkspaceStore::open(workspace, false)? else {
+        return Ok(None);
+    };
+    store.child(leaf, false)
 }
