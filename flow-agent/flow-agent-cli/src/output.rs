@@ -31,6 +31,17 @@ pub(crate) fn print_error(error: &impl std::fmt::Display) {
     let _ = writeln!(io::stderr().lock(), "error: {escaped}");
 }
 
+pub(crate) fn print_runtime_error(error: &RuntimeError) {
+    if let RuntimeError::Usage(message) = error {
+        let usage = crate::parsing::usage();
+        if message == &usage {
+            let _ = writeln!(io::stderr().lock(), "error: {usage}");
+            return;
+        }
+    }
+    print_error(error);
+}
+
 pub(crate) fn write_stdout(contents: &str) -> Result<(), RuntimeError> {
     #[cfg(test)]
     observe_stdout_write();

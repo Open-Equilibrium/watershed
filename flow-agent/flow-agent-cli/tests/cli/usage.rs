@@ -1,4 +1,7 @@
-use super::{flow_command, test_support::workspace_copy};
+use super::{
+    flow_command,
+    test_support::{session_home_path, workspace_copy},
+};
 use std::{io::Write, process::Stdio};
 
 #[test]
@@ -44,21 +47,36 @@ fn help_flags_print_usage() {
 }
 
 #[test]
-fn no_arguments_and_unknown_commands_print_usage_errors() {
-    for args in [Vec::<&str>::new(), vec!["unknown"]] {
-        let output = flow_command()
-            .args(args)
-            .output()
-            .expect("flow binary should run");
+fn no_arguments_print_readable_global_usage_error() {
+    assert_global_usage_error(&[]);
+}
 
-        assert_eq!(output.status.code(), Some(64));
-        assert!(
-            String::from_utf8(output.stderr)
-                .expect("stderr should be UTF-8")
-                .contains("Usage:\\n  flow run <flow>")
-        );
-        assert!(output.stdout.is_empty());
-    }
+#[test]
+fn unknown_commands_print_readable_global_usage_error() {
+    assert_global_usage_error(&["unknown"]);
+}
+
+fn assert_global_usage_error(args: &[&str]) {
+    let help = flow_command()
+        .arg("--help")
+        .output()
+        .expect("flow help should run");
+    assert!(help.status.success());
+    assert!(help.stderr.is_empty());
+    let usage = String::from_utf8(help.stdout).expect("help should be UTF-8");
+    assert_eq!(usage.lines().count(), 19);
+
+    let output = flow_command()
+        .args(args)
+        .output()
+        .expect("flow binary should run");
+
+    assert_eq!(output.status.code(), Some(64));
+    assert_eq!(
+        String::from_utf8(output.stderr).expect("stderr should be UTF-8"),
+        format!("error: {usage}")
+    );
+    assert!(output.stdout.is_empty());
 }
 
 #[test]
@@ -94,7 +112,7 @@ fn invalid_command_arguments_print_usage_errors() {
 #[test]
 fn registry_diagnostics_escape_terminal_controls() {
     let workspace = workspace_copy("smoke-flow");
-    let hostile_flow_ref = "missing\u{1b}]0;owned\u{7}";
+    let hostile_flow_ref = "missing\u{1b}]0;owned\u{7}\n";
 
     let output = flow_command()
         .current_dir(&workspace)
@@ -108,10 +126,33 @@ fn registry_diagnostics_escape_terminal_controls() {
     assert!(!stderr.contains('\u{1b}'), "{stderr:?}");
     assert!(!stderr.contains('\u{7}'), "{stderr:?}");
     assert!(
-        stderr.contains("missing\\u{1b}]0;owned\\u{7}"),
+        stderr.contains("missing\\u{1b}]0;owned\\u{7}\\n"),
         "{stderr:?}"
     );
     assert_eq!(stderr.lines().count(), 1, "{stderr:?}");
+}
+
+#[test]
+fn usage_diagnostics_escape_terminal_controls() {
+    let workspace = workspace_copy("smoke-flow");
+    std::fs::write(
+        session_home_path().join("config.yaml"),
+        "\"hostile\\n\\u001b]0;owned\\u0007\": true\n",
+    )
+    .expect("synthetic invalid config writes");
+
+    let output = flow_command()
+        .current_dir(&workspace)
+        .arg("validate")
+        .output()
+        .expect("flow binary should run");
+
+    assert_eq!(output.status.code(), Some(64));
+    assert!(output.stdout.is_empty());
+    assert_eq!(
+        String::from_utf8(output.stderr).expect("stderr should be UTF-8"),
+        "error: FLOW_AGENT_HOME/config.yaml: unknown field: hostile\\n\\u{1b}]0;owned\\u{7}\n"
+    );
 }
 
 #[test]
