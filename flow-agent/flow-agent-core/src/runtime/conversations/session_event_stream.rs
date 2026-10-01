@@ -410,7 +410,14 @@ impl SessionEventReader {
                 continue;
             }
             after_read();
-            let mut validation = self.validation.clone();
+            let empty_validation = SessionAppendValidationState::empty(
+                self.validation
+                    .expected_session_id
+                    .as_deref()
+                    .expect("session readers always validate one session"),
+            );
+            // Errors and unwinds leave an empty cache for the next verified replay.
+            let mut validation = std::mem::replace(&mut self.validation, empty_validation);
             let mut signature = self.observed_signature.clone();
             let mut discovered_bytes = 0u64;
             let mut current_segment_count = self.observed_segment_count;

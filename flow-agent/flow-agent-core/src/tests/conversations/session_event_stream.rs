@@ -347,6 +347,94 @@ fn incremental_reader_recovers_atomically_after_a_semantically_invalid_append() 
 }
 
 #[test]
+fn incremental_reader_recovers_after_callback_error_or_unwind() {
+    for unwind in [false, true] {
+        let (_workspace, path, started, _completed, mut reader) = reader_fixture(
+            &format!("tail-callback-recovery-{unwind}"),
+            "tailcallback001",
+        );
+        let progress = EventEnvelope::new(
+            "evt-progress",
+            EventType::MetricSample,
+            "tailcallback001",
+            2,
+            event_timestamp(2),
+            "flow-agent-cli",
+            serde_json::json!({"metric_name":"reader.progress","value":1}),
+        )
+        .canonical_jsonl()
+        .expect("progress event serializes");
+        let completed = session_event_line(
+            "tailcallback001",
+            "evt-completed",
+            EventType::SessionCompleted,
+            3,
+        );
+        assert_eq!(reader.read_after(0).expect("initial prefix reads").len(), 1);
+        append_session_log_line(&path, &format!("{progress}{completed}"))
+            .expect("committed suffix appends");
+
+        let mut cursor = 1;
+        let failed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            reader.visit_incremental_after(cursor, 3, |event, _line| {
+                if event.sequence == 3 {
+                    assert!(!unwind, "sink panicked");
+                    return Err(RuntimeError::Usage("sink stopped".to_owned()));
+                }
+                cursor = event.sequence;
+                Ok(())
+            })
+        }));
+        if unwind {
+            assert!(failed.is_err(), "the sink panic is caught");
+        } else {
+            assert!(matches!(
+                failed.expect("returned sink error does not panic"),
+                Err(RuntimeError::Usage(message)) if message == "sink stopped"
+            ));
+        }
+        assert_eq!(cursor, 2);
+
+        let changed = started.replace("evt-started", "evt-mutated");
+        fs::write(&path, format!("{changed}{progress}{completed}"))
+            .expect("previously observed event is replaced");
+        let mut delivered = Vec::new();
+        let error = reader
+            .visit_verified_after(cursor, 3, |_event, line| {
+                delivered.push(line.to_owned());
+                Ok(())
+            })
+            .expect_err("failed delivery retains the observed prefix digest");
+        assert!(matches!(
+            error,
+            RuntimeError::Protocol(message) if message.contains("append-only")
+        ));
+        assert!(delivered.is_empty());
+
+        fs::write(&path, format!("{started}{progress}{completed}"))
+            .expect("original prefix is restored");
+        reader
+            .visit_incremental_after(cursor, 3, |event, line| {
+                delivered.push(line.to_owned());
+                cursor = event.sequence;
+                Ok(())
+            })
+            .expect("failed callback event remains readable");
+        assert_eq!(delivered, [completed]);
+        assert_eq!(cursor, 3);
+        assert!(
+            reader
+                .read_incremental_after(cursor)
+                .expect("processed suffix reads")
+                .is_empty()
+        );
+        reader
+            .visit_verified_after(cursor, 3, |_event, _line| Ok(()))
+            .expect("final authoritative replay succeeds");
+    }
+}
+
+#[test]
 fn replay_and_reader_reject_lossy_null_envelope_metadata() {
     let (_workspace, path, started, completed, mut reader) =
         reader_fixture("tail-null-envelope", "tailnull001");
