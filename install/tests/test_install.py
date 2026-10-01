@@ -421,10 +421,6 @@ class PrefixInstallerTest(unittest.TestCase):
             journal.touch(mode=0o600)
             os.chown(journal, user.pw_uid, user.pw_gid)
             source = (bundle / "install.sh").read_text(encoding="utf-8")
-            if sys.platform == "linux":
-                route = "if [ -x /usr/bin/sudo ]; then"
-                self.assertEqual(source.count(route), 1)
-                source = source.replace(route, "if false; then", 1)
             boundary = '    IFS= read -r request || exit 1\n'
             self.assertEqual(source.count(boundary), 1)
             observation = (
