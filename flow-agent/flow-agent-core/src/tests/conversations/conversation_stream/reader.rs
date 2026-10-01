@@ -2,12 +2,78 @@ use super::super::super::helpers::empty_workspace;
 use super::padded_json_value;
 use crate::runtime::conversations::{
     MAX_CONVERSATION_RECORD_BYTES, MAX_CONVERSATION_SCAN_BYTES, MAX_CONVERSATION_SCAN_RECORDS,
-    MAX_CONVERSATION_SEGMENT_BYTES, append_jsonl, read_jsonl, read_jsonl_quantum,
+    MAX_CONVERSATION_SEGMENT_BYTES, append_jsonl, existing_anchored_run, read_anchored_jsonl,
+    read_jsonl, read_jsonl_quantum,
 };
+use crate::runtime::types::MAX_SESSION_METADATA_BYTES;
+use serde::{Deserialize, Deserializer, Serialize};
 use std::{
+    cell::RefCell,
     fs::{self, OpenOptions},
+    io::Write,
     path::{Path, PathBuf},
 };
+
+thread_local! {
+    static PRODUCTIVE_LOG_GROWTH: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
+}
+
+#[derive(Serialize)]
+#[serde(transparent)]
+struct GrowingLogRecord(serde_json::Value);
+
+impl<'de> Deserialize<'de> for GrowingLogRecord {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        PRODUCTIVE_LOG_GROWTH.with(|growth| {
+            if let Some(path) = growth.borrow_mut().take() {
+                OpenOptions::new()
+                    .append(true)
+                    .open(path)
+                    .expect("admitted Run Log opens for concurrent growth")
+                    .write_all(b"{}\n")
+                    .expect("one record appends after inventory admission");
+            }
+        });
+        Ok(Self(value))
+    }
+}
+
+#[test]
+fn productive_full_run_log_read_bounds_growth_after_inventory() {
+    let workspace = empty_workspace("productive-run-log-read-growth");
+    crate::tests::conversations::create_review_run(&workspace);
+    let run = existing_anchored_run(&workspace, "review", "review-1").expect("Run opens");
+    let log = run.file("run-log.jsonl");
+    let original_bytes = b"{}\n".repeat(MAX_CONVERSATION_SCAN_RECORDS + 1);
+    fs::write(log.diagnostic_path(), &original_bytes).expect("multi-quantum Run Log writes");
+    OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(run.file("recovery.jsonl").diagnostic_path())
+        .expect("recovery capacity fixture opens")
+        .set_len(MAX_SESSION_METADATA_BYTES - u64::try_from(original_bytes.len()).unwrap())
+        .expect("aggregate metadata starts at its exact limit");
+    PRODUCTIVE_LOG_GROWTH.with(|growth| {
+        *growth.borrow_mut() = Some(log.diagnostic_path().to_owned());
+    });
+
+    let error = read_anchored_jsonl::<GrowingLogRecord>(&log)
+        .err()
+        .expect("growth past admitted metadata capacity rejects during the full read");
+
+    assert!(
+        error
+            .to_string()
+            .contains("metadata exceeds its byte limit"),
+        "{error}"
+    );
+    assert_eq!(
+        fs::metadata(log.diagnostic_path()).unwrap().len(),
+        u64::try_from(original_bytes.len() + 3).unwrap(),
+        "growth occurred after inventory admission"
+    );
+}
 
 #[test]
 fn conversation_scan_count_budget() {
@@ -78,7 +144,7 @@ fn conversation_io_buffer_budget() {
     crate::runtime::m11_budget_evidence::verify_conversation_operation_boundaries_for_test(
         &empty_workspace("conversation-io-buffer-budget"),
     )
-    .expect("real migration and replay stay within their finite scan and I/O bounds");
+    .expect("replay stays within its finite scan and I/O bounds");
 }
 
 #[test]

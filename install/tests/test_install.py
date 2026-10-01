@@ -1,0 +1,1122 @@
+import ctypes
+import json
+import os
+import pathlib
+import shlex
+import shutil
+import signal
+import stat
+import subprocess
+import sys
+import tempfile
+import time
+import unittest
+
+
+ROOT = pathlib.Path(__file__).resolve().parents[2]
+INSTALLER = ROOT / "install" / "install.sh"
+PROBE_DOCUMENT = (
+    '{"backend":"bubblewrap-seccomp","backend_version":"test",'
+    '"executor":"flow-executor","executor_version":"0.0.0",'
+    '"platform":"ubuntu-24.04-x86_64","protocol_versions":["0"],'
+    '"ready":true,"schema":"flow-executor-probe-v0",'
+    '"supported_policy_features":["flow-owned-write-protection"]}'
+)
+
+
+@unittest.skipUnless(
+    sys.platform in ("linux", "darwin"),
+    "requires a native Linux or macOS host",
+)
+class PrefixInstallerTest(unittest.TestCase):
+    @unittest.skipUnless(sys.platform == "darwin", "requires Darwin ACL metadata")
+    def test_macos_acl_admission_checks_held_source_and_directory_metadata(self):
+        source = INSTALLER.read_text(encoding="utf-8")
+        declarations = source.partition("\nprefix=")[0]
+        metadata = "metadata() {" + source.partition("\nmetadata() {")[2].partition('\ncase "$0" in')[0]
+        bundle_checks = 'exec 3<"$bundle"' + source.partition('exec 3<"$bundle"')[2].partition("\nreadiness_owner=$current_owner")[0]
+        source_checks = "validate_source() {" + source.partition("\nvalidate_source() {")[2].partition("\nflow_source_name=")[0]
+        bin_checks = 'exec 6<"$bin"' + source.partition('exec 6<"$bin"')[2].partition("\n# The working directory")[0]
+        admission = (
+            declarations + "\nhost=Darwin\ndescriptor_root=/dev/fd\n" + metadata +
+            '\nbundle=$1\nbin=$2\nimage=$3\nmarker=$4\n' + bundle_checks +
+            "\n" + source_checks + '\nexec 4<"$image"\nvalidate_source /dev/fd/4 "$image"\n' +
+            bin_checks + '\n: > "$marker"\n'
+        )
+        owner = subprocess.check_output(["/usr/bin/id", "-un"], text=True).strip()
+        cases = [
+            ("image", ["everyone allow write"], False),
+            ("bundle", ["everyone allow add_file,delete_child"], False),
+            ("bin", ["everyone allow delete_child"], False),
+            ("image", ["everyone allow read,execute"], True),
+            ("bundle", ["everyone allow list,search"], True),
+            ("image", ["everyone deny write", "everyone allow write"], True),
+            ("image", ["everyone allow write", "everyone deny write"], False),
+            ("image", ["group:staff allow write"], False),
+            ("image", ["group:staff deny write", "group:staff allow write"], True),
+            ("image", ["user:root deny write", "group:staff allow write"], False),
+            ("image", [f"user:{owner} allow write,writesecurity"], True),
+            ("image", ["user:root allow write,writesecurity"], True),
+            ("inherited", ["everyone allow write,file_inherit,only_inherit"], False),
+        ]
+        if os.geteuid() != 0:
+            cases.append(("image", [f"user:{owner} deny readsecurity"], False))
+        for target_name, entries, safe in cases:
+            with self.subTest(target=target_name, entries=entries), tempfile.TemporaryDirectory() as temporary:
+                root = pathlib.Path(temporary)
+                bundle = root / "bundle"
+                bundle.mkdir(mode=0o755)
+                bin_path = root / "bin"
+                bin_path.mkdir(mode=0o755)
+                image = bundle / "flow"
+                image.write_bytes(b"synthetic source image")
+                image.chmod(0o755)
+                target = {"image": image, "bundle": bundle, "bin": bin_path,
+                          "inherited": bin_path}[target_name]
+                for index, entry in enumerate(entries):
+                    subprocess.run(["/bin/chmod", "+a#", str(index), entry, str(target)], check=True)
+                if target_name == "inherited":
+                    image = bin_path / "inherited-image"
+                    image.write_bytes(b"synthetic staged image")
+                    image.chmod(0o755)
+                if safe:
+                    expected_acl = subprocess.check_output(["/bin/ls", "-lde", str(target)]).splitlines()[1:]
+                marker = root / "publication-permitted"
+                result = subprocess.run(
+                    ["/bin/sh", "-c", admission, "acl-admission", str(bundle), str(bin_path),
+                     str(image), str(marker)], env={"PATH": ""}, capture_output=True, timeout=15,
+                )
+                self.assertEqual(result.returncode, 0 if safe else 1, result.stderr)
+                self.assertEqual(marker.exists(), safe, result.stderr)
+                if safe:
+                    self.assertEqual(subprocess.check_output(["/bin/ls", "-lde", str(target)]).splitlines()[1:], expected_acl)
+
+    @unittest.skipUnless(sys.platform == "darwin", "requires Darwin ACL metadata")
+    def test_macos_inherited_staging_acl_is_checked_before_publication(self):
+        source = INSTALLER.read_text(encoding="utf-8")
+        declarations = source.partition("\nprefix=")[0]
+        metadata = "metadata() {" + source.partition("\nmetadata() {")[2].partition('\ncase "$0" in')[0]
+        source_checks = "validate_source() {" + source.partition("\nvalidate_source() {")[2].partition("\nflow_source_name=")[0]
+        binding_checks = "verify_bundle_binding() {" + source.partition("\nverify_bundle_binding() {")[2].partition("\nverify_bundle_binding\nverify_bin_binding\n")[0]
+        staging = source.partition("\nverify_bundle_binding\nverify_bin_binding\n")[2].partition('\n/bin/ln -- "$flow_stage"')[0]
+        owner = subprocess.check_output(["/usr/bin/id", "-un"], text=True).strip()
+        cases = [
+            ("everyone allow write,file_inherit,directory_inherit,only_inherit", False),
+            ("everyone allow add_file,directory_inherit,only_inherit", False),
+            ("everyone allow read,file_inherit,directory_inherit,only_inherit", True),
+            (f"user:{owner} allow write,writesecurity,file_inherit,directory_inherit,only_inherit", True),
+            ("stage-file-only", False),
+        ]
+        for entry, safe in cases:
+            with self.subTest(entry=entry), tempfile.TemporaryDirectory() as temporary:
+                root = pathlib.Path(temporary)
+                bundle = root / "bundle"
+                bundle.mkdir(mode=0o755)
+                image = bundle / "flow"
+                image.write_bytes(b"synthetic source image")
+                image.chmod(0o755)
+                bin_path = root / "bin"
+                bin_path.mkdir(mode=0o755)
+                staging_body = staging
+                if entry == "stage-file-only":
+                    # The directory grant is inactive, but its new file inherits mutation.
+                    staging_body = staging.replace('stage_admitted=1\n',
+                        'stage_admitted=1\n/bin/chmod +a "everyone allow write,file_inherit,only_inherit" "$stage_directory"\n', 1)
+                else:
+                    subprocess.run(["/bin/chmod", "+a", entry, str(bin_path)], check=True)
+                marker = root / "publication-permitted"
+                admission = (
+                    declarations + "\nhost=Darwin\ndescriptor_root=/dev/fd\n" + metadata +
+                    "\n" + source_checks + "\n" + binding_checks +
+                    '\nbundle=$1\nbin=$2\nflow_source_name=$3\nmarker=$4\n'
+                    'current_owner=$(/usr/bin/id -u)\ninstall_executor=0\n'
+                    'exec 3<"$bundle"\nbundle_fd=/dev/fd/3\n'
+                    'exec 4<"$flow_source_name"\nflow_source=/dev/fd/4\n'
+                    'exec 6<"$bin"\nbin_fd=/dev/fd/6\ncd "$bin"\n'
+                    'stage_directory=./stage\nflow_stage=$stage_directory/flow\n' +
+                    staging_body + '\n: > "$marker"\n'
+                )
+                result = subprocess.run(
+                    ["/bin/sh", "-c", admission, "staging-admission", str(bundle), str(bin_path),
+                     str(image), str(marker)], env={"PATH": ""}, capture_output=True, timeout=15,
+                )
+                self.assertEqual(result.returncode, 0 if safe else 1, result.stderr)
+                self.assertEqual(marker.exists(), safe, result.stderr)
+
+    @unittest.skipUnless(sys.platform == "darwin", "requires Darwin ACL metadata")
+    def test_macos_staging_control_acl_is_private_before_channel_creation(self):
+        source = INSTALLER.read_text(encoding="utf-8")
+        declarations = source.partition("\nprefix=")[0]
+        metadata = "metadata() {" + source.partition("\nmetadata() {")[2].partition('\ncase "$0" in')[0]
+        creation = '/bin/mkdir -m 0700 -- "$stage_directory"' + source.partition(
+            '/bin/mkdir -m 0700 -- "$stage_directory"')[2].partition('stage_admitted=1')[0] + 'stage_admitted=1\n'
+        for fault in (False, True):
+            with self.subTest(normalization_failure=fault), tempfile.TemporaryDirectory() as temporary:
+                root = pathlib.Path(temporary)
+                subprocess.run(["/bin/chmod", "+a", "everyone allow write,file_inherit,only_inherit",
+                                str(root)], check=True)
+                parent_acl = subprocess.check_output(["/bin/ls", "-lde", str(root)]).splitlines()[1:]
+                body = creation.replace('stage_created=1\n',
+                    'stage_created=1\n/bin/chmod +a "everyone allow write,file_inherit,only_inherit" "$stage_directory"\n', 1)
+                functions = declarations
+                if fault:
+                    functions = functions.replace('checked($.acl_set_fd_np(0, empty, 256));',
+                        'throw Error("synthetic ACL normalization failure");')
+                command = (
+                    functions + "\nhost=Darwin\ndescriptor_root=/dev/fd\n" + metadata +
+                    '\ncurrent_owner=$(/usr/bin/id -u)\nstage_directory=$1/stage\n' + body +
+                    '/usr/bin/mkfifo -m 0600 "$stage_directory/control"\n'
+                )
+                result = subprocess.run(["/bin/sh", "-c", command, "private-staging", str(root)],
+                                        env={"PATH": ""}, capture_output=True, timeout=15)
+                self.assertEqual(result.returncode, 1 if fault else 0, result.stderr)
+                self.assertEqual((root / "stage" / "control").exists(), not fault, result.stderr)
+                if not fault:
+                    self.assertEqual(subprocess.check_output(["/bin/ls", "-lde", str(root / "stage")]).splitlines()[1:], [])
+                    self.assertEqual(subprocess.check_output(["/bin/ls", "-le", str(root / "stage" / "control")]).splitlines()[1:], [])
+                self.assertEqual(subprocess.check_output(["/bin/ls", "-lde", str(root)]).splitlines()[1:], parent_acl)
+
+    @unittest.skipUnless(sys.platform == "darwin", "requires Darwin ACL metadata")
+    def test_macos_readiness_directory_hardens_safe_inherited_acl_before_use(self):
+        source = INSTALLER.read_text(encoding="utf-8")
+        declarations = source.partition("\nprefix=")[0]
+        metadata = "metadata() {" + source.partition("\nmetadata() {")[2].partition('\ncase "$0" in')[0]
+        creation = '/bin/mkdir -m 0700 -- "$readiness_config"' + source.partition(
+            '/bin/mkdir -m 0700 -- "$readiness_config"')[2].partition(
+            '    installer_group=')[0]
+        libc = ctypes.CDLL(None, use_errno=True)
+        libc.acl_get_fd_np.argtypes = [ctypes.c_int, ctypes.c_int]
+        libc.acl_get_fd_np.restype = ctypes.c_void_p
+        libc.acl_get_entry.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.POINTER(ctypes.c_void_p)]
+        libc.acl_free.argtypes = [ctypes.c_void_p]
+
+        def has_acl(path):
+            descriptor = os.open(path, os.O_RDONLY)
+            try:
+                acl = libc.acl_get_fd_np(descriptor, 256)
+                if not acl:
+                    self.assertEqual(ctypes.get_errno(), 2)
+                    return False
+                try:
+                    result = libc.acl_get_entry(acl, 0, ctypes.byref(ctypes.c_void_p()))
+                    if result == -1:
+                        self.assertEqual(ctypes.get_errno(), 22)
+                        return False
+                    self.assertEqual(result, 0)
+                    return True
+                finally:
+                    libc.acl_free(acl)
+            finally:
+                os.close(descriptor)
+
+        owner = subprocess.check_output(["/usr/bin/id", "-un"], text=True).strip()
+        cases = [(None, True),
+                 ("everyone allow read,search,directory_inherit,only_inherit", True),
+                 (f"user:{owner} allow write,writesecurity,directory_inherit,only_inherit", True),
+                 ("everyone allow add_file,directory_inherit,only_inherit", False)]
+        for entry, safe in cases:
+            with self.subTest(entry=entry), tempfile.TemporaryDirectory() as temporary:
+                root = pathlib.Path(temporary)
+                if entry:
+                    subprocess.run(["/bin/chmod", "+a", entry, str(root)], check=True)
+                parent_acl = subprocess.check_output(["/bin/ls", "-lde", str(root)]).splitlines()[1:]
+                marker = root / "readiness-permitted"
+                admission = (
+                    declarations + "\nhost=Darwin\ndescriptor_root=/dev/fd\n" + metadata +
+                    '\nreadiness_config=$1\nmarker=$2\ncurrent_owner=$(/usr/bin/id -u)\n'
+                    'readiness_owner=$current_owner\nreadiness_group=$(/usr/bin/id -g)\n' +
+                    creation + '\n: > "$marker"\n'
+                )
+                result = subprocess.run(
+                    ["/bin/sh", "-c", admission, "readiness-admission", str(root / "readiness"),
+                     str(marker)], env={"PATH": ""}, capture_output=True, timeout=15,
+                )
+                self.assertEqual(result.returncode, 0 if safe else 1, result.stderr)
+                self.assertEqual(marker.exists(), safe, result.stderr)
+                self.assertEqual(has_acl(root / "readiness"), not safe)
+                self.assertEqual(subprocess.check_output(["/bin/ls", "-lde", str(root)]).splitlines()[1:], parent_acl)
+
+    @unittest.skipUnless(sys.platform == "darwin", "requires Darwin ACL metadata")
+    def test_macos_acl_rejection_cleanup_preserves_foreign_entries(self):
+        source = INSTALLER.read_text(encoding="utf-8")
+        declarations = source.partition("\nprefix=")[0]
+        metadata = "metadata() {" + source.partition("\nmetadata() {")[2].partition('\ncase "$0" in')[0]
+        cleanup = "stop_readiness() {" + source.partition("\nstop_readiness() {")[2].partition("\nsignal_exit() {")[0]
+        stage = source.partition("\nverify_bundle_binding\nverify_bin_binding\n")[2].partition('\n/bin/ln -- "$flow_stage"')[0]
+        readiness = '/bin/mkdir -m 0700 -- "$readiness_config"' + source.partition(
+            '/bin/mkdir -m 0700 -- "$readiness_config"')[2].partition(
+            '    installer_group=')[0]
+        for kind in ("stage", "stage-linked", "readiness"):
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as temporary:
+                root = pathlib.Path(temporary)
+                subprocess.run([
+                    "/bin/chmod", "+a", "everyone allow add_file,directory_inherit,only_inherit",
+                    str(root),
+                ], check=True)
+                setup = (
+                    '\ncurrent_owner=$(/usr/bin/id -u)\ninstall_executor=0\n'
+                    'stage_directory=$1/stage\nflow_stage=$stage_directory/flow\n'
+                    'executor_stage=$stage_directory/flow-executor\nflow_target=$1/flow\n'
+                    'executor_target=$1/flow-executor\nreadiness_config=$1/readiness\n'
+                    'stage_created=0\nstage_admitted=0\nreadiness_config_created=0\n'
+                    'readiness_config_admitted=0\ninstallation_committed=0\n'
+                    'published_flow=0\npublished_executor=0\nreadiness_active=0\n'
+                    'readiness_control=$1/control\nreadiness_inner_control=$1/inner-control\ntrap cleanup EXIT\n'
+                )
+                if kind.startswith("stage"):
+                    # A synthetic peer entry appears during the inherited unsafe interval.
+                    body = stage.replace('stage_created=1\n', 'stage_created=1\nprintf foreign > "$flow_stage"\n', 1)
+                    foreign = root / "stage" / "flow"
+                    if kind == "stage-linked":
+                        body = body.replace('printf foreign > "$flow_stage"\n',
+                                            'printf foreign > "$flow_target"\n/bin/ln "$flow_target" "$flow_stage"\n', 1)
+                else:
+                    body = readiness.replace('readiness_config_created=1\n',
+                                             'readiness_config_created=1\nprintf foreign > "$readiness_config/status"\n', 1)
+                    foreign = root / "readiness" / "status"
+                admission = declarations + "\nhost=Darwin\ndescriptor_root=/dev/fd\n" + metadata + "\n" + cleanup + setup + body
+                result = subprocess.run(
+                    ["/bin/sh", "-c", admission, "rejected-cleanup", str(root)],
+                    env={"PATH": ""}, capture_output=True, timeout=15,
+                )
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertIn(b"unsafe or unavailable macOS ACL", result.stderr)
+                self.assertTrue(foreign.exists(), result.stderr)
+                self.assertEqual(foreign.read_bytes(), b"foreign")
+                if kind == "stage-linked":
+                    self.assertTrue((root / "flow").exists(), result.stderr)
+                    self.assertEqual((root / "flow").read_bytes(), b"foreign")
+
+    @unittest.skipUnless(sys.platform == "darwin", "requires Darwin ACL metadata")
+    def test_macos_acl_prerequisite_and_held_descriptor_errors_fail_closed(self):
+        declarations = INSTALLER.read_text(encoding="utf-8").partition("\nprefix=")[0]
+        owner = subprocess.check_output(["/usr/bin/id", "-un"], text=True).strip()
+        cases = ["missing-bridge", "closed-descriptor"]
+        if os.geteuid() != 0:
+            cases.append("unreadable-acl")
+        for fault in cases:
+            with self.subTest(fault=fault), tempfile.TemporaryDirectory() as temporary:
+                root = pathlib.Path(temporary)
+                image = root / "image"
+                image.write_bytes(b"synthetic opened image")
+                marker = root / "effect-permitted"
+                functions = declarations
+                setup = 'exec 7<"$1"\n'
+                if fault == "missing-bridge":
+                    functions = functions.replace("/usr/bin/osascript", str(root / "missing-osascript"))
+                elif fault == "closed-descriptor":
+                    setup += "exec 7<&-\n"
+                else:
+                    setup += '/bin/chmod +a "$3" "$1"\n'
+                admission = (
+                    functions + '\nhost=Darwin\ncurrent_owner=$(/usr/bin/id -u)\n' + setup +
+                    'validate_acl /dev/fd/7 "opened image"\n: > "$2"\n'
+                )
+                result = subprocess.run(
+                    ["/bin/sh", "-c", admission, "acl-fault", str(image), str(marker),
+                     f"user:{owner} deny readsecurity"], env={"PATH": ""}, capture_output=True,
+                    timeout=15,
+                )
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertFalse(marker.exists(), result.stderr)
+                if fault == "missing-bridge":
+                    self.assertIn(b"requires", result.stderr)
+                elif fault == "unreadable-acl":
+                    self.assertIn(b"unsafe or unavailable macOS ACL: opened image", result.stderr)
+
+    def test_release_admission_matches_runtime(self):
+        declarations, separator, _ = INSTALLER.read_text(encoding="utf-8").partition("\nprefix=")
+        self.assertTrue(separator, "installer declarations must precede installation")
+        cases = [
+            ("Linux", "x86_64", f"ID={a}ubuntu{a}\nVERSION_ID={b}24.04{b}\n", True)
+            for a in ("", '"', "'") for b in ("", '"', "'")
+        ]
+        cases += [("Linux", "x86_64", release, False) for release in (
+            "ID=debian\nVERSION_ID=24.04\n", "ID=ubuntu\n", "VERSION_ID=24.04\n",
+            "ID=ubuntu\nVERSION_ID=24.10\n", "ID=ubuntu\nVERSION_ID='24.10'\n",
+            "ID=debian\nID=ubuntu\nVERSION_ID=24.04\n",
+            "ID=ubuntu\nID=ubuntu\nVERSION_ID=24.04\n",
+            "ID=ubuntu\nVERSION_ID=24.04\nVERSION_ID=24.04\n",
+            'ID="ubuntu\nVERSION_ID=24.04\n',
+        )]
+        cases += [("Darwin", "arm64", version, accepted) for version, accepted in (
+            ("27.0", True), ("27.1.2\n", True), ("25.9", False),
+            ("26.0", False), ("26.6.2", False), ("28.0", False),
+            ("270", False), ("27", False), ("27..0", False),
+            ("27.0.beta", False), ("27.0\n27.1", False),
+        )]
+        cases += [("Linux", "arm64", "ID=ubuntu\nVERSION_ID=24.04\n", False),
+                  ("Darwin", "x86_64", "27.0", False)]
+        for host, machine, release, accepted in cases:
+            with self.subTest(host=host, machine=machine, release=release):
+                result = subprocess.run(
+                    ["/bin/sh", "-c", declarations + '\nrelease_supported "$1" "$2"\n',
+                     "release-test", host, machine], input=release, text=True,
+                    capture_output=True, timeout=5, check=False,
+                )
+                self.assertEqual(result.returncode, 0 if accepted else 1, result.stderr)
+
+    def test_help_succeeds_without_installing(self):
+        expected = (
+            "Usage: install.sh --prefix <absolute-prefix> [--no-default-executor]\n"
+            "\n"
+            "Install Flow Agent on Linux or macOS from sibling bundle artifacts.\n"
+            "\n"
+            "Options:\n"
+            "  --prefix <absolute-prefix>  Install into <absolute-prefix>/bin.\n"
+            "  --no-default-executor       Install flow without the bundled Default Executor.\n"
+            "  -h, --help                  Show this help.\n"
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            for flag in ("-h", "--help"):
+                completed = subprocess.run(
+                    ["/bin/sh", str(INSTALLER), flag],
+                    cwd=root,
+                    env={"PATH": ""},
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    check=False,
+                    text=True,
+                )
+                self.assertEqual(completed.returncode, 0, completed.stderr)
+                self.assertEqual(completed.stdout, expected)
+                self.assertEqual(completed.stderr, "")
+                self.assertEqual(list(root.iterdir()), [])
+
+    def bundle(self, root: pathlib.Path) -> pathlib.Path:
+        bundle = root / "bundle"
+        bundle.mkdir(mode=0o755, parents=True)
+        shutil.copy2(INSTALLER, bundle / "install.sh")
+        platform = "macos-27-aarch64" if sys.platform == "darwin" else "ubuntu-24.04-x86_64"
+        (bundle / "bundle-info").write_text(f"0.0.0\n{platform}\n", encoding="ascii")
+        flow = bundle / "flow"
+        flow.write_text(
+            "#!/bin/sh\n"
+            "test \"$1 $2\" = \"executor check\" || exit 64\n"
+            "test -n \"$XDG_CONFIG_HOME\" || exit 65\n"
+            "test \"$HOME\" = \"$XDG_CONFIG_HOME\" || exit 65\n"
+            "physical_home=$(cd \"$HOME\" && /bin/pwd -P) || exit 65\n"
+            "test \"$HOME\" = \"$physical_home\" || exit 65\n"
+            "test -z \"${FLOW_AGENT_HOME+x}\" || exit 65\n"
+            "test ! -e \"$XDG_CONFIG_HOME/flow-agent/executor.json\" || exit 65\n"
+            "probe=$(\"${0%/*}/flow-executor\" --probe) || exit 65\n"
+            f"expected='{PROBE_DOCUMENT}'\n"
+            "test \"$probe\" = \"$expected\" || exit 65\n",
+            encoding="utf-8",
+        )
+        executor = bundle / "flow-executor"
+        executor.write_text(
+            "#!/bin/sh\n"
+            "test \"$#\" -eq 1 && test \"$1\" = \"--probe\" || exit 64\n"
+            f"printf '%s\\n' '{PROBE_DOCUMENT}'\n",
+            encoding="utf-8",
+        )
+        for path in (bundle / "install.sh", flow, executor):
+            path.chmod(0o755)
+        user = getattr(self, "readiness_user", None)
+        if user is not None:
+            os.chown(root, user.pw_uid, user.pw_gid)
+            journal = root / "supervision"
+            journal.touch(mode=0o600)
+            os.chown(journal, user.pw_uid, user.pw_gid)
+            source = (bundle / "install.sh").read_text(encoding="utf-8")
+            boundary = '    IFS= read -r request || exit 1\n'
+            self.assertEqual(source.count(boundary), 1)
+            observation = (
+                '    readiness_terminal=$(/bin/ps -o tty= -p "$$") || exit 1\n'
+                f'    printf "%s|%s|%s|%s\\n" "$role" "$(/usr/bin/id -u)" '
+                f'"$readiness_pgid" "$readiness_terminal" >> {shlex.quote(str(journal))}\n'
+            ).replace("'", "'\"'\"'")
+            (bundle / "install.sh").write_text(
+                source.replace(boundary, observation + boundary), encoding="utf-8"
+            )
+        return bundle
+
+    def readiness_environment(self):
+        environment = {"PATH": ""}
+        user = getattr(self, "readiness_user", None)
+        if user is not None:
+            environment["SUDO_USER"] = user.pw_name
+        return environment
+
+    def assert_privileged_supervision(self, bundle):
+        user = getattr(self, "readiness_user", None)
+        if user is None:
+            return
+        observations = {}
+        for line in (bundle.parent / "supervision").read_text().splitlines():
+            role, uid, group, terminal = (field.strip() for field in line.split("|"))
+            self.assertNotIn(role, observations)
+            self.assertGreater(int(group), 1)
+            self.assertNotEqual(int(group), os.getpgrp())
+            observations[role] = (int(uid), int(group), terminal)
+        self.assertEqual(set(observations), {"outer", "inner"}, observations)
+        self.assertEqual(observations["outer"][0], 0, observations)
+        self.assertEqual(observations["inner"][0], user.pw_uid, observations)
+        if sys.platform == "darwin":
+            self.assertNotEqual(observations["outer"][1], observations["inner"][1], observations)
+            self.assertNotIn(observations["inner"][2], ("", "?", "??"), observations)
+            self.assertNotEqual(observations["outer"][2], observations["inner"][2],
+                                "configured sudo did not create a separate controlling PTY")
+        print(f"privileged readiness supervision: {observations}", flush=True)
+
+    def test_missing_malformed_or_wrong_target_bundle_is_rejected_before_program_execution(self):
+        for contents in (None, "0.0.0\n", "0.0.0\nunsupported-platform\n",
+                         "0.0.0\nmacos-26-aarch64\n",
+                         "0.0.0\nmacos-27-aarch64\n" if sys.platform == "linux"
+                         else "0.0.0\nubuntu-24.04-x86_64\n"):
+            with self.subTest(contents=contents), tempfile.TemporaryDirectory() as temporary:
+                root = pathlib.Path(temporary)
+                bundle = self.bundle(root)
+                manifest = bundle / "bundle-info"
+                if contents is None:
+                    manifest.unlink()
+                else:
+                    manifest.write_text(contents, encoding="ascii")
+                marker = root / "executed"
+                (bundle / "flow").write_text(
+                    f"#!/bin/sh\n: > {shlex.quote(str(marker))}\n", encoding="utf-8")
+                prefix = root / "prefix"
+                for options in ((), ("--no-default-executor",)):
+                    result = self.install(bundle, prefix, *options)
+                    self.assertEqual(result.returncode, 1, result.stderr)
+                    self.assertIn(b"bundle", result.stderr)
+                    self.assertFalse(marker.exists(), result.stderr)
+                    self.assertFalse(prefix.exists(), result.stderr)
+
+    def install(self, bundle: pathlib.Path, prefix: pathlib.Path, *args: str):
+        unrelated_cwd = prefix.parent / "unrelated-cwd"
+        unrelated_cwd.mkdir(exist_ok=True)
+        command = [
+            "/bin/sh", str(bundle / "install.sh"), "--prefix", str(prefix), *args,
+        ]
+        options = dict(
+            cwd=unrelated_cwd,
+            env={**self.readiness_environment(),
+                 "FLOW_AGENT_HOME": str(unrelated_cwd / "ignored-flow-home")},
+        )
+        result = subprocess.run(command, **options, capture_output=True, check=False, timeout=15)
+        if "--no-default-executor" not in args:
+            self.assert_privileged_supervision(bundle)
+        return result
+
+    def pause_installer_after_validation(
+        self, bundle: pathlib.Path, marker: pathlib.Path, release: pathlib.Path
+    ):
+        installer = bundle / "install.sh"
+        source = installer.read_text(encoding="utf-8")
+        boundary = "trap 'signal_exit 143' TERM\n\n"
+        self.assertEqual(source.count(boundary), 1)
+        barrier = (
+            f": > {shlex.quote(str(marker))}\n"
+            f"while [ ! -e {shlex.quote(str(release))} ]; do /bin/sleep 0.01; done\n"
+        )
+        installer.write_text(
+            source.replace(boundary, boundary + barrier),
+            encoding="utf-8",
+        )
+        installer.chmod(0o755)
+
+    def wait_for_installer_marker(
+        self, process: subprocess.Popen, marker: pathlib.Path
+    ):
+        for _ in range(500):
+            if marker.exists():
+                return
+            if process.poll() is not None:
+                self.fail(process.stderr.read().decode("utf-8", errors="replace"))
+            time.sleep(0.01)
+        process.kill()
+        self.fail("installer did not reach the post-validation boundary")
+
+    def test_standard_and_opt_out_install_from_any_cwd_with_empty_path(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            bundle = self.bundle(root)
+
+            standard = root / "standard"
+            installed = self.install(bundle, standard)
+            self.assertEqual(installed.returncode, 0, installed.stderr)
+            self.assertTrue((standard / "bin" / "flow").is_file())
+            self.assertTrue((standard / "bin" / "flow-executor").is_file())
+
+            opt_out = root / "opt-out"
+            installed = self.install(bundle, opt_out, "--no-default-executor")
+            self.assertEqual(installed.returncode, 0, installed.stderr)
+            self.assertTrue((opt_out / "bin" / "flow").is_file())
+            self.assertFalse((opt_out / "bin" / "flow-executor").exists())
+
+    def test_existing_targets_and_unsafe_bundle_inputs_fail_without_upgrade(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            bundle = self.bundle(root)
+            prefix = root / "prefix"
+            first = self.install(bundle, prefix, "--no-default-executor")
+            self.assertEqual(first.returncode, 0, first.stderr)
+
+            repeated = self.install(bundle, prefix, "--no-default-executor")
+            self.assertNotEqual(repeated.returncode, 0)
+            self.assertIn(b"existing installation", repeated.stderr)
+
+            unsafe_bundle = self.bundle(root / "unsafe")
+            executor = unsafe_bundle / "flow-executor"
+            executor.unlink()
+            executor.symlink_to(unsafe_bundle / "flow")
+            unsafe_prefix = root / "unsafe-prefix"
+            rejected = self.install(unsafe_bundle, unsafe_prefix)
+            self.assertNotEqual(rejected.returncode, 0)
+            self.assertFalse((unsafe_prefix / "bin" / "flow").exists())
+
+    def test_readiness_does_not_require_or_forward_a_user_manager(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            bundle = self.bundle(root)
+            flow = bundle / "flow"
+            source = flow.read_text(encoding="utf-8")
+            flow.write_text(
+                source.replace(
+                    "#!/bin/sh\n",
+                    "#!/bin/sh\n"
+                    'test -z "${XDG_RUNTIME_DIR+x}" || exit 65\n'
+                    'test -z "${DBUS_SESSION_BUS_ADDRESS+x}" || exit 65\n',
+                ),
+                encoding="utf-8",
+            )
+            completed = subprocess.run(
+                ["/bin/sh", str(bundle / "install.sh"), "--prefix", str(root / "prefix")],
+                env={"PATH": "", "XDG_RUNTIME_DIR": str(root / "absent-runtime"),
+                     "DBUS_SESSION_BUS_ADDRESS": "unix:path=/absent/bus"},
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=15,
+            )
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertFalse((root / "absent-runtime").exists())
+            self.assertEqual(sorted(p.name for p in (root / "prefix" / "bin").iterdir()),
+                             ["flow", "flow-executor"])
+
+    def test_unsafe_source_and_directory_metadata_rejects_before_publication(self):
+        cases = [
+            (name, mutation, diagnostic)
+            for name in ("flow", "flow-executor")
+            for mutation, diagnostic in (
+                ("non-executable", b"bundle artifact is not executable:"),
+                ("writable", b"writable bundle artifact is unsafe:"),
+                ("hardlink", b"hard-linked bundle artifact is unsafe:"),
+                ("fifo", b"missing regular bundle artifact:"),
+            )
+        ] + [
+            ("bundle", "writable", b"installer bundle is writable by other users"),
+            ("bin", "writable", b"installation bin directory is writable by other users"),
+        ]
+        for name, mutation, diagnostic in cases:
+            with self.subTest(name=name, mutation=mutation), tempfile.TemporaryDirectory() as temporary:
+                root = pathlib.Path(temporary)
+                bundle = self.bundle(root)
+                prefix = root / "prefix"
+                target = bundle / name
+                if name == "bundle":
+                    target = bundle
+                elif name == "bin":
+                    target = prefix / "bin"
+                    target.mkdir(parents=True)
+                if mutation == "hardlink":
+                    os.link(target, root / "artifact-alias")
+                elif mutation == "fifo":
+                    target.unlink()
+                    os.mkfifo(target)
+                else:
+                    target.chmod(0o644 if mutation == "non-executable" else 0o775)
+
+                args = ("--no-default-executor",) if name == "flow" else ()
+                rejected = self.install(bundle, prefix, *args)
+
+                self.assertEqual(rejected.returncode, 1, rejected.stderr)
+                self.assertEqual(rejected.stdout, b"")
+                self.assertIn(diagnostic, rejected.stderr)
+                if (prefix / "bin").exists():
+                    self.assertEqual(list((prefix / "bin").iterdir()), [])
+
+    def test_staging_collision_preserves_preexisting_file(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            bundle = self.bundle(root)
+            prefix = root / "prefix"
+            bin_directory = prefix / "bin"
+            bin_directory.mkdir(parents=True)
+            result = subprocess.run(
+                ["/bin/sh", "-c",
+                 'printf sentinel > "$1/bin/.flow.install.$$" || exit 90\n'
+                 'exec /bin/sh "$2" --prefix "$1" --no-default-executor',
+                 "collision", str(prefix), str(bundle / "install.sh")],
+                env={"PATH": ""}, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                timeout=15,
+            )
+            self.assertEqual(result.returncode, 1, result.stderr)
+            entries = list(bin_directory.iterdir())
+            self.assertEqual(len(entries), 1, result.stderr)
+            self.assertEqual(entries[0].read_bytes(), b"sentinel")
+
+    def test_installed_files_are_regular_executable_siblings(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            bundle = self.bundle(root)
+            prefix = root / "prefix"
+
+            installed = self.install(bundle, prefix)
+
+            self.assertEqual(installed.returncode, 0, installed.stderr)
+            for name in ("flow", "flow-executor"):
+                path = prefix / "bin" / name
+                metadata = path.lstat()
+                self.assertTrue(stat.S_ISREG(metadata.st_mode))
+                self.assertEqual(metadata.st_nlink, 1)
+                self.assertEqual(metadata.st_uid, os.geteuid())
+                self.assertEqual(metadata.st_mode & 0o022, 0)
+
+    def test_failed_readiness_rolls_back_every_published_artifact(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            bundle = self.bundle(root)
+            (bundle / "flow").write_text(
+                "#!/bin/sh\n"
+                ": > \"$XDG_CONFIG_HOME/readiness-state\"\n"
+                "printf '%s\\n' 'executor_unavailable: Bubblewrap is unavailable' >&2\n"
+                "exit 65\n",
+                encoding="utf-8",
+            )
+            (bundle / "flow").chmod(0o755)
+            prefix = root / "prefix"
+
+            installed = self.install(bundle, prefix)
+
+            self.assertNotEqual(installed.returncode, 0)
+            self.assertIn(b"Bubblewrap is unavailable", installed.stderr)
+            self.assertIn(b"failed readiness", installed.stderr)
+            self.assertEqual(list((prefix / "bin").iterdir()), [])
+
+    def test_host_prerequisite_failure_explains_explicit_authoring_opt_out(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            bundle = self.bundle(root)
+            readiness_called = root / "readiness-called"
+            diagnostic = "error: executor_unavailable: native protection self-test failed"
+            (bundle / "flow").write_text(
+                "#!/bin/sh\n"
+                "test \"$1 $2\" = \"executor check\" || exit 64\n"
+                f": > {shlex.quote(str(readiness_called))}\n"
+                f"printf '%s\\n' {shlex.quote(diagnostic)} >&2\n"
+                "exit 65\n",
+                encoding="utf-8",
+            )
+            (bundle / "flow").chmod(0o755)
+            prefix = root / "prefix with spaces"
+
+            rejected = self.install(bundle, prefix)
+
+            self.assertEqual(rejected.returncode, 1, rejected.stderr)
+            self.assertTrue(readiness_called.is_file())
+            self.assertIn(diagnostic.encode(), rejected.stderr)
+            self.assertEqual(rejected.stdout, b"")
+            self.assertEqual(list((prefix / "bin").iterdir()), [])
+
+            readiness_called.unlink()
+            opted_out = self.install(bundle, prefix, "--no-default-executor")
+
+            self.assertEqual(opted_out.returncode, 0, opted_out.stderr)
+            self.assertEqual(
+                [path.name for path in (prefix / "bin").iterdir()], ["flow"]
+            )
+            self.assertFalse(readiness_called.exists())
+            self.assertIn(b"--no-default-executor", rejected.stderr)
+            self.assertIn(b"authoring", rejected.stderr.lower())
+            self.assertIn(b"fixture", rejected.stderr.lower())
+
+    def test_replacing_validated_bundle_fails_without_running_substituted_flow(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            bundle = self.bundle(root)
+            validated = root / "validated"
+            release = root / "release"
+            executed = root / "substituted-flow-ran"
+            self.pause_installer_after_validation(bundle, validated, release)
+            prefix = root / "prefix"
+            unrelated_cwd = root / "unrelated-cwd"
+            unrelated_cwd.mkdir()
+            process = subprocess.Popen(
+                ["/bin/sh", str(bundle / "install.sh"), "--prefix", str(prefix)],
+                cwd=unrelated_cwd,
+                env={"PATH": ""},
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.wait_for_installer_marker(process, validated)
+            bundle.rename(root / "original-bundle")
+            replacement = self.bundle(root)
+            (replacement / "flow").write_text(
+                "#!/bin/sh\n"
+                f": > {shlex.quote(str(executed))}\n"
+                "exit 0\n",
+                encoding="utf-8",
+            )
+            (replacement / "flow").chmod(0o755)
+            release.touch()
+            _, stderr = process.communicate(timeout=5)
+
+            self.assertNotEqual(process.returncode, 0, stderr)
+            self.assertIn(b"installer bundle path changed during installation", stderr)
+            self.assertFalse(executed.exists())
+            self.assertEqual(list((prefix / "bin").iterdir()), [])
+
+    def test_replacing_validated_target_directory_fails_without_publication(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            bundle = self.bundle(root)
+            validated = root / "validated"
+            release = root / "release"
+            self.pause_installer_after_validation(bundle, validated, release)
+            prefix = root / "prefix"
+            unrelated_cwd = root / "unrelated-cwd"
+            unrelated_cwd.mkdir()
+            process = subprocess.Popen(
+                [
+                    "/bin/sh",
+                    str(bundle / "install.sh"),
+                    "--prefix",
+                    str(prefix),
+                    "--no-default-executor",
+                ],
+                cwd=unrelated_cwd,
+                env={"PATH": ""},
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.wait_for_installer_marker(process, validated)
+            original_bin = root / "original-bin"
+            (prefix / "bin").rename(original_bin)
+            (prefix / "bin").mkdir(mode=0o755)
+            release.touch()
+            _, stderr = process.communicate(timeout=5)
+
+            self.assertNotEqual(process.returncode, 0, stderr)
+            self.assertIn(b"installation bin path changed during installation", stderr)
+            self.assertEqual(list(original_bin.iterdir()), [])
+            self.assertEqual(list((prefix / "bin").iterdir()), [])
+
+    def test_replacing_validated_source_artifact_fails_without_publication(self):
+        for name in ("flow", "flow-executor"):
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as temporary:
+                root = pathlib.Path(temporary)
+                bundle = self.bundle(root)
+                validated = root / "validated"
+                release = root / "release"
+                self.pause_installer_after_validation(bundle, validated, release)
+                prefix = root / "prefix"
+                process = subprocess.Popen(
+                    ["/bin/sh", str(bundle / "install.sh"), "--prefix", str(prefix)],
+                    cwd=root, env={"PATH": ""},
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                )
+
+                self.wait_for_installer_marker(process, validated)
+                original = root / "original-artifact"
+                (bundle / name).rename(original)
+                shutil.copy2(original, bundle / name)
+                self.assertNotEqual(original.stat().st_ino, (bundle / name).stat().st_ino)
+                release.touch()
+                _, stderr = process.communicate(timeout=5)
+
+                self.assertEqual(process.returncode, 1, stderr)
+                self.assertIn(f"{name} bundle artifact changed during installation".encode(), stderr)
+                self.assertEqual(list((prefix / "bin").iterdir()), [])
+
+    def test_signal_at_each_publication_boundary_rolls_back(self):
+        boundaries = (
+            (
+                '/bin/ln -- "$flow_stage" "$flow_target" || fail \'cannot publish flow\'\n',
+                "--no-default-executor",
+            ),
+            (
+                '/bin/ln -- "$executor_stage" "$executor_target" || fail \'cannot publish flow-executor\'\n',
+                None,
+            ),
+        )
+        for publication, opt_out in boundaries:
+            with self.subTest(publication=publication), tempfile.TemporaryDirectory() as temporary:
+                root = pathlib.Path(temporary)
+                bundle = self.bundle(root)
+                installer = bundle / "install.sh"
+                source = installer.read_text(encoding="utf-8")
+                self.assertEqual(source.count(publication), 1)
+                installer.write_text(
+                    source.replace(
+                        publication,
+                        publication + '/bin/kill -TERM "$$"\n',
+                    ),
+                    encoding="utf-8",
+                )
+                installer.chmod(0o755)
+                prefix = root / "prefix"
+
+                args = (opt_out,) if opt_out else ()
+                installed = self.install(bundle, prefix, *args)
+
+                self.assertEqual(installed.returncode, 128 + signal.SIGTERM, installed.stderr)
+                self.assertEqual(list((prefix / "bin").iterdir()), [])
+
+    def test_signal_at_commit_boundary_is_all_or_nothing(self):
+        commit = "installation_committed=1\n"
+        cases = (
+            ("before", f'/bin/kill -TERM "$$"\n{commit}', ()),
+            (
+                "after",
+                f'{commit}/bin/kill -TERM "$$"\n',
+                ("flow", "flow-executor"),
+            ),
+        )
+        for side, injected, expected in cases:
+            with self.subTest(side=side), tempfile.TemporaryDirectory() as temporary:
+                root = pathlib.Path(temporary)
+                bundle = self.bundle(root)
+                installer = bundle / "install.sh"
+                source = installer.read_text(encoding="utf-8")
+                self.assertEqual(source.count(commit), 1)
+                installer.write_text(
+                    source.replace(commit, injected),
+                    encoding="utf-8",
+                )
+                installer.chmod(0o755)
+                prefix = root / "prefix"
+
+                installed = self.install(bundle, prefix)
+
+                self.assertEqual(installed.returncode, 128 + signal.SIGTERM, installed.stderr)
+                self.assertEqual(
+                    tuple(sorted(path.name for path in (prefix / "bin").iterdir())),
+                    expected,
+                )
+
+    def test_signal_during_failure_cleanup_does_not_interrupt_rollback(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            bundle = self.bundle(root)
+            installer = bundle / "install.sh"
+            source = installer.read_text(encoding="utf-8")
+            first_removal = '            /bin/rm -f -- "$executor_target" || :\n'
+            self.assertEqual(source.count(first_removal), 1)
+            installer.write_text(
+                source.replace(
+                    first_removal,
+                    first_removal + '            /bin/kill -TERM "$$"\n',
+                ),
+                encoding="utf-8",
+            )
+            installer.chmod(0o755)
+            (bundle / "flow").write_text("#!/bin/sh\nexit 65\n", encoding="utf-8")
+            (bundle / "flow").chmod(0o755)
+            prefix = root / "prefix"
+
+            installed = self.install(bundle, prefix)
+
+            self.assertEqual(installed.returncode, 1, installed.stderr)
+            self.assertIn(b"failed readiness", installed.stderr)
+            self.assertEqual(list((prefix / "bin").iterdir()), [])
+
+    def test_readiness_cancel_before_start_does_not_launch(self):
+        for boundary in ("    readiness_active=1\n", "    exec 7>&-\n    printf '%s\\n' start >&8"):
+            with self.subTest(boundary=boundary), tempfile.TemporaryDirectory() as temporary:
+                root = pathlib.Path(temporary)
+                bundle = self.bundle(root)
+                marker = root / "checker-started"
+                (bundle / "flow").write_text(f"#!/bin/sh\n: > {shlex.quote(str(marker))}\n", encoding="utf-8")
+                installer = bundle / "install.sh"
+                source = installer.read_text(encoding="utf-8")
+                self.assertEqual(source.count(boundary), 1)
+                installer.write_text(source.replace(boundary,
+                    '    /bin/kill -TERM "$$"\n' + boundary), encoding="utf-8")
+                prefix = root / "prefix"
+                started = time.monotonic()
+
+                result = self.install(bundle, prefix)
+
+                self.assertLess(time.monotonic() - started, 5)
+                self.assertEqual(result.returncode, 143, result.stderr)
+                self.assertFalse(marker.exists(), result.stderr)
+                self.assertEqual(list((prefix / "bin").iterdir()), [])
+
+    def test_readiness_launch_failure_rolls_back_without_signal_fallback(self):
+        for fault in ("missing-launcher", "missing-group-query", "installer-group"):
+            with self.subTest(fault=fault), tempfile.TemporaryDirectory() as temporary:
+                root = pathlib.Path(temporary)
+                bundle = self.bundle(root)
+                installer = bundle / "install.sh"
+                source = installer.read_text(encoding="utf-8")
+                if fault == "missing-launcher":
+                    source = source.replace('set -- /bin/sh -c "$readiness_shell"',
+                                            'set -- /missing/readiness-launcher -c "$readiness_shell"', 1)
+                elif fault == "missing-group-query":
+                    source = source.replace('/bin/ps -o pgid= -p "$$"', '/missing/ps -o pgid= -p "$$"', 1)
+                else:
+                    source = source.replace('readiness_group=$(/bin/ps -o pgid= -p "$$")',
+                                            'readiness_group=$installer_pgid', 1)
+                installer.write_text(source, encoding="utf-8")
+                marker = root / "checker-started"
+                (bundle / "flow").write_text(f"#!/bin/sh\n: > {shlex.quote(str(marker))}\n", encoding="utf-8")
+                prefix = root / "prefix"
+
+                result = self.install(bundle, prefix)
+
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertIn(b"did not report readiness", result.stderr)
+                self.assertFalse(marker.exists(), result.stderr)
+                self.assertEqual(list((prefix / "bin").iterdir()), [])
+
+    def test_readiness_cleanup_signals_only_retained_groups(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            bundle = self.bundle(root)
+            journal = root / "signals"
+            shim = root / "owned-kill"
+            shim.write_text(
+                f"#!{sys.executable}\n"
+                "import json, os, signal, sys, time\n"
+                f"journal = {str(journal)!r}\n"
+                f"test_group = {os.getpgrp()}\n"
+                "target = int(sys.argv[-1]); number = getattr(signal, 'SIG' + sys.argv[1][1:])\n"
+                "group = -target; owned = target < -1 and group == os.getpgrp() and group != test_group\n"
+                "entry = dict(target=target, actor=os.getpid(), owned=owned, unsafe=not owned)\n"
+                "if not owned:\n"
+                "    time.sleep(0.1)\n"
+                "    try: os.kill(abs(target), 0); entry['released'] = False\n"
+                "    except ProcessLookupError: entry['released'] = True\n"
+                "with open(journal, 'a') as output: output.write(json.dumps(entry) + '\\n')\n"
+                "if owned: os.killpg(group, number)\n",
+                encoding="utf-8",
+            )
+            shim.chmod(0o755)
+            installer = bundle / "install.sh"
+            source = installer.read_text(encoding="utf-8")
+            final_signal = '    kill -s KILL -- "-$readiness_pgid"'
+            self.assertEqual(source.count(final_signal), 1)
+            source = source.replace(final_signal, f'    {shlex.quote(str(shim))} -KILL -- "-$readiness_pgid"')
+            installer.write_text(source.replace(
+                "/bin/kill", shlex.quote(str(shim))), encoding="utf-8")
+
+            result = self.install(bundle, root / "prefix")
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            signals = [json.loads(line) for line in journal.read_text().splitlines()]
+            self.assertTrue(signals, "cleanup did not exercise signal ownership")
+            self.assertFalse([entry for entry in signals if entry.get("unsafe")], signals)
+
+    def test_signal_during_readiness_terminates_descendants_and_rolls_back(self):
+        for scanner in ("/usr/bin/pgrep", "/missing/pgrep"):
+            with self.subTest(scanner=scanner), tempfile.TemporaryDirectory() as temporary:
+                root = pathlib.Path(temporary)
+                bundle = self.bundle(root)
+                installer = bundle / "install.sh"
+                source = installer.read_text(encoding="utf-8")
+                self.assertEqual(source.count("/usr/bin/pgrep"), 1)
+                self.assertEqual(source.count("signal_exit() {\n"), 1)
+                installer.write_text(
+                    source.replace("/usr/bin/pgrep", scanner).replace(
+                        "signal_exit() {\n", "signal_exit() {\n    set -x\n"
+                    ),
+                    encoding="utf-8",
+                )
+                marker = root / "readiness-started"
+                (bundle / "flow").write_text(
+                    "#!/bin/sh\n"
+                    "trap 'exit 1' HUP INT TERM\n"
+                    "(\n"
+                    "    trap '' HUP INT TERM\n"
+                    "    /bin/sleep 30\n"
+                    ") &\n"
+                    "descendant=$!\n"
+                    f"printf '%s\\n' \"$descendant\" > '{marker}'\n"
+                    "wait \"$descendant\"\n",
+                    encoding="utf-8",
+                )
+                (bundle / "flow").chmod(0o755)
+                prefix = root / "prefix"
+                unrelated_cwd = root / "unrelated-cwd"
+                unrelated_cwd.mkdir()
+                process = subprocess.Popen(
+                    ["/bin/sh", str(bundle / "install.sh"), "--prefix", str(prefix)],
+                    cwd=unrelated_cwd,
+                    env=self.readiness_environment(),
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
+                descendant = None
+                descendant_group = None
+                try:
+                    for _ in range(200):
+                        if marker.exists() and marker.read_text(encoding="utf-8").strip():
+                            descendant = int(marker.read_text(encoding="utf-8").strip())
+                            descendant_group = os.getpgid(descendant)
+                            break
+                        if process.poll() is not None:
+                            self.fail("installer exited before entering readiness")
+                        time.sleep(0.01)
+                    else:
+                        self.fail("installer did not enter readiness")
+
+                    self.assertNotEqual(
+                        descendant_group, os.getpgrp(), "readiness shares the test process group"
+                    )
+                    process.send_signal(signal.SIGTERM)
+                    try:
+                        _, stderr = process.communicate(timeout=5)
+                    except subprocess.TimeoutExpired as error:
+                        installer_status = process.poll()
+                        try:
+                            state = subprocess.run(
+                                [
+                                    "/bin/ps", "-o", "pid,ppid,pgid,stat,wchan,comm", "-p",
+                                    f"{process.pid},{descendant_group},{descendant}",
+                                ],
+                                env={"PATH": ""},
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT,
+                                timeout=1,
+                                check=False,
+                            )
+                            state_text = f"ps exit={state.returncode}\n" + state.stdout.decode(
+                                "utf-8", errors="replace"
+                            )
+                        except (OSError, subprocess.TimeoutExpired) as diagnostic_error:
+                            state_text = f"process-state diagnostic failed: {diagnostic_error}"
+                        self.fail(
+                            "installer did not finish within 5s after SIGTERM; "
+                            f"pid={process.pid}, status={installer_status}, "
+                            f"readiness_pgid={descendant_group}, descendant={descendant}\n"
+                            f"{state_text}\ninstaller stderr tail:\n"
+                            + (error.stderr or b"")[-16384:].decode("utf-8", errors="replace")
+                        )
+
+                    self.assertEqual(process.returncode, 128 + signal.SIGTERM, stderr)
+                    self.assert_privileged_supervision(bundle)
+                    self.assertEqual(list((prefix / "bin").iterdir()), [])
+                    for _ in range(200):
+                        try:
+                            os.kill(descendant, 0)
+                        except ProcessLookupError:
+                            break
+                        time.sleep(0.01)
+                    else:
+                        self.fail(f"readiness descendant {descendant} survived cleanup")
+                finally:
+                    # A failed fixture expires after its finite sleep; saved
+                    # descendant numbers cannot safely authorize rescue signals.
+                    if process.poll() is None:
+                        process.kill()
+                    try:
+                        process.wait(timeout=5)
+                    finally:
+                        process.stdout.close()
+                        process.stderr.close()
+
+if __name__ == "__main__":
+    unittest.main()

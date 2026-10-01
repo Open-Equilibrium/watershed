@@ -6,13 +6,12 @@ use super::super::{
     support::{append_session_log_line, event_timestamp},
     test_support::{TempWorkspace, expected_stream, workspace_copy},
 };
-#[cfg(unix)]
 use crate::runtime::types::EventClock;
 use crate::runtime::{
-    fs_guards::{AnchoredWorkspace, ensure_runtime_dirs, segmented_jsonl_path},
-    segmented_appender::{EventLogAppender, SessionLogAppender},
+    fs_guards::{AnchoredWorkspace, segmented_jsonl_path},
     session_reading::SessionEventReader,
     session_reservation::acquire_anchored_session_lock,
+    session_store::ensure_runtime_dirs,
     types::{EVENT_STREAM_LIMITS, MAX_SESSION_SEGMENT_BYTES, RuntimeError},
 };
 use proto::{EventEnvelope, EventType};
@@ -50,65 +49,6 @@ fn assert_protocol_contains(result: Result<Vec<EventEnvelope>, RuntimeError>, ex
 
 fn sequences(events: &[EventEnvelope]) -> Vec<u64> {
     events.iter().map(|event| event.sequence).collect()
-}
-
-#[test]
-fn incremental_reader_rejects_a_suffix_above_the_in_memory_limit() {
-    let workspace = empty_workspace("tail-in-memory-limit");
-    let session_id = "tailmemorylimit001";
-    let reservation = reserve_session_log(&workspace, session_id).expect("session reserves");
-    let path = reservation.session_path.diagnostic_path().to_owned();
-    let mut appender =
-        SessionLogAppender::open(&reservation.session_path).expect("session appender opens");
-    let started = super::super::performance::sized_synthetic_event_line(
-        session_id,
-        1,
-        EventType::SessionStarted,
-        768,
-    );
-    appender
-        .append(&path, started.as_bytes())
-        .expect("session start appends");
-    appender.sync(&path).expect("session start syncs");
-
-    let mut reader = SessionEventReader::open(&workspace, session_id).expect("session opens");
-    assert_eq!(reader.read_after(0).expect("session start reads").len(), 1);
-
-    for sequence in 2..=258 {
-        let metric = super::super::performance::sized_synthetic_event_line(
-            session_id,
-            sequence,
-            EventType::MetricSample,
-            256 * 1024,
-        );
-        appender
-            .append(&path, metric.as_bytes())
-            .expect("metric appends");
-    }
-    appender.sync(&path).expect("metric suffix syncs");
-
-    assert!(matches!(
-        reader.read_incremental_after(1),
-        Err(RuntimeError::ReplayOutputLimitExceeded {
-            limit_bytes: 67_108_864
-        })
-    ));
-
-    let mut visited_events = 0usize;
-    let mut visited_bytes = 0usize;
-    reader
-        .visit_incremental_after(1, u64::MAX, |_event, line| {
-            visited_events = visited_events.saturating_add(1);
-            visited_bytes = visited_bytes.saturating_add(line.len());
-            Ok(())
-        })
-        .expect("callback incremental reader streams a suffix above the in-memory limit");
-    assert_eq!(visited_events, 257);
-    assert!(visited_bytes > 67_108_864);
-
-    drop(reader);
-    drop(appender);
-    reservation.rollback().expect("session rolls back");
 }
 
 #[test]
@@ -407,6 +347,94 @@ fn incremental_reader_recovers_atomically_after_a_semantically_invalid_append() 
 }
 
 #[test]
+fn incremental_reader_recovers_after_callback_error_or_unwind() {
+    for unwind in [false, true] {
+        let (_workspace, path, started, _completed, mut reader) = reader_fixture(
+            &format!("tail-callback-recovery-{unwind}"),
+            "tailcallback001",
+        );
+        let progress = EventEnvelope::new(
+            "evt-progress",
+            EventType::MetricSample,
+            "tailcallback001",
+            2,
+            event_timestamp(2),
+            "flow-agent-cli",
+            serde_json::json!({"metric_name":"reader.progress","value":1}),
+        )
+        .canonical_jsonl()
+        .expect("progress event serializes");
+        let completed = session_event_line(
+            "tailcallback001",
+            "evt-completed",
+            EventType::SessionCompleted,
+            3,
+        );
+        assert_eq!(reader.read_after(0).expect("initial prefix reads").len(), 1);
+        append_session_log_line(&path, &format!("{progress}{completed}"))
+            .expect("committed suffix appends");
+
+        let mut cursor = 1;
+        let failed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            reader.visit_incremental_after(cursor, 3, |event, _line| {
+                if event.sequence == 3 {
+                    assert!(!unwind, "sink panicked");
+                    return Err(RuntimeError::Usage("sink stopped".to_owned()));
+                }
+                cursor = event.sequence;
+                Ok(())
+            })
+        }));
+        if unwind {
+            assert!(failed.is_err(), "the sink panic is caught");
+        } else {
+            assert!(matches!(
+                failed.expect("returned sink error does not panic"),
+                Err(RuntimeError::Usage(message)) if message == "sink stopped"
+            ));
+        }
+        assert_eq!(cursor, 2);
+
+        let changed = started.replace("evt-started", "evt-mutated");
+        fs::write(&path, format!("{changed}{progress}{completed}"))
+            .expect("previously observed event is replaced");
+        let mut delivered = Vec::new();
+        let error = reader
+            .visit_verified_after(cursor, 3, |_event, line| {
+                delivered.push(line.to_owned());
+                Ok(())
+            })
+            .expect_err("failed delivery retains the observed prefix digest");
+        assert!(matches!(
+            error,
+            RuntimeError::Protocol(message) if message.contains("append-only")
+        ));
+        assert!(delivered.is_empty());
+
+        fs::write(&path, format!("{started}{progress}{completed}"))
+            .expect("original prefix is restored");
+        reader
+            .visit_incremental_after(cursor, 3, |event, line| {
+                delivered.push(line.to_owned());
+                cursor = event.sequence;
+                Ok(())
+            })
+            .expect("failed callback event remains readable");
+        assert_eq!(delivered, [completed]);
+        assert_eq!(cursor, 3);
+        assert!(
+            reader
+                .read_incremental_after(cursor)
+                .expect("processed suffix reads")
+                .is_empty()
+        );
+        reader
+            .visit_verified_after(cursor, 3, |_event, _line| Ok(()))
+            .expect("final authoritative replay succeeds");
+    }
+}
+
+#[test]
 fn replay_and_reader_reject_lossy_null_envelope_metadata() {
     let (_workspace, path, started, completed, mut reader) =
         reader_fixture("tail-null-envelope", "tailnull001");
@@ -612,7 +640,6 @@ fn reader_rejects_an_incomplete_suffix_after_session_ownership_ends() {
     ));
 }
 
-#[cfg(any(unix, windows))]
 #[test]
 fn reader_ownership_remains_bound_when_workspace_alias_is_retargeted() {
     let source = empty_workspace("tail-ownership-source");
@@ -647,7 +674,6 @@ fn reader_ownership_remains_bound_when_workspace_alias_is_retargeted() {
     assert_eq!(sequences(&events), [1]);
 }
 
-#[cfg(unix)]
 #[test]
 fn reader_ownership_ignores_an_active_replacement_at_the_original_workspace_path() {
     let parent = empty_workspace("tail-ownership-root-replacement");
@@ -696,37 +722,6 @@ fn reader_ownership_ignores_an_active_replacement_at_the_original_workspace_path
     assert_protocol_contains(
         result,
         "contains an incomplete final JSONL line without active session ownership",
-    );
-}
-
-#[cfg(windows)]
-#[test]
-fn reader_does_not_block_session_directory_rename() {
-    let parent = empty_workspace("tail-read-only-workspace");
-    let workspace = parent.join("workspace");
-    fs::create_dir(&workspace).expect("workspace created");
-    let session_id = "tailreadonly001";
-    let session_dir = crate::tests::helpers::ensure_workspace_session_dir(&workspace);
-    let moved_session_dir =
-        crate::tests::helpers::workspace_store_dir(&workspace).join("sessions-moved");
-    let started = session_event_line(session_id, "evt-started", EventType::SessionStarted, 1);
-    let completed = session_event_line(session_id, "evt-completed", EventType::SessionCompleted, 2);
-    fs::write(
-        session_dir.join(format!("{session_id}.jsonl")),
-        format!("{started}{completed}"),
-    )
-    .expect("session stream written");
-    let mut reader = SessionEventReader::open(&workspace, session_id).expect("reader opens");
-
-    fs::rename(&session_dir, &moved_session_dir)
-        .expect("read-only reader must not block session directory rename");
-    let result = reader.read_after(0);
-    drop(reader);
-    fs::rename(&moved_session_dir, &session_dir).expect("session directory restored");
-
-    assert_eq!(
-        sequences(&result.expect("moved session still reads")),
-        [1, 2]
     );
 }
 
@@ -808,7 +803,6 @@ fn reader_rejects_partial_bytes_after_a_terminal_event() {
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn live_reader_stays_bound_to_the_opened_session_directory() {
     use std::os::unix::fs::symlink;

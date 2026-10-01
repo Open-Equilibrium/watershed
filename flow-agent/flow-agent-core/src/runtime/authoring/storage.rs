@@ -20,12 +20,7 @@ std::thread_local! {
 
 #[cfg(test)]
 pub(crate) fn set_authoring_post_publication_failure() {
-    set_authoring_post_publication_failure_after(1);
-}
-
-#[cfg(test)]
-pub(crate) fn set_authoring_post_publication_failure_after(publications: usize) {
-    AUTHORING_POST_PUBLICATION_FAILURE.with(|failure| failure.set(publications));
+    AUTHORING_POST_PUBLICATION_FAILURE.with(|failure| failure.set(1));
 }
 
 #[cfg(test)]
@@ -147,7 +142,7 @@ fn write_new_file_with(
             )));
         }
         ensure_anchored_new_leaf_available(target)?;
-        temporary.hard_link_to(target)?;
+        temporary.hard_link_to(&target.leaf)?;
         drop(opened);
         temporary
             .remove()

@@ -295,21 +295,12 @@ fn conversation_entry_validation_rejects_every_malformed_persisted_shape() {
     let mut invalid = Vec::new();
 
     let mut candidate = valid.clone();
-    candidate.schema = "flow-conversation-entry-v0".to_owned();
-    candidate.recovery_snapshot_hash = Some("a".repeat(64));
-    invalid.push(candidate);
-
-    let mut candidate = valid.clone();
-    candidate.schema = "flow-conversation-entry-v1".to_owned();
-    invalid.push(candidate);
-
-    let mut candidate = valid.clone();
     candidate.schema = "flow-conversation-entry-v2".to_owned();
     invalid.push(candidate);
 
     let mut candidate = valid.clone();
     candidate.schema = "flow-conversation-entry-v1".to_owned();
-    candidate.recovery_snapshot_hash = Some("A".repeat(64));
+    candidate.recovery_snapshot_hash = "A".repeat(64);
     invalid.push(candidate);
 
     let mut candidate = valid.clone();
@@ -352,32 +343,28 @@ fn conversation_entry_validation_rejects_every_malformed_persisted_shape() {
 
 #[test]
 fn productive_entry_types_must_match_their_ancestry() {
-    for (name, entry_type) in [
-        ("root-continuation", ConversationEntryType::Continuation),
-        ("root-legacy", ConversationEntryType::LegacyRun),
-    ] {
-        let workspace = empty_workspace(&format!("conversation-entry-type-{name}"));
-        create_terminal_review_run(&workspace);
-        let mut candidate = entry("root", None, "review-1", 1);
-        candidate.schema = "flow-conversation-entry-v1".to_owned();
-        candidate.recovery_snapshot_hash = Some("a".repeat(64));
-        candidate.entry_type = entry_type;
+    let workspace = empty_workspace("conversation-entry-type-root-continuation");
+    create_terminal_review_run(&workspace);
+    let mut candidate = entry("root", None, "review-1", 1);
+    candidate.schema = "flow-conversation-entry-v1".to_owned();
+    candidate.recovery_snapshot_hash = "a".repeat(64);
+    candidate.entry_type = ConversationEntryType::Continuation;
 
-        append_conversation_entry(&workspace, "review", &candidate)
-            .expect_err("a productive root with the wrong type must not append");
-        write_history_records(&workspace, "review", [&candidate]);
-        read_conversation_history(&workspace, "review")
-            .expect_err("a persisted productive root with the wrong type must fail closed");
-    }
+    append_conversation_entry(&workspace, "review", &candidate)
+        .expect_err("a productive root with the wrong type must not append");
+    write_history_records(&workspace, "review", [&candidate]);
+    read_conversation_history(&workspace, "review")
+        .expect_err("a persisted productive root with the wrong type must fail closed");
 
     let workspace = empty_workspace("conversation-entry-type-child-checkpoint");
     create_terminal_review_run(&workspace);
     let mut root = entry("root", None, "review-1", 1);
     root.schema = "flow-conversation-entry-v1".to_owned();
-    root.recovery_snapshot_hash = Some("a".repeat(64));
+    root.recovery_snapshot_hash = "a".repeat(64);
     let mut child = entry("child", Some("root"), "review-1", 1);
     child.schema = "flow-conversation-entry-v1".to_owned();
-    child.recovery_snapshot_hash = Some("b".repeat(64));
+    child.recovery_snapshot_hash = "b".repeat(64);
+    child.entry_type = ConversationEntryType::Checkpoint;
 
     append_conversation_entry(&workspace, "review", &root).expect("valid productive root appends");
     append_conversation_entry(&workspace, "review", &child)

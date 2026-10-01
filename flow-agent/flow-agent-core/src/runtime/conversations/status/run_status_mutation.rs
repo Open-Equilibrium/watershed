@@ -167,7 +167,7 @@ fn validate_run_creation_shape(
     Ok((actual, construction))
 }
 
-pub(super) fn validate_complete_created_run(
+fn validate_complete_created_run(
     run: &AnchoredDir,
     expected_run_log_sha256: &str,
     unpublished_productive_run: bool,
@@ -202,8 +202,7 @@ fn remove_identity_bound_run_creation_stage(
     }
     drop(current);
     drop(stage);
-    runs.dir
-        .remove_dir(stage_leaf)
+    runs.remove_dir(stage_leaf)
         .map_err(|source| path_io_error(&runs.path.join(stage_leaf), source))?;
     sync_anchored_directory(runs)
 }
@@ -234,12 +233,10 @@ pub(in crate::runtime::conversations) fn remove_recoverable_run_creation_stage(
         }
         if leaf == RUN_OBJECTS_DIR {
             stage
-                .dir
                 .remove_dir(leaf)
                 .map_err(|source| path_io_error(&stage.path.join(leaf), source))?;
         } else {
             stage
-                .dir
                 .remove_file(leaf)
                 .map_err(|source| path_io_error(&stage.path.join(leaf), source))?;
         }
@@ -382,8 +379,7 @@ pub(in crate::runtime::conversations) fn finish_recoverable_run_reclamation(
     if let Some(objects) = objects {
         remove_run_reclamation_objects(&objects)?;
         drop(objects);
-        run.dir
-            .remove_dir(RUN_OBJECTS_DIR)
+        run.remove_dir(RUN_OBJECTS_DIR)
             .map_err(|source| path_io_error(&run.path.join(RUN_OBJECTS_DIR), source))?;
     }
     for leaf in actual
@@ -411,8 +407,7 @@ pub(in crate::runtime::conversations) fn finish_recoverable_run_reclamation(
     }
     drop(current);
     drop(run);
-    runs.dir
-        .remove_dir(run_session_id)
+    runs.remove_dir(run_session_id)
         .map_err(|source| path_io_error(&runs.path.join(run_session_id), source))?;
     Ok(true)
 }

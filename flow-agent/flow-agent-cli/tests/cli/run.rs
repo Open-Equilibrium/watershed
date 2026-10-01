@@ -109,7 +109,6 @@ fn productive_run_reports_provider_failure_directly() {
 
     let output = flow_command()
         .current_dir(&workspace)
-        .env("APPDATA", &isolated_config)
         .env("XDG_CONFIG_HOME", &isolated_config)
         .args(["run", "hello-flow"])
         .output()

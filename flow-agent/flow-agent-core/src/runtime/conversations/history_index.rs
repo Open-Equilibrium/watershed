@@ -1,8 +1,9 @@
 use super::{
     contract::{
-        CONVERSATION_HISTORY_LEAF, MAX_CONVERSATION_RECORD_BYTES, MAX_CONVERSATION_SCAN_BYTES,
-        MAX_CONVERSATION_SCAN_RECORDS, MAX_CONVERSATION_SEGMENT_BYTES, protocol, validate_digest,
-        validate_id, validate_timestamp,
+        CONVERSATION_ENTRY_SCHEMA_V1, CONVERSATION_HISTORY_LEAF, ConversationEntry,
+        ConversationEntryType, MAX_CONVERSATION_RECORD_BYTES, MAX_CONVERSATION_SCAN_BYTES,
+        MAX_CONVERSATION_SCAN_RECORDS, MAX_CONVERSATION_SEGMENT_BYTES, protocol,
+        validate_conversation_entry, validate_digest, validate_id,
     },
     conversation_stream::{read_anchored_jsonl_quantum, validate_jsonl_segment_snapshot},
     status::{StatusAppendKind, append_jsonl_with_status},
@@ -20,7 +21,7 @@ use crate::runtime::{
 #[cfg(test)]
 use std::cell::Cell;
 use std::{
-    io::{BufRead, BufReader, Read, Seek, SeekFrom},
+    io::{BufRead, BufReader, Read},
     path::Path,
 };
 
@@ -38,22 +39,16 @@ use event_identifiers::{
     validate_history_event_pointers,
 };
 use external_sort::{index_sort_record_limit, merge_all_runs, write_sorted_run};
-pub(super) use model::CONVERSATION_ENTRY_SCHEMA_V1;
 #[cfg(test)]
 use model::EventPointerMetrics;
 #[cfg(any(test, feature = "m11-budget-evidence"))]
 pub(crate) use model::MAX_HISTORY_INDEX_ID_BYTES;
-pub(crate) use model::{CONVERSATION_ENTRY_SCHEMA_V0, ConversationEntry, ConversationEntryType};
 use model::{
-    INDEX_ANCESTRY_RECORD_BYTES, INDEX_MERGE_FAN_IN, INDEX_RECORD_BYTES, INDEX_SORT_BYTES,
-    IndexRecord, IndexedConversationEntry, WorkBudget,
+    INDEX_IO_BUFFER_BYTES, INDEX_MERGE_FAN_IN, INDEX_RECORD_BYTES, INDEX_SORT_BYTES, IndexRecord,
+    WorkBudget,
 };
-use records::{
-    decode_id, decode_record, encode_id, encode_record, find_record, validate_sorted_index,
-};
-use scratch::{
-    ANCESTRY_LEAF, HistoryScratch, INDEX_WORK_RESERVE, create_scratch_file, index_run_leaf,
-};
+use records::{encode_record, find_record, validate_sorted_index};
+use scratch::{HistoryScratch, INDEX_WORK_RESERVE, create_scratch_file, index_run_leaf};
 #[cfg(test)]
 pub(crate) use scratch::{
     HistoryScratchFault, HistoryScratchMemberStage, HistoryScratchStage,
@@ -68,7 +63,8 @@ const INDEX_SCRATCH_PER_ENTRY: u64 = 1024;
 const HISTORY_INDEX_MEMORY_BOUND: u64 = MAX_CONVERSATION_SCAN_BYTES
     + INDEX_SORT_BYTES as u64
     + 2 * 1024 * 1024
-    + INDEX_MERGE_FAN_IN * INDEX_RECORD_BYTES as u64;
+    + INDEX_MERGE_FAN_IN * INDEX_RECORD_BYTES as u64
+    + (INDEX_MERGE_FAN_IN + 1) * INDEX_IO_BUFFER_BYTES as u64;
 const INDEX_MEMORY_BOUND: u64 = if HISTORY_INDEX_MEMORY_BOUND > EVENT_IDENTIFIER_MEMORY_BOUND {
     HISTORY_INDEX_MEMORY_BOUND
 } else {
@@ -227,7 +223,7 @@ pub(crate) fn append_productive_run_checkpoint(
             schema: CONVERSATION_ENTRY_SCHEMA_V1.to_owned(),
             entry_id: format!("entry-{}", sha256_hex(material.as_bytes())),
             parent_entry_id: parent_entry_id.map(str::to_owned),
-            recovery_snapshot_hash: Some(recovery_snapshot_hash.to_owned()),
+            recovery_snapshot_hash: recovery_snapshot_hash.to_owned(),
             run_session_id: run_session_id.to_owned(),
             event_sequence: sequence,
             entry_type: if parent_entry_id.is_some() {
@@ -271,56 +267,6 @@ pub(crate) fn validate_conversation_history_for_budget(
         None,
         |_index, summary| Ok(summary.entry_count),
     )
-}
-
-pub(super) fn validate_conversation_entry(entry: &ConversationEntry) -> Result<(), RuntimeError> {
-    match (
-        entry.schema.as_str(),
-        entry.recovery_snapshot_hash.as_deref(),
-    ) {
-        (CONVERSATION_ENTRY_SCHEMA_V0, None) => {}
-        (CONVERSATION_ENTRY_SCHEMA_V1, Some(digest)) => {
-            validate_digest(digest, "conversation recovery snapshot hash")?;
-        }
-        (CONVERSATION_ENTRY_SCHEMA_V0, Some(_)) => {
-            return Err(protocol(
-                "conversation entry v0 cannot address a recovery snapshot",
-            ));
-        }
-        (CONVERSATION_ENTRY_SCHEMA_V1, None) => {
-            return Err(protocol(
-                "conversation entry v1 must address a recovery snapshot",
-            ));
-        }
-        _ => return Err(protocol("conversation entry has an unsupported schema")),
-    }
-    if entry.schema == CONVERSATION_ENTRY_SCHEMA_V1 {
-        let expected_type = if entry.parent_entry_id.is_some() {
-            ConversationEntryType::Continuation
-        } else {
-            ConversationEntryType::Checkpoint
-        };
-        if entry.entry_type != expected_type {
-            return Err(protocol(
-                "conversation entry v1 type does not match its ancestry",
-            ));
-        }
-    }
-    validate_id(&entry.entry_id, "conversation entry")?;
-    if entry
-        .parent_entry_id
-        .as_deref()
-        .is_some_and(|id| !proto::is_valid_session_id(id))
-    {
-        return Err(protocol("conversation entry has an invalid parent id"));
-    }
-    validate_id(&entry.run_session_id, "run session")?;
-    if entry.event_sequence == 0 {
-        return Err(protocol(
-            "conversation entry event_sequence must be positive",
-        ));
-    }
-    validate_timestamp(&entry.timestamp)
 }
 
 pub(super) fn with_conversation_history_index<T>(
@@ -475,17 +421,13 @@ impl ConversationHistoryIndex {
         }
     }
 
-    pub(super) fn find(
-        &mut self,
-        entry_id: &str,
-    ) -> Result<Option<IndexedConversationEntry>, RuntimeError> {
+    pub(super) fn find(&mut self, entry_id: &str) -> Result<Option<IndexRecord>, RuntimeError> {
         find_record(
             &self.scratch.dir.file(&self.index_leaf),
             self.entries,
             entry_id.as_bytes(),
             &mut self.work,
         )
-        .map(|record| record.map(decode_record))
     }
 
     fn validate_event_pointer(
@@ -504,56 +446,6 @@ impl ConversationHistoryIndex {
         self.event_metrics.include(metrics);
         #[cfg(not(test))]
         let _ = metrics;
-        Ok(())
-    }
-
-    pub(super) fn for_each_ancestry(
-        &mut self,
-        selected_id: &str,
-        mut visit: impl FnMut(IndexedConversationEntry) -> Result<(), RuntimeError>,
-    ) -> Result<(), RuntimeError> {
-        let path = self.scratch.dir.file(ANCESTRY_LEAF);
-        let mut ancestry = create_scratch_file(&self.scratch.dir, ANCESTRY_LEAF)?;
-        let mut cursor = selected_id.to_owned();
-        let mut count = 0u64;
-        loop {
-            if count >= self.entries {
-                return Err(protocol("conversation ancestry cycle exceeds history"));
-            }
-            let entry = self
-                .find(&cursor)?
-                .ok_or_else(|| protocol("conversation ancestry has a missing parent"))?;
-            let encoded = encode_id(&entry.entry_id)?;
-            self.scratch.write(&mut ancestry, &path, &encoded)?;
-            count += 1;
-            let Some(parent) = entry.parent_entry_id else {
-                break;
-            };
-            cursor = parent;
-        }
-        ancestry
-            .sync_all()
-            .map_err(|source| path_io_error(path.diagnostic_path(), source))?;
-        drop(ancestry);
-        let (mut ancestry, _) = open_anchored_file_for_read(&path)?;
-        for reverse in (0..count).rev() {
-            ancestry
-                .seek(SeekFrom::Start(
-                    reverse * INDEX_ANCESTRY_RECORD_BYTES as u64,
-                ))
-                .and_then(|_| {
-                    let mut bytes = [0u8; INDEX_ANCESTRY_RECORD_BYTES];
-                    ancestry.read_exact(&mut bytes).map(|()| bytes)
-                })
-                .map_err(|source| path_io_error(path.diagnostic_path(), source))
-                .and_then(|bytes| decode_id(&bytes))
-                .and_then(|id| {
-                    self.find(&id)?.ok_or_else(|| {
-                        protocol("conversation ancestry index lost an existing entry")
-                    })
-                })
-                .and_then(&mut visit)?;
-        }
         Ok(())
     }
 

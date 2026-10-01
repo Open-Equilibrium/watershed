@@ -1,7 +1,7 @@
 use crate::runtime::{
     context::{ContextHistory, ContextObject},
     productive::ProductiveCompletionCommitPoint,
-    run_attempts::{ProductiveRecovery, RunAttemptKind, RunAttemptOutcome, RunAttemptResult},
+    run_attempts::{ProductiveRecovery, RunAttemptKind, RunAttemptResult},
     types::RuntimeError,
 };
 use std::{cell::Cell, collections::BTreeMap};
@@ -108,8 +108,8 @@ impl ProductiveRecovery for CompletionBoundaryRecordingRecovery {
 pub(in super::super) enum InjectedAttemptRecovery {
     ProviderError,
     ProviderResult(RunAttemptResult),
+    ToolError,
     ToolResult(RunAttemptResult),
-    ToolWrongKind,
 }
 
 impl ProductiveRecovery for InjectedAttemptRecovery {
@@ -127,16 +127,10 @@ impl ProductiveRecovery for InjectedAttemptRecovery {
             Self::ProviderResult(result) if kind == RunAttemptKind::Provider => {
                 Ok(Some(result.clone()))
             }
+            Self::ToolError if kind == RunAttemptKind::Tool => Err(RuntimeError::Protocol(
+                "fixture Tool recovery failure".to_owned(),
+            )),
             Self::ToolResult(result) if kind == RunAttemptKind::Tool => Ok(Some(result.clone())),
-            Self::ToolWrongKind if kind == RunAttemptKind::Tool => Ok(Some(RunAttemptResult {
-                attempt_id: "tool-000001".to_owned(),
-                attempt_kind: RunAttemptKind::Provider,
-                outcome: RunAttemptOutcome::Completed,
-                classification: None,
-                exit_code: None,
-                timestamp: "2026-07-30T12:00:00Z".to_owned(),
-                durable_output: Some(serde_json::json!({})),
-            })),
             _ => Ok(None),
         }
     }

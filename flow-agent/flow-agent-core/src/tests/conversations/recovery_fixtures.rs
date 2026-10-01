@@ -21,4 +21,5 @@ pub(in crate::tests) use terminal::write_terminal_recovery_snapshot;
 pub(super) use terminal::{
     replace_terminal_recovery_snapshot, write_terminal_recovery_fixture,
     write_terminal_recovery_snapshot_with_parent,
+    write_terminal_recovery_snapshot_with_parent_and_prior_event_count,
 };

@@ -7,11 +7,6 @@ pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
     encode_sha256(&digest)
 }
 
-pub(crate) fn finish_sha256(hasher: Sha256) -> String {
-    let digest = hasher.finalize();
-    encode_sha256(&digest)
-}
-
 fn encode_sha256(digest: &[u8]) -> String {
     const HEX: &[u8; 16] = b"0123456789abcdef";
     let mut encoded = String::with_capacity(digest.len() * 2);

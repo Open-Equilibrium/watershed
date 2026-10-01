@@ -2,15 +2,29 @@ use super::super::helpers::empty_workspace;
 use crate::runtime::{
     fixture_tools::{anchored_workspace_write_path, replace_script_output_atomically},
     fs_guards::{
-        create_anchored_file_for_update, ensure_runtime_dirs,
-        open_anchored_session_log_append_file, with_anchored_replacement_temp,
+        create_anchored_file_for_update, open_anchored_session_log_append_file,
+        with_anchored_replacement_temp,
     },
+    session_store::ensure_runtime_dirs,
     types::RuntimeError,
 };
+
+use crate::runtime::fs_guards::validate_real_file;
 use std::{
     fs,
     io::{Read, Seek, Write},
 };
+
+#[test]
+fn real_file_validation_rejects_a_directory() {
+    let workspace = empty_workspace("real-file-directory");
+    let metadata = fs::metadata(&*workspace).expect("directory metadata reads");
+
+    let error = validate_real_file(&workspace, &metadata)
+        .expect_err("a directory must not pass file validation");
+
+    assert!(matches!(error, RuntimeError::Protocol(message) if message.contains("must be a file")));
+}
 
 #[test]
 fn create_for_update_opens_one_new_validated_file_for_read_and_write() {
@@ -77,7 +91,6 @@ fn replacement_temp_cleanup_failure_preserves_both_causes_and_allows_retry() {
     );
 }
 
-#[cfg(any(unix, windows))]
 #[test]
 fn append_rejects_hardlinked_leaf_without_changing_target() {
     let workspace = empty_workspace("session-hardlink");
@@ -99,7 +112,6 @@ fn append_rejects_hardlinked_leaf_without_changing_target() {
     );
 }
 
-#[cfg(windows)]
 #[test]
 fn session_log_append_handle_cannot_overwrite_existing_records() {
     let workspace = empty_workspace("session-append-semantics");

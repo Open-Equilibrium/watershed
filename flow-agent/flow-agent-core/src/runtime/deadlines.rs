@@ -3,6 +3,11 @@ use std::future::Future;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
+mod network;
+
+#[cfg(test)]
+pub(crate) use network::with_system_lookup;
+
 pub(crate) const HTTP_CONNECT_DEADLINE: Duration = Duration::from_secs(10);
 pub(crate) const HTTP_HEADER_DEADLINE: Duration = Duration::from_secs(30);
 pub(crate) const AUTH_BODY_DEADLINE: Duration = Duration::from_secs(30);
@@ -36,7 +41,8 @@ pub(crate) const RESPONSES_HTTP_DEADLINES: HttpDeadlines = HttpDeadlines {
 pub(crate) fn build_http_client(
     deadlines: HttpDeadlines,
 ) -> Result<reqwest::Client, reqwest::Error> {
-    configure_http_client(reqwest::Client::builder(), deadlines)
+    let builder = reqwest::Client::builder().dns_resolver(network::SystemResolver::new());
+    configure_http_client(builder, deadlines)
 }
 
 fn configure_http_client(
@@ -116,10 +122,5 @@ pub(crate) fn block_on_network<F>(future: F) -> Result<F::Output, RuntimeError>
 where
     F: Future,
 {
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_io()
-        .enable_time()
-        .build()
-        .map_err(|_| RuntimeError::Protocol("network runtime construction failed".to_owned()))?;
-    Ok(runtime.block_on(future))
+    Ok(network::runtime()?.block_on(future))
 }

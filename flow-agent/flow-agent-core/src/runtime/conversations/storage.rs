@@ -4,30 +4,16 @@ use super::contract::{
 };
 use crate::runtime::{
     fs_guards::{
-        AnchoredDir, AnchoredWorkspace, DirectoryErrorMode, RuntimeDirs,
-        ensure_anchored_runtime_dirs, open_anchored_file_for_read, path_io_error,
+        AnchoredDir, AnchoredWorkspace, DirectoryErrorMode, open_anchored_file_for_read,
+        path_io_error,
     },
+    session_store::{RuntimeDirs, ensure_anchored_runtime_dirs},
     types::RuntimeError,
 };
 use serde::Serialize;
 #[cfg(test)]
 use std::fs;
 use std::{collections::BTreeSet, path::Path};
-
-pub(super) const CONVERSATION_MIGRATIONS_DIR: &str = ".migrations";
-const MIGRATION_TRANSACTION_SUFFIX: &str = ".json";
-
-pub(super) fn migration_transaction_leaf(session_id: &str) -> String {
-    format!("{session_id}{MIGRATION_TRANSACTION_SUFFIX}")
-}
-
-pub(super) fn migration_transaction_stage_leaf(session_id: &str) -> String {
-    format!(".{session_id}{MIGRATION_TRANSACTION_SUFFIX}.staged")
-}
-
-pub(super) fn migration_transaction_id(leaf: &str) -> Option<&str> {
-    leaf.strip_suffix(MIGRATION_TRANSACTION_SUFFIX)
-}
 
 #[cfg(any(test, feature = "m11-budget-evidence"))]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -78,15 +64,6 @@ pub(super) fn record_conversation_read_request(_bytes: usize) {
     });
 }
 
-pub(super) fn record_conversation_write_request(_bytes: usize) {
-    #[cfg(any(test, feature = "m11-budget-evidence"))]
-    CONVERSATION_OPERATION_METRICS.with(|slot| {
-        if let Some(metrics) = slot.borrow_mut().as_mut() {
-            metrics.max_write_request_bytes = metrics.max_write_request_bytes.max(_bytes);
-        }
-    });
-}
-
 pub(crate) struct ConversationScanQuantum {
     entries: usize,
     stored_bytes: u64,
@@ -112,20 +89,6 @@ impl ConversationScanQuantum {
         }
         self.entries += 1;
         self.stored_bytes += stored_bytes;
-        Ok(())
-    }
-
-    pub(super) fn admit_directory_entry(&mut self, stored_bytes: u64) -> Result<(), RuntimeError> {
-        if stored_bytes > MAX_CONVERSATION_SCAN_BYTES {
-            return Err(protocol("conversation entry exceeds one scan quantum"));
-        }
-        if self.entries == MAX_CONVERSATION_SCAN_RECORDS
-            || self.stored_bytes.saturating_add(stored_bytes) > MAX_CONVERSATION_SCAN_BYTES
-        {
-            self.flush();
-        }
-        self.entries += 1;
-        self.stored_bytes = self.stored_bytes.saturating_add(stored_bytes);
         Ok(())
     }
 
@@ -176,35 +139,6 @@ pub(crate) fn existing_anchored_run(
     conversation_id: &str,
     run_session_id: &str,
 ) -> Result<AnchoredDir, RuntimeError> {
-    existing_anchored_run_with_parent(workspace, conversation_id, run_session_id)
-        .map(|(_, run)| run)
-}
-
-pub(super) fn existing_anchored_conversation(
-    workspace: &Path,
-    conversation_id: &str,
-) -> Result<AnchoredDir, RuntimeError> {
-    existing_anchored_conversation_with_parent(workspace, conversation_id)
-        .map(|(_, conversation)| conversation)
-}
-
-pub(super) fn existing_anchored_conversation_with_parent(
-    workspace: &Path,
-    conversation_id: &str,
-) -> Result<(AnchoredDir, AnchoredDir), RuntimeError> {
-    validate_id(conversation_id, "conversation")?;
-    let sessions = ensure_anchored_sessions(workspace)?;
-    let conversation = sessions
-        .child(conversation_id, false, DirectoryErrorMode::Protocol)?
-        .ok_or_else(|| protocol("conversation does not exist"))?;
-    Ok((sessions, conversation))
-}
-
-pub(super) fn existing_anchored_run_with_parent(
-    workspace: &Path,
-    conversation_id: &str,
-    run_session_id: &str,
-) -> Result<(AnchoredDir, AnchoredDir), RuntimeError> {
     validate_id(run_session_id, "run session")?;
     let conversation = existing_anchored_conversation(workspace, conversation_id)?;
     let runs = required_child(
@@ -215,7 +149,19 @@ pub(super) fn existing_anchored_run_with_parent(
     let run = runs
         .child(run_session_id, false, DirectoryErrorMode::Protocol)?
         .ok_or_else(|| protocol("conversation run does not exist"))?;
-    Ok((runs, run))
+    Ok(run)
+}
+
+pub(super) fn existing_anchored_conversation(
+    workspace: &Path,
+    conversation_id: &str,
+) -> Result<AnchoredDir, RuntimeError> {
+    validate_id(conversation_id, "conversation")?;
+    let sessions = ensure_anchored_sessions(workspace)?;
+    let conversation = sessions
+        .child(conversation_id, false, DirectoryErrorMode::Protocol)?
+        .ok_or_else(|| protocol("conversation does not exist"))?;
+    Ok(conversation)
 }
 
 pub(super) fn bounded_anchored_real_child_file_names(

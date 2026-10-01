@@ -3,11 +3,11 @@ use crate::runtime::{
     conversations::read_anchored_jsonl,
     digest::sha256_hex,
     fs_guards::{
-        for_each_segmented_jsonl_line, open_runtime_dir, read_anchored_file_with_limit,
-        segmented_jsonl_files, segmented_jsonl_path,
-        with_segmented_jsonl_discovery_metrics_for_test,
+        for_each_segmented_jsonl_line, read_anchored_file_with_limit, segmented_jsonl_files,
+        segmented_jsonl_path, with_segmented_jsonl_discovery_metrics_for_test,
     },
     segmented_appender::SessionLogAppender,
+    session_store::open_runtime_dir,
     types::{
         CONTEXT_MANIFEST_STREAM_LIMITS, EVENT_STREAM_LIMITS, MAX_SESSION_OBJECT_BYTES,
         RuntimeError, SessionStreamLimits,
@@ -102,7 +102,6 @@ fn segmented_stream_consumers_reject_high_ordinals_and_rollback_preserves_foreig
     }
 }
 
-#[cfg(any(unix, windows))]
 #[test]
 fn rotated_stream_segments_and_objects_reject_hardlinks() {
     for kind in ["event", "context", "object"] {
@@ -244,7 +243,7 @@ fn segmented_stream_rejects_case_aliased_names() {
                 .to_string_lossy()
                 .to_ascii_uppercase(),
         );
-        if base_alias && cfg!(any(windows, target_os = "macos")) {
+        if base_alias && cfg!(target_os = "macos") {
             fs::rename(canonical.diagnostic_path(), &alias).expect("case-aliased base renamed");
         } else {
             fs::write(&alias, b"\n").expect("case-aliased stream file written");

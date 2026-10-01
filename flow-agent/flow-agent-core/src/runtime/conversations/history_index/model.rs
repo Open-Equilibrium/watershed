@@ -1,9 +1,6 @@
 use super::super::contract::protocol;
 use crate::runtime::types::RuntimeError;
-use serde::{Deserialize, Serialize};
 
-pub(crate) const CONVERSATION_ENTRY_SCHEMA_V0: &str = "flow-conversation-entry-v0";
-pub(crate) const CONVERSATION_ENTRY_SCHEMA_V1: &str = "flow-conversation-entry-v1";
 pub(crate) const MAX_HISTORY_INDEX_ID_BYTES: usize = proto::MAX_SESSION_ID_BYTES;
 pub(super) const INDEX_ID_FIELD_BYTES: usize = MAX_HISTORY_INDEX_ID_BYTES + 1;
 pub(super) const INDEX_ENTRY_ID_OFFSET: usize = 0;
@@ -14,45 +11,15 @@ pub(super) const INDEX_EVENT_SEQUENCE_OFFSET: usize =
     INDEX_ORDINAL_OFFSET + std::mem::size_of::<u64>();
 pub(super) const INDEX_RECORD_BYTES: usize =
     INDEX_EVENT_SEQUENCE_OFFSET + std::mem::size_of::<u64>();
-pub(super) const INDEX_ANCESTRY_RECORD_BYTES: usize = INDEX_ID_FIELD_BYTES;
 pub(super) const EVENT_POINTER_SEQUENCE_OFFSET: usize = INDEX_ID_FIELD_BYTES;
 pub(super) const EVENT_POINTER_RECORD_BYTES: usize =
     EVENT_POINTER_SEQUENCE_OFFSET + std::mem::size_of::<u64>();
 pub(super) const INDEX_SORT_BYTES: usize = 16 * 1024 * 1024;
 pub(super) const INDEX_MERGE_FAN_IN: u64 = 64;
+pub(super) const INDEX_IO_BUFFER_BYTES: usize = 8 * 1024;
 
 pub(super) type IndexRecord = [u8; INDEX_RECORD_BYTES];
 pub(super) type EventPointerRecord = [u8; EVENT_POINTER_RECORD_BYTES];
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub(crate) enum ConversationEntryType {
-    Checkpoint,
-    Continuation,
-    LegacyRun,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct ConversationEntry {
-    pub(crate) schema: String,
-    pub(crate) entry_id: String,
-    pub(crate) parent_entry_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(crate) recovery_snapshot_hash: Option<String>,
-    pub(crate) run_session_id: String,
-    pub(crate) event_sequence: u64,
-    pub(crate) entry_type: ConversationEntryType,
-    pub(crate) timestamp: String,
-}
-
-#[derive(Clone, Debug)]
-pub(in crate::runtime::conversations) struct IndexedConversationEntry {
-    pub(in crate::runtime::conversations) entry_id: String,
-    pub(in crate::runtime::conversations) parent_entry_id: Option<String>,
-    pub(in crate::runtime::conversations) run_session_id: String,
-    pub(in crate::runtime::conversations) event_sequence: u64,
-}
 
 #[derive(Clone, Copy)]
 pub(super) struct WorkBudget {

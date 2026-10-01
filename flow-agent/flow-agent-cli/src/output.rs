@@ -31,6 +31,17 @@ pub(crate) fn print_error(error: &impl std::fmt::Display) {
     let _ = writeln!(io::stderr().lock(), "error: {escaped}");
 }
 
+pub(crate) fn print_runtime_error(error: &RuntimeError) {
+    if let RuntimeError::Usage(message) = error {
+        let usage = crate::parsing::usage();
+        if message == &usage {
+            let _ = writeln!(io::stderr().lock(), "error: {usage}");
+            return;
+        }
+    }
+    print_error(error);
+}
+
 pub(crate) fn write_stdout(contents: &str) -> Result<(), RuntimeError> {
     #[cfg(test)]
     observe_stdout_write();
@@ -39,19 +50,11 @@ pub(crate) fn write_stdout(contents: &str) -> Result<(), RuntimeError> {
 }
 
 pub(crate) fn write_output(writer: &mut impl Write, contents: &[u8]) -> Result<bool, RuntimeError> {
-    write_output_to(writer, contents, "<stdout>")
-}
-
-fn write_output_to(
-    writer: &mut impl Write,
-    contents: &[u8],
-    diagnostic_path: &str,
-) -> Result<bool, RuntimeError> {
     match writer.write_all(contents).and_then(|()| writer.flush()) {
         Ok(()) => Ok(true),
         Err(err) if err.kind() == io::ErrorKind::BrokenPipe => Ok(false),
         Err(source) => Err(RuntimeError::Io {
-            path: PathBuf::from(diagnostic_path),
+            path: PathBuf::from("<stdout>"),
             source,
         }),
     }

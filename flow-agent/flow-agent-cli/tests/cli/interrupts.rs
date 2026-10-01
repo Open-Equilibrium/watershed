@@ -1,16 +1,13 @@
-#[cfg(unix)]
 use super::{
     flow_command,
     process::wait_with_output_before,
     test_support::{workspace_copy, workspace_session_dir},
 };
-#[cfg(unix)]
 use std::{
     process::{Child, Command, Stdio},
     time::Duration,
 };
 
-#[cfg(unix)]
 fn interrupt_and_wait_for_130(child: Child) {
     let signal = Command::new("kill")
         .args(["-s", "INT", &child.id().to_string()])
@@ -26,7 +23,6 @@ fn interrupt_and_wait_for_130(child: Child) {
     assert_eq!(output.status.code(), Some(130));
 }
 
-#[cfg(unix)]
 #[test]
 fn idle_sigint_exits_the_entire_program_with_130() {
     let workspace = workspace_copy("hello-flow");
@@ -50,7 +46,6 @@ fn idle_sigint_exits_the_entire_program_with_130() {
     interrupt_and_wait_for_130(child);
 }
 
-#[cfg(unix)]
 #[test]
 fn sigint_while_waiting_for_a_complete_root_input_exits_with_130() {
     let workspace = workspace_copy("smoke-flow");

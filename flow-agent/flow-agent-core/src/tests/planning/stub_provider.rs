@@ -4,7 +4,7 @@ use super::super::{
     test_support::workspace_copy,
 };
 use crate::runtime::{
-    execution_plan::{FlowExecutionOptions, ToolSideEffectMode, runtime_policy_target},
+    execution_plan::{FlowExecutionOptions, ToolSideEffectMode},
     planning::plan_flow,
     session::run_flow,
     types::{EmitMode, EventClock},
@@ -43,8 +43,7 @@ fn planning_rejects_malformed_stub_results() {
         let registry = load_test_registry(&workspace, "smoke-flow");
         let flow = registry.flow_block("smoke-flow").expect("root Flow");
         let policy =
-            core_policy::compile_policy_artifact(&registry, "smoke-flow", runtime_policy_target())
-                .expect("policy compiles");
+            core_policy::compile_policy_artifact(&registry, "smoke-flow").expect("policy compiles");
         let error = match plan_flow(
             &workspace,
             &registry,

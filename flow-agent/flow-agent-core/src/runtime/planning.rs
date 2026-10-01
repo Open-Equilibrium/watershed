@@ -65,7 +65,6 @@ fn compile_flow_plan(
     let context = FlowEmitContext {
         registry,
         policy,
-        side_effect_mode: options.side_effect_mode,
         stub_model_fixture_profile: options.stub_model_fixture_profile,
     };
     let failed = match emit_flow_block(
@@ -78,7 +77,7 @@ fn compile_flow_plan(
     ) {
         Ok(ExecutionOutcome::Failed(failure)) => Some(failure),
         Ok(ExecutionOutcome::Completed(_)) => None,
-        Err(err) if execution::should_terminalize_error(options.side_effect_mode, &err) => {
+        Err(err) if execution::should_terminalize_error(&err) => {
             let reason = runtime_failure_for_unhandled_error(&err).reason;
             builder.emit(
                 None,

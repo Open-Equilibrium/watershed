@@ -7,7 +7,7 @@ use super::super::status::{StatusTransactionCrashPoint, status_run_mutation_chec
 use super::super::{
     contract::{
         CONVERSATION_HISTORY_LEAF, CONVERSATION_RUNS_DIR, CONVERSATION_STATUS_LEAF,
-        RUN_CONTEXTS_LEAF, RUN_EVENTS_LEAF, RUN_LOG_LEAF, RUN_LOG_RECORD_SCHEMA_V0,
+        RUN_CONTEXTS_LEAF, RUN_EVENTS_LEAF, RUN_LOG_LEAF, RUN_LOG_RECORD_SCHEMA_V1,
         RUN_OBJECTS_DIR, RUN_SESSION_LOCK_LEAF, UNPUBLISHED_PRODUCTIVE_RUN_MARKER, protocol,
         run_creation_identity_marker_name, validate_hash, validate_id,
     },
@@ -36,14 +36,13 @@ use crate::runtime::{
 };
 use std::path::Path;
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 type RunCreationStageObserver = Box<dyn FnOnce(&Path)>;
 
 #[cfg(test)]
 std::thread_local! {
     static PRODUCTIVE_RUN_CREATION_OBSERVER: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
         const { std::cell::RefCell::new(None) };
-    #[cfg(unix)]
     static RUN_CREATION_STAGE_OBSERVER: std::cell::RefCell<Option<RunCreationStageObserver>> =
         const { std::cell::RefCell::new(None) };
 }
@@ -53,7 +52,7 @@ pub(crate) fn set_productive_run_creation_observer(observer: impl FnOnce() + 'st
     PRODUCTIVE_RUN_CREATION_OBSERVER.with(|slot| slot.replace(Some(Box::new(observer))));
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 pub(crate) fn set_run_creation_stage_observer(observer: impl FnOnce(&Path) + 'static) {
     RUN_CREATION_STAGE_OBSERVER.with(|slot| slot.replace(Some(Box::new(observer))));
 }
@@ -67,7 +66,7 @@ fn productive_run_creation_observer() {
     });
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 fn run_creation_stage_observer(stage: &Path) {
     RUN_CREATION_STAGE_OBSERVER.with(|slot| {
         if let Some(observer) = slot.replace(None) {
@@ -256,7 +255,6 @@ fn cleanup_new_empty_conversation(
         }
         drop(runs);
         conversation
-            .dir
             .remove_dir(CONVERSATION_RUNS_DIR)
             .map_err(|source| {
                 path_io_error(&conversation.path.join(CONVERSATION_RUNS_DIR), source)
@@ -297,7 +295,6 @@ fn cleanup_new_empty_conversation(
     drop(current);
     drop(conversation);
     sessions
-        .dir
         .remove_dir(conversation_id)
         .map_err(|source| path_io_error(&sessions.path.join(conversation_id), source))?;
     sync_anchored_directory(sessions)
@@ -371,7 +368,7 @@ fn create_conversation_run_with_publication_marker(
     validate_hash(flow_definition_hash, "Flow definition hash")?;
     let sessions_dir = ensure_anchored_sessions(workspace)?;
     finish_incomplete_conversation_lifecycle(&sessions_dir, conversation_id)?;
-    let conversation_is_new = match sessions_dir.dir.create_dir(conversation_id) {
+    let conversation_is_new = match sessions_dir.create_dir(conversation_id) {
         Ok(()) => true,
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => false,
         Err(source) => {
@@ -434,7 +431,7 @@ fn create_conversation_run_with_publication_marker(
                 )
             });
         let definition = RunLogRecord::Definition {
-            schema: RUN_LOG_RECORD_SCHEMA_V0.to_owned(),
+            schema: RUN_LOG_RECORD_SCHEMA_V1.to_owned(),
             flow_definition_id: flow_definition_id.to_owned(),
             registry_hash: registry_hash.to_owned(),
             flow_definition_hash: flow_definition_hash.to_owned(),
@@ -443,8 +440,6 @@ fn create_conversation_run_with_publication_marker(
             model_context_limit,
             output_reserve,
             safety_margin,
-            legacy_session_id: None,
-            legacy_source_manifest: None,
         };
         let mut definition_bytes = canonical_json(&definition)?.into_bytes();
         definition_bytes.push(b'\n');
@@ -455,15 +450,14 @@ fn create_conversation_run_with_publication_marker(
             Err(source) => return Err(path_io_error(&stage, source)),
         }
         runs_dir
-            .dir
             .create_dir(&staging_name)
             .map_err(|source| path_io_error(&stage, source))?;
         let created_stage = runs_dir
-            .publishable_child(&staging_name, DirectoryErrorMode::Protocol)?
+            .child(&staging_name, false, DirectoryErrorMode::Protocol)?
             .expect("new run staging directory is present");
         let created_stage_identity = created_stage.identity()?;
         let stage_marker = run_creation_identity_marker_name(created_stage_identity);
-        #[cfg(all(test, unix))]
+        #[cfg(test)]
         run_creation_stage_observer(&stage);
         partial_run = Some((
             runs_dir.clone(),
@@ -504,7 +498,6 @@ fn create_conversation_run_with_publication_marker(
         sync_anchored_directory(&created_stage)?;
         #[cfg(test)]
         status_run_mutation_checkpoint(StatusTransactionCrashPoint::RunCreationStagePopulated);
-        #[cfg(not(windows))]
         let Some(stage_for_publication) =
             runs_dir.child(&staging_name, false, DirectoryErrorMode::Protocol)?
         else {
@@ -512,25 +505,14 @@ fn create_conversation_run_with_publication_marker(
                 "run-creation staging artifact disappeared before publication",
             ));
         };
-        #[cfg(not(windows))]
         if stage_for_publication.identity()? != created_stage_identity {
             return Err(protocol(
                 "run-creation staging artifact identity changed before publication",
             ));
         }
-        #[cfg(not(windows))]
         drop(stage_for_publication);
-        #[cfg(windows)]
-        crate::runtime::windows_anchored_dir::publish_anchored_directory(
-            &created_stage.dir,
-            &runs_dir.dir,
-            run_session_id,
-        )
-        .map_err(|source| path_io_error(&run, source))?;
-        #[cfg(not(windows))]
         runs_dir
-            .dir
-            .rename(&staging_name, &runs_dir.dir, run_session_id)
+            .rename(&staging_name, run_session_id)
             .map_err(|source| path_io_error(&run, source))?;
         if let Some((_, _, cleanup_leaf, cleanup_path, _, _)) = partial_run.as_mut() {
             *cleanup_leaf = run_session_id.to_owned();

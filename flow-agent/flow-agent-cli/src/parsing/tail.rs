@@ -29,7 +29,7 @@ pub(crate) fn paired_tail_args(
     Ok((conversation_id, run_session_id, emit, options))
 }
 
-pub(crate) fn tail_args(args: &[String]) -> Result<(EmitMode, TailOptions), RuntimeError> {
+fn tail_args(args: &[String]) -> Result<(EmitMode, TailOptions), RuntimeError> {
     let mut emit = EmitMode::Human;
     let mut options = TailOptions::follow();
     let mut index = 2;

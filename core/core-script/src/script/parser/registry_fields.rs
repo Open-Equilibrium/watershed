@@ -26,10 +26,6 @@ fn reject_tool_fields(source_name: &str, value: &noyalib::Value) -> Result<(), R
             "script_runtime",
             "script_body",
             "allowed_parameters",
-            "read_scope",
-            "write_scope",
-            "protected_path_grants",
-            "network",
         ],
     )?;
     let Some(tool) = value.as_mapping() else {
@@ -37,18 +33,6 @@ fn reject_tool_fields(source_name: &str, value: &noyalib::Value) -> Result<(), R
     };
     if let Some(command) = tool.get("command") {
         reject_mapping_fields(source_name, command, &["command_id", "argv"])?;
-    }
-    if let Some(network) = tool.get("network") {
-        reject_mapping_fields(source_name, network, &["default", "allow"])?;
-        if let Some(entries) = network
-            .as_mapping()
-            .and_then(|network| network.get("allow"))
-            .and_then(noyalib::Value::as_sequence)
-        {
-            for entry in entries {
-                reject_mapping_fields(source_name, entry, &["kind", "transport", "cidr", "port"])?;
-            }
-        }
     }
     Ok(())
 }
@@ -314,10 +298,6 @@ mod tests {
         let flow = include_str!(
             "../../../../../flow-agent/fixtures/hello-flow/registry/flows/hello-flow.yaml"
         );
-        let network_tool = tool.replace(
-            "  network: deny",
-            "  network:\n    default: deny\n    allow:\n      - kind: cidr\n        transport: tcp\n        cidr: 192.0.2.0/24\n        port: 443",
-        );
         let cases = [
             INSTRUCTION.replace("  prompt:", "  extra: true\n  prompt:"),
             tool.replace("    argv: []", "    argv: []\n    extra: true"),
@@ -326,8 +306,6 @@ mod tests {
                 "      required: true\n      extra: true",
             ),
             phase.replace("    type: string", "    type: string\n    extra: true"),
-            network_tool.replace("    default:", "    extra: true\n    default:"),
-            network_tool.replace("        port:", "        extra: true\n        port:"),
             flow.replace("  phase_refs:", "  extra: true\n  phase_refs:"),
             r#"tool:
   id: inspect
@@ -338,10 +316,6 @@ mod tests {
     argv: []
     extra: true
   allowed_parameters: []
-  read_scope: []
-  write_scope: []
-  protected_path_grants: []
-  network: deny
 "#
             .to_owned(),
             r#"instruction:

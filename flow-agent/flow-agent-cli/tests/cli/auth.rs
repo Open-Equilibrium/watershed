@@ -6,7 +6,6 @@ const SYNTHETIC_CREDENTIAL: &str = r#"{"openai-codex":{"type":"oauth","access":"
 fn run_auth(config_root: &Path, action: &str) -> Output {
     flow_command()
         .current_dir(config_root)
-        .env("APPDATA", config_root)
         .env("HOME", config_root)
         .env("XDG_CONFIG_HOME", config_root)
         .args(["auth", action, "openai-codex"])
@@ -15,9 +14,7 @@ fn run_auth(config_root: &Path, action: &str) -> Output {
 }
 
 fn credential_path(config_root: &Path) -> std::path::PathBuf {
-    if cfg!(windows) {
-        config_root.join("flow-agent/credentials.json")
-    } else if cfg!(target_os = "macos") {
+    if cfg!(target_os = "macos") {
         config_root.join("Library/Application Support/flow-agent/credentials.json")
     } else {
         config_root.join("flow-agent/credentials.json")

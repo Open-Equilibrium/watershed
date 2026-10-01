@@ -9,6 +9,8 @@ mod auth;
 mod authoring;
 #[path = "cli/chat.rs"]
 mod chat;
+#[path = "cli/executor.rs"]
+mod executor;
 #[path = "cli/failures.rs"]
 mod failures;
 #[path = "cli/interrupts.rs"]

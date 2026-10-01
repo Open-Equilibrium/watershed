@@ -1,9 +1,9 @@
 use crate::{
-    authoring::{create_command, import_command, init_command, validate_command},
+    authoring::{create_command, init_command, validate_command},
     interrupt::InterruptCoordinator,
     output::write_stdout,
     parsing::{
-        ResumeCommand, auth_args, paired_emit_args, paired_tail_args, positional,
+        ResumeCommand, auth_args, executor_args, paired_emit_args, paired_tail_args, positional,
         reconcile_tool_args, reject_extra_args, resume_args, run_args, sessions_args, usage,
     },
     streaming::stream_conversation_replay,
@@ -15,6 +15,7 @@ use std::{path::Path, process::ExitCode};
 mod auth;
 mod chat;
 mod execution;
+mod executor;
 mod resume;
 mod run;
 mod sessions;
@@ -22,6 +23,7 @@ mod sessions;
 use auth::authentication_command;
 use chat::chat;
 use execution::command_exit_code;
+use executor::executor_command;
 use resume::{continue_command, resume_command};
 use run::{read_root_input, read_tool_reconciliation, run_command};
 use sessions::sessions_command;
@@ -47,10 +49,6 @@ fn dispatch_in_workspace(
             init_command(workspace, &args[1..])?;
             Ok(ExitCode::SUCCESS)
         }
-        "import" => {
-            import_command(workspace, &args[1..])?;
-            Ok(ExitCode::SUCCESS)
-        }
         "validate" => {
             validate_command(workspace, &args[1..])?;
             Ok(ExitCode::SUCCESS)
@@ -61,6 +59,10 @@ fn dispatch_in_workspace(
         }
         "auth" => {
             authentication_command(auth_args(args)?)?;
+            Ok(ExitCode::SUCCESS)
+        }
+        "executor" => {
+            executor_command(executor_args(args)?)?;
             Ok(ExitCode::SUCCESS)
         }
         "run" => {

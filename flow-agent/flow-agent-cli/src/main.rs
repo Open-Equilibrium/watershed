@@ -18,7 +18,7 @@ mod test_support;
 use crate::{
     dispatch::dispatch,
     interrupt::InterruptCoordinator,
-    output::{print_error, write_stdout},
+    output::{print_error, print_runtime_error, write_stdout},
     parsing::{informational_output, parse_args},
 };
 use flow_agent_core::RuntimeError;
@@ -54,7 +54,7 @@ fn main() -> ExitCode {
     match dispatch(&args, &interrupts) {
         Ok(code) => code,
         Err(err) => {
-            print_error(&err);
+            print_runtime_error(&err);
             ExitCode::from(err.exit_code() as u8)
         }
     }

@@ -3,7 +3,7 @@ use crate::runtime::tool_runner::{
     MAX_TOOL_STREAM_BYTES, PrimaryTrigger, READY_CANCELLATION_MARKER, ToolExecutionOutcome,
     ToolInvocation, ToolRunControl, ToolTerminalClassification,
     execute_tool_invocation as execute_anchored_tool_invocation, force_reap_timeout_for_test,
-    measure_ready_tool_cancellation, visible_exit_code,
+    measure_ready_tool_cancellation, observe_group_signals_for_test, visible_exit_code,
 };
 use crate::runtime::{fs_guards::AnchoredWorkspace, run_attempts::RunAttemptOutcome};
 use std::{
@@ -12,10 +12,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-#[cfg(unix)]
 fn shell_invocation(body: &str) -> ToolInvocation {
     ToolInvocation {
-        executable: "/bin/sh".to_owned(),
+        executable: proto::EXECUTOR_OWN_SCRIPT_EXECUTABLE_V0.to_owned(),
         argv: vec![
             "-c".to_owned(),
             body.to_owned(),
@@ -24,7 +23,6 @@ fn shell_invocation(body: &str) -> ToolInvocation {
     }
 }
 
-#[cfg(unix)]
 fn execute_tool_invocation(
     invocation: &ToolInvocation,
     workspace: &Path,
@@ -34,7 +32,6 @@ fn execute_tool_invocation(
     execute_anchored_tool_invocation(invocation, workspace.root(), control)
 }
 
-#[cfg(unix)]
 fn escaped_output_invocation(fixture: &str) -> ToolInvocation {
     let mut invocation = shell_invocation(
         "\"$1\" --exact \"$2\" --nocapture & printf leader-done; while [ ! -f escaped.filled ]; do /bin/sleep 0.01; done",
@@ -49,7 +46,6 @@ fn escaped_output_invocation(fixture: &str) -> ToolInvocation {
     invocation
 }
 
-#[cfg(unix)]
 fn run_escaped_output_fixture(marker: &str, write_cap: bool) -> bool {
     use std::io::Write as _;
 
@@ -71,12 +67,10 @@ fn run_escaped_output_fixture(marker: &str, write_cap: bool) -> bool {
     true
 }
 
-#[cfg(unix)]
 fn contains_bytes(bytes: &[u8], needle: &[u8]) -> bool {
     bytes.windows(needle.len()).any(|window| window == needle)
 }
 
-#[cfg(unix)]
 #[test]
 fn unix_runner_captures_both_streams_with_an_empty_environment() {
     let cancelled = AtomicBool::new(false);
@@ -110,7 +104,6 @@ fn unix_runner_captures_both_streams_with_an_empty_environment() {
     assert_eq!(outcome.stderr, b"stderr-value");
 }
 
-#[cfg(unix)]
 #[test]
 fn runner_pre_cancelled_before_spawn_does_not_launch() {
     let cancelled = AtomicBool::new(true);
@@ -136,7 +129,6 @@ fn runner_pre_cancelled_before_spawn_does_not_launch() {
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn runner_uses_the_retained_workspace_after_ambient_path_replacement() {
     let workspace = empty_workspace("runner-retained-workspace");
@@ -169,7 +161,6 @@ fn runner_uses_the_retained_workspace_after_ambient_path_replacement() {
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn runner_cancellation_lifecycle() {
     let workspace = empty_workspace("runner-cancelled-after-ready");
@@ -191,7 +182,6 @@ fn runner_cancellation_lifecycle() {
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn runner_omits_an_observed_exit_code_for_timeout_or_cancellation() {
     assert_eq!(visible_exit_code(&PrimaryTrigger::TimedOut, Some(0)), None);
@@ -202,7 +192,6 @@ fn runner_omits_an_observed_exit_code_for_timeout_or_cancellation() {
     );
 }
 
-#[cfg(unix)]
 fn stream_budget_fixture(body: &str) -> ToolExecutionOutcome {
     let cancelled = AtomicBool::new(false);
     execute_tool_invocation(
@@ -215,7 +204,6 @@ fn stream_budget_fixture(body: &str) -> ToolExecutionOutcome {
     )
 }
 
-#[cfg(unix)]
 #[test]
 fn runner_stdout_budget() {
     let exact = stream_budget_fixture("/usr/bin/head -c 4194304 /dev/zero");
@@ -234,7 +222,6 @@ fn runner_stdout_budget() {
     assert!(excess.stderr.is_empty());
 }
 
-#[cfg(unix)]
 #[test]
 fn runner_stderr_budget() {
     let exact = stream_budget_fixture("/usr/bin/head -c 4194304 /dev/zero >&2");
@@ -253,7 +240,6 @@ fn runner_stderr_budget() {
     assert!(excess.stdout.is_empty());
 }
 
-#[cfg(unix)]
 #[test]
 fn runner_cap_does_not_expose_an_exit_observed_during_cleanup() {
     let outcome =
@@ -267,7 +253,6 @@ fn runner_cap_does_not_expose_an_exit_observed_during_cleanup() {
     assert_eq!(outcome.exit_code, None);
 }
 
-#[cfg(unix)]
 #[test]
 fn runner_noop_lifecycle() {
     let cancelled = AtomicBool::new(false);
@@ -288,7 +273,107 @@ fn runner_noop_lifecycle() {
     }
 }
 
-#[cfg(unix)]
+#[test]
+fn runner_owns_completed_leader_until_final_group_signal() {
+    use std::cell::Cell;
+
+    thread_local! {
+        static LOST_OWNERSHIP: Cell<bool> = const { Cell::new(false) };
+        static LAST_SIGNAL_COMPLETED: Cell<bool> = const { Cell::new(false) };
+        static LAST_SIGNAL_EXIT: Cell<Option<i32>> = const { Cell::new(None) };
+        static LAST_SIGNAL: Cell<Option<rustix::process::Signal>> = const { Cell::new(None) };
+    }
+    fn observe_owned_leader(pid: rustix::process::Pid, signal: rustix::process::Signal) {
+        // Only the controller can verify that this exact child remains waitable.
+        // NOWAIT leaves ownership intact through the signal that follows.
+        let status = rustix::process::waitid(
+            rustix::process::WaitId::Pid(pid),
+            rustix::process::WaitIdOptions::EXITED
+                | rustix::process::WaitIdOptions::NOHANG
+                | rustix::process::WaitIdOptions::NOWAIT,
+        );
+        LOST_OWNERSHIP.set(LOST_OWNERSHIP.get() || status.is_err());
+        LAST_SIGNAL_COMPLETED.set(status.as_ref().is_ok_and(Option::is_some));
+        LAST_SIGNAL_EXIT.set(
+            status
+                .ok()
+                .flatten()
+                .and_then(|status| status.exit_status()),
+        );
+        LAST_SIGNAL.set(Some(signal));
+    }
+
+    for (body, deadline, classification, expected_exit, last_signal_exit, needs_kill) in [
+        (
+            "exit 17",
+            Duration::from_secs(5),
+            ToolTerminalClassification::NonzeroExit,
+            Some(17),
+            Some(17),
+            false,
+        ),
+        (
+            "trap '' TERM; (while :; do :; done) & exit 17",
+            Duration::from_secs(5),
+            ToolTerminalClassification::NonzeroExit,
+            Some(17),
+            Some(17),
+            true,
+        ),
+        (
+            "trap '' TERM; (while :; do :; done) & trap - TERM; kill -TERM $$",
+            Duration::from_secs(5),
+            ToolTerminalClassification::SignalTermination,
+            None,
+            None,
+            true,
+        ),
+        (
+            "trap '' TERM; (while :; do :; done) & trap 'exit 17' TERM; printf ready; while :; do :; done",
+            Duration::from_millis(100),
+            ToolTerminalClassification::ToolTimedOut,
+            None,
+            Some(17),
+            true,
+        ),
+    ] {
+        LOST_OWNERSHIP.set(false);
+        LAST_SIGNAL_COMPLETED.set(false);
+        LAST_SIGNAL_EXIT.set(None);
+        LAST_SIGNAL.set(None);
+        observe_group_signals_for_test(Some(observe_owned_leader));
+        let cancelled = AtomicBool::new(false);
+        let outcome = execute_tool_invocation(
+            &shell_invocation(body),
+            Path::new("."),
+            ToolRunControl {
+                cancelled: &cancelled,
+                deadline: Instant::now() + deadline,
+            },
+        );
+        observe_group_signals_for_test(None);
+
+        assert!(
+            !LOST_OWNERSHIP.get(),
+            "a group signal must retain ownership of its original leader"
+        );
+        assert!(
+            LAST_SIGNAL_COMPLETED.get(),
+            "the completed leader must remain waitable at the final signal"
+        );
+        assert_eq!(
+            LAST_SIGNAL_EXIT.get(),
+            last_signal_exit,
+            "the retained leader must preserve its actual terminal status"
+        );
+        assert_eq!(outcome.classification, Some(classification));
+        assert_eq!(outcome.exit_code, expected_exit);
+        if needs_kill {
+            assert_eq!(LAST_SIGNAL.get(), Some(rustix::process::Signal::KILL));
+        }
+    }
+}
+
 #[test]
 fn runner_term_grace() {
     let cancelled = AtomicBool::new(false);
@@ -312,7 +397,6 @@ fn runner_term_grace() {
     assert!(started.elapsed() < Duration::from_secs(3));
 }
 
-#[cfg(unix)]
 #[test]
 fn runner_forced_reap() {
     force_reap_timeout_for_test(true);
@@ -337,7 +421,6 @@ fn runner_forced_reap() {
     assert!(started.elapsed() < Duration::from_secs(4));
 }
 
-#[cfg(unix)]
 #[test]
 fn runner_output_drain() {
     const FILTER: &str = "tests::tool_runner::unix_process::runner_output_drain";
@@ -367,7 +450,6 @@ fn runner_output_drain() {
     assert!(started.elapsed() < Duration::from_secs(3));
 }
 
-#[cfg(unix)]
 #[test]
 fn runner_output_drain_rejects_an_escaped_child_that_exceeds_the_stream_cap() {
     const FILTER: &str = "tests::tool_runner::unix_process::runner_output_drain_rejects_an_escaped_child_that_exceeds_the_stream_cap";

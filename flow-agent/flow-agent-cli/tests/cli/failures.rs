@@ -120,16 +120,8 @@ fn non_unicode_argument_exits_with_usage_error() {
     assert!(output.stdout.is_empty());
 }
 
-#[cfg(unix)]
 fn non_unicode_argument() -> OsString {
     use std::os::unix::ffi::OsStringExt;
 
     OsString::from_vec(vec![0xff])
-}
-
-#[cfg(windows)]
-fn non_unicode_argument() -> OsString {
-    use std::os::windows::ffi::OsStringExt;
-
-    OsString::from_wide(&[0xd800])
 }

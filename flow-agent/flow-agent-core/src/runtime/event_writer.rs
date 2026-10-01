@@ -1,7 +1,7 @@
 use crate::runtime::{
     context::ContextManifestCheckpoint,
     context_persistence::{ContextManifestWriter, validate_context_manifest_pairing},
-    event_construction::RuntimeEventAlternative,
+    event_construction::{ConstructedRuntimeEvent, RuntimeEventAlternative},
     fs_guards::AnchoredFile,
     live_events::LiveEventNotifier,
     productive_capacity::ProductiveDispatchReservation,
@@ -48,9 +48,16 @@ pub(crate) fn post_writer_finish_observer(path: &AnchoredFile) {
 }
 
 pub trait RuntimeEventSink {
-    #[cfg(test)]
-    fn measurement_started_at(&self) -> Option<Instant> {
-        None
+    fn commit_constructed(
+        &mut self,
+        constructed: &ConstructedRuntimeEvent,
+        context_manifest: Option<ContextManifestCheckpoint>,
+    ) -> Result<(), RuntimeError> {
+        self.commit(
+            constructed.event(),
+            constructed.canonical_jsonl(),
+            context_manifest,
+        )
     }
 
     fn commit(
@@ -58,7 +65,6 @@ pub trait RuntimeEventSink {
         event: &EventEnvelope,
         canonical_jsonl: &str,
         context_manifest: Option<ContextManifestCheckpoint>,
-        #[cfg(test)] measurement_started_at: Option<Instant>,
     ) -> Result<(), RuntimeError>;
 
     fn needs_alternative_preflight(&self) -> bool {
@@ -80,19 +86,10 @@ pub trait RuntimeEventSink {
     }
 }
 
-#[cfg(test)]
-#[derive(Default)]
-pub struct EventWriterTimings {
-    pub(crate) append_nanos: Vec<u128>,
-    pub(crate) notification_nanos: Vec<u128>,
-}
-
 pub struct SerialSessionWriter<'a> {
     pub(crate) captured_jsonl: Option<String>,
     client: SerialWriterClient,
     pub(crate) commit_reservation: Option<&'a SessionReservation>,
-    #[cfg(test)]
-    pub(crate) timings: Option<&'a mut EventWriterTimings>,
 }
 
 pub struct SerialWriterStart<'a> {
@@ -102,15 +99,12 @@ pub struct SerialWriterStart<'a> {
     pub(crate) validation: SessionAppendValidationState,
     pub(crate) commit_reservation: Option<&'a SessionReservation>,
     pub(crate) notifier: Option<LiveEventNotifier>,
-    #[cfg(test)]
-    pub(crate) timings: Option<&'a mut EventWriterTimings>,
 }
 
 impl<'a> SerialSessionWriter<'a> {
     pub(crate) fn start(
         reservation: &'a SessionReservation,
         notifier: Option<LiveEventNotifier>,
-        #[cfg(test)] timings: Option<&'a mut EventWriterTimings>,
     ) -> Result<Self, RuntimeError> {
         Self::start_prevalidated(SerialWriterStart {
             context_path: reservation.context_path.clone(),
@@ -119,8 +113,6 @@ impl<'a> SerialSessionWriter<'a> {
             validation: SessionAppendValidationState::empty(&reservation.session_id),
             commit_reservation: Some(reservation),
             notifier,
-            #[cfg(test)]
-            timings,
         })
     }
 
@@ -143,8 +135,6 @@ impl<'a> SerialSessionWriter<'a> {
             validation,
             commit_reservation,
             notifier,
-            #[cfg(test)]
-            timings,
         } = start;
         let context_writer = ContextManifestWriter::open_for_session(
             &context_path,
@@ -173,14 +163,11 @@ impl<'a> SerialSessionWriter<'a> {
             captured_jsonl: None,
             client: SerialWriterClient::new(sender, worker),
             commit_reservation,
-            #[cfg(test)]
-            timings,
         })
     }
 
     fn apply_outcome(
         commit_reservation: Option<&SessionReservation>,
-        #[cfg(test)] timings: &mut Option<&mut EventWriterTimings>,
         outcome: WriterOutcome,
     ) -> Result<(), RuntimeError> {
         let mut failures = Vec::new();
@@ -189,15 +176,6 @@ impl<'a> SerialSessionWriter<'a> {
             && let Err(error) = reservation.activate()
         {
             failures.push(error);
-        }
-        #[cfg(test)]
-        if let Some(timings) = timings.as_deref_mut() {
-            if let Some(append_latency) = outcome.append_latency_nanos {
-                timings.append_nanos.push(append_latency);
-            }
-            if let Some(notification_latency) = outcome.notification_latency_nanos {
-                timings.notification_nanos.push(notification_latency);
-            }
         }
         if let Some(err) = outcome.error {
             failures.push(event_writer_failure(err));
@@ -215,32 +193,19 @@ impl<'a> SerialSessionWriter<'a> {
 
     pub(crate) fn finish(&mut self) -> Result<(), RuntimeError> {
         let commit_reservation = self.commit_reservation;
-        #[cfg(test)]
-        let timings = &mut self.timings;
         self.client
             .finish("session", "started event writer owns a worker", |outcome| {
-                Self::apply_outcome(
-                    commit_reservation,
-                    #[cfg(test)]
-                    timings,
-                    outcome,
-                )
+                Self::apply_outcome(commit_reservation, outcome)
             })
     }
 }
 
 impl RuntimeEventSink for SerialSessionWriter<'_> {
-    #[cfg(test)]
-    fn measurement_started_at(&self) -> Option<Instant> {
-        self.timings.as_ref().map(|_| Instant::now())
-    }
-
     fn commit(
         &mut self,
         event: &EventEnvelope,
         canonical_jsonl: &str,
         context_manifest: Option<ContextManifestCheckpoint>,
-        #[cfg(test)] measurement_started_at: Option<Instant>,
     ) -> Result<(), RuntimeError> {
         let is_batchable = is_micro_batch_event(&event.event_type);
         let (acknowledgement, response) = std::sync::mpsc::sync_channel(1);
@@ -248,16 +213,10 @@ impl RuntimeEventSink for SerialSessionWriter<'_> {
             acknowledgement,
             canonical_jsonl: canonical_jsonl.to_owned(),
             context_manifest,
-            #[cfg(test)]
-            measurement_started_at,
             event: Box::new(event.clone()),
-            #[cfg(test)]
-            pre_batch_latency_nanos: None,
         };
         let commit_reservation = self.commit_reservation;
         let captured_jsonl = &mut self.captured_jsonl;
-        #[cfg(test)]
-        let timings = &mut self.timings;
         self.client.commit(
             queued,
             response,
@@ -268,14 +227,7 @@ impl RuntimeEventSink for SerialSessionWriter<'_> {
                     captured_jsonl.push_str(canonical_jsonl);
                 }
             },
-            |outcome| {
-                Self::apply_outcome(
-                    commit_reservation,
-                    #[cfg(test)]
-                    timings,
-                    outcome,
-                )
-            },
+            |outcome| Self::apply_outcome(commit_reservation, outcome),
         )
     }
 }
@@ -313,11 +265,6 @@ impl<A: EventLogAppender> SerialEventBackend for WriterWorker<'_, A> {
             self.stopped = true;
             return;
         }
-        #[cfg(test)]
-        let append_started_at = pending
-            .iter()
-            .any(|event| event.pre_batch_latency_nanos.is_some())
-            .then(Instant::now);
         if let Err(error) =
             validate_batch(self.path.diagnostic_path(), &mut self.validation, &pending)
         {
@@ -362,12 +309,7 @@ impl<A: EventLogAppender> SerialEventBackend for WriterWorker<'_, A> {
                     self.dirty.mark_dirty(Instant::now());
                     self.sync_required = true;
                 }
-                acknowledge_batch(
-                    partition.committed,
-                    #[cfg(test)]
-                    append_started_at.map_or(0, |started_at| started_at.elapsed().as_nanos()),
-                    self.notifier.as_ref(),
-                );
+                acknowledge_batch(partition.committed, self.notifier.as_ref());
                 self.pending_error = partition.pending_error;
                 if let Some(error) = partition.rejection_error {
                     reject_batch(partition.rejected, error);
@@ -376,17 +318,9 @@ impl<A: EventLogAppender> SerialEventBackend for WriterWorker<'_, A> {
                 return;
             }
         };
-        #[cfg(test)]
-        let append_latency_nanos =
-            append_started_at.map_or(0, |started_at| started_at.elapsed().as_nanos());
         self.dirty.mark_dirty(Instant::now());
         self.sync_required = true;
-        acknowledge_batch(
-            pending,
-            #[cfg(test)]
-            append_latency_nanos,
-            self.notifier.as_ref(),
-        );
+        acknowledge_batch(pending, self.notifier.as_ref());
     }
 
     fn commit(&mut self, event: QueuedEvent) {
@@ -402,8 +336,6 @@ impl<A: EventLogAppender> SerialEventBackend for WriterWorker<'_, A> {
                     event: &event.event,
                     canonical_jsonl: &event.canonical_jsonl,
                     context_manifest: event.context_manifest,
-                    #[cfg(test)]
-                    measurement_started_at: event.measurement_started_at,
                 },
                 &mut self.appender,
                 &mut self.context_writer,
@@ -414,17 +346,6 @@ impl<A: EventLogAppender> SerialEventBackend for WriterWorker<'_, A> {
         if outcome.appended {
             self.sync_required = self.dirty.is_dirty();
         }
-        #[cfg(test)]
-        let mut outcome = outcome;
-        #[cfg(test)]
-        if outcome.appended {
-            outcome.notification_latency_nanos = notify_committed(
-                self.notifier.as_ref(),
-                &event.event,
-                event.measurement_started_at.is_some(),
-            );
-        }
-        #[cfg(not(test))]
         if outcome.appended {
             notify_committed(self.notifier.as_ref(), &event.event);
         }
@@ -506,49 +427,16 @@ pub fn reject_batch(batch: Vec<QueuedEvent>, error: RuntimeError) {
     }
 }
 
-pub fn acknowledge_batch(
-    batch: Vec<QueuedEvent>,
-    #[cfg(test)] append_latency_nanos: u128,
-    notifier: Option<&LiveEventNotifier>,
-) {
+pub fn acknowledge_batch(batch: Vec<QueuedEvent>, notifier: Option<&LiveEventNotifier>) {
     for event in batch {
-        #[cfg(not(test))]
         notify_committed(notifier, &event.event);
         let _ = event.acknowledgement.send(WriterOutcome {
-            #[cfg(test)]
-            append_latency_nanos: event
-                .pre_batch_latency_nanos
-                .map(|latency| latency.saturating_add(append_latency_nanos)),
             appended: true,
             error: None,
-            #[cfg(test)]
-            notification_latency_nanos: notify_committed(
-                notifier,
-                &event.event,
-                event.pre_batch_latency_nanos.is_some(),
-            ),
         });
     }
 }
 
-#[cfg(test)]
-pub fn notify_committed(
-    notifier: Option<&LiveEventNotifier>,
-    event: &EventEnvelope,
-    measurement_requested: bool,
-) -> Option<u128> {
-    let notifier = notifier?;
-    if measurement_requested {
-        let started_at = Instant::now();
-        let _ = notifier.try_notify(&event.session_id, event.sequence);
-        Some(started_at.elapsed().as_nanos())
-    } else {
-        let _ = notifier.try_notify(&event.session_id, event.sequence);
-        None
-    }
-}
-
-#[cfg(not(test))]
 pub fn notify_committed(notifier: Option<&LiveEventNotifier>, event: &EventEnvelope) {
     if let Some(notifier) = notifier {
         let _ = notifier.try_notify(&event.session_id, event.sequence);
@@ -561,8 +449,6 @@ pub struct SessionEventCommit<'a> {
     pub(crate) event: &'a EventEnvelope,
     pub(crate) canonical_jsonl: &'a str,
     pub(crate) context_manifest: Option<ContextManifestCheckpoint>,
-    #[cfg(test)]
-    pub(crate) measurement_started_at: Option<Instant>,
 }
 
 pub fn commit_session_event<A>(
@@ -581,61 +467,35 @@ where
         event,
         canonical_jsonl,
         context_manifest,
-        #[cfg(test)]
-        measurement_started_at,
     } = commit;
     if let Err(err) = validation.validate_constructed_event(path, event, canonical_jsonl.len()) {
         return WriterOutcome::failed(err);
     }
-    #[cfg(test)]
-    let mut checkpoint_sync_duration = Duration::ZERO;
     if let Err(error) =
         validate_context_manifest_pairing(&event.event_type, context_manifest.is_some())
     {
         return WriterOutcome::failed(RuntimeError::Protocol(error.message().to_owned()));
     }
-    if let Some(manifest) = context_manifest {
-        #[cfg(test)]
-        let checkpoint_started_at = measurement_started_at.map(|_| Instant::now());
-        if let Err(err) = context_writer.persist(context_path, &manifest) {
-            return WriterOutcome::failed(err);
-        }
-        #[cfg(test)]
-        {
-            checkpoint_sync_duration =
-                checkpoint_started_at.map_or(Duration::ZERO, |started_at| started_at.elapsed());
-        }
+    if let Some(manifest) = context_manifest
+        && let Err(err) = context_writer.persist(context_path, &manifest)
+    {
+        return WriterOutcome::failed(err);
     }
     if let Err(err) = appender.append(path, canonical_jsonl.as_bytes()) {
         return WriterOutcome::failed(err);
     }
-    #[cfg(test)]
-    let append_latency_nanos = measurement_started_at.map(|started_at| {
-        started_at
-            .elapsed()
-            .saturating_sub(checkpoint_sync_duration)
-            .as_nanos()
-    });
     dirty.mark_dirty(Instant::now());
     if is_event_sync_checkpoint(&event.event_type) {
         if let Err(err) = appender.sync(path) {
             return WriterOutcome {
-                #[cfg(test)]
-                append_latency_nanos,
                 appended: true,
                 error: Some(err),
-                #[cfg(test)]
-                notification_latency_nanos: None,
             };
         }
         dirty.mark_synced();
     }
     WriterOutcome {
-        #[cfg(test)]
-        append_latency_nanos,
         appended: true,
         error: None,
-        #[cfg(test)]
-        notification_latency_nanos: None,
     }
 }

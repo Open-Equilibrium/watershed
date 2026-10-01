@@ -130,7 +130,12 @@ fn productive_recovery_header_reader_rejects_every_uncommitted_or_foreign_header
         }
         Err(error) => error,
     };
-    assert!(error.to_string().contains("read size"), "{error}");
+    assert!(
+        error
+            .to_string()
+            .contains("productive metadata exceeds its byte limit"),
+        "{error}"
+    );
 }
 
 #[test]

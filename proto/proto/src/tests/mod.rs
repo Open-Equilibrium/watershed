@@ -1,5 +1,6 @@
 mod canonical;
 mod event;
+mod executor;
 mod flow_value;
 mod metadata;
 mod session_object;

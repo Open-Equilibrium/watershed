@@ -70,7 +70,7 @@ where
     }
     let operation_workspace = workspace.clone();
     let worker_operation = operation.clone();
-    stream_live_operation(workspace, None, move |notifier| {
+    stream_live_operation(workspace, move |notifier| {
         execute(operation_workspace, Some(notifier), worker_operation)
     })
 }

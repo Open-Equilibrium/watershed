@@ -4,10 +4,9 @@ use crate::runtime::{
 };
 use crate::runtime::{
     fs_guards::{AnchoredDir, AnchoredWorkspace, DirectoryErrorMode},
-    types::{GLOBAL_WORKSPACES_DIR, RuntimeError},
+    types::{GLOBAL_WORKSPACES_DIR, LOG_STORAGE_DIR, RuntimeError, SESSION_STORAGE_DIR},
 };
 use std::{
-    ffi::OsString,
     fs,
     path::{Path, PathBuf},
 };
@@ -26,21 +25,7 @@ impl WorkspaceStore {
         workspace: &AnchoredWorkspace,
         create: bool,
     ) -> Result<Option<Self>, RuntimeError> {
-        Self::open_with_access(workspace, create, false)
-    }
-
-    pub(crate) fn open_read_only(
-        workspace: &AnchoredWorkspace,
-    ) -> Result<Option<Self>, RuntimeError> {
-        Self::open_with_access(workspace, false, true)
-    }
-
-    fn open_with_access(
-        workspace: &AnchoredWorkspace,
-        create: bool,
-        read_only: bool,
-    ) -> Result<Option<Self>, RuntimeError> {
-        let Some(home) = open_flow_agent_home(create, read_only)? else {
+        let Some(home) = open_flow_agent_home(create)? else {
             return Ok(None);
         };
         let Some(workspaces) =
@@ -90,38 +75,24 @@ pub(crate) fn workspace_store_path(workspace: &AnchoredWorkspace) -> Result<Path
         .join(workspace_store_leaf(workspace)?))
 }
 
-pub(crate) fn open_flow_agent_home(
-    create: bool,
-    read_only: bool,
-) -> Result<Option<AnchoredDir>, RuntimeError> {
+pub(crate) fn open_flow_agent_home(create: bool) -> Result<Option<AnchoredDir>, RuntimeError> {
     let home_path = flow_agent_home_path()?;
-    open_flow_agent_home_at(&home_path, create, read_only)
+    open_flow_agent_home_at(&home_path, create)
 }
 
 pub(crate) fn open_flow_agent_home_at(
     home_path: &Path,
     create: bool,
-    read_only: bool,
 ) -> Result<Option<AnchoredDir>, RuntimeError> {
-    let (parent, leaf, _) = open_flow_agent_home_parent_at(home_path, read_only)?;
+    let (parent, leaf) = open_flow_agent_home_parent_at(home_path)?;
     let home = parent.private_child(&leaf, create, DirectoryErrorMode::Protocol)?;
     if create && home.is_some() {
         sync_anchored_directory(&parent)?;
     }
-    Ok(home)
+    Ok(home.map(AnchoredDir::with_publication))
 }
 
-pub(crate) fn open_flow_agent_home_parent(
-    read_only: bool,
-) -> Result<(AnchoredDir, String, PathBuf), RuntimeError> {
-    let path = flow_agent_home_path()?;
-    open_flow_agent_home_parent_at(&path, read_only)
-}
-
-pub(crate) fn open_flow_agent_home_parent_at(
-    path: &Path,
-    read_only: bool,
-) -> Result<(AnchoredDir, String, PathBuf), RuntimeError> {
+fn open_flow_agent_home_parent_at(path: &Path) -> Result<(AnchoredDir, String), RuntimeError> {
     if !path.is_absolute() {
         return Err(RuntimeError::Usage(
             "FLOW_AGENT_HOME must name an absolute directory".to_owned(),
@@ -137,18 +108,8 @@ pub(crate) fn open_flow_agent_home_parent_at(
             RuntimeError::Usage("global Flow home must end in a UTF-8 directory name".to_owned())
         })?;
     let parent = fs::canonicalize(parent).map_err(|source| path_io_error(parent, source))?;
-    #[cfg(windows)]
-    let parent = if read_only {
-        AnchoredDir::read_only_workspace(&parent)?
-    } else {
-        AnchoredDir::workspace(&parent)?
-    };
-    #[cfg(not(windows))]
-    let parent = {
-        let _ = read_only;
-        AnchoredDir::workspace(&parent)?
-    };
-    Ok((parent, leaf.to_owned(), path.to_owned()))
+    let parent = AnchoredDir::workspace(&parent)?;
+    Ok((parent, leaf.to_owned()))
 }
 
 pub(crate) fn flow_agent_home_path() -> Result<PathBuf, RuntimeError> {
@@ -165,19 +126,9 @@ pub(crate) fn flow_agent_home_path() -> Result<PathBuf, RuntimeError> {
 }
 
 fn default_flow_agent_home() -> Result<PathBuf, RuntimeError> {
-    let home = platform_home_dir()
+    let home = std::env::var_os("HOME")
         .ok_or_else(|| RuntimeError::Usage("the user home directory is unavailable".to_owned()))?;
     Ok(PathBuf::from(home).join(FLOW_AGENT_HOME_LEAF))
-}
-
-#[cfg(windows)]
-fn platform_home_dir() -> Option<OsString> {
-    std::env::var_os("USERPROFILE")
-}
-
-#[cfg(not(windows))]
-fn platform_home_dir() -> Option<OsString> {
-    std::env::var_os("HOME")
 }
 
 pub(crate) fn workspace_store_leaf(workspace: &AnchoredWorkspace) -> Result<String, RuntimeError> {
@@ -189,19 +140,50 @@ pub(crate) fn workspace_store_leaf(workspace: &AnchoredWorkspace) -> Result<Stri
     Ok(format!("{WORKSPACE_STORE_PREFIX}{}", sha256_hex(&key)))
 }
 
-#[cfg(unix)]
 pub(crate) fn stable_native_path_bytes(path: &Path) -> Vec<u8> {
     use std::os::unix::ffi::OsStrExt as _;
 
     path.as_os_str().as_bytes().to_vec()
 }
 
-#[cfg(windows)]
-pub(crate) fn stable_native_path_bytes(path: &Path) -> Vec<u8> {
-    use std::os::windows::ffi::OsStrExt as _;
+pub struct RuntimeDirs {
+    pub(crate) logs: AnchoredDir,
+    pub(crate) sessions: AnchoredDir,
+}
 
-    path.as_os_str()
-        .encode_wide()
-        .flat_map(u16::to_le_bytes)
-        .collect()
+#[cfg(test)]
+pub fn ensure_runtime_dirs(workspace: &Path) -> Result<RuntimeDirs, RuntimeError> {
+    let workspace = AnchoredWorkspace::open(workspace)?;
+    ensure_anchored_runtime_dirs(&workspace)
+}
+
+pub(crate) fn ensure_anchored_runtime_dirs(
+    workspace: &AnchoredWorkspace,
+) -> Result<RuntimeDirs, RuntimeError> {
+    let store = WorkspaceStore::open(workspace, true)?.expect("created workspace store is present");
+    let sessions = store
+        .child(SESSION_STORAGE_DIR, true)?
+        .expect("created session directory is present");
+    sync_anchored_directory(store.root())?;
+    let logs = store
+        .child(LOG_STORAGE_DIR, true)?
+        .expect("created log directory is present");
+    sync_anchored_directory(store.root())?;
+    Ok(RuntimeDirs { logs, sessions })
+}
+
+#[cfg(test)]
+pub fn open_runtime_dir(workspace: &Path, leaf: &str) -> Result<Option<AnchoredDir>, RuntimeError> {
+    let workspace = AnchoredWorkspace::open(workspace)?;
+    open_anchored_runtime_dir(&workspace, leaf)
+}
+
+pub(crate) fn open_anchored_runtime_dir(
+    workspace: &AnchoredWorkspace,
+    leaf: &str,
+) -> Result<Option<AnchoredDir>, RuntimeError> {
+    let Some(store) = WorkspaceStore::open(workspace, false)? else {
+        return Ok(None);
+    };
+    store.child(leaf, false)
 }

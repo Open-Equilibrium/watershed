@@ -1,10 +1,7 @@
 use super::OPENAI_CODEX_ORIGINATOR;
 use super::protocol::{ProviderTurn, decode_responses_turn, provider_error_message};
 use crate::runtime::{
-    deadlines::{
-        AwaitInterruption, HttpDeadlines, RESPONSES_HTTP_DEADLINES, await_deadline_or_cancellation,
-        block_on_network, build_http_client,
-    },
+    deadlines::{AwaitInterruption, HttpDeadlines, await_deadline_or_cancellation},
     responses::SseDecoder,
     types::RuntimeError,
 };
@@ -12,34 +9,7 @@ use std::sync::atomic::AtomicBool;
 
 const MAX_PROVIDER_ERROR_BODY_BYTES: usize = 64 * 1024;
 
-pub(crate) fn request_responses_at(
-    endpoint: &str,
-    credential: &crate::runtime::oauth_credential::CredentialRecord,
-    body: &serde_json::Value,
-) -> Result<ProviderTurn, RuntimeError> {
-    request_responses_at_with_cancellation(
-        endpoint,
-        credential,
-        body,
-        crate::runtime::cancellation::productive_cancellation(),
-    )
-}
-
-pub(crate) fn request_responses_at_with_cancellation(
-    endpoint: &str,
-    credential: &crate::runtime::oauth_credential::CredentialRecord,
-    body: &serde_json::Value,
-    cancelled: &AtomicBool,
-) -> Result<ProviderTurn, RuntimeError> {
-    request_responses_at_with_deadlines_and_cancellation(
-        endpoint,
-        credential,
-        body,
-        RESPONSES_HTTP_DEADLINES,
-        cancelled,
-    )
-}
-
+#[cfg(test)]
 pub(crate) fn request_responses_at_with_deadlines_and_cancellation(
     endpoint: &str,
     credential: &crate::runtime::oauth_credential::CredentialRecord,
@@ -47,23 +17,15 @@ pub(crate) fn request_responses_at_with_deadlines_and_cancellation(
     deadlines: HttpDeadlines,
     cancelled: &AtomicBool,
 ) -> Result<ProviderTurn, RuntimeError> {
-    block_on_network(request_responses_async(
-        endpoint, credential, body, deadlines, cancelled,
-    ))?
-}
-
-pub(crate) async fn request_responses_async(
-    endpoint: &str,
-    credential: &crate::runtime::oauth_credential::CredentialRecord,
-    body: &serde_json::Value,
-    deadlines: HttpDeadlines,
-    cancelled: &AtomicBool,
-) -> Result<ProviderTurn, RuntimeError> {
-    let client = build_http_client(deadlines).map_err(|_| {
-        RuntimeError::definitive_provider_error(None, "HTTP client construction failed")
-    })?;
-    request_responses_with_client_async(client, endpoint, credential, body, deadlines, cancelled)
+    crate::runtime::deadlines::block_on_network(async {
+        let client = crate::runtime::deadlines::build_http_client(deadlines).map_err(|_| {
+            RuntimeError::definitive_provider_error(None, "HTTP client construction failed")
+        })?;
+        request_responses_with_client_async(
+            client, endpoint, credential, body, deadlines, cancelled,
+        )
         .await
+    })?
 }
 
 pub(crate) async fn request_responses_with_client_async(

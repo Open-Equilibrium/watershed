@@ -1,4 +1,5 @@
 use super::provider_turn::execute_leaf_turns;
+#[cfg(test)]
 use super::tool::SystemProductiveToolExecutor;
 use super::{
     CANCELLED_REASON, ProductiveContext, ProductiveExecution, ProductiveProvider,
@@ -15,7 +16,8 @@ use crate::runtime::{
         phase_entered_payload,
     },
     event_writer::RuntimeEventSink,
-    execution_plan::RuntimeExecution,
+    execution_plan::{RuntimeExecution, RuntimeFailure},
+    failures::runtime_failure_for_unhandled_error,
     live_flow_invocations::acquire_live_flow_invocation,
     phase_control::{PhaseSequenceState, phase_should_repeat},
     run_attempts::{ProductiveAttemptLog, ProductiveRecovery, ProviderTerminalClassification},
@@ -48,6 +50,7 @@ where
     )
 }
 
+#[cfg(test)]
 pub(crate) fn execute_productive_flow_with_recovery<P, A, S>(
     execution: ProductiveExecution<'_>,
     provider: &mut P,
@@ -185,7 +188,7 @@ where
             if context.recovery_failed || context.event_commit_failed {
                 return Err(error);
             }
-            let reason = productive_failure_reason(&error);
+            let reason = productive_failure(&error).reason;
             mark_recovery_failure(
                 &mut context.recovery_failed,
                 context.recovery.terminal_boundary(
@@ -288,16 +291,22 @@ where
             if context.recovery_failed || context.event_commit_failed {
                 return Err(error);
             }
-            let reason = productive_failure_reason(&error);
+            let failure = productive_failure(&error);
             if !context.runtime_error_emitted {
+                let mut payload = serde_json::json!({
+                    "code": failure.reason,
+                    "message": error
+                        .provider_failure()
+                        .map_or(failure.message, |provider| provider.message()),
+                });
+                if !failure.data.is_empty() {
+                    payload["data"] = serde_json::Value::Object(failure.data);
+                }
                 emit_and_commit(
                     builder,
                     Some(&invocation),
                     EventType::Error,
-                    serde_json::json!({
-                        "code": reason,
-                        "message": productive_failure_message(&error),
-                    }),
+                    payload,
                     context.sink,
                     &mut context.event_commit_failed,
                 )?;
@@ -308,7 +317,7 @@ where
                 Some(&invocation),
                 EventType::FlowFailed,
                 serde_json::json!({
-                    "error": reason,
+                    "error": failure.reason,
                     "flow_definition_id": flow.identity.id,
                 }),
                 context.sink,
@@ -407,7 +416,7 @@ where
                     .expect("Phase entry payload is an object")
                     .insert(
                         "error".to_owned(),
-                        serde_json::json!(productive_failure_reason(&error)),
+                        serde_json::json!(productive_failure(&error).reason),
                     );
                 emit_and_commit(
                     builder,
@@ -539,17 +548,19 @@ where
     unreachable!("Phase iteration range is non-empty and bounded")
 }
 
-fn productive_failure_reason(error: &RuntimeError) -> &str {
-    match error {
-        RuntimeError::Denied { reason, .. } => reason.as_str(),
-        RuntimeError::Provider(_) => ProviderTerminalClassification::ProviderError.as_str(),
-        RuntimeError::Cancelled => CANCELLED_REASON,
-        _ => RUNTIME_ERROR_REASON,
+fn productive_failure(error: &RuntimeError) -> RuntimeFailure {
+    let mut failure = runtime_failure_for_unhandled_error(error);
+    if failure.reason != RUNTIME_ERROR_REASON {
+        return failure;
     }
-}
-
-fn productive_failure_message(error: &RuntimeError) -> &str {
-    error
-        .provider_failure()
-        .map_or("runtime execution failed", |failure| failure.message())
+    match error {
+        RuntimeError::Provider(_) => {
+            failure.reason = ProviderTerminalClassification::ProviderError
+                .as_str()
+                .to_owned();
+        }
+        RuntimeError::Cancelled => failure.reason = CANCELLED_REASON.to_owned(),
+        _ => {}
+    }
+    failure
 }

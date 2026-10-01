@@ -356,9 +356,7 @@ fn completed_recovery_attempts(
         let state = state_by_id
             .get(&attempt_id)
             .ok_or_else(|| protocol("completed recovery attempt has no state"))?;
-        let request_hash = state.request_hash.clone().ok_or_else(|| {
-            protocol("completed productive attempt predates safe recovery request hashes")
-        })?;
+        let request_hash = state.request_hash.clone();
         completed.insert(
             attempt_id.clone(),
             RecoveryAttempt {

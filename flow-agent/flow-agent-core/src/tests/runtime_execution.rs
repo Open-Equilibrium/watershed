@@ -7,7 +7,7 @@ use super::{
 };
 use crate::runtime::{
     apply::{FlowApplication, apply_flow_with_sink},
-    execution_plan::{FlowExecutionOptions, ToolSideEffectMode, runtime_policy_target},
+    execution_plan::{FlowExecutionAction, FlowExecutionOptions, ToolSideEffectMode},
     fixture_effects::{
         fixture_tool_applied_ids, fixture_tool_apply_count, reset_fixture_tool_apply_count,
     },
@@ -41,6 +41,23 @@ fn deterministic_plan_and_checked_execution_match_planned_signatures() {
     assert_eq!(fixture_tool_apply_count(), 0);
     assert!(plan.execution.events.record_count > 0);
     assert!(plan.execution.context_manifests.record_count > 0);
+    assert_eq!(
+        plan.execution
+            .actions
+            .iter()
+            .filter_map(|action| match action {
+                FlowExecutionAction::Fixture(action) => Some(action.action_id.clone()),
+                FlowExecutionAction::Event(_) => None,
+            })
+            .collect::<Vec<_>>(),
+        [
+            "fixture-000001",
+            "fixture-000002",
+            "fixture-000003",
+            "fixture-000004"
+        ],
+        "Fixture actions preserve contiguous Tool identity despite interleaved Events"
+    );
     let mut original = RuntimeStreamSignatureBuilder::new(EVENT_PLAN_DOMAIN);
     original.push(b"a");
     original.push(b"bc");
@@ -162,9 +179,8 @@ fn apply_uses_the_planned_fixture_effect_snapshot() {
         "instruction_refs: []",
     );
     let registry_a = load_test_registry(&workspace, "hello-flow");
-    let policy_a =
-        core_policy::compile_policy_artifact(&registry_a, "hello-flow", runtime_policy_target())
-            .expect("plan policy compiles");
+    let policy_a = core_policy::compile_policy_artifact(&registry_a, "hello-flow")
+        .expect("plan policy compiles");
     let root_flow_a = registry_a
         .flow_block("hello-flow")
         .expect("hello-flow fixture exists");
@@ -218,7 +234,7 @@ fn run_flow_keeps_started_audit_after_partial_apply_failure() {
         "printf '%s\\n' \"$SUMMARY\" > out/summary.txt",
         "printf 'partial\\n' > out/blocker",
     );
-    add_bad_write_tool_to_summarize(&workspace, "printf 'later\\n' > out/blocker/later.txt");
+    add_bad_write_tool_to_summarize(&workspace, "printf 'later\\n' > out/blocker");
 
     let output = run_flow(&workspace, "hello-flow", EmitMode::Jsonl)
         .expect("later apply-time write is recorded as a failed run");
@@ -294,7 +310,7 @@ fn nested_partial_apply_failure_terminalizes_child_and_parent_flows() {
         "printf '%s\\n' \"$SUMMARY\" > out/summary.txt",
         "printf 'partial\\n' > out/blocker",
     );
-    add_bad_write_tool_to_summarize(&workspace, "printf 'later\\n' > out/blocker/later.txt");
+    add_bad_write_tool_to_summarize(&workspace, "printf 'later\\n' > out/blocker");
 
     let output = run_flow(&workspace, "hello-flow", EmitMode::Jsonl)
         .expect("nested apply-time denial is recorded as a failed run");

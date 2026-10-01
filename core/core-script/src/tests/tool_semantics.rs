@@ -1,10 +1,8 @@
 use super::super::error::SemanticValidationError;
 use super::super::model::{
-    AllowedParameter, BlockIdentity, NetworkAllowEntry, NetworkAllowKind, NetworkDefault,
-    NetworkDeny, NetworkPolicy, NetworkTransport, ParameterValueType, RegistryBlock,
-    ResolvedRegistry, ToolBlock, ToolCommand, ToolKind,
+    AllowedParameter, BlockIdentity, ParameterValueType, ToolBlock, ToolCommand, ToolKind,
 };
-use super::super::semantics::{validate_registry_block_semantics, validate_tool_semantics};
+use super::super::semantics::validate_tool_semantics;
 use super::super::values::parameter_pattern_matches;
 use super::own_script_tool;
 
@@ -51,13 +49,9 @@ fn semantic_validation_enforces_tool_kind_specific_script_fields() {
             id: "echo".to_owned(),
             name: "Echo".to_owned(),
         },
-        network: NetworkPolicy::Deny(NetworkDeny),
-        protected_path_grants: Vec::new(),
-        read_scope: Vec::new(),
         script_body: Some("echo unexpected".to_owned()),
         script_runtime: None,
         tool_kind: ToolKind::PredefinedCommand,
-        write_scope: Vec::new(),
     };
 
     let err =
@@ -91,13 +85,9 @@ fn semantic_validation_rejects_nul_bearing_tool_execution_fields() {
             id: "echo".to_owned(),
             name: "Echo".to_owned(),
         },
-        network: NetworkPolicy::Deny(NetworkDeny),
-        protected_path_grants: Vec::new(),
-        read_scope: Vec::new(),
         script_body: None,
         script_runtime: None,
         tool_kind: ToolKind::PredefinedCommand,
-        write_scope: Vec::new(),
     };
     let error = validate_tool_semantics(&predefined).expect_err("NUL argv is rejected");
     assert!(error.to_string().contains("NUL"));
@@ -168,75 +158,4 @@ fn semantic_validation_compiles_tool_parameter_patterns() {
         SemanticValidationError::InvalidToolDefinition { message, .. }
             if message.contains("min must be <= max")
     ));
-}
-
-#[test]
-fn semantic_validation_rejects_noncanonical_network_cidr() {
-    let mut tool = own_script_tool("network-tool", "script:network-tool");
-    tool.network = NetworkPolicy::Declared {
-        allow: vec![NetworkAllowEntry {
-            cidr: "192.0.2.42/24".to_owned(),
-            kind: NetworkAllowKind::Cidr,
-            port: 443,
-            transport: NetworkTransport::Tcp,
-        }],
-        default: NetworkDefault::Deny,
-    };
-
-    let err = validate_tool_semantics(&tool).expect_err("host-bit CIDR rejected");
-
-    assert!(err.to_string().contains("invalid canonical CIDR"));
-    assert_eq!(
-        err,
-        SemanticValidationError::InvalidCanonicalCidr {
-            cidr: "192.0.2.42/24".to_owned(),
-            tool_id: "network-tool".to_owned(),
-        }
-    );
-
-    if let NetworkPolicy::Declared { allow, .. } = &mut tool.network {
-        allow[0].cidr = "192.0.2.0/24".to_owned();
-    }
-    validate_registry_block_semantics(&RegistryBlock::Tool(tool)).expect("canonical CIDR accepted");
-}
-
-#[test]
-fn registry_boundaries_reject_unsafe_tool_filesystem_paths() {
-    for (field, value) in [
-        ("read_scope", "../outside"),
-        ("read_scope", "/tmp"),
-        ("read_scope", r"workspace\out"),
-        ("write_scope", "C:/temp"),
-        ("write_scope", "workspace/./out"),
-        ("write_scope", "workspace/NUL"),
-        ("protected_path_grants", "../**"),
-        ("protected_path_grants", "$HOME/**"),
-        ("protected_path_grants", "workspace/**suffix"),
-    ] {
-        let mut tool = own_script_tool("unsafe-path", "script:unsafe-path");
-        match field {
-            "read_scope" => tool.read_scope.push(value.to_owned()),
-            "write_scope" => tool.write_scope.push(value.to_owned()),
-            "protected_path_grants" => tool.protected_path_grants.push(value.to_owned()),
-            _ => unreachable!(),
-        }
-
-        let err = ResolvedRegistry::from_blocks([RegistryBlock::Tool(tool)])
-            .expect_err("unsafe tool filesystem path is rejected");
-
-        assert!(err.to_string().contains(field), "{field} {value:?}: {err}");
-    }
-}
-
-#[test]
-fn semantic_validation_accepts_safe_tool_filesystem_paths_and_patterns() {
-    let mut tool = own_script_tool("safe-path", "script:safe-path");
-    tool.read_scope = vec!["workspace".to_owned()];
-    tool.write_scope = vec!["workspace/out".to_owned()];
-    tool.protected_path_grants = vec![
-        "workspace/.env".to_owned(),
-        "workspace/secrets/**".to_owned(),
-    ];
-
-    validate_tool_semantics(&tool).expect("safe filesystem paths and patterns are accepted");
 }

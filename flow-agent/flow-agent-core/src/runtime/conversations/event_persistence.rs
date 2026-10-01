@@ -94,10 +94,6 @@ impl SerialConversationWriter {
                 canonical_jsonl: canonical_jsonl.to_owned(),
                 context_manifest,
                 event: Box::new(event.clone()),
-                #[cfg(test)]
-                measurement_started_at: None,
-                #[cfg(test)]
-                pre_batch_latency_nanos: None,
             },
             response,
             is_batchable,
@@ -148,7 +144,6 @@ struct ConversationWriterBackend {
 impl ConversationWriterBackend {
     fn acknowledge(&self, event: QueuedEvent, outcome: WriterOutcome) {
         if outcome.appended
-            && outcome.error.is_none()
             && let Some(notifier) = &self.notifier
         {
             notifier.try_notify_conversation_run(
@@ -176,12 +171,8 @@ impl ConversationWriterBackend {
             self.acknowledge(
                 event,
                 WriterOutcome {
-                    #[cfg(test)]
-                    append_latency_nanos: None,
                     appended: true,
                     error: None,
-                    #[cfg(test)]
-                    notification_latency_nanos: None,
                 },
             );
         }
@@ -243,12 +234,8 @@ impl ConversationWriterBackend {
             None
         };
         WriterOutcome {
-            #[cfg(test)]
-            append_latency_nanos: None,
             appended: true,
             error: append_error.or(sync_error),
-            #[cfg(test)]
-            notification_latency_nanos: None,
         }
     }
 }

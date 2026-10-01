@@ -1,15 +1,11 @@
 use super::{M11BudgetOutcome, RSS_FIXTURE_BYTES, RSS_TOUCH_STRIDE_BYTES, outcome};
 use std::{hint::black_box, path::Path, time::Instant};
 
-#[cfg(unix)]
 use crate::runtime::tool_runner::{
-    MAX_TOOL_STREAM_BYTES, OWN_SCRIPT_EXECUTABLE, ToolInvocation, ToolRunControl,
-    ToolTerminalClassification, execute_tool_invocation, measure_ready_process_group_cleanup,
-    measure_ready_tool_cancellation,
+    MAX_TOOL_STREAM_BYTES, ToolInvocation, ToolRunControl, ToolTerminalClassification,
+    execute_tool_invocation, measure_ready_process_group_cleanup, measure_ready_tool_cancellation,
 };
-#[cfg(unix)]
 use crate::runtime::{fs_guards::AnchoredWorkspace, run_attempts::RunAttemptOutcome};
-#[cfg(unix)]
 use std::{sync::atomic::AtomicBool, time::Duration};
 
 pub(super) const NOOP_LAUNCHES: usize = 4;
@@ -39,7 +35,6 @@ pub(super) fn rss_detection_fixture() -> Result<M11BudgetOutcome, String> {
     ))
 }
 
-#[cfg(unix)]
 pub(super) fn runner_four_noop_launches(temp_root: &Path) -> Result<M11BudgetOutcome, String> {
     let cancelled = AtomicBool::new(false);
     let workspace = AnchoredWorkspace::open(temp_root)
@@ -77,23 +72,11 @@ pub(super) fn runner_four_noop_launches(temp_root: &Path) -> Result<M11BudgetOut
     ))
 }
 
-#[cfg(not(unix))]
-pub(super) fn runner_four_noop_launches(_: &Path) -> Result<M11BudgetOutcome, String> {
-    Err("runner workloads require the selected Unix reference platform".to_owned())
-}
-
-#[cfg(unix)]
 pub(super) fn runner_termination() -> Result<M11BudgetOutcome, String> {
     let elapsed = measure_ready_process_group_cleanup().map_err(str::to_owned)?;
     Ok(outcome(elapsed, 1, 0, 0, 0))
 }
 
-#[cfg(not(unix))]
-pub(super) fn runner_termination() -> Result<M11BudgetOutcome, String> {
-    Err("runner workloads require the selected Unix reference platform".to_owned())
-}
-
-#[cfg(unix)]
 pub(super) fn runner_cancellation(temp_root: &Path) -> Result<M11BudgetOutcome, String> {
     let (elapsed, result) = measure_ready_tool_cancellation(temp_root).map_err(str::to_owned)?;
     if result.status != RunAttemptOutcome::Cancelled
@@ -107,18 +90,12 @@ pub(super) fn runner_cancellation(temp_root: &Path) -> Result<M11BudgetOutcome, 
     Ok(outcome(elapsed, 1, 0, 0, 1))
 }
 
-#[cfg(not(unix))]
-pub(super) fn runner_cancellation(_: &Path) -> Result<M11BudgetOutcome, String> {
-    Err("runner workloads require the selected Unix reference platform".to_owned())
-}
-
-#[cfg(unix)]
 pub(super) fn runner_dual_stream_caps(temp_root: &Path) -> Result<M11BudgetOutcome, String> {
     let cancelled = AtomicBool::new(false);
     let workspace = AnchoredWorkspace::open(temp_root)
         .map_err(|_| "runner workspace did not open".to_owned())?;
     let invocation = ToolInvocation {
-        executable: OWN_SCRIPT_EXECUTABLE.to_owned(),
+        executable: proto::EXECUTOR_OWN_SCRIPT_EXECUTABLE_V0.to_owned(),
         argv: vec![
             "-c".to_owned(),
             format!(
@@ -157,9 +134,4 @@ pub(super) fn runner_dual_stream_caps(temp_root: &Path) -> Result<M11BudgetOutco
         (result.stdout.len() + result.stderr.len()) as u64,
         checksum,
     ))
-}
-
-#[cfg(not(unix))]
-pub(super) fn runner_dual_stream_caps(_: &Path) -> Result<M11BudgetOutcome, String> {
-    Err("runner workloads require the selected Unix reference platform".to_owned())
 }
