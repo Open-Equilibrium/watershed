@@ -4,11 +4,12 @@ use crate::runtime::deadlines::{
 };
 use reqwest::dns::{Name, Resolve, Resolving};
 use std::{
+    collections::HashSet,
     future::Future,
     io::{Read, Write},
     net::{TcpListener, TcpStream},
     sync::{
-        Arc,
+        Arc, Condvar, Mutex,
         atomic::{AtomicBool, Ordering},
         mpsc,
     },
@@ -161,4 +162,263 @@ fn elapsed_deadline_cancels_the_in_flight_future_once() {
 
     assert!(matches!(result, Ok(Err(DeadlineElapsed))));
     assert!(cancelled.load(Ordering::SeqCst));
+}
+
+type SystemLookup = Arc<dyn Fn(&str) -> std::io::Result<reqwest::dns::Addrs> + Send + Sync>;
+
+#[derive(Default)]
+struct LookupGate {
+    released: HashSet<String>,
+    release_all: bool,
+}
+
+struct HeldSystemLookups {
+    gate: Arc<(Mutex<LookupGate>, Condvar)>,
+    lookup: SystemLookup,
+    started: mpsc::Receiver<String>,
+    completed: mpsc::Receiver<String>,
+    commands: Vec<thread::JoinHandle<()>>,
+}
+
+impl HeldSystemLookups {
+    fn new() -> Self {
+        let gate = Arc::new((Mutex::new(LookupGate::default()), Condvar::new()));
+        let held = Arc::clone(&gate);
+        let (started, started_rx) = mpsc::channel();
+        let (completed, completed_rx) = mpsc::channel();
+        let lookup = Arc::new(move |name: &str| {
+            started.send(name.to_owned()).unwrap();
+            let (lock, wake) = &*held;
+            let state = lock.lock().unwrap();
+            let (state, guard) = wake
+                .wait_timeout_while(state, Duration::from_secs(20), |state| {
+                    !state.release_all && !state.released.contains(name)
+                })
+                .unwrap();
+            assert!(
+                !guard.timed_out(),
+                "held lookup cleanup did not release {name}"
+            );
+            drop(state);
+            let _ = completed.send(name.to_owned());
+            Err(std::io::Error::other("controlled system lookup completed"))
+        });
+        Self {
+            gate,
+            lookup,
+            started: started_rx,
+            completed: completed_rx,
+            commands: Vec::new(),
+        }
+    }
+
+    fn command(
+        &mut self,
+        name: &str,
+        authentication: bool,
+        cancelled: Arc<AtomicBool>,
+        deadlines: HttpDeadlines,
+    ) -> mpsc::Receiver<Result<(), crate::runtime::types::RuntimeError>> {
+        let endpoint = format!("http://{name}/lookup");
+        let lookup = Arc::clone(&self.lookup);
+        let (returned, result) = mpsc::channel();
+        self.commands.push(thread::spawn(move || {
+            let result = crate::runtime::deadlines::with_system_lookup(lookup, || {
+                if authentication {
+                    crate::runtime::auth::post_json_with_deadlines(
+                        &endpoint,
+                        &serde_json::json!({}),
+                        16,
+                        deadlines,
+                    )
+                    .map(|_| ())
+                } else {
+                    let credential = crate::runtime::oauth_credential::CredentialRecord {
+                        credential_type: "oauth".to_owned(),
+                        access: "access-fixture".to_owned(),
+                        refresh: "refresh-fixture".to_owned(),
+                        expires: 1,
+                        account_id: "account-fixture".to_owned(),
+                        is_fedramp: false,
+                    };
+                    crate::runtime::openai_codex::request_responses_at_with_deadlines_and_cancellation(
+                        &endpoint,
+                        &credential,
+                        &serde_json::json!({}),
+                        deadlines,
+                        &cancelled,
+                    )
+                    .map(|_| ())
+                }
+            });
+            let _ = returned.send(result);
+        }));
+        result
+    }
+
+    fn release(&self, name: &str) {
+        let (lock, wake) = &*self.gate;
+        lock.lock().unwrap().released.insert(name.to_owned());
+        wake.notify_all();
+        assert_eq!(
+            self.completed.recv_timeout(Duration::from_secs(2)).unwrap(),
+            name
+        );
+    }
+}
+
+impl Drop for HeldSystemLookups {
+    fn drop(&mut self) {
+        let (lock, wake) = &*self.gate;
+        lock.lock().unwrap().release_all = true;
+        wake.notify_all();
+        for command in self.commands.drain(..) {
+            let _ = command.join();
+        }
+    }
+}
+
+fn lookup_deadlines() -> HttpDeadlines {
+    HttpDeadlines {
+        connect: Duration::from_secs(5),
+        header: Duration::from_millis(100),
+        read: Duration::from_secs(5),
+        overall: Duration::from_secs(10),
+    }
+}
+
+fn assert_lookup_command_error(
+    result: mpsc::Receiver<Result<(), crate::runtime::types::RuntimeError>>,
+    authentication: bool,
+    cancellation: bool,
+) {
+    use crate::runtime::types::RuntimeError;
+    let error = result
+        .recv_timeout(Duration::from_secs(2))
+        .expect("synchronous command must return before held system lookup completes")
+        .expect_err("lookup is interrupted");
+    if authentication {
+        assert_eq!(error.to_string(), "authentication protocol failure");
+    } else if cancellation {
+        assert!(matches!(error, RuntimeError::Cancelled));
+    } else {
+        assert!(
+            error
+                .to_string()
+                .contains("Responses header deadline elapsed")
+        );
+        assert!(!error.provider_failure().unwrap().is_definitive());
+    }
+}
+
+#[test]
+fn system_dns_timeout_and_cancellation_return_before_lookup_completion() {
+    let mut held = HeldSystemLookups::new();
+    for (name, authentication, cancellation) in [
+        ("auth-timeout.invalid", true, false),
+        ("provider-timeout.invalid", false, false),
+        ("provider-cancellation.invalid", false, true),
+    ] {
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let result = held.command(
+            name,
+            authentication,
+            Arc::clone(&cancelled),
+            lookup_deadlines(),
+        );
+        assert_eq!(
+            held.started.recv_timeout(Duration::from_secs(2)).unwrap(),
+            name
+        );
+        if cancellation {
+            cancelled.store(true, Ordering::Release);
+        }
+        assert_lookup_command_error(result, authentication, cancellation);
+        assert!(matches!(
+            held.completed.try_recv(),
+            Err(mpsc::TryRecvError::Empty)
+        ));
+        held.release(name);
+    }
+}
+
+#[test]
+fn system_dns_capacity_is_shared_and_reclaimed_only_after_lookup_completion() {
+    let mut held = HeldSystemLookups::new();
+    let mut results = Vec::new();
+    for index in 0..32 {
+        let authentication = index % 2 == 0;
+        let name = format!("mixed-{index}.invalid");
+        let cancelled = Arc::new(AtomicBool::new(false));
+        results.push((
+            held.command(
+                &name,
+                authentication,
+                Arc::clone(&cancelled),
+                lookup_deadlines(),
+            ),
+            authentication,
+        ));
+        assert_eq!(
+            held.started.recv_timeout(Duration::from_secs(2)).unwrap(),
+            name
+        );
+        if !authentication {
+            cancelled.store(true, Ordering::Release);
+        }
+    }
+    let excess = held.command(
+        "excess.invalid",
+        true,
+        Arc::new(AtomicBool::new(false)),
+        lookup_deadlines(),
+    );
+    assert!(
+        held.started
+            .recv_timeout(Duration::from_millis(250))
+            .is_err(),
+        "the 33rd system lookup started while all 32 admitted lookups remained held"
+    );
+    assert_lookup_command_error(excess, true, false);
+    for (result, authentication) in results {
+        assert_lookup_command_error(result, authentication, !authentication);
+    }
+    assert!(matches!(
+        held.completed.try_recv(),
+        Err(mpsc::TryRecvError::Empty)
+    ));
+
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let waiting = held.command(
+        "cancelled-admission.invalid",
+        false,
+        Arc::clone(&cancelled),
+        HttpDeadlines {
+            header: Duration::from_secs(5),
+            ..lookup_deadlines()
+        },
+    );
+    cancelled.store(true, Ordering::Release);
+    assert_lookup_command_error(waiting, false, true);
+    assert!(matches!(
+        held.started.try_recv(),
+        Err(mpsc::TryRecvError::Empty)
+    ));
+
+    held.release("mixed-0.invalid");
+    let replacement = held.command(
+        "replacement.invalid",
+        true,
+        Arc::new(AtomicBool::new(false)),
+        lookup_deadlines(),
+    );
+    assert_eq!(
+        held.started.recv_timeout(Duration::from_secs(2)).unwrap(),
+        "replacement.invalid"
+    );
+    assert_lookup_command_error(replacement, true, false);
+    assert!(matches!(
+        held.completed.try_recv(),
+        Err(mpsc::TryRecvError::Empty)
+    ));
 }

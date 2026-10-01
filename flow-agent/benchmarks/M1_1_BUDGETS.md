@@ -1,6 +1,6 @@
 # M1.1 Limits and Performance Evidence
 
-This is the canonical M1.1 source for hard functional limits, their boundary proofs and the selected observational workloads. Its counting rules, fixtures and exclusions are fixed by ADR-0107; ADR-0123 adds CV-15, ADR-0124 adds PR-01/PR-02 and ADR-0127 adds CV-16/CV-17.
+This is the canonical M1.1 source for hard functional limits, their boundary proofs and the selected observational workloads. Its counting rules, fixtures and exclusions are fixed by ADR-0107; ADR-0123 adds CV-15, ADR-0124 adds PR-01/PR-02, ADR-0127 adds CV-16/CV-17 and ADR-0177 adds OA-24.
 
 ## Evidence rules
 
@@ -50,6 +50,7 @@ HTTP body caps count decoded response-body bytes delivered by the HTTP client, b
 | OA-21 | Response-body deadline: 30 s | `F:auth_body_deadline`; after headers, fake monotonic time keeps the production body read pending through 30 s - 1 ns and observes its sole timeout at 30 s. | F-only: exact production deadline lifecycle. |
 | OA-22 | Complete authentication request: 60 s | `F:auth_overall_deadline`; body progress cannot extend the production request past the sole exact 60 s fake-time timeout. | F-only: exact production deadline lifecycle. |
 | OA-23 | Complete device poll: 15 min | `F:device_poll_overall_deadline`; pending and `slow_down` responses cannot extend 900 s. | F-only: fake-clock protocol lifecycle. |
+| OA-24 | System DNS: 32 admitted queued or executing lookups shared by authentication and Responses | `F:system_dns_timeout_and_cancellation_return_before_lookup_completion`, `F:system_dns_capacity_is_shared_and_reclaimed_only_after_lookup_completion`; held lookups cannot delay command returns, mixed requests fill the exact capacity, excess requests time out or cancel without starting a lookup, and only actual completion admits replacement work. | F-only: bounded blocking-work and command-deadline lifecycle; no latency threshold. |
 
 ## Responses stream
 

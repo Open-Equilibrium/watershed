@@ -16,7 +16,6 @@ summary{cursor:pointer}summary h3{display:inline;margin:0}summary:focus-visible{
     <p class="muted">Live maintainer decisions only. Accepted decisions live in <a href="../adr/ADR-LOG.md">ADR-LOG.md</a>; implementation detail belongs in the canonical docs listed in <a href="../../AGENTS.md">AGENTS.md</a>.</p>
     <p><span class="tag">Rule</span> Hygiene limits and canonical-home rules live in <a href="../../AGENTS.md">AGENTS.md</a>.</p>
     <nav aria-label="Decision links">
-      <a href="#m1-2">Flow Agent: M1.2 completion</a>
       <a href="#release-1">Flow Agent: first release</a>
       <a href="#release-security">Shared release safeguards</a>
       <a href="#m2">Meta-Harness (M2)</a>
@@ -24,24 +23,6 @@ summary{cursor:pointer}summary h3{display:inline;margin:0}summary:focus-visible{
       <a href="#post-m1">Flow Agent: extended capabilities</a>
     </nav>
   </header>
-
-  <section id="m1-2">
-    <h2>Flow Agent - M1.2 Completion</h2>
-    <div class="grid">
-      <details id="d-068" class="decision" style="grid-column:1/-1">
-        <summary><h3>D-068 - Network Deadlines During Stalled DNS</h3></summary>
-        <p><strong>Status:</strong> Blocks the stability review and M1.2 closeout. No repair policy is approved.</p>
-        <p><strong>Observed failure:</strong> Authentication and provider requests use the operating system to resolve server names. A controlled test held that lookup open: the request reached its timeout or cancellation, but its temporary network runtime waited for the lookup during cleanup, so the command did not return. Authentication can retain its credential-store lock, and a provider Run can retain its dispatch permit without settling the durable attempt. Existing fail-closed recovery remains in force.</p>
-        <p><strong>Question:</strong> Which ownership and capacity policy should make command deadlines enforceable when system DNS stalls?</p>
-        <ul>
-          <li><strong>A - Keep system DNS and existing dependencies.</strong> Use one process-owned network runtime and a shared limit of 32 queued or executing DNS lookups across authentication and provider requests. Admission waits only within the existing request deadline; a started lookup keeps its slot until it actually finishes, even after cancellation. Runtime shutdown never waits for stalled lookups. Pro: preserves system DNS behavior and bounds retained work without a new dependency. Con: system lookups cannot be forcibly cancelled; exhausted slots can prevent new network work until lookups finish or the process restarts.</li>
-          <li><strong>B - Select a cancellable asynchronous resolver.</strong> Review the specific dependency, license and DNS behavior before implementation. Pro: stalled lookups can end with their request. Con: adds a dependency and may change host DNS behavior; both native targets need verification.</li>
-        </ul>
-        <p><strong>Recommendation:</strong> A with the stated shared limit, deadline-bounded admission and slot lifetime. Detaching a fresh runtime per request alone would permit repeated stalled lookups to accumulate; the existing live-Flow limit does not bound authentication or DNS work retained after cancellation.</p>
-        <p><strong>Acceptance criterion:</strong> Record the selected policy before implementation. Controlled timeout and cancellation tests must return before the blocked lookup is released. Repeated mixed authentication/provider requests must retain no more than the approved aggregate lookup capacity, reclaim slots only when the actual work ends, and preserve existing request budgets, durable intent ordering and uncertain-result recovery. Verify the implementation on the native targets in <a href="../../PLATFORMS.md">PLATFORMS.md</a>; keep numeric request budgets canonical in the <a href="../../flow-agent/benchmarks/M1_1_BUDGETS.md#oauth-and-authentication">budget matrix</a>.</p>
-      </details>
-    </div>
-  </section>
 
   <section id="release-1">
     <h2>Flow Agent - First Release</h2>

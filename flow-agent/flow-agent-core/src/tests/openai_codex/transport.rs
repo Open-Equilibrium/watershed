@@ -34,7 +34,10 @@ fn productive_http_dispatch_uses_the_pinned_headers_and_no_retry() {
     let credential = fixture_credential_with_routing(None);
     let access = credential.access.clone();
     let listener = TcpListener::bind("127.0.0.1:0").expect("fake provider binds");
-    let endpoint = format!("http://{}/responses", listener.local_addr().unwrap());
+    let endpoint = format!(
+        "http://localhost:{}/responses",
+        listener.local_addr().unwrap().port()
+    );
     let server = thread::spawn(move || {
         let (mut stream, _) = listener.accept().expect("one provider request");
         let mut request = vec![0_u8; 16 * 1024];
