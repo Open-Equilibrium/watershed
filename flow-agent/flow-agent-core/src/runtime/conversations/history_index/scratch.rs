@@ -262,7 +262,7 @@ impl HistoryScratchRootLease {
             Err(RuntimeError::Io { source, .. })
                 if source.kind() == std::io::ErrorKind::AlreadyExists =>
             {
-                open_scratch_file_for_update(&path)?.0
+                open_anchored_file_for_update(&path)?.0
             }
             Err(error) => return Err(error),
         };
@@ -383,7 +383,7 @@ fn validate_inactive_scratch(
         return Ok(Some(identity));
     }
     let lease_path = dir.file(LEASE_LEAF);
-    let (lease, _) = open_scratch_file_for_update(&lease_path)?;
+    let (lease, _) = open_anchored_file_for_update(&lease_path)?;
     match lease.try_lock() {
         Ok(()) => {
             let validation = validate_scratch_members(&dir);
@@ -539,7 +539,7 @@ fn remove_scratch_dir(
         return remove_empty_scratch_dir(root, leaf, dir, expected);
     }
     let lease_path = dir.file(LEASE_LEAF);
-    let (lease, _) = open_scratch_file_for_update(&lease_path)?;
+    let (lease, _) = open_anchored_file_for_update(&lease_path)?;
     match lease.try_lock() {
         Ok(()) => {}
         Err(fs::TryLockError::WouldBlock) => {
@@ -808,10 +808,6 @@ fn observe_history_scratch_member_stage(stage: HistoryScratchMemberStage, member
             observer(stage, member);
         }
     });
-}
-
-fn open_scratch_file_for_update(path: &AnchoredFile) -> Result<(File, fs::Metadata), RuntimeError> {
-    open_anchored_file_for_update(path)
 }
 
 fn available_space(path: &Path) -> Result<u64, RuntimeError> {
