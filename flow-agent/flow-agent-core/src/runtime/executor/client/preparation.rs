@@ -14,7 +14,8 @@ pub(super) struct ProtectedObject {
 }
 
 impl PreparedExecutor {
-    pub(super) fn prepare_tool_native(
+    /// Retains and hashes the exact Executor request without launching any process.
+    pub(crate) fn prepare_tool(
         &self,
         workspace: &AnchoredWorkspace,
         policy: &core_policy::PolicyArtifact,

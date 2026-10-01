@@ -61,9 +61,7 @@ pub use runtime_dirs::RuntimeDirs;
 pub use runtime_dirs::ensure_runtime_dirs;
 #[cfg(test)]
 pub use runtime_dirs::open_runtime_dir;
-pub(crate) use runtime_dirs::{
-    ensure_anchored_runtime_dirs, open_anchored_runtime_dir, open_anchored_runtime_dir_read_only,
-};
+pub(crate) use runtime_dirs::{ensure_anchored_runtime_dirs, open_anchored_runtime_dir};
 
 #[cfg(test)]
 pub(crate) fn test_path_key(path: &Path) -> PathBuf {

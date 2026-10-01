@@ -138,35 +138,6 @@ pub(crate) fn existing_anchored_run(
     conversation_id: &str,
     run_session_id: &str,
 ) -> Result<AnchoredDir, RuntimeError> {
-    existing_anchored_run_with_parent(workspace, conversation_id, run_session_id)
-        .map(|(_, run)| run)
-}
-
-pub(super) fn existing_anchored_conversation(
-    workspace: &Path,
-    conversation_id: &str,
-) -> Result<AnchoredDir, RuntimeError> {
-    existing_anchored_conversation_with_parent(workspace, conversation_id)
-        .map(|(_, conversation)| conversation)
-}
-
-fn existing_anchored_conversation_with_parent(
-    workspace: &Path,
-    conversation_id: &str,
-) -> Result<(AnchoredDir, AnchoredDir), RuntimeError> {
-    validate_id(conversation_id, "conversation")?;
-    let sessions = ensure_anchored_sessions(workspace)?;
-    let conversation = sessions
-        .child(conversation_id, false, DirectoryErrorMode::Protocol)?
-        .ok_or_else(|| protocol("conversation does not exist"))?;
-    Ok((sessions, conversation))
-}
-
-fn existing_anchored_run_with_parent(
-    workspace: &Path,
-    conversation_id: &str,
-    run_session_id: &str,
-) -> Result<(AnchoredDir, AnchoredDir), RuntimeError> {
     validate_id(run_session_id, "run session")?;
     let conversation = existing_anchored_conversation(workspace, conversation_id)?;
     let runs = required_child(
@@ -177,7 +148,19 @@ fn existing_anchored_run_with_parent(
     let run = runs
         .child(run_session_id, false, DirectoryErrorMode::Protocol)?
         .ok_or_else(|| protocol("conversation run does not exist"))?;
-    Ok((runs, run))
+    Ok(run)
+}
+
+pub(super) fn existing_anchored_conversation(
+    workspace: &Path,
+    conversation_id: &str,
+) -> Result<AnchoredDir, RuntimeError> {
+    validate_id(conversation_id, "conversation")?;
+    let sessions = ensure_anchored_sessions(workspace)?;
+    let conversation = sessions
+        .child(conversation_id, false, DirectoryErrorMode::Protocol)?
+        .ok_or_else(|| protocol("conversation does not exist"))?;
+    Ok(conversation)
 }
 
 pub(super) fn bounded_anchored_real_child_file_names(

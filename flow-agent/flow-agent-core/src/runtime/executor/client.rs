@@ -2,11 +2,7 @@ use super::{
     ExecutorSelection,
     selection::{protected_directories, resolve_executor_with_roots},
 };
-use crate::runtime::{
-    fs_guards::AnchoredWorkspace,
-    tool_runner::{ToolExecutionOutcome, ToolInvocation},
-    types::RuntimeError,
-};
+use crate::runtime::{tool_runner::ToolExecutionOutcome, types::RuntimeError};
 use preparation::{ProtectedObject, retain_protected_objects};
 use response::{decode_tool_outcome, validate_receipt_identity};
 use transport::{ExecutorPreflightProcess, preflight_one_shot, start_one_shot};
@@ -79,18 +75,6 @@ impl PreparedExecutor {
             protected_objects,
             _protected_directories: protected_directories,
         })
-    }
-
-    /// Retains and hashes the exact Executor request without launching any process.
-    pub(crate) fn prepare_tool(
-        &self,
-        workspace: &AnchoredWorkspace,
-        policy: &core_policy::PolicyArtifact,
-        command_policy: &core_policy::CommandPolicy,
-        invocation: &ToolInvocation,
-        request_id: &str,
-    ) -> Result<PreparedExecutorTool, RuntimeError> {
-        self.prepare_tool_native(workspace, policy, command_policy, invocation, request_id)
     }
 
     /// Launches exactly one Executor and validates the prepared request without starting its Tool.

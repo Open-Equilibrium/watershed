@@ -14,16 +14,12 @@ pub struct RuntimeDirs {
 #[cfg(test)]
 pub fn ensure_runtime_dirs(workspace: &Path) -> Result<RuntimeDirs, RuntimeError> {
     let workspace = AnchoredWorkspace::open(workspace)?;
-    ensure_runtime_dirs_from(&workspace)
+    ensure_anchored_runtime_dirs(&workspace)
 }
 
 pub(crate) fn ensure_anchored_runtime_dirs(
     workspace: &AnchoredWorkspace,
 ) -> Result<RuntimeDirs, RuntimeError> {
-    ensure_runtime_dirs_from(workspace)
-}
-
-fn ensure_runtime_dirs_from(workspace: &AnchoredWorkspace) -> Result<RuntimeDirs, RuntimeError> {
     let store = WorkspaceStore::open(workspace, true)?.expect("created workspace store is present");
     let sessions = store
         .child(SESSION_STORAGE_DIR, true)?
@@ -39,27 +35,10 @@ fn ensure_runtime_dirs_from(workspace: &AnchoredWorkspace) -> Result<RuntimeDirs
 #[cfg(test)]
 pub fn open_runtime_dir(workspace: &Path, leaf: &str) -> Result<Option<AnchoredDir>, RuntimeError> {
     let workspace = AnchoredWorkspace::open(workspace)?;
-    open_runtime_dir_from(&workspace, leaf)
+    open_anchored_runtime_dir(&workspace, leaf)
 }
 
 pub(crate) fn open_anchored_runtime_dir(
-    workspace: &AnchoredWorkspace,
-    leaf: &str,
-) -> Result<Option<AnchoredDir>, RuntimeError> {
-    open_runtime_dir_from(workspace, leaf)
-}
-
-pub(crate) fn open_anchored_runtime_dir_read_only(
-    workspace: &AnchoredWorkspace,
-    leaf: &str,
-) -> Result<Option<AnchoredDir>, RuntimeError> {
-    let Some(store) = WorkspaceStore::open(workspace, false)? else {
-        return Ok(None);
-    };
-    store.child(leaf, false)
-}
-
-fn open_runtime_dir_from(
     workspace: &AnchoredWorkspace,
     leaf: &str,
 ) -> Result<Option<AnchoredDir>, RuntimeError> {

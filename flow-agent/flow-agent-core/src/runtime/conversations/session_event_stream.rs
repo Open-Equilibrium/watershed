@@ -7,7 +7,7 @@ use crate::runtime::{
     fs_guards::{
         AnchoredDir, AnchoredDirectoryIdentity, AnchoredFile, AnchoredWorkspace,
         DirectoryErrorMode, ensure_anchored_real_file, open_anchored_file_for_read,
-        open_anchored_runtime_dir_read_only, path_io_error, retry_event_segment_discovery,
+        open_anchored_runtime_dir, path_io_error, retry_event_segment_discovery,
         segmented_jsonl_files, segmented_jsonl_path,
     },
     session_authority::{SessionOwnershipObserver, run_ownership_key},
@@ -73,10 +73,12 @@ impl SessionEventReader {
             fs::canonicalize(workspace).map_err(|source| path_io_error(workspace, source))?;
         let workspace = AnchoredWorkspace::open(&workspace_path)?;
         let session_dir_path = workspace_store_path(&workspace)?.join(SESSION_STORAGE_DIR);
-        let sessions = open_anchored_runtime_dir_read_only(&workspace, SESSION_STORAGE_DIR)?
-            .ok_or_else(|| RuntimeError::Io {
-                path: session_dir_path,
-                source: io::Error::from(io::ErrorKind::NotFound),
+        let sessions =
+            open_anchored_runtime_dir(&workspace, SESSION_STORAGE_DIR)?.ok_or_else(|| {
+                RuntimeError::Io {
+                    path: session_dir_path,
+                    source: io::Error::from(io::ErrorKind::NotFound),
+                }
             })?;
         Self::open_flat_anchored(&workspace, &sessions, session_id)
     }
@@ -120,10 +122,12 @@ impl SessionEventReader {
         let ownership_key = run_ownership_key(conversation_id, run_session_id);
         let ownership = SessionOwnershipObserver::open_anchored(&workspace, &ownership_key)?;
         let session_dir_path = workspace_store_path(&workspace)?.join(SESSION_STORAGE_DIR);
-        let sessions = open_anchored_runtime_dir_read_only(&workspace, SESSION_STORAGE_DIR)?
-            .ok_or_else(|| RuntimeError::Io {
-                path: session_dir_path,
-                source: io::Error::from(io::ErrorKind::NotFound),
+        let sessions =
+            open_anchored_runtime_dir(&workspace, SESSION_STORAGE_DIR)?.ok_or_else(|| {
+                RuntimeError::Io {
+                    path: session_dir_path,
+                    source: io::Error::from(io::ErrorKind::NotFound),
+                }
             })?;
         let Some(conversation) =
             sessions.child(conversation_id, false, DirectoryErrorMode::Protocol)?
