@@ -38,6 +38,11 @@ def run(
 
 
 def git(repo: Path, *args: str, check: bool = True) -> str:
+    if args[0] in {"diff", "show", "ls-files", "status"}:
+        args += (
+            "--", ".", ":(top,exclude)AGENTS.md",
+            ":(top,exclude).codex/**", ":(top,exclude).agents/**",
+        )
     return run(
         [resolve_command("git", repo), *args], repo, check=check
     ).stdout
