@@ -93,5 +93,26 @@ class NativeProcessTest(unittest.TestCase):
         self.assertEqual(host.call_count, 2)
 
 
+class NativeHostTest(unittest.TestCase):
+    def test_macos_acceptance_requires_the_supported_release_and_architecture(self):
+        with patch.object(native.sys, "platform", "darwin"):
+            for machine, release, accepted in (
+                ("arm64", "27.0", True), ("arm64", "27.1.2", True),
+                ("arm64", "26.0", False), ("arm64", "26.6.2", False),
+                ("arm64", "28.0", False), ("x86_64", "27.0", False),
+                ("arm64", "", False), ("arm64", "27", False),
+                ("arm64", "27..0", False), ("arm64", "27.0.beta", False),
+            ):
+                with self.subTest(machine=machine, release=release), \
+                     patch.object(native.host_platform, "machine", return_value=machine), \
+                     patch.object(native.host_platform, "mac_ver", return_value=(release, (), machine)):
+                    if accepted:
+                        self.assertEqual(native.native_host(),
+                                         ("macos-27-aarch64", "seatbelt", ("seatbelt-launch",)))
+                    else:
+                        with self.assertRaises(AssertionError):
+                            native.native_host()
+
+
 if __name__ == "__main__":
     unittest.main()

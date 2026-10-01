@@ -40,14 +40,14 @@ class ReadinessContractTest(unittest.TestCase):
             self.assertEqual(filter_result(program, syscall, argument), 0x7FFF0000)
 
     def test_probe_has_only_retained_native_metadata(self):
-        probe = dict(backend="seatbelt", backend_version="26.0",
+        probe = dict(backend="seatbelt", backend_version="27.0",
                      executor="flow-executor", executor_version="0.0.0",
-                     platform="macos-26-aarch64", protocol_versions=["0"], ready=True,
+                     platform="macos-27-aarch64", protocol_versions=["0"], ready=True,
                      schema="flow-executor-probe-v0",
                      supported_policy_features=["flow-owned-write-protection"])
         def validate(value, ready=True):
             return validate_probe(json.dumps(value), ready=ready,
-                                  platform="macos-26-aarch64", backend="seatbelt")
+                                  platform="macos-27-aarch64", backend="seatbelt")
         self.assertEqual(validate(probe), probe)
         for key, value in (("runtime_mounts", []), ("unknown", True),
                            ("supported_policy_features", ["static-self-reexec"]),

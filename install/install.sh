@@ -37,7 +37,7 @@ release_supported() {
                 { release = release $0 "\n" }
                 END {
                     gsub(/^[[:space:]]+|[[:space:]]+$/, "", release)
-                    exit (release !~ /^26(\.[0-9]+)+$/)
+                    exit (release !~ /^27(\.[0-9]+)+$/)
                 }
             '
             ;;
@@ -227,10 +227,10 @@ case "$bundle_platform:$host:$machine" in
         release_supported "$host" "$machine" < /etc/os-release \
             || fail 'bundle requires Ubuntu 24.04 x86_64'
         ;;
-    macos-26-aarch64:Darwin:arm64)
+    macos-27-aarch64:Darwin:arm64)
         release=$(/usr/bin/sw_vers -productVersion) || fail 'cannot identify macOS release'
         printf '%s\n' "$release" | release_supported "$host" "$machine" \
-            || fail 'bundle requires macOS 26 ARM64'
+            || fail 'bundle requires macOS 27 ARM64'
         ;;
     *) fail "bundle target $bundle_platform does not match $host $machine" ;;
 esac

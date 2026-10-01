@@ -26,7 +26,7 @@ unavailable_workspace="$acceptance_root/m12-unavailable-workspace"
 case "$(/usr/bin/uname -s)" in
   Linux) expected_platform=ubuntu-24.04-x86_64; expected_backend=bubblewrap-seccomp ;;
   Darwin)
-    expected_platform=macos-26-aarch64
+    expected_platform=macos-27-aarch64
     expected_backend=seatbelt
     config="$home/Library/Application Support"
     ;;
@@ -57,7 +57,7 @@ mac_assessment() {
   # must be reviewed as policy rejection or assessment failure, not conflated.
   printf 'Gatekeeper assessment: exit %s: %s\n' "$assessment_status" "$1"
 }
-if [ "$expected_platform" = macos-26-aarch64 ]; then
+if [ "$expected_platform" = macos-27-aarch64 ]; then
   gatekeeper_status=0
   /usr/sbin/spctl --status || gatekeeper_status=$?
   printf 'Gatekeeper status command: exit %s; disabled policy cannot prove enforcement\n' "$gatekeeper_status"
@@ -69,7 +69,7 @@ fi
 (cd "$download" && verify_download)
 /usr/bin/tar -xzf "$download/$archive" -C "$acceptance_root"
 printf '%s\n' "$bundle_version" "$expected_platform" | /usr/bin/cmp - "$bundle/bundle-info"
-if [ "$expected_platform" = macos-26-aarch64 ]; then
+if [ "$expected_platform" = macos-27-aarch64 ]; then
   # Observe actual extraction first, then strengthen the private fixture.
   # Neither step establishes browser transport or Developer ID approval.
   for artifact in install.sh flow flow-executor; do
@@ -113,14 +113,14 @@ test -x "$standard_prefix/bin/flow"
 test -x "$standard_prefix/bin/flow-executor"
 for artifact in flow flow-executor; do
   /usr/bin/cmp "$bundle/$artifact" "$standard_prefix/bin/$artifact"
-  if [ "$expected_platform" = macos-26-aarch64 ]; then
+  if [ "$expected_platform" = macos-27-aarch64 ]; then
     mac_metadata installed-after-installer-readiness "$standard_prefix/bin/$artifact"
     mac_assessment "$standard_prefix/bin/$artifact"
   fi
 done
 test "$(run_local "$standard_prefix/bin/flow" --version)" = "flow $bundle_version"
 run_local "$standard_prefix/bin/flow" executor check </dev/null
-if [ "$expected_platform" = macos-26-aarch64 ]; then
+if [ "$expected_platform" = macos-27-aarch64 ]; then
   for artifact in flow flow-executor; do
     mac_metadata installed-after-explicit-readiness "$standard_prefix/bin/$artifact"
   done

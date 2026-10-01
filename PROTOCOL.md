@@ -284,7 +284,7 @@ Stable integration failures are grouped without exposing request content:
 
 ### Native backend contract
 
-The integrated official backends target `ubuntu-24.04-x86_64` (`bubblewrap-seccomp`) and `macos-26-aarch64` (`seatbelt`). These identifiers describe implemented selection; [TESTING.md](TESTING.md#native-verification-status) owns native evidence and remaining acceptance gates.
+The integrated official backends target `ubuntu-24.04-x86_64` (`bubblewrap-seccomp`) and `macos-27-aarch64` (`seatbelt`). These identifiers describe implemented selection; [TESTING.md](TESTING.md#native-verification-status) owns native evidence and remaining acceptance gates.
 
 Linux uses stock Bubblewrap with a host-root bind. Ancestor bind points prevent relocation without making unrelated siblings read-only; protected descriptor sources are overlaid read-only after those binds. A read-only `/proc`, private `/dev`, user/PID namespaces and seccomp support the narrow protection and descriptor/terminal boundary. A retained self-image descriptor starts the trusted inner Executor. Tool networking remains available; there is no network namespace denial, runtime-read profile, transient systemd scope, cgroup requirement or process/thread ceiling.
 

@@ -140,7 +140,7 @@ class CiWorkflowContractTest(unittest.TestCase):
         ))
         self.assertEqual(scopes, {
             "ubuntu-24.04": "--workspace",
-            "macos-26": "--workspace",
+            "xcode-27": "--workspace",
             "windows-latest": "-p core-script -p core-policy -p proto",
         })
         for name in ("Check lints", "Run tests", "Run Rustdoc tests", "Check shared Windows line coverage"):
@@ -161,6 +161,12 @@ class CiWorkflowContractTest(unittest.TestCase):
         assert_step_state(
             self, workflow, "Run native release Executor acceptance", condition=NATIVE
         )
+        assert_step_state(self, workflow, "Check native Mac host",
+                          condition="matrix.os == 'xcode-27'")
+        self.assertIn("from scripts.m12_native import native_host; native_host()",
+                      step_run(workflow, "Check native Mac host"))
+        self.assertLess(workflow.index("      - name: Check native Mac host"),
+                        workflow.index("      - name: Run repository tooling tests"))
 
     def test_versions_come_from_their_canonical_project_files(self) -> None:
         workflow = workflow_text()
@@ -547,7 +553,7 @@ class CiWorkflowContractTest(unittest.TestCase):
             log = home / "workspaces/workspace-v1-test/sessions/session/runs/run/run-log.jsonl"
             log.parent.mkdir(parents=True)
             for platform, backend in (("ubuntu-24.04-x86_64", "bubblewrap-seccomp"),
-                                      ("macos-26-aarch64", "seatbelt")):
+                                      ("macos-27-aarch64", "seatbelt")):
                 for active in (True, False):
                     with self.subTest(platform=platform, active=active):
                         records = [

@@ -7,7 +7,7 @@ use std::{
 };
 
 pub(crate) const BACKEND: &str = "seatbelt";
-pub(crate) const PLATFORM: &str = "macos-26-aarch64";
+pub(crate) const PLATFORM: &str = "macos-27-aarch64";
 const SANDBOX_EXEC: &str = "/usr/bin/sandbox-exec";
 
 pub(super) fn readiness() -> Result<String, BackendError> {
@@ -23,9 +23,9 @@ pub(super) fn readiness() -> Result<String, BackendError> {
     command.arg("-productVersion");
     let version = supervision::checked_output(command)?;
     let version = version.trim();
-    if !crate::platform::supported_release("macos", "aarch64", version) {
+    if !crate::platform::supported_release("macos", std::env::consts::ARCH, version) {
         return Err(BackendError::unavailable(
-            "productive Executor support requires macOS 26 ARM64",
+            "productive Executor support requires macOS 27 ARM64",
         ));
     }
     Ok(version.to_owned())

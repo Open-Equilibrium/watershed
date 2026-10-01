@@ -37,17 +37,17 @@ cargo nextest run --config 'target."cfg(all())".runner = ["node", "../../scripts
 
 Download distribution is implemented; publication and final acceptance are still pending. Once a version is published, download its platform-specific `.tar.gz` and `SHA256SUMS` from the official [GitHub Releases page](https://github.com/Open-Equilibrium/watershed/releases) in a browser. Stop on any browser HTTPS/certificate warning; do not use mirrors or disable verification. No compiler, Node or Python is needed to install. The [download trust contract](SECURITY.md#m12-tool-execution-trust-boundary) explains what the checksum does and does not prove.
 
-In the download directory, set the exact selected release version and platform (`ubuntu-24.04-x86_64` or `macos-26-aarch64`). Run this verification before extracting or executing anything from the download; any failure stops the sequence:
+In the download directory, set the exact selected release version and platform (`ubuntu-24.04-x86_64` or `macos-27-aarch64`). Run this verification before extracting or executing anything from the download; any failure stops the sequence:
 
 ```sh
 set -eu
 version=0.0.0 # Replace with the selected published version.
-platform=ubuntu-24.04-x86_64 # Or macos-26-aarch64.
+platform=ubuntu-24.04-x86_64 # Or macos-27-aarch64.
 archive="flow-agent-$version-$platform.tar.gz"
 case "$platform" in
   ubuntu-24.04-x86_64)
     awk -v file="$archive" '$2 == file {print}' SHA256SUMS | sha256sum --check - ;;
-  macos-26-aarch64)
+  macos-27-aarch64)
     awk -v file="$archive" '$2 == file {print}' SHA256SUMS | shasum -a 256 --check - ;;
   *) exit 1 ;;
 esac

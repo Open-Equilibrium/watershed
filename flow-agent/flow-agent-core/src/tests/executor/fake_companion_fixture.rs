@@ -18,7 +18,7 @@ fn platform() -> &'static str {
     }
     #[cfg(target_os = "macos")]
     {
-        "macos-26-aarch64"
+        "macos-27-aarch64"
     }
 }
 

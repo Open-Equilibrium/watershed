@@ -5,6 +5,7 @@ import json
 import os
 import pathlib
 import platform as host_platform
+import re
 import shutil
 import signal
 import subprocess
@@ -92,9 +93,10 @@ def native_host():
     identity = (sys.platform, host_platform.machine())
     if identity == ("linux", "x86_64"):
         return "ubuntu-24.04-x86_64", "bubblewrap-seccomp", ("user-namespace", "seccomp")
-    if identity == ("darwin", "arm64"):
-        return "macos-26-aarch64", "seatbelt", ("seatbelt-launch",)
-    raise AssertionError(f"native acceptance requires a supported native host: {identity}")
+    release = host_platform.mac_ver()[0] if sys.platform == "darwin" else ""
+    if identity == ("darwin", "arm64") and re.fullmatch(r"27(?:\.[0-9]+)+", release):
+        return "macos-27-aarch64", "seatbelt", ("seatbelt-launch",)
+    raise AssertionError(f"native acceptance requires a supported native host: {identity}, release={release!r}")
 
 
 def readiness_negatives():

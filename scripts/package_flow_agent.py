@@ -13,7 +13,7 @@ import tomllib
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-PLATFORMS = ("ubuntu-24.04-x86_64", "macos-26-aarch64")
+PLATFORMS = ("ubuntu-24.04-x86_64", "macos-27-aarch64")
 
 
 def check_program(path, platform):

@@ -285,7 +285,7 @@ fn host_identity() -> (&'static str, &'static str) {
     }
     #[cfg(target_os = "macos")]
     {
-        ("macos-26-aarch64", "seatbelt")
+        ("macos-27-aarch64", "seatbelt")
     }
 }
 

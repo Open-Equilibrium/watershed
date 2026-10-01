@@ -8,16 +8,16 @@ Linux and macOS share the same [public installation guarantee and maintenance li
 
 | Product / capability | Release 1 native targets | Current implementation |
 |---|---|---|
-| Flow Agent authoring, Fixture execution and provider-only Flows | Linux x86_64; macOS ARM64 | Implemented; productive provider execution is restricted to Ubuntu 24.04 and macOS 26. |
+| Flow Agent authoring, Fixture execution and provider-only Flows | Linux x86_64; macOS ARM64 | Implemented; productive provider execution is restricted to Ubuntu 24.04 and macOS 27. |
 | Flow Agent Tool execution with mandatory self-protection | Linux x86_64; macOS ARM64 | Linux Bubblewrap/seccomp and Mac Seatbelt replacements integrated; native evidence is linked above. Failed admission/readiness prevents launch without fallback. |
 | Meta-Harness CLI, service and host-local agent control | Linux x86_64; macOS ARM64 | Not implemented. |
 | Liquid desktop client | Linux x86_64; macOS ARM64; Windows 11 x86_64 | Not implemented. |
 
 Linux ARM64 and Windows 11 ARM64 are deferred beyond Release 1. Earlier Windows versions are unsupported. Flow Agent and Meta-Harness have no native Windows support or future Windows-backend commitment. Liquid's mobile and headless capabilities retain their separate contracts in its [V-Spec](docs/concept/V-Spec_Liquid.html); desktop support does not certify them.
 
-Ubuntu 24.04 x86_64 and macOS 26 ARM64 are the current concrete Flow verification targets. Other Linux distributions or OS versions do not acquire a support claim from sharing an architecture or passing compilation. Liquid and Meta-Harness must establish their own runtime evidence, not inherit Flow's verification results.
+Ubuntu 24.04 x86_64 and macOS 27 ARM64 are the current concrete Flow verification targets. Other Linux distributions or OS versions do not acquire a support claim from sharing an architecture or passing compilation. Liquid and Meta-Harness must establish their own runtime evidence, not inherit Flow's verification results.
 
-Productive execution, the Default Executor and installation use the same release admission: Ubuntu metadata must contain exactly one `ID=ubuntu` and one `VERSION_ID=24.04`, with unquoted, double-quoted or single-quoted values; macOS must report a dotted numeric version beginning with `26`. Missing, contradictory or malformed release identification is rejected without changing the host. Rust consumers share [the release predicate](flow-agent/release.rs); the standalone installer applies the same finite grammar without executing metadata as shell code.
+Productive execution, the Default Executor and installation use the same release admission: Ubuntu metadata must contain exactly one `ID=ubuntu` and one `VERSION_ID=24.04`, with unquoted, double-quoted or single-quoted values; macOS must report a dotted numeric version beginning with `27`. Missing, contradictory or malformed release identification is rejected without changing the host. Rust consumers share [the release predicate](flow-agent/release.rs); the standalone installer applies the same finite grammar without executing metadata as shell code.
 
 ## Execution and development boundaries
 
@@ -36,7 +36,7 @@ On macOS, installation requires Apple's `/usr/bin/osascript -l JavaScript` and i
 | Verification host | Required host facilities |
 |---|---|
 | Ubuntu 24.04 x86_64 | `/usr/bin/bwrap`, a regular root-owned executable without group/other write permission; host policy permitting the backend's user/PID namespaces and seccomp. |
-| macOS 26 ARM64 | Apple's `/usr/bin/sandbox-exec`, a regular root-owned executable without group/other write permission, and the selected Seatbelt mechanism. Its deprecated-interface/OS-update risk remains accepted (ADR-0172). |
+| macOS 27 ARM64 | Apple's `/usr/bin/sandbox-exec`, a regular root-owned executable without group/other write permission, and the selected Seatbelt mechanism. Its deprecated-interface/OS-update risk remains accepted (ADR-0172). |
 
 Host administrators must supply missing prerequisites explicitly. Installation does not update the kernel, change host security policy or start privileged services; no systemd/cgroup service is required. Tool-specific runtimes, libraries, helpers and services remain the Agentic Engineer's responsibility. Follow the [installation steps](README.md#download-installation-on-linux-or-macos), then run `flow executor check` as the intended unprivileged user. Readiness is advisory, not native acceptance or a substitute for per-attempt admission; [PROTOCOL.md](PROTOCOL.md#native-backend-contract) defines backend enforcement.
 

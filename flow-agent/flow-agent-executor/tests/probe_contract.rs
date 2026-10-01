@@ -18,7 +18,7 @@ fn sibling_probe_uses_the_canonical_protocol_identity() {
     #[cfg(target_os = "linux")]
     let identity = ("bubblewrap-seccomp", "ubuntu-24.04-x86_64");
     #[cfg(target_os = "macos")]
-    let identity = ("seatbelt", "macos-26-aarch64");
+    let identity = ("seatbelt", "macos-27-aarch64");
     assert_eq!(probe.backend, identity.0);
     assert_eq!(probe.platform, identity.1);
     assert_eq!(

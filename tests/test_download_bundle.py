@@ -35,7 +35,7 @@ class DownloadBundleTest(unittest.TestCase):
         )
 
     def test_platform_archives_cover_final_installer_and_program_bytes(self):
-        for platform in ("ubuntu-24.04-x86_64", "macos-26-aarch64"):
+        for platform in ("ubuntu-24.04-x86_64", "macos-27-aarch64"):
             with self.subTest(platform=platform), tempfile.TemporaryDirectory() as temporary:
                 root = pathlib.Path(temporary)
                 binaries = self.binaries(root, platform)
@@ -69,6 +69,15 @@ class DownloadBundleTest(unittest.TestCase):
                 self.assertNotEqual(rejected.returncode, 0)
                 self.assertEqual(archive.read_bytes(), final_bytes)
                 self.assertEqual((output / "SHA256SUMS").read_text(), checksum)
+
+    def test_dropped_macos_release_does_not_produce_a_download(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            platform = "macos-26-aarch64"
+            output = root / "download"
+            result = self.package(self.binaries(root, platform), output, platform)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertFalse(output.exists(), result.stderr)
 
     def test_missing_or_wrong_architecture_program_does_not_produce_a_download(self):
         platform = "ubuntu-24.04-x86_64"

@@ -1,7 +1,7 @@
 pub(crate) fn supported_release(target_os: &str, target_arch: &str, release: &str) -> bool {
     match (target_os, target_arch) {
         ("linux", "x86_64") => ubuntu_24_04_release(release),
-        ("macos", "aarch64") => macos_26_release(release),
+        ("macos", "aarch64") => macos_27_release(release),
         _ => false,
     }
 }
@@ -34,10 +34,10 @@ fn ubuntu_24_04_release(release: &str) -> bool {
     id == Some("ubuntu") && version_id == Some("24.04")
 }
 
-fn macos_26_release(release: &str) -> bool {
+fn macos_27_release(release: &str) -> bool {
     let components = release.trim().split('.').collect::<Vec<_>>();
     components.len() >= 2
-        && components[0] == "26"
+        && components[0] == "27"
         && components.iter().all(|component| {
             !component.is_empty() && component.bytes().all(|byte| byte.is_ascii_digit())
         })
@@ -54,7 +54,7 @@ mod tests {
             "x86_64",
             "ID=ubuntu\nVERSION_ID=24.04\n"
         ));
-        assert!(supported_release("macos", "aarch64", "26.0"));
+        assert!(supported_release("macos", "aarch64", "27.0"));
     }
 
     #[test]
@@ -69,7 +69,8 @@ mod tests {
             ("linux", "x86_64", "ID=debian\nVERSION_ID=\"24.04\"\n"),
             ("linux", "x86_64", "ID=ubuntu\n"),
             ("macos", "aarch64", "25.9"),
-            ("macos", "aarch64", "260"),
+            ("macos", "aarch64", "26.0"),
+            ("macos", "aarch64", "270"),
         ] {
             assert!(
                 !supported_release(target_os, target_arch, release),
@@ -95,7 +96,7 @@ mod tests {
 
     #[test]
     fn productive_execution_rejects_malformed_macos_versions() {
-        for release in ["", "26", "26..0", "26.0.beta"] {
+        for release in ["", "27", "27..0", "27.0.beta", "27.0\n27.1"] {
             assert!(
                 !supported_release("macos", "aarch64", release),
                 "malformed macOS release {release:?} must be unavailable"
@@ -107,8 +108,8 @@ mod tests {
     fn productive_tool_execution_accepts_only_the_official_native_releases() {
         for (target_os, target_arch, release) in [
             ("linux", "x86_64", "ID=ubuntu\nVERSION_ID='24.04'\n"),
-            ("macos", "aarch64", "26.0"),
-            ("macos", "aarch64", "26.6.2\n"),
+            ("macos", "aarch64", "27.0"),
+            ("macos", "aarch64", "27.1.2\n"),
         ] {
             assert!(
                 supported_release(target_os, target_arch, release),
@@ -118,11 +119,13 @@ mod tests {
         for (target_os, target_arch, release) in [
             ("linux", "x86_64", "ID=ubuntu\nVERSION_ID=24.10\n"),
             ("linux", "aarch64", "ID=ubuntu\nVERSION_ID=24.04\n"),
-            ("macos", "x86_64", "26.0"),
+            ("macos", "x86_64", "27.0"),
             ("macos", "aarch64", "25.9"),
-            ("macos", "aarch64", "27.0"),
-            ("windows", "x86_64", "26.0"),
-            ("windows", "aarch64", "26.0"),
+            ("macos", "aarch64", "26.0"),
+            ("macos", "aarch64", "26.6.2"),
+            ("macos", "aarch64", "28.0"),
+            ("windows", "x86_64", "27.0"),
+            ("windows", "aarch64", "27.0"),
         ] {
             assert!(
                 !supported_release(target_os, target_arch, release),

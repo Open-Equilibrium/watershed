@@ -34,7 +34,7 @@ jobs:
           - os: ubuntu-24.04
             packages: --workspace
             product: Flow Agent
-          - os: macos-26
+          - os: xcode-27
             packages: --workspace
             product: Flow Agent
           - os: windows-latest
@@ -66,12 +66,16 @@ jobs:
             throw "Node $expectedNode must be active for CI gates"
           }
 
+      - name: Check native Mac host
+        if: steps.scope.outputs.product == 'true' && (matrix.os == 'xcode-27')
+        run: node scripts/run-python.mjs -c 'from scripts.m12_native import native_host; native_host()'
+
       - name: Run repository tooling tests
         if: steps.scope.outputs.product == 'true'
         run: node scripts/run-python.mjs -m unittest discover -s tests -p "test_*.py"
 
       - name: Establish experimental Mac unprotected red control
-        if: steps.scope.outputs.product == 'true' && (matrix.os == 'macos-26' && github.event_name == 'workflow_dispatch' && inputs.mac_self_protection_evaluation)
+        if: steps.scope.outputs.product == 'true' && (matrix.os == 'xcode-27' && github.event_name == 'workflow_dispatch' && inputs.mac_self_protection_evaluation)
         timeout-minutes: 2
         shell: bash
         run: |
@@ -84,7 +88,7 @@ jobs:
           fi
 
       - name: Evaluate experimental Mac profile and launcher (not release proof)
-        if: steps.scope.outputs.product == 'true' && (matrix.os == 'macos-26' && github.event_name == 'workflow_dispatch' && inputs.mac_self_protection_evaluation)
+        if: steps.scope.outputs.product == 'true' && (matrix.os == 'xcode-27' && github.event_name == 'workflow_dispatch' && inputs.mac_self_protection_evaluation)
         timeout-minutes: 2
         shell: bash
         run: |
@@ -101,7 +105,7 @@ jobs:
           exit "$probe_status"
 
       - name: Compare native App Sandbox (not release proof)
-        if: steps.scope.outputs.product == 'true' && (!cancelled() && matrix.os == 'macos-26' && github.event_name == 'workflow_dispatch' && inputs.mac_self_protection_evaluation)
+        if: steps.scope.outputs.product == 'true' && (!cancelled() && matrix.os == 'xcode-27' && github.event_name == 'workflow_dispatch' && inputs.mac_self_protection_evaluation)
         timeout-minutes: 6
         run: python3 scripts/probe-macos-app-sandbox.py
 
@@ -197,7 +201,7 @@ jobs:
         run: |
           case "$(uname -s)" in
             Linux) platform=ubuntu-24.04-x86_64 ;;
-            Darwin) platform=macos-26-aarch64 ;;
+            Darwin) platform=macos-27-aarch64 ;;
             *) exit 1 ;;
           esac
           node scripts/run-python.mjs scripts/package_flow_agent.py \

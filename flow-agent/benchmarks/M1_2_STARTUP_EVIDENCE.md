@@ -12,7 +12,7 @@ CI builds each host's native release Executor in `target/m12-standard` and measu
 
 Metadata and aggregate/failure inputs declare `self_protection_required: true`; each measured sample retains receipt-derived `self_protection_active: true` alongside its unadjusted elapsed time. Schema mismatch, missing/inactive guard evidence and legacy child fields reject rather than becoming ignored settings. Every warmup and measured child is validated before its observation is accepted. Reports retain environment metadata, all 30 raw observations plus p50, p95 and maximum; obsolete runtime-profile, process-capacity and systemd/cgroup metadata are not emitted. Report metadata declares the requirement, not a successful protection observation before any child runs.
 
-Each Ubuntu 24.04 x64 and macOS 26 ARM64 CI job runs five warmups followed by 30 measured children, one process at a time. For a local run, set `M12_INSTALLED_EXECUTOR` to the absolute path of your installed native Executor; do not supply a hardlinked Cargo output directly.
+Each Ubuntu 24.04 x64 and macOS 27 ARM64 CI job runs five warmups followed by 30 measured children, one process at a time. For a local run, set `M12_INSTALLED_EXECUTOR` to the absolute path of your installed native Executor; do not supply a hardlinked Cargo output directly.
 
 ```sh
 mkdir -p target/m12-startup
@@ -33,7 +33,8 @@ Replacement observations remain separate for each host:
 | Host | CI artifact | Observation |
 | --- | --- | --- |
 | Ubuntu 24.04 x64 | `m12-executor-startup-evidence-ubuntu-24.04` | Complete samples in the four runs below; not complete product acceptance. |
-| macOS 26 ARM64 | `m12-executor-startup-evidence-macos-26` | Complete samples at `8725a1c` and `6af7296` below; not complete product acceptance. |
+| macOS 27 ARM64 | `m12-executor-startup-evidence-xcode-27` | Current target; complete native startup evidence outstanding. |
+| macOS 26 ARM64 (historical) | `m12-executor-startup-evidence-macos-26` | Complete samples at `8725a1c` and `6af7296` below; not proof for macOS 27. |
 
 Retain each host's raw samples and distribution separately; do not pool them or treat one as evidence for the other. Compare only like-for-like host observations. Compile checks and legacy measurements do not supply replacement timing or native protection evidence.
 

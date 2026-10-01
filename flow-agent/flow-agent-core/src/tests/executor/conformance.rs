@@ -36,7 +36,7 @@ const FAKE_EXECUTOR_SOURCE: &str = include_str!("fake_companion_fixture.rs");
 #[cfg(target_os = "linux")]
 const EXPECTED_PLATFORM: &str = "ubuntu-24.04-x86_64";
 #[cfg(target_os = "macos")]
-const EXPECTED_PLATFORM: &str = "macos-26-aarch64";
+const EXPECTED_PLATFORM: &str = "macos-27-aarch64";
 
 #[test]
 fn controller_admission_rejects_a_protected_home_file_with_an_outside_alias() {

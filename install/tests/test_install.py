@@ -305,12 +305,13 @@ class PrefixInstallerTest(unittest.TestCase):
             'ID="ubuntu\nVERSION_ID=24.04\n',
         )]
         cases += [("Darwin", "arm64", version, accepted) for version, accepted in (
-            ("26.0", True), ("26.6.2\n", True), ("25.9", False),
-            ("27.0", False), ("260", False), ("26", False),
-            ("26..0", False), ("26.0.beta", False), ("26.0\n26.1", False),
+            ("27.0", True), ("27.1.2\n", True), ("25.9", False),
+            ("26.0", False), ("26.6.2", False), ("28.0", False),
+            ("270", False), ("27", False), ("27..0", False),
+            ("27.0.beta", False), ("27.0\n27.1", False),
         )]
         cases += [("Linux", "arm64", "ID=ubuntu\nVERSION_ID=24.04\n", False),
-                  ("Darwin", "x86_64", "26.0", False)]
+                  ("Darwin", "x86_64", "27.0", False)]
         for host, machine, release, accepted in cases:
             with self.subTest(host=host, machine=machine, release=release):
                 result = subprocess.run(
@@ -352,7 +353,7 @@ class PrefixInstallerTest(unittest.TestCase):
         bundle = root / "bundle"
         bundle.mkdir(mode=0o755, parents=True)
         shutil.copy2(INSTALLER, bundle / "install.sh")
-        platform = "macos-26-aarch64" if sys.platform == "darwin" else "ubuntu-24.04-x86_64"
+        platform = "macos-27-aarch64" if sys.platform == "darwin" else "ubuntu-24.04-x86_64"
         (bundle / "bundle-info").write_text(f"0.0.0\n{platform}\n", encoding="ascii")
         flow = bundle / "flow"
         flow.write_text(
@@ -382,7 +383,8 @@ class PrefixInstallerTest(unittest.TestCase):
 
     def test_missing_malformed_or_wrong_target_bundle_is_rejected_before_program_execution(self):
         for contents in (None, "0.0.0\n", "0.0.0\nunsupported-platform\n",
-                         "0.0.0\nmacos-26-aarch64\n" if sys.platform == "linux"
+                         "0.0.0\nmacos-26-aarch64\n",
+                         "0.0.0\nmacos-27-aarch64\n" if sys.platform == "linux"
                          else "0.0.0\nubuntu-24.04-x86_64\n"):
             with self.subTest(contents=contents), tempfile.TemporaryDirectory() as temporary:
                 root = pathlib.Path(temporary)
