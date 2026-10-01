@@ -32,7 +32,7 @@ Replacement observations remain separate for each host:
 
 | Host | CI artifact | Observation |
 | --- | --- | --- |
-| Ubuntu 24.04 x64 | `m12-executor-startup-evidence-ubuntu-24.04` | Complete samples in the four runs below; not complete product acceptance. |
+| Ubuntu 24.04 x64 | `m12-executor-startup-evidence-ubuntu-24.04` | Complete samples in the five runs below; acceptance is recorded in TESTING.md. |
 | macOS 27 ARM64 | `m12-executor-startup-evidence-xcode-27` | Complete samples at `6689775` below. |
 | macOS 26 ARM64 (historical) | `m12-executor-startup-evidence-macos-26` | Complete samples at `8725a1c` and `6af7296` below; not proof for macOS 27. |
 
@@ -40,7 +40,7 @@ The macOS 27.0 ARM64 report in [PR run 36861751848, job 110367390216](https://gi
 
 Retain each host's raw samples and distribution separately; do not pool them or treat one as evidence for the other. Compare only like-for-like host observations. Compile checks and legacy measurements do not supply replacement timing or native protection evidence.
 
-All four Linux reports use Rust 1.98.1, five warmups, 30 fresh-child samples and `complete: true`:
+All five Linux reports use Rust 1.98.1, five warmups, 30 fresh-child samples and `complete: true`:
 
 | Revision / CI run | Runner image / CPU (four logical CPUs) | p50 (ns) | p95 (ns) | Maximum (ns) |
 |---|---|---:|---:|---:|
@@ -48,6 +48,9 @@ All four Linux reports use Rust 1.98.1, five warmups, 30 fresh-child samples and
 | `b04f9eb`, [35538252515](https://github.com/Open-Equilibrium/watershed/actions/runs/35538252515) | `20260907.300.1`, Intel Xeon 6973P-C | 52,210,434 | 100,226,036 | 173,744,825 |
 | `8725a1c`, [35541356501](https://github.com/Open-Equilibrium/watershed/actions/runs/35541356501) | `20260907.300.1`, AMD EPYC 7763 | 52,082,381 | 52,358,806 | 52,409,896 |
 | `6af7296`, [35542649811](https://github.com/Open-Equilibrium/watershed/actions/runs/35542649811) | `20260907.300.1`, Intel Xeon 6973P-C | 51,890,944 | 110,808,479 | 219,583,245 |
+| `6689775`, [36861751848](https://github.com/Open-Equilibrium/watershed/actions/runs/36861751848/job/110367389599) | `20260927.320.1`, AMD EPYC 7763 | 52,073,177 | 52,180,690 | 52,188,414 |
+
+The `6689775` report uses the same tested merge/tree as the macOS 27 report above. Artifact `11163114397` retains all 30 samples, each with active protection, and verified aggregates; the runner reports 16,766,414,848 bytes of memory. Its separate M1.1 artifact retains the closed workload matrix.
 
 The medians are similar; tail observations vary between runs. The second run's M1.1 artifact also records longer tails in unchanged authoring/status workloads. Changed hardware and runner images prevent attributing the differences solely to Executor changes. Keep the unadjusted samples; this is neither a threshold failure nor an established architectural cause. Native gate results are tracked in [TESTING.md](../../TESTING.md#native-verification-status).
 
