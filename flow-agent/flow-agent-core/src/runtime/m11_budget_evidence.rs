@@ -44,7 +44,7 @@ pub enum M11BudgetWorkloadId {
     RunnerDualStreamCaps,
     /// Maximum Tool-definition transaction.
     AuthoringMaxDefinitionTransaction,
-    /// Empty-workspace initialization.
+    /// Empty global Flow home initialization.
     AuthoringInit,
     /// Maximum registry validation.
     AuthoringMaxRegistryValidate,
@@ -175,7 +175,7 @@ pub fn m11_budget_workload_inputs(id: M11BudgetWorkloadId) -> serde_json::Value 
             "stages": ["stage", "sync", "no-replace publish", "reload", "semantic compare"],
         }),
         M11BudgetWorkloadId::AuthoringInit => json!({
-            "workspaces": 1,
+            "global_homes": 1,
             "initial_state": "empty",
             "registry_root": DEFAULT_REGISTRY_ROOT,
             "registry_kinds": RegistryBlockKind::ALL.map(registry_directory),
