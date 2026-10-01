@@ -82,7 +82,9 @@ pub(crate) use run_log::{append_run_attempt_intent, append_run_attempt_result};
 mod run_objects;
 pub(crate) use run_objects::RunObjectStore;
 #[cfg(test)]
-pub(crate) use run_objects::RunObjectUsageSnapshot;
+pub(crate) use run_objects::{
+    RunObjectReadStage, RunObjectUsageSnapshot, with_run_object_read_observer_for_test,
+};
 
 mod recovery_record;
 #[cfg(test)]

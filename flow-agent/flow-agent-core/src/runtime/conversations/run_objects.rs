@@ -32,6 +32,44 @@ pub(crate) struct RunObjectUsageSnapshot {
     pub(crate) object_count: usize,
 }
 
+#[cfg(test)]
+#[derive(Clone, Copy)]
+pub(crate) enum RunObjectReadStage {
+    Admitted,
+    Retained(usize),
+}
+
+#[cfg(test)]
+type RunObjectReadObserver = Box<dyn FnMut(&Path, RunObjectReadStage)>;
+
+#[cfg(test)]
+thread_local! {
+    static RUN_OBJECT_READ_OBSERVER: std::cell::RefCell<Option<RunObjectReadObserver>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+pub(crate) fn with_run_object_read_observer_for_test<T>(
+    observer: impl FnMut(&Path, RunObjectReadStage) + 'static,
+    operation: impl FnOnce() -> T,
+) -> T {
+    RUN_OBJECT_READ_OBSERVER.with(|slot| {
+        let previous = slot.replace(Some(Box::new(observer)));
+        let result = operation();
+        slot.replace(previous);
+        result
+    })
+}
+
+#[cfg(test)]
+fn observe_run_object_read(path: &Path, stage: RunObjectReadStage) {
+    RUN_OBJECT_READ_OBSERVER.with_borrow_mut(|slot| {
+        if let Some(observer) = slot.as_mut() {
+            observer(path, stage);
+        }
+    });
+}
+
 #[derive(Clone, Copy)]
 struct RunObjectEntry {
     directory_synced: bool,
@@ -177,9 +215,21 @@ pub(super) fn read_run_object_uri(
         ));
     }
     let mut bytes = Vec::with_capacity(usize::try_from(metadata.len()).unwrap_or(usize::MAX));
+    #[cfg(test)]
+    observe_run_object_read(path.diagnostic_path(), RunObjectReadStage::Admitted);
     file.take(MAX_SESSION_OBJECT_BYTES.saturating_add(1))
         .read_to_end(&mut bytes)
         .map_err(|source| path_io_error(path.diagnostic_path(), source))?;
+    #[cfg(test)]
+    observe_run_object_read(
+        path.diagnostic_path(),
+        RunObjectReadStage::Retained(bytes.len()),
+    );
+    if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > MAX_SESSION_OBJECT_BYTES {
+        return Err(protocol(
+            "productive recovery object exceeds its byte limit",
+        ));
+    }
     if sha256_hex(&bytes) != digest {
         return Err(protocol(
             "productive recovery object does not match its URI digest",
@@ -254,9 +304,19 @@ impl RunObjectWriter {
                 Ok((file, _)) => file,
                 Err(error) => return self.fail(error),
             };
-            if let Err(source) = file.read_to_end(&mut bytes) {
+            #[cfg(test)]
+            observe_run_object_read(path.diagnostic_path(), RunObjectReadStage::Admitted);
+            let limit = u64::try_from(object.bytes.len())
+                .unwrap_or(u64::MAX)
+                .saturating_add(1);
+            if let Err(source) = (&mut file).take(limit).read_to_end(&mut bytes) {
                 return self.fail(path_io_error(path.diagnostic_path(), source));
             }
+            #[cfg(test)]
+            observe_run_object_read(
+                path.diagnostic_path(),
+                RunObjectReadStage::Retained(bytes.len()),
+            );
             if bytes != object.bytes {
                 return self.fail(protocol("existing run object does not match its digest"));
             }
