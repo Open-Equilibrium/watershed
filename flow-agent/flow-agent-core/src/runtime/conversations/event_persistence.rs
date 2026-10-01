@@ -144,7 +144,6 @@ struct ConversationWriterBackend {
 impl ConversationWriterBackend {
     fn acknowledge(&self, event: QueuedEvent, outcome: WriterOutcome) {
         if outcome.appended
-            && outcome.error.is_none()
             && let Some(notifier) = &self.notifier
         {
             notifier.try_notify_conversation_run(

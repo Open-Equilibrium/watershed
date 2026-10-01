@@ -8,11 +8,13 @@ use crate::runtime::{
         ConversationEventWriter, MAX_CONVERSATION_SEGMENT_BYTES,
         conversation_stream_parent_sync_count_for_path_for_test,
         reset_conversation_stream_parent_sync_count_for_path_for_test,
+        set_conversation_batch_append_error_after_commit_for_path_for_test,
         set_conversation_file_sync_error_for_path_for_test,
         set_conversation_stream_parent_sync_error_for_path_for_test,
     },
     event_writer::RuntimeEventSink,
     live_events::live_event_channel,
+    session_reading::SessionEventReader,
     types::{EventClock, MAX_CANONICAL_EVENT_BYTES},
 };
 use proto::{EventEnvelope, EventType};
@@ -83,50 +85,80 @@ fn exact_recovery_rejects_a_replaced_event_prefix_after_preflight() {
 }
 
 #[test]
-fn failed_event_checkpoint_sync_does_not_notify() {
-    let workspace = empty_workspace("conversation-failed-event-sync-notification");
-    let (mut writer, receiver) = open_notified_review_writer(&workspace);
-    let run = crate::tests::helpers::workspace_session_dir(&workspace).join("review/runs/review-1");
-    let events_path = run.join("events.jsonl");
-    let events = [
-        review_session_started_event(),
-        EventEnvelope::new(
-            "evt-002",
-            EventType::SessionCompleted,
-            "review-1",
-            2,
-            "2026-07-30T12:00:01Z",
-            "flow-agent-cli",
-            serde_json::json!({}),
-        ),
-    ];
-    let started = events[0]
-        .canonical_jsonl()
-        .expect("session start canonicalizes");
-    writer
-        .commit(&events[0], &started, None)
-        .expect("session start commits");
-    receiver
-        .recv_timeout(Duration::from_millis(500))
-        .expect("session start notification arrives");
+fn readable_semantic_append_notifies_despite_cleanup_or_checkpoint_failure() {
+    for case in ["checkpoint-sync", "append-cleanup"] {
+        let workspace = empty_workspace(&format!("conversation-semantic-notification-{case}"));
+        let (mut writer, receiver) = open_notified_review_writer(&workspace);
+        let events_path = crate::tests::helpers::workspace_session_dir(&workspace)
+            .join("review/runs/review-1/events.jsonl");
+        let mut event = review_session_started_event();
+        let mut expected = String::new();
+        if case == "checkpoint-sync" {
+            let canonical = event.canonical_jsonl().expect("start canonicalizes");
+            writer
+                .commit(&event, &canonical, None)
+                .expect("start commits");
+            receiver
+                .recv_timeout(Duration::from_millis(500))
+                .expect("start notifies");
+            expected.push_str(&canonical);
+            event.event_id = "evt-002".to_owned();
+            event.sequence = 2;
+            event.event_type = EventType::SessionCompleted;
+            event.timestamp = "2026-07-30T12:00:01Z".to_owned();
+            set_conversation_file_sync_error_for_path_for_test(&events_path, io::ErrorKind::Other);
+        } else {
+            set_conversation_batch_append_error_after_commit_for_path_for_test(&events_path);
+        }
+        let canonical = event.canonical_jsonl().expect("target canonicalizes");
+        let error = writer
+            .commit(&event, &canonical, None)
+            .expect_err("failure is retained");
+        assert!(
+            error.to_string().contains(if case == "checkpoint-sync" {
+                "injected conversation file synchronization failure"
+            } else {
+                "injected conversation batch append failure"
+            }),
+            "{error}"
+        );
+        expected.push_str(&canonical);
+        assert_eq!(
+            fs::read_to_string(&events_path).expect("readable log reads"),
+            expected
+        );
+        writer
+            .commit(&event, &canonical, None)
+            .expect_err("failed writer stops later events");
+        writer.finish().expect_err("finish retains failure");
 
-    set_conversation_file_sync_error_for_path_for_test(&events_path, io::ErrorKind::Other);
-    let completed = events[1]
-        .canonical_jsonl()
-        .expect("session completion canonicalizes");
-    writer
-        .commit(&events[1], &completed, None)
-        .expect_err("event synchronization failure is reported");
-
-    assert_eq!(
-        receiver.highest_committed_sequence(),
-        1,
-        "a failed checkpoint must not advance the committed high-watermark"
-    );
-    assert!(
-        receiver.recv_timeout(Duration::from_millis(50)).is_err(),
-        "a failed checkpoint must not notify"
-    );
+        let mut reader =
+            SessionEventReader::open_conversation_run(&workspace, "review", "review-1")
+                .expect("final catch-up reader opens");
+        let mut delivered = String::new();
+        reader
+            .visit_verified_after(0, receiver.highest_committed_sequence(), |_, line| {
+                delivered.push_str(line);
+                Ok(())
+            })
+            .expect("authoritative log verifies");
+        assert_eq!(
+            delivered, expected,
+            "readable failed append reaches bounded final catch-up"
+        );
+        assert_eq!(receiver.highest_committed_sequence(), event.sequence);
+        assert_eq!(
+            receiver
+                .recv_timeout(Duration::from_millis(50))
+                .expect("append notifies")
+                .highest_committed_sequence,
+            event.sequence
+        );
+        assert!(
+            receiver.recv_timeout(Duration::from_millis(50)).is_err(),
+            "stopped retry must not notify"
+        );
+    }
 }
 
 fn event_with_exact_canonical_bytes(

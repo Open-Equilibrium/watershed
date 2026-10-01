@@ -12,12 +12,14 @@ use crate::runtime::{
         ConversationEventWriter, MAX_CONVERSATION_SEGMENT_BYTES,
         conversation_stream_parent_sync_count_for_path_for_test,
         reset_conversation_stream_parent_sync_count_for_path_for_test,
+        set_conversation_batch_append_error_after_commit_for_path_for_test,
         set_conversation_file_sync_error_for_path_for_test,
         set_conversation_stream_parent_sync_error_for_path_for_test,
     },
     event_writer::RuntimeEventSink,
     live_events::live_event_channel,
     productive_capacity::ProductiveDispatchReservation,
+    session_reading::SessionEventReader,
 };
 use proto::{EventEnvelope, EventType};
 use std::{
@@ -171,37 +173,99 @@ fn exact_recovery_appends_the_event_missing_after_its_durable_context() {
 }
 
 #[test]
-fn failed_context_only_repair_sync_does_not_notify() {
-    let (workspace, prefix, event, checkpoint) =
-        context_only_recovery_fixture("conversation-failed-repair-sync-notification", false);
-    let events_path = crate::tests::helpers::workspace_session_dir(&workspace)
-        .join("review/runs/review-1/events.jsonl");
-    let (notifier, receiver) = live_event_channel();
-    let mut resumed = ConversationEventWriter::open_for_recovery(
-        &workspace,
-        "review",
-        "review-1",
-        false,
-        Some(notifier),
-    )
-    .expect("recovery writer opens");
-    replay_prefix(&mut resumed, &prefix);
+fn readable_context_only_repair_notifies_despite_cleanup_or_sync_failure() {
+    for case in ["event-sync", "context-sync", "append-cleanup"] {
+        let (workspace, prefix, event, checkpoint) = context_only_recovery_fixture(
+            &format!("conversation-failed-repair-notification-{case}"),
+            false,
+        );
+        let run =
+            crate::tests::helpers::workspace_session_dir(&workspace).join("review/runs/review-1");
+        let events_path = run.join("events.jsonl");
+        let contexts_before = fs::read(run.join("contexts.jsonl")).expect("context prefix reads");
+        let (notifier, receiver) = live_event_channel();
+        let mut resumed = ConversationEventWriter::open_for_recovery(
+            &workspace,
+            "review",
+            "review-1",
+            false,
+            Some(notifier),
+        )
+        .expect("recovery writer opens");
+        replay_prefix(&mut resumed, &prefix);
 
-    set_conversation_file_sync_error_for_path_for_test(&events_path, io::ErrorKind::Other);
-    let canonical = event.canonical_jsonl().expect("completion canonicalizes");
-    resumed
-        .commit(&event, &canonical, Some(checkpoint))
-        .expect_err("repaired-event synchronization failure is reported");
-
-    assert_eq!(
-        receiver.highest_committed_sequence(),
-        0,
-        "a failed repair must not advance the committed high-watermark"
-    );
-    assert!(
-        receiver.recv_timeout(Duration::from_millis(50)).is_err(),
-        "a failed repair must not notify"
-    );
+        assert_eq!(
+            receiver.highest_committed_sequence(),
+            0,
+            "replayed prefix stays silent"
+        );
+        match case {
+            "append-cleanup" => {
+                set_conversation_batch_append_error_after_commit_for_path_for_test(&events_path)
+            }
+            "event-sync" => set_conversation_file_sync_error_for_path_for_test(
+                &events_path,
+                io::ErrorKind::Other,
+            ),
+            "context-sync" => set_conversation_file_sync_error_for_path_for_test(
+                &run.join("contexts.jsonl"),
+                io::ErrorKind::Other,
+            ),
+            _ => unreachable!("closed repair failure matrix"),
+        }
+        let canonical = event.canonical_jsonl().expect("completion canonicalizes");
+        let error = resumed
+            .commit(&event, &canonical, Some(checkpoint.clone()))
+            .expect_err("repair failure is reported");
+        assert!(
+            error.to_string().contains(if case == "append-cleanup" {
+                "injected conversation batch append failure"
+            } else {
+                "injected conversation file synchronization failure"
+            }),
+            "{error}"
+        );
+        resumed
+            .commit(&event, &canonical, Some(checkpoint))
+            .expect_err("failed repair stops later events");
+        resumed.finish().expect_err("finish retains repair failure");
+        let events = fs::read_to_string(&events_path).expect("repaired events read");
+        assert_eq!(events.matches(&canonical).count(), 1);
+        assert_eq!(
+            fs::read(run.join("contexts.jsonl")).expect("context prefix reads"),
+            contexts_before
+        );
+        let mut reader =
+            SessionEventReader::open_conversation_run(&workspace, "review", "review-1")
+                .expect("final catch-up reader opens");
+        let mut delivered = String::new();
+        reader
+            .visit_verified_after(
+                prefix.last().expect("prefix exists").sequence,
+                receiver.highest_committed_sequence(),
+                |_, line| {
+                    delivered.push_str(line);
+                    Ok(())
+                },
+            )
+            .expect("repaired log verifies");
+        assert_eq!(
+            delivered, canonical,
+            "readable repair reaches bounded final catch-up"
+        );
+        assert_eq!(receiver.highest_committed_sequence(), event.sequence);
+        assert_eq!(
+            receiver
+                .recv_timeout(Duration::from_millis(50))
+                .expect("readable repair notifies")
+                .highest_committed_sequence,
+            event.sequence
+        );
+        assert!(
+            receiver.recv_timeout(Duration::from_millis(50)).is_err(),
+            "stopped retry must not notify"
+        );
+    }
 }
 
 #[test]
@@ -220,9 +284,15 @@ fn message_completion_syncs_context_before_event_append_and_recovers_the_context
     }
     writer.finish().expect("prefix writer finishes");
     drop(writer);
-    let mut writer =
-        ConversationEventWriter::open_for_recovery(&workspace, "review", "review-1", false, None)
-            .expect("prefix recovery writer opens");
+    let (notifier, receiver) = live_event_channel();
+    let mut writer = ConversationEventWriter::open_for_recovery(
+        &workspace,
+        "review",
+        "review-1",
+        false,
+        Some(notifier),
+    )
+    .expect("prefix recovery writer opens");
     replay_prefix(&mut writer, &prefix);
 
     let run = crate::tests::helpers::workspace_session_dir(&workspace).join("review/runs/review-1");
@@ -250,6 +320,15 @@ fn message_completion_syncs_context_before_event_append_and_recovers_the_context
     );
     let contexts_after = fs::read(&contexts_path).expect("context-only tail reads");
     assert_eq!(contexts_after, checkpoint.manifest.line.as_bytes());
+    assert_eq!(
+        receiver.highest_committed_sequence(),
+        0,
+        "unappended completion does not advance notification"
+    );
+    assert!(
+        receiver.recv_timeout(Duration::from_millis(50)).is_err(),
+        "unappended completion does not notify"
+    );
     writer
         .finish()
         .expect_err("failed conversation writer remains failed after cleanup");

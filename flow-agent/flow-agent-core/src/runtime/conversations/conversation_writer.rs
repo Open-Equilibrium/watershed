@@ -301,9 +301,7 @@ impl ConversationEventWriter {
             .err();
         self.validation = Some(validation);
         let error = append_error.or(sync_error);
-        if error.is_none()
-            && let Some(notifier) = &self.notifier
-        {
+        if let Some(notifier) = &self.notifier {
             notifier.try_notify_conversation_run(
                 &self.conversation_id,
                 &self.run_session_id,
