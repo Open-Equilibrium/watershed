@@ -485,7 +485,7 @@ class PrefixInstallerTest(unittest.TestCase):
                     self.assertFalse(marker.exists(), result.stderr)
                     self.assertFalse(prefix.exists(), result.stderr)
 
-    def install(self, bundle: pathlib.Path, prefix: pathlib.Path, *args: str, observe_timeout=False):
+    def install(self, bundle: pathlib.Path, prefix: pathlib.Path, *args: str):
         unrelated_cwd = prefix.parent / "unrelated-cwd"
         unrelated_cwd.mkdir(exist_ok=True)
         command = [
@@ -496,18 +496,7 @@ class PrefixInstallerTest(unittest.TestCase):
             env={**self.readiness_environment(),
                  "FLOW_AGENT_HOME": str(unrelated_cwd / "ignored-flow-home")},
         )
-        if observe_timeout:
-            from install.tests.test_readiness import _captured_readiness, _capture_timeout_note
-
-            with _captured_readiness(command, **options) as (process, notice):
-                try:
-                    stdout, stderr = process.communicate(timeout=15)
-                except subprocess.TimeoutExpired as error:
-                    _capture_timeout_note(error, process, notice)
-                    raise
-                result = subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
-        else:
-            result = subprocess.run(command, **options, capture_output=True, check=False, timeout=15)
+        result = subprocess.run(command, **options, capture_output=True, check=False, timeout=15)
         if "--no-default-executor" not in args:
             self.assert_privileged_supervision(bundle)
         return result
@@ -971,15 +960,12 @@ class PrefixInstallerTest(unittest.TestCase):
                 else:
                     source = source.replace('readiness_group=$(/bin/ps -o pgid= -p "$$")',
                                             'readiness_group=$installer_pgid', 1)
-                # Trace only this disposable refusal copy; failure notes retain its tail.
-                source = source.replace("set -eu\n", 'set -eu\nPS4="+fixture-pid=$$ "\nset -x\n', 1)
-                source = source.replace("readiness_shell='\n", 'readiness_shell=\'\n    PS4="+fixture-pid=$$ "\n    set -x\n', 1)
                 installer.write_text(source, encoding="utf-8")
                 marker = root / "checker-started"
                 (bundle / "flow").write_text(f"#!/bin/sh\n: > {shlex.quote(str(marker))}\n", encoding="utf-8")
                 prefix = root / "prefix"
 
-                result = self.install(bundle, prefix, observe_timeout=True)
+                result = self.install(bundle, prefix)
 
                 self.assertEqual(result.returncode, 1, result.stderr)
                 self.assertIn(b"did not report readiness", result.stderr)
@@ -1033,13 +1019,6 @@ class PrefixInstallerTest(unittest.TestCase):
                 source = installer.read_text(encoding="utf-8")
                 self.assertEqual(source.count("/usr/bin/pgrep"), 1)
                 self.assertEqual(source.count("signal_exit() {\n"), 1)
-                shutdown = "        IFS= read -r request || :\n"
-                self.assertEqual(source.count(shutdown), 2)
-                source = source.replace(shutdown, (
-                    '        PS4="+readiness role=$role pid=$$ group=$readiness_pgid '
-                    'bash=${BASH_VERSION-unavailable} seconds=\\${SECONDS-unavailable} "\n'
-                    '        set -x\n'
-                ) + shutdown)
                 installer.write_text(
                     source.replace("/usr/bin/pgrep", scanner).replace(
                         "signal_exit() {\n", "signal_exit() {\n    set -x\n"
@@ -1109,16 +1088,10 @@ class PrefixInstallerTest(unittest.TestCase):
                             )
                         except (OSError, subprocess.TimeoutExpired) as diagnostic_error:
                             state_text = f"process-state diagnostic failed: {diagnostic_error}"
-                        journal = bundle.parent / "supervision"
-                        try:
-                            supervision = journal.read_text()[-4096:] if journal.exists() else "absent"
-                        except OSError as diagnostic_error:
-                            supervision = f"journal diagnostic failed: {diagnostic_error}"
                         self.fail(
                             "installer did not finish within 5s after SIGTERM; "
                             f"pid={process.pid}, status={installer_status}, "
-                            f"readiness_pgid={descendant_group}, descendant={descendant}, "
-                            f"scanner={scanner}\ncurrent supervision:\n{supervision}\n"
+                            f"readiness_pgid={descendant_group}, descendant={descendant}\n"
                             f"{state_text}\ninstaller stderr tail:\n"
                             + (error.stderr or b"")[-16384:].decode("utf-8", errors="replace")
                         )

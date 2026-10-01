@@ -80,36 +80,6 @@ def _cleanup_errors(primary, errors):
         primary.add_note(f"fixture teardown: {error!r}")
 
 
-def _capture_timeout_note(error, child, notice):
-    try:
-        error.add_note(f"root_exit_observed_without_reaping={notice.exited()}")
-    except Exception as diagnostic_error:
-        error.add_note(f"root exit observation failed: {diagnostic_error!r}")
-    for name in ("stdout", "stderr"):
-        stream = getattr(child, name)
-        tail = getattr(error, "output" if name == "stdout" else "stderr") or b""
-        residual = bytearray()
-        state = "closed"
-        try:
-            if stream is not None and not stream.closed:
-                os.set_blocking(stream.fileno(), False)
-                state = "64KiB cap; EOF inconclusive"
-                while len(residual) < 65536:
-                    try:
-                        chunk = os.read(stream.fileno(), min(4096, 65536 - len(residual)))
-                    except BlockingIOError:
-                        state = "EAGAIN; writer remains"
-                        break
-                    if not chunk:
-                        state = "EOF"
-                        break
-                    residual.extend(chunk)
-        except Exception as diagnostic_error:
-            state = f"snapshot failed: {diagnostic_error!r}"
-        error.add_note(f"{name}: {state}; tail:\n"
-                       + (tail + residual)[-16384:].decode("utf-8", errors="replace"))
-
-
 @contextlib.contextmanager
 def _captured_readiness(command, **options):
     child = subprocess.Popen(command, start_new_session=True,
@@ -290,13 +260,6 @@ class ReadinessContractTest(unittest.TestCase):
         source = (pathlib.Path(__file__).parents[1] / "install.sh").read_text()
         body = source.partition("readiness_shell='\n")[2].partition("\n'\nwait_for_readiness_status()")[0]
         self.assertTrue(body)
-        shutdown = "        IFS= read -r request || :\n"
-        self.assertEqual(body.count(shutdown), 2)
-        body = body.replace(shutdown, (
-            '        PS4="+readiness role=$role pid=$$ group=$readiness_pgid '
-            'bash=${BASH_VERSION-unavailable} seconds=\\${SECONDS-unavailable} "\n'
-            '        set -x\n'
-        ) + shutdown)
         cases = (("failed", False, "/usr/bin/pgrep"),
                  ("before-inner", False, "/usr/bin/pgrep"),
                  ("after-inner", False, "/usr/bin/pgrep"),
@@ -369,11 +332,7 @@ class ReadinessContractTest(unittest.TestCase):
                             started = time.monotonic()
                             process.stdin.close()
                             process.stdin = None
-                            try:
-                                _, stderr = process.communicate(timeout=5)
-                            except subprocess.TimeoutExpired as error:
-                                _capture_timeout_note(error, process, notice)
-                                raise
+                            _, stderr = process.communicate(timeout=5)
                             self.assertLess(time.monotonic() - started, 5, stderr)
                             self.assertIn(process.returncode, (0, -signal.SIGKILL), stderr)
                             if phase == "after-inner":
