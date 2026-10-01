@@ -90,7 +90,7 @@ The M1 deterministic runtime foundation satisfies the following criteria. They r
 14. Per-Tool Run Log projections plus actual `tool.timed_out` and Tool-failure events.
 15. Durable intent around every explicit provider or provider-requested Tool attempt; an uncertain attempt is never relaunched automatically, and `flow reconcile-tool <conversation-id> <run-session-id> --result <file|->` settles exactly one eligible Tool attempt from bounded external evidence.
 16. Versioned Conversation trees over linear Runs, including creation, continuation, branching, recovery and paged status, as defined in `PROTOCOL.md`.
-17. Explicit `openai-codex` project configuration, browser/device authentication and a protected Flow-owned credential record.
+17. Explicit `openai-codex` global configuration, browser/device authentication and a protected Flow-owned credential record.
 18. Ordered global-home and harness-start Workspace `AGENTS.md` loading as a separate instruction/context channel. Manually referenced Instruction source filenames have no authority or naming semantics and may, for example, be named `SYSTEM.md`.
 19. No Watershed-owned project-code VCS behavior.
 

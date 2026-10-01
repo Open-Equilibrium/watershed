@@ -6,7 +6,7 @@ This is the canonical M1.1 source for hard functional limits, their boundary pro
 
 - Binary units are used. A byte cap counts the bytes identified in the row, not Unicode scalars, allocator capacity or a transport's framing overhead.
 - `F:<name>` is a required functional test in the workspace `nextest` gate on Flow Agent's native targets; capability-specific evidence follows [TESTING.md](../../TESTING.md). For a byte or count cap `N`, a valid `N` fixture succeeds and `N + 1` fails before unbounded allocation or productive effects. Parameterized rows execute every named field or operation separately. Required malformed, missing, zero, negative and checked-arithmetic cases remain part of the relevant protocol test even when they are not additional numeric selections.
-- A deadline test uses a fake monotonic clock unless the row explicitly requires a child process. At `limit - 1 ns` the operation remains eligible; at `limit` it reaches exactly one terminal timeout path; advancing past the limit cannot create another effect or terminal result.
+- A deadline test uses a fake monotonic clock unless the row explicitly requires a child process. Fake-clock tests assert that at `limit - 1 ns` the operation remains eligible; at `limit` it reaches exactly one terminal timeout path; advancing past the limit cannot create another effect or terminal result. Real-process tests assert the outcomes and elapsed ranges named in the row; these observations do not prove exact transition times.
 - `P:<name>` is a release-mode, one-process-at-a-time observation on the fixed `ubuntu-24.04` x64 runner. Five warmups and 30 measured fresh-child samples produce `target/m11-performance/m11-performance-evidence.jsonl` with schema `flow-m11-performance-evidence-v0`. The report records unadjusted elapsed-time and Linux `post-workload VmHWM - pre-workload VmRSS` observations without threshold comparisons.
 - `P:rss_detection_fixture` is always present. It allocates, touches and frees exactly 4 MiB in a fresh child and must report at least 4 MiB minus the documented 512 KiB Linux accounting tolerance. This validates measurement integrity; it is not a product RSS limit.
 - `F`-only rows are intentionally excluded from maximum-load observation because they exercise parser, cardinality or fake-clock boundaries rather than representative product work.
@@ -80,7 +80,7 @@ The concrete Run writer inventories current stored usage and admits the complete
 
 ## Tool runner
 
-The rows below validate the existing runner's bounded behavior. They do not establish the approved replacement's protection or guarantee that hostile descendants cannot survive; security scope is canonical in [SECURITY.md](../../SECURITY.md#accepted-flow-agent-security-target).
+The rows below retain M1.1 direct-process evidence. TR-03–TR-05 observe real-process outcomes and elapsed ranges, not exact `CleanupDeadline` transition times or replacement protection. The replacement Executor's [`CleanupController` test using supplied times](../flow-agent-executor/src/tests.rs) covers its own lifecycle. Security guarantees remain canonical in [SECURITY.md](../../SECURITY.md#accepted-flow-agent-security-target).
 
 Stream caps count raw bytes read from each pipe before UTF-8 classification.
 
@@ -88,9 +88,9 @@ Stream caps count raw bytes read from each pipe before UTF-8 classification.
 |---|---|---|---|
 | TR-01 | Stdout: 4 MiB | `F:runner_stdout_budget`; a child emits 4,194,304 bytes, then 4,194,305 bytes, with stderr empty. | `P:runner_dual_stream_caps` also emits exactly 4 MiB on both pipes concurrently. |
 | TR-02 | Stderr: 4 MiB | `F:runner_stderr_budget`; the TR-01 pair on stderr with stdout empty. | Covered by `P:runner_dual_stream_caps`. |
-| TR-03 | TERM grace: 1 s | `F:runner_term_grace`; a ready child ignores TERM and proves TERM precedes escalation by exactly the deadline convention. | `P:runner_termination` observes post-readiness TERM through reaping and EOF; the ignored-TERM second remains a safety deadline, not a latency target. |
-| TR-04 | Forced reap: 1 s | `F:runner_forced_reap`; an escalated process-group leader plus inherited child exercises the exact wait and one terminal forced-reap failure. | F-only: intentional timeout path. |
-| TR-05 | Output drain: 1 s | `F:runner_output_drain`; a descendant retaining both pipe handles forces controller closure at the deadline and one terminal drain failure. | F-only: intentional timeout path; ordinary EOF is covered by the stream observation. |
+| TR-03 | TERM grace: 1 s | `F:runner_term_grace`; a child ignores TERM; the runner returns `TimedOut`/`ToolTimedOut` with stdout `ready` and total elapsed time `>= 1 s` and `< 3 s`. | `P:runner_termination` observes post-readiness TERM through reaping and EOF; the ignored-TERM second remains a safety deadline, not a latency target. |
+| TR-04 | Forced reap: 1 s | `F:runner_forced_reap`; an injected forced-reap timeout returns `Failed`/`ProcessReapFailed` with total elapsed time `>= 2 s` and `< 4 s`. | F-only: intentional timeout path. |
+| TR-05 | Output drain: 1 s | `F:runner_output_drain`; a descendant retains both pipe handles; the runner returns `Failed`/`OutputDrainTimeout`, stdout containing `leader-done` and total elapsed time `< 3 s`. | F-only: intentional timeout path; ordinary EOF is covered by the stream observation. |
 | TR-06 | Exec-vector entries: 2,048 | `F:runner_exec_entry_budget`; exact complete vectors with 2,048/2,049 entries include executable and generated parameter tokens. | F-only: construction boundary. |
 | TR-07 | Encoded exec vector: 128 KiB | `F:runner_exec_byte_budget`; exact 131,072/131,073-byte vectors cover strings, terminators and pointer arrays on each supported pointer width. | F-only: construction boundary. |
 | TR-08 | Four no-op launch lifecycle | `F:runner_noop_lifecycle`; four direct-exec children each produce exactly one terminal result. | `P:runner_four_noop_launches` observes four sequential direct executable launches per sample. |
