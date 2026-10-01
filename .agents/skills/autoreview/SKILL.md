@@ -23,6 +23,7 @@ Run the bundled structured review helper as a closeout check. This is code revie
 - Keep going until structured review returns no accepted/actionable findings, unless the open search-space stop below triggers.
 - For security-audit suppression changes, verify accepted findings remain auditable: suppressed findings stay in structured output, active output keeps an unsuppressible suppression notice, and aggregate findings cannot hide unrelated active risk.
 - Never switch or override the requested review engine/model. If the review hits model capacity, retry the same command a few times with the same engine/model.
+- For both Watershed review stages, read `model` and `model_reasoning_effort` from [.codex/agents/worker.toml](../../../.codex/agents/worker.toml), set `AUTOREVIEW_MODEL` and `AUTOREVIEW_THINKING` to those values, and include `--engine codex --model "codex=$AUTOREVIEW_MODEL" --thinking "codex=$AUTOREVIEW_THINKING"` on every model-invoking helper command. Target examples below omit these repeated flags.
 - Be patient with large bundles. Structured review can take up to 30 minutes while the model call is active, especially with Codex tools or web search.
 - Treat heartbeat lines like `review still running: ... elapsed=... pid=...` as healthy progress, not a hang. Let the helper continue while heartbeats are advancing. Pass `--stream-engine-output` when live engine text is useful; Codex filters tool/file chatter.
 - Do not kill a review just because it has been quiet for 2-5 minutes, or because it is still running under the 30-minute window. Inspect the process only after missing multiple expected heartbeats, after 30 minutes, or after an obviously failed subprocess; prefer letting the same helper command finish.
@@ -144,13 +145,13 @@ Run multiple reviewers against one frozen bundle:
 Set reviewer models and thinking/effort explicitly:
 
 ```bash
-"$AUTOREVIEW" --reviewers codex --model codex=gpt-5.6-sol --thinking codex=high
+"$AUTOREVIEW" --engine codex --model "codex=$AUTOREVIEW_MODEL" --thinking "codex=$AUTOREVIEW_THINKING"
 ```
 
 Inline syntax is also supported:
 
 ```bash
-"$AUTOREVIEW" --reviewers codex:gpt-5.6-sol:high
+"$AUTOREVIEW" --reviewers "codex:$AUTOREVIEW_MODEL:$AUTOREVIEW_THINKING"
 ```
 
 Codex maps thinking to `model_reasoning_effort` and accepts `low`, `medium`,

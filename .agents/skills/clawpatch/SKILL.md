@@ -11,6 +11,8 @@ This skill is the procedural home for the clawpatch sequence only.
 
 Run in the project root without interleaving unrelated commands.
 
+For both Watershed review stages, read `model` and `model_reasoning_effort` from [.codex/agents/worker.toml](../../../.codex/agents/worker.toml). Every model-invoking `review` or `revalidate` command must include `--provider codex --model <model> --reasoning-effort <model_reasoning_effort>` using those values.
+
 1. Once per checkout: `pnpm install`, then `pnpm exec clawpatch doctor`.
 2. First run per repo: `pnpm exec clawpatch init`, then `pnpm exec clawpatch map`; rerun `map` after structural changes.
 3. Review open work: `pnpm exec clawpatch review --limit <n> --jobs 3` (`n` = number of features), then `pnpm exec clawpatch report`.

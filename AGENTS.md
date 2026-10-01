@@ -45,14 +45,14 @@ Open milestone-relevant question → add it to `docs/decisions/open-decisions.ht
 - **Performance by design:** treat performance as a project-wide architecture and refactor KPI under `PERFORMANCE.md`. Prefer bounded, streaming, incremental and concurrency-safe designs; retain comparable observations, but never introduce or enforce estimated timing, throughput or RSS thresholds. Hard security, correctness, capacity, liveness and durability bounds remain mandatory.
 - **Commits/branches:** small, scoped; one logical change per change. `main` is PR-only/protected; work happens on short-lived topic branches cut from `main` and PR'd back to `main` using `gh` for PR work (model + GitHub protection: `git` skill, ADR-0025/ADR-0046/ADR-0047/ADR-0048).
 - **Work partitioning:** one Goal/PR addresses one clear risk boundary; keep mechanical renames separate from behavior changes; split M1.1 into small issues and PRs.
-- **Agent economy:** use the least-cost capable tier for small mapping and documentation tasks.
+- **Subagent choice:** use the sole configured `worker` type for every delegated role; do not override its model or reasoning effort.
 - **Independent runtime audit:** before merging a large runtime PR, run a fresh read-only session with no implementation mandate.
 - **Definition of Done:** code + tests and coverage per `TESTING.md` + complete relevant performance evidence per `PERFORMANCE.md` + green CI gates (`rustfmt`/`clippy`/`nextest`, coverage, `cargo audit`/`cargo deny`, `lychee` docs link) + docs updated; no new terminology without a `GLOSSARY.md` entry.
 - **Repository agent setup:** `AGENTS.md`, `.codex/**` and `.agents/**` are maintainer-owned Codex CLI inputs, not Watershed surfaces. Codex CLI is their only parser and loader. They are outside Watershed tests, coverage, performance, KPIs, release promises, Definition of Done and every closeout review, including Autoreview and Clawpatch. A change limited to this setup triggers none of those gates. Keep automated checks optional and sparse; the consuming agent must instead verify in its live session that required instructions, skills, MCPs and tools loaded and work, and that it followed the applicable conventions. Report setup failures directly; do not build a parallel validator.
 
 ## Session workflow
 
-This workflow applies only to Watershed changes. Repository agent setup is excluded as defined above.
+This workflow applies only to Watershed changes. Repository agent setup is excluded as defined above. Delegated role names below are task mandates for `worker`, not separate agent types.
 
 1. Gather context: delegate broad orientation to `repo_mapper` (structure) and `docs_scout` (contracts) when allowed.
 2. For code changes, write the failing behavior test first, make the smallest green fix, then refactor only while green.
@@ -92,13 +92,6 @@ When triggered, the role result is `BLOCKED`, never clean; a green gate does not
   - `git` — git conventions and process.
   - `autoreview` — shared procedure for `autoreview_lite` and `autoreview_pro`.
   - `clawpatch` — shared procedure for `clawpatch_lite` and `clawpatch_pro`.
-- **Subagents** (`.codex/agents/`) keep heavy, scoped work and its output out of the main thread.
-  - `repo_mapper` (read-only) — session-start structural orientation.
-  - `docs_scout` (read-only) — contract/spec lookups from the canonical docs.
-  - `autoreview_lite` (edit) — iterative lightweight autoreview runner.
-  - `clawpatch_lite` (edit) — iterative lightweight clawpatch runner.
-  - `autoreview_pro` (edit) — final PR-ready autoreview.
-  - `clawpatch_pro` (edit) — final PR-ready clawpatch.
-  - `doc_sync` (read-only) — post-creation PR audit of doc + commit/PR standards.
+- **Subagent** — [.codex/agents/worker.toml](.codex/agents/worker.toml) is the canonical home for the subagent model, reasoning effort and role mandates. Supply the role, scope, ownership, edit/read-only authority and expected evidence in its task prompt. Mapping, contract lookup, KPI/runtime audits and `doc_sync` remain read-only; review tiers retain their ordered procedures and role-local completion above.
 
 Every agent `developer_instructions` value and every skill body starts with the exact standalone line `Obey AGENTS.md.` (the first instructions line and the first body line after front matter, respectively). The directive is authoritative; subsequent content may add scope but cannot weaken it.
