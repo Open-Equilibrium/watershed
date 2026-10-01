@@ -330,33 +330,88 @@ published_executor=0
 installation_committed=0
 readiness_config_created=0
 readiness_config_admitted=0
-readiness_pid=
-readiness_pgid=
+readiness_active=0
+readiness_control=$stage_directory/readiness-control
+readiness_inner_control=$stage_directory/readiness-inner-control
 readiness_scanner=/usr/bin/pgrep
-readiness_group_has_descendant() {
-    # Darwin's EXIT-trap command substitution can report a missing command as 1.
-    [ -x "$readiness_scanner" ] || return 0
-    if readiness_members=$("$readiness_scanner" -g "$readiness_pgid" 2>/dev/null); then
-        for readiness_member in $readiness_members; do
-            [ "$readiness_member" = "$readiness_pid" ] || return 0
+# Every signal is issued by a live member of its own admitted group.
+readiness_shell='
+    set +e
+    trap ":" HUP INT TERM PIPE
+    role=$1
+    readiness_config=$2
+    flow_target=$3
+    readiness_status_file=$4
+    readiness_inner_control=$5
+    installer_pgid=$6
+    readiness_scanner=$7
+    script=$8
+    shift 8
+    helper_count=$#
+    readiness_pid=$$
+    readiness_group=$(/bin/ps -o pgid= -p "$$") || exit 1
+    # Preserve the literal helper arguments while checking exactly one group.
+    readiness_pgid=$(set -- $readiness_group; [ "$#" -eq 1 ] && printf "%s" "$1") || exit 1
+    case "$readiness_pgid" in ""|*[!0-9]*) exit 1 ;; esac
+    [ "$readiness_pgid" -gt 1 ] && [ "$readiness_pgid" != "$installer_pgid" ] || exit 1
+    readiness_group_has_descendant() {
+        [ -x "$readiness_scanner" ] || return 0
+        if readiness_members=$("$readiness_scanner" -g "$readiness_pgid" 2>/dev/null); then
+            for readiness_member in $readiness_members; do
+                [ "$readiness_member" = "$readiness_pid" ] || return 0
+            done
+            return 1
+        else
+            readiness_scan_status=$?
+            [ "$readiness_scan_status" -eq 1 ] && return 1
+            return 0
+        fi
+    }
+    wait_for_readiness_group() {
+        wait_attempts=20
+        while readiness_group_has_descendant; do
+            [ -x "$readiness_scanner" ] || return 1
+            [ "$wait_attempts" -gt 0 ] || return 1
+            /bin/sleep 0.05
+            wait_attempts=$((wait_attempts - 1))
         done
-        return 1
+    }
+    IFS= read -r request || exit 1
+    [ "$request" = start ] || exit 1
+    if [ "$role" = outer ]; then
+        [ "$helper_count" -gt 0 ] || exit 1
+        exec 7<>"$readiness_inner_control" || exit 1
+        exec 8>"$readiness_inner_control" || exit 1
+        "$@" /bin/sh -c "$script" flow-readiness inner \
+            "$readiness_config" "$flow_target" "$readiness_status_file" \
+            "$readiness_inner_control" "$installer_pgid" "$readiness_scanner" "" \
+            <"$readiness_inner_control" 7>&- 8>&- &
+        exec 7>&-
+        printf "%s\n" start >&8 || :
+        IFS= read -r request || :
+        exec 7>&- 8>&-
+        wait_for_readiness_group && exit 0
     else
-        readiness_scan_status=$?
-        [ "$readiness_scan_status" -eq 1 ] && return 1
-        return 0
+        (
+            trap - HUP INT TERM PIPE
+            umask 077
+            PATH=
+            HOME=$(cd "$readiness_config" && /bin/pwd -P) || exit 1
+            [ "$HOME" -ef "$readiness_config" ] || exit 1
+            XDG_CONFIG_HOME=$HOME
+            unset FLOW_AGENT_HOME XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS
+            export PATH HOME XDG_CONFIG_HOME
+            if "$flow_target" executor check </dev/null; then status=0; else status=$?; fi
+            printf "%s\n" "$status" > "$readiness_status_file.pending" && \
+                /bin/mv -f -- "$readiness_status_file.pending" "$readiness_status_file" || :
+        ) </dev/null &
+        IFS= read -r request || :
     fi
-}
-wait_for_readiness_group() {
-    wait_attempts=20
-    while readiness_group_has_descendant; do
-        # An unavailable scanner cannot observe progress; escalate immediately.
-        [ -x "$readiness_scanner" ] || return 1
-        [ "$wait_attempts" -gt 0 ] || return 1
-        /bin/sleep 0.05
-        wait_attempts=$((wait_attempts - 1))
-    done
-}
+    /bin/kill -TERM -- "-$readiness_pgid" 2>/dev/null || :
+    wait_for_readiness_group && exit 0
+    # This last signal also kills the caller; there is no numeric identity reuse.
+    exec /bin/kill -KILL -- "-$readiness_pgid" 2>/dev/null
+'
 wait_for_readiness_status() {
     # Six seconds permits the five-second checker timeout plus reporting overhead.
     readiness_attempts=120
@@ -378,17 +433,12 @@ wait_for_readiness_status() {
     [ "$readiness_status" -le 255 ] || return 1
 }
 stop_readiness() {
-    [ -n "$readiness_pid" ] || return 0
-    /bin/kill -TERM -- "-$readiness_pgid" 2>/dev/null || :
-    /bin/kill -TERM -- "$readiness_pid" 2>/dev/null || :
-    if ! wait_for_readiness_group; then
-        /bin/kill -KILL -- "-$readiness_pgid" 2>/dev/null || :
-        /bin/kill -KILL -- "$readiness_pid" 2>/dev/null || :
-        wait_for_readiness_group || :
-    fi
-    wait "$readiness_pid" 2>/dev/null || :
-    readiness_pid=
-    readiness_pgid=
+    [ "$readiness_active" -eq 1 ] || return 0
+    exec 7>&- 8>&-
+    # Readiness is the sole installer background job, including a fork interrupted
+    # before its process number could be assigned. No saved number is signaled.
+    wait 2>/dev/null || :
+    readiness_active=0
 }
 cleanup() {
     trap '' HUP INT TERM
@@ -414,7 +464,7 @@ cleanup() {
     fi
     if [ "$stage_created" -eq 1 ]; then
         if [ "$stage_admitted" -eq 1 ]; then
-            /bin/rm -f -- "$flow_stage" "$executor_stage" || :
+            /bin/rm -f -- "$flow_stage" "$executor_stage" "$readiness_control" "$readiness_inner_control" || :
         fi
         /bin/rmdir -- "$stage_directory" || :
     fi
@@ -450,7 +500,7 @@ stage_created=1
 exec 7<"$stage_directory" || fail 'cannot open installation staging directory'
 stage_fd=$descriptor_root/7
 matches_descriptor "$stage_directory" "$stage_fd" || fail 'installation staging directory changed'
-validate_acl "$stage_fd" 'installation staging directory'
+validate_acl "$stage_fd" 'installation staging directory' created-private
 stage_admitted=1
 (umask 077; set -C; /bin/cat <&4 > "$flow_stage") \
     || fail 'cannot stage flow'
@@ -501,34 +551,36 @@ if [ "$install_executor" -eq 1 ]; then
     fi
     matches_descriptor "$readiness_config" "$descriptor_root/7" || fail 'readiness configuration changed'
     exec 7<&-
+    installer_group=$(/bin/ps -o pgid= -p "$$") || fail 'cannot inspect installer process group'
+    installer_pgid=$(set -- $installer_group; [ "$#" -eq 1 ] && printf '%s' "$1") \
+        || fail 'cannot inspect installer process group'
+    case "$installer_pgid" in ''|*[!0-9]*) fail 'cannot inspect installer process group' ;; esac
+    readiness_role=inner
+    /usr/bin/mkfifo -m 0600 "$readiness_control" || fail 'cannot create readiness control'
+    if [ "$current_owner" -eq 0 ]; then
+        readiness_role=outer
+        /usr/bin/mkfifo -m 0600 "$readiness_inner_control" || fail 'cannot create readiness control'
+    fi
+    exec 7<>"$readiness_control" || fail 'cannot open readiness control'
+    exec 8>"$readiness_control" || fail 'cannot open readiness control'
+    set -- /bin/sh -c "$readiness_shell" flow-readiness "$readiness_role" \
+        "$readiness_config" "$flow_target" "$readiness_status_file" \
+        "$readiness_inner_control" "$installer_pgid" "$readiness_scanner" "$readiness_shell" "$@"
     if [ "$host" = Darwin ]; then
-        # macOS /bin/sh supports job control without a terminal: each background
-        # job gets its own process group. No external session helper is required.
+        # macOS /bin/sh gives each background job its own group without a terminal.
         set -m
     else
         set -- /usr/bin/setsid "$@"
     fi
-    "$@" /bin/sh -c '
-        umask 077
-        PATH=
-        HOME=$(cd "$1" && /bin/pwd -P) || exit 1
-        [ "$HOME" -ef "$1" ] || exit 1
-        XDG_CONFIG_HOME=$HOME
-        unset FLOW_AGENT_HOME
-        unset XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS
-        export PATH HOME XDG_CONFIG_HOME
-        if "$2" executor check </dev/null; then
-            readiness_status=0
-        else
-            readiness_status=$?
-        fi
-        printf "%s\\n" "$readiness_status" > "$3.pending" && /bin/mv -f -- "$3.pending" "$3" || :
-        while :; do /bin/sleep 3600; done
-    ' flow-readiness "$readiness_config" "$flow_target" "$readiness_status_file" &
-    readiness_pid=$!
-    readiness_pgid=$readiness_pid
+    trap ':' PIPE
+    readiness_active=1
+    # Open the reader while the inherited RDWR anchor still prevents an open hang.
+    "$@" <"$readiness_control" 7>&- 8>&- &
+    exec 7>&-
+    printf '%s\n' start >&8 || :
     wait_for_readiness_status || fail 'installed Default Executor did not report readiness'
     stop_readiness
+    /bin/rm -f -- "$readiness_control" "$readiness_inner_control" || fail 'cannot remove readiness control'
     if [ "$readiness_status" -ne 0 ]; then
         fail 'installed Default Executor failed readiness; resolve the reported cause for productive Tools, or rerun with --no-default-executor for authoring and Fixture execution only'
     fi
@@ -540,6 +592,6 @@ fi
 verify_bin_binding
 /bin/rmdir -- "$stage_directory" || fail 'cannot remove installation staging directory'
 installation_committed=1
-trap - EXIT HUP INT TERM
+trap - EXIT HUP INT TERM PIPE
 exec 6<&-
 printf '%s\n' "installed flow $bundle_version ($bundle_platform) in $bin"
