@@ -282,7 +282,7 @@ class CiWorkflowContractTest(unittest.TestCase):
             workflow.replace("--fail-under-lines 90", "--fail-under-lines 89", 1),
             workflow.replace("report --fail-under-lines 90", "report --fail-under-lines 89", 1),
             workflow.replace("cargo audit", "true", 1),
-            workflow.replace("pnpm run docs:render-check", "true", 1),
+            workflow.replace("node scripts/check-html-render.mjs", "true", 1),
             workflow.replace("--example m11_budgets", "--example m12_executor_startup", 1),
             workflow.replace("--example m12_executor_startup", "--example m11_budgets", 1),
             workflow.replace('-- --executor "$M12_INSTALLED_EXECUTOR"', "--", 1),
@@ -320,7 +320,7 @@ class CiWorkflowContractTest(unittest.TestCase):
             "Check RustSec advisories": "cargo audit",
             "Check dependency policy": "cargo deny check",
             "Check Node advisories": "pnpm audit",
-            "Render HTML docs": "pnpm run docs:render-check",
+            "Render HTML docs": "node scripts/check-html-render.mjs",
         }
         for name, command in commands.items():
             assert_step_state(self, workflow, name)

@@ -351,7 +351,7 @@ jobs:
 
       - name: Install Node dev tools
         if: steps.scope.outputs.product == 'true'
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --config.minimum-release-age-exclude=clawpatch@0.8.2
 
       - name: Check Node advisories
         if: steps.scope.outputs.product == 'true'
@@ -359,7 +359,7 @@ jobs:
 
       - name: Render HTML docs
         if: steps.scope.outputs.product == 'true'
-        run: pnpm run docs:render-check
+        run: node scripts/check-html-render.mjs
 
       - name: Check documentation links
         if: steps.scope.outputs.product == 'true'

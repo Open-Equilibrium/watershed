@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
+import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { chromium } from "playwright";
 import { assertDecisionPage } from "./check-decision-page.mjs";
@@ -14,16 +15,14 @@ const viewports = [
 ];
 
 function runPlaywrightCli(args, action) {
-  const result =
-    process.platform === "win32"
-      ? spawnSync("cmd.exe", ["/d", "/s", "/c", ["pnpm", ...args].join(" ")], {
-          cwd: repoRoot,
-          stdio: "inherit",
-        })
-      : spawnSync("pnpm", args, {
-          cwd: repoRoot,
-          stdio: "inherit",
-        });
+  const cli = path.join(
+    path.dirname(createRequire(import.meta.url).resolve("playwright/package.json")),
+    "cli.js",
+  );
+  const result = spawnSync(process.execPath, [cli, ...args], {
+    cwd: repoRoot,
+    stdio: "inherit",
+  });
 
   if (result.error) {
     throw new Error(`failed to start ${action}: ${result.error.message}`);
@@ -39,7 +38,7 @@ function runPlaywrightCli(args, action) {
 function ensurePlaywrightChromium() {
   if (process.platform === "linux" && process.env.CI === "true") {
     runPlaywrightCli(
-      ["exec", "playwright", "install-deps", "chromium"],
+      ["install-deps", "chromium"],
       "Playwright browser dependency install",
     );
   }
@@ -49,7 +48,7 @@ function ensurePlaywrightChromium() {
     return;
   }
 
-  runPlaywrightCli(["exec", "playwright", "install", "chromium"], "Playwright browser install");
+  runPlaywrightCli(["install", "chromium"], "Playwright browser install");
 
   if (!existsSync(executablePath)) {
     throw new Error(`Playwright browser install did not create ${executablePath}`);
