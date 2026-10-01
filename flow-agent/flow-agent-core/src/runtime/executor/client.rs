@@ -886,6 +886,7 @@ mod tests {
             },
             |_| Ok(()),
             &Instant::now,
+            |_| {},
         ) {
             Err(error) => error,
             Ok(_) => panic!("a new channel must not be overwritten during remapping"),
@@ -965,6 +966,94 @@ mod tests {
             1,
             "a synchronously reaped Executor leader must not be signaled again by ChildGuard"
         );
+    }
+
+    #[test]
+    fn exited_preflight_drains_its_final_frame_before_classifying() {
+        use super::super::process::child_exited_without_reaping;
+        use crate::runtime::types::RuntimeError;
+
+        let (request, protected_descriptors) = one_shot_request();
+        let rejection = String::from_utf8(
+            proto::canonical_executor_preflight_v0(&proto::ExecutorPreflightV0::Error {
+                code: proto::ExecutorErrorCodeV0::Unavailable,
+                message: "unavailable".to_owned(),
+                request_id: request.request_id.clone(),
+                schema: proto::EXECUTOR_PREFLIGHT_SCHEMA_V0.to_owned(),
+            })
+            .expect("rejection is canonical"),
+        )
+        .expect("rejection is UTF-8");
+        let ready = String::from_utf8(
+            proto::canonical_executor_preflight_v0(&proto::ExecutorPreflightV0::Ready {
+                request_id: request.request_id.clone(),
+                schema: proto::EXECUTOR_PREFLIGHT_SCHEMA_V0.to_owned(),
+            })
+            .expect("Ready is canonical"),
+        )
+        .expect("Ready is UTF-8");
+        for (response, accepted) in [
+            (rejection.clone(), true),
+            (ready, false),
+            (rejection[..rejection.len() / 2].to_owned(), false),
+            (String::new(), false),
+        ] {
+            reset_process_group_cleanup_calls_for_test();
+            let root = crate::tests::empty_workspace();
+            let release = root.join("release");
+            let flushed = root.join("flushed");
+            let script = format!(
+                "{{\n\
+                 while [ ! -f '{}' ]; do /bin/sleep 0.01; done\n\
+                 printf '%s' '{response}' || exit 1\n\
+                 printf flushed > '{}'\n\
+                 exit 0\n\
+                 }}\n",
+                release.display(),
+                flushed.display(),
+            );
+            let executor = File::open("/bin/sh").expect("shell executor opens");
+            let now = Instant::now();
+            let outcome = preflight_one_shot_with_deadline(
+                (&executor, Path::new("/bin/sh")),
+                &protected_descriptors,
+                &request,
+                script.as_bytes(),
+                || Ok(now + Duration::from_secs(1)),
+                |_| Ok(()),
+                &|| now,
+                |child| {
+                    // The fixture cannot emit its frame until stdout has been polled empty.
+                    std::fs::write(&release, b"release").expect("response producer is released");
+                    let started = Instant::now();
+                    while !child_exited_without_reaping(child).expect("Executor is observable") {
+                        assert!(
+                            started.elapsed() < Duration::from_secs(5),
+                            "Executor did not exit"
+                        );
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                    assert!(
+                        flushed.is_file(),
+                        "Executor exited before writing its frame"
+                    );
+                },
+            );
+            match outcome {
+                Ok(ExecutorPreflightProcess::Rejected(proto::ExecutorErrorCodeV0::Unavailable))
+                    if accepted => {}
+                Err(RuntimeError::Executor(error)) if !accepted => {
+                    assert_eq!(error.code(), proto::ExecutorErrorCodeV0::InvalidResponse);
+                }
+                Err(error) => panic!("late complete Error must remain a rejection: {error}"),
+                Ok(_) => panic!("exited Ready or incomplete preflight must reject"),
+            }
+            assert_eq!(
+                process_group_cleanup_calls_for_test(),
+                1,
+                "cleanup must run once"
+            );
+        }
     }
 
     #[test]

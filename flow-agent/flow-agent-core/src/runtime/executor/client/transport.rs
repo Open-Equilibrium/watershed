@@ -116,9 +116,18 @@ pub(super) fn preflight_one_shot(
         || executor_deadline_at(request.resolved_policy.limits.timeout_ms, now()),
         |_| Ok(()),
         &now,
+        #[cfg(test)]
+        |_| {},
     )
 }
 
+#[cfg_attr(
+    test,
+    allow(
+        clippy::too_many_arguments,
+        reason = "the test-only callback controls the output-poll/exit interleaving"
+    )
+)]
 pub(super) fn preflight_one_shot_with_deadline(
     executable: (&File, &Path),
     protected_descriptors: &[OwnedFd],
@@ -127,6 +136,7 @@ pub(super) fn preflight_one_shot_with_deadline(
     deadline: impl FnOnce() -> Result<Instant, RuntimeError>,
     after_request: impl FnOnce(&mut Child) -> Result<(), RuntimeError>,
     now: &impl Fn() -> Instant,
+    #[cfg(test)] after_output_poll: impl FnOnce(&Child),
 ) -> Result<ExecutorPreflightProcess, RuntimeError> {
     let executor = duplicate_executor_descriptor(executable.0)?;
     let inherited_path =
@@ -244,6 +254,8 @@ pub(super) fn preflight_one_shot_with_deadline(
     set_nonblocking(&stderr)?;
     let mut request_offset = 0_usize;
     let mut after_request = Some(after_request);
+    #[cfg(test)]
+    let mut after_output_poll = Some(after_output_poll);
     let mut stdin = Some(stdin);
     let mut stdout_read = BoundedRead::new(proto::MAX_EXECUTOR_CONTROL_BYTES_V0);
     let mut stderr_read = BoundedRead::new(4 * 1024);
@@ -287,6 +299,10 @@ pub(super) fn preflight_one_shot_with_deadline(
             stderr_eof = read_available(&mut stderr, &mut stderr_read)
                 .map_err(|_| invalid_response("Executor stderr read failed"))?;
         }
+        #[cfg(test)]
+        if let Some(after_output_poll) = after_output_poll.take() {
+            after_output_poll(child.child_mut());
+        }
         if stdout_read.overflowed {
             return Err(invalid_response(
                 "Executor preflight exceeds its byte limit",
@@ -304,8 +320,10 @@ pub(super) fn preflight_one_shot_with_deadline(
             }
             match preflight {
                 proto::ExecutorPreflightV0::Ready { .. } => {
-                    if child_exited_without_reaping(child.child_mut())
-                        .map_err(|_| invalid_response("Executor process could not be observed"))?
+                    if process_status.is_some()
+                        || child_exited_without_reaping(child.child_mut()).map_err(|_| {
+                            invalid_response("Executor process could not be observed")
+                        })?
                     {
                         return Err(invalid_response(
                             "Executor exited after declaring preflight readiness",
@@ -372,7 +390,8 @@ pub(super) fn preflight_one_shot_with_deadline(
             return before_executor_deadline(hard_deadline, now, || outcome)
                 .ok_or_else(|| invalid_response("Executor preflight timed out"));
         }
-        if rejected_code.is_none() && (stdout_eof || process_status.is_some()) {
+        // Exit can follow the output poll; retain stdout until its final frame is drained.
+        if rejected_code.is_none() && stdout_eof {
             return Err(invalid_response(
                 "Executor exited without a complete preflight response",
             ));
@@ -568,6 +587,7 @@ pub(super) fn preflight_one_shot_at_deadline(
         || Ok(deadline),
         after_request,
         &now,
+        |_| {},
     )
 }
 
