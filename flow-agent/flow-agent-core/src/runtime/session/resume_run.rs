@@ -23,7 +23,7 @@ pub fn resume_conversation_run(
     run_session_id: &str,
     emit: EmitMode,
 ) -> Result<RunOutput, RuntimeError> {
-    let mut provider = OpenAiCodexProvider;
+    let mut provider = OpenAiCodexProvider::default();
     resume_conversation_run_internal(
         workspace,
         conversation_id,
@@ -44,7 +44,7 @@ pub fn resume_conversation_run_with_live_events(
     run_session_id: &str,
     notifier: LiveEventNotifier,
 ) -> Result<RunOutput, RuntimeError> {
-    let mut provider = OpenAiCodexProvider;
+    let mut provider = OpenAiCodexProvider::default();
     let mut output = resume_conversation_run_internal(
         workspace,
         conversation_id,
@@ -70,7 +70,7 @@ pub fn resume_conversation_run_with_execution_activation<G>(
     activate: impl FnOnce(bool) -> Result<G, RuntimeError>,
 ) -> Result<RunOutput, RuntimeError> {
     let live = notifier.is_some();
-    let mut provider = OpenAiCodexProvider;
+    let mut provider = OpenAiCodexProvider::default();
     let mut output = resume_conversation_run_internal(
         workspace,
         conversation_id,

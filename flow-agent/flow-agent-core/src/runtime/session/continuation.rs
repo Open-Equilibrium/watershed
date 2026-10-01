@@ -65,7 +65,7 @@ pub fn continue_conversation_with_execution_activation<G>(
     activate: impl FnOnce(bool) -> Result<G, RuntimeError>,
 ) -> Result<RunOutput, RuntimeError> {
     let live = notifier.is_some();
-    let mut provider = OpenAiCodexProvider;
+    let mut provider = OpenAiCodexProvider::default();
     let mut output = continue_conversation_internal_with_provider(
         workspace,
         conversation_id,
@@ -92,7 +92,7 @@ fn continue_conversation_internal(
     notifier: Option<LiveEventNotifier>,
     capture_jsonl: bool,
 ) -> Result<RunOutput, RuntimeError> {
-    let mut provider = OpenAiCodexProvider;
+    let mut provider = OpenAiCodexProvider::default();
     continue_conversation_internal_with_provider(
         workspace,
         conversation_id,

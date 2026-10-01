@@ -231,7 +231,7 @@ fn run_flow_internal_with_cleanup_observer_impl<G>(
         let agent_instructions = reconcile_productive_preflight(
             read_applicable_agent_instructions(&authority.home, &execution_workspace),
         )?;
-        let mut provider = OpenAiCodexProvider;
+        let mut provider = OpenAiCodexProvider::default();
         return run_productive_session_with_provider(
             workspace,
             &execution_workspace,

@@ -350,7 +350,7 @@ fn productive_session_uses_the_selected_executor_and_persists_its_receipt() {
     unsafe { env::set_var("FLOW_AGENT_M12_INSTALL_ACCEPTANCE", "1") };
     let (workspace, fixture) = configured_smoke_productive_execution_fixture();
     let config = load_global_config().expect("productive config loads");
-    let mut provider = OpenAiCodexProvider;
+    let mut provider = OpenAiCodexProvider::default();
     let output = run_productive_session_with_provider(
         &workspace,
         &fixture.anchored,

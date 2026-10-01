@@ -4,13 +4,14 @@ use crate::runtime::run_attempts::RunAttemptKind;
 use crate::runtime::{
     context::ContextModelProfile,
     conversations::MAX_CONVERSATION_RECORD_BYTES,
+    deadlines::{RESPONSES_HTTP_DEADLINES, block_on_network, build_http_client},
     executor::{
         ExecutorDispatchOutcome, ExecutorPreflightOutcome, PreparedExecutor, PreparedExecutorTool,
         PreparedExecutorWaiting,
     },
     fs_guards::AnchoredWorkspace,
     oauth_credential::CredentialRecord,
-    openai_codex::{OPENAI_CODEX_RESPONSES_URL, ProviderTurn, request_responses_at},
+    openai_codex::{OPENAI_CODEX_RESPONSES_URL, ProviderTurn, request_responses_with_client_async},
     productive_capacity::ProductiveDispatchReservation,
     responses::MAX_RESPONSES_DECODED_STREAM_BYTES,
     tool_runner::{MAX_TOOL_STREAM_BYTES, ToolInvocation},
@@ -144,7 +145,44 @@ struct NoopProductiveRecovery;
 #[cfg(test)]
 impl ProductiveRecovery for NoopProductiveRecovery {}
 
-pub(crate) struct OpenAiCodexProvider;
+#[derive(Default)]
+pub(crate) struct OpenAiCodexProvider {
+    client: Option<reqwest::Client>,
+}
+
+impl OpenAiCodexProvider {
+    pub(crate) fn turn_at(
+        &mut self,
+        endpoint: &str,
+        credential: &CredentialRecord,
+        body: &serde_json::Value,
+    ) -> Result<ProviderTurn, RuntimeError> {
+        block_on_network(async {
+            let client = match &self.client {
+                Some(client) => client.clone(),
+                None => {
+                    let client = build_http_client(RESPONSES_HTTP_DEADLINES).map_err(|_| {
+                        RuntimeError::definitive_provider_error(
+                            None,
+                            "HTTP client construction failed",
+                        )
+                    })?;
+                    self.client = Some(client.clone());
+                    client
+                }
+            };
+            request_responses_with_client_async(
+                client,
+                endpoint,
+                credential,
+                body,
+                RESPONSES_HTTP_DEADLINES,
+                crate::runtime::cancellation::productive_cancellation(),
+            )
+            .await
+        })?
+    }
+}
 
 impl ProductiveProvider for OpenAiCodexProvider {
     fn turn(
@@ -157,7 +195,7 @@ impl ProductiveProvider for OpenAiCodexProvider {
         if let Some(turn) = crate::runtime::m12_install_acceptance::maybe_provider_turn(body)? {
             return Ok(turn);
         }
-        request_responses_at(OPENAI_CODEX_RESPONSES_URL, credential, body)
+        self.turn_at(OPENAI_CODEX_RESPONSES_URL, credential, body)
     }
 }
 
