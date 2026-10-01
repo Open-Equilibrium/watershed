@@ -148,8 +148,9 @@ class RustDependencyContractTest(unittest.TestCase):
                 self.test_rust_product_manifests_have_no_node_runtime_dependency()
                 product = repo / ".codex-tools" / "Cargo.toml"
                 product.write_text('[dependencies]\nnode = "1"\n', encoding="utf-8")
+                violation = f"{product.relative_to(repo)}:dependencies:node"
                 with self.assertRaisesRegex(
-                    AssertionError, r"\.codex-tools.Cargo.toml:dependencies:node"
+                    AssertionError, re.escape(repr(violation)[1:-1])
                 ):
                     self.test_rust_product_manifests_have_no_node_runtime_dependency()
 

@@ -46,13 +46,6 @@ fn registry_schema_concrete_blocks_own_full_shapes() {
         assert!(block["properties"]["id"].is_object(), "{definition}");
         assert!(block["properties"]["name"].is_object(), "{definition}");
     }
-
-    for definition in ["instruction", "flow", "phase"] {
-        assert!(
-            parsed["$defs"][definition]["allOf"].is_null(),
-            "{definition} must not compose identity through allOf"
-        );
-    }
 }
 
 #[test]

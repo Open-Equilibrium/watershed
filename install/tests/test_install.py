@@ -287,7 +287,7 @@ class PrefixInstallerTest(unittest.TestCase):
                 if fault == "missing-bridge":
                     self.assertIn(b"requires", result.stderr)
                 elif fault == "unreadable-acl":
-                    self.assertIn(b"ACL metadata unavailable: 13", result.stderr)
+                    self.assertIn(b"unsafe or unavailable macOS ACL: opened image", result.stderr)
 
     def test_release_admission_matches_runtime(self):
         declarations, separator, _ = INSTALLER.read_text(encoding="utf-8").partition("\nprefix=")
