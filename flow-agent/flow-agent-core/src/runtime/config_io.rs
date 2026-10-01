@@ -83,13 +83,11 @@ pub(crate) fn parse_global_config_from_text(text: &str) -> Result<GlobalConfig, 
 }
 
 pub(crate) fn normalize_registry_root(source: &str) -> Result<PathBuf, RuntimeError> {
-    let normalized = core_script::normalize_safe_relative_path(source)
-        .filter(|path| *path != ".")
-        .ok_or_else(|| {
-            RuntimeError::Usage(format!(
-                "{GLOBAL_CONFIG_PATH} registry_root must stay within the global Flow home"
-            ))
-        })?;
+    let normalized = core_script::normalize_safe_relative_path(source).ok_or_else(|| {
+        RuntimeError::Usage(format!(
+            "{GLOBAL_CONFIG_PATH} registry_root must stay within the global Flow home"
+        ))
+    })?;
     if normalized.split('/').next().is_some_and(|component| {
         GLOBAL_RESERVED_LEAVES
             .iter()

@@ -148,7 +148,7 @@ pub enum DenyReasonCode {
 }
 
 impl DenyReasonCode {
-    /// Every stable denial reason represented in policy artifacts.
+    /// Every stable denial reason code.
     pub const ALL: [Self; 6] = [
         Self::WriteDenied,
         Self::NetworkDenied,

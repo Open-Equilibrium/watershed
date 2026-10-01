@@ -487,11 +487,6 @@ fn rollback_scratch_initialization(
     dir: AnchoredDir,
 ) -> Result<(), RuntimeError> {
     let expected = dir.identity()?;
-    if dir.identity()? != expected {
-        return Err(protocol(
-            "history validation scratch identity changed during initialization",
-        ));
-    }
     for_each_scratch_member(&dir, |member, file| {
         if !matches!(member, MARKER_LEAF | LEASE_LEAF) {
             return Err(protocol(
@@ -554,22 +549,14 @@ fn remove_scratch_dir(
             return Err(path_io_error(lease_path.diagnostic_path(), source));
         }
     }
-    let removal = (|| {
-        for_each_scratch_member(&dir, |member, file| {
-            if matches!(member, MARKER_LEAF | LEASE_LEAF) {
-                return Ok(());
-            }
-            let _ = open_anchored_file_for_read(file)?;
-            file.remove()?;
-            Ok(())
-        })?;
-        if dir.identity()? != expected {
-            return Err(protocol(
-                "history validation scratch identity changed during cleanup",
-            ));
+    let removal = for_each_scratch_member(&dir, |member, file| {
+        if matches!(member, MARKER_LEAF | LEASE_LEAF) {
+            return Ok(());
         }
+        let _ = open_anchored_file_for_read(file)?;
+        file.remove()?;
         Ok(())
-    })();
+    });
     let release = lease
         .unlock()
         .map_err(|source| path_io_error(lease_path.diagnostic_path(), source));
@@ -581,11 +568,6 @@ fn remove_scratch_dir(
         HistoryScratchFault::CleanupAfterLeaseRemoval,
         lease_path.diagnostic_path(),
     )?;
-    if dir.identity()? != expected {
-        return Err(protocol(
-            "history validation scratch identity changed after cleanup",
-        ));
-    }
     let remaining = scratch_members(&dir)?;
     if remaining.count != 1 || !remaining.marker || remaining.lease {
         return Err(protocol(
@@ -609,11 +591,6 @@ fn remove_empty_scratch_dir(
     dir: AnchoredDir,
     expected: AnchoredDirectoryIdentity,
 ) -> Result<(), RuntimeError> {
-    if dir.identity()? != expected {
-        return Err(protocol(
-            "history validation scratch identity changed after cleanup",
-        ));
-    }
     if dir
         .dir
         .entries()
