@@ -901,6 +901,7 @@ mod tests {
 
     #[test]
     fn one_shot_completion_cleans_its_process_group_once() {
+        #[cfg(target_os = "linux")]
         use std::{fs, os::unix::fs::PermissionsExt as _};
 
         reset_process_group_cleanup_calls_for_test();
@@ -916,11 +917,19 @@ mod tests {
         )
         .expect("response is UTF-8");
         let request_bytes = format!("printf '%s' '{response}'\n").into_bytes();
+        #[cfg(target_os = "linux")]
         let root = crate::tests::empty_workspace();
-        let path = root.join("executor");
-        fs::copy("/bin/sh", &path).expect("private shell executor is copied");
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o700))
-            .expect("private shell executor is executable");
+        #[cfg(target_os = "linux")]
+        let path = {
+            let path = root.join("executor");
+            fs::copy("/bin/sh", &path).expect("private shell executor is copied");
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o700))
+                .expect("private shell executor is executable");
+            path
+        };
+        // macOS can kill a relocated system shell before it runs the fixture.
+        #[cfg(target_os = "macos")]
+        let path = Path::new("/bin/sh").to_owned();
         let executor = File::open(&path).expect("shell executor opens");
         let parent_flags =
             rustix::io::fcntl_getfd(&executor).expect("parent descriptor flags read");
