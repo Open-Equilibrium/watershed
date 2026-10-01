@@ -154,6 +154,26 @@ fn global_config_helpers_reject_unsafe_registry_roots() {
             "registry_root: registry\n---\nregistry_root: other\n",
             "document",
         ),
+        (
+            "fixture config without stub model",
+            "fixture_profile: stub-model\nregistry_root: registry\n",
+            "requires stub_model",
+        ),
+        (
+            "stub model without fixture profile",
+            "registry_root: registry\nstub_model: deterministic\n",
+            "requires fixture_profile",
+        ),
+        (
+            "unsupported fixture profile",
+            "fixture_profile: live\nregistry_root: registry\nstub_model: deterministic\n",
+            "unsupported FLOW_AGENT_HOME/config.yaml fixture_profile",
+        ),
+        (
+            "unsupported stub model",
+            "fixture_profile: stub-model\nregistry_root: registry\nstub_model: live\n",
+            "unsupported FLOW_AGENT_HOME/config.yaml stub_model",
+        ),
     ] {
         fs::write(global_config_path(), source).expect("invalid config written");
         match load_global_config().expect_err("invalid config must be rejected") {
@@ -202,46 +222,6 @@ fn global_config_helpers_reject_unsafe_registry_roots() {
     .expect("fixture config");
     let config = load_global_config().expect("fixture config loads");
     assert_eq!(config.event_clock, EventClock::fixed_fixture());
-
-    fs::write(
-        global_config_path(),
-        "fixture_profile: stub-model\nregistry_root: registry\n",
-    )
-    .expect("fixture config without stub model");
-    assert!(matches!(
-        load_global_config(),
-        Err(RuntimeError::Usage(message)) if message.contains("requires stub_model")
-    ));
-
-    fs::write(
-        global_config_path(),
-        "registry_root: registry\nstub_model: deterministic\n",
-    )
-    .expect("stub model without fixture profile");
-    assert!(matches!(
-        load_global_config(),
-        Err(RuntimeError::Usage(message)) if message.contains("requires fixture_profile")
-    ));
-
-    fs::write(
-        global_config_path(),
-        "fixture_profile: live\nregistry_root: registry\nstub_model: deterministic\n",
-    )
-    .expect("unsupported fixture profile");
-    assert!(matches!(
-        load_global_config(),
-        Err(RuntimeError::Usage(message)) if message.contains("unsupported FLOW_AGENT_HOME/config.yaml fixture_profile")
-    ));
-
-    fs::write(
-        global_config_path(),
-        "fixture_profile: stub-model\nregistry_root: registry\nstub_model: live\n",
-    )
-    .expect("unsupported stub model");
-    assert!(matches!(
-        load_global_config(),
-        Err(RuntimeError::Usage(message)) if message.contains("unsupported FLOW_AGENT_HOME/config.yaml stub_model")
-    ));
 
     for registry_root in [
         ".",

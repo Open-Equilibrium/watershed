@@ -29,10 +29,8 @@ fn create_hello_flow_run(workspace: &Path) -> String {
     expected_stream("hello-flow", "hello-flow.jsonl")
 }
 
-#[test]
-fn conversation_history_event_pointer_replays_nested_flow_and_tool_identifiers() {
-    let workspace = empty_workspace("conversation-history-nested-tool-identifiers");
-    let events = create_hello_flow_run(&workspace);
+fn write_hello_flow_history(workspace: &Path) -> u64 {
+    let events = create_hello_flow_run(workspace);
     let terminal = serde_json::from_str::<EventEnvelope>(
         events
             .lines()
@@ -41,20 +39,27 @@ fn conversation_history_event_pointer_replays_nested_flow_and_tool_identifiers()
     )
     .expect("golden terminal event parses");
     fs::write(
-        crate::tests::helpers::workspace_session_dir(&workspace)
+        crate::tests::helpers::workspace_session_dir(workspace)
             .join("review/runs/hello-flow/events.jsonl"),
         events,
     )
-    .expect("nested Tool event stream writes");
+    .expect("golden event stream writes");
     write_history_records(
-        &workspace,
+        workspace,
         "review",
         [entry("root", None, "hello-flow", terminal.sequence)],
     );
+    terminal.sequence
+}
+
+#[test]
+fn conversation_history_event_pointer_replays_nested_flow_and_tool_identifiers() {
+    let workspace = empty_workspace("conversation-history-nested-tool-identifiers");
+    let terminal_sequence = write_hello_flow_history(&workspace);
 
     let history = read_conversation_history(&workspace, "review")
         .expect("nested Flow and Tool identifiers replay exactly");
-    assert_eq!(history[0].event_sequence, terminal.sequence);
+    assert_eq!(history[0].event_sequence, terminal_sequence);
     assert_history_validation_scratch_is_empty(&workspace);
 }
 
@@ -102,25 +107,7 @@ fn conversation_history_event_pointer_rejects_duplicate_event_identity() {
 #[test]
 fn conversation_history_resolves_event_identifier_digest_collisions_exactly() {
     let workspace = empty_workspace("conversation-history-identifier-collision");
-    let events = create_hello_flow_run(&workspace);
-    let terminal = serde_json::from_str::<EventEnvelope>(
-        events
-            .lines()
-            .last()
-            .expect("golden stream has a terminal event"),
-    )
-    .expect("golden terminal event parses");
-    fs::write(
-        crate::tests::helpers::workspace_session_dir(&workspace)
-            .join("review/runs/hello-flow/events.jsonl"),
-        events,
-    )
-    .expect("golden event stream writes");
-    write_history_records(
-        &workspace,
-        "review",
-        [entry("root", None, "hello-flow", terminal.sequence)],
-    );
+    write_hello_flow_history(&workspace);
 
     with_event_identifier_digest_collision_for_test(|| {
         read_conversation_history(&workspace, "review")

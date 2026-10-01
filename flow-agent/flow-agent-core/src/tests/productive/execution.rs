@@ -2,6 +2,7 @@ use super::super::{support::write_registry_definition, test_support::workspace_c
 use super::support::{
     FakeToolExecutionFault, FakeToolExecutor, InjectedAttemptRecovery, MemoryAttempts, MemorySink,
     ScriptedProvider, disabled_smoke_productive_execution_fixture,
+    execute_scripted_productive_case, execute_scripted_productive_case_with_tools,
     load_productive_execution_fixture, single_tool_provider_turn,
     smoke_productive_execution_fixture,
 };
@@ -151,25 +152,11 @@ fn productive_tool_started_commit_failure_settles_without_dispatch() {
 
 #[test]
 fn productive_executor_boundary_failure_closes_tool_event_and_leaves_attempt_uncertain() {
-    let (_workspace, fixture) = smoke_productive_execution_fixture();
-    let flow = fixture.smoke_flow();
-    let mut provider = ScriptedProvider {
-        bodies: Vec::new(),
-        turns: VecDeque::from([single_tool_provider_turn("response", "call")]),
-    };
-    let mut attempts = MemoryAttempts::default();
-    let mut sink = MemorySink::default();
-    let mut tools = FakeToolExecutor {
-        fault: FakeToolExecutionFault::ExecutorError,
-        ..FakeToolExecutor::default()
-    };
-
-    let execution = execute_productive_flow_with_tool_executor(
-        fixture.execution(flow, "productive-executor-boundary-failure"),
-        &mut provider,
-        &mut attempts,
-        &mut sink,
-        &mut tools,
+    let (execution, provider, attempts, sink, tools) = execute_scripted_productive_case_with_tools(
+        "productive-executor-boundary-failure",
+        [single_tool_provider_turn("response", "call")],
+        |_| {},
+        |tools| tools.fault = FakeToolExecutionFault::ExecutorError,
     )
     .expect("Executor boundary failure remains a terminal failed session");
 
@@ -322,11 +309,9 @@ fn productive_policy_rejection_precedes_tool_lifecycle_and_replays_without_start
 
 #[test]
 fn interleaved_provider_and_tool_attempt_timestamps_are_strictly_monotonic() {
-    let (_workspace, fixture) = smoke_productive_execution_fixture();
-    let flow = fixture.smoke_flow();
-    let mut provider = ScriptedProvider {
-        bodies: Vec::new(),
-        turns: VecDeque::from([
+    let (_, _, attempts, _, _) = execute_scripted_productive_case(
+        "productive-attempt-chronology",
+        [
             ProviderTurn {
                 token_usage: None,
                 response_id: "response-tools".to_owned(),
@@ -342,18 +327,8 @@ fn interleaved_provider_and_tool_attempt_timestamps_are_strictly_monotonic() {
                     .collect(),
             },
             string_provider_turn("response-final", "done"),
-        ]),
-    };
-    let mut attempts = MemoryAttempts::default();
-    let mut sink = MemorySink::default();
-    let mut tools = FakeToolExecutor::default();
-
-    execute_productive_flow_with_tool_executor(
-        fixture.execution(flow, "productive-attempt-chronology"),
-        &mut provider,
-        &mut attempts,
-        &mut sink,
-        &mut tools,
+        ],
+        |_| {},
     )
     .expect("interleaved productive execution completes");
 

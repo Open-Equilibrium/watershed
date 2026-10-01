@@ -17,6 +17,23 @@ use std::{
     io::{self, Write},
 };
 
+fn completed_provider_result(attempt_id: &str, timestamp: &str) -> RunAttemptResult {
+    RunAttemptResult {
+        attempt_id: attempt_id.to_owned(),
+        attempt_kind: RunAttemptKind::Provider,
+        outcome: RunAttemptOutcome::Completed,
+        classification: None,
+        exit_code: None,
+        timestamp: timestamp.to_owned(),
+        durable_output: Some(serde_json::json!({
+            "provider_output_objects": [
+                "session-object:sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+            ],
+            "schema": "flow-provider-output-v2"
+        })),
+    }
+}
+
 #[test]
 fn exact_recovery_promotes_a_completed_attempt_without_redispatch() {
     let workspace = empty_workspace("conversation-completed-attempt-recovery");
@@ -36,20 +53,7 @@ fn exact_recovery_promotes_a_completed_attempt_without_redispatch() {
         },
     )
     .expect("provider intent commits");
-    let result = RunAttemptResult {
-        attempt_id: "provider-000001".to_owned(),
-        attempt_kind: RunAttemptKind::Provider,
-        outcome: RunAttemptOutcome::Completed,
-        classification: None,
-        exit_code: None,
-        timestamp: "2026-01-01T00:00:00Z".to_owned(),
-        durable_output: Some(serde_json::json!({
-            "provider_output_objects": [
-                "session-object:sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
-            ],
-            "schema": "flow-provider-output-v2"
-        })),
-    };
+    let result = completed_provider_result("provider-000001", "2026-01-01T00:00:00Z");
     append_run_attempt_result(&workspace, "review", "review-1", &result)
         .expect("provider terminal result commits");
     let recovery_path = crate::tests::helpers::workspace_session_dir(&workspace)
@@ -84,20 +88,7 @@ fn productive_recovery_rejects_cross_ledger_attempt_conflicts() {
     let workspace = empty_workspace("conversation-recovery-attempt-conflict");
     let mut recovery =
         standard_review_recovery_writer(&workspace, None, &ContextHistory::default());
-    let recorded = RunAttemptResult {
-        attempt_id: "provider-000001".to_owned(),
-        attempt_kind: RunAttemptKind::Provider,
-        outcome: RunAttemptOutcome::Completed,
-        classification: None,
-        exit_code: None,
-        timestamp: "2026-01-01T00:00:01Z".to_owned(),
-        durable_output: Some(serde_json::json!({
-            "provider_output_objects": [
-                "session-object:sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
-            ],
-            "schema": "flow-provider-output-v2"
-        })),
-    };
+    let recorded = completed_provider_result("provider-000001", "2026-01-01T00:00:01Z");
     recovery
         .record_attempt(None, REQUEST_HASH, &recorded)
         .expect("recovery attempt record commits");
@@ -203,20 +194,7 @@ fn productive_recovery_round_trips_every_committed_boundary() {
         tool_id: None,
         timestamp: "2026-01-01T00:00:00Z".to_owned(),
     };
-    let result = RunAttemptResult {
-        attempt_id: intent.attempt_id.clone(),
-        attempt_kind: RunAttemptKind::Provider,
-        outcome: RunAttemptOutcome::Completed,
-        classification: None,
-        exit_code: None,
-        timestamp: "2026-01-01T00:00:01Z".to_owned(),
-        durable_output: Some(serde_json::json!({
-            "provider_output_objects": [
-                "session-object:sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
-            ],
-            "schema": "flow-provider-output-v2"
-        })),
-    };
+    let result = completed_provider_result(&intent.attempt_id, "2026-01-01T00:00:01Z");
     append_run_attempt_intent(&workspace, "review", "review-1", &intent)
         .expect("provider intent commits");
     append_run_attempt_result(&workspace, "review", "review-1", &result)
@@ -309,20 +287,7 @@ fn complete_recovery_fixture(name: &str, extra_completed_attempt: bool) -> Compl
     let request_hash = REQUEST_HASH.to_owned();
     let history = ContextHistory::default();
     let mut recovery = standard_review_recovery_writer(&workspace, None, &history);
-    let provider_result = RunAttemptResult {
-        attempt_id: "provider-000001".to_owned(),
-        attempt_kind: RunAttemptKind::Provider,
-        outcome: RunAttemptOutcome::Completed,
-        classification: None,
-        exit_code: None,
-        timestamp: "2026-07-30T12:00:01Z".to_owned(),
-        durable_output: Some(serde_json::json!({
-            "provider_output_objects": [
-                "session-object:sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
-            ],
-            "schema": "flow-provider-output-v2"
-        })),
-    };
+    let provider_result = completed_provider_result("provider-000001", "2026-07-30T12:00:01Z");
     append_run_attempt_intent(
         &workspace,
         "review",
@@ -384,20 +349,7 @@ fn complete_recovery_fixture(name: &str, extra_completed_attempt: bool) -> Compl
             &workspace,
             "review",
             "review-1",
-            &RunAttemptResult {
-                attempt_id: "provider-000002".to_owned(),
-                attempt_kind: RunAttemptKind::Provider,
-                outcome: RunAttemptOutcome::Completed,
-                classification: None,
-                exit_code: None,
-                timestamp: "2026-07-30T12:00:03Z".to_owned(),
-                durable_output: Some(serde_json::json!({
-                    "provider_output_objects": [
-                        "session-object:sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
-                    ],
-                    "schema": "flow-provider-output-v2"
-                })),
-            },
+            &completed_provider_result("provider-000002", "2026-07-30T12:00:03Z"),
         )
         .expect("extra provider result commits");
     }
@@ -809,20 +761,7 @@ fn header_only_recovery_with_completed_attempt(
         },
     )
     .expect("provider intent commits");
-    let result = RunAttemptResult {
-        attempt_id: "provider-000001".to_owned(),
-        attempt_kind: RunAttemptKind::Provider,
-        outcome: RunAttemptOutcome::Completed,
-        classification: None,
-        exit_code: None,
-        timestamp: "2026-08-16T12:00:01Z".to_owned(),
-        durable_output: Some(serde_json::json!({
-            "provider_output_objects": [
-                "session-object:sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
-            ],
-            "schema": "flow-provider-output-v2"
-        })),
-    };
+    let result = completed_provider_result("provider-000001", "2026-08-16T12:00:01Z");
     append_run_attempt_result(&workspace, "review", "review-1", &result)
         .expect("provider result commits");
     (workspace, history, result)

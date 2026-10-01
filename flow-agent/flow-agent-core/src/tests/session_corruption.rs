@@ -160,7 +160,7 @@ fn session_log_rejects_events_after_flow_terminal() {
 
 #[test]
 fn session_log_allows_tool_reuse_in_later_phase_execution() {
-    let stream = [
+    let mut events = vec![
         event_line(
             "evt-001",
             EventType::SessionStarted,
@@ -177,108 +177,66 @@ fn session_log_allows_tool_reuse_in_later_phase_execution() {
             Some("flow-001"),
             serde_json::json!({"flow_definition_id":"reuse-flow"}),
         ),
-        event_line(
-            "evt-003",
-            EventType::PhaseEntered,
-            "reuse-lifecycle",
-            3,
-            Some("flow-001"),
-            serde_json::json!({
-                "instruction_ids": [],
-                "iteration": 1,
-                "phase_execution_id": "phase-execution-a",
-                "phase_id": "phase-a",
-                "phase_kind": "leaf",
-                "phase_name": "PhaseA",
-                "tool_ids": ["echo"],
-            }),
-        ),
-        event_line(
-            "evt-004",
-            EventType::ToolStarted,
-            "reuse-lifecycle",
-            4,
-            Some("flow-001"),
-            serde_json::json!({
-                "allowed_parameters": [],
-                "tool_id": "echo",
-                "tool_kind": "predefined-command",
-                "tool_name": "Echo",
-            }),
-        ),
-        event_line(
-            "evt-005",
-            EventType::ToolCompleted,
-            "reuse-lifecycle",
-            5,
-            Some("flow-001"),
-            serde_json::json!({"exit_code":0,"tool_id":"echo"}),
-        ),
-        event_line(
-            "evt-006",
-            EventType::PhaseCompleted,
-            "reuse-lifecycle",
-            6,
-            Some("flow-001"),
-            serde_json::json!({
-                "iteration":1,
-                "phase_execution_id":"phase-execution-a",
-                "phase_id":"phase-a",
-                "phase_kind":"leaf",
-                "result":{"type":"string","value":"a"},
-            }),
-        ),
-        event_line(
-            "evt-007",
-            EventType::PhaseEntered,
-            "reuse-lifecycle",
-            7,
-            Some("flow-001"),
-            serde_json::json!({
-                "instruction_ids": [],
-                "iteration": 1,
-                "phase_execution_id": "phase-execution-b",
-                "phase_id": "phase-b",
-                "phase_kind": "leaf",
-                "phase_name": "PhaseB",
-                "tool_ids": ["echo"],
-            }),
-        ),
-        event_line(
-            "evt-008",
-            EventType::ToolStarted,
-            "reuse-lifecycle",
-            8,
-            Some("flow-001"),
-            serde_json::json!({
-                "allowed_parameters": [],
-                "tool_id": "echo",
-                "tool_kind": "predefined-command",
-                "tool_name": "Echo",
-            }),
-        ),
-        event_line(
-            "evt-009",
-            EventType::ToolCompleted,
-            "reuse-lifecycle",
-            9,
-            Some("flow-001"),
-            serde_json::json!({"exit_code":0,"tool_id":"echo"}),
-        ),
-        event_line(
-            "evt-010",
-            EventType::PhaseCompleted,
-            "reuse-lifecycle",
-            10,
-            Some("flow-001"),
-            serde_json::json!({
-                "iteration":1,
-                "phase_execution_id":"phase-execution-b",
-                "phase_id":"phase-b",
-                "phase_kind":"leaf",
-                "result":{"type":"string","value":"b"},
-            }),
-        ),
+    ];
+    for (sequence, phase_execution_id, phase_id, phase_name, result) in [
+        (3, "phase-execution-a", "phase-a", "PhaseA", "a"),
+        (7, "phase-execution-b", "phase-b", "PhaseB", "b"),
+    ] {
+        events.extend([
+            event_line(
+                &format!("evt-{:03}", sequence),
+                EventType::PhaseEntered,
+                "reuse-lifecycle",
+                sequence,
+                Some("flow-001"),
+                serde_json::json!({
+                    "instruction_ids": [],
+                    "iteration": 1,
+                    "phase_execution_id": phase_execution_id,
+                    "phase_id": phase_id,
+                    "phase_kind": "leaf",
+                    "phase_name": phase_name,
+                    "tool_ids": ["echo"],
+                }),
+            ),
+            event_line(
+                &format!("evt-{:03}", sequence + 1),
+                EventType::ToolStarted,
+                "reuse-lifecycle",
+                sequence + 1,
+                Some("flow-001"),
+                serde_json::json!({
+                    "allowed_parameters": [],
+                    "tool_id": "echo",
+                    "tool_kind": "predefined-command",
+                    "tool_name": "Echo",
+                }),
+            ),
+            event_line(
+                &format!("evt-{:03}", sequence + 2),
+                EventType::ToolCompleted,
+                "reuse-lifecycle",
+                sequence + 2,
+                Some("flow-001"),
+                serde_json::json!({"exit_code":0,"tool_id":"echo"}),
+            ),
+            event_line(
+                &format!("evt-{:03}", sequence + 3),
+                EventType::PhaseCompleted,
+                "reuse-lifecycle",
+                sequence + 3,
+                Some("flow-001"),
+                serde_json::json!({
+                    "iteration":1,
+                    "phase_execution_id":phase_execution_id,
+                    "phase_id":phase_id,
+                    "phase_kind":"leaf",
+                    "result":{"type":"string","value":result},
+                }),
+            ),
+        ]);
+    }
+    events.extend([
         event_line(
             "evt-011",
             EventType::FlowCompleted,
@@ -295,8 +253,8 @@ fn session_log_allows_tool_reuse_in_later_phase_execution() {
             None,
             serde_json::json!({}),
         ),
-    ]
-    .concat();
+    ]);
+    let stream = events.concat();
 
     validate_session_log_text(
         Path::new("reuse-lifecycle.jsonl"),
