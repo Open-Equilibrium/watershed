@@ -14,6 +14,10 @@ import tempfile
 import tomllib
 
 
+MAC_READINESS_FAULT = ('(version 1)(allow default)'
+                       '(deny process-exec (literal "/usr/bin/sandbox-exec"))')
+
+
 def linux_fault_filter(fault):
     # x86_64 only. These inherited, process-local filters inject EPERM without
     # changing kernel settings, files, services or the host's security policy.
@@ -68,10 +72,7 @@ def run(command, *, env=None, fault=None, timeout=20, capture=True):
     if fault and sys.platform == "linux":
         before_exec = lambda: inject_linux_fault(fault)
     elif fault and sys.platform == "darwin":
-        # The outer profile denies only the nested launch, not the whole host.
-        command = ["/usr/bin/sandbox-exec", "-p",
-                   '(version 1)(allow default)'
-                   '(deny process-exec (literal "/usr/bin/sandbox-exec"))', *command]
+        command = ["/usr/bin/sandbox-exec", "-p", MAC_READINESS_FAULT, *command]
     with subprocess.Popen(command, env=env, stdin=subprocess.DEVNULL,
                           stdout=subprocess.PIPE if capture else None,
                           stderr=subprocess.PIPE if capture else None,
@@ -114,6 +115,15 @@ def readiness_negatives():
                              ("flow-executor", artifacts / "flow-executor")):
             shutil.copyfile(source, bundle / name)
             (bundle / name).chmod(0o755)
+        if sys.platform == "darwin":
+            # Fault the real checker; the installer must inspect its group first.
+            installer = bundle / "install.sh"
+            source = installer.read_text(encoding="utf-8")
+            checker = '"$flow_target" executor check </dev/null'
+            assert source.count(checker) == 1, "installer checker boundary changed"
+            profile = MAC_READINESS_FAULT.replace('"', '\\"')
+            installer.write_text(source.replace(
+                checker, f'/usr/bin/sandbox-exec -p "{profile}" {checker}'), encoding="utf-8")
         version = tomllib.loads((repository / "Cargo.toml").read_text())["workspace"]["package"]["version"]
         (bundle / "bundle-info").write_text(f"{version}\n{platform}\n", encoding="ascii")
         home = root / "home"
@@ -139,15 +149,16 @@ def readiness_negatives():
             assert checked.stdout == b"", checked.stdout
             assert checked.stderr.startswith(b"error: executor_unavailable:"), checked.stderr
             prefix = root / fault
+            installer_fault = None if sys.platform == "darwin" else fault
             installed = run(["/bin/sh", str(bundle / "install.sh"), "--prefix", str(prefix)],
-                            env=environment, fault=fault)
+                            env=environment, fault=installer_fault)
             assert installed.returncode == 1, installed.stderr
             assert installed.stdout == b"", installed.stdout
             assert b"executor_unavailable:" in installed.stderr, installed.stderr
             assert b"--no-default-executor" in installed.stderr, installed.stderr
             assert list((prefix / "bin").iterdir()) == [], "failed installation did not roll back"
             opted_out = run(["/bin/sh", str(bundle / "install.sh"), "--prefix", str(prefix),
-                             "--no-default-executor"], env=environment, fault=fault)
+                             "--no-default-executor"], env=environment, fault=installer_fault)
             assert opted_out.returncode == 0, opted_out.stderr
             assert sorted(path.name for path in (prefix / "bin").iterdir()) == ["flow"]
             assert not (config / "flow-agent/executor.json").exists()
