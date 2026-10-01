@@ -123,7 +123,7 @@ pub enum RuntimeError {
         /// Maximum canonical JSONL bytes accepted by the in-memory replay API.
         limit_bytes: usize,
     },
-    /// M1 has no productive provider or external-tool execution backend.
+    /// Fixture resume requires the explicit Fixture execution backend.
     ExecutionBackendUnavailable,
     /// Productive execution has no supported backend on this platform.
     ProductiveExecutionUnavailable,
@@ -335,7 +335,7 @@ impl fmt::Display for RuntimeError {
                 "replay_output_limit_exceeded: in-memory replay output exceeds {limit_bytes} bytes"
             ),
             Self::ExecutionBackendUnavailable => f.write_str(
-                "execution_backend_unavailable: M1 requires the explicit stub-model fixture profile",
+                "execution_backend_unavailable: Fixture resume requires the explicit stub-model fixture profile",
             ),
             Self::ProductiveExecutionUnavailable => f.write_str(
                 "execution_backend_unavailable: productive execution is unavailable on this platform",

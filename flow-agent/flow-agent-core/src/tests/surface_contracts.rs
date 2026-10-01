@@ -70,7 +70,7 @@ fn runtime_error_diagnostics_cover_every_controlled_failure_shape() {
         ),
         (
             RuntimeError::ExecutionBackendUnavailable,
-            "execution_backend_unavailable: M1 requires the explicit stub-model fixture profile",
+            "execution_backend_unavailable: Fixture resume requires the explicit stub-model fixture profile",
             false,
         ),
         (
