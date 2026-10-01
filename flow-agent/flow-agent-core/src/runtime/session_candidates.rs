@@ -89,6 +89,9 @@ fn classify_session_candidate_leaf<'a>(
     name: &'a str,
     canonical: bool,
 ) -> Option<(&'a str, SessionCandidateHint)> {
+    if proto::is_valid_session_id(name) {
+        return Some((name, SessionCandidateHint::Occupied));
+    }
     if let Some(id) = SessionBundlePaths::split_lock_leaf(name) {
         let hint = match dir.file(name).metadata() {
             Ok(metadata) if !metadata.file_type().is_symlink() => SessionCandidateHint::Occupied,

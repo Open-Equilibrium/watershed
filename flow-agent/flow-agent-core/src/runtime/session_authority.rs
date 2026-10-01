@@ -28,7 +28,8 @@ thread_local! {
 pub(crate) use crate::runtime::session_store::stable_native_path_bytes;
 
 pub(crate) fn conversation_ownership_key(conversation_id: &str) -> String {
-    format!("conversation:{conversation_id}")
+    // Fixture and productive roots address the same equal-ID public pair.
+    conversation_id.to_owned()
 }
 
 pub(crate) fn run_ownership_key(conversation_id: &str, run_session_id: &str) -> String {

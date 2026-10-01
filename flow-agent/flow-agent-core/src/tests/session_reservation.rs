@@ -157,6 +157,51 @@ fn run_flow_rechecks_a_free_candidate_after_a_cooperating_run_completes() {
 }
 
 #[test]
+fn unpublished_fixture_and_productive_candidates_share_public_ownership() {
+    use crate::runtime::conversations::reserve_new_conversation_run;
+
+    for fixture_first in [false, true] {
+        let workspace = empty_workspace("mixed-unpublished-candidates");
+        let anchored = AnchoredWorkspace::open(&workspace).expect("workspace opens");
+        if fixture_first {
+            let fixture =
+                reserve_unique_session_candidate_with_anchored_workspace(&anchored, "smoke-flow")
+                    .expect("Fixture claims the unpublished base");
+            let productive = reserve_new_conversation_run(&workspace, "smoke-flow")
+                .expect("productive allocation skips the held Fixture candidate");
+            assert_eq!(fixture.session_id, "smoke-flow");
+            assert_eq!(productive.conversation_id(), "smoke-flow-2");
+            assert_eq!(productive.run_session_id(), "smoke-flow-2");
+            productive.release().expect("productive ownership releases");
+            drop(fixture);
+        } else {
+            let productive = reserve_new_conversation_run(&workspace, "smoke-flow")
+                .expect("productive claims the unpublished base");
+            let fixture =
+                reserve_unique_session_candidate_with_anchored_workspace(&anchored, "smoke-flow")
+                    .expect("Fixture allocation skips the held productive candidate");
+            assert_eq!(productive.conversation_id(), "smoke-flow");
+            assert_eq!(productive.run_session_id(), "smoke-flow");
+            assert_eq!(fixture.session_id, "smoke-flow-2");
+            drop(fixture);
+            productive.release().expect("productive ownership releases");
+        }
+        assert!(
+            crate::tests::helpers::workspace_session_dir(&workspace)
+                .read_dir()
+                .expect("productive allocation creates its empty sessions root")
+                .next()
+                .is_none(),
+            "neither producer published a bundle"
+        );
+        let retry =
+            reserve_unique_session_candidate_with_anchored_workspace(&anchored, "smoke-flow")
+                .expect("released unpublished candidates are reusable");
+        assert_eq!(retry.session_id, "smoke-flow");
+    }
+}
+
+#[test]
 fn reservation_collision_preserves_existing_session_log() {
     let workspace = empty_workspace("reservation-existing-session");
     let anchored = AnchoredWorkspace::open(&workspace).expect("workspace opens");

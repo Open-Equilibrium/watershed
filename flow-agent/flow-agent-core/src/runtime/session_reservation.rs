@@ -86,10 +86,7 @@ pub(crate) fn reserve_unique_session_candidate_with_anchored_workspace(
         if hint == SessionCandidateHint::Probe
             && let Some(sessions) = sessions.as_ref()
         {
-            match ensure_anchored_session_file_available(
-                &SessionBundlePaths::events_in(sessions, &session_id),
-                &session_id,
-            ) {
+            match ensure_anchored_session_candidate_available(sessions, &session_id) {
                 Ok(()) => {}
                 Err(RuntimeError::SessionLogExists(_)) => continue,
                 Err(error) => return Err(error),
@@ -105,10 +102,7 @@ pub(crate) fn reserve_unique_session_candidate_with_anchored_workspace(
         match SessionOwnershipLease::acquire_anchored(workspace, &session_id, &marker_path) {
             Ok(ownership) => {
                 if let Some(sessions) = open_anchored_runtime_dir(workspace, SESSION_STORAGE_DIR)? {
-                    match ensure_anchored_session_file_available(
-                        &SessionBundlePaths::events_in(&sessions, &session_id),
-                        &session_id,
-                    ) {
+                    match ensure_anchored_session_candidate_available(&sessions, &session_id) {
                         Ok(()) => {}
                         Err(RuntimeError::SessionLogExists(_)) => {
                             ownership.release()?;
@@ -130,6 +124,17 @@ pub(crate) fn reserve_unique_session_candidate_with_anchored_workspace(
     Err(RuntimeError::Protocol(format!(
         "could not allocate a unique session_id for {base_session_id}"
     )))
+}
+
+fn ensure_anchored_session_candidate_available(
+    sessions: &AnchoredDir,
+    session_id: &str,
+) -> Result<(), RuntimeError> {
+    ensure_anchored_bundle_leaf_available(&sessions.file(session_id), session_id)?;
+    ensure_anchored_session_file_available(
+        &SessionBundlePaths::events_in(sessions, session_id),
+        session_id,
+    )
 }
 
 pub(crate) fn materialize_session_candidate(
@@ -225,6 +230,7 @@ pub fn ensure_session_bundle_namespace_available(
     lock_path: &AnchoredFile,
     session_id: &str,
 ) -> Result<(), RuntimeError> {
+    ensure_anchored_bundle_leaf_available(&dirs.sessions.file(session_id), session_id)?;
     for path in [log_path, context_path] {
         ensure_anchored_bundle_leaf_available(path, session_id)?;
     }

@@ -404,6 +404,95 @@ fn productive_session_entrypoint_persists_a_resumable_conversation() {
 }
 
 #[test]
+fn fixture_run_preserves_productive_public_identity_across_profile_changes() {
+    use crate::runtime::{
+        session::run_flow,
+        session_reading::{SessionEventReader, replay_conversation_run},
+        session_reservation::set_candidate_pre_lease_observer_for_test,
+        types::EmitMode,
+    };
+    use std::{cell::RefCell, rc::Rc};
+
+    for publish_after_snapshot in [false, true] {
+        let (workspace, fixture) = disabled_configured_smoke_productive_execution_fixture();
+        let config = load_global_config().expect("productive profile loads");
+        let productive = Rc::new(RefCell::new(None));
+        let captured = Rc::clone(&productive);
+        let productive_workspace = workspace.clone();
+        let complete_productive = move || {
+            let output = run_productive_session_with_provider(
+                &productive_workspace,
+                &fixture.anchored,
+                &config,
+                "gpt-fixture",
+                ContextModelProfile::stub_v0(),
+                &fixture.registry,
+                fixture.smoke_flow(),
+                &fixture.policy,
+                None,
+                true,
+                || Ok(fixture.credential().clone()),
+                "",
+                None,
+                &mut FakeProvider::default(),
+            )
+            .expect("canonical productive Run completes");
+            assert!(!output.failed);
+            assert_eq!(output.session_id, "smoke-flow");
+            *captured.borrow_mut() = Some(output);
+        };
+        if publish_after_snapshot {
+            set_candidate_pre_lease_observer_for_test(complete_productive);
+        } else {
+            complete_productive();
+        }
+        fs::copy(
+            crate::tests::test_support::fixture_dir("smoke-flow").join(".flow/config.yaml"),
+            crate::tests::test_support::session_home_path().join("config.yaml"),
+        )
+        .expect("administrator selects the explicit Fixture profile");
+
+        let fixture = run_flow(&workspace, "smoke-flow", EmitMode::Jsonl)
+            .expect("Fixture Run completes after productive execution");
+        assert!(!fixture.failed);
+        assert_eq!(fixture.session_id, "smoke-flow-2");
+        let replay = replay_conversation_run(
+            &workspace,
+            &fixture.session_id,
+            &fixture.session_id,
+            EmitMode::Jsonl,
+        )
+        .expect("paired replay addresses the new Fixture Run");
+        assert_eq!(replay.stdout, fixture.stdout);
+        let mut reader = SessionEventReader::open_conversation_run(
+            &workspace,
+            &fixture.session_id,
+            &fixture.session_id,
+        )
+        .expect("Tail opens the new Fixture pair");
+        let mut tail = String::new();
+        reader
+            .visit_incremental_after(0, u64::MAX, |_event, line| {
+                tail.push_str(line);
+                Ok(())
+            })
+            .expect("Tail reads the new Fixture stream");
+        assert_eq!(tail, fixture.stdout);
+        let productive = productive.borrow_mut().take().expect("productive output");
+        assert_eq!(
+            fs::read_to_string(productive.session_path).expect("prior productive bytes remain"),
+            productive.stdout
+        );
+        assert_eq!(
+            replay_conversation_run(&workspace, "smoke-flow", "smoke-flow", EmitMode::Jsonl)
+                .expect("prior productive Run retains its public pair")
+                .stdout,
+            productive.stdout
+        );
+    }
+}
+
+#[test]
 fn cancellation_at_productive_run_creation_respects_publication_boundary() {
     const CHILD_ENV: &str = "WATERSHED_PRE_RUN_CREATE_CANCELLATION_CHILD";
     if run_isolated_test(CHILD_ENV) {
