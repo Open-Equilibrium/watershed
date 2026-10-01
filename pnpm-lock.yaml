@@ -167,16 +167,16 @@ importers:
   .:
     devDependencies:
       clawpatch:
-        specifier: 0.8.1
-        version: 0.8.1
+        specifier: 0.8.2
+        version: 0.8.2
       playwright:
         specifier: 1.63.0
         version: 1.63.0
 
 packages:
 
-  clawpatch@0.8.1:
-    resolution: {integrity: sha512-jfYqifV3GaVd7DbaUayk6fWbrP7ZVzBI+7amOGrytx9dKxickSx8c0UlVwEJ2NV2YUzod2O/DyX1/1KdQULw3g==}
+  clawpatch@0.8.2:
+    resolution: {integrity: sha512-pye4c+5LemI5XyNk87Zk8RGX4yVAAeBtNReRHYiLfW2fZTY0J0Oqf/KYzZGj8g95O/oYWoxmyfcQZI1Ow46MYQ==}
     engines: {node: '>=22'}
     hasBin: true
 
@@ -211,7 +211,7 @@ packages:
 
 snapshots:
 
-  clawpatch@0.8.1:
+  clawpatch@0.8.2:
     dependencies:
       js-tokens: 10.0.0
       proper-lockfile: 4.1.2

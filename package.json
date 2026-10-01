@@ -12,7 +12,7 @@
     "docs:render-check": "node scripts/check-html-render.mjs"
   },
   "devDependencies": {
-    "clawpatch": "0.8.1",
+    "clawpatch": "0.8.2",
     "playwright": "1.63.0"
   }
 }
