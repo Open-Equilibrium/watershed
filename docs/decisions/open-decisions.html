@@ -16,7 +16,6 @@ summary{cursor:pointer}summary h3{display:inline;margin:0}summary:focus-visible{
     <p class="muted">Live maintainer decisions only. Accepted decisions live in <a href="../adr/ADR-LOG.md">ADR-LOG.md</a>; implementation detail belongs in the canonical docs listed in <a href="../../AGENTS.md">AGENTS.md</a>.</p>
     <p><span class="tag">Rule</span> Hygiene limits and canonical-home rules live in <a href="../../AGENTS.md">AGENTS.md</a>.</p>
     <nav aria-label="Decision links">
-      <a href="#m12">Flow Agent: M1.2 installation</a>
       <a href="#release-1">Flow Agent: first release</a>
       <a href="#release-security">Shared release safeguards</a>
       <a href="#m2">Meta-Harness (M2)</a>
@@ -24,25 +23,6 @@ summary{cursor:pointer}summary h3{display:inline;margin:0}summary:focus-visible{
       <a href="#post-m1">Flow Agent: extended capabilities</a>
     </nav>
   </header>
-
-  <section id="m12">
-    <h2>Flow Agent - M1.2 Installation</h2>
-    <div class="grid">
-      <details id="d-069" class="decision" style="grid-column:1/-1">
-        <summary><h3>D-069 - Mac Installer Access-Permission Checks</h3></summary>
-        <p><strong>Status:</strong> Blocks the installer repair and final M1.2 acceptance. The runtime repair uses existing native APIs; the installer mechanism requires a maintainer choice.</p>
-        <p><strong>Problem:</strong> Mac access-control lists (ACLs) can let another user change or replace an installed program even when ordinary file permissions look safe. Admission must check the opened bundle, programs, installation directory and newly staged objects before execution or publication. The existing shell tools cannot reliably distinguish an absent ACL from a failed query. Harmless read access and administrator-only grants must remain usable under the <a href="../../PROTOCOL.md#process-and-framing-contract">installed-program admission contract</a>.</p>
-        <p><strong>Question:</strong> Which trusted mechanism should the Mac installer use to read and evaluate those additional permissions?</p>
-        <ul>
-          <li><strong>A - Apple's built-in JavaScript automation runtime.</strong> Embed a bounded evaluator in the installer and invoke <code>/usr/bin/osascript -l JavaScript</code> on each held descriptor. Pro: no extra executable, compiler, Node or Python; the working prototype correctly admits or rejects 17 isolated metadata cases. Con: installation requires the system JavaScript/Objective-C bridge and duplicates the runtime's Rust evaluator. Missing components or query errors must stop installation; no application automation or privilege elevation is involved.</li>
-          <li><strong>B - A shipped native helper using the Rust evaluator.</strong> Pro: one permission-policy implementation and no end-user developer tools or scripting bridge. Con: adds an executable, private bootstrap/cleanup and build, packaging, signing and native tests. Before execution, the trusted installer must create and anchor new owner-only objects, clear only their ACLs, prove their identities and verify the helper against a digest embedded after its final signing; a mutable bundle manifest is insufficient. This design is feasible but not implemented.</li>
-        </ul>
-        <p><strong>Recommendation:</strong> A for the smallest repair; choose B if keeping one Rust evaluator outweighs its extra publication and bootstrap machinery. Requiring developer Python would change the accepted <a href="../../SECURITY.md#m12-tool-execution-trust-boundary">installation without extra developer tools</a> contract and is not proposed.</p>
-        <p><strong>Evidence:</strong> The prototype covers ordered allow/deny entries, trusted users, public reads, directory replacement, inherited grants and denied metadata reads. It ran on macOS 27 with synthetic objects, not a supported-target acceptance run. The installer regression remains red; neither option is approved or integrated.</p>
-        <p><strong>Acceptance criterion:</strong> Record the selected mechanism and prerequisites; check actual held objects before effects, preserve effectively harmless permissions, reject unsafe grants and unavailable metadata, cover inherited staging permissions and missing prerequisites, make the installer regression green, and pass the unchanged macOS 26 native installer and release gates. Do not modify existing administrator ACLs, host policy or release guards.</p>
-      </details>
-    </div>
-  </section>
 
   <section id="release-1">
     <h2>Flow Agent - First Release</h2>
