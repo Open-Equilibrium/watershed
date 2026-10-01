@@ -4,6 +4,7 @@ import tempfile
 import tomllib
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from test_m1_validation_contract import tracked_validation_paths
 
@@ -116,9 +117,43 @@ class RustDependencyContractTest(unittest.TestCase):
             protected = repo / "credentials" / "Cargo.toml"
             protected.parent.mkdir()
             protected.write_text("[dependencies]\nnode = \"1\"\n", encoding="utf-8")
-            subprocess.run(["git", "add", "--", tracked.name], cwd=repo, check=True)
+            manifests = {
+                ".codex/example/Cargo.toml": '[dependencies]\nnode = "1"\n',
+                ".agents/example/Cargo.toml": '[dependencies]\nnode = "1"\n',
+                ".codex-tools/Cargo.toml": "[package]\n",
+            }
+            for name, content in manifests.items():
+                manifest = repo / name
+                manifest.parent.mkdir(parents=True, exist_ok=True)
+                manifest.write_text(content, encoding="utf-8")
+            subprocess.run(
+                ["git", "add", "--", tracked.name, *manifests], cwd=repo, check=True
+            )
 
-            self.assertEqual(rust_product_manifest_paths(repo), [tracked])
+            excluded = {
+                repo / name for name in manifests if name != ".codex-tools/Cargo.toml"
+            }
+            open_path = Path.open
+
+            def open_product_path(path: Path, *args, **kwargs):
+                self.assertNotIn(
+                    path, excluded, "product gate opened repository agent setup"
+                )
+                return open_path(path, *args, **kwargs)
+
+            with (
+                mock.patch(__name__ + ".ROOT", repo),
+                mock.patch.object(Path, "open", autospec=True, side_effect=open_product_path),
+            ):
+                self.test_rust_product_manifests_have_no_node_runtime_dependency()
+                product = repo / ".codex-tools" / "Cargo.toml"
+                product.write_text('[dependencies]\nnode = "1"\n', encoding="utf-8")
+                with self.assertRaisesRegex(
+                    AssertionError, r"\.codex-tools.Cargo.toml:dependencies:node"
+                ):
+                    self.test_rust_product_manifests_have_no_node_runtime_dependency()
+
+            self.assertEqual(set(rust_product_manifest_paths(repo)), {tracked, product})
 
     def test_cargo_dependency_tables_exclude_metadata(self) -> None:
         manifest = {

@@ -56,6 +56,13 @@ def is_protected_validation_path(relative_path: Path) -> bool:
     )
 
 
+def is_repository_agent_setup_path(relative_path: Path) -> bool:
+    return relative_path == Path("AGENTS.md") or (
+        len(relative_path.parts) > 1
+        and relative_path.parts[0] in {".codex", ".agents"}
+    )
+
+
 def tracked_validation_paths(repo: Path) -> list[Path]:
     result = subprocess.run(
         ["git", "ls-files", "-z"],
@@ -76,7 +83,11 @@ def tracked_validation_paths(repo: Path) -> list[Path]:
     paths: list[Path] = []
     for relative_path in relative_paths:
         path = repo / relative_path
-        if is_protected_validation_path(relative_path) or path.is_symlink():
+        if (
+            is_repository_agent_setup_path(relative_path)
+            or is_protected_validation_path(relative_path)
+            or path.is_symlink()
+        ):
             continue
         try:
             metadata = path.lstat()
@@ -90,6 +101,7 @@ def tracked_validation_paths(repo: Path) -> list[Path]:
         resolved_relative = resolved.relative_to(root)
         if (
             resolved_relative in tracked_paths
+            and not is_repository_agent_setup_path(resolved_relative)
             and not is_protected_validation_path(resolved_relative)
             and resolved.is_file()
         ):
@@ -128,15 +140,55 @@ class M1ValidationContractTest(unittest.TestCase):
             credential = repo / "credentials" / "token.txt"
             credential.parent.mkdir()
             credential.write_text("credential", encoding="utf-8")
+            documents = {
+                "docs/decisions/open-decisions.html": '<section id="d-001">Live</section>',
+                "AGENTS.md": "D-999",
+                ".codex/example.md": "D-998",
+                ".agents/example.md": "D-997",
+                "docs/AGENTS.md": "D-001",
+                ".codex-tools/product.md": "D-001",
+            }
+            for name, content in documents.items():
+                document = repo / name
+                document.parent.mkdir(parents=True, exist_ok=True)
+                document.write_text(content, encoding="utf-8")
             subprocess.run(
-                ["git", "add", "--", "safe.txt", ".env", "credentials/token.txt"],
+                [
+                    "git", "add", "--", "safe.txt", ".env",
+                    "credentials/token.txt", *documents,
+                ],
                 cwd=repo,
                 check=True,
             )
 
-            paths = tracked_validation_paths(repo)
+            excluded = {
+                repo / name
+                for name in ("AGENTS.md", ".codex/example.md", ".agents/example.md")
+            }
+            open_path = Path.open
 
-            self.assertEqual(paths, [safe])
+            def open_product_path(path: Path, *args, **kwargs):
+                self.assertNotIn(
+                    path, excluded, "product gate opened repository agent setup"
+                )
+                return open_path(path, *args, **kwargs)
+
+            with (
+                mock.patch(__name__ + ".ROOT", repo),
+                mock.patch.object(Path, "open", autospec=True, side_effect=open_product_path),
+            ):
+                self.test_documented_decision_references_resolve_to_live_entries()
+                for name in ("docs/AGENTS.md", ".codex-tools/product.md"):
+                    with self.subTest(product_path=name):
+                        (repo / name).write_text("D-002", encoding="utf-8")
+                        with self.assertRaisesRegex(AssertionError, "002"):
+                            self.test_documented_decision_references_resolve_to_live_entries()
+                        (repo / name).write_text("D-001", encoding="utf-8")
+
+            self.assertEqual(
+                set(tracked_validation_paths(repo)),
+                {safe} | {repo / name for name in documents if repo / name not in excluded},
+            )
 
     def test_validation_scan_skips_non_utf8_tracked_path_bytes(self) -> None:
         result = subprocess.CompletedProcess(
@@ -176,20 +228,24 @@ class M1ValidationContractTest(unittest.TestCase):
         for label, target_relative in [
             ("protected", Path("credentials/Cargo.toml")),
             ("untracked", Path("scratch/Cargo.toml")),
+            ("setup-agents", Path(".agents/Cargo.toml")),
+            ("setup-codex", Path(".codex/Cargo.toml")),
+            ("setup-root", Path("AGENTS.md")),
         ]:
             with self.subTest(label=label), tempfile.TemporaryDirectory() as temporary_directory:
                 repo = Path(temporary_directory)
                 subprocess.run(["git", "init", "--quiet"], cwd=repo, check=True)
                 target = repo / target_relative
-                target.parent.mkdir()
+                target.parent.mkdir(exist_ok=True)
                 target.write_text(label, encoding="utf-8")
                 safe_parent = repo / "safe"
                 safe_parent.mkdir()
-                tracked = safe_parent / "Cargo.toml"
+                tracked = safe_parent / target.name
                 tracked.write_text("tracked", encoding="utf-8")
-                subprocess.run(
-                    ["git", "add", "--", "safe/Cargo.toml"], cwd=repo, check=True
-                )
+                staged = [str(tracked.relative_to(repo))]
+                if label.startswith("setup-"):
+                    staged.append(str(target_relative))
+                subprocess.run(["git", "add", "--", *staged], cwd=repo, check=True)
                 tracked.unlink()
                 safe_parent.rmdir()
                 try:
