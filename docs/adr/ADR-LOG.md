@@ -10,7 +10,7 @@ Format: `ID | date | status | decision — canonical context`
 
 - **ADR-0001 / ADR-0078 / ADR-0080** | 2026-06-05–2026-07-24 | Accepted | Flow Agent has a Rust core and no product Node runtime; exact Rust, Node and pnpm pins are canonical in `rust-toolchain.toml`, `.node-version` and `package.json`; CI consumes them.
 - **ADR-0002 / ADR-0033** | 2026-06-05–2026-06-19 | Accepted | The monorepo keeps shared contract crates separate from Flow Agent runtime and CLI crates — `README.md`, Flow Agent V-Spec.
-- **ADR-0003** | 2026-06-09 | Accepted | License is SPDX `AGPL-3.0-only` — `LICENSE`, `README.md`.
+- **ADR-0003 / ADR-0115** | 2026-06-09–2026-07-31 | Accepted | Watershed is SPDX `AGPL-3.0-only`; ISC and BSD-3-Clause are allowed for the approved dependency stack — `LICENSE`, `deny.toml`, `README.md`.
 - **ADR-0004 / ADR-0042** | 2026-06-05–2026-06-21 | Accepted | Scripts define capabilities; Flow orchestration owns invocation validation; Tool code is trusted under the replacement boundary in ADR-0166 — `SECURITY.md`.
 - **ADR-0005** | 2026-06-05 | Accepted | Reuse proven sandbox primitives and Wasmtime plugin isolation — `SECURITY.md`.
 - **ADR-0006** | 2026-06-05 | Accepted | Authored scripts are authoritative; visual graphs are views — `GLOSSARY.md`.
@@ -44,7 +44,6 @@ Format: `ID | date | status | decision — canonical context`
 - **ADR-0096 / ADR-0101 / ADR-0112 / ADR-0118 / ADR-0128 / ADR-0129 / ADR-0130 / ADR-0131 / ADR-0139** | 2026-07-28–2026-08-10 | Accepted; M1.1 implemented; `flow-provider-output-v1` compatibility removed before release; config/binding scopes superseded by ADR-0152/ADR-0153 | Productive provider configuration, bounded context profiles, Codex OAuth/credential locking and publication, cache identity/counters, durable attempts, uncertainty and bounded direct provider failures follow the Flow-owned contracts — `PROTOCOL.md`, `SECURITY.md`, `TESTING.md`.
 - **ADR-0108 / ADR-0109 / ADR-0110** | 2026-07-30 | Accepted; ADR-0109 supersedes ADR-0108 | The finite M1.1 Tool, Instruction, recursive Phase and Flow grammar, typed handoff, transitions, loops and deferred features are canonical in `PROTOCOL.md`.
 - **ADR-0111 / ADR-0113** | 2026-07-30–2026-07-31 | Accepted | Productive transport, bounded deadlines, cancellation and the narrow approved Tool/process dependencies follow the canonical contracts in `PROTOCOL.md` and `SECURITY.md`.
-- **ADR-0115** | 2026-07-31 | Accepted | ISC and BSD-3-Clause are allowed for the approved dependency stack; Watershed code remains AGPL-3.0-only — `deny.toml`, `README.md`.
 - **ADR-0125 / ADR-0126** | 2026-08-03 | Accepted | Unix Ctrl-C uses one lock-linearized operation state: first active cancellation is controlled and persisted; idle or repeated interruption exits 130 — `PROTOCOL.md`, `SECURITY.md`, `TESTING.md`.
 - **ADR-0132** | 2026-08-10 | Accepted; implemented | Flow Agent has no public Conversation deletion; operators remove retained data outside Flow Agent, while failed creation may reclaim only a proven empty unpublished reservation — `PROTOCOL.md`, `SECURITY.md`.
 - **ADR-0133** | 2026-08-10 | Accepted; implemented | Remove the unused unbounded Rust session-listing surface; any later supported listing requires a bounded contract — `PROTOCOL.md`, `PERFORMANCE.md`.
