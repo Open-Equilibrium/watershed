@@ -161,6 +161,11 @@ class CiWorkflowContractTest(unittest.TestCase):
         assert_step_state(
             self, workflow, "Run native release Executor acceptance", condition=NATIVE
         )
+        assert_step_state(self, workflow, "Run privileged M1.2 installer acceptance", condition=NATIVE)
+        privileged = step_run(workflow, "Run privileged M1.2 installer acceptance")
+        self.assertIn('sudo -n -- /usr/bin/env PATH="$PATH" SUDO_USER="$(id -un)"', privileged)
+        self.assertIn("install.tests.test_readiness.ReadinessContractTest.privileged_installer_acceptance",
+                      privileged)
         assert_step_state(self, workflow, "Check native Mac host",
                           condition="matrix.os == 'xcode-27'")
         self.assertIn("from scripts.m12_native import native_host; native_host()",

@@ -113,6 +113,14 @@ jobs:
         if: steps.scope.outputs.product == 'true' && (matrix.os != 'windows-latest')
         run: node scripts/run-python.mjs -m unittest install.tests.test_install install.tests.test_readiness
 
+      - name: Run privileged M1.2 installer acceptance
+        if: steps.scope.outputs.product == 'true' && (matrix.os != 'windows-latest')
+        timeout-minutes: 2
+        run: >-
+          sudo -n -- /usr/bin/env PATH="$PATH" SUDO_USER="$(id -un)"
+          node scripts/run-python.mjs -m unittest
+          install.tests.test_readiness.ReadinessContractTest.privileged_installer_acceptance
+
       - name: Select pinned Rust
         if: steps.scope.outputs.product == 'true'
         shell: pwsh
