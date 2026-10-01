@@ -290,6 +290,13 @@ class ReadinessContractTest(unittest.TestCase):
         source = (pathlib.Path(__file__).parents[1] / "install.sh").read_text()
         body = source.partition("readiness_shell='\n")[2].partition("\n'\nwait_for_readiness_status()")[0]
         self.assertTrue(body)
+        shutdown = "        IFS= read -r request || :\n"
+        self.assertEqual(body.count(shutdown), 2)
+        body = body.replace(shutdown, (
+            '        PS4="+readiness role=$role pid=$$ group=$readiness_pgid '
+            'bash=${BASH_VERSION-unavailable} seconds=\\${SECONDS-unavailable} "\n'
+            '        set -x\n'
+        ) + shutdown)
         cases = (("failed", False, "/usr/bin/pgrep"),
                  ("before-inner", False, "/usr/bin/pgrep"),
                  ("after-inner", False, "/usr/bin/pgrep"),

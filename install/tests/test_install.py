@@ -1029,6 +1029,13 @@ class PrefixInstallerTest(unittest.TestCase):
                 source = installer.read_text(encoding="utf-8")
                 self.assertEqual(source.count("/usr/bin/pgrep"), 1)
                 self.assertEqual(source.count("signal_exit() {\n"), 1)
+                shutdown = "        IFS= read -r request || :\n"
+                self.assertEqual(source.count(shutdown), 2)
+                source = source.replace(shutdown, (
+                    '        PS4="+readiness role=$role pid=$$ group=$readiness_pgid '
+                    'bash=${BASH_VERSION-unavailable} seconds=\\${SECONDS-unavailable} "\n'
+                    '        set -x\n'
+                ) + shutdown)
                 installer.write_text(
                     source.replace("/usr/bin/pgrep", scanner).replace(
                         "signal_exit() {\n", "signal_exit() {\n    set -x\n"
@@ -1098,10 +1105,16 @@ class PrefixInstallerTest(unittest.TestCase):
                             )
                         except (OSError, subprocess.TimeoutExpired) as diagnostic_error:
                             state_text = f"process-state diagnostic failed: {diagnostic_error}"
+                        journal = bundle.parent / "supervision"
+                        try:
+                            supervision = journal.read_text()[-4096:] if journal.exists() else "absent"
+                        except OSError as diagnostic_error:
+                            supervision = f"journal diagnostic failed: {diagnostic_error}"
                         self.fail(
                             "installer did not finish within 5s after SIGTERM; "
                             f"pid={process.pid}, status={installer_status}, "
-                            f"readiness_pgid={descendant_group}, descendant={descendant}\n"
+                            f"readiness_pgid={descendant_group}, descendant={descendant}, "
+                            f"scanner={scanner}\ncurrent supervision:\n{supervision}\n"
                             f"{state_text}\ninstaller stderr tail:\n"
                             + (error.stderr or b"")[-16384:].decode("utf-8", errors="replace")
                         )
