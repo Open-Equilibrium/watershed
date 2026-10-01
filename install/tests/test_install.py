@@ -1010,7 +1010,11 @@ class PrefixInstallerTest(unittest.TestCase):
             )
             shim.chmod(0o755)
             installer = bundle / "install.sh"
-            installer.write_text(installer.read_text(encoding="utf-8").replace(
+            source = installer.read_text(encoding="utf-8")
+            final_signal = '    kill -s KILL -- "-$readiness_pgid"'
+            self.assertEqual(source.count(final_signal), 1)
+            source = source.replace(final_signal, f'    {shlex.quote(str(shim))} -KILL -- "-$readiness_pgid"')
+            installer.write_text(source.replace(
                 "/bin/kill", shlex.quote(str(shim))), encoding="utf-8")
 
             result = self.install(bundle, root / "prefix")

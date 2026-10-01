@@ -407,8 +407,8 @@ readiness_shell='
     fi
     /bin/kill -TERM -- "-$readiness_pgid" 2>/dev/null || :
     wait_for_readiness_group && exit 0
-    # This last signal also kills the caller; there is no numeric identity reuse.
-    exec /bin/kill -KILL -- "-$readiness_pgid" 2>/dev/null
+    # Stay in this shell so shutdown traps survive through the group KILL.
+    kill -s KILL -- "-$readiness_pgid" 2>/dev/null
 '
 wait_for_readiness_status() {
     # Request six seconds of sleep for the five-second checker and reporting.
