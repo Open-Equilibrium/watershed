@@ -14,7 +14,9 @@ use std::{
 mod macos_acl;
 #[cfg(target_os = "macos")]
 pub(crate) use macos_acl::{
-    clear_entries as clear_macos_acl_entries, has_entries as has_macos_acl_entries,
+    clear_entries as clear_macos_acl_entries,
+    ensure_no_other_user_mutation as ensure_macos_acl_no_other_user_mutation,
+    has_entries as has_macos_acl_entries,
 };
 
 mod bounded_read;

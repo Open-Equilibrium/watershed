@@ -464,6 +464,18 @@ fn open_anchored_program(path: AnchoredFile) -> Result<InstalledProgram, Runtime
             "Executor installation directory is unsafe",
         ));
     }
+    #[cfg(target_os = "macos")]
+    {
+        use crate::runtime::fs_guards::ensure_macos_acl_no_other_user_mutation;
+        ensure_macos_acl_no_other_user_mutation(&file, effective_uid).map_err(|_| {
+            executor_unavailable("Executor executable ACL is unsafe or unavailable")
+        })?;
+        ensure_macos_acl_no_other_user_mutation(&*path.parent.dir, effective_uid).map_err(
+            |_| {
+                executor_unavailable("Executor installation directory ACL is unsafe or unavailable")
+            },
+        )?;
+    }
     Ok(InstalledProgram { path, image: file })
 }
 
@@ -599,6 +611,172 @@ mod tests {
         fs,
         os::unix::fs::{PermissionsExt as _, symlink},
     };
+
+    #[cfg(target_os = "macos")]
+    fn set_acl(path: &std::path::Path, entries: &[String]) {
+        let status = std::process::Command::new("/bin/chmod")
+            .arg("-N")
+            .arg(path)
+            .status()
+            .expect("fixture ACL clears");
+        assert!(status.success());
+        for (index, entry) in entries.iter().enumerate() {
+            let status = std::process::Command::new("/bin/chmod")
+                .args(["+a#", &index.to_string(), entry])
+                .arg(path)
+                .status()
+                .expect("fixture ACL installs in its specified order");
+            assert!(status.success());
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn installed_program_acl_admission_preserves_only_effectively_safe_access() {
+        let root = crate::tests::empty_workspace();
+        let flow = root.join("flow");
+        let custom = root.join("custom-executor");
+        let sibling = root.join("flow-executor");
+        for path in [&flow, &custom, &sibling] {
+            fs::write(path, b"installed program").expect("program stages");
+            fs::set_permissions(path, fs::Permissions::from_mode(0o755))
+                .expect("program is executable");
+        }
+        let selection = ExecutorSelection::new(custom.clone(), ExecutorSelectionSource::Custom);
+        let owner = std::process::Command::new("/usr/bin/id")
+            .arg("-un")
+            .output()
+            .expect("fixture owner resolves");
+        assert!(owner.status.success());
+        let owner = String::from_utf8(owner.stdout).expect("owner is UTF-8");
+        let trusted = format!("user:{} allow write,writesecurity", owner.trim());
+        for (path, entries, safe) in [
+            (custom.as_path(), vec!["everyone allow write".into()], false),
+            (flow.as_path(), vec!["everyone allow append".into()], false),
+            (
+                sibling.as_path(),
+                vec!["everyone allow writesecurity".into()],
+                false,
+            ),
+            (
+                root.as_ref(),
+                vec!["everyone allow add_file,delete_child".into()],
+                false,
+            ),
+            (
+                custom.as_path(),
+                vec!["everyone allow read,execute".into()],
+                true,
+            ),
+            (
+                root.as_ref(),
+                vec!["everyone allow list,search".into()],
+                true,
+            ),
+            (
+                custom.as_path(),
+                vec!["everyone deny write".into(), "everyone allow write".into()],
+                true,
+            ),
+            (
+                custom.as_path(),
+                vec!["everyone allow write".into(), "everyone deny write".into()],
+                false,
+            ),
+            (
+                custom.as_path(),
+                vec!["group:staff allow write".into()],
+                false,
+            ),
+            (
+                custom.as_path(),
+                vec![
+                    "group:staff deny write".into(),
+                    "group:staff allow write".into(),
+                ],
+                true,
+            ),
+            (
+                custom.as_path(),
+                vec![
+                    "user:root deny write".into(),
+                    "group:staff allow write".into(),
+                ],
+                false,
+            ),
+            (custom.as_path(), vec![trusted], true),
+            (
+                custom.as_path(),
+                vec!["user:root allow write,writesecurity".into()],
+                true,
+            ),
+            (
+                root.as_ref(),
+                vec!["everyone allow add_file,only_inherit,file_inherit".into()],
+                true,
+            ),
+        ] {
+            set_acl(path, &entries);
+            let admitted = open_validated_executable(&selection, &flow);
+            assert_eq!(admitted.is_ok(), safe, "{path:?} {entries:?}: {admitted:?}");
+            set_acl(path, &[]);
+        }
+
+        set_acl(
+            &root,
+            &["everyone allow write,file_inherit,only_inherit".into()],
+        );
+        let inherited = root.join("inherited-executor");
+        fs::write(&inherited, b"inherited image").expect("inherited image creates");
+        fs::set_permissions(&inherited, fs::Permissions::from_mode(0o755))
+            .expect("inherited image is executable");
+        assert!(
+            open_program(&inherited).is_err(),
+            "inherited write grant rejects admission"
+        );
+        set_acl(&root, &[]);
+
+        // An ordinary installation owner can deny its own ACL metadata reads.
+        if rustix::process::geteuid().as_raw() != 0 {
+            set_acl(
+                &custom,
+                &[format!("user:{} deny readsecurity", owner.trim())],
+            );
+            assert!(open_validated_executable(&selection, &flow).is_err());
+            set_acl(&custom, &[]);
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn installed_program_acl_change_rejects_probe_and_unchanged_inode_launch() {
+        let root = crate::tests::empty_workspace();
+        let image = root.join("flow");
+        let marker = root.join("executed");
+        fs::write(&image, format!("#!/bin/sh\n: > '{}'\n", marker.display()))
+            .expect("probe fixture stages");
+        fs::set_permissions(&image, fs::Permissions::from_mode(0o755))
+            .expect("probe fixture is executable");
+        let retained = open_program(&image).expect("safe image admits");
+        set_acl(&image, &["everyone allow write".into()]);
+        assert!(
+            retained.launch_target().is_err(),
+            "same inode ACL mutation rejects launch"
+        );
+        let selection = ExecutorSelection::new(image.clone(), ExecutorSelectionSource::Custom);
+        assert!(super::probe_executor(&selection, &image, &[]).is_err());
+        assert!(!marker.exists(), "unsafe probe image must never execute");
+        set_acl(&image, &[]);
+        retained
+            .launch_target()
+            .expect("restored effective safety admits retained image");
+        set_acl(&root, &["everyone allow delete_child".into()]);
+        assert!(
+            retained.launch_target().is_err(),
+            "same parent inode ACL mutation rejects launch"
+        );
+        set_acl(&root, &[]);
+    }
 
     #[test]
     fn executable_ownership_follows_the_effective_administrator() {
