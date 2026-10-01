@@ -538,12 +538,14 @@ class PrefixInstallerTest(unittest.TestCase):
             standard = root / "standard"
             installed = self.install(bundle, standard)
             self.assertEqual(installed.returncode, 0, installed.stderr)
+            self.assertEqual(installed.stderr, b"")
             self.assertTrue((standard / "bin" / "flow").is_file())
             self.assertTrue((standard / "bin" / "flow-executor").is_file())
 
             opt_out = root / "opt-out"
             installed = self.install(bundle, opt_out, "--no-default-executor")
             self.assertEqual(installed.returncode, 0, installed.stderr)
+            self.assertEqual(installed.stderr, b"")
             self.assertTrue((opt_out / "bin" / "flow").is_file())
             self.assertFalse((opt_out / "bin" / "flow-executor").exists())
 
@@ -997,11 +999,11 @@ class PrefixInstallerTest(unittest.TestCase):
             shim.chmod(0o755)
             installer = bundle / "install.sh"
             source = installer.read_text(encoding="utf-8")
-            final_signal = '    kill -s KILL -- "-$readiness_pgid"'
-            self.assertEqual(source.count(final_signal), 1)
-            source = source.replace(final_signal, f'    {shlex.quote(str(shim))} -KILL -- "-$readiness_pgid"')
-            installer.write_text(source.replace(
-                "/bin/kill", shlex.quote(str(shim))), encoding="utf-8")
+            for number in ("TERM", "KILL"):
+                command = f'    kill -s {number} -- "-$readiness_pgid"'
+                self.assertEqual(source.count(command), 1)
+                source = source.replace(command, f'    {shlex.quote(str(shim))} -{number} -- "-$readiness_pgid"')
+            installer.write_text(source, encoding="utf-8")
 
             result = self.install(bundle, root / "prefix")
 

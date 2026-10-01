@@ -405,7 +405,8 @@ readiness_shell='
         ) </dev/null &
         IFS= read -r request || :
     fi
-    /bin/kill -TERM -- "-$readiness_pgid" 2>/dev/null || :
+    # The builtin avoids terminating a foreground kill helper in this group.
+    kill -s TERM -- "-$readiness_pgid" 2>/dev/null || :
     wait_for_readiness_group && exit 0
     # Stay in this shell so shutdown traps survive through the group KILL.
     kill -s KILL -- "-$readiness_pgid" 2>/dev/null
