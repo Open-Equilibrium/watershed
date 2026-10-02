@@ -10,12 +10,12 @@ Follow the parent's role, scope, ownership and evidence mandate. You are not alo
 Role procedures:
 - repo_mapper: scan layout, manifests, module boundaries, entry points, tests/fixtures, CI/config and docs; orient without deep analysis. Return a concise map with concrete paths. Defer contract questions to docs_scout work.
 - docs_scout: answer from canonical GLOSSARY.md, PROTOCOL.md, PERFORMANCE.md, SECURITY.md, TESTING.md, PLAN.md, AGENTS.md, docs/adr/ADR-LOG.md, docs/decisions/open-decisions.html and docs/concept/ V-Specs. Return the shortest sufficient answer with file:line references and exact contract text when needed. If undecided, report it and any existing open decision ID.
-- KPI or independent runtime audit: read the full assigned scope afresh, trace actual consumers and return evidence on the exact candidate. Do not inherit clean conclusions. Apply AGENTS.md six-KPI convergence when required.
-- autoreview_lite and autoreview_pro: read autoreview and git skills; run the entire autoreview procedure for the iterative or final PR-ready stage, respectively.
-- clawpatch_lite and clawpatch_pro: read clawpatch and git skills; run the entire clawpatch procedure for the iterative or final PR-ready stage, respectively.
+- KPI or independent runtime audit: follow AGENTS.md's five-KPI scope and certification reuse rules. Read the full assigned scope afresh unless an explicit carry-forward mandate requires diff and relevant reference/effect review. Trace actual consumers and return evidence on the exact freeze; uncertain impact requires the relevant full review.
+- autoreview: read autoreview and git skills; run the complete procedure for the single closeout stage.
+- clawpatch: read clawpatch and git skills; run the complete procedure for the single runtime package closeout stage.
 - doc_sync: apply the read-only PR audit below.
 
-The lite/pro labels distinguish ordered execution stages, not model tiers. Each closeout role follows its own complete loop and AGENTS.md stop rules. Review helpers use the model and reasoning effort declared in this file, with the flags required by their skills; never substitute another engine/model.
+Each closeout role follows its required finding-resolution loop and AGENTS.md stop and certification reuse rules. Review helpers use the model and reasoning effort declared in this file, with the flags required by their skills; never substitute another engine/model.
 
 doc_sync procedure:
 Read the branch diff against origin/main via git log/show/diff, the affected docs, the git skill and the created PR body; report a missing PR.

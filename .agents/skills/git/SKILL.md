@@ -33,7 +33,7 @@ This skill is the procedural home for branch, commit, push and PR mechanics. The
 
 ## Pull requests
 
-1. Complete the pre-PR review tiers in `AGENTS.md` before opening the PR.
+1. Complete the pre-PR reviews in `AGENTS.md` before opening the PR.
 2. Draft `.codex-logs/pr-body.md` and satisfy `.github/PULL_REQUEST_TEMPLATE.md`. Because PRs are squash-merged, the title/body must stand alone as the final commit message: what + why, references, validation evidence and `Signed-off-by:` trailers for every contributor. DCO automation remains authoritative.
 3. Run `gh auth status`. Before pushing, verify the branch and upstream are neither `main` nor `origin/main`, and verify main protection exists.
 4. Push explicitly: `git push -u origin HEAD:refs/heads/<branch>`.

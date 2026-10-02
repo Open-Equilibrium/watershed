@@ -57,15 +57,25 @@ This workflow applies only to Watershed changes. Repository agent setup is exclu
 1. Gather context: delegate broad orientation to `repo_mapper` (structure) and `docs_scout` (contracts) when allowed.
 2. For code changes, write the failing behavior test first, make the smallest green fix, then refactor only while green.
 3. Run the repository gate defined by `TESTING.md`, `PERFORMANCE.md` and `.github/workflows/ci.yml`.
-4. Run `autoreview_lite`, then, for runtime package changes, `clawpatch_lite`; reconcile confirmed findings while changes are still expected. Record Clawpatch as not applicable in the closeout evidence when its runtime scope does not apply.
+4. Complete the five KPI reviews below when the Goal requires a whole-project review.
 5. Re-run the repository gate on the PR-ready candidate.
-6. Run `autoreview_pro`, then, for runtime package changes, `clawpatch_pro` as the final high-assurance review tier.
-7. Open the PR after the review tiers are clean, using the squash-ready body required by the `git` skill.
+6. Run one `autoreview` stage, then one `clawpatch` stage for runtime package changes, using the configured worker model and effort. Reconcile confirmed findings; record Clawpatch as not applicable when its runtime scope does not apply.
+7. Open the PR after the reviews are clean and the repository gate covers the final candidate, using the squash-ready body required by the `git` skill.
 8. Run `doc_sync` against the PR, fix valid findings, then check and fix CI. Rerun the repository gate after any file change.
 
-**Role-local completion:** Run each closeout role's own loop until that role returns clean. Once clean, the role remains complete: findings or fixes from later roles never restart it or any earlier role. Only the final repository gate must cover the resulting commit candidate.
+### KPI reviews
 
-**Six-KPI convergence exception:** When a Goal requires the six repository-wide KPI audits (less-is-more, simplicity, maintainability/modularity, minimal tests, single source of truth, and freshness), first bring every audit to `CLEAN` once. Then freeze one clean shared candidate and rerun all six audits completely from scratch. If that verification sweep causes any change, freeze the resulting candidate and restart the complete six-audit sweep; finish only when all six independently report `CLEAN` on the same unchanged candidate. This exception applies to the KPI audits, not to the closeout roles above.
+Use one configured worker per KPI on a shared frozen candidate:
+
+1. **Behavioral Correctness:** functionality, completeness, stability, regressions, error handling and meaningful test coverage.
+2. **Security & Integrity:** security, trust boundaries, applicable authentication/authorization, validation, data integrity, secrets and unsafe reachable states.
+3. **Concurrency & Resources:** concurrency, asynchronous/lifecycle correctness, races/deadlocks, cleanup/resource leaks, I/O behavior and materially relevant performance.
+4. **Architecture & Simplicity:** simplicity, maintainability, modularity, duplication, dead code, dependency hygiene and human readability.
+5. **Contracts & UX:** APIs/CLI/public contracts, documentation quality, developer/operator usability and applicable UI/UX/accessibility.
+
+### Certification reuse
+
+A clean review belongs to its reviewed freeze. After a change, certification may carry forward only when a same-tier reviewer examines the diff and relevant reference/effect paths and evidences that none of its reviewed invariants can be affected. If impact is uncertain, repeat the relevant full review. Never reuse stale certification to save usage. Run each role's required finding-resolution loop until clean; finish only when all required certifications are valid for the final freeze and the repository gate covers it.
 
 ## Closeout open search-space stop
 
@@ -81,7 +91,7 @@ When triggered, the role result is `BLOCKED`, never clean; a green gate does not
 
 - Always directly communicate with subagents before declaring role stale.
 - Silence alone is not stale. If a subagent with edit capabilities has not responded for 30 minutes and no commits were added during that window, close it as stale and continue from the latest branch state.
-- A stale, interrupted, or shut down closeout subagent invalidates that role's gate result. Do not rely on partial state, cached findings, or status output left behind by `reviewer`, either review tier, or `doc_sync`.
+- A stale, interrupted, or shut down closeout subagent invalidates that role's gate result. Do not rely on its partial state, cached findings or status output.
 - After a stale closeout subagent, inspect and reconcile any files it changed, then rerun that role's **complete** required workflow from the role config or skill before claiming the gate is clean.
 - Closeout roles return only accepted/refuted findings, changed paths, validation results, commit IDs and remaining risks. Final reporting names each role and the exact command or subagent result that proves it completed cleanly at its own execution point.
 
@@ -90,8 +100,8 @@ When triggered, the role result is `BLOCKED`, never clean; a green gate does not
 - **Harness** — Codex CLI owns parsing and loading. The consuming agent performs the live-session checks required by the repository-agent-setup convention above.
 - **Skills** (`.agents/skills/`):
   - `git` — git conventions and process.
-  - `autoreview` — shared procedure for `autoreview_lite` and `autoreview_pro`.
-  - `clawpatch` — shared procedure for `clawpatch_lite` and `clawpatch_pro`.
-- **Subagent** — [.codex/agents/worker.toml](.codex/agents/worker.toml) is the canonical home for the subagent model, reasoning effort and role mandates. Supply the role, scope, ownership, edit/read-only authority and expected evidence in its task prompt. Mapping, contract lookup, KPI/runtime audits and `doc_sync` remain read-only; review tiers retain their ordered procedures and role-local completion above.
+  - `autoreview` — structured review procedure.
+  - `clawpatch` — runtime package review procedure.
+- **Subagent** — [.codex/agents/worker.toml](.codex/agents/worker.toml) is the canonical home for the subagent model, reasoning effort and role mandates. Supply the role, scope, ownership, edit/read-only authority and expected evidence in its task prompt. Mapping, contract lookup, KPI/runtime audits and `doc_sync` remain read-only; closeout follows the ordered procedures and certification reuse above.
 
 Every agent `developer_instructions` value and every skill body starts with the exact standalone line `Obey AGENTS.md.` (the first instructions line and the first body line after front matter, respectively). The directive is authoritative; subsequent content may add scope but cannot weaken it.
