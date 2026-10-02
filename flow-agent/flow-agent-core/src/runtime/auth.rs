@@ -116,11 +116,7 @@ pub(crate) fn auth_status_from_store(store: &CredentialStore) -> Result<AuthStat
 
 /// Removes only Flow Agent's local OpenAI Codex credential record.
 pub fn logout_openai_codex() -> Result<bool, RuntimeError> {
-    logout_from_store(&CredentialStore::platform_default()?)
-}
-
-pub(crate) fn logout_from_store(store: &CredentialStore) -> Result<bool, RuntimeError> {
-    store.logout()
+    CredentialStore::platform_default()?.logout()
 }
 
 pub(crate) fn resolve_openai_codex_credential() -> Result<CredentialRecord, RuntimeError> {

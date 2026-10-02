@@ -1,4 +1,4 @@
-use crate::runtime::session_bundle::SessionBundlePaths;
+use crate::runtime::{fs_guards::segmented_jsonl_leaf_stem, session_bundle::SessionBundlePaths};
 
 #[test]
 fn session_bundle_leaf_builders_and_parsers_share_one_grammar() {
@@ -15,10 +15,7 @@ fn session_bundle_leaf_builders_and_parsers_share_one_grammar() {
         SessionBundlePaths::split_contexts_leaf(&contexts),
         Some(session_id)
     );
-    assert_eq!(
-        SessionBundlePaths::split_events_leaf(&events),
-        Some(session_id)
-    );
+    assert_eq!(segmented_jsonl_leaf_stem(&events), Some(session_id));
     assert_eq!(SessionBundlePaths::split_lock_leaf(&lock), Some(session_id));
     assert_eq!(
         SessionBundlePaths::split_metadata_leaf(&metadata),

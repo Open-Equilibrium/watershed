@@ -3,7 +3,7 @@ use crate::{
     runtime::{
         RuntimeError,
         auth::{
-            AuthStatus, auth_status_from_store, logout_from_store, parse_token_body,
+            AuthStatus, auth_status_from_store, parse_token_body,
             run_browser_login_with_components, store_login_credential, system_browser_launcher,
         },
         credential_store::CredentialStore,
@@ -179,6 +179,6 @@ fn auth_status_and_logout_are_redacted_store_operations() {
         auth_status_from_store(&store).expect("stored status"),
         status
     );
-    assert!(logout_from_store(&store).expect("credential removes"));
-    assert!(!logout_from_store(&store).expect("second logout is empty"));
+    assert!(store.logout().expect("credential removes"));
+    assert!(!store.logout().expect("second logout is empty"));
 }

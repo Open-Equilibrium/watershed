@@ -15,11 +15,11 @@ use crate::runtime::{
     session_authority::{SessionOwnershipLease, session_ownership_is_active},
     session_candidates::suffixed_session_id,
     session_definition::SessionDefinitionMetadata,
+    session_lock::open_or_create_anchored_session_marker,
     session_reservation::{
-        materialize_session_candidate, reserve_anchored_session_lock_file,
-        reserve_unique_session_candidate_with_anchored_workspace, session_log_metadata_text,
-        set_candidate_pre_lease_observer_for_test, set_metadata_pre_activation_observer_for_test,
-        write_reserved_session_metadata,
+        materialize_session_candidate, reserve_unique_session_candidate_with_anchored_workspace,
+        session_log_metadata_text, set_candidate_pre_lease_observer_for_test,
+        set_metadata_pre_activation_observer_for_test, write_reserved_session_metadata,
     },
     session_store::{ensure_runtime_dirs, workspace_store_leaf},
     types::{EmitMode, RuntimeError},
@@ -1258,7 +1258,7 @@ fn session_reservation_publishes_under_lock_and_suffixes_lock_collisions() {
 
     let held_lock = sessions.file("smoke001.lock");
     let held_lock_file =
-        reserve_anchored_session_lock_file(&held_lock, "smoke001").expect("candidate lock held");
+        open_or_create_anchored_session_marker(&held_lock).expect("candidate lock held");
 
     let second = reserve_session_log(&workspace, "smoke001")
         .expect("locked unpublished candidate must allocate the next suffix");

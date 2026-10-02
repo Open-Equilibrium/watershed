@@ -366,14 +366,6 @@ pub fn ensure_anchored_session_file_available(
     }
 }
 
-#[cfg(test)]
-pub fn reserve_anchored_session_lock_file(
-    path: &AnchoredFile,
-    _session_id: &str,
-) -> Result<std::fs::File, RuntimeError> {
-    open_or_create_anchored_session_marker(path)
-}
-
 pub fn acquire_anchored_session_lock(
     workspace: &AnchoredWorkspace,
     sessions: &AnchoredDir,

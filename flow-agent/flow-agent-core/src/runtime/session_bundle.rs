@@ -114,10 +114,6 @@ impl SessionBundlePaths {
         name.strip_suffix(CONTEXT_STREAM_STEM_SUFFIX)
     }
 
-    pub(crate) fn split_events_leaf(name: &str) -> Option<&str> {
-        segmented_jsonl_leaf_stem(name)
-    }
-
     pub(crate) fn split_lock_leaf(name: &str) -> Option<&str> {
         name.strip_suffix(LOCK_SUFFIX)
     }

@@ -107,7 +107,7 @@ fn classify_session_candidate_leaf<'a>(
     if let Some(id) = segmented_candidate_id(name, false) {
         return Some((id, SessionCandidateHint::Occupied));
     }
-    SessionBundlePaths::split_events_leaf(name).map(|id| {
+    segmented_jsonl_leaf_stem(name).map(|id| {
         let hint = if canonical {
             SessionCandidateHint::Probe
         } else {
