@@ -329,6 +329,8 @@ installation_committed=0
 readiness_config_created=0
 readiness_config_admitted=0
 readiness_active=0
+creation_pending=0
+pending_signal_status=
 readiness_control=$stage_directory/readiness-control
 readiness_inner_control=$stage_directory/readiness-inner-control
 readiness_scanner=/usr/bin/pgrep
@@ -469,9 +471,15 @@ cleanup() {
     fi
 }
 signal_exit() {
-    signal_status=$1
+    # Settle mkdir's result and ownership before honoring the first interrupt.
+    pending_signal_status=${pending_signal_status:-$1}
+    [ "${creation_pending:-0}" -ne 1 ] || return 0
     trap '' HUP INT TERM
-    exit "$signal_status"
+    exit "$pending_signal_status"
+}
+finish_creation() {
+    creation_pending=0
+    [ -z "${pending_signal_status:-}" ] || signal_exit "$pending_signal_status"
 }
 trap cleanup EXIT
 trap 'signal_exit 129' HUP
@@ -494,8 +502,14 @@ verify_bin_binding() {
 verify_bundle_binding
 verify_bin_binding
 
-/bin/mkdir -m 0700 -- "$stage_directory" || fail 'cannot create installation staging directory'
-stage_created=1
+creation_pending=1
+if /bin/mkdir -m 0700 -- "$stage_directory"; then
+    stage_created=1
+else
+    finish_creation
+    fail 'cannot create installation staging directory'
+fi
+finish_creation
 exec 7<"$stage_directory" || fail 'cannot open installation staging directory'
 stage_fd=$descriptor_root/7
 matches_descriptor "$stage_directory" "$stage_fd" || fail 'installation staging directory changed'
@@ -531,8 +545,14 @@ if [ "$install_executor" -eq 1 ]; then
     /bin/ln -- "$executor_stage" "$executor_target" || fail 'cannot publish flow-executor'
     published_executor=1
     /bin/rm -- "$executor_stage" || fail 'cannot finalize flow-executor publication'
-    /bin/mkdir -m 0700 -- "$readiness_config" || fail 'cannot isolate readiness configuration'
-    readiness_config_created=1
+    creation_pending=1
+    if /bin/mkdir -m 0700 -- "$readiness_config"; then
+        readiness_config_created=1
+    else
+        finish_creation
+        fail 'cannot isolate readiness configuration'
+    fi
+    finish_creation
     exec 7<"$readiness_config" || fail 'cannot open readiness configuration'
     matches_descriptor "$readiness_config" "$descriptor_root/7" || fail 'readiness configuration changed'
     validate_acl "$descriptor_root/7" 'private readiness configuration' created-private

@@ -95,6 +95,7 @@ class PrefixInstallerTest(unittest.TestCase):
     def test_macos_inherited_staging_acl_is_checked_before_publication(self):
         source = INSTALLER.read_text(encoding="utf-8")
         declarations = source.partition("\nprefix=")[0]
+        declarations += "\nsignal_exit() {" + source.partition("\nsignal_exit() {")[2].partition("\ntrap cleanup EXIT")[0]
         metadata = "metadata() {" + source.partition("\nmetadata() {")[2].partition('\ncase "$0" in')[0]
         source_checks = "validate_source() {" + source.partition("\nvalidate_source() {")[2].partition("\nflow_source_name=")[0]
         binding_checks = "verify_bundle_binding() {" + source.partition("\nverify_bundle_binding() {")[2].partition("\nverify_bundle_binding\nverify_bin_binding\n")[0]
@@ -147,9 +148,10 @@ class PrefixInstallerTest(unittest.TestCase):
     def test_macos_staging_control_acl_is_private_before_channel_creation(self):
         source = INSTALLER.read_text(encoding="utf-8")
         declarations = source.partition("\nprefix=")[0]
+        declarations += "\nsignal_exit() {" + source.partition("\nsignal_exit() {")[2].partition("\ntrap cleanup EXIT")[0]
         metadata = "metadata() {" + source.partition("\nmetadata() {")[2].partition('\ncase "$0" in')[0]
-        creation = '/bin/mkdir -m 0700 -- "$stage_directory"' + source.partition(
-            '/bin/mkdir -m 0700 -- "$stage_directory"')[2].partition('stage_admitted=1')[0] + 'stage_admitted=1\n'
+        creation = '\ncreation_pending=1\n' + source.partition(
+            '\ncreation_pending=1\n')[2].partition('stage_admitted=1')[0] + 'stage_admitted=1\n'
         for fault in (False, True):
             with self.subTest(normalization_failure=fault), tempfile.TemporaryDirectory() as temporary:
                 root = pathlib.Path(temporary)
@@ -180,9 +182,10 @@ class PrefixInstallerTest(unittest.TestCase):
     def test_macos_readiness_directory_hardens_safe_inherited_acl_before_use(self):
         source = INSTALLER.read_text(encoding="utf-8")
         declarations = source.partition("\nprefix=")[0]
+        declarations += "\nsignal_exit() {" + source.partition("\nsignal_exit() {")[2].partition("\ntrap cleanup EXIT")[0]
         metadata = "metadata() {" + source.partition("\nmetadata() {")[2].partition('\ncase "$0" in')[0]
-        creation = '/bin/mkdir -m 0700 -- "$readiness_config"' + source.partition(
-            '/bin/mkdir -m 0700 -- "$readiness_config"')[2].partition(
+        creation = '    creation_pending=1\n' + source.partition(
+            '    creation_pending=1\n')[2].partition(
             '    installer_group=')[0]
         libc = ctypes.CDLL(None, use_errno=True)
         libc.acl_get_fd_np.argtypes = [ctypes.c_int, ctypes.c_int]
@@ -240,11 +243,12 @@ class PrefixInstallerTest(unittest.TestCase):
     def test_macos_acl_rejection_cleanup_preserves_foreign_entries(self):
         source = INSTALLER.read_text(encoding="utf-8")
         declarations = source.partition("\nprefix=")[0]
+        declarations += "\nsignal_exit() {" + source.partition("\nsignal_exit() {")[2].partition("\ntrap cleanup EXIT")[0]
         metadata = "metadata() {" + source.partition("\nmetadata() {")[2].partition('\ncase "$0" in')[0]
         cleanup = "stop_readiness() {" + source.partition("\nstop_readiness() {")[2].partition("\nsignal_exit() {")[0]
         stage = source.partition("\nverify_bundle_binding\nverify_bin_binding\n")[2].partition('\n/bin/ln -- "$flow_stage"')[0]
-        readiness = '/bin/mkdir -m 0700 -- "$readiness_config"' + source.partition(
-            '/bin/mkdir -m 0700 -- "$readiness_config"')[2].partition(
+        readiness = '    creation_pending=1\n' + source.partition(
+            '    creation_pending=1\n')[2].partition(
             '    installer_group=')[0]
         for kind in ("stage", "stage-linked", "readiness"):
             with self.subTest(kind=kind), tempfile.TemporaryDirectory() as temporary:
@@ -638,25 +642,78 @@ class PrefixInstallerTest(unittest.TestCase):
                 if (prefix / "bin").exists():
                     self.assertEqual(list((prefix / "bin").iterdir()), [])
 
-    def test_staging_collision_preserves_preexisting_file(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = pathlib.Path(temporary)
-            bundle = self.bundle(root)
-            prefix = root / "prefix"
-            bin_directory = prefix / "bin"
-            bin_directory.mkdir(parents=True)
-            result = subprocess.run(
-                ["/bin/sh", "-c",
-                 'printf sentinel > "$1/bin/.flow.install.$$" || exit 90\n'
-                 'exec /bin/sh "$2" --prefix "$1" --no-default-executor',
-                 "collision", str(prefix), str(bundle / "install.sh")],
-                env={"PATH": ""}, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                timeout=15,
-            )
-            self.assertEqual(result.returncode, 1, result.stderr)
-            entries = list(bin_directory.iterdir())
-            self.assertEqual(len(entries), 1, result.stderr)
-            self.assertEqual(entries[0].read_bytes(), b"sentinel")
+    def test_failed_scratch_creation_preserves_foreign_paths(self):
+        for name in (".flow.install", ".flow-readiness-config"):
+            for kind in ("file", "directory", "symlink"):
+                with self.subTest(directory=name, kind=kind), tempfile.TemporaryDirectory() as temporary:
+                    root = pathlib.Path(temporary)
+                    bundle = self.bundle(root)
+                    prefix = root / "prefix"
+                    marker, release = root / "validated", root / "release"
+                    self.pause_installer_after_validation(bundle, marker, release)
+                    options = ["--no-default-executor"] if name == ".flow.install" else []
+                    process = subprocess.Popen(
+                        ["/bin/sh", str(bundle / "install.sh"), "--prefix", str(prefix), *options],
+                        env={**self.readiness_environment(), "FLOW_AGENT_HOME": str(root / "private-home")},
+                        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                    )
+                    try:
+                        self.wait_for_installer_marker(process, marker)
+                        foreign = prefix / "bin" / f"{name}.{process.pid}"
+                        target = root / "foreign-target"
+                        target.write_bytes(b"sentinel")
+                        target_identity = target.stat()
+                        if kind == "file":
+                            foreign.write_bytes(b"sentinel")
+                        elif kind == "directory":
+                            foreign.mkdir()
+                        else:
+                            foreign.symlink_to(target)
+                        identity = foreign.lstat()
+                        release.touch()
+                        stdout, stderr = process.communicate(timeout=15)
+                    finally:
+                        if process.poll() is None:
+                            process.kill()
+                            process.communicate()
+                    self.assertEqual(process.returncode, 1, stderr)
+                    self.assertEqual(stdout, b"")
+                    self.assertEqual(list((prefix / "bin").iterdir()), [foreign], stderr)
+                    after = foreign.lstat()
+                    self.assertEqual((after.st_dev, after.st_ino, after.st_mode),
+                                     (identity.st_dev, identity.st_ino, identity.st_mode))
+                    if kind == "directory":
+                        self.assertEqual(list(foreign.iterdir()), [])
+                    else:
+                        self.assertEqual(foreign.read_bytes(), b"sentinel")
+                    if kind == "symlink":
+                        self.assertEqual(foreign.readlink(), target)
+                    self.assertEqual(target.stat().st_ino, target_identity.st_ino)
+                    self.assertEqual(target.read_bytes(), b"sentinel")
+
+    def test_signal_after_scratch_creation_rolls_back_owned_directory(self):
+        boundaries = (("stage_created=1\n", ("--no-default-executor",)),
+                      ("readiness_config_created=1\n", ()))
+        signals = ("HUP", "INT", "TERM")
+        sequences = [(number,) for number in signals] + [signals[index:] + signals[:index]
+                                                        for index in range(len(signals))]
+        for boundary, options in boundaries:
+            for sequence in sequences:
+                with self.subTest(boundary=boundary.strip(), signals=sequence), tempfile.TemporaryDirectory() as temporary:
+                    root = pathlib.Path(temporary)
+                    bundle = self.bundle(root)
+                    installer = bundle / "install.sh"
+                    source = installer.read_text(encoding="utf-8")
+                    self.assertEqual(source.count(boundary), 1)
+                    interruption = "".join(f'/bin/kill -{number} "$$"\n' for number in sequence)
+                    installer.write_text(source.replace(boundary, interruption + boundary), encoding="utf-8")
+                    prefix = root / "prefix"
+
+                    result = self.install(bundle, prefix, *options)
+
+                    self.assertEqual(result.returncode, 128 + getattr(signal, "SIG" + sequence[0]), result.stderr)
+                    self.assertEqual(result.stdout, b"")
+                    self.assertEqual(list((prefix / "bin").iterdir()), [], result.stderr)
 
     def test_installed_files_are_regular_executable_siblings(self):
         with tempfile.TemporaryDirectory() as temporary:
