@@ -1,4 +1,4 @@
-use super::super::super::helpers::{canonical_test_path, empty_workspace, workspace_store_dir};
+use super::super::super::helpers::{empty_workspace, workspace_store_dir};
 use super::super::recovery_fixtures::published_productive_recovery_fixture;
 use super::super::{FLOW_HASH, REGISTRY_HASH};
 use crate::runtime::{
@@ -11,7 +11,7 @@ use crate::runtime::{
     },
     fs_guards::{
         set_directory_sync_error_for_path_for_test, start_directory_sync_trace_for_test,
-        take_directory_sync_trace_for_test,
+        take_directory_sync_trace_for_test, test_path_key,
     },
     types::RuntimeError,
 };
@@ -107,7 +107,7 @@ fn productive_run_creation_syncs_every_new_ancestor_before_returning() {
         crate::tests::helpers::workspace_session_dir(&workspace).join("review"),
         crate::tests::helpers::workspace_session_dir(&workspace).join("review/runs"),
     ]
-    .map(|path| canonical_test_path(&path));
+    .map(|path| test_path_key(&path));
     for parent in expected {
         assert!(
             trace.iter().any(|path| path == &parent),
@@ -130,7 +130,7 @@ fn conversation_runtime_sessions_retries_failed_ancestor_sync_before_publication
             .parent()
             .expect("workspaces has a home parent")
             .to_path_buf();
-        let failed_parent = canonical_test_path(&match label {
+        let failed_parent = test_path_key(&match label {
             "home-parent" => home.parent().expect("home has a parent").to_path_buf(),
             "home" => home,
             "workspaces" => workspaces,

@@ -27,10 +27,10 @@ pub(super) use validation::{
 };
 pub(super) use workspace::{
     add_bad_write_tool_to_summarize, assert_no_active_session_lock, assert_no_session_artifacts,
-    canonical_test_path, copy_workspace_runtime, create_directory_alias, disable_smoke_echo_tool,
-    empty_workspace, ensure_workspace_log_dir, ensure_workspace_session_dir,
-    fixture_runtime_policy, load_test_registry, remove_directory_alias, replace_registry_text,
-    reserve_session_log, reserve_session_log_with_publish_observer, workspace_log_dir,
-    workspace_session_dir, workspace_store_dir, workspace_with_later_invalid_own_script_path,
+    copy_workspace_runtime, create_directory_alias, disable_smoke_echo_tool, empty_workspace,
+    ensure_workspace_log_dir, ensure_workspace_session_dir, fixture_runtime_policy,
+    load_test_registry, remove_directory_alias, replace_registry_text, reserve_session_log,
+    reserve_session_log_with_publish_observer, workspace_log_dir, workspace_session_dir,
+    workspace_store_dir, workspace_with_later_invalid_own_script_path,
     write_productive_workspace_config,
 };

@@ -107,16 +107,14 @@ mod storage;
 #[cfg(any(test, feature = "m11-budget-evidence"))]
 pub(crate) use conversation_stream::{append_jsonl, read_jsonl};
 #[cfg(test)]
+pub(crate) use conversation_stream::{read_anchored_jsonl, read_jsonl_quantum};
+#[cfg(test)]
 pub(crate) use conversation_stream::{
-    conversation_stream_parent_sync_count_for_path_for_test,
-    reset_conversation_stream_parent_sync_count_for_path_for_test,
     set_conversation_batch_append_error_after_commit_for_path_for_test,
     set_conversation_file_sync_error_for_path_for_test,
     set_conversation_out_of_band_append_before_next_append_for_path_for_test,
-    set_conversation_stream_parent_sync_error_for_path_for_test, target_segment_count_for_test,
+    target_segment_count_for_test,
 };
-#[cfg(test)]
-pub(crate) use conversation_stream::{read_anchored_jsonl, read_jsonl_quantum};
 #[cfg(test)]
 pub(crate) use status::{StatusTransactionCrashPoint, set_status_transaction_crash_point};
 #[cfg(any(test, feature = "m11-budget-evidence"))]

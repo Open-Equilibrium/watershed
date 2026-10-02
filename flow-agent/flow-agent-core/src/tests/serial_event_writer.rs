@@ -122,7 +122,7 @@ fn finish_reports_append_panic_and_channel_failure_together() {
         .expect_err("finish must retain the channel and panic causes");
     assert_writer_panic_causes(&err);
 
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
 }
 
 #[test]
@@ -145,7 +145,7 @@ fn finish_reports_shutdown_sync_panic_and_channel_failure_together() {
         .expect_err("finish must retain the channel and panic causes");
     assert_writer_panic_causes(&err);
 
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
 }
 
 #[test]
@@ -204,7 +204,7 @@ fn finish_preserves_every_deferred_batch_failure() {
         "{message}"
     );
 
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
 }
 
 #[test]
@@ -246,7 +246,7 @@ fn finish_preserves_an_all_committed_batch_failure_and_final_sync_failure() {
     );
     assert_eq!(syncs.load(Ordering::Relaxed), 1);
 
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
 }
 
 #[test]
@@ -281,7 +281,7 @@ fn finish_syncs_an_acknowledged_event_after_a_later_validation_failure() {
     writer.finish().expect("dirty prefix syncs during shutdown");
 
     assert_eq!(syncs.load(Ordering::Relaxed), 1);
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
 }
 
 #[test]
@@ -324,7 +324,7 @@ fn progress_batches_stay_bounded_and_flush_before_semantic_events() {
             .highest_committed_sequence,
         terminal.sequence
     );
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
 }
 
 #[test]
@@ -356,7 +356,7 @@ fn lone_progress_flushes_on_a_non_sliding_deadline() {
         [jsonl.into_bytes()]
     );
     writer.finish().expect("writer finishes");
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
 }
 
 #[test]
@@ -430,7 +430,7 @@ fn failed_progress_batch_retains_and_notifies_only_its_complete_prefix() {
             usize::from(readable_prefix == Some(1)),
             "only a retained complete prefix requires a final sync"
         );
-        reservation.rollback().expect("reservation rolls back");
+        reservation.release_lock().expect("reservation rolls back");
     }
 }
 
@@ -481,7 +481,7 @@ fn appended_checkpoint_notifies_but_sync_failure_remains_visible() {
         *appended.lock().expect("appended bytes lock"),
         format!("{started_jsonl}{completed_jsonl}").into_bytes()
     );
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
 }
 
 fn test_event(
@@ -585,7 +585,7 @@ fn failed_batch_retains_a_complete_prefix_already_observed_by_a_reader() {
         Vec::new()
     );
     drop(reader);
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
 }
 
 #[test]
@@ -632,7 +632,7 @@ fn cleanup_sync_failure_still_reports_the_complete_persisted_prefix() {
     );
     drop(reader);
     drop(appender);
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
 }
 
 #[test]
@@ -658,7 +658,7 @@ fn failed_truncation_reports_no_readable_prefix() {
 
     assert_eq!(failure.committed_events, None);
     drop(appender);
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
 }
 
 #[test]

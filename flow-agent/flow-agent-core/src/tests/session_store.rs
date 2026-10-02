@@ -1,7 +1,8 @@
-use super::helpers::{canonical_test_path, empty_workspace, workspace_store_dir};
+use super::helpers::{empty_workspace, workspace_store_dir};
 use crate::runtime::{
     fs_guards::{
         AnchoredWorkspace, start_directory_sync_trace_for_test, take_directory_sync_trace_for_test,
+        test_path_key,
     },
     session_store::{WorkspaceStore, ensure_runtime_dirs, workspace_store_leaf},
 };
@@ -108,6 +109,6 @@ fn syncs_every_created_ancestor_edge() {
             store.as_path(),
             store.as_path()
         ]
-        .map(canonical_test_path)
+        .map(test_path_key)
     );
 }

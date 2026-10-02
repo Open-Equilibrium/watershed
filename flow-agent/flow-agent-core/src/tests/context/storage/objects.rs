@@ -40,7 +40,7 @@ fn session_object_namespace_rejects_case_aliases() {
     let reservation = reserve_session_log(&workspace, session_id)
         .expect("case-aliased namespace advances the reservation candidate");
     assert_eq!(reservation.session_id, "objectcase001-2");
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
 }
 
 #[test]
@@ -172,7 +172,7 @@ fn session_object_retry_and_reopen_preserve_accounting() {
     assert_eq!(writer.accounted_bytes, accounted_bytes);
     assert_eq!(writer.object_count, 1);
     drop(writer);
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
     drop(reservation);
     fs::remove_dir_all(workspace).expect("workspace removed");
 }
@@ -239,7 +239,7 @@ fn session_object_writer_enforces_the_unique_object_count_boundary() {
         .expect("one new digest is allowed below the object limit");
     assert_eq!(one_slot.object_count, MAX_SESSION_OBJECTS);
 
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
 }
 
 #[test]
@@ -304,7 +304,7 @@ fn session_object_batch_counts_duplicate_digests_once_and_rejects_excess_before_
         .collect::<BTreeSet<_>>();
     assert_eq!(after_entries, before_entries, "no temp path is created");
 
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
 }
 
 #[test]
@@ -391,7 +391,7 @@ fn session_object_partial_batch_publication_remains_accounted() {
         "the over-limit retry fails before writing"
     );
 
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
 }
 
 #[test]
@@ -441,7 +441,7 @@ fn session_object_reopen_restores_zero_byte_count_and_requires_content_verificat
         "{error}"
     );
 
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
 }
 
 #[test]
@@ -487,7 +487,7 @@ fn session_object_writer_revalidates_published_objects() {
         "{missing}"
     );
 
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
 }
 
 #[test]
@@ -567,7 +567,7 @@ fn context_manifest_rejects_missing_and_mismatched_object_associations() {
             fs::read(reservation.context_path.diagnostic_path()).expect("manifest reads"),
             b""
         );
-        reservation.rollback().expect("reservation rolls back");
+        reservation.release_lock().expect("reservation rolls back");
     }
 }
 
@@ -615,7 +615,7 @@ fn assert_invalid_context_checkpoint_preserves_objects(
         accounted_bytes
     );
     drop(writer);
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
 }
 
 #[test]

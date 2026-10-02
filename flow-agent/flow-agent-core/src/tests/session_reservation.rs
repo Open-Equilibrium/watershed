@@ -473,7 +473,7 @@ fn unactivated_reservation_rollback_preserves_concurrent_segment_siblings() {
     fs::write(&context_segment_path, b"foreign context segment")
         .expect("foreign context segment written");
 
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
 
     assert_eq!(
         fs::read(&event_segment_path).expect("foreign event segment remains"),
@@ -564,7 +564,7 @@ fn unique_reservation_skips_orphan_namespaces() {
         reserve_session_log(&workspace, "bundle001").expect("inventory skips orphan namespaces");
 
     assert_eq!(reservation.session_id, "bundle001-14");
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
     assert!(
         sentinels
             .iter()
@@ -584,7 +584,7 @@ fn unique_reservation_skips_a_non_unicode_object_namespace() {
         .expect("non-Unicode object namespace advances the candidate");
 
     assert_eq!(reservation.session_id, "nonunicode001-2");
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
     assert_eq!(
         fs::read(object_path).expect("object sentinel remains readable"),
         b"foreign object member"
@@ -624,7 +624,7 @@ fn unique_reservation_skips_a_truncated_candidate_alias() {
         .expect("duplicate generated candidate is skipped once");
 
     assert_eq!(reservation.session_id, suffixed_session_id(&base, 3));
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
 }
 
 #[cfg(target_os = "linux")]
@@ -650,7 +650,7 @@ fn unique_reservation_skips_case_alias_symlink_locks() {
         .expect("case aliases are inventoried on a case-sensitive host");
 
     assert_eq!(reservation.session_id, "bundle001-5");
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
 }
 
 #[test]
@@ -665,8 +665,10 @@ fn unique_session_reservation_suffixes_an_active_session_id() {
     assert!(first.session_path.diagnostic_path().exists());
     assert!(first.log_path.diagnostic_path().exists());
     assert!(!first.lock_path.diagnostic_path().exists());
-    second.rollback().expect("second reservation rolls back");
-    first.rollback().expect("reservation rolls back");
+    second
+        .release_lock()
+        .expect("second reservation rolls back");
+    first.release_lock().expect("reservation rolls back");
 }
 
 #[test]
@@ -1023,7 +1025,7 @@ fn metadata_parent_sync_failure_is_retryable_before_reservation_activation() {
         .expect("retry re-synchronizes metadata and activates the reservation");
     assert_eq!(
         take_directory_sync_trace_for_test(),
-        [crate::tests::helpers::canonical_test_path(&logs)]
+        [crate::runtime::fs_guards::test_path_key(&logs)]
     );
     assert_eq!(
         fs::read_to_string(reservation.log_path.diagnostic_path())
@@ -1254,7 +1256,7 @@ fn session_reservation_publishes_under_lock_and_suffixes_lock_collisions() {
     let session_dir = sessions.path.clone();
     let published = reserve_session_log_with_publish_observer(&workspace, "publish001", || {})
         .expect("session published under lock");
-    published.rollback().expect("reservation rolls back");
+    published.release_lock().expect("reservation rolls back");
 
     let held_lock = sessions.file("smoke001.lock");
     let held_lock_file =
@@ -1267,7 +1269,7 @@ fn session_reservation_publishes_under_lock_and_suffixes_lock_collisions() {
     assert!(held_lock.diagnostic_path().exists());
     assert_eq!(second.session_id, "smoke001-2");
     assert!(second.session_path.diagnostic_path().exists());
-    second.rollback().expect("reservation rolls back");
+    second.release_lock().expect("reservation rolls back");
     held_lock.remove().expect("held lock removed");
     drop(held_lock_file);
 }
@@ -1289,7 +1291,7 @@ fn session_reservation_cleanup_stays_bound_to_the_opened_runtime_directory() {
         symlink(&outside, &session_dir).expect("replacement session symlink created");
     })
     .expect("reservation survives directory rename");
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
 
     assert_eq!(
         fs::read_to_string(outside_session).expect("outside session remains readable"),

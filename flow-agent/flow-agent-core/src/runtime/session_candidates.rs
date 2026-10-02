@@ -139,7 +139,7 @@ fn generated_suffix_candidate_index(base_session_id: &str, session_id: &str) -> 
 
 pub fn suffixed_session_id(base_session_id: &str, ordinal: u32) -> String {
     let suffix = format!("-{ordinal}");
-    let prefix_len = 128usize.saturating_sub(suffix.len());
+    let prefix_len = proto::MAX_SESSION_ID_BYTES.saturating_sub(suffix.len());
     let prefix = if base_session_id.len() > prefix_len {
         &base_session_id[..prefix_len]
     } else {

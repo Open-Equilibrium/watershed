@@ -22,10 +22,7 @@ pub(in crate::runtime::conversations) use writer::{
 };
 #[cfg(test)]
 pub(crate) use writer::{
-    conversation_stream_parent_sync_count_for_path_for_test,
-    reset_conversation_stream_parent_sync_count_for_path_for_test,
     set_conversation_batch_append_error_after_commit_for_path_for_test,
     set_conversation_file_sync_error_for_path_for_test,
     set_conversation_out_of_band_append_before_next_append_for_path_for_test,
-    set_conversation_stream_parent_sync_error_for_path_for_test,
 };

@@ -6,14 +6,15 @@ use super::super::{
 use crate::runtime::{
     conversations::{
         ConversationEventWriter, MAX_CONVERSATION_SEGMENT_BYTES,
-        conversation_stream_parent_sync_count_for_path_for_test,
-        reset_conversation_stream_parent_sync_count_for_path_for_test,
         set_conversation_batch_append_error_after_commit_for_path_for_test,
         set_conversation_file_sync_error_for_path_for_test,
-        set_conversation_stream_parent_sync_error_for_path_for_test,
     },
     event_writer::RuntimeEventSink,
     live_events::live_event_channel,
+    segmented_appender::{
+        reset_session_stream_parent_sync_count_for_test, session_stream_parent_sync_count_for_test,
+        set_session_stream_parent_sync_error_for_test,
+    },
     session_reading::SessionEventReader,
     types::{EventClock, MAX_CANONICAL_EVENT_BYTES},
 };
@@ -268,7 +269,7 @@ fn rotated_event_checkpoint_retry_resyncs_segment_parent_before_success() {
             .commit(event, line, None)
             .expect("event prefix replays");
     }
-    set_conversation_stream_parent_sync_error_for_path_for_test(&run, io::ErrorKind::Other);
+    set_session_stream_parent_sync_error_for_test(&run, io::ErrorKind::Other);
     writer
         .commit(&target, &canonical, None)
         .expect_err("rotated event parent-sync failure is reported");
@@ -296,12 +297,12 @@ fn rotated_event_checkpoint_retry_resyncs_segment_parent_before_success() {
             .commit(event, line, None)
             .expect("event prefix replays after parent-sync failure");
     }
-    reset_conversation_stream_parent_sync_count_for_path_for_test(&run);
+    reset_session_stream_parent_sync_count_for_test(&run);
     recovered
         .commit(&target, &canonical, None)
         .expect("exact event checkpoint retry succeeds");
     assert!(
-        conversation_stream_parent_sync_count_for_path_for_test(&run) > 0,
+        session_stream_parent_sync_count_for_test(&run) > 0,
         "retry succeeded without synchronizing the rotated event parent"
     );
     receiver

@@ -189,7 +189,7 @@ fn incremental_reader_does_not_skip_an_append_after_reading_a_new_segment() {
 
     assert_eq!(appended.len(), 1);
     assert_eq!(appended[0].event_type, EventType::SessionCompleted);
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
 }
 
 #[test]
@@ -845,5 +845,5 @@ fn live_reader_stays_bound_to_the_opened_session_directory() {
     let observed = reader.read_after(0).expect("anchored session reads");
 
     assert_eq!(observed, vec![event]);
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
 }

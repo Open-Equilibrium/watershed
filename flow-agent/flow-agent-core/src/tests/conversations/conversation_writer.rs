@@ -471,7 +471,7 @@ fn assert_inventoried_object_sync_failure_is_retryable(
             run_objects
                 .persist(&checkpoint.objects)
                 .expect("parent synchronization remains retryable");
-            let object_dir = crate::tests::helpers::canonical_test_path(&object_dir);
+            let object_dir = crate::runtime::fs_guards::test_path_key(&object_dir);
             assert!(
                 take_directory_sync_trace_for_test()
                     .iter()

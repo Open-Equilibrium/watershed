@@ -7,11 +7,6 @@ use crate::runtime::fs_guards::sync_directory;
 use crate::runtime::segmented_appender::{
     BatchAppendFailure, EventLogAppender, SessionLogAppender,
 };
-#[cfg(test)]
-use crate::runtime::segmented_appender::{
-    reset_session_stream_parent_sync_count_for_test, session_stream_parent_sync_count_for_test,
-    set_session_stream_parent_sync_error_for_test,
-};
 use crate::runtime::{
     fs_guards::{AnchoredFile, create_anchored_file, path_io_error},
     types::{RuntimeError, SessionStreamLimits},
@@ -160,24 +155,6 @@ pub(in crate::runtime::conversations) fn sync_anchored_stream_with(
 ) -> Result<(), RuntimeError> {
     conversation_file_sync_checkpoint(appender.current_path()?.diagnostic_path())?;
     appender.sync(path.diagnostic_path())
-}
-
-#[cfg(test)]
-pub(crate) fn set_conversation_stream_parent_sync_error_for_path_for_test(
-    path: &Path,
-    kind: std::io::ErrorKind,
-) {
-    set_session_stream_parent_sync_error_for_test(path, kind);
-}
-
-#[cfg(test)]
-pub(crate) fn reset_conversation_stream_parent_sync_count_for_path_for_test(path: &Path) {
-    reset_session_stream_parent_sync_count_for_test(path);
-}
-
-#[cfg(test)]
-pub(crate) fn conversation_stream_parent_sync_count_for_path_for_test(path: &Path) -> usize {
-    session_stream_parent_sync_count_for_test(path)
 }
 
 #[cfg(test)]

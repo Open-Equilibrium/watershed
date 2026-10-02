@@ -190,7 +190,7 @@ fn ownership_authority_uses_the_session_store() {
             .is_dir(),
         "tests keep session data and ownership in one scoped store"
     );
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
 }
 
 #[test]
@@ -213,7 +213,7 @@ fn adjacent_workspace_files_do_not_select_session_authority() {
             .is_dir(),
         "the session store owns its lease namespace"
     );
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
 }
 
 #[test]
@@ -237,7 +237,7 @@ fn adjacent_directory_permissions_do_not_select_session_authority() {
             .is_dir(),
         "the session store owns its lease namespace"
     );
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
 }
 
 #[test]

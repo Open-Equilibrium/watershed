@@ -44,7 +44,7 @@ fn assert_invalid_manifest_does_not_publish(label: &str, line: String, expected_
     );
     assert!(!object_path.exists());
     drop(writer);
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
 }
 
 #[test]
@@ -134,7 +134,7 @@ fn context_manifest_growth_is_visible_through_the_existing_file() {
     );
     drop(observed);
     drop(writer);
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
 }
 
 #[test]
@@ -162,7 +162,7 @@ fn context_manifest_replay_rejects_an_in_place_length_change() {
 
     assert!(err.to_string().contains("changed outside"), "{err}");
     drop(writer);
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
 }
 
 #[test]
@@ -187,7 +187,7 @@ fn context_manifest_replay_rejects_a_same_length_prefix_change() {
         "{error}"
     );
     drop(writer);
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
 }
 
 #[test]
@@ -210,7 +210,7 @@ fn context_manifest_writer_rejects_an_invalid_persisted_prefix() {
         error.to_string().contains("invalid context manifest"),
         "{error}"
     );
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
 }
 
 #[test]
@@ -244,7 +244,7 @@ fn context_writer_stays_bound_to_the_opened_log_directory() {
             .expect("anchored context readable"),
         manifest.manifest.line
     );
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
 }
 
 #[test]
@@ -316,7 +316,7 @@ fn context_manifest_waits_for_object_directory_sync() {
         checkpoint.manifest.line
     );
     drop(writer);
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
 }
 
 #[test]

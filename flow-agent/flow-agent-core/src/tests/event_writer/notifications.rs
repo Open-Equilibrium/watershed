@@ -85,7 +85,7 @@ fn notification_is_observable_only_after_the_sequence_is_persisted() {
         [jsonl.into_bytes()]
     );
     drop(writer);
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
 }
 
 #[test]
@@ -161,5 +161,5 @@ fn validation_failure_closes_the_writer_without_notifying() {
         fs::read(reservation.session_path.diagnostic_path()).expect("log reads"),
         b""
     );
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
 }

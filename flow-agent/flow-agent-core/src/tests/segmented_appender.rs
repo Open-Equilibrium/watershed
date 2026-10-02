@@ -44,7 +44,7 @@ fn event_appender_rejects_a_leaf_replaced_while_open() {
             b"replacement\n"
         );
         assert!(!second.diagnostic_path().exists());
-        reservation.rollback().expect("reservation rolls back");
+        reservation.release_lock().expect("reservation rolls back");
     }
 }
 
@@ -95,7 +95,7 @@ fn event_appender_rejects_an_in_place_length_change() {
         b"external\n"
     );
     drop(appender);
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
 }
 
 #[test]
@@ -130,7 +130,7 @@ fn event_appender_rejects_a_sealed_segment_length_change() {
         "{sync_error}"
     );
     drop(appender);
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
 }
 
 #[test]
@@ -159,7 +159,7 @@ fn event_appender_rejects_a_length_change_during_inventory() {
         fs::read(reservation.session_path.diagnostic_path()).expect("external bytes remain"),
         b"external\n"
     );
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
 }
 
 #[test]
@@ -243,7 +243,7 @@ fn event_appender_rejects_unterminated_segment_boundaries() {
                 .expect("unterminated segment remains"),
             b"{}"
         );
-        reservation.rollback().expect("reservation rolls back");
+        reservation.release_lock().expect("reservation rolls back");
     }
 }
 
@@ -289,7 +289,7 @@ fn event_appender_rotates_before_crossing_the_segment_limit() {
         2
     );
     drop(appender);
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
 }
 
 #[test]
@@ -321,7 +321,7 @@ fn rotated_segment_checkpoint_requires_directory_sync() {
         .sync(reservation.session_path.diagnostic_path())
         .expect("the directory sync can be retried");
     drop(appender);
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
 }
 
 #[test]
@@ -358,5 +358,5 @@ fn event_and_manifest_appenders_enforce_distinct_segment_caps() {
     ContextManifestWriter::open(&reservation.context_path)
         .expect("five context-manifest segments remain valid");
     drop(appender);
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
 }

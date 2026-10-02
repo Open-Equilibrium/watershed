@@ -10,15 +10,16 @@ use crate::runtime::{
     context::{ContextManifest, ContextManifestCheckpoint},
     conversations::{
         ConversationEventWriter, MAX_CONVERSATION_SEGMENT_BYTES,
-        conversation_stream_parent_sync_count_for_path_for_test,
-        reset_conversation_stream_parent_sync_count_for_path_for_test,
         set_conversation_batch_append_error_after_commit_for_path_for_test,
         set_conversation_file_sync_error_for_path_for_test,
-        set_conversation_stream_parent_sync_error_for_path_for_test,
     },
     event_writer::RuntimeEventSink,
     live_events::live_event_channel,
     productive_capacity::ProductiveDispatchReservation,
+    segmented_appender::{
+        reset_session_stream_parent_sync_count_for_test, session_stream_parent_sync_count_for_test,
+        set_session_stream_parent_sync_error_for_test,
+    },
     session_reading::SessionEventReader,
 };
 use proto::{EventEnvelope, EventType};
@@ -76,7 +77,7 @@ fn rotated_context_checkpoint_retry_resyncs_segment_parent_before_success() {
         ConversationEventWriter::open_for_recovery(&workspace, "review", "review-1", false, None)
             .expect("full-context recovery writer opens");
     replay_prefix(&mut writer);
-    set_conversation_stream_parent_sync_error_for_path_for_test(&run, io::ErrorKind::Other);
+    set_session_stream_parent_sync_error_for_test(&run, io::ErrorKind::Other);
     writer
         .commit(&target, &canonical, Some(target_checkpoint.clone()))
         .expect_err("rotated context parent-sync failure is reported");
@@ -101,12 +102,12 @@ fn rotated_context_checkpoint_retry_resyncs_segment_parent_before_success() {
     )
     .expect("rotated context recovery writer opens");
     replay_prefix(&mut recovered);
-    reset_conversation_stream_parent_sync_count_for_path_for_test(&run);
+    reset_session_stream_parent_sync_count_for_test(&run);
     recovered
         .commit(&target, &canonical, Some(target_checkpoint.clone()))
         .expect("exact context checkpoint retry succeeds");
     assert!(
-        conversation_stream_parent_sync_count_for_path_for_test(&run) > 0,
+        session_stream_parent_sync_count_for_test(&run) > 0,
         "retry succeeded without synchronizing the rotated context parent"
     );
     receiver

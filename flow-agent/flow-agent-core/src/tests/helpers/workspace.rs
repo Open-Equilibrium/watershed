@@ -12,10 +12,7 @@ use crate::{
     },
     tests::test_support::{TempWorkspace, copy_dir, fixture_dir, workspace_copy},
 };
-use std::{
-    fs,
-    path::{Path, PathBuf},
-};
+use std::{fs, path::Path};
 
 pub(in crate::tests) fn reserve_session_log(
     workspace: &Path,
@@ -66,10 +63,6 @@ pub(in crate::tests) fn empty_workspace(label: &str) -> TempWorkspace {
 pub(in crate::tests) fn workspace_store_dir(workspace: &Path) -> std::path::PathBuf {
     let workspace = AnchoredWorkspace::open(workspace).expect("workspace store root opens");
     workspace_store_path(&workspace).expect("workspace store path resolves")
-}
-
-pub(in crate::tests) fn canonical_test_path(path: &Path) -> PathBuf {
-    crate::runtime::fs_guards::test_path_key(path)
 }
 
 pub(in crate::tests) fn workspace_session_dir(workspace: &Path) -> std::path::PathBuf {
