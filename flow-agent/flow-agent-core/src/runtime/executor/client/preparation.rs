@@ -62,7 +62,7 @@ impl PreparedExecutor {
         };
         let request_bytes =
             proto::canonical_executor_request_v0(&request).map_err(invalid_request)?;
-        let request_hash = executor_request_hash(&request_bytes);
+        let request_hash = crate::runtime::digest::prefixed_sha256_hex(&request_bytes);
         // The inventory is admitted once per controller. Per-Tool work duplicates
         // only the bounded retained object handles, never a recursive home scan.
         let protected_descriptors = self
@@ -112,10 +112,6 @@ pub(super) fn retain_protected_objects(
         ));
     }
     Ok(objects.into_values().collect())
-}
-
-pub(super) fn executor_request_hash(request_bytes: &[u8]) -> String {
-    crate::runtime::digest::prefixed_sha256_hex(request_bytes)
 }
 
 fn protocol_path(path: &Path) -> Result<String, RuntimeError> {

@@ -1,9 +1,6 @@
 use super::{
     contract::protocol,
-    conversation_stream::{
-        append_anchored_canonical_jsonl_batch_with, open_anchored_stream_appender,
-        sync_anchored_stream_with,
-    },
+    conversation_stream::{append_anchored_canonical_jsonl_batch_with, sync_anchored_stream_with},
     run_objects::RunObjectStore,
 };
 use crate::runtime::{
@@ -44,9 +41,10 @@ impl SerialConversationWriter {
         notifier: Option<LiveEventNotifier>,
         run_objects: RunObjectStore,
     ) -> Result<Self, RuntimeError> {
-        let events_appender = open_anchored_stream_appender(&events_file, EVENT_STREAM_LIMITS)?;
+        let events_appender =
+            SessionLogAppender::open_with_limits(&events_file, EVENT_STREAM_LIMITS)?;
         let contexts_appender =
-            open_anchored_stream_appender(&contexts_file, CONTEXT_MANIFEST_STREAM_LIMITS)?;
+            SessionLogAppender::open_with_limits(&contexts_file, CONTEXT_MANIFEST_STREAM_LIMITS)?;
         let thread_name = format!("flow-conversation-writer-{run_session_id}");
         let (sender, receiver) = std::sync::mpsc::sync_channel(EVENT_WRITER_QUEUE_CAPACITY);
         let worker = thread::Builder::new()

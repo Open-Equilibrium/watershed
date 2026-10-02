@@ -179,7 +179,7 @@ mod tests {
     use super::super::process::{
         process_group_cleanup_calls_for_test, reset_process_group_cleanup_calls_for_test,
     };
-    use super::preparation::{ProtectedObject, executor_request_hash};
+    use super::preparation::ProtectedObject;
     use super::response::{decode_tool_outcome, validate_receipt_identity};
     use super::transport::{
         ExecutorPreflightProcess, c_close, preflight_one_shot, preflight_one_shot_at_deadline,
@@ -385,7 +385,7 @@ mod tests {
         );
         assert_eq!(
             first.request_hash(),
-            executor_request_hash(&first.request_bytes)
+            crate::runtime::digest::prefixed_sha256_hex(&first.request_bytes)
         );
 
         let changed_invocation = ToolInvocation {
@@ -621,7 +621,7 @@ mod tests {
 
     #[test]
     fn prepared_executor_request_hash_uses_run_log_format() {
-        let hash = executor_request_hash(b"canonical Executor request");
+        let hash = crate::runtime::digest::prefixed_sha256_hex(b"canonical Executor request");
         let digest = hash
             .strip_prefix(crate::runtime::digest::SHA256_PREFIX)
             .expect("Executor request hash has the canonical prefix");

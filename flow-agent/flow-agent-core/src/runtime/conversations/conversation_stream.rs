@@ -17,8 +17,8 @@ pub(crate) use reader::{
 pub(crate) use writer::append_jsonl;
 pub(in crate::runtime::conversations) use writer::{
     append_anchored_canonical_jsonl_batch, append_anchored_canonical_jsonl_batch_with,
-    conversation_file_sync_checkpoint, create_anchored_jsonl_file, open_anchored_stream_appender,
-    sync_anchored_stream, sync_anchored_stream_with,
+    conversation_file_sync_checkpoint, create_anchored_jsonl_file, sync_anchored_stream,
+    sync_anchored_stream_with,
 };
 #[cfg(test)]
 pub(crate) use writer::{

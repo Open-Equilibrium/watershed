@@ -63,16 +63,9 @@ pub(in crate::runtime::conversations) fn append_anchored_canonical_jsonl_batch(
     #[cfg(test)]
     conversation_out_of_band_append_for_test(path, None)
         .map_err(BatchAppendFailure::none_committed)?;
-    let mut appender =
-        open_anchored_stream_appender(path, limits).map_err(BatchAppendFailure::none_committed)?;
+    let mut appender = SessionLogAppender::open_with_limits(path, limits)
+        .map_err(BatchAppendFailure::none_committed)?;
     append_anchored_canonical_jsonl_batch_with(&mut appender, path, lines)
-}
-
-pub(in crate::runtime::conversations) fn open_anchored_stream_appender(
-    path: &AnchoredFile,
-    limits: SessionStreamLimits,
-) -> Result<SessionLogAppender, RuntimeError> {
-    SessionLogAppender::open_with_limits(path, limits)
 }
 
 pub(in crate::runtime::conversations) fn append_anchored_canonical_jsonl_batch_with(
@@ -157,7 +150,7 @@ pub(in crate::runtime::conversations) fn sync_anchored_stream(
     path: &AnchoredFile,
     limits: SessionStreamLimits,
 ) -> Result<(), RuntimeError> {
-    let mut appender = open_anchored_stream_appender(path, limits)?;
+    let mut appender = SessionLogAppender::open_with_limits(path, limits)?;
     sync_anchored_stream_with(&mut appender, path)
 }
 
