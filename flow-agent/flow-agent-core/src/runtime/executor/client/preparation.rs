@@ -1,6 +1,4 @@
-use super::{
-    PreparedExecutor, PreparedExecutorTool, executor_error, invalid_request, runtime_open_error,
-};
+use super::{PreparedExecutor, PreparedExecutorTool, invalid_request, runtime_open_error};
 use crate::runtime::{
     fs_guards::AnchoredWorkspace, tool_runner::ToolInvocation, types::RuntimeError,
 };
@@ -108,7 +106,7 @@ pub(super) fn retain_protected_objects(
         });
     }
     if objects.is_empty() || objects.len() > proto::MAX_EXECUTOR_PROTECTED_OBJECTS_V0 {
-        return Err(executor_error(
+        return Err(RuntimeError::executor(
             proto::ExecutorErrorCodeV0::PolicyUnsupported,
             "protected installation object count is outside its bound",
         ));
@@ -122,7 +120,7 @@ pub(super) fn executor_request_hash(request_bytes: &[u8]) -> String {
 
 fn protocol_path(path: &Path) -> Result<String, RuntimeError> {
     path.to_str().map(str::to_owned).ok_or_else(|| {
-        executor_error(
+        RuntimeError::executor(
             proto::ExecutorErrorCodeV0::PolicyUnsupported,
             "Executor paths must be representable as UTF-8",
         )
@@ -135,7 +133,7 @@ fn descriptor_identity(descriptor: &OwnedFd) -> Result<proto::UnixObjectIdentity
         rustix::fs::FileType::RegularFile => proto::ExecutorObjectKindV0::File,
         rustix::fs::FileType::Directory => proto::ExecutorObjectKindV0::Directory,
         _ => {
-            return Err(executor_error(
+            return Err(RuntimeError::executor(
                 proto::ExecutorErrorCodeV0::PolicyUnsupported,
                 "protected object must be a regular file or directory",
             ));

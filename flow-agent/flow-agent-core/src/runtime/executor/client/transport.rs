@@ -29,7 +29,7 @@ pub(super) fn duplicate_executor_descriptor(executable: &File) -> Result<OwnedFd
     )
     .expect("protocol descriptor bounds fit i32");
     rustix::io::fcntl_dupfd_cloexec(executable, minimum).map_err(|_| {
-        super::executor_error(
+        RuntimeError::executor(
             proto::ExecutorErrorCodeV0::Unavailable,
             "validated Executor descriptor could not be moved outside the protected descriptor range",
         )
@@ -161,7 +161,7 @@ pub(super) fn preflight_one_shot_with_deadline(
     let mut reservations = Vec::new();
     loop {
         let reservation = File::open("/dev/null").map_err(|_| {
-            super::executor_error(
+            RuntimeError::executor(
                 proto::ExecutorErrorCodeV0::Unavailable,
                 "one-shot Executor process could not reserve protected descriptor slots",
             )
@@ -177,7 +177,7 @@ pub(super) fn preflight_one_shot_with_deadline(
         .map(|&(_, target)| retain_remap_destination(target, high_base))
         .collect::<Result<Vec<_>, _>>()
         .map_err(|_| {
-            super::executor_error(
+            RuntimeError::executor(
                 proto::ExecutorErrorCodeV0::Unavailable,
                 "one-shot Executor process could not retain protected descriptor destinations",
             )
@@ -221,7 +221,7 @@ pub(super) fn preflight_one_shot_with_deadline(
     }
     let hard_deadline = deadline()?;
     let child = command.spawn().map_err(|error| {
-        super::executor_error(
+        RuntimeError::executor(
             proto::ExecutorErrorCodeV0::Unavailable,
             format!(
                 "one-shot Executor process could not start (OS error {:?})",

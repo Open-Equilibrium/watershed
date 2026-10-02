@@ -177,14 +177,6 @@ fn session_object_retry_and_reopen_preserve_accounting() {
     fs::remove_dir_all(workspace).expect("workspace removed");
 }
 
-fn fill_session_object_inventory(
-    writer: &mut SessionObjectWriter,
-    count: usize,
-    required_digest: Option<&str>,
-) {
-    writer.seed_published_inventory_for_test(count, required_digest);
-}
-
 #[test]
 fn session_object_writer_enforces_the_unique_object_count_boundary() {
     let workspace = empty_workspace("session-object-count-boundary");
@@ -210,7 +202,7 @@ fn session_object_writer_enforces_the_unique_object_count_boundary() {
         &reservation.session_id,
     )
     .expect("full writer opens");
-    fill_session_object_inventory(&mut full, MAX_SESSION_OBJECTS, Some(&existing.digest));
+    full.seed_published_inventory_for_test(MAX_SESSION_OBJECTS, Some(&existing.digest));
     full.persist(&existing)
         .expect("an existing digest is allowed at the object limit");
 
@@ -241,11 +233,7 @@ fn session_object_writer_enforces_the_unique_object_count_boundary() {
         &reservation.session_id,
     )
     .expect("one-slot writer opens");
-    fill_session_object_inventory(
-        &mut one_slot,
-        MAX_SESSION_OBJECTS - 1,
-        Some(&existing.digest),
-    );
+    one_slot.seed_published_inventory_for_test(MAX_SESSION_OBJECTS - 1, Some(&existing.digest));
     one_slot
         .persist(&new)
         .expect("one new digest is allowed below the object limit");
@@ -283,7 +271,7 @@ fn session_object_batch_counts_duplicate_digests_once_and_rejects_excess_before_
         &reservation.session_id,
     )
     .expect("duplicate writer opens");
-    fill_session_object_inventory(&mut duplicate_writer, MAX_SESSION_OBJECTS - 1, None);
+    duplicate_writer.seed_published_inventory_for_test(MAX_SESSION_OBJECTS - 1, None);
     duplicate_writer
         .persist_all(&[first.clone(), first.clone()])
         .expect("duplicate new digests consume one slot");
@@ -296,7 +284,7 @@ fn session_object_batch_counts_duplicate_digests_once_and_rejects_excess_before_
         &reservation.session_id,
     )
     .expect("excess writer opens");
-    fill_session_object_inventory(&mut excess_writer, MAX_SESSION_OBJECTS - 1, None);
+    excess_writer.seed_published_inventory_for_test(MAX_SESSION_OBJECTS - 1, None);
     let before_entries = fs::read_dir(crate::tests::helpers::workspace_session_dir(&workspace))
         .expect("session directory reads")
         .map(|entry| entry.expect("entry reads").file_name())
@@ -342,7 +330,7 @@ fn session_object_partial_batch_publication_remains_accounted() {
         &reservation.session_id,
     )
     .expect("writer opens");
-    fill_session_object_inventory(&mut writer, MAX_SESSION_OBJECTS - 2, None);
+    writer.seed_published_inventory_for_test(MAX_SESSION_OBJECTS - 2, None);
     writer.accounted_bytes = MAX_SESSION_OBJECT_TOTAL_BYTES - 2;
 
     let mut writes = 0;

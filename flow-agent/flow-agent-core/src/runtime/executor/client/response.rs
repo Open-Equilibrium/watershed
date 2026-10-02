@@ -1,4 +1,4 @@
-use super::{executor_error, invalid_request};
+use super::invalid_request;
 use crate::runtime::{
     run_attempts::{RunAttemptOutcome, ToolTerminalClassification},
     tool_runner::ToolExecutionOutcome,
@@ -15,7 +15,7 @@ pub(super) fn validate_receipt_identity(
         || receipt.backend_version != probe.backend_version
         || receipt.platform != probe.platform
     {
-        return Err(executor_error(
+        return Err(RuntimeError::executor(
             proto::ExecutorErrorCodeV0::InvalidResponse,
             "Executor enforcement receipt identity does not match readiness",
         ));

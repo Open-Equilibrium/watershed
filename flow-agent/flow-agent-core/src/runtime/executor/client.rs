@@ -164,18 +164,14 @@ fn invalid_request(_: proto::ExecutorProtocolError) -> RuntimeError {
 }
 
 fn invalid_response(message: impl Into<String>) -> RuntimeError {
-    executor_error(proto::ExecutorErrorCodeV0::InvalidResponse, message)
+    RuntimeError::executor(proto::ExecutorErrorCodeV0::InvalidResponse, message)
 }
 
 fn runtime_open_error(_: rustix::io::Errno) -> RuntimeError {
-    executor_error(
+    RuntimeError::executor(
         proto::ExecutorErrorCodeV0::PolicyUnsupported,
         "Executor protected object could not be retained",
     )
-}
-
-fn executor_error(code: proto::ExecutorErrorCodeV0, message: impl Into<String>) -> RuntimeError {
-    RuntimeError::executor(code, message)
 }
 
 #[cfg(test)]

@@ -210,13 +210,13 @@ pub(super) fn probe_executor(
         }));
     }
     if stdout_read.overflowed {
-        return Err(protocol_failure(
+        return Err(RuntimeError::executor(
             proto::ExecutorErrorCodeV0::InvalidResponse,
             "Executor readiness response exceeded its byte limit",
         ));
     }
     let probe = proto::parse_executor_probe_v0(&stdout_read.bytes).map_err(|_| {
-        protocol_failure(
+        RuntimeError::executor(
             proto::ExecutorErrorCodeV0::InvalidResponse,
             "Executor readiness response is invalid",
         )
@@ -242,7 +242,7 @@ fn validate_probe(
         .iter()
         .any(|version| version == proto::EXECUTOR_PROTOCOL_VERSION_V0)
     {
-        return Err(protocol_failure(
+        return Err(RuntimeError::executor(
             proto::ExecutorErrorCodeV0::ProtocolMismatch,
             "Executor does not support Flow protocol v0",
         ));
@@ -484,7 +484,7 @@ fn owner_is_trusted(owner: u32, effective_uid: u32) -> bool {
 }
 
 fn executor_unavailable(message: &str) -> RuntimeError {
-    protocol_failure(proto::ExecutorErrorCodeV0::Unavailable, message)
+    RuntimeError::executor(proto::ExecutorErrorCodeV0::Unavailable, message)
 }
 
 #[cfg(test)]
@@ -597,10 +597,6 @@ mod diagnostic_tests {
             assert!(error.to_string().contains("incompatible"), "{error}");
         }
     }
-}
-
-fn protocol_failure(code: proto::ExecutorErrorCodeV0, message: &str) -> RuntimeError {
-    RuntimeError::executor(code, message)
 }
 
 #[cfg(test)]

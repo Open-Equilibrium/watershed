@@ -17,10 +17,6 @@ fn attempt_result(outcome: &str, durable_output: Option<serde_json::Value>) -> R
     }
 }
 
-fn attempt_output(tool_result: serde_json::Value) -> serde_json::Value {
-    fake_tool_attempt_output(tool_result)
-}
-
 #[test]
 fn tool_results_enforce_their_durable_value_contracts() {
     for (outcome, expected_status, expected_event, expected_error) in [
@@ -84,7 +80,7 @@ fn tool_results_enforce_their_durable_value_contracts() {
             None => assert!(value["value"].get("exit_code").is_none()),
         }
 
-        let mut result = attempt_result(expected_status, Some(attempt_output(value)));
+        let mut result = attempt_result(expected_status, Some(fake_tool_attempt_output(value)));
         result.classification = outcome
             .classification
             .map(|classification| classification.as_str().to_owned());
@@ -142,7 +138,7 @@ fn recovered_tool_stream_objects_must_match_their_digest_uris() {
     let recovery = ObjectRecovery(std::collections::BTreeMap::from([(uri, vec![0xfe])]));
     let result = attempt_result(
         "completed",
-        Some(attempt_output(
+        Some(fake_tool_attempt_output(
             serde_json::to_value(durable.value).expect("Tool value JSON"),
         )),
     );
@@ -195,7 +191,7 @@ fn recovered_tool_results_enforce_terminal_matrix_and_stream_caps() {
         };
         let mut result = attempt_result(
             status,
-            Some(attempt_output(
+            Some(fake_tool_attempt_output(
                 serde_json::to_value(durable.value).expect("Tool value JSON"),
             )),
         );
@@ -238,7 +234,7 @@ fn recovered_tool_results_enforce_terminal_matrix_and_stream_caps() {
         let recovery = ObjectRecovery::from_objects(&durable.objects);
         let mut result = attempt_result(
             "completed",
-            Some(attempt_output(
+            Some(fake_tool_attempt_output(
                 serde_json::to_value(durable.value).expect("Tool value JSON"),
             )),
         );
@@ -266,8 +262,9 @@ fn recovered_tool_results_reject_semantically_inconsistent_durable_values() {
         stderr: b"stderr".to_vec(),
     })
     .expect("valid Tool result becomes durable");
-    let valid_output =
-        attempt_output(serde_json::to_value(durable.value).expect("Tool value serializes"));
+    let valid_output = fake_tool_attempt_output(
+        serde_json::to_value(durable.value).expect("Tool value serializes"),
+    );
     let cases: [(&str, RecoveredToolMutation, &str); 7] = [
         (
             "outer-schema",
@@ -331,7 +328,7 @@ fn recovered_tool_results_reject_semantically_inconsistent_durable_values() {
 
     let mut non_map = attempt_result(
         "completed",
-        Some(attempt_output(serde_json::json!({
+        Some(fake_tool_attempt_output(serde_json::json!({
             "type": "string", "value": "not a map"
         }))),
     );

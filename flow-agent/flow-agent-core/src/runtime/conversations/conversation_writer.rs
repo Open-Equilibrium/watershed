@@ -235,23 +235,15 @@ impl ConversationEventWriter {
     }
 
     fn recovery_prefix_error(&mut self, message: &'static str) -> Option<RuntimeError> {
-        match self.next_expected_event() {
+        match self.event_prefix.next_line() {
             Ok(Some(_)) => Some(protocol(message)),
-            Ok(None) => match self.next_expected_context() {
+            Ok(None) => match self.context_prefix.next_line() {
                 Ok(Some(_)) => Some(protocol(message)),
                 Ok(None) => None,
                 Err(error) => Some(error),
             },
             Err(error) => Some(error),
         }
-    }
-
-    fn next_expected_event(&mut self) -> Result<Option<String>, RuntimeError> {
-        self.event_prefix.next_line()
-    }
-
-    fn next_expected_context(&mut self) -> Result<Option<String>, RuntimeError> {
-        self.context_prefix.next_line()
     }
 
     fn live_writer(&mut self) -> Result<&mut SerialConversationWriter, RuntimeError> {
@@ -359,7 +351,7 @@ impl RuntimeEventSink for ConversationEventWriter {
             }
             let event = constructed.event();
             let canonical_jsonl = constructed.canonical_jsonl();
-            if let Some(expected) = self.next_expected_event()? {
+            if let Some(expected) = self.event_prefix.next_line()? {
                 if expected != canonical_jsonl {
                     return Err(protocol(
                         "productive recovery event prefix diverged from deterministic replay",
@@ -378,7 +370,7 @@ impl RuntimeEventSink for ConversationEventWriter {
                     }));
                 }
                 if let Some(checkpoint) = context_manifest.as_ref() {
-                    let expected_context = self.next_expected_context()?.ok_or_else(|| {
+                    let expected_context = self.context_prefix.next_line()?.ok_or_else(|| {
                         protocol("productive recovery message.completed has no context prefix")
                     })?;
                     if expected_context != checkpoint.manifest.line {
@@ -393,8 +385,8 @@ impl RuntimeEventSink for ConversationEventWriter {
                 self.last_timestamp = Some(event.timestamp.clone());
                 return Ok(());
             }
-            if let Some(expected_context) = self.next_expected_context()? {
-                if self.next_expected_context()?.is_some() {
+            if let Some(expected_context) = self.context_prefix.next_line()? {
+                if self.context_prefix.next_line()?.is_some() {
                     return Err(protocol(
                         "productive recovery context prefix extends beyond one missing event",
                     ));
