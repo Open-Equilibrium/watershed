@@ -258,7 +258,8 @@ if [ -e "$unavailable_workspace/.flow" ]; then
   exit 1
 fi
 check_custom_selection() {
-  run_local "$custom_prefix/bin/flow" executor configure --path "$bundle/flow-executor"
+  # Use the installed copy; extracted quarantine is assessed separately above.
+  run_local "$custom_prefix/bin/flow" executor configure --path "$standard_prefix/bin/flow-executor"
   test -f "$config/flow-agent/executor.json"
   run_local "$custom_prefix/bin/flow" executor check </dev/null
   ln -s "$custom_prefix/bin/absent-executor" "$custom_prefix/bin/flow-executor"
@@ -268,7 +269,7 @@ check_custom_selection() {
   else
     test "$?" -eq 65
   fi
-  if run_local "$custom_prefix/bin/flow" executor configure --path "$bundle/flow-executor"; then
+  if run_local "$custom_prefix/bin/flow" executor configure --path "$standard_prefix/bin/flow-executor"; then
     printf 'Custom configuration ignored an unsafe installed sibling\n' >&2
     exit 1
   else
