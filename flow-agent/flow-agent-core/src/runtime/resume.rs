@@ -181,9 +181,7 @@ pub(crate) fn resume_fixture_session_internal(
                 &execution_workspace,
                 Some(&mut preflight_sink),
             )?;
-            let matches = runtime.matches_plan(&plan);
-            preflight_sink.finish()?;
-            matches
+            runtime.matches_plan(&plan)
         };
         if !preflight_matches {
             return Err(RuntimeError::Protocol(format!(

@@ -210,10 +210,6 @@ impl<'path> ResumePreflightSink<'path> {
             resume_marker_count,
         })
     }
-
-    pub(crate) fn finish(self) -> Result<(), RuntimeError> {
-        Ok(())
-    }
 }
 
 impl RuntimeEventSink for ResumePreflightSink<'_> {
