@@ -112,12 +112,12 @@ summary{cursor:pointer}summary h3{display:inline;margin:0}summary:focus-visible{
   <section id="m3">
     <h2>M3 - Liquid</h2>
     <div class="grid">
-      <details id="d-009" class="decision">
-        <summary><h3>D-009 - Liquid UI Framework</h3></summary>
-        <p><strong>Status:</strong> Open before Liquid app shell work.</p>
-        <p><strong>Question:</strong> Which Dart/native UI stack should implement Liquid?</p>
-        <ul><li><strong>A:</strong> Flutter. Pro: mature cross-platform tooling. Con: larger runtime surface.</li><li><strong>B:</strong> Lower-level native/Dart stack. Pro: tighter control. Con: higher implementation cost.</li></ul>
-        <p><strong>Recommendation:</strong> Flutter unless a concrete MVP requirement rules it out.</p>
+      <details id="d-068" class="decision">
+        <summary><h3>D-068 - Liquid Rust–Flutter Bridge</h3></summary>
+        <p><strong>Status:</strong> Open before Liquid app shell work; Flutter over the Rust core is decided (ADR-0181).</p>
+        <p><strong>Question:</strong> How should the Flutter UI call the Rust Liquid core and receive its update streams? ADR-0182 requires asynchronous calls, small change messages instead of whole documents, and streams that are released when a View closes.</p>
+        <ul><li><strong>A:</strong> flutter_rust_bridge v2, which generates the binding code. Pro: asynchronous calls and Rust-to-Dart streams built in, little hand-written unsafe code. Con: a code generator in the build and a dependency to track.</li><li><strong>B:</strong> A hand-written C interface with Dart's built-in FFI and a binary message format, as AppFlowy does with Protocol Buffers. Pro: no generator, full control over memory and threads. Con: more unsafe glue code and hand-built stream handling.</li></ul>
+        <p><strong>Recommendation:</strong> A, provided its generated code keeps work off the Dart main isolate and supports bounded change messages and stream disposal.</p>
       </details>
       <details id="d-027" class="decision">
         <summary><h3>D-027 - Liquid CLI/API Surface</h3></summary>
@@ -129,15 +129,15 @@ summary{cursor:pointer}summary h3{display:inline;margin:0}summary:focus-visible{
       <details id="d-028" class="decision">
         <summary><h3>D-028 - Liquid Action History Model</h3></summary>
         <p><strong>Status:</strong> Open before M3 storage work.</p>
-        <p><strong>Question:</strong> How should Liquid remember changes so users can inspect and undo them?</p>
+        <p><strong>Question:</strong> How should Liquid remember changes so users can inspect and undo them? Because sync uses a CRDT library (ADR-0182), this also decides whether History is derived from that library's own change history or stored separately.</p>
         <ul><li><strong>A:</strong> Keep an unchangeable sequence of actions plus occasional full save points. Pro: auditable and reversible. Con: old entries must be combined or archived later.</li><li><strong>B:</strong> Keep only the current state plus periodic backups. Pro: simpler storage. Con: weak audit and undo.</li></ul>
-        <p><strong>Recommendation:</strong> A.</p>
+        <p><strong>Recommendation:</strong> A, stored separately from the CRDT library's internal history unless the library chosen in <a href="#d-035">D-035</a> already records actor-attributed, revertible changes.</p>
       </details>
       <details id="d-029" class="decision">
         <summary><h3>D-029 - Liquid Storage Model</h3></summary>
         <p><strong>Status:</strong> Open before M3 storage work.</p>
-        <p><strong>Question:</strong> How should Liquid store workspace state and history on the user's device?</p>
-        <ul><li><strong>A:</strong> Use a SQLite database as the local copy. Pro: reliable offline searches and all-or-nothing updates. Con: upgrades and sharing need careful data conversion.</li><li><strong>B:</strong> Use folders of readable JSON files as the local copy. Pro: transparent. Con: weaker consistency and slower searching.</li></ul>
+        <p><strong>Question:</strong> How should Liquid store workspace state and history on the user's device? ADR-0182 requires every acknowledged change to be durably saved together with its History entry before sync, and Database Views to read sorted, filtered pages without loading whole tables.</p>
+        <ul><li><strong>A:</strong> SQLite in write-ahead-log mode. Pro: proven crash safety on every target, indexes, SQL queries and full-text search for the PowerBar. Con: a bundled C library and careful schema upgrades.</li><li><strong>B:</strong> redb, an embedded transactional key-value store written in Rust. Pro: no C dependency, simple cross-compilation. Con: indexes, sorting, filtering and search must be built by hand.</li></ul>
         <p><strong>Recommendation:</strong> A unless sync requirements force a different engine.</p>
       </details>
       <details id="d-031" class="decision">
@@ -149,10 +149,11 @@ summary{cursor:pointer}summary h3{display:inline;margin:0}summary:focus-visible{
       </details>
       <details id="d-035" class="decision">
         <summary><h3>D-035 - Sync Conflict Semantics</h3></summary>
-        <p><strong>Status:</strong> Open before shared-workspace work.</p>
-        <p><strong>Question:</strong> When local replicas send concurrent offline changes to the central Sync Server, how should Liquid combine them?</p>
-        <ul><li><strong>A:</strong> Combine recorded changes using the same fixed rule for each field and ask the user when no safe combination exists. Pro: preserves local-first behavior and audit history. Con: more merge design.</li><li><strong>B:</strong> Keep the most recent ordinary field value and ask only about deletes or structural changes. Pro: smaller first implementation. Con: can silently discard intent.</li></ul>
-        <p><strong>Recommendation:</strong> A, scoped first to the M3 Block Types and action model.</p>
+        <p><strong>Status:</strong> Open before shared-workspace work. ADR-0182 already requires an established CRDT library (a data structure that lets copies edited offline merge to the same result) and forbids custom conflict-resolution logic.</p>
+        <p><strong>Question:</strong> Which CRDT library should combine concurrent offline changes?</p>
+        <ul><li><strong>A:</strong> yrs, the Rust port of Yjs. Pro: very fast rich-text editing and compact updates; widely deployed, including in AppFlowy. Con: Liquid's Block and View model must be mapped onto Yjs data types; when two devices change the same field, one value silently wins and the other is dropped; its history is not attributed per actor.</li><li><strong>B:</strong> Automerge. Pro: JSON-like documents with a complete change history that maps naturally to attributed History; when two devices change the same field it keeps both values, so Liquid can show the user both instead of losing one. Con: historically higher memory and CPU use on large documents, so it must be proven against the Liquid workloads.</li></ul>
+        <p><strong>Recommendation:</strong> B, because it does not silently drop a concurrent change, unless the acceptance spike shows it cannot keep typing and memory use responsive; then reconsider A. Either way every replica keeps applying received changes through its own mutation pipeline as <a href="../../SECURITY.md">SECURITY.md</a> requires.</p>
+        <p><strong>Acceptance criterion:</strong> The chosen library passes convergence tests for the M3 Block Types (text, Database rows, View order, deletion cascade), retains fixed observational typing and memory evidence on the Liquid targets, and a remote change denied by Roles is rejected identically for every replica.</p>
       </details>
     </div>
   </section>

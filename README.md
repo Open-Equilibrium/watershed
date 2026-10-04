@@ -104,6 +104,7 @@ Sequencing and the MVP project-code VCS boundary are canonical in [PLAN.md](PLAN
 - **Current implementation architecture:** [docs/architecture.md](docs/architecture.md)
 - **Platform targets and available capabilities:** [PLATFORMS.md](PLATFORMS.md)
 - **Executor and Sandbox architecture:** [docs/concept/flow-agent-executor-architecture.md](docs/concept/flow-agent-executor-architecture.md)
+- **Liquid client architecture:** [docs/concept/liquid-client-architecture.md](docs/concept/liquid-client-architecture.md)
 - **Rules for AI/human contributors:** [AGENTS.md](AGENTS.md)
 - **Open decisions (human decision page):** [docs/decisions/open-decisions.html](docs/decisions/open-decisions.html)
 - **Terminology:** [GLOSSARY.md](GLOSSARY.md)

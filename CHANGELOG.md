@@ -13,6 +13,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: [S
 
 ### Changed
 
+- Liquid clients use Flutter over the Rust core under binding stability invariants: no Workspace work on the Dart main isolate, bounded delta streams, viewport virtualization, durable local commit before acknowledgement and sync, an established CRDT library and owned disposal (ADR-0181, ADR-0182).
 - Before the first release, Flow Agent removed `flow import` and compatibility for automatic flat-session migration, `flow-conversation-entry-v0`, `flow-run-log-record-v0`, `flow-provider-output-v1`, legacy Phase/Step events and Tool observations.
 - M1.2 replaces broad Tool isolation with trusted Tool invocation and native protection of this installation's Flow-owned files. A shared one-shot Executor lifecycle uses Linux Bubblewrap/seccomp or macOS Seatbelt; Ready/Start, durable intent, bounded results and self-protection receipts remain. Mount declarations, runtime-read profiles, network policy, process/thread capacity and the systemd/cgroup service dependency are removed without compatibility aliases. Version/platform download packaging is implemented; publication and final acceptance remain pending ([status](PLAN.md#m12--flow-agent-os-isolation); ADR-0166–ADR-0176).
 - Controlled Run and Resume returns preserve operation, writer-finalization and ownership-cleanup failures; Drop remains only a best-effort fallback (ADR-0077).
