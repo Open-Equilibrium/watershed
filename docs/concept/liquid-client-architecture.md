@@ -41,9 +41,9 @@ flowchart TD
 ### Durability and sync
 
 9. A local change is acknowledged only after the core has durably committed it, together with its History Action, to the local replica. The editor may group consecutive keystrokes into one commit; only unacknowledged input can be lost in a crash.
-10. Sync sends only durably committed changes and tracks its progress in the local replica. Network state never gates or delays the local commit.
+10. Sync sends only durably committed changes and tracks its progress in the local replica. A committed change that awaits sync is never rewritten or dropped; later edits are new changes. Network state never gates or delays the local commit.
 11. Sync uses the established CRDT library selected by D-035; Liquid adds no custom conflict-resolution algorithm. Remote changes merge through that library; sync never resets local state to a remote snapshot or drops unsynced local changes outside that merge.
-12. Connection loss, suspension or termination by the OS, including mobile background limits, leaves committed changes and sync progress intact. When the app is paused the UI hands the focused edit to the core; on resume the sync client retries from its durable cursor.
+12. Connection loss, suspension or termination by the OS, including Android background limits, leaves committed changes and sync progress intact. When the app is paused the UI hands the focused edit to the core; on resume the sync client retries from its durable cursor.
 
 ### Resources
 
