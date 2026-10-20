@@ -160,6 +160,7 @@ The target product is canonical in [`docs/concept/V-Spec_Liquid.html`](docs/conc
 #### M3a — Local Workspace foundation
 
 - Local replica as the only interactive store; storage choice remains D-029.
+- Flutter clients over the Rust core follow the [client architecture](docs/concept/liquid-client-architecture.md) invariants (ADR-0181, ADR-0182).
 - Pages, Blocks, Views, Sources, Connections, Automations, Roles, History and settings.
 - Explorer with Pages and Sources as peer navigation entries; Page templates create use-case compositions rather than new Page Types.
 - PowerBar for finding Workspace objects, creating Blocks and invoking permitted Workspace actions.
