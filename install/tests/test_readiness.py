@@ -185,7 +185,7 @@ class ReadinessContractTest(unittest.TestCase):
         self.assertEqual(os.geteuid(), 0, "requires root and an explicit non-root SUDO_USER")
         user = pwd.getpwnam(os.environ["SUDO_USER"])
         self.assertNotEqual(user.pw_uid, 0)
-        helper = "/usr/bin/sudo" if sys.platform == "darwin" else "/usr/sbin/runuser"
+        helper = "/usr/bin/sudo" if sys.platform == "darwin" else "/usr/bin/setpriv"
         self.assertTrue(os.access(helper, os.X_OK), helper)
         child, terminal = pty.fork()
         if child == 0:
