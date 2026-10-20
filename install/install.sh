@@ -252,7 +252,7 @@ if [ "$install_executor" -eq 1 ] && [ "$current_owner" -eq 0 ]; then
     if [ "$host" = Darwin ]; then
         set -- /usr/bin/sudo -n -u "$SUDO_USER" --
     else
-        set -- /usr/sbin/runuser --user "$SUDO_USER" --
+        set -- /usr/bin/setpriv --reuid="$readiness_owner" --regid="$readiness_group" --init-groups --
     fi
 fi
 
