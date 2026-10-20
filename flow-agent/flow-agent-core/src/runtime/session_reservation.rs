@@ -1,10 +1,10 @@
+use crate::runtime::session_lock::{SessionLockGuard, open_or_create_anchored_session_marker};
 use crate::runtime::{
     fs_guards::{
         AnchoredDir, AnchoredDirectoryIdentity, AnchoredFile, AnchoredFileIdentity,
-        AnchoredWorkspace, RuntimeDirs, anchored_file_identity, canonical_segmented_jsonl_sibling,
-        create_anchored_file, ensure_anchored_non_hardlinked_file, ensure_anchored_runtime_dirs,
-        for_each_segmented_jsonl_member, open_anchored_file_for_read, open_anchored_runtime_dir,
-        path_io_error, reserve_new_anchored_file, sync_directory,
+        AnchoredWorkspace, anchored_file_identity, canonical_segmented_jsonl_sibling,
+        create_anchored_file, ensure_anchored_non_hardlinked_file, for_each_segmented_jsonl_member,
+        open_anchored_file_for_read, path_io_error, reserve_new_anchored_file, sync_directory,
     },
     session_authority::SessionOwnershipLease,
     session_bundle::SessionBundlePaths,
@@ -13,8 +13,10 @@ use crate::runtime::{
         suffixed_session_id,
     },
     session_definition::{SessionDefinitionMetadata, ascii_case_alias},
-    session_lock::{SessionLockGuard, SessionReservation, open_or_create_anchored_session_marker},
-    session_store::workspace_store_path,
+    session_lock::SessionReservation,
+    session_store::{
+        RuntimeDirs, ensure_anchored_runtime_dirs, open_anchored_runtime_dir, workspace_store_path,
+    },
     stage_results::reconcile_controlled_stages,
     types::{LOG_STORAGE_DIR, RuntimeError, SESSION_STORAGE_DIR},
 };
@@ -29,6 +31,13 @@ use std::{
 std::thread_local! {
     static METADATA_PRE_ACTIVATION_OBSERVER: RefCell<Option<Box<dyn FnOnce()>>> =
         RefCell::new(None);
+    static CANDIDATE_PRE_LEASE_OBSERVER: RefCell<Option<Box<dyn FnOnce()>>> =
+        RefCell::new(None);
+}
+
+#[cfg(test)]
+pub(crate) fn set_candidate_pre_lease_observer_for_test(observer: impl FnOnce() + 'static) {
+    CANDIDATE_PRE_LEASE_OBSERVER.with_borrow_mut(|slot| *slot = Some(Box::new(observer)));
 }
 
 #[cfg(test)]
@@ -77,10 +86,7 @@ pub(crate) fn reserve_unique_session_candidate_with_anchored_workspace(
         if hint == SessionCandidateHint::Probe
             && let Some(sessions) = sessions.as_ref()
         {
-            match ensure_anchored_session_file_available(
-                &SessionBundlePaths::events_in(sessions, &session_id),
-                &session_id,
-            ) {
+            match ensure_anchored_session_candidate_available(sessions, &session_id) {
                 Ok(()) => {}
                 Err(RuntimeError::SessionLogExists(_)) => continue,
                 Err(error) => return Err(error),
@@ -89,8 +95,22 @@ pub(crate) fn reserve_unique_session_candidate_with_anchored_workspace(
         let marker_path = workspace_store_path(workspace)?
             .join(SESSION_STORAGE_DIR)
             .join(SessionBundlePaths::lock_leaf(&session_id));
+        #[cfg(test)]
+        if let Some(observer) = CANDIDATE_PRE_LEASE_OBSERVER.with_borrow_mut(Option::take) {
+            observer();
+        }
         match SessionOwnershipLease::acquire_anchored(workspace, &session_id, &marker_path) {
             Ok(ownership) => {
+                if let Some(sessions) = open_anchored_runtime_dir(workspace, SESSION_STORAGE_DIR)? {
+                    match ensure_anchored_session_candidate_available(&sessions, &session_id) {
+                        Ok(()) => {}
+                        Err(RuntimeError::SessionLogExists(_)) => {
+                            ownership.release()?;
+                            continue;
+                        }
+                        Err(error) => return Err(error),
+                    }
+                }
                 return Ok(SessionCandidateReservation {
                     ownership,
                     session_id,
@@ -104,6 +124,17 @@ pub(crate) fn reserve_unique_session_candidate_with_anchored_workspace(
     Err(RuntimeError::Protocol(format!(
         "could not allocate a unique session_id for {base_session_id}"
     )))
+}
+
+fn ensure_anchored_session_candidate_available(
+    sessions: &AnchoredDir,
+    session_id: &str,
+) -> Result<(), RuntimeError> {
+    ensure_anchored_bundle_leaf_available(&sessions.file(session_id), session_id)?;
+    ensure_anchored_session_file_available(
+        &SessionBundlePaths::events_in(sessions, session_id),
+        session_id,
+    )
 }
 
 pub(crate) fn materialize_session_candidate(
@@ -199,6 +230,7 @@ pub fn ensure_session_bundle_namespace_available(
     lock_path: &AnchoredFile,
     session_id: &str,
 ) -> Result<(), RuntimeError> {
+    ensure_anchored_bundle_leaf_available(&dirs.sessions.file(session_id), session_id)?;
     for path in [log_path, context_path] {
         ensure_anchored_bundle_leaf_available(path, session_id)?;
     }
@@ -332,14 +364,6 @@ pub fn ensure_anchored_session_file_available(
         Err(RuntimeError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(error),
     }
-}
-
-#[cfg(test)]
-pub fn reserve_anchored_session_lock_file(
-    path: &AnchoredFile,
-    _session_id: &str,
-) -> Result<std::fs::File, RuntimeError> {
-    open_or_create_anchored_session_marker(path)
 }
 
 pub fn acquire_anchored_session_lock(

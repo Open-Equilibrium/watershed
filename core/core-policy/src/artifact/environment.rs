@@ -13,10 +13,6 @@ pub struct EnvironmentPolicy {
 
 impl EnvironmentPolicy {
     pub(super) fn validate(&self, tool_id: &str) -> Result<(), PolicyArtifactValidationError> {
-        match self.default {
-            EnvironmentDefault::Clear => {}
-        }
-
         for name in &self.allow {
             validate_environment_allow_name(tool_id, name)?;
         }

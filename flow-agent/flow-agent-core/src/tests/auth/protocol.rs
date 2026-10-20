@@ -173,6 +173,35 @@ fn oauth_loopback_rejects_a_truncated_request_header() {
 }
 
 #[test]
+fn oauth_loopback_waits_for_a_callback_on_an_inherited_nonblocking_stream() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("loopback binds");
+    let address = listener.local_addr().expect("loopback address");
+    let client = thread::spawn(move || {
+        let mut stream = TcpStream::connect(address).expect("loopback connects");
+        thread::sleep(Duration::from_millis(25));
+        stream
+            .write_all(b"GET /auth/callback?state=s&code=c HTTP/1.1\r\nHost: localhost\r\n\r\n")
+            .expect("callback writes");
+    });
+    let (mut stream, _) = listener.accept().expect("callback accepts");
+    stream
+        .set_nonblocking(true)
+        .expect("accepted stream becomes nonblocking");
+
+    assert_eq!(
+        read_loopback_callback_until(
+            &mut stream,
+            "s",
+            Instant::now() + Duration::from_secs(1),
+            Duration::from_secs(1),
+        )
+        .expect("callback waits for request bytes"),
+        "c"
+    );
+    client.join().expect("callback client completes");
+}
+
+#[test]
 fn oauth_loopback_callback_respects_an_absolute_deadline() {
     let listener = TcpListener::bind("127.0.0.1:0").expect("loopback binds");
     let address = listener.local_addr().expect("loopback address");

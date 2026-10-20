@@ -236,30 +236,25 @@ pub fn compile_context(
         .map(Vec::len)
         .sum();
     let context_hash = sha256_hex(&provider_bytes);
-    let mut included_sources = tier_zero
+    let (included_sources, objects): (Vec<_>, Vec<_>) = tier_zero
         .iter()
-        .zip(&tier_zero_bytes)
-        .map(|(source, bytes)| context_source_manifest_record(source, bytes))
-        .collect::<Vec<_>>();
-    if let (Some(source), Some(bytes)) = (
-        recent_interaction.filter(|_| include_recent),
-        recent_bytes.as_ref(),
-    ) {
-        included_sources.push(context_source_manifest_record(source, bytes));
-    }
-    let mut objects = tier_zero_bytes
-        .iter()
-        .map(|bytes| ContextObject {
-            bytes: bytes.clone(),
-            digest: sha256_hex(bytes),
+        .chain(recent_interaction.filter(|_| include_recent))
+        .zip(
+            tier_zero_bytes
+                .into_iter()
+                .chain(recent_bytes.filter(|_| include_recent)),
+        )
+        .map(|(source, bytes)| {
+            let digest = sha256_hex(&bytes);
+            let record = ContextManifestSourceRecord {
+                object_uri: core_script::build_session_object_uri(&digest)
+                    .expect("sha256_hex returns a lowercase SHA-256 digest"),
+                projection_hash: digest.clone(),
+                source_id: source.source_id.clone(),
+            };
+            (record, ContextObject { bytes, digest })
         })
-        .collect::<Vec<_>>();
-    if let Some(bytes) = recent_bytes.as_ref().filter(|_| include_recent) {
-        objects.push(ContextObject {
-            bytes: bytes.clone(),
-            digest: sha256_hex(bytes),
-        });
-    }
+        .unzip();
     let manifest_record = ContextManifestRecord {
         cache_boundaries: vec![ContextManifestCacheBoundary {
             after_source_id: tier_zero[CACHE_STABLE_TIER_ZERO_SOURCES - 1]
@@ -350,18 +345,4 @@ pub fn bounded_context_array_source(
         content.push(item);
     }
     Ok(context_source(source_id, serde_json::Value::Array(content)))
-}
-
-fn context_source_manifest_record(
-    source: &ContextSource,
-    bytes: &[u8],
-) -> ContextManifestSourceRecord {
-    let digest = sha256_hex(bytes);
-    let object_uri = core_script::build_session_object_uri(&digest)
-        .expect("sha256_hex returns a lowercase SHA-256 digest");
-    ContextManifestSourceRecord {
-        object_uri,
-        projection_hash: digest,
-        source_id: source.source_id.clone(),
-    }
 }

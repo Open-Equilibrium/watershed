@@ -99,10 +99,10 @@ fn conversation_status_recovers_run_creation_before_and_after_publication() {
                 );
             }
             let trace = take_directory_sync_trace_for_test();
-            let runs = crate::tests::helpers::canonical_test_path(
+            let runs = crate::runtime::fs_guards::test_path_key(
                 &crate::tests::helpers::workspace_session_dir(&workspace).join("review/runs"),
             );
-            let conversation = crate::tests::helpers::canonical_test_path(
+            let conversation = crate::runtime::fs_guards::test_path_key(
                 &crate::tests::helpers::workspace_session_dir(&workspace).join("review"),
             );
             let runs_sync = trace
@@ -379,10 +379,10 @@ fn conversation_status_recovers_run_reclamation_before_and_after_removal() {
             .expect("run-reclamation status transaction recovers");
         assert_eq!(page.conversations[0].run_count, expected_runs, "{point:?}");
         let trace = take_directory_sync_trace_for_test();
-        let runs = crate::tests::helpers::canonical_test_path(
+        let runs = crate::runtime::fs_guards::test_path_key(
             &crate::tests::helpers::workspace_session_dir(&workspace).join("review/runs"),
         );
-        let conversation = crate::tests::helpers::canonical_test_path(
+        let conversation = crate::runtime::fs_guards::test_path_key(
             &crate::tests::helpers::workspace_session_dir(&workspace).join("review"),
         );
         let runs_sync = trace
@@ -455,8 +455,8 @@ fn run_reclamation_recovery_finishes_an_authorized_partial_cleanup() {
         "the transaction clears only after cleanup is durable"
     );
     let trace = take_directory_sync_trace_for_test();
-    let runs = crate::tests::helpers::canonical_test_path(&runs);
-    let conversation = crate::tests::helpers::canonical_test_path(&conversation);
+    let runs = crate::runtime::fs_guards::test_path_key(&runs);
+    let conversation = crate::runtime::fs_guards::test_path_key(&conversation);
     let runs_sync = trace
         .iter()
         .position(|path| path == &runs)

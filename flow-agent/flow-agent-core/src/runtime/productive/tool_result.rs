@@ -1,4 +1,14 @@
-use crate::runtime::run_attempts::RunAttemptOutcome;
+use crate::runtime::{
+    context::ContextObject,
+    digest::sha256_hex,
+    run_attempts::{
+        ProductiveRecovery, RunAttemptOutcome, ToolTerminalClassification,
+        read_verified_session_object, resolve_tool_terminal,
+    },
+    tool_runner::{MAX_TOOL_STREAM_BYTES, ToolExecutionOutcome},
+    types::RuntimeError,
+};
+use proto::EventType;
 use std::{collections::BTreeMap, fmt};
 
 const TOOL_RESULT_SCHEMA_V0: &str = "flow-tool-result-v0";
@@ -63,7 +73,7 @@ pub(super) fn parse_tool_result(
     })
 }
 
-pub(super) fn build_tool_result(
+fn build_tool_result(
     outcome: RunAttemptOutcome,
     exit_code: Option<i32>,
     stdout: core_script::FlowValue,
@@ -102,4 +112,99 @@ fn stream<'a>(
             _ => "stderr has an invalid value",
         })),
     }
+}
+
+pub(super) fn validate_tool_result_streams(
+    fields: &ToolResultFields<'_>,
+    recovery: &dyn ProductiveRecovery,
+) -> Result<(), RuntimeError> {
+    for (name, value) in [("stdout", fields.stdout), ("stderr", fields.stderr)] {
+        match value {
+            core_script::FlowValue::String(_) => {}
+            core_script::FlowValue::SessionObject(uri) => {
+                let bytes = read_verified_session_object(
+                    recovery,
+                    uri,
+                    &format!("recovered Tool result {name} object"),
+                )?;
+                if bytes.len() > MAX_TOOL_STREAM_BYTES {
+                    return Err(RuntimeError::Protocol(format!(
+                        "recovered Tool result {name} exceeds the per-stream byte limit"
+                    )));
+                }
+            }
+            _ => unreachable!("Tool result codec validates stream values"),
+        }
+    }
+    Ok(())
+}
+
+pub(crate) struct DurableToolResult {
+    pub(crate) objects: Vec<ContextObject>,
+    pub(crate) value: core_script::FlowValue,
+}
+
+pub(crate) fn tool_result_value(
+    outcome: &ToolExecutionOutcome,
+) -> Result<DurableToolResult, RuntimeError> {
+    let inline = build_tool_result(
+        outcome.status,
+        outcome.exit_code,
+        stream_inline_value(&outcome.stdout),
+        stream_inline_value(&outcome.stderr),
+    );
+    if core_script::validate_flow_value(&inline).is_ok()
+        && std::str::from_utf8(&outcome.stdout).is_ok()
+        && std::str::from_utf8(&outcome.stderr).is_ok()
+    {
+        return Ok(DurableToolResult {
+            objects: Vec::new(),
+            value: inline,
+        });
+    }
+    let mut objects = Vec::new();
+    let mut object_value = |bytes: &[u8]| -> Result<core_script::FlowValue, RuntimeError> {
+        if bytes.is_empty() {
+            return Ok(core_script::FlowValue::String(String::new()));
+        }
+        let digest = sha256_hex(bytes);
+        let uri = core_script::build_session_object_uri(&digest).map_err(|error| {
+            RuntimeError::Protocol(format!("Tool result object URI is invalid: {error}"))
+        })?;
+        objects.push(ContextObject {
+            bytes: bytes.to_vec(),
+            digest,
+        });
+        Ok(core_script::FlowValue::SessionObject(uri))
+    };
+    let stdout = object_value(&outcome.stdout)?;
+    let stderr = object_value(&outcome.stderr)?;
+    let value = build_tool_result(outcome.status, outcome.exit_code, stdout, stderr);
+    core_script::validate_flow_value(&value).map_err(|error| {
+        RuntimeError::Protocol(format!("canonical Tool result is invalid: {error}"))
+    })?;
+    Ok(DurableToolResult { objects, value })
+}
+
+fn stream_inline_value(bytes: &[u8]) -> core_script::FlowValue {
+    core_script::FlowValue::String(std::str::from_utf8(bytes).unwrap_or_default().to_owned())
+}
+
+pub(crate) fn tool_terminal(
+    outcome: &ToolExecutionOutcome,
+) -> Result<(RunAttemptOutcome, EventType, Option<&'static str>), RuntimeError> {
+    let outcome_name = outcome.status;
+    let (event_type, classification) = resolve_tool_terminal(
+        outcome_name,
+        outcome.classification,
+        outcome.exit_code,
+    )
+    .ok_or_else(|| {
+        RuntimeError::Protocol("Tool execution produced an invalid terminal state".to_owned())
+    })?;
+    Ok((
+        outcome_name,
+        event_type,
+        classification.map(ToolTerminalClassification::as_str),
+    ))
 }

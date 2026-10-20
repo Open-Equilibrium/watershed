@@ -1,7 +1,7 @@
 use super::super::helpers::empty_workspace;
 use super::support::credential;
 use crate::runtime::{
-    credential_store::{CREDENTIAL_STORE_MAX_BYTES, CredentialStore, StoreLock},
+    credential_store::{CREDENTIAL_STORE_MAX_BYTES, CredentialStore},
     oauth_credential::{CredentialRecord, MAX_OAUTH_FIELD_BYTES, MAX_OAUTH_SECRET_BYTES},
     types::RuntimeError,
 };
@@ -14,10 +14,14 @@ use std::{
 #[test]
 fn credential_store_replaces_atomically_and_logout_is_local() {
     let workspace = empty_workspace("credential-store-lifecycle");
-    let path = workspace.join("credentials.json");
-    let foreign = workspace.join("foreign-client.json");
-    fs::write(&foreign, b"foreign").expect("foreign cache");
+    let parent = workspace.join("private");
+    let path = parent.join("credentials.json");
+    let foreign = parent.join("foreign-client.json");
     let store = CredentialStore::at(path);
+    store
+        .acquire_lock_for_test(|| Duration::ZERO, |_| {})
+        .expect("private credential parent initializes");
+    fs::write(&foreign, b"foreign").expect("foreign cache");
     let credential = credential(100);
 
     store
@@ -36,7 +40,7 @@ fn credential_store_replaces_atomically_and_logout_is_local() {
 #[test]
 fn credential_resolution_refreshes_near_expiry_under_the_store_lock() {
     let workspace = empty_workspace("credential-resolution-refresh");
-    let store = CredentialStore::at(workspace.join("credentials.json"));
+    let store = CredentialStore::at(workspace.join("private/credentials.json"));
     store
         .replace_with_clock(&credential(300_000), || Duration::ZERO, |_| {})
         .expect("near-expiry credential");
@@ -60,11 +64,10 @@ fn credential_resolution_refreshes_near_expiry_under_the_store_lock() {
     assert_eq!(store.read().expect("stored refresh"), Some(resolved));
 }
 
-#[cfg(any(unix, windows))]
 #[test]
 fn protected_credential_store_coordinates_the_end_to_end_lifecycle() {
     let workspace = empty_workspace("protected-credential-lifecycle");
-    let store = CredentialStore::protected_at(workspace.join("private/credentials.json"));
+    let store = CredentialStore::at(workspace.join("private/credentials.json"));
     let prior = credential(300_000);
     store
         .replace_with_clock(&prior, || Duration::ZERO, |_| {})
@@ -106,9 +109,10 @@ fn protected_credential_store_coordinates_the_end_to_end_lifecycle() {
 #[test]
 fn credential_store_rejects_malformed_and_oversized_documents() {
     let workspace = empty_workspace("credential-store-bounds");
-    let path = workspace.join("credentials.json");
+    let path = workspace.join("private/credentials.json");
     let store = CredentialStore::at(path.clone());
     assert_eq!(store.read().expect("missing store is empty"), None);
+    store.logout().expect("private empty document initializes");
 
     for document in [
         b"not-json".as_slice(),
@@ -152,7 +156,7 @@ fn credential_store_does_not_report_metadata_errors_as_absence() {
 #[test]
 fn credential_store_enforces_the_on_disk_size_limit_before_replacement() {
     let workspace = empty_workspace("credential-store-write-boundary");
-    let path = workspace.join("credentials.json");
+    let path = workspace.join("private/credentials.json");
     let store = CredentialStore::at(path.clone());
     let boundary = credential_with_document_len(CREDENTIAL_STORE_MAX_BYTES as usize - 1);
 
@@ -209,7 +213,7 @@ fn serialized_credential_document_len(credential: &CredentialRecord) -> usize {
 #[test]
 fn credential_resolution_requires_or_reuses_a_current_credential() {
     let workspace = empty_workspace("credential-resolution-current");
-    let store = CredentialStore::at(workspace.join("credentials.json"));
+    let store = CredentialStore::at(workspace.join("private/credentials.json"));
     let error = store
         .resolve_with_clock(
             1,
@@ -239,7 +243,7 @@ fn credential_resolution_requires_or_reuses_a_current_credential() {
 #[test]
 fn credential_refresh_failure_preserves_the_prior_record() {
     let workspace = empty_workspace("credential-refresh-failure");
-    let store = CredentialStore::at(workspace.join("credentials.json"));
+    let store = CredentialStore::at(workspace.join("private/credentials.json"));
     let prior = credential(100);
     store
         .replace_with_clock(&prior, || Duration::ZERO, |_| {})
@@ -276,33 +280,15 @@ fn credential_refresh_failure_preserves_the_prior_record() {
 
 #[test]
 fn credential_refresh_reuses_a_winner_after_lock_contention() {
-    assert_credential_refresh_reuses_a_winner_after_lock_contention(false);
-}
-
-#[cfg(any(unix, windows))]
-#[test]
-fn protected_credential_refresh_reuses_a_winner_after_lock_contention() {
-    assert_credential_refresh_reuses_a_winner_after_lock_contention(true);
-}
-
-fn assert_credential_refresh_reuses_a_winner_after_lock_contention(protected: bool) {
     let workspace = empty_workspace("credential-refresh-race-winner");
-    let path = if protected {
-        workspace.join("private/credentials.json")
-    } else {
-        workspace.join("credentials.json")
-    };
-    let lock = path.with_extension("lock");
-    let store = if protected {
-        CredentialStore::protected_at(path.clone())
-    } else {
-        CredentialStore::at(path.clone())
-    };
+    let path = workspace.join("private/credentials.json");
+    let store = CredentialStore::at(path.clone());
     store
         .replace_with_clock(&credential(300_000), || Duration::ZERO, |_| {})
         .expect("near-expiry credential stores");
     let held = RefCell::new(Some(
-        StoreLock::acquire(lock, protected, || Duration::ZERO, |_| {})
+        store
+            .acquire_lock_for_test(|| Duration::ZERO, |_| {})
             .expect("competing refresh lock acquires"),
     ));
     let winner = credential(900_000);

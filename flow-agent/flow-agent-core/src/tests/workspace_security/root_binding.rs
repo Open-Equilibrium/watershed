@@ -1,5 +1,3 @@
-#[cfg(windows)]
-use crate::tests::helpers::create_windows_junction;
 use crate::{
     runtime::{
         apply::{FlowApplication, apply_flow_with_sink},
@@ -19,7 +17,6 @@ use proto::{EventEnvelope, EventType};
 use std::{
     fs,
     path::{Path, PathBuf},
-    time::Instant,
 };
 
 fn replace_ambient_registry_text(workspace: &Path, path: &str, before: &str, after: &str) {
@@ -39,7 +36,6 @@ fn tool_dispatch_rejects_a_workspace_root_rebound_after_run_or_tool_start() {
         moved: PathBuf,
         outside: &'a Path,
         rebound: bool,
-        rebind_blocked: bool,
         trigger: EventType,
         workspace: &'a Path,
     }
@@ -50,10 +46,8 @@ fn tool_dispatch_rejects_a_workspace_root_rebound_after_run_or_tool_start() {
             event: &EventEnvelope,
             _canonical_jsonl: &str,
             _context_manifest: Option<ContextManifestCheckpoint>,
-            _measurement_started_at: Option<Instant>,
         ) -> Result<(), RuntimeError> {
             if !self.rebound
-                && !self.rebind_blocked
                 && event.event_type == self.trigger
                 && (self.trigger != EventType::ToolStarted
                     || event
@@ -62,13 +56,7 @@ fn tool_dispatch_rejects_a_workspace_root_rebound_after_run_or_tool_start() {
                         .and_then(serde_json::Value::as_str)
                         == Some("write-summary"))
             {
-                if let Err(source) = fs::rename(self.workspace, &self.moved) {
-                    if cfg!(windows) && source.raw_os_error() == Some(32) {
-                        self.rebind_blocked = true;
-                        return Ok(());
-                    }
-                    panic!("workspace root must move or be retained open: {source}");
-                }
+                fs::rename(self.workspace, &self.moved).expect("workspace root moves");
                 fs::rename(self.outside, self.workspace).expect("workspace root is rebound");
                 self.rebound = true;
             }
@@ -91,7 +79,6 @@ fn tool_dispatch_rejects_a_workspace_root_rebound_after_run_or_tool_start() {
             moved: moved.clone(),
             outside: &outside,
             rebound: false,
-            rebind_blocked: false,
             trigger,
             workspace: &workspace,
         };
@@ -118,17 +105,6 @@ fn tool_dispatch_rejects_a_workspace_root_rebound_after_run_or_tool_start() {
             Some(&mut sink),
         );
 
-        if sink.rebind_blocked {
-            assert!(
-                result.is_ok(),
-                "an OS-retained workspace root must remain dispatchable"
-            );
-            assert!(
-                !outside.join("out/summary.txt").exists(),
-                "outside workspace must remain untouched"
-            );
-            continue;
-        }
         assert!(
             sink.rebound,
             "{label} fixture must rebind the workspace root"
@@ -206,26 +182,14 @@ fn run_rejects_a_workspace_root_rebound_after_config_load() {
     let workspace_for_observer = workspace.to_path_buf();
     let outside_for_observer = outside.to_path_buf();
     let moved_for_observer = moved.clone();
-    let rebind_blocked = std::rc::Rc::new(std::cell::Cell::new(false));
-    let observer_rebind_blocked = rebind_blocked.clone();
     set_run_post_config_observer(move || {
-        if let Err(source) = fs::rename(&workspace_for_observer, &moved_for_observer) {
-            if cfg!(windows) && source.raw_os_error() == Some(32) {
-                observer_rebind_blocked.set(true);
-                return;
-            }
-            panic!("configured workspace root must move or be retained open: {source}");
-        }
+        fs::rename(&workspace_for_observer, &moved_for_observer)
+            .expect("configured workspace root moves");
         fs::rename(&outside_for_observer, &workspace_for_observer)
             .expect("workspace root is rebound after config load");
     });
 
     let result = run_flow(&workspace, "hello-flow", EmitMode::Jsonl);
-    if rebind_blocked.get() {
-        assert!(result.is_ok(), "OS-retained workspace remains runnable");
-        assert!(!outside.join("out/summary.txt").exists());
-        return;
-    }
     fs::rename(&*workspace, &*outside).expect("rebound workspace restores");
     fs::rename(&moved, &*workspace).expect("configured workspace restores");
 
@@ -240,47 +204,6 @@ fn run_rejects_a_workspace_root_rebound_after_config_load() {
     );
 }
 
-#[cfg(windows)]
-#[test]
-fn run_uses_the_retained_workspace_when_a_root_junction_is_transiently_rebound() {
-    let original = workspace_copy("hello-flow");
-    let rebound = workspace_copy("hello-flow");
-    replace_ambient_registry_text(
-        &rebound,
-        "tools/write-summary.yaml",
-        "printf '%s\\n' \"$SUMMARY\" > out/summary.txt",
-        "printf 'rebound\\n' > out/summary.txt",
-    );
-    let workspace = empty_workspace("transient-root-junction");
-    fs::remove_dir(&*workspace).expect("junction path starts absent");
-    create_windows_junction(&workspace, &original);
-
-    let workspace_for_rebind = workspace.to_path_buf();
-    let rebound_for_observer = rebound.to_path_buf();
-    set_run_post_config_observer(move || {
-        fs::remove_dir(&workspace_for_rebind).expect("original workspace junction removed");
-        create_windows_junction(&workspace_for_rebind, &rebound_for_observer);
-    });
-    let workspace_for_restore = workspace.to_path_buf();
-    let original_for_observer = original.to_path_buf();
-    set_run_pre_plan_observer(move || {
-        fs::remove_dir(&workspace_for_restore).expect("rebound workspace junction removed");
-        create_windows_junction(&workspace_for_restore, &original_for_observer);
-    });
-
-    let output = run_flow(&workspace, "hello-flow", EmitMode::Jsonl)
-        .expect("transient root rebind cannot replace capability-loaded definitions");
-
-    assert!(!output.failed);
-    assert_eq!(
-        fs::read_to_string(original.join("out/summary.txt")).expect("original output is readable"),
-        "hello\n"
-    );
-    assert!(!rebound.join("out/summary.txt").exists());
-    fs::remove_dir(&*workspace).expect("test junction removed");
-}
-
-#[cfg(unix)]
 #[test]
 fn run_uses_the_retained_workspace_when_the_root_is_transiently_rebound() {
     let workspace = workspace_copy("hello-flow");
@@ -321,7 +244,6 @@ fn run_uses_the_retained_workspace_when_the_root_is_transiently_rebound() {
     assert!(!rebound.join("out/summary.txt").exists());
 }
 
-#[cfg(unix)]
 #[test]
 fn run_retains_one_workspace_root_across_reservation_planning_and_apply() {
     let workspace = workspace_copy("hello-flow");

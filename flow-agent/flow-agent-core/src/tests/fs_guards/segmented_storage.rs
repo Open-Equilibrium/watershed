@@ -3,11 +3,11 @@ use crate::runtime::{
     conversations::read_anchored_jsonl,
     digest::sha256_hex,
     fs_guards::{
-        for_each_segmented_jsonl_line, open_runtime_dir, read_anchored_file_with_limit,
-        segmented_jsonl_files, segmented_jsonl_path,
-        with_segmented_jsonl_discovery_metrics_for_test,
+        for_each_segmented_jsonl_line, read_anchored_file_with_limit, segmented_jsonl_files,
+        segmented_jsonl_path, with_segmented_jsonl_discovery_metrics_for_test,
     },
     segmented_appender::SessionLogAppender,
+    session_store::open_runtime_dir,
     types::{
         CONTEXT_MANIFEST_STREAM_LIMITS, EVENT_STREAM_LIMITS, MAX_SESSION_OBJECT_BYTES,
         RuntimeError, SessionStreamLimits,
@@ -43,7 +43,7 @@ fn conversation_segment_discovery_has_constant_inventory_memory_and_one_pass() {
         "inventory retains at most one discovered path, observed {}",
         metrics.retained_path_peak
     );
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
 }
 #[test]
 fn segmented_stream_consumers_reject_high_ordinals_and_rollback_preserves_foreign_siblings() {
@@ -83,7 +83,7 @@ fn segmented_stream_consumers_reject_high_ordinals_and_rollback_preserves_foreig
             .diagnostic_path()
             .with_extension("JSONL");
         fs::write(&alias, b"\n").expect("case-aliased segment fixture writes");
-        reservation.rollback().expect("reservation rolls back");
+        reservation.release_lock().expect("reservation rolls back");
         assert_eq!(
             fs::read(high.diagnostic_path()).expect("foreign high segment remains"),
             b"\n",
@@ -102,7 +102,6 @@ fn segmented_stream_consumers_reject_high_ordinals_and_rollback_preserves_foreig
     }
 }
 
-#[cfg(any(unix, windows))]
 #[test]
 fn rotated_stream_segments_and_objects_reject_hardlinks() {
     for kind in ["event", "context", "object"] {
@@ -156,7 +155,7 @@ fn rotated_stream_segments_and_objects_reject_hardlinks() {
             matches!(err, RuntimeError::Protocol(message) if message.contains("hard-linked")),
             "{kind} hardlink was not rejected"
         );
-        reservation.rollback().expect("reservation rolls back");
+        reservation.release_lock().expect("reservation rolls back");
         drop(reservation);
         fs::remove_dir_all(workspace).expect("workspace removed");
     }
@@ -196,7 +195,7 @@ fn segmented_stream_rejects_invalid_ordinal_layouts() {
         let err = segmented_jsonl_files(&reservation.session_path, EVENT_STREAM_LIMITS)
             .expect_err("invalid segment layout is rejected");
         assert!(err.to_string().contains(expected), "{err}");
-        reservation.rollback().expect("reservation rolls back");
+        reservation.release_lock().expect("reservation rolls back");
         drop(reservation);
         fs::remove_dir_all(workspace).expect("invalid segment workspace removed");
     }
@@ -221,7 +220,7 @@ fn segmented_stream_rejects_malformed_reserved_names() {
         let err = segmented_jsonl_files(&reservation.session_path, EVENT_STREAM_LIMITS)
             .expect_err("malformed reserved segment name is rejected");
         assert!(err.to_string().contains("malformed"), "{suffix}: {err}");
-        reservation.rollback().expect("reservation rolls back");
+        reservation.release_lock().expect("reservation rolls back");
     }
 }
 
@@ -244,7 +243,7 @@ fn segmented_stream_rejects_case_aliased_names() {
                 .to_string_lossy()
                 .to_ascii_uppercase(),
         );
-        if base_alias && cfg!(any(windows, target_os = "macos")) {
+        if base_alias && cfg!(target_os = "macos") {
             fs::rename(canonical.diagnostic_path(), &alias).expect("case-aliased base renamed");
         } else {
             fs::write(&alias, b"\n").expect("case-aliased stream file written");
@@ -256,7 +255,7 @@ fn segmented_stream_rejects_case_aliased_names() {
             err.to_string().contains("non-canonical"),
             "base_alias={base_alias}: {err}"
         );
-        reservation.rollback().expect("reservation rolls back");
+        reservation.release_lock().expect("reservation rolls back");
     }
 }
 
@@ -297,7 +296,7 @@ fn segmented_stream_rejects_non_ascii_stems() {
     assert!(err.to_string().contains("ASCII"), "{err}");
 
     fs::remove_file(base.diagnostic_path()).expect("non-ASCII base removes");
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
 }
 
 #[test]
@@ -322,7 +321,7 @@ fn segmented_stream_callbacks_do_not_observe_bytes_beyond_total_limit() {
 
     assert!(err.to_string().contains("exceeds max"), "{err}");
     assert_eq!(visited, vec!["one\n"]);
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
 }
 
 #[test]
@@ -348,7 +347,7 @@ fn segmented_stream_callbacks_reject_unterminated_non_final_segment() {
         "{stream_err}"
     );
     assert!(visited.is_empty());
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
 }
 
 #[test]
@@ -372,5 +371,5 @@ fn segmented_stream_callbacks_reject_empty_non_final_segment() {
         "{stream_err}"
     );
     assert!(visited.is_empty());
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
 }

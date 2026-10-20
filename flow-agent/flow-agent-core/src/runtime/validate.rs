@@ -1,9 +1,7 @@
 mod lifecycle;
 
+use lifecycle::SessionLifecycleState;
 pub(crate) use lifecycle::lifecycle_payload_string;
-#[cfg(test)]
-pub use lifecycle::stream_is_completed;
-use lifecycle::{SessionLifecycleState, SessionWireFormat};
 
 use crate::runtime::types::{
     MAX_CANONICAL_EVENT_BYTES, MAX_FLOW_EVENTS, MAX_FLOW_INVOCATIONS, MAX_SESSION_EVENT_BYTES,
@@ -67,12 +65,15 @@ pub struct SessionAppendValidationState {
     pub(crate) stream_bytes: usize,
     pub(crate) line_count: usize,
     pub(crate) lifecycle: SessionLifecycleState,
-    pub(crate) wire_format: Option<SessionWireFormat>,
 }
 
 impl SessionAppendValidationState {
-    pub(crate) fn unscoped() -> Self {
+    fn unscoped() -> Self {
         Self::new(None)
+    }
+
+    pub(crate) fn tool_without_progress(&self) -> Option<&str> {
+        self.lifecycle.tool_without_progress()
     }
 
     pub(crate) fn empty(expected_session_id: &str) -> Self {
@@ -90,12 +91,7 @@ impl SessionAppendValidationState {
             stream_bytes: 0,
             line_count: 0,
             lifecycle: SessionLifecycleState::default(),
-            wire_format: None,
         }
-    }
-
-    pub(crate) fn tool_without_progress(&self) -> Option<&str> {
-        self.lifecycle.tool_without_progress()
     }
 
     #[cfg(test)]
@@ -194,7 +190,7 @@ impl SessionAppendValidationState {
         Ok(())
     }
 
-    pub(crate) fn validate_budget(
+    fn validate_budget(
         &self,
         path: &Path,
         line_number: usize,
@@ -295,22 +291,7 @@ impl SessionAppendValidationState {
                 path.display()
             )));
         }
-        let event_format = SessionWireFormat::marker(event);
-        if let (Some(stream_format), Some(event_format)) = (self.wire_format, event_format)
-            && stream_format != event_format
-        {
-            return Err(RuntimeError::Protocol(format!(
-                "{} line {line_number} {} mixes current and M1 legacy event formats",
-                path.display(),
-                event.event_type.as_str()
-            )));
-        }
-        let wire_format = self
-            .wire_format
-            .or(event_format)
-            .unwrap_or(SessionWireFormat::Current);
-        self.lifecycle
-            .validate_event(path, line_number, event, wire_format)?;
+        self.lifecycle.validate_event(path, line_number, event)?;
         if matches!(
             event.event_type,
             EventType::SessionCompleted | EventType::SessionFailed
@@ -343,14 +324,7 @@ impl SessionAppendValidationState {
         }
         self.stream_session_id
             .get_or_insert_with(|| event.session_id.clone());
-        let wire_format = self
-            .wire_format
-            .or_else(|| SessionWireFormat::marker(event))
-            .unwrap_or(SessionWireFormat::Current);
-        self.lifecycle.record_event(line_number, event, wire_format);
-        if self.wire_format.is_none() {
-            self.wire_format = SessionWireFormat::marker(event);
-        }
+        self.lifecycle.record_event(line_number, event);
         if matches!(
             event.event_type,
             EventType::SessionCompleted | EventType::SessionFailed

@@ -10,7 +10,7 @@ use std::{thread, time::Instant};
 
 #[cfg(test)]
 pub(crate) use browser::{
-    BrowserLauncher, build_authorize_url, read_loopback_callback, read_loopback_callback_until,
+    build_authorize_url, read_loopback_callback, read_loopback_callback_until,
     run_browser_login_with_components, system_browser_launcher, write_loopback_response,
 };
 #[cfg(test)]
@@ -27,8 +27,9 @@ pub(crate) use protocol::{
 };
 #[cfg(test)]
 pub(crate) use transport::{
-    exchange_authorization_code_body_with_transport, post_json_with_deadlines,
-    refresh_credential_with_transport, send_auth_request_async,
+    exchange_authorization_code_at, exchange_authorization_code_body_with_transport,
+    post_json_with_deadlines, refresh_credential_at, refresh_credential_with_transport,
+    send_auth_request_async,
 };
 
 pub(crate) const MAX_OAUTH_CALLBACK_HTTP_HEAD_BYTES: usize = 16_384;
@@ -115,11 +116,7 @@ pub(crate) fn auth_status_from_store(store: &CredentialStore) -> Result<AuthStat
 
 /// Removes only Flow Agent's local OpenAI Codex credential record.
 pub fn logout_openai_codex() -> Result<bool, RuntimeError> {
-    logout_from_store(&CredentialStore::platform_default()?)
-}
-
-pub(crate) fn logout_from_store(store: &CredentialStore) -> Result<bool, RuntimeError> {
-    store.logout()
+    CredentialStore::platform_default()?.logout()
 }
 
 pub(crate) fn resolve_openai_codex_credential() -> Result<CredentialRecord, RuntimeError> {

@@ -6,7 +6,3 @@ tool:
     command_id: agent-negative
     argv: ["symlink"]
   allowed_parameters: []
-  read_scope: ["workspace"]
-  write_scope: ["workspace/links"]
-  protected_path_grants: []
-  network: deny

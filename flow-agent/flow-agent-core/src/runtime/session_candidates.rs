@@ -89,6 +89,9 @@ fn classify_session_candidate_leaf<'a>(
     name: &'a str,
     canonical: bool,
 ) -> Option<(&'a str, SessionCandidateHint)> {
+    if proto::is_valid_session_id(name) {
+        return Some((name, SessionCandidateHint::Occupied));
+    }
     if let Some(id) = SessionBundlePaths::split_lock_leaf(name) {
         let hint = match dir.file(name).metadata() {
             Ok(metadata) if !metadata.file_type().is_symlink() => SessionCandidateHint::Occupied,
@@ -104,7 +107,7 @@ fn classify_session_candidate_leaf<'a>(
     if let Some(id) = segmented_candidate_id(name, false) {
         return Some((id, SessionCandidateHint::Occupied));
     }
-    SessionBundlePaths::split_events_leaf(name).map(|id| {
+    segmented_jsonl_leaf_stem(name).map(|id| {
         let hint = if canonical {
             SessionCandidateHint::Probe
         } else {
@@ -136,7 +139,7 @@ fn generated_suffix_candidate_index(base_session_id: &str, session_id: &str) -> 
 
 pub fn suffixed_session_id(base_session_id: &str, ordinal: u32) -> String {
     let suffix = format!("-{ordinal}");
-    let prefix_len = 128usize.saturating_sub(suffix.len());
+    let prefix_len = proto::MAX_SESSION_ID_BYTES.saturating_sub(suffix.len());
     let prefix = if base_session_id.len() > prefix_len {
         &base_session_id[..prefix_len]
     } else {

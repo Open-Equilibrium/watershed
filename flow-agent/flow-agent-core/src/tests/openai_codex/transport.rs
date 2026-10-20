@@ -4,13 +4,13 @@ use super::super::deadlines::{
 };
 use crate::runtime::deadlines::{HttpDeadlines, RESPONSES_HTTP_DEADLINES, build_http_client};
 use crate::runtime::openai_codex::{
-    request_responses_async, request_responses_at,
     request_responses_at_with_deadlines_and_cancellation, request_responses_with_client_async,
 };
+use crate::runtime::productive::OpenAiCodexProvider;
 use crate::runtime::responses::{MAX_RESPONSES_DECODED_STREAM_BYTES, MAX_RESPONSES_LINE_BYTES};
 use crate::runtime::types::RuntimeError;
 use std::io::{Read, Write};
-use std::net::TcpListener;
+use std::net::{TcpListener, TcpStream};
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
@@ -34,7 +34,10 @@ fn productive_http_dispatch_uses_the_pinned_headers_and_no_retry() {
     let credential = fixture_credential_with_routing(None);
     let access = credential.access.clone();
     let listener = TcpListener::bind("127.0.0.1:0").expect("fake provider binds");
-    let endpoint = format!("http://{}/responses", listener.local_addr().unwrap());
+    let endpoint = format!(
+        "http://localhost:{}/responses",
+        listener.local_addr().unwrap().port()
+    );
     let server = thread::spawn(move || {
         let (mut stream, _) = listener.accept().expect("one provider request");
         let mut request = vec![0_u8; 16 * 1024];
@@ -62,12 +65,13 @@ fn productive_http_dispatch_uses_the_pinned_headers_and_no_retry() {
         );
         write_sse_response(&mut stream, body);
     });
-    let turn = request_responses_at(
-        &endpoint,
-        &credential,
-        &serde_json::json!({"model":"fixture"}),
-    )
-    .expect("one request completes");
+    let turn = OpenAiCodexProvider::default()
+        .turn_at(
+            &endpoint,
+            &credential,
+            &serde_json::json!({"model":"fixture"}),
+        )
+        .expect("one request completes");
     assert_eq!(turn.output_text, "ok");
     server.join().expect("fake provider completes");
 }
@@ -94,13 +98,127 @@ fn productive_http_dispatch_routes_fedramp_accounts() {
         write_sse_response(&mut stream, body);
     });
 
-    request_responses_at(
-        &endpoint,
-        &fixture_credential_with_routing(Some(true)),
-        &serde_json::json!({"model":"fixture"}),
-    )
-    .expect("FedRAMP request completes");
+    OpenAiCodexProvider::default()
+        .turn_at(
+            &endpoint,
+            &fixture_credential_with_routing(Some(true)),
+            &serde_json::json!({"model":"fixture"}),
+        )
+        .expect("FedRAMP request completes");
     server.join().expect("fake provider completes");
+}
+
+#[test]
+fn productive_provider_reuses_completed_connections_with_request_local_headers() {
+    fn read_request(stream: &mut TcpStream) -> std::io::Result<String> {
+        let mut request = Vec::new();
+        while !request.ends_with(b"\r\n\r\n") {
+            let mut byte = [0];
+            stream.read_exact(&mut byte)?;
+            request.push(byte[0]);
+            assert!(request.len() <= 16 * 1024, "fixture headers are bounded");
+        }
+        let headers = String::from_utf8(request).expect("fixture request headers are UTF-8");
+        let content_length = headers
+            .lines()
+            .find_map(|line| {
+                line.to_ascii_lowercase()
+                    .strip_prefix("content-length: ")
+                    .map(|length| length.parse::<usize>().expect("fixture content length"))
+            })
+            .expect("fixture request has a content length");
+        assert!(content_length <= 4096, "fixture body is bounded");
+        let mut body = vec![0; content_length];
+        stream.read_exact(&mut body)?;
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&body).expect("fixture JSON body"),
+            serde_json::json!({"model":"fixture"})
+        );
+        Ok(headers)
+    }
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("fake provider binds");
+    let endpoint = format!("http://{}/responses", listener.local_addr().unwrap());
+    let (release_sender, release_receiver) = mpsc::channel();
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("first provider request connects");
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .expect("fixture deadlock guard is set");
+        let mut connections = 1;
+        let mut requests = Vec::new();
+        for turn in 1..=2 {
+            let request = match read_request(&mut stream) {
+                Ok(request) => request,
+                Err(error) if turn == 2 && error.kind() == std::io::ErrorKind::UnexpectedEof => {
+                    (stream, _) = listener.accept().expect("second provider request connects");
+                    stream
+                        .set_read_timeout(Some(Duration::from_secs(5)))
+                        .expect("fixture deadlock guard is set");
+                    connections += 1;
+                    read_request(&mut stream).expect("second request reads")
+                }
+                Err(error) => panic!("fixture request failed: {error}"),
+            };
+            requests.push(request);
+            let body = format!(
+                "data:{{\"type\":\"response.created\",\"response\":{{\"id\":\"resp_{turn}\"}}}}\n\n\
+                 data:{{\"type\":\"response.output_text.delta\",\"delta\":\"turn {turn}\"}}\n\n\
+                 data:{{\"type\":\"response.completed\",\"response\":{{\"id\":\"resp_{turn}\"}}}}\n\n\
+                 data:[DONE]\n\n"
+            );
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: keep-alive\r\n\r\n{}",
+                body.len(),
+                body
+            )
+            .expect("complete keep-alive response writes");
+            stream.flush().expect("complete response flushes");
+        }
+        release_receiver
+            .recv_timeout(Duration::from_secs(5))
+            .expect("both provider turns complete while the connection stays open");
+        (connections, requests)
+    });
+
+    let mut provider = OpenAiCodexProvider::default();
+    for turn in 1..=2 {
+        let mut credential = fixture_credential_with_routing(Some(turn == 1));
+        credential.access = format!("access-fixture-{turn}");
+        credential.account_id = format!("account-fixture-{turn}");
+        let response = provider
+            .turn_at(
+                &endpoint,
+                &credential,
+                &serde_json::json!({"model":"fixture"}),
+            )
+            .expect("fully completed provider turn succeeds");
+        assert_eq!(response.output_text, format!("turn {turn}"));
+    }
+    release_sender
+        .send(())
+        .expect("fixture connection can close");
+    let (connections, requests) = server.join().expect("fake provider completes");
+    assert_eq!(requests.len(), 2, "each turn sends exactly one request");
+    for (index, request) in requests.iter().enumerate() {
+        let turn = index + 1;
+        assert!(request.starts_with("POST /responses HTTP/1.1\r\n"));
+        let headers = request.to_ascii_lowercase();
+        assert!(headers.contains(&format!("authorization: bearer access-fixture-{turn}\r\n")));
+        assert!(headers.contains(&format!("chatgpt-account-id: account-fixture-{turn}\r\n")));
+        assert!(headers.contains("originator: flow-agent\r\n"));
+        assert!(headers.contains("accept: text/event-stream\r\n"));
+        assert!(headers.contains(&format!(
+            "user-agent: flow-agent/{}\r\n",
+            env!("CARGO_PKG_VERSION")
+        )));
+        assert_eq!(headers.contains("x-openai-fedramp: true\r\n"), turn == 1);
+    }
+    assert_eq!(
+        connections, 1,
+        "completed turns reuse the provider's HTTP connection"
+    );
 }
 
 #[test]
@@ -131,7 +249,8 @@ fn productive_http_dispatch_enforces_the_decoded_stream_budget() {
         }
     });
 
-    let error = request_responses_at(&endpoint, &fixture_credential(), &serde_json::json!({}))
+    let error = OpenAiCodexProvider::default()
+        .turn_at(&endpoint, &fixture_credential(), &serde_json::json!({}))
         .expect_err("aggregate decoded stream is bounded");
     assert!(
         error.to_string().contains("decoded response stream"),
@@ -158,7 +277,8 @@ fn definitive_http_failure_reports_status_and_bounded_provider_message() {
         .expect("provider error writes");
     });
 
-    let error = request_responses_at(&endpoint, &fixture_credential(), &serde_json::json!({}))
+    let error = OpenAiCodexProvider::default()
+        .turn_at(&endpoint, &fixture_credential(), &serde_json::json!({}))
         .expect_err("provider rejection is definitive");
     let message = error.to_string();
     let provider_message = message
@@ -184,12 +304,13 @@ fn productive_http_dispatch_rejects_a_missing_terminal_sentinel() {
         write_sse_response(&mut stream, body);
     });
 
-    let error = request_responses_at(
-        &endpoint,
-        &fixture_credential(),
-        &serde_json::json!({"model":"fixture"}),
-    )
-    .expect_err("missing terminal sentinel fails");
+    let error = OpenAiCodexProvider::default()
+        .turn_at(
+            &endpoint,
+            &fixture_credential(),
+            &serde_json::json!({"model":"fixture"}),
+        )
+        .expect_err("missing terminal sentinel fails");
     assert!(error.to_string().contains("terminal sentinel"));
     server.join().expect("fake provider completes");
 }
@@ -409,7 +530,8 @@ fn responses_overall_deadline() {
     let cancelled = AtomicBool::new(false);
     block_on_paused_network(async {
         let request = tokio::spawn(async move {
-            request_responses_async(
+            request_responses_with_client_async(
+                build_http_client(RESPONSES_HTTP_DEADLINES).expect("Responses client builds"),
                 &endpoint,
                 &credential,
                 &body,
@@ -432,7 +554,7 @@ fn responses_overall_deadline() {
         for _ in 0..17 {
             tokio::time::advance(Duration::from_secs(100)).await;
             send_scripted_http_bytes(&writes, &written, ": progress\n\n");
-            assert_pending(&request).await;
+            settle_pending(&request).await;
         }
         tokio::time::advance(Duration::from_secs(100) - Duration::from_nanos(1)).await;
         assert_pending(&request).await;

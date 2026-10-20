@@ -4,11 +4,19 @@ use super::super::helpers::{
 use super::{create_review_run, file_tree_bytes};
 use crate::runtime::{
     context::ContextObject,
-    conversations::{RunObjectStore, RunObjectUsageSnapshot},
+    conversations::{
+        RunObjectReadStage, RunObjectStore, RunObjectUsageSnapshot,
+        with_run_object_read_observer_for_test,
+    },
     digest::sha256_hex,
+    types::MAX_SESSION_OBJECT_BYTES,
 };
 use std::{
+    cell::Cell,
     fs::{self},
+    io::Write,
+    path::Path,
+    rc::Rc,
     sync::{Arc, Barrier},
     thread,
 };
@@ -207,5 +215,199 @@ fn reopened_run_object_store_closes_after_existing_object_verification_fails() {
     assert!(
         reopened.usage_snapshot().is_err(),
         "the store remains closed after integrity failure"
+    );
+}
+
+fn read_with_object_growth<T>(
+    object_path: &Path,
+    appended: &'static [u8],
+    operation: impl FnOnce() -> T,
+) -> (T, usize) {
+    let object_path = fs::canonicalize(object_path).expect("the fixture object path resolves");
+    let admitted = Rc::new(Cell::new(false));
+    let retained = Rc::new(Cell::new(None));
+    let result = with_run_object_read_observer_for_test(
+        {
+            let admitted = Rc::clone(&admitted);
+            let retained = Rc::clone(&retained);
+            move |path, stage| {
+                assert_eq!(path, object_path);
+                match stage {
+                    RunObjectReadStage::Admitted => {
+                        assert!(!admitted.replace(true), "the read is admitted once");
+                        fs::OpenOptions::new()
+                            .append(true)
+                            .open(path)
+                            .expect("the admitted fixture object opens")
+                            .write_all(appended)
+                            .expect("the opened fixture object grows");
+                    }
+                    RunObjectReadStage::Retained(bytes) => {
+                        assert!(retained.replace(Some(bytes)).is_none());
+                    }
+                }
+            }
+        },
+        operation,
+    );
+    assert!(admitted.get(), "growth occurs after read admission");
+    (
+        result,
+        retained
+            .get()
+            .expect("the owner observes its retained bytes"),
+    )
+}
+
+#[test]
+fn existing_run_object_reuse_bounds_reads_after_open_growth() {
+    let workspace = empty_workspace("run-object-reuse-growth");
+    create_review_run(&workspace);
+    let object = ContextObject {
+        digest: sha256_hex(b"durable object"),
+        bytes: b"durable object".to_vec(),
+    };
+    let unpublished = ContextObject {
+        digest: sha256_hex(b"unpublished object"),
+        bytes: b"unpublished object".to_vec(),
+    };
+    let uri = format!("session-object:sha256:{}", object.digest);
+    let store =
+        RunObjectStore::open(&workspace, "review", "review-1").expect("the object store opens");
+    store
+        .persist(std::slice::from_ref(&object))
+        .expect("the object persists");
+    let before = store.usage_snapshot().expect("initial usage reads");
+    let objects = workspace_session_dir(&workspace).join("review/runs/review-1/objects");
+    let object_path = objects.join(&object.digest);
+
+    let (result, retained) =
+        read_with_object_growth(&object_path, b"unexpected appended bytes", || {
+            store.persist(&[object.clone(), unpublished.clone()])
+        });
+
+    let error = result.expect_err("growing an existing object must fail exact verification");
+    assert!(error.to_string().contains("does not match its digest"));
+    assert!(
+        retained <= object.bytes.len() + 1,
+        "existing reuse retained {retained} bytes beyond the expected-length sentinel"
+    );
+    assert!(!objects.join(&unpublished.digest).exists());
+    assert_eq!(
+        fs::read_dir(&objects)
+            .expect("object inventory reads")
+            .count(),
+        1
+    );
+    fs::write(&object_path, &object.bytes).expect("the fixture restores its original object");
+    assert!(
+        store
+            .read(&uri)
+            .expect_err("reuse failure closes reads")
+            .to_string()
+            .contains("closed")
+    );
+    assert!(
+        store
+            .persist(std::slice::from_ref(&unpublished))
+            .expect_err("reuse failure closes nonempty persistence")
+            .to_string()
+            .contains("closed")
+    );
+    assert!(
+        store.usage_snapshot().is_err(),
+        "reuse failure closes usage reporting"
+    );
+    let reopened = RunObjectStore::open(&workspace, "review", "review-1")
+        .expect("the restored inventory reopens");
+    assert_eq!(
+        reopened.usage_snapshot().expect("restored usage reads"),
+        before
+    );
+    assert_eq!(
+        reopened.read(&uri).expect("the original object reads"),
+        object.bytes
+    );
+}
+
+#[test]
+fn run_object_reader_rejects_growth_sentinel_and_remains_retryable() {
+    let workspace = empty_workspace("run-object-read-growth");
+    create_review_run(&workspace);
+    let limit = usize::try_from(MAX_SESSION_OBJECT_BYTES).expect("the object bound fits usize");
+    let boundary_bytes = vec![b'x'; limit];
+    let boundary = ContextObject {
+        digest: sha256_hex(&boundary_bytes),
+        bytes: boundary_bytes,
+    };
+    let boundary_uri = format!("session-object:sha256:{}", boundary.digest);
+    let store =
+        RunObjectStore::open(&workspace, "review", "review-1").expect("the object store opens");
+    store
+        .persist(std::slice::from_ref(&boundary))
+        .expect("the exact-limit object persists");
+    assert!(
+        store
+            .read(&boundary_uri)
+            .expect("the exact-limit object reads")
+            == boundary.bytes
+    );
+    drop(store);
+    let mut future_bytes = boundary.bytes.clone();
+    future_bytes.push(b'!');
+    let future_digest = sha256_hex(&future_bytes);
+    drop(future_bytes);
+    let future_uri = format!("session-object:sha256:{future_digest}");
+    let future_path = workspace_session_dir(&workspace)
+        .join("review/runs/review-1/objects")
+        .join(&future_digest);
+    fs::write(&future_path, &boundary.bytes)
+        .expect("the future-digest fixture is short during metadata admission");
+    let store = RunObjectStore::open(&workspace, "review", "review-1")
+        .expect("the bounded metadata inventory opens");
+    let before = store.usage_snapshot().expect("initial reader usage reads");
+
+    let (result, retained) =
+        read_with_object_growth(&future_path, b"!", || store.read(&future_uri));
+
+    assert_eq!(
+        retained,
+        limit + 1,
+        "the owner retains only its overflow sentinel"
+    );
+    let Err(error) = result else {
+        panic!("matching oversized content must fail byte admission");
+    };
+    assert!(error.to_string().contains("exceeds its byte limit"));
+    assert_eq!(
+        store
+            .usage_snapshot()
+            .expect("read failure leaves the writer open"),
+        before
+    );
+    fs::write(&future_path, &boundary.bytes).expect("the fixture restores admitted length");
+    let Err(error) = store.read(&future_uri) else {
+        panic!("equal-size wrong-digest content fails");
+    };
+    assert!(error.to_string().contains("does not match its URI digest"));
+    assert!(
+        store
+            .read(&boundary_uri)
+            .expect("a valid read still succeeds")
+            == boundary.bytes
+    );
+    let retry = ContextObject {
+        digest: sha256_hex(b"retry"),
+        bytes: b"retry".to_vec(),
+    };
+    store
+        .persist(std::slice::from_ref(&retry))
+        .expect("read failures do not close persistence");
+    assert_eq!(
+        store.usage_snapshot().expect("retry usage reads"),
+        RunObjectUsageSnapshot {
+            object_bytes: before.object_bytes + u64::try_from(retry.bytes.len()).unwrap(),
+            object_count: before.object_count + 1,
+        }
     );
 }

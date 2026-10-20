@@ -189,6 +189,20 @@ fn productive_recovery_reader_rejects_every_invalid_record_identity() {
             "timestamp": timestamp
         })
     };
+    let phase = |field: &str, value: serde_json::Value| {
+        let mut record = serde_json::json!({
+            "flow_execution_id": "flow-exec-1",
+            "iteration": 1,
+            "phase_execution_id": "phase-exec-1",
+            "phase_id": "phase",
+            "record_type": "phase",
+            "result_object": object,
+            "schema": "flow-productive-recovery-v0",
+            "will_repeat": false
+        });
+        record[field] = value;
+        record
+    };
     for (name, record) in [
         (
             "recovery-invalid-provider-attempt",
@@ -228,68 +242,23 @@ fn productive_recovery_reader_rejects_every_invalid_record_identity() {
         ),
         (
             "recovery-invalid-phase-flow-execution",
-            serde_json::json!({
-                "flow_execution_id": "INVALID",
-                "iteration": 1,
-                "phase_execution_id": "phase-exec-1",
-                "phase_id": "phase",
-                "record_type": "phase",
-                "result_object": object,
-                "schema": "flow-productive-recovery-v0",
-                "will_repeat": false
-            }),
+            phase("flow_execution_id", serde_json::json!("INVALID")),
         ),
         (
             "recovery-invalid-phase-execution",
-            serde_json::json!({
-                "flow_execution_id": "flow-exec-1",
-                "iteration": 1,
-                "phase_execution_id": "INVALID",
-                "phase_id": "phase",
-                "record_type": "phase",
-                "result_object": object,
-                "schema": "flow-productive-recovery-v0",
-                "will_repeat": false
-            }),
+            phase("phase_execution_id", serde_json::json!("INVALID")),
         ),
         (
             "recovery-invalid-phase-id",
-            serde_json::json!({
-                "flow_execution_id": "flow-exec-1",
-                "iteration": 1,
-                "phase_execution_id": "phase-exec-1",
-                "phase_id": "../phase",
-                "record_type": "phase",
-                "result_object": object,
-                "schema": "flow-productive-recovery-v0",
-                "will_repeat": false
-            }),
+            phase("phase_id", serde_json::json!("../phase")),
         ),
         (
             "recovery-invalid-phase-iteration",
-            serde_json::json!({
-                "flow_execution_id": "flow-exec-1",
-                "iteration": 0,
-                "phase_execution_id": "phase-exec-1",
-                "phase_id": "phase",
-                "record_type": "phase",
-                "result_object": object,
-                "schema": "flow-productive-recovery-v0",
-                "will_repeat": false
-            }),
+            phase("iteration", serde_json::json!(0)),
         ),
         (
             "recovery-invalid-phase-object",
-            serde_json::json!({
-                "flow_execution_id": "flow-exec-1",
-                "iteration": 1,
-                "phase_execution_id": "phase-exec-1",
-                "phase_id": "phase",
-                "record_type": "phase",
-                "result_object": "object:wrong",
-                "schema": "flow-productive-recovery-v0",
-                "will_repeat": false
-            }),
+            phase("result_object", serde_json::json!("object:wrong")),
         ),
         (
             "recovery-invalid-transition-flow-execution",

@@ -1,7 +1,4 @@
-use super::{
-    MAX_TOOL_EXEC_BYTES, MAX_TOOL_EXEC_ENTRIES, OWN_SCRIPT_EXECUTABLE, ToolInvocation,
-    ToolRunnerError,
-};
+use super::{ToolInvocation, ToolRunnerError};
 use std::collections::BTreeMap;
 
 pub(crate) fn build_tool_invocation(
@@ -15,7 +12,9 @@ pub(crate) fn build_tool_invocation(
         ) => {
             let command = core_policy::TrustedPredefinedCommand::parse(command_id)
                 .ok_or(ToolRunnerError::UnsupportedCommand)?;
-            let executable = resolve_predefined_executable(command)?;
+            let executable = command
+                .productive_executable()
+                .ok_or(ToolRunnerError::UnsupportedCommand)?;
             let mut rendered = argv.clone();
             let parameter_alias = (command == core_policy::TrustedPredefinedCommand::Read)
                 .then_some(("--file", "--"));
@@ -39,7 +38,7 @@ pub(crate) fn build_tool_invocation(
             ];
             argv.extend(parameter_tokens);
             ToolInvocation {
-                executable: OWN_SCRIPT_EXECUTABLE.to_owned(),
+                executable: proto::EXECUTOR_OWN_SCRIPT_EXECUTABLE_V0.to_owned(),
                 argv,
             }
         }
@@ -47,16 +46,6 @@ pub(crate) fn build_tool_invocation(
     };
     validate_tool_invocation(&invocation)?;
     Ok(invocation)
-}
-
-fn resolve_predefined_executable(
-    command: core_policy::TrustedPredefinedCommand,
-) -> Result<&'static str, ToolRunnerError> {
-    match command {
-        core_policy::TrustedPredefinedCommand::Echo => Ok("/bin/echo"),
-        core_policy::TrustedPredefinedCommand::Read => Ok("/bin/cat"),
-        core_policy::TrustedPredefinedCommand::Negative => Err(ToolRunnerError::UnsupportedCommand),
-    }
 }
 
 fn render_tool_parameters(
@@ -194,43 +183,26 @@ fn validate_text_bounds(
 }
 
 pub(crate) fn validate_tool_invocation(invocation: &ToolInvocation) -> Result<(), ToolRunnerError> {
-    if invocation.executable.contains('\0')
-        || invocation.argv.iter().any(|value| value.contains('\0'))
-    {
-        return Err(ToolRunnerError::NulByte);
-    }
-    let entries = invocation.argv.len().saturating_add(1);
-    if entries > MAX_TOOL_EXEC_ENTRIES {
-        return Err(ToolRunnerError::ExecEntryBudget { actual: entries });
-    }
-    let bytes = encoded_exec_vector_bytes(invocation)?;
-    if bytes > MAX_TOOL_EXEC_BYTES {
-        return Err(ToolRunnerError::ExecByteBudget { actual: bytes });
-    }
-    Ok(())
+    encoded_exec_vector_bytes(invocation).map(|_| ())
 }
 
 pub(crate) fn encoded_exec_vector_bytes(
     invocation: &ToolInvocation,
 ) -> Result<usize, ToolRunnerError> {
-    let entries = invocation
-        .argv
-        .len()
-        .checked_add(1)
-        .ok_or(ToolRunnerError::ExecEntryBudget { actual: usize::MAX })?;
-    let string_bytes = std::iter::once(invocation.executable.as_str())
-        .chain(invocation.argv.iter().map(String::as_str))
-        .try_fold(0usize, |total, value| {
-            total.checked_add(value.len().checked_add(1)?)
-        })
-        .ok_or(ToolRunnerError::ExecByteBudget { actual: usize::MAX })?;
-    let pointer_bytes = entries
-        .checked_add(2)
-        .and_then(|count| count.checked_mul(std::mem::size_of::<usize>()))
-        .ok_or(ToolRunnerError::ExecByteBudget { actual: usize::MAX })?;
-    string_bytes
-        .checked_add(pointer_bytes)
-        .ok_or(ToolRunnerError::ExecByteBudget { actual: usize::MAX })
+    proto::validate_executor_exec_vector_v0(
+        &invocation.executable,
+        &invocation.argv,
+        &BTreeMap::new(),
+    )
+    .map_err(|error| match error {
+        proto::ExecutorExecVectorErrorV0::NulByte => ToolRunnerError::NulByte,
+        proto::ExecutorExecVectorErrorV0::EntryBudget { actual } => {
+            ToolRunnerError::ExecEntryBudget { actual }
+        }
+        proto::ExecutorExecVectorErrorV0::ByteBudget { actual } => {
+            ToolRunnerError::ExecByteBudget { actual }
+        }
+    })
 }
 
 fn invalid_parameter(message: impl Into<String>) -> ToolRunnerError {

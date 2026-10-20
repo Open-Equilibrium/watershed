@@ -1,6 +1,6 @@
 use super::super::{M11BudgetOutcome, authoring::maximum_id, outcome};
 use crate::runtime::conversations::{
-    CONVERSATION_ENTRY_SCHEMA_V0, CONVERSATION_HISTORY_LEAF, CONVERSATION_RUNS_DIR,
+    CONVERSATION_ENTRY_SCHEMA_V1, CONVERSATION_HISTORY_LEAF, CONVERSATION_RUNS_DIR,
     CONVERSATION_STATUS_LEAF, ConversationEntry, ConversationEntryType, ConversationStatusSummary,
     MAX_CONVERSATION_STATUS_BYTES, MAX_CONVERSATION_STATUS_RECORDS, RUN_LOG_LEAF,
     STATUS_SUMMARY_SCHEMA, canonical_json, conversation_status_page,
@@ -29,10 +29,10 @@ pub(in crate::runtime::m11_budget_evidence) fn conversation_status_page_workload
         write_jsonl_record(
             &conversation.join(CONVERSATION_HISTORY_LEAF),
             &ConversationEntry {
-                schema: CONVERSATION_ENTRY_SCHEMA_V0.to_owned(),
+                schema: CONVERSATION_ENTRY_SCHEMA_V1.to_owned(),
                 entry_id: entry_id.clone(),
                 parent_entry_id: None,
-                recovery_snapshot_hash: None,
+                recovery_snapshot_hash: "c".repeat(64),
                 run_session_id: run_id.clone(),
                 event_sequence: 1,
                 entry_type: ConversationEntryType::Checkpoint,

@@ -1,6 +1,6 @@
 use crate::runtime::{
     context::ContextObject,
-    run_attempts::{ProductiveAttemptLog, RunAttemptKind, RunAttemptResult},
+    run_attempts::{ProductiveAttemptLog, RunAttemptIntent, RunAttemptKind, RunAttemptResult},
     types::RuntimeError,
 };
 #[derive(Default)]
@@ -9,6 +9,7 @@ pub(in super::super) struct MemoryAttempts {
     pub(in super::super) intents: Vec<(RunAttemptKind, String, Option<String>)>,
     pub(in super::super) objects: Vec<ContextObject>,
     pub(in super::super) results: Vec<(RunAttemptKind, String, String, Option<String>)>,
+    pub(in super::super) terminal_results: Vec<RunAttemptResult>,
     pub(in super::super) timestamps: Vec<String>,
 }
 
@@ -18,22 +19,19 @@ impl ProductiveAttemptLog for MemoryAttempts {
         Ok(())
     }
 
-    fn intent(
-        &mut self,
-        kind: RunAttemptKind,
-        attempt_id: &str,
-        _request_hash: &str,
-        tool_id: Option<&str>,
-        timestamp: &str,
-    ) -> Result<(), RuntimeError> {
-        self.intents
-            .push((kind, attempt_id.to_owned(), tool_id.map(str::to_owned)));
-        self.timestamps.push(timestamp.to_owned());
+    fn intent(&mut self, intent: &RunAttemptIntent) -> Result<(), RuntimeError> {
+        self.intents.push((
+            intent.attempt_kind,
+            intent.attempt_id.clone(),
+            intent.tool_id.clone(),
+        ));
+        self.timestamps.push(intent.timestamp.clone());
         Ok(())
     }
 
     fn terminal(&mut self, result: &RunAttemptResult) -> Result<(), RuntimeError> {
         self.durable_outputs.push(result.durable_output.clone());
+        self.terminal_results.push(result.clone());
         self.results.push((
             result.attempt_kind,
             result.attempt_id.clone(),

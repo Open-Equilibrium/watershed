@@ -304,13 +304,6 @@ pub enum SemanticValidationError {
         /// Tool id.
         tool_id: String,
     },
-    /// Network CIDR entry was not canonical.
-    InvalidCanonicalCidr {
-        /// Rejected CIDR string.
-        cidr: String,
-        /// Tool id.
-        tool_id: String,
-    },
     /// An Instruction definition violates its finite placeholder contract.
     InvalidInstructionDefinition {
         /// Instruction id.
@@ -351,9 +344,6 @@ impl fmt::Display for SemanticValidationError {
                 f,
                 "own-script command must be script:<tool-id>: {tool_id} used {command}"
             ),
-            Self::InvalidCanonicalCidr { cidr, tool_id } => {
-                write!(f, "invalid canonical CIDR for tool {tool_id}: {cidr}")
-            }
             Self::InvalidInstructionDefinition {
                 instruction_id,
                 message,

@@ -26,11 +26,10 @@ pub(crate) fn load_global_config_authority_at(
     home_path: &std::path::Path,
 ) -> Result<GlobalConfigAuthority, RuntimeError> {
     let config_path = home_path.join(GLOBAL_CONFIG_LEAF);
-    let home =
-        open_flow_agent_home_at(home_path, false, true)?.ok_or_else(|| RuntimeError::Io {
-            path: config_path,
-            source: io::Error::from(io::ErrorKind::NotFound),
-        })?;
+    let home = open_flow_agent_home_at(home_path, false)?.ok_or_else(|| RuntimeError::Io {
+        path: config_path,
+        source: io::Error::from(io::ErrorKind::NotFound),
+    })?;
     ensure_global_config_settled(&home)?;
     let config = load_global_config_from(&home)?;
     Ok(GlobalConfigAuthority { config, home })
@@ -55,7 +54,7 @@ pub fn load_global_config() -> Result<GlobalConfig, RuntimeError> {
     load_global_config_authority().map(|authority| authority.config)
 }
 
-pub(crate) fn load_global_config_from(home: &AnchoredDir) -> Result<GlobalConfig, RuntimeError> {
+fn load_global_config_from(home: &AnchoredDir) -> Result<GlobalConfig, RuntimeError> {
     let text = read_global_config_to_string_from(home)?;
     parse_global_config_from_text(&text)
 }
@@ -84,13 +83,11 @@ pub(crate) fn parse_global_config_from_text(text: &str) -> Result<GlobalConfig, 
 }
 
 pub(crate) fn normalize_registry_root(source: &str) -> Result<PathBuf, RuntimeError> {
-    let normalized = core_script::normalize_safe_relative_path(source)
-        .filter(|path| *path != ".")
-        .ok_or_else(|| {
-            RuntimeError::Usage(format!(
-                "{GLOBAL_CONFIG_PATH} registry_root must stay within the global Flow home"
-            ))
-        })?;
+    let normalized = core_script::normalize_safe_relative_path(source).ok_or_else(|| {
+        RuntimeError::Usage(format!(
+            "{GLOBAL_CONFIG_PATH} registry_root must stay within the global Flow home"
+        ))
+    })?;
     if normalized.split('/').next().is_some_and(|component| {
         GLOBAL_RESERVED_LEAVES
             .iter()

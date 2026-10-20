@@ -5,15 +5,15 @@ use std::path::Path;
 
 #[test]
 fn usage_errors_precede_workspace_access() {
-    for args in [
-        Vec::<String>::new(),
-        vec!["unknown".to_owned()],
-        vec!["init".to_owned(), "--registry-root".to_owned()],
-        vec!["validate".to_owned(), "--unknown".to_owned()],
-        vec!["create".to_owned()],
-        vec!["create".to_owned(), "connection".to_owned()],
-        vec!["create".to_owned(), "tool".to_owned(), "--id".to_owned()],
-        [
+    let cases: &[&[&str]] = &[
+        &[],
+        &["unknown"],
+        &["init", "--registry-root"],
+        &["validate", "--unknown"],
+        &["create"],
+        &["create", "connection"],
+        &["create", "tool", "--id"],
+        &[
             "create",
             "instruction",
             "--id",
@@ -27,11 +27,8 @@ fn usage_errors_precede_workspace_access() {
             "project",
             "--parameter-contract-file",
             "missing-contract.yaml",
-        ]
-        .into_iter()
-        .map(str::to_owned)
-        .collect(),
-        [
+        ],
+        &[
             "create",
             "instruction",
             "--id",
@@ -44,11 +41,8 @@ fn usage_errors_precede_workspace_access() {
             "--parameter-contract-file",
             "missing-contract.yaml",
             "--end-parameter",
-        ]
-        .into_iter()
-        .map(str::to_owned)
-        .collect(),
-        [
+        ],
+        &[
             "create",
             "phase",
             "--id",
@@ -62,11 +56,8 @@ fn usage_errors_precede_workspace_access() {
             "1",
             "--loop-until-file",
             "missing-until.yaml",
-        ]
-        .into_iter()
-        .map(str::to_owned)
-        .collect(),
-        [
+        ],
+        &[
             "create",
             "flow",
             "--id",
@@ -82,24 +73,15 @@ fn usage_errors_precede_workspace_access() {
             "publish-phase",
             "--transition-when-file",
             "missing-when.yaml",
-        ]
-        .into_iter()
-        .map(str::to_owned)
-        .collect(),
-        vec!["sessions".to_owned(), "--bogus".to_owned()],
-        vec!["replay".to_owned(), "INVALID".to_owned(), "run".to_owned()],
-        vec![
-            "replay".to_owned(),
-            "conversation".to_owned(),
-            "INVALID".to_owned(),
         ],
-        vec!["tail".to_owned(), "INVALID".to_owned(), "run".to_owned()],
-        vec![
-            "tail".to_owned(),
-            "conversation".to_owned(),
-            "INVALID".to_owned(),
-        ],
-    ] {
+        &["sessions", "--bogus"],
+        &["replay", "INVALID", "run"],
+        &["replay", "conversation", "INVALID"],
+        &["tail", "INVALID", "run"],
+        &["tail", "conversation", "INVALID"],
+    ];
+    for case in cases {
+        let args = case.iter().map(|arg| (*arg).to_owned()).collect::<Vec<_>>();
         let interrupts = InterruptCoordinator::new();
         let error = dispatch_in_workspace(
             &args,

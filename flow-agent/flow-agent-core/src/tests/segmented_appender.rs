@@ -2,8 +2,6 @@ use super::helpers::{
     canonical_context_manifest_line, empty_workspace, fill_event_segments_to_final_byte,
     reserve_session_log,
 };
-#[cfg(windows)]
-use crate::runtime::fs_guards::windows_file_is_current_user_only_for_test;
 use crate::runtime::{
     context_persistence::ContextManifestWriter,
     fs_guards::{segmented_jsonl_files, segmented_jsonl_path, set_directory_sync_error_for_test},
@@ -18,7 +16,6 @@ use std::{
     io::{self, Write},
 };
 
-#[cfg(unix)]
 #[test]
 fn event_appender_rejects_a_leaf_replaced_while_open() {
     for force_rotation in [false, true] {
@@ -47,11 +44,10 @@ fn event_appender_rejects_a_leaf_replaced_while_open() {
             b"replacement\n"
         );
         assert!(!second.diagnostic_path().exists());
-        reservation.rollback().expect("reservation rolls back");
+        reservation.release_lock().expect("reservation rolls back");
     }
 }
 
-#[cfg(unix)]
 #[test]
 fn event_appender_rejects_a_canonical_path_replaced_while_handle_remains_linked() {
     let workspace = empty_workspace("event-writer-relinked-handle");
@@ -76,7 +72,6 @@ fn event_appender_rejects_a_canonical_path_replaced_while_handle_remains_linked(
     reservation.simulate_abrupt_termination();
 }
 
-#[cfg(any(unix, windows))]
 #[test]
 fn event_appender_rejects_an_in_place_length_change() {
     let workspace = empty_workspace("event-writer-length-change");
@@ -100,10 +95,9 @@ fn event_appender_rejects_an_in_place_length_change() {
         b"external\n"
     );
     drop(appender);
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
 }
 
-#[cfg(any(unix, windows))]
 #[test]
 fn event_appender_rejects_a_sealed_segment_length_change() {
     let workspace = empty_workspace("event-writer-sealed-length-change");
@@ -136,7 +130,7 @@ fn event_appender_rejects_a_sealed_segment_length_change() {
         "{sync_error}"
     );
     drop(appender);
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
 }
 
 #[test]
@@ -165,10 +159,9 @@ fn event_appender_rejects_a_length_change_during_inventory() {
         fs::read(reservation.session_path.diagnostic_path()).expect("external bytes remain"),
         b"external\n"
     );
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
 }
 
-#[cfg(any(unix, windows))]
 #[test]
 fn event_appender_rejects_a_same_length_replacement_during_inventory() {
     let workspace = empty_workspace("event-writer-inventory-identity-change");
@@ -194,7 +187,6 @@ fn event_appender_rejects_a_same_length_replacement_during_inventory() {
     reservation.simulate_abrupt_termination();
 }
 
-#[cfg(any(unix, windows))]
 #[test]
 fn event_appender_rejects_a_same_length_replacement_during_rotation() {
     let workspace = empty_workspace("event-writer-rotation-identity-change");
@@ -251,7 +243,7 @@ fn event_appender_rejects_unterminated_segment_boundaries() {
                 .expect("unterminated segment remains"),
             b"{}"
         );
-        reservation.rollback().expect("reservation rolls back");
+        reservation.release_lock().expect("reservation rolls back");
     }
 }
 
@@ -296,17 +288,8 @@ fn event_appender_rotates_before_crossing_the_segment_limit() {
             .len(),
         2
     );
-    #[cfg(windows)]
-    for segment in [&reservation.session_path, &second] {
-        assert!(
-            windows_file_is_current_user_only_for_test(segment.diagnostic_path())
-                .expect("segment DACL reads"),
-            "{} must grant access to the current Windows user only",
-            segment.diagnostic_path().display()
-        );
-    }
     drop(appender);
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
 }
 
 #[test]
@@ -338,7 +321,7 @@ fn rotated_segment_checkpoint_requires_directory_sync() {
         .sync(reservation.session_path.diagnostic_path())
         .expect("the directory sync can be retried");
     drop(appender);
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
 }
 
 #[test]
@@ -375,5 +358,5 @@ fn event_and_manifest_appenders_enforce_distinct_segment_caps() {
     ContextManifestWriter::open(&reservation.context_path)
         .expect("five context-manifest segments remain valid");
     drop(appender);
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
 }

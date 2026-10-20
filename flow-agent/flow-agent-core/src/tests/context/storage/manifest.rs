@@ -2,8 +2,6 @@ use super::super::{
     super::helpers::{empty_workspace, reserve_session_log},
     support::compiled_context_checkpoint,
 };
-#[cfg(windows)]
-use crate::runtime::fs_guards::open_anchored_file_for_update;
 use crate::runtime::{
     context::ensure_context_manifest_growth_within_limit,
     context_persistence::ContextManifestWriter,
@@ -13,8 +11,6 @@ use crate::runtime::{
     },
     types::{MAX_SESSION_CONTEXT_MANIFEST_BYTES, RuntimeError},
 };
-#[cfg(windows)]
-use std::io::{Seek, SeekFrom};
 use std::{
     fs,
     io::{self, Read, Write},
@@ -48,7 +44,7 @@ fn assert_invalid_manifest_does_not_publish(label: &str, line: String, expected_
     );
     assert!(!object_path.exists());
     drop(writer);
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
 }
 
 #[test]
@@ -81,7 +77,6 @@ fn context_manifest_writer_rejects_projection_hash_mismatch_before_publication()
         "projection_hash does not match object_uri",
     );
 }
-#[cfg(unix)]
 fn overwrite_manifest_prefix(writer: &mut ContextManifestWriter, bytes: &[u8]) {
     let mut file = fs::OpenOptions::new()
         .write(true)
@@ -91,21 +86,6 @@ fn overwrite_manifest_prefix(writer: &mut ContextManifestWriter, bytes: &[u8]) {
         .expect("context manifest prefix changes in place");
 }
 
-#[cfg(windows)]
-fn overwrite_manifest_prefix(writer: &mut ContextManifestWriter, bytes: &[u8]) {
-    let current_path = writer
-        .appender
-        .current_path()
-        .expect("current manifest segment resolves");
-    let (mut file, _) = open_anchored_file_for_update(&current_path)
-        .expect("context manifest opens for external mutation");
-    file.seek(SeekFrom::Start(0))
-        .expect("context manifest seeks to its prefix");
-    file.write_all(bytes)
-        .expect("context manifest prefix changes in place");
-}
-
-#[cfg(any(unix, windows))]
 #[test]
 fn context_manifest_growth_is_visible_through_the_existing_file() {
     let workspace = empty_workspace("context-manifest-append");
@@ -154,10 +134,9 @@ fn context_manifest_growth_is_visible_through_the_existing_file() {
     );
     drop(observed);
     drop(writer);
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
 }
 
-#[cfg(any(unix, windows))]
 #[test]
 fn context_manifest_replay_rejects_an_in_place_length_change() {
     let workspace = empty_workspace("context-manifest-length-change");
@@ -183,10 +162,9 @@ fn context_manifest_replay_rejects_an_in_place_length_change() {
 
     assert!(err.to_string().contains("changed outside"), "{err}");
     drop(writer);
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
 }
 
-#[cfg(any(unix, windows))]
 #[test]
 fn context_manifest_replay_rejects_a_same_length_prefix_change() {
     let workspace = empty_workspace("context-manifest-content-change");
@@ -209,7 +187,7 @@ fn context_manifest_replay_rejects_a_same_length_prefix_change() {
         "{error}"
     );
     drop(writer);
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
 }
 
 #[test]
@@ -232,10 +210,9 @@ fn context_manifest_writer_rejects_an_invalid_persisted_prefix() {
         error.to_string().contains("invalid context manifest"),
         "{error}"
     );
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
 }
 
-#[cfg(unix)]
 #[test]
 fn context_writer_stays_bound_to_the_opened_log_directory() {
     use std::os::unix::fs::symlink;
@@ -267,7 +244,7 @@ fn context_writer_stays_bound_to_the_opened_log_directory() {
             .expect("anchored context readable"),
         manifest.manifest.line
     );
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
 }
 
 #[test]
@@ -339,7 +316,7 @@ fn context_manifest_waits_for_object_directory_sync() {
         checkpoint.manifest.line
     );
     drop(writer);
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
 }
 
 #[test]

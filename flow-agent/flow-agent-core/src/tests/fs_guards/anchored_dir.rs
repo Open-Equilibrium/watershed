@@ -1,61 +1,128 @@
-#[cfg(windows)]
-use super::super::helpers::create_windows_junction;
 use super::super::helpers::empty_workspace;
-#[cfg(windows)]
-use crate::runtime::fs_guards::AnchoredWorkspace;
-#[cfg(windows)]
-use crate::runtime::fs_guards::set_windows_directory_world_access_for_test;
 use crate::runtime::fs_guards::validate_unix_private_directory_metadata;
-use crate::runtime::fs_guards::{AnchoredDir, DirectoryErrorMode};
-#[cfg(unix)]
+use crate::runtime::fs_guards::{
+    AnchoredDir, DirectoryErrorMode, create_anchored_file_for_update,
+    open_anchored_session_log_append_file,
+};
 use crate::runtime::fs_guards::{
     set_private_directory_create_observer, set_private_directory_open_observer,
 };
-#[cfg(any(unix, windows))]
 use crate::runtime::types::RuntimeError;
-use std::fs;
+use std::{fs, io::Write as _, os::unix::fs::MetadataExt as _, path::Path};
 
-#[cfg(windows)]
 #[test]
-fn anchored_directory_rejects_non_leaf_paths_before_access() {
-    let workspace = empty_workspace("anchored-directory-non-leaf");
-    let outside = empty_workspace("anchored-directory-non-leaf-outside");
-    let intermediate = workspace.join("intermediate");
-    fs::create_dir_all(workspace.join("nested/target")).expect("nested directory created");
-    create_windows_junction(&intermediate, &outside);
-    let parent = AnchoredDir::workspace(&workspace).expect("workspace opens");
-
-    for leaf in [
-        r"nested\target",
-        "nested/target",
-        r"intermediate\created",
-        "intermediate/created",
-        ".",
-        "..",
-        r"\rooted",
-        r"C:\rooted",
-        "target:stream",
+fn protected_home_publication_waits_for_admission_without_locking_other_homes() {
+    let workspace = empty_workspace("protected-publication-admission");
+    let open_home = |name| {
+        crate::runtime::session_store::open_flow_agent_home_at(&workspace.join(name), true)
+            .expect("private home opens")
+            .expect("private home exists")
+    };
+    let home = open_home("home");
+    let other = open_home("other");
+    let nested = home
+        .private_child("nested", true, DirectoryErrorMode::Protocol)
+        .expect("nested publication directory opens")
+        .expect("nested publication directory exists");
+    for (name, bytes) in [
+        ("source", "source"),
+        ("current", "old"),
+        ("stage", "new"),
+        ("log", "old\n"),
     ] {
-        let error = parent
-            .child(leaf, true, DirectoryErrorMode::Protocol)
-            .expect_err("non-leaf directory path must be rejected");
+        fs::write(nested.path.join(name), bytes).expect("publication fixture is staged");
+    }
+    nested
+        .create_dir("stage-dir")
+        .expect("directory stage is created");
+    fs::write(nested.path.join("stage-dir/data"), b"directory payload")
+        .expect("directory stage is populated");
+    let publisher = fs::File::open(&home.path).expect("independent publisher handle opens");
+    publisher
+        .try_lock_shared()
+        .expect("another publisher begins");
+    home.create_dir("concurrent")
+        .expect("publishers may share the same home lease");
+    drop(publisher);
+    let admission = fs::File::open(&home.path).expect("independent admission handle opens");
+    admission.try_lock().expect("exclusive admission begins");
+    other
+        .create_dir("unrelated")
+        .expect("other home remains available");
+    let error = home
+        .create_dir("pending")
+        .expect_err("publication must not race admission");
+    assert_eq!(error.kind(), std::io::ErrorKind::WouldBlock);
+    assert!(!home.path.join("pending").exists());
+    let publish = |operation| match operation {
+        "create" => create_anchored_file_for_update(&nested.file("created")).map(|_| ()),
+        "hardlink" => nested.file("source").hard_link_to(Path::new("alias")),
+        "replace" => nested.file("stage").rename_to(Path::new("current")),
+        "directory" => nested
+            .rename("stage-dir", "published-dir")
+            .map_err(|source| RuntimeError::Io {
+                path: nested.path.clone(),
+                source,
+            }),
+        _ => unreachable!("fixed publication matrix"),
+    };
+    let operations = ["create", "hardlink", "replace", "directory"];
+    std::thread::scope(|scope| {
+        let publishers = operations.map(|operation| {
+            let publish = &publish;
+            (operation, scope.spawn(move || publish(operation)))
+        });
+        for (operation, publisher) in publishers {
+            let error = publisher
+                .join()
+                .expect("publisher joins")
+                .expect_err("nested namespace publication must not race admission");
+            assert!(
+                matches!(error, RuntimeError::Io { source, .. }
+                if source.kind() == std::io::ErrorKind::WouldBlock),
+                "{operation}"
+            );
+        }
+    });
+    for absent in ["created", "alias", "published-dir"] {
         assert!(
-            matches!(
-                &error,
-                RuntimeError::Io { source, .. }
-                    if source.kind() == std::io::ErrorKind::InvalidInput
-            ),
-            "{leaf:?}: {error}"
+            !nested.path.join(absent).exists(),
+            "{absent} was not published"
         );
     }
-    assert!(
-        !outside.join("created").exists(),
-        "an intermediate junction target must receive no side effect"
+    assert_eq!(fs::read(nested.path.join("current")).unwrap(), b"old");
+    assert_eq!(fs::read(nested.path.join("stage")).unwrap(), b"new");
+    assert_eq!(
+        fs::read(nested.path.join("stage-dir/data")).unwrap(),
+        b"directory payload"
     );
-    fs::remove_dir(intermediate).expect("test junction removed");
+    // Appending to an admitted file changes no names and must not serialize a Run.
+    open_anchored_session_log_append_file(&nested.file("log"))
+        .expect("existing log opens during admission")
+        .write_all(b"new\n")
+        .expect("existing log appends during admission");
+    assert_eq!(fs::read(nested.path.join("log")).unwrap(), b"old\nnew\n");
+    drop(admission);
+    home.create_dir("pending")
+        .expect("publication resumes after admission");
+    for operation in operations {
+        publish(operation)
+            .unwrap_or_else(|error| panic!("{operation} retries after admission: {error}"));
+    }
+    assert!(nested.path.join("created").is_file());
+    assert_eq!(
+        fs::metadata(nested.path.join("source")).unwrap().ino(),
+        fs::metadata(nested.path.join("alias")).unwrap().ino()
+    );
+    assert_eq!(fs::read(nested.path.join("current")).unwrap(), b"new");
+    assert_eq!(
+        fs::read(nested.path.join("published-dir/data")).unwrap(),
+        b"directory payload"
+    );
+    assert!(!nested.path.join("stage").exists());
+    assert!(!nested.path.join("stage-dir").exists());
 }
 
-#[cfg(unix)]
 #[test]
 fn private_child_revalidates_permissions_on_the_opened_directory() {
     use std::os::unix::fs::PermissionsExt as _;
@@ -83,7 +150,6 @@ fn private_child_revalidates_permissions_on_the_opened_directory() {
     assert!(err.to_string().contains("group or other access"), "{err}");
 }
 
-#[cfg(unix)]
 #[test]
 fn private_child_creation_does_not_chmod_a_replacement_target() {
     use std::os::unix::fs::PermissionsExt as _;
@@ -131,7 +197,6 @@ fn private_directory_validation_rejects_an_owner_other_than_the_effective_user()
     assert!(error.to_string().contains("current user"), "{error}");
 }
 
-#[cfg(unix)]
 #[test]
 fn private_child_reports_a_removed_open_race_as_io() {
     use std::os::unix::fs::PermissionsExt as _;
@@ -160,7 +225,6 @@ fn private_child_reports_a_removed_open_race_as_io() {
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn private_child_still_denies_a_symlink_open_race() {
     use std::os::unix::fs::{PermissionsExt as _, symlink};
@@ -196,7 +260,7 @@ fn private_child_still_denies_a_symlink_open_race() {
 }
 
 // macOS rejects non-UTF-8 directory entries before this race can be constructed.
-#[cfg(all(unix, not(target_os = "macos")))]
+#[cfg(not(target_os = "macos"))]
 #[test]
 fn private_child_denies_a_non_unicode_symlink_open_race() {
     use std::{
@@ -233,83 +297,4 @@ fn private_child_denies_a_non_unicode_symlink_open_race() {
         ),
         "{err}"
     );
-}
-
-#[cfg(windows)]
-#[test]
-fn private_child_rejects_a_preexisting_world_accessible_directory() {
-    let workspace = empty_workspace("private-directory-windows-existing");
-    let private = workspace.join("private");
-    fs::create_dir(&private).expect("private directory created");
-    set_windows_directory_world_access_for_test(&private).expect("world access configured");
-    let parent = AnchoredDir::workspace(&workspace).expect("workspace opens");
-
-    let err = parent
-        .private_child("private", false, DirectoryErrorMode::Protocol)
-        .expect_err("world-accessible private directory must be rejected");
-
-    assert!(
-        err.to_string().contains("current Windows user only"),
-        "{err}"
-    );
-}
-
-#[cfg(windows)]
-#[test]
-fn private_child_creation_overrides_a_world_accessible_parent_dacl() {
-    let workspace = empty_workspace("private-directory-windows-create");
-    set_windows_directory_world_access_for_test(&workspace).expect("world access configured");
-    let parent = AnchoredDir::workspace(&workspace).expect("workspace opens");
-
-    parent
-        .private_child("private", true, DirectoryErrorMode::Protocol)
-        .expect("private directory creation succeeds");
-
-    let private = AnchoredDir::workspace(&workspace.join("private")).expect("private dir opens");
-    private
-        .private_child("nested", true, DirectoryErrorMode::Protocol)
-        .expect("validated private directory creates a private child");
-}
-
-#[cfg(windows)]
-#[test]
-fn private_child_creation_remains_bound_to_the_opened_parent() {
-    let workspace = empty_workspace("private-directory-windows-parent-binding");
-    fs::remove_dir(&*workspace).expect("workspace junction path starts absent");
-    let original = empty_workspace("private-directory-windows-original");
-    let outside = empty_workspace("private-directory-windows-outside");
-    create_windows_junction(&workspace, &original);
-    let parent = AnchoredDir::workspace(&workspace).expect("workspace opens");
-    fs::remove_dir(&*workspace).expect("original workspace junction removed");
-    create_windows_junction(&workspace, &outside);
-
-    let result = parent.private_child("private", true, DirectoryErrorMode::Protocol);
-
-    assert!(
-        !outside.join("private").exists(),
-        "ambient workspace replacement must receive no side effect"
-    );
-    result.expect("creation remains bound to the opened parent");
-    assert!(original.join("private").is_dir());
-}
-
-#[cfg(windows)]
-#[test]
-fn read_only_workspace_rejects_a_root_junction() {
-    let workspace = empty_workspace("read-only-workspace-root-junction");
-    fs::remove_dir(&*workspace).expect("workspace junction path starts absent");
-    let outside = empty_workspace("read-only-workspace-root-junction-target");
-    create_windows_junction(&workspace, &outside);
-
-    let err = AnchoredWorkspace::open_read_only(&workspace)
-        .expect_err("read-only workspace root junction must be rejected");
-
-    assert!(
-        matches!(
-            &err,
-            RuntimeError::Protocol(message) if message.contains("reparse point")
-        ),
-        "{err}"
-    );
-    fs::remove_dir(&*workspace).expect("test junction removed");
 }

@@ -28,7 +28,8 @@ thread_local! {
 pub(crate) use crate::runtime::session_store::stable_native_path_bytes;
 
 pub(crate) fn conversation_ownership_key(conversation_id: &str) -> String {
-    format!("conversation:{conversation_id}")
+    // Fixture and productive roots address the same equal-ID public pair.
+    conversation_id.to_owned()
 }
 
 pub(crate) fn run_ownership_key(conversation_id: &str, run_session_id: &str) -> String {
@@ -237,17 +238,13 @@ fn append_length_prefixed(target: &mut Vec<u8>, value: &[u8]) {
 }
 
 fn open_or_create_authority_file(path: &AnchoredFile) -> Result<fs::File, RuntimeError> {
-    match create_authority_file(path) {
+    match create_anchored_file_for_update(path) {
         Ok(file) => Ok(file),
         Err(RuntimeError::Io { source, .. }) if source.kind() == io::ErrorKind::AlreadyExists => {
             open_existing_authority_file(path)
         }
         Err(error) => Err(error),
     }
-}
-
-fn create_authority_file(path: &AnchoredFile) -> Result<fs::File, RuntimeError> {
-    create_anchored_file_for_update(path)
 }
 
 fn open_existing_authority_file(path: &AnchoredFile) -> Result<fs::File, RuntimeError> {

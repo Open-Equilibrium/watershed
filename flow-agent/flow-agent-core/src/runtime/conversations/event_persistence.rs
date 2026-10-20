@@ -1,9 +1,6 @@
 use super::{
     contract::protocol,
-    conversation_stream::{
-        append_anchored_canonical_jsonl_batch_with, open_anchored_stream_appender,
-        sync_anchored_stream_with,
-    },
+    conversation_stream::{append_anchored_canonical_jsonl_batch_with, sync_anchored_stream_with},
     run_objects::RunObjectStore,
 };
 use crate::runtime::{
@@ -44,9 +41,10 @@ impl SerialConversationWriter {
         notifier: Option<LiveEventNotifier>,
         run_objects: RunObjectStore,
     ) -> Result<Self, RuntimeError> {
-        let events_appender = open_anchored_stream_appender(&events_file, EVENT_STREAM_LIMITS)?;
+        let events_appender =
+            SessionLogAppender::open_with_limits(&events_file, EVENT_STREAM_LIMITS)?;
         let contexts_appender =
-            open_anchored_stream_appender(&contexts_file, CONTEXT_MANIFEST_STREAM_LIMITS)?;
+            SessionLogAppender::open_with_limits(&contexts_file, CONTEXT_MANIFEST_STREAM_LIMITS)?;
         let thread_name = format!("flow-conversation-writer-{run_session_id}");
         let (sender, receiver) = std::sync::mpsc::sync_channel(EVENT_WRITER_QUEUE_CAPACITY);
         let worker = thread::Builder::new()
@@ -94,10 +92,6 @@ impl SerialConversationWriter {
                 canonical_jsonl: canonical_jsonl.to_owned(),
                 context_manifest,
                 event: Box::new(event.clone()),
-                #[cfg(test)]
-                measurement_started_at: None,
-                #[cfg(test)]
-                pre_batch_latency_nanos: None,
             },
             response,
             is_batchable,
@@ -148,7 +142,6 @@ struct ConversationWriterBackend {
 impl ConversationWriterBackend {
     fn acknowledge(&self, event: QueuedEvent, outcome: WriterOutcome) {
         if outcome.appended
-            && outcome.error.is_none()
             && let Some(notifier) = &self.notifier
         {
             notifier.try_notify_conversation_run(
@@ -176,12 +169,8 @@ impl ConversationWriterBackend {
             self.acknowledge(
                 event,
                 WriterOutcome {
-                    #[cfg(test)]
-                    append_latency_nanos: None,
                     appended: true,
                     error: None,
-                    #[cfg(test)]
-                    notification_latency_nanos: None,
                 },
             );
         }
@@ -243,12 +232,8 @@ impl ConversationWriterBackend {
             None
         };
         WriterOutcome {
-            #[cfg(test)]
-            append_latency_nanos: None,
             appended: true,
             error: append_error.or(sync_error),
-            #[cfg(test)]
-            notification_latency_nanos: None,
         }
     }
 }

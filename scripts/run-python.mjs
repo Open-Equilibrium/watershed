@@ -1,9 +1,9 @@
 import { spawnSync as defaultSpawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 
-const PYTHON_THREE_PROBE_ARGS = [
+const PYTHON_PROBE_ARGS = [
   "-c",
-  "import sys; raise SystemExit(sys.version_info.major != 3)",
+  "import sys; raise SystemExit(sys.version_info < (3, 11))",
 ];
 
 function writeError(stderr, message) {
@@ -16,15 +16,15 @@ function pythonCandidates(platform, args) {
         {
           executable: "py",
           args: ["-3", ...args],
-          probeArgs: ["-3", ...PYTHON_THREE_PROBE_ARGS],
+          probeArgs: ["-3", ...PYTHON_PROBE_ARGS],
           missingName: "py -3",
         },
-        { executable: "python3", args, probeArgs: PYTHON_THREE_PROBE_ARGS },
-        { executable: "python", args, probeArgs: PYTHON_THREE_PROBE_ARGS },
+        { executable: "python3", args, probeArgs: PYTHON_PROBE_ARGS },
+        { executable: "python", args, probeArgs: PYTHON_PROBE_ARGS },
       ]
     : [
-        { executable: "python3", args, probeArgs: PYTHON_THREE_PROBE_ARGS },
-        { executable: "python", args, probeArgs: PYTHON_THREE_PROBE_ARGS },
+        { executable: "python3", args, probeArgs: PYTHON_PROBE_ARGS },
+        { executable: "python", args, probeArgs: PYTHON_PROBE_ARGS },
       ];
 }
 
@@ -73,7 +73,7 @@ export function runPython(
     return result.status ?? 1;
   }
 
-  writeError(stderr, `missing Python 3 interpreter: tried ${missing.join(", ")}`);
+  writeError(stderr, `missing Python 3.11+ interpreter: tried ${missing.join(", ")}`);
   return 127;
 }
 

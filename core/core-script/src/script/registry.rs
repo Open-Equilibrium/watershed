@@ -74,9 +74,6 @@ impl ResolvedRegistry {
         registry.name_ids = name_ids;
 
         registry.validate_references()?;
-        if registry.phases.is_empty() && registry.flows.is_empty() {
-            return Ok(registry);
-        }
         Ok(registry.with_canonical_references())
     }
 
@@ -133,11 +130,6 @@ impl ResolvedRegistry {
     /// Resolves a tool by id or unambiguous name.
     pub fn tool_block(&self, reference: &str) -> Option<&ToolBlock> {
         self.named_block(RegistryBlockKind::Tool, reference, &self.tools)
-    }
-
-    /// Returns tool blocks in canonical id order.
-    pub fn tool_blocks(&self) -> impl Iterator<Item = &ToolBlock> {
-        self.tools.values()
     }
 
     /// Resolves an instruction by id or unambiguous name.

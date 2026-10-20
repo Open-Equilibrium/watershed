@@ -1,18 +1,18 @@
 use super::super::contract::protocol;
 use super::model::{
-    EVENT_POINTER_RECORD_BYTES, EventPointerRecord, INDEX_MERGE_FAN_IN, INDEX_RECORD_BYTES,
-    INDEX_SORT_BYTES, IndexRecord, WorkBudget,
+    EVENT_POINTER_RECORD_BYTES, EventPointerRecord, INDEX_IO_BUFFER_BYTES, INDEX_MERGE_FAN_IN,
+    INDEX_RECORD_BYTES, INDEX_SORT_BYTES, IndexRecord, WorkBudget,
 };
 use super::records::{event_pointer_id, read_event_pointer_record, read_index_record, record_id};
 use super::scratch::{
-    HistoryScratch, create_scratch_file, event_pointer_run_leaf, index_run_leaf,
-    write_sorted_scratch_run,
+    HistoryScratch, create_scratch_file, event_pointer_run_leaf, finish_scratch_run,
+    index_run_leaf, write_sorted_scratch_run,
 };
-use crate::runtime::{
-    fs_guards::{open_anchored_file_for_read, path_io_error},
-    types::RuntimeError,
+use crate::runtime::{fs_guards::open_anchored_file_for_read, types::RuntimeError};
+use std::{
+    cell::Cell,
+    io::{BufReader, BufWriter, Read},
 };
-use std::{cell::Cell, fs::File};
 
 #[cfg(test)]
 thread_local! {
@@ -58,7 +58,7 @@ pub(super) fn merge_all_event_pointer_runs(
 
 trait ExternalSortRecord: AsRef<[u8]> + Clone + Sized {
     fn id(&self) -> &[u8];
-    fn read(file: &mut File) -> Result<Option<Self>, RuntimeError>;
+    fn read(file: &mut impl Read) -> Result<Option<Self>, RuntimeError>;
     fn run_leaf(generation: u32, run: u64) -> String;
     fn merge_generation_overflow() -> &'static str;
 }
@@ -68,7 +68,7 @@ impl ExternalSortRecord for IndexRecord {
         record_id(self)
     }
 
-    fn read(file: &mut File) -> Result<Option<Self>, RuntimeError> {
+    fn read(file: &mut impl Read) -> Result<Option<Self>, RuntimeError> {
         read_index_record(file)
     }
 
@@ -86,7 +86,7 @@ impl ExternalSortRecord for EventPointerRecord {
         event_pointer_id(self)
     }
 
-    fn read(file: &mut File) -> Result<Option<Self>, RuntimeError> {
+    fn read(file: &mut impl Read) -> Result<Option<Self>, RuntimeError> {
         read_event_pointer_record(file)
     }
 
@@ -160,7 +160,10 @@ fn merge_record_run_group<R: ExternalSortRecord>(
     let mut readers = Vec::new();
     for run in first..first + length {
         let path = scratch.dir.file(R::run_leaf(generation, run));
-        readers.push(open_anchored_file_for_read(&path)?.0);
+        readers.push(BufReader::with_capacity(
+            INDEX_IO_BUFFER_BYTES,
+            open_anchored_file_for_read(&path)?.0,
+        ));
     }
     let mut heads = vec![None; readers.len()];
     for (head, reader) in heads.iter_mut().zip(&mut readers) {
@@ -168,7 +171,10 @@ fn merge_record_run_group<R: ExternalSortRecord>(
     }
     let leaf = R::run_leaf(next_generation, output_run);
     let path = scratch.dir.file(&leaf);
-    let mut output = create_scratch_file(&scratch.dir, &leaf)?;
+    let mut output = BufWriter::with_capacity(
+        INDEX_IO_BUFFER_BYTES,
+        create_scratch_file(&scratch.dir, &leaf)?,
+    );
     loop {
         let mut least: Option<usize> = None;
         for (index, head) in heads.iter().enumerate() {
@@ -192,9 +198,7 @@ fn merge_record_run_group<R: ExternalSortRecord>(
         )?;
         heads[least] = R::read(&mut readers[least])?;
     }
-    output
-        .sync_all()
-        .map_err(|source| path_io_error(path.diagnostic_path(), source))?;
+    finish_scratch_run(&mut output, &path)?;
     drop(output);
     drop(readers);
     for run in first..first + length {

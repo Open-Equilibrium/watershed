@@ -202,13 +202,8 @@ impl SessionReservation {
     }
 
     #[cfg(test)]
-    pub(crate) fn rollback(&self) -> Result<(), RuntimeError> {
-        // TempWorkspace owns fixture deletion; teardown only releases the real lease.
-        self.release_lock()
-    }
-
-    #[cfg(test)]
     pub(crate) fn release_lock(&self) -> Result<(), RuntimeError> {
+        // TempWorkspace owns fixture deletion; teardown only releases the real lease.
         if self.state.get() == ReservationState::Released {
             return Ok(());
         }

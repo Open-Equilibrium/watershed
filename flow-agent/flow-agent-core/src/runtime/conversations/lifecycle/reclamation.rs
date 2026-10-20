@@ -4,7 +4,7 @@ use super::super::{
     contract::{
         CONVERSATION_HISTORY_LEAF, CONVERSATION_RUNS_DIR, CONVERSATION_STATUS_LEAF,
         MAX_CONVERSATION_RECORD_BYTES, RUN_CONTEXTS_LEAF, RUN_EVENTS_LEAF, RUN_LOG_LEAF,
-        RUN_LOG_RECORD_SCHEMA_V0, RUN_OBJECTS_DIR, RUN_RECOVERY_LEAF, RUN_SESSION_LOCK_LEAF,
+        RUN_LOG_RECORD_SCHEMA_V1, RUN_OBJECTS_DIR, RUN_RECOVERY_LEAF, RUN_SESSION_LOCK_LEAF,
         UNPUBLISHED_PRODUCTIVE_RUN_MARKER, protocol, validate_id,
     },
     conversation_stream::read_anchored_jsonl,
@@ -181,10 +181,8 @@ fn reclaim_productive_run(
                     flow_definition_id: recorded_flow_definition_id,
                     registry_hash: recorded_registry_hash,
                     flow_definition_hash: recorded_flow_definition_hash,
-                    legacy_session_id: None,
-                    legacy_source_manifest: None,
                     ..
-                }] if schema == RUN_LOG_RECORD_SCHEMA_V0
+                }] if schema == RUN_LOG_RECORD_SCHEMA_V1
                     && recorded_flow_definition_id == flow_definition_id
                     && recorded_registry_hash == registry_hash
                     && recorded_flow_definition_hash == flow_definition_hash
@@ -281,7 +279,6 @@ fn reclaim_productive_run(
         conversation_dir.file(CONVERSATION_HISTORY_LEAF).remove()?;
         status_summary_file(&conversation_dir).remove()?;
         conversation_dir
-            .dir
             .remove_dir(CONVERSATION_RUNS_DIR)
             .map_err(|source| path_io_error(&runs_path, source))?;
         sync_anchored_directory(&conversation_dir)?;
@@ -293,7 +290,6 @@ fn reclaim_productive_run(
         )?;
         drop(conversation_dir);
         sessions_dir
-            .dir
             .remove_dir(conversation_id)
             .map_err(|source| path_io_error(&conversation, source))?;
         sync_anchored_directory(&sessions_dir)?;

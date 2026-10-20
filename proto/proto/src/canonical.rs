@@ -160,25 +160,31 @@ pub fn canonical_json(value: &Value) -> Result<String, CanonicalJsonError> {
     if json_nesting_reaches_limit(value, 0) {
         return Err(CanonicalJsonError::JsonNestingLimitExceeded);
     }
-    canonical_json_bounded(value)
+    let mut output = String::new();
+    append_canonical_json(value, &mut output)?;
+    Ok(output)
 }
 
-fn canonical_json_bounded(value: &Value) -> Result<String, CanonicalJsonError> {
+fn append_canonical_json(value: &Value, output: &mut String) -> Result<(), CanonicalJsonError> {
     match value {
-        Value::Null => Ok("null".to_owned()),
-        Value::Bool(value) => Ok(value.to_string()),
-        Value::Number(value) => Ok(canonical_number(value)),
+        Value::Null => output.push_str("null"),
+        Value::Bool(value) => output.push_str(if *value { "true" } else { "false" }),
+        Value::Number(value) => output.push_str(&canonical_number(value)),
         Value::String(value) => {
             let normalized = value.nfc().collect::<String>();
-            Ok(serde_json::to_string(&normalized).expect("string serialization cannot fail"))
+            output.push_str(
+                &serde_json::to_string(&normalized).expect("string serialization cannot fail"),
+            );
         }
         Value::Array(values) => {
-            let body = values
-                .iter()
-                .map(canonical_json_bounded)
-                .collect::<Result<Vec<_>, _>>()?
-                .join(",");
-            Ok(format!("[{body}]"))
+            output.push('[');
+            for (index, value) in values.iter().enumerate() {
+                if index > 0 {
+                    output.push(',');
+                }
+                append_canonical_json(value, output)?;
+            }
+            output.push(']');
         }
         Value::Object(map) => {
             let mut seen_keys = HashSet::new();
@@ -193,17 +199,21 @@ fn canonical_json_bounded(value: &Value) -> Result<String, CanonicalJsonError> {
                 entries.push((normalized_key, value));
             }
             entries.sort_by(|(left, _), (right, _)| left.cmp(right));
-            let mut fields = Vec::with_capacity(entries.len());
-            for (key, value) in entries {
-                fields.push(format!(
-                    "{}:{}",
-                    serde_json::to_string(&key).expect("object key serialization cannot fail"),
-                    canonical_json_bounded(value)?
-                ));
+            output.push('{');
+            for (index, (key, value)) in entries.into_iter().enumerate() {
+                if index > 0 {
+                    output.push(',');
+                }
+                output.push_str(
+                    &serde_json::to_string(&key).expect("object key serialization cannot fail"),
+                );
+                output.push(':');
+                append_canonical_json(value, output)?;
             }
-            Ok(format!("{{{}}}", fields.join(",")))
+            output.push('}');
         }
     }
+    Ok(())
 }
 
 fn canonical_number(value: &Number) -> String {

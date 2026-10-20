@@ -113,7 +113,7 @@ pub(in crate::runtime) fn create_global_registry_block_at(
     home_path: &std::path::Path,
     block: RegistryBlock,
 ) -> Result<PathBuf, RuntimeError> {
-    let home = open_flow_agent_home_at(home_path, false, false)?.ok_or_else(|| {
+    let home = open_flow_agent_home_at(home_path, false)?.ok_or_else(|| {
         RuntimeError::PersistedState("global Flow config is not initialized".to_owned())
     })?;
     ensure_global_config_settled(&home)?;

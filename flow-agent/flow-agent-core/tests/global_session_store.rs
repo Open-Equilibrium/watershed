@@ -22,13 +22,6 @@ fn sessions_are_stored_in_the_user_home_not_the_workspace() {
     // SAFETY: this integration-test binary contains one test, and every runtime call returns
     // before the next process-environment change.
     unsafe {
-        #[cfg(windows)]
-        {
-            std::env::remove_var("USERPROFILE");
-            std::env::remove_var("HOMEDRIVE");
-            std::env::remove_var("HOMEPATH");
-        }
-        #[cfg(not(windows))]
         std::env::remove_var("HOME");
     }
 
@@ -47,7 +40,6 @@ fn sessions_are_stored_in_the_user_home_not_the_workspace() {
             .expect("session directory has a workspace-store parent"),
         "the production store uses the canonical hashed workspace leaf"
     );
-    #[cfg(unix)]
     {
         assert_private_directory(&session_home);
         assert_private_directory(&session_home.join("workspaces"));
@@ -98,9 +90,6 @@ fn sessions_are_stored_in_the_user_home_not_the_workspace() {
     // process-environment changes.
     unsafe {
         std::env::remove_var("FLOW_AGENT_HOME");
-        #[cfg(windows)]
-        std::env::set_var("USERPROFILE", &*user_home);
-        #[cfg(not(windows))]
         std::env::set_var("HOME", &*user_home);
     }
     initialize_global_config(None).expect("the default global Flow authority initializes");
@@ -160,7 +149,6 @@ fn only_workspace_store(workspaces: &Path) -> PathBuf {
     stores.pop().expect("workspace store is present")
 }
 
-#[cfg(unix)]
 fn assert_private_directory(path: &Path) {
     use std::os::unix::fs::PermissionsExt as _;
 

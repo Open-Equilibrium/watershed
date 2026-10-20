@@ -1,6 +1,4 @@
-use super::super::helpers::fixture_runtime_policy;
 use crate::runtime::{
-    execution_plan::runtime_protected_path_match_mode,
     fixture_tools::{
         compile_own_script_operations, evaluate_script_command, normalize_script_write_target,
         script_redirection,
@@ -10,14 +8,6 @@ use crate::runtime::{
 
 #[test]
 fn helpers_reject_unsupported_m1_shell_shapes() {
-    let (_registry, policy) = fixture_runtime_policy("hello-flow", "hello-flow");
-    let command_policy = policy
-        .commands
-        .iter()
-        .find(|command| command.tool_id == "write-summary")
-        .expect("write-summary policy exists");
-    let match_mode = runtime_protected_path_match_mode(&policy.target);
-
     assert_eq!(
         script_redirection("printf 'hello > world\\n' > \"out/quoted.txt\"")
             .expect("quoted redirection parses"),
@@ -38,30 +28,25 @@ fn helpers_reject_unsupported_m1_shell_shapes() {
         script_redirection("echo no-redirection").expect("plain command parses"),
         None
     );
-    assert!(matches!(
-        script_redirection("printf 'x' >> out/summary.txt"),
-        Err(RuntimeError::Protocol(message)) if message.contains("append redirection")
-    ));
-    assert!(matches!(
-        script_redirection("> out/summary.txt"),
-        Err(RuntimeError::Protocol(message)) if message.contains("must include a command")
-    ));
-    assert!(matches!(
-        script_redirection("printf 'x' > out/a > out/b"),
-        Err(RuntimeError::Protocol(message)) if message.contains("multiple redirections")
-    ));
-    assert!(matches!(
-        script_redirection("printf 'unterminated > out/summary.txt"),
-        Err(RuntimeError::Protocol(message)) if message.contains("unterminated quote")
-    ));
-    assert!(matches!(
-        script_redirection("printf 'x' > out/summary one.txt"),
-        Err(RuntimeError::Protocol(message)) if message.contains("one literal path")
-    ));
-    assert!(matches!(
-        script_redirection("printf 'x' > \"out/summary.txt\"suffix"),
-        Err(RuntimeError::Protocol(message)) if message.contains("one literal path")
-    ));
+    for (command, expected) in [
+        ("printf 'x' >> out/summary.txt", "append redirection"),
+        ("> out/summary.txt", "must include a command"),
+        ("printf 'x' > out/a > out/b", "multiple redirections"),
+        (
+            "printf 'unterminated > out/summary.txt",
+            "unterminated quote",
+        ),
+        ("printf 'x' > out/summary one.txt", "one literal path"),
+        ("printf 'x' > \"out/summary.txt\"suffix", "one literal path"),
+    ] {
+        assert!(
+            matches!(
+                script_redirection(command),
+                Err(RuntimeError::Protocol(message)) if message.contains(expected)
+            ),
+            "{command}"
+        );
+    }
 
     for target in [
         "",
@@ -120,41 +105,27 @@ fn helpers_reject_unsupported_m1_shell_shapes() {
         evaluate_script_command("echo plain").expect("echo evaluates"),
         b"plain\n"
     );
-    assert!(matches!(
-        evaluate_script_command("printf \"bad\""),
-        Err(RuntimeError::Protocol(message)) if message.contains("single-quoted")
-    ));
-    assert!(matches!(
-        evaluate_script_command("printf 'bad"),
-        Err(RuntimeError::Protocol(message)) if message.contains("unterminated")
-    ));
-    assert!(matches!(
-        evaluate_script_command("printf 'bad\\t'"),
-        Err(RuntimeError::Protocol(message)) if message.contains("unsupported")
-    ));
-    assert!(matches!(
-        evaluate_script_command("printf 'bad\\'"),
-        Err(RuntimeError::Protocol(message)) if message.contains("dangling escape")
-    ));
-    assert!(matches!(
-        evaluate_script_command("printf '%s' OTHER"),
-        Err(RuntimeError::Protocol(message)) if message.contains("printf argument")
-    ));
-    assert!(matches!(
-        evaluate_script_command("echo $SUMMARY"),
-        Err(RuntimeError::Protocol(message)) if message.contains("unsupported own-script argument")
-    ));
-    assert!(matches!(
-        evaluate_script_command("echo \"$SUMMARY\""),
-        Err(RuntimeError::Protocol(message)) if message.contains("unsupported own-script argument")
-    ));
-    assert!(matches!(
-        evaluate_script_command("cat out/summary.txt"),
-        Err(RuntimeError::Protocol(message)) if message.contains("unsupported own-script command")
-    ));
+    for (command, expected) in [
+        ("printf \"bad\"", "single-quoted"),
+        ("printf 'bad", "unterminated"),
+        ("printf 'bad\\t'", "unsupported"),
+        ("printf 'bad\\'", "dangling escape"),
+        ("printf '%s' OTHER", "printf argument"),
+        ("echo $SUMMARY", "unsupported own-script argument"),
+        ("echo \"$SUMMARY\"", "unsupported own-script argument"),
+        ("cat out/summary.txt", "unsupported own-script command"),
+    ] {
+        assert!(
+            matches!(
+                evaluate_script_command(command),
+                Err(RuntimeError::Protocol(message)) if message.contains(expected)
+            ),
+            "{command}"
+        );
+    }
 
     assert!(
-        compile_own_script_operations(match_mode, command_policy, "\n# comment\n---\necho noop\n")
+        compile_own_script_operations("\n# comment\n---\necho noop\n")
             .expect("noop-like lines and echo compile")
             .is_none()
     );

@@ -5,7 +5,6 @@ use crate::runtime::{
     types::{CANCELLED_REASON, RuntimeError},
 };
 use proto::{EventEnvelope, EventType};
-use std::time::Instant;
 pub(in super::super) struct InterruptingSink {
     pub(in super::super) action: Option<crate::ProductiveInterruptAction>,
     pub(in super::super) events: Vec<EventEnvelope>,
@@ -18,7 +17,6 @@ impl RuntimeEventSink for InterruptingSink {
         event: &EventEnvelope,
         _canonical_jsonl: &str,
         _context_manifest: Option<ContextManifestCheckpoint>,
-        _measurement_started_at: Option<Instant>,
     ) -> Result<(), RuntimeError> {
         self.events.push(event.clone());
         if event.event_type == self.trigger && self.action.is_none() {
@@ -50,7 +48,6 @@ impl RuntimeEventSink for RejectingReservationSink {
         event: &EventEnvelope,
         _canonical_jsonl: &str,
         _context_manifest: Option<ContextManifestCheckpoint>,
-        _measurement_started_at: Option<Instant>,
     ) -> Result<(), RuntimeError> {
         self.events.push(event.clone());
         Ok(())

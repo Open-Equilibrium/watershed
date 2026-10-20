@@ -10,6 +10,7 @@ use super::{
 use crate::runtime::{
     context::ContextManifestCheckpoint,
     context_persistence::{ContextManifestPairingError, validate_context_manifest_pairing},
+    event_construction::ConstructedRuntimeEvent,
     event_writer::RuntimeEventSink,
     fs_guards::{AnchoredFile, ensure_anchored_non_hardlinked_file},
     live_events::LiveEventNotifier,
@@ -23,8 +24,6 @@ use crate::runtime::{
 };
 use proto::{EventEnvelope, EventType};
 use std::path::{Path, PathBuf};
-#[cfg(test)]
-use std::time::Instant;
 
 pub(crate) struct ConversationEventWriter {
     capture: Option<String>,
@@ -195,8 +194,13 @@ impl ConversationEventWriter {
         self.event_prefix.retained_payload_bytes() + self.context_prefix.retained_payload_bytes()
     }
 
+    #[cfg(test)]
     pub(crate) fn captured_jsonl(&self) -> Option<&str> {
         self.capture.as_deref()
+    }
+
+    pub(crate) fn take_captured_jsonl(&mut self) -> Option<String> {
+        self.capture.take()
     }
 
     pub(crate) fn last_checkpoint(&self) -> Option<(u64, &str)> {
@@ -231,26 +235,15 @@ impl ConversationEventWriter {
     }
 
     fn recovery_prefix_error(&mut self, message: &'static str) -> Option<RuntimeError> {
-        match self.next_expected_event() {
+        match self.event_prefix.next_line() {
             Ok(Some(_)) => Some(protocol(message)),
-            Ok(None) => match self.next_expected_context() {
+            Ok(None) => match self.context_prefix.next_line() {
                 Ok(Some(_)) => Some(protocol(message)),
                 Ok(None) => None,
                 Err(error) => Some(error),
             },
             Err(error) => Some(error),
         }
-    }
-
-    fn next_expected_event(&mut self) -> Result<Option<String>, RuntimeError> {
-        self.event_prefix.next_line()
-    }
-
-    fn next_expected_context(&mut self) -> Result<Option<String>, RuntimeError> {
-        let Some(line) = self.context_prefix.next_line()? else {
-            return Ok(None);
-        };
-        Ok(Some(line))
     }
 
     fn live_writer(&mut self) -> Result<&mut SerialConversationWriter, RuntimeError> {
@@ -303,9 +296,7 @@ impl ConversationEventWriter {
             .err();
         self.validation = Some(validation);
         let error = append_error.or(sync_error);
-        if error.is_none()
-            && let Some(notifier) = &self.notifier
-        {
+        if let Some(notifier) = &self.notifier {
             notifier.try_notify_conversation_run(
                 &self.conversation_id,
                 &self.run_session_id,
@@ -322,7 +313,6 @@ impl RuntimeEventSink for ConversationEventWriter {
         event: &EventEnvelope,
         canonical_jsonl: &str,
         context_manifest: Option<ContextManifestCheckpoint>,
-        #[cfg(test)] _measurement_started_at: Option<Instant>,
     ) -> Result<(), RuntimeError> {
         if self.failed {
             return Err(prior_conversation_writer_failure());
@@ -331,17 +321,37 @@ impl RuntimeEventSink for ConversationEventWriter {
             if self.finished {
                 return Err(protocol("conversation event writer is already finished"));
             }
-            let expected_jsonl = event.canonical_jsonl().map_err(|error| {
+            let constructed = ConstructedRuntimeEvent::new(event.clone()).map_err(|error| {
                 protocol(format!(
                     "conversation event canonical JSONL encoding failed: {error}"
                 ))
             })?;
-            if canonical_jsonl != expected_jsonl {
+            if canonical_jsonl != constructed.canonical_jsonl() {
                 return Err(protocol(
                     "conversation event does not match its canonical JSONL",
                 ));
             }
-            if let Some(expected) = self.next_expected_event()? {
+            self.commit_constructed(&constructed, context_manifest)
+        })();
+        self.failed |= result.is_err();
+        result
+    }
+
+    fn commit_constructed(
+        &mut self,
+        constructed: &ConstructedRuntimeEvent,
+        context_manifest: Option<ContextManifestCheckpoint>,
+    ) -> Result<(), RuntimeError> {
+        if self.failed {
+            return Err(prior_conversation_writer_failure());
+        }
+        let result = (|| {
+            if self.finished {
+                return Err(protocol("conversation event writer is already finished"));
+            }
+            let event = constructed.event();
+            let canonical_jsonl = constructed.canonical_jsonl();
+            if let Some(expected) = self.event_prefix.next_line()? {
                 if expected != canonical_jsonl {
                     return Err(protocol(
                         "productive recovery event prefix diverged from deterministic replay",
@@ -360,7 +370,7 @@ impl RuntimeEventSink for ConversationEventWriter {
                     }));
                 }
                 if let Some(checkpoint) = context_manifest.as_ref() {
-                    let expected_context = self.next_expected_context()?.ok_or_else(|| {
+                    let expected_context = self.context_prefix.next_line()?.ok_or_else(|| {
                         protocol("productive recovery message.completed has no context prefix")
                     })?;
                     if expected_context != checkpoint.manifest.line {
@@ -375,8 +385,8 @@ impl RuntimeEventSink for ConversationEventWriter {
                 self.last_timestamp = Some(event.timestamp.clone());
                 return Ok(());
             }
-            if let Some(expected_context) = self.next_expected_context()? {
-                if self.next_expected_context()?.is_some() {
+            if let Some(expected_context) = self.context_prefix.next_line()? {
+                if self.context_prefix.next_line()?.is_some() {
                     return Err(protocol(
                         "productive recovery context prefix extends beyond one missing event",
                     ));

@@ -3,52 +3,38 @@ use super::{
         create_directory_alias, empty_workspace, remove_directory_alias, reserve_session_log,
         reserve_session_log_with_publish_observer,
     },
-    support::assert_active_session,
     test_support::workspace_copy,
 };
-#[cfg(any(all(unix, not(target_os = "macos")), windows))]
-use crate::runtime::session_bundle::{SessionBundleInventory, SessionBundlePaths};
 use crate::runtime::{
     fs_guards::{
-        AnchoredWorkspace, ensure_runtime_dirs, set_directory_sync_error_for_path_for_test,
+        AnchoredWorkspace, set_directory_sync_error_for_path_for_test,
         set_owned_file_remove_observer, start_directory_sync_trace_for_test,
         take_directory_sync_trace_for_test,
     },
-    resume::resume_session,
-    session::run_flow,
+    session::{run_flow, set_run_pre_plan_observer},
     session_authority::{SessionOwnershipLease, session_ownership_is_active},
     session_candidates::suffixed_session_id,
     session_definition::SessionDefinitionMetadata,
+    session_lock::open_or_create_anchored_session_marker,
     session_reservation::{
-        materialize_session_candidate, reserve_anchored_session_lock_file,
-        reserve_unique_session_candidate_with_anchored_workspace, session_log_metadata_text,
+        materialize_session_candidate, reserve_unique_session_candidate_with_anchored_workspace,
+        session_log_metadata_text, set_candidate_pre_lease_observer_for_test,
         set_metadata_pre_activation_observer_for_test, write_reserved_session_metadata,
     },
-    session_store::workspace_store_leaf,
+    session_store::{ensure_runtime_dirs, workspace_store_leaf},
     types::{EmitMode, RuntimeError},
 };
-#[cfg(any(all(unix, not(target_os = "macos")), windows))]
+#[cfg(not(target_os = "macos"))]
 use std::ffi::OsString;
 use std::{fs, io};
 
-#[cfg(all(unix, not(target_os = "macos")))]
+#[cfg(not(target_os = "macos"))]
 fn non_unicode_object_leaf(session_id: &str) -> OsString {
     use std::os::unix::ffi::OsStringExt;
 
     let mut bytes = format!("{session_id}.object.sha256-").into_bytes();
     bytes.push(0xff);
     OsString::from_vec(bytes)
-}
-
-#[cfg(windows)]
-fn non_unicode_object_leaf(session_id: &str) -> OsString {
-    use std::os::windows::ffi::OsStringExt;
-
-    let mut units = format!("{session_id}.object.sha256-")
-        .encode_utf16()
-        .collect::<Vec<_>>();
-    units.push(0xd800);
-    OsString::from_wide(&units)
 }
 
 fn session_definition_metadata(
@@ -103,6 +89,119 @@ fn run_flow_allocates_next_session_id_when_base_log_is_corrupt() {
 }
 
 #[test]
+fn run_flow_rechecks_a_free_candidate_after_a_cooperating_run_completes() {
+    use std::{cell::RefCell, rc::Rc, sync::mpsc, thread, time::Duration};
+
+    let workspace = workspace_copy("smoke-flow");
+    let first_workspace = workspace.clone();
+    let (planning, waiting_for_plan) = mpsc::channel();
+    let (finish_first, resume_first) = mpsc::channel();
+    let first = thread::spawn(move || {
+        set_run_pre_plan_observer(move || {
+            planning.send(()).expect("first Run holds its candidate");
+            resume_first
+                .recv_timeout(Duration::from_secs(10))
+                .expect("second Run has reached its pre-lease barrier");
+        });
+        run_flow(&first_workspace, "smoke-flow", EmitMode::Jsonl)
+    });
+    waiting_for_plan
+        .recv_timeout(Duration::from_secs(10))
+        .expect("first Run reaches planning while holding the base lease");
+    let sessions = crate::tests::helpers::workspace_session_dir(&workspace);
+    assert!(
+        !sessions.exists(),
+        "neither Run has published session files"
+    );
+    assert!(
+        session_ownership_is_active(&workspace, "smoke-flow").expect("first Run ownership reads")
+    );
+
+    let first_output = Rc::new(RefCell::new(None));
+    let captured_first = Rc::clone(&first_output);
+    let observer_workspace = workspace.clone();
+    set_candidate_pre_lease_observer_for_test(move || {
+        finish_first.send(()).expect("first Run may publish");
+        *captured_first.borrow_mut() = Some(
+            first
+                .join()
+                .expect("first Run thread joins")
+                .expect("first Run completes before the second acquires its lease"),
+        );
+        assert!(
+            !session_ownership_is_active(&observer_workspace, "smoke-flow")
+                .expect("completed Run ownership reads")
+        );
+    });
+
+    let second = run_flow(&workspace, "smoke-flow", EmitMode::Jsonl)
+        .expect("second Run skips the base published after its availability snapshot");
+    let first = first_output
+        .borrow_mut()
+        .take()
+        .expect("first Run captured");
+
+    for (run, session_id) in [(&first, "smoke-flow"), (&second, "smoke-flow-2")] {
+        assert!(!run.failed);
+        assert_eq!(run.session_id, session_id);
+        assert_eq!(
+            fs::read(sessions.join(format!("{session_id}.jsonl")))
+                .expect("each completed Run retains its own stream"),
+            run.stdout.as_bytes()
+        );
+        assert!(
+            !session_ownership_is_active(&workspace, session_id)
+                .expect("completed Run ownership reads")
+        );
+    }
+}
+
+#[test]
+fn unpublished_fixture_and_productive_candidates_share_public_ownership() {
+    use crate::runtime::conversations::reserve_new_conversation_run;
+
+    for fixture_first in [false, true] {
+        let workspace = empty_workspace("mixed-unpublished-candidates");
+        let anchored = AnchoredWorkspace::open(&workspace).expect("workspace opens");
+        if fixture_first {
+            let fixture =
+                reserve_unique_session_candidate_with_anchored_workspace(&anchored, "smoke-flow")
+                    .expect("Fixture claims the unpublished base");
+            let productive = reserve_new_conversation_run(&workspace, "smoke-flow")
+                .expect("productive allocation skips the held Fixture candidate");
+            assert_eq!(fixture.session_id, "smoke-flow");
+            assert_eq!(productive.conversation_id(), "smoke-flow-2");
+            assert_eq!(productive.run_session_id(), "smoke-flow-2");
+            productive.release().expect("productive ownership releases");
+            drop(fixture);
+        } else {
+            let productive = reserve_new_conversation_run(&workspace, "smoke-flow")
+                .expect("productive claims the unpublished base");
+            let fixture =
+                reserve_unique_session_candidate_with_anchored_workspace(&anchored, "smoke-flow")
+                    .expect("Fixture allocation skips the held productive candidate");
+            assert_eq!(productive.conversation_id(), "smoke-flow");
+            assert_eq!(productive.run_session_id(), "smoke-flow");
+            assert_eq!(fixture.session_id, "smoke-flow-2");
+            drop(fixture);
+            productive.release().expect("productive ownership releases");
+        }
+        assert!(
+            crate::tests::helpers::workspace_session_dir(&workspace)
+                .read_dir()
+                .expect("productive allocation creates its empty sessions root")
+                .next()
+                .is_none(),
+            "neither producer published a bundle"
+        );
+        let retry =
+            reserve_unique_session_candidate_with_anchored_workspace(&anchored, "smoke-flow")
+                .expect("released unpublished candidates are reusable");
+        assert_eq!(retry.session_id, "smoke-flow");
+    }
+}
+
+#[test]
 fn reservation_collision_preserves_existing_session_log() {
     let workspace = empty_workspace("reservation-existing-session");
     let anchored = AnchoredWorkspace::open(&workspace).expect("workspace opens");
@@ -152,7 +251,6 @@ fn reserved_candidate_rejects_materialization_in_another_workspace() {
     );
 }
 
-#[cfg(any(unix, windows))]
 #[test]
 fn reserved_candidate_rejects_a_rebound_workspace_path() {
     let workspace = empty_workspace("reservation-rebound-original");
@@ -375,7 +473,7 @@ fn unactivated_reservation_rollback_preserves_concurrent_segment_siblings() {
     fs::write(&context_segment_path, b"foreign context segment")
         .expect("foreign context segment written");
 
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
 
     assert_eq!(
         fs::read(&event_segment_path).expect("foreign event segment remains"),
@@ -466,7 +564,7 @@ fn unique_reservation_skips_orphan_namespaces() {
         reserve_session_log(&workspace, "bundle001").expect("inventory skips orphan namespaces");
 
     assert_eq!(reservation.session_id, "bundle001-14");
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
     assert!(
         sentinels
             .iter()
@@ -474,7 +572,7 @@ fn unique_reservation_skips_orphan_namespaces() {
     );
 }
 
-#[cfg(any(all(unix, not(target_os = "macos")), windows))]
+#[cfg(not(target_os = "macos"))]
 #[test]
 fn unique_reservation_skips_a_non_unicode_object_namespace() {
     let workspace = empty_workspace("reservation-non-unicode-object-inventory");
@@ -486,14 +584,14 @@ fn unique_reservation_skips_a_non_unicode_object_namespace() {
         .expect("non-Unicode object namespace advances the candidate");
 
     assert_eq!(reservation.session_id, "nonunicode001-2");
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
     assert_eq!(
         fs::read(object_path).expect("object sentinel remains readable"),
         b"foreign object member"
     );
 }
 
-#[cfg(any(all(unix, not(target_os = "macos")), windows))]
+#[cfg(not(target_os = "macos"))]
 #[test]
 fn reservation_rejects_a_non_unicode_object_published_after_candidate_selection() {
     let workspace = empty_workspace("reservation-non-unicode-object-race");
@@ -515,40 +613,6 @@ fn reservation_rejects_a_non_unicode_object_published_after_candidate_selection(
     );
 }
 
-#[cfg(any(all(unix, not(target_os = "macos")), windows))]
-#[test]
-fn bundle_inspection_rejects_a_non_unicode_object_in_its_namespace() {
-    let workspace = empty_workspace("bundle-non-unicode-object-inventory");
-    let reservation =
-        reserve_session_log(&workspace, "nonunicode003").expect("Run bundle reserved");
-    let paths = SessionBundlePaths::from_reservation(&reservation);
-    reservation.activate().expect("reservation activates");
-    drop(reservation);
-    fs::write(paths.events.diagnostic_path(), b"event\n").expect("event segment written");
-    fs::write(paths.contexts.diagnostic_path(), b"context\n").expect("context segment written");
-    fs::write(paths.metadata.diagnostic_path(), b"metadata").expect("metadata written");
-    fs::write(
-        paths
-            .sessions
-            .path
-            .join(non_unicode_object_leaf("nonunicode003")),
-        b"foreign object member",
-    )
-    .expect("non-Unicode object written");
-
-    let error = SessionBundleInventory::inspect(paths)
-        .expect_err("non-Unicode object name in the session namespace must be rejected");
-
-    assert!(
-        matches!(
-            &error,
-            RuntimeError::Protocol(message)
-                if message.contains("non-canonical session object name")
-        ),
-        "unexpected bundle inspection error: {error}"
-    );
-}
-
 #[test]
 fn unique_reservation_skips_a_truncated_candidate_alias() {
     let workspace = empty_workspace("reservation-truncated-candidate");
@@ -560,7 +624,7 @@ fn unique_reservation_skips_a_truncated_candidate_alias() {
         .expect("duplicate generated candidate is skipped once");
 
     assert_eq!(reservation.session_id, suffixed_session_id(&base, 3));
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
 }
 
 #[cfg(target_os = "linux")]
@@ -586,7 +650,7 @@ fn unique_reservation_skips_case_alias_symlink_locks() {
         .expect("case aliases are inventoried on a case-sensitive host");
 
     assert_eq!(reservation.session_id, "bundle001-5");
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
 }
 
 #[test]
@@ -601,8 +665,10 @@ fn unique_session_reservation_suffixes_an_active_session_id() {
     assert!(first.session_path.diagnostic_path().exists());
     assert!(first.log_path.diagnostic_path().exists());
     assert!(!first.lock_path.diagnostic_path().exists());
-    second.rollback().expect("second reservation rolls back");
-    first.rollback().expect("reservation rolls back");
+    second
+        .release_lock()
+        .expect("second reservation rolls back");
+    first.release_lock().expect("reservation rolls back");
 }
 
 #[test]
@@ -959,7 +1025,7 @@ fn metadata_parent_sync_failure_is_retryable_before_reservation_activation() {
         .expect("retry re-synchronizes metadata and activates the reservation");
     assert_eq!(
         take_directory_sync_trace_for_test(),
-        [crate::tests::helpers::canonical_test_path(&logs)]
+        [crate::runtime::fs_guards::test_path_key(&logs)]
     );
     assert_eq!(
         fs::read_to_string(reservation.log_path.diagnostic_path())
@@ -1188,17 +1254,13 @@ fn session_reservation_publishes_under_lock_and_suffixes_lock_collisions() {
         .expect("runtime dirs")
         .sessions;
     let session_dir = sessions.path.clone();
-    let published = reserve_session_log_with_publish_observer(&workspace, "publish001", || {
-        let err = resume_session(&workspace, "publish001", EmitMode::Jsonl)
-            .expect_err("published session must already be locked");
-        assert_active_session(err, "publish001", "publish001.lock");
-    })
-    .expect("session published under lock");
-    published.rollback().expect("reservation rolls back");
+    let published = reserve_session_log_with_publish_observer(&workspace, "publish001", || {})
+        .expect("session published under lock");
+    published.release_lock().expect("reservation rolls back");
 
     let held_lock = sessions.file("smoke001.lock");
     let held_lock_file =
-        reserve_anchored_session_lock_file(&held_lock, "smoke001").expect("candidate lock held");
+        open_or_create_anchored_session_marker(&held_lock).expect("candidate lock held");
 
     let second = reserve_session_log(&workspace, "smoke001")
         .expect("locked unpublished candidate must allocate the next suffix");
@@ -1207,12 +1269,11 @@ fn session_reservation_publishes_under_lock_and_suffixes_lock_collisions() {
     assert!(held_lock.diagnostic_path().exists());
     assert_eq!(second.session_id, "smoke001-2");
     assert!(second.session_path.diagnostic_path().exists());
-    second.rollback().expect("reservation rolls back");
+    second.release_lock().expect("reservation rolls back");
     held_lock.remove().expect("held lock removed");
     drop(held_lock_file);
 }
 
-#[cfg(unix)]
 #[test]
 fn session_reservation_cleanup_stays_bound_to_the_opened_runtime_directory() {
     use std::os::unix::fs::symlink;
@@ -1230,7 +1291,7 @@ fn session_reservation_cleanup_stays_bound_to_the_opened_runtime_directory() {
         symlink(&outside, &session_dir).expect("replacement session symlink created");
     })
     .expect("reservation survives directory rename");
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
 
     assert_eq!(
         fs::read_to_string(outside_session).expect("outside session remains readable"),

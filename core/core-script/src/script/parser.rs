@@ -101,7 +101,7 @@ fn parse_safe_yaml_value(source_name: &str, source: &str) -> Result<noyalib::Val
     if contains_null(&value) {
         return Err(parse_error(
             source_name,
-            "explicit YAML null values are not allowed".to_owned(),
+            "YAML null values are not allowed".to_owned(),
         ));
     }
     Ok(value)

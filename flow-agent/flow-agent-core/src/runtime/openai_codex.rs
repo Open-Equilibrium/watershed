@@ -13,12 +13,9 @@ pub(crate) use protocol::{
     derive_prompt_cache_key, output_contract_instruction, provider_arguments_to_flow_value,
     responses_request_input_bytes,
 };
-pub(crate) use transport::request_responses_at;
+pub(crate) use transport::request_responses_with_client_async;
 
 #[cfg(test)]
 pub(crate) use protocol::decode_responses_turn;
 #[cfg(test)]
-pub(crate) use transport::{
-    request_responses_async, request_responses_at_with_deadlines_and_cancellation,
-    request_responses_with_client_async,
-};
+pub(crate) use transport::request_responses_at_with_deadlines_and_cancellation;

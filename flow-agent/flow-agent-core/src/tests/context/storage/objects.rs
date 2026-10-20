@@ -9,9 +9,10 @@ use crate::runtime::{
     context::{ContextManifest, ContextManifestCheckpoint, ContextObject},
     context_persistence::{ContextManifestWriter, SessionObjectWriter, ensure_session_object_size},
     digest::sha256_hex,
-    fs_guards::{ensure_runtime_dirs, open_anchored_session_log_append_file, path_io_error},
+    fs_guards::{open_anchored_session_log_append_file, path_io_error},
     session::run_flow,
     session_bundle::ensure_session_object_total,
+    session_store::ensure_runtime_dirs,
     types::{
         EmitMode, MAX_SESSION_OBJECT_BYTES, MAX_SESSION_OBJECT_TOTAL_BYTES, MAX_SESSION_OBJECTS,
     },
@@ -39,7 +40,7 @@ fn session_object_namespace_rejects_case_aliases() {
     let reservation = reserve_session_log(&workspace, session_id)
         .expect("case-aliased namespace advances the reservation candidate");
     assert_eq!(reservation.session_id, "objectcase001-2");
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
 }
 
 #[test]
@@ -171,60 +172,9 @@ fn session_object_retry_and_reopen_preserve_accounting() {
     assert_eq!(writer.accounted_bytes, accounted_bytes);
     assert_eq!(writer.object_count, 1);
     drop(writer);
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
     drop(reservation);
     fs::remove_dir_all(workspace).expect("workspace removed");
-}
-
-#[test]
-fn session_object_preflight_rejects_the_persisted_total_before_writing() {
-    let workspace = empty_workspace("session-object-preflight-total");
-    let reservation =
-        reserve_session_log(&workspace, "objectpreflight001").expect("session reserved");
-    let bytes = b"xx".to_vec();
-    let object = ContextObject {
-        digest: sha256_hex(&bytes),
-        bytes,
-    };
-    let object_path = crate::tests::helpers::workspace_session_dir(&workspace).join(format!(
-        "{}.object.sha256-{}",
-        reservation.session_id, object.digest
-    ));
-    let mut writer = SessionObjectWriter::open(
-        reservation.session_path.parent.clone(),
-        &reservation.session_id,
-    )
-    .expect("object writer opens");
-    writer.accounted_bytes = MAX_SESSION_OBJECT_TOTAL_BYTES - 1;
-
-    let preflight_error = writer
-        .preflight_all(std::slice::from_ref(&object))
-        .expect_err("preflight rejects an object above the persisted total budget");
-
-    assert!(
-        preflight_error.to_string().contains("object data size"),
-        "{preflight_error}"
-    );
-    assert_eq!(writer.accounted_bytes, MAX_SESSION_OBJECT_TOTAL_BYTES - 1);
-    let mut write_attempted = false;
-    let persist_error = writer
-        .persist_with(&object, |_path, _bytes| {
-            write_attempted = true;
-            Ok(())
-        })
-        .expect_err("persistence rejects the same total budget");
-    assert_eq!(persist_error.to_string(), preflight_error.to_string());
-    assert!(!write_attempted, "the rejected object must not be written");
-    assert!(!object_path.exists());
-    reservation.rollback().expect("reservation rolls back");
-}
-
-fn fill_session_object_inventory(
-    writer: &mut SessionObjectWriter,
-    count: usize,
-    required_digest: Option<&str>,
-) {
-    writer.seed_published_inventory_for_test(count, required_digest);
 }
 
 #[test]
@@ -252,7 +202,7 @@ fn session_object_writer_enforces_the_unique_object_count_boundary() {
         &reservation.session_id,
     )
     .expect("full writer opens");
-    fill_session_object_inventory(&mut full, MAX_SESSION_OBJECTS, Some(&existing.digest));
+    full.seed_published_inventory_for_test(MAX_SESSION_OBJECTS, Some(&existing.digest));
     full.persist(&existing)
         .expect("an existing digest is allowed at the object limit");
 
@@ -283,17 +233,13 @@ fn session_object_writer_enforces_the_unique_object_count_boundary() {
         &reservation.session_id,
     )
     .expect("one-slot writer opens");
-    fill_session_object_inventory(
-        &mut one_slot,
-        MAX_SESSION_OBJECTS - 1,
-        Some(&existing.digest),
-    );
+    one_slot.seed_published_inventory_for_test(MAX_SESSION_OBJECTS - 1, Some(&existing.digest));
     one_slot
         .persist(&new)
         .expect("one new digest is allowed below the object limit");
     assert_eq!(one_slot.object_count, MAX_SESSION_OBJECTS);
 
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
 }
 
 #[test]
@@ -325,7 +271,7 @@ fn session_object_batch_counts_duplicate_digests_once_and_rejects_excess_before_
         &reservation.session_id,
     )
     .expect("duplicate writer opens");
-    fill_session_object_inventory(&mut duplicate_writer, MAX_SESSION_OBJECTS - 1, None);
+    duplicate_writer.seed_published_inventory_for_test(MAX_SESSION_OBJECTS - 1, None);
     duplicate_writer
         .persist_all(&[first.clone(), first.clone()])
         .expect("duplicate new digests consume one slot");
@@ -338,7 +284,7 @@ fn session_object_batch_counts_duplicate_digests_once_and_rejects_excess_before_
         &reservation.session_id,
     )
     .expect("excess writer opens");
-    fill_session_object_inventory(&mut excess_writer, MAX_SESSION_OBJECTS - 1, None);
+    excess_writer.seed_published_inventory_for_test(MAX_SESSION_OBJECTS - 1, None);
     let before_entries = fs::read_dir(crate::tests::helpers::workspace_session_dir(&workspace))
         .expect("session directory reads")
         .map(|entry| entry.expect("entry reads").file_name())
@@ -358,7 +304,7 @@ fn session_object_batch_counts_duplicate_digests_once_and_rejects_excess_before_
         .collect::<BTreeSet<_>>();
     assert_eq!(after_entries, before_entries, "no temp path is created");
 
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
 }
 
 #[test]
@@ -384,7 +330,7 @@ fn session_object_partial_batch_publication_remains_accounted() {
         &reservation.session_id,
     )
     .expect("writer opens");
-    fill_session_object_inventory(&mut writer, MAX_SESSION_OBJECTS - 2, None);
+    writer.seed_published_inventory_for_test(MAX_SESSION_OBJECTS - 2, None);
     writer.accounted_bytes = MAX_SESSION_OBJECT_TOTAL_BYTES - 2;
 
     let mut writes = 0;
@@ -445,47 +391,7 @@ fn session_object_partial_batch_publication_remains_accounted() {
         "the over-limit retry fails before writing"
     );
 
-    reservation.rollback().expect("reservation rolls back");
-}
-
-#[test]
-fn session_object_count_preflight_is_transactional_and_matches_persistence() {
-    let workspace = empty_workspace("session-object-count-preflight");
-    let reservation =
-        reserve_session_log(&workspace, "objectcountpreflight001").expect("session reserved");
-    let bytes = b"new object above the limit".to_vec();
-    let object = ContextObject {
-        digest: sha256_hex(&bytes),
-        bytes,
-    };
-    let mut writer = SessionObjectWriter::open(
-        reservation.session_path.parent.clone(),
-        &reservation.session_id,
-    )
-    .expect("writer opens");
-    fill_session_object_inventory(&mut writer, MAX_SESSION_OBJECTS, None);
-    let accounted_bytes = writer.accounted_bytes;
-    let object_count = writer.object_count;
-    let preflight_object_count = writer.preflight_object_count;
-
-    let preflight_error = writer
-        .preflight_all(std::slice::from_ref(&object))
-        .expect_err("preflight rejects the excess digest");
-    assert_eq!(writer.accounted_bytes, accounted_bytes);
-    assert_eq!(writer.object_count, object_count);
-    assert_eq!(writer.preflight_object_count, preflight_object_count);
-
-    let mut write_attempted = false;
-    let persist_error = writer
-        .persist_with(&object, |_path, _bytes| {
-            write_attempted = true;
-            Ok(())
-        })
-        .expect_err("persistence rejects the same excess digest");
-    assert_eq!(persist_error.to_string(), preflight_error.to_string());
-    assert!(!write_attempted);
-
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
 }
 
 #[test]
@@ -535,7 +441,7 @@ fn session_object_reopen_restores_zero_byte_count_and_requires_content_verificat
         "{error}"
     );
 
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
 }
 
 #[test]
@@ -581,7 +487,7 @@ fn session_object_writer_revalidates_published_objects() {
         "{missing}"
     );
 
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
 }
 
 #[test]
@@ -661,7 +567,7 @@ fn context_manifest_rejects_missing_and_mismatched_object_associations() {
             fs::read(reservation.context_path.diagnostic_path()).expect("manifest reads"),
             b""
         );
-        reservation.rollback().expect("reservation rolls back");
+        reservation.release_lock().expect("reservation rolls back");
     }
 }
 
@@ -709,7 +615,7 @@ fn assert_invalid_context_checkpoint_preserves_objects(
         accounted_bytes
     );
     drop(writer);
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
 }
 
 #[test]

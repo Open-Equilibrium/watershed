@@ -2,8 +2,10 @@ import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
+import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { chromium } from "playwright";
+import { assertDecisionPage } from "./check-decision-page.mjs";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, "..");
@@ -13,16 +15,14 @@ const viewports = [
 ];
 
 function runPlaywrightCli(args, action) {
-  const result =
-    process.platform === "win32"
-      ? spawnSync("cmd.exe", ["/d", "/s", "/c", ["pnpm", ...args].join(" ")], {
-          cwd: repoRoot,
-          stdio: "inherit",
-        })
-      : spawnSync("pnpm", args, {
-          cwd: repoRoot,
-          stdio: "inherit",
-        });
+  const cli = path.join(
+    path.dirname(createRequire(import.meta.url).resolve("playwright/package.json")),
+    "cli.js",
+  );
+  const result = spawnSync(process.execPath, [cli, ...args], {
+    cwd: repoRoot,
+    stdio: "inherit",
+  });
 
   if (result.error) {
     throw new Error(`failed to start ${action}: ${result.error.message}`);
@@ -38,7 +38,7 @@ function runPlaywrightCli(args, action) {
 function ensurePlaywrightChromium() {
   if (process.platform === "linux" && process.env.CI === "true") {
     runPlaywrightCli(
-      ["exec", "playwright", "install-deps", "chromium"],
+      ["install-deps", "chromium"],
       "Playwright browser dependency install",
     );
   }
@@ -48,7 +48,7 @@ function ensurePlaywrightChromium() {
     return;
   }
 
-  runPlaywrightCli(["exec", "playwright", "install", "chromium"], "Playwright browser install");
+  runPlaywrightCli(["install", "chromium"], "Playwright browser install");
 
   if (!existsSync(executablePath)) {
     throw new Error(`Playwright browser install did not create ${executablePath}`);
@@ -165,6 +165,37 @@ async function assertVisibleLayout(page, expectedText, viewport, label) {
   }
 }
 
+async function assertNoHorizontalOverflow(page, label) {
+  const layout = await page.evaluate(() => {
+    const root = document.documentElement;
+    const overflowing = [...document.querySelectorAll("body *")]
+      .map((element) => {
+        const rect = element.getBoundingClientRect();
+        return {
+          element: element.tagName.toLowerCase(),
+          left: Math.round(rect.left),
+          right: Math.round(rect.right),
+          width: Math.round(rect.width),
+        };
+      })
+      .filter(({ left, right }) => left < -1 || right > root.clientWidth + 1)
+      .slice(0, 3);
+
+    return {
+      clientWidth: root.clientWidth,
+      overflowing,
+      scrollWidth: root.scrollWidth,
+    };
+  });
+
+  if (layout.scrollWidth > layout.clientWidth + 1) {
+    throw new Error(
+      `${label}: horizontal overflow (${layout.scrollWidth}px content in ${layout.clientWidth}px viewport); ` +
+        `offenders: ${JSON.stringify(layout.overflowing)}`,
+    );
+  }
+}
+
 async function checkDocument(browser, doc, viewport) {
   const label = `${doc.relativePath} ${viewport.name} ${viewport.width}x${viewport.height}`;
   const context = await browser.newContext({
@@ -191,6 +222,24 @@ async function checkDocument(browser, doc, viewport) {
     }
 
     await assertVisibleLayout(page, expectedText, viewport, label);
+    if (viewport.name === "mobile") {
+      await assertNoHorizontalOverflow(page, label);
+    }
+
+    if (doc.relativePath === "docs/decisions/open-decisions.html") {
+      await assertDecisionPage(page);
+      await page.goto(`${pathToFileURL(doc.absolutePath).href}#d-067`, { waitUntil: "load" });
+      await page.locator("#d-067").getByRole("link", { name: "D-066", exact: true }).press("Enter");
+      await page.keyboard.press("Tab");
+      if (await page.locator("#d-066 a:focus").count() !== 1) {
+        throw new Error(`${label}: Tab after a decision link must continue inside its destination`);
+      }
+      await page.keyboard.press("Shift+Tab");
+      await page.keyboard.press("Enter");
+      if (await page.locator("#d-066 p").first().isVisible()) {
+        throw new Error(`${label}: keyboard navigation must return to the destination collapse control`);
+      }
+    }
 
     if (consoleErrors.length > 0) {
       throw new Error(`${label}: console errors: ${consoleErrors.join("; ")}`);

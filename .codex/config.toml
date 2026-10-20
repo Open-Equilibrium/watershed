@@ -3,7 +3,7 @@
 # Codex CLI alone parses and loads this repository-only setup. AGENTS.md defines
 # its live-session verification and excludes it from Watershed review gates.
 
-model = "gpt-5.6-sol"
+model = "gpt-6.1-sol"
 model_reasoning_effort = "xhigh"
 model_verbosity = "low"
 personality = "pragmatic"
@@ -11,7 +11,7 @@ personality = "pragmatic"
 # Keep big logs and diagnostics out of future turns.
 tool_output_token_limit = 6000
 
-# Auto-compact well before GPT's >272K premium-pricing zone.
+# Compact before context becomes crowded.
 model_auto_compact_token_limit = 150000
 
 approval_policy = "never"

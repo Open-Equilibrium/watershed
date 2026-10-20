@@ -19,6 +19,22 @@ pub(in crate::tests::conversations) fn write_terminal_recovery_snapshot_with_par
     run_session_id: &str,
     parent_entry_id: Option<&str>,
 ) -> String {
+    write_terminal_recovery_snapshot_with_parent_and_prior_event_count(
+        workspace,
+        conversation_id,
+        run_session_id,
+        parent_entry_id,
+        0,
+    )
+}
+
+pub(in crate::tests::conversations) fn write_terminal_recovery_snapshot_with_parent_and_prior_event_count(
+    workspace: &Path,
+    conversation_id: &str,
+    run_session_id: &str,
+    parent_entry_id: Option<&str>,
+    prior_event_count: u64,
+) -> String {
     let run = crate::tests::helpers::workspace_session_dir(workspace)
         .join(conversation_id)
         .join("runs")
@@ -53,7 +69,7 @@ pub(in crate::tests::conversations) fn write_terminal_recovery_snapshot_with_par
             "flow_definition_hash": flow_hash,
             "flow_definition_id": "review-flow",
             "parent_entry_id": parent_entry_id,
-            "prior_event_count": 0,
+            "prior_event_count": prior_event_count,
             "prior_history_object": history_uri,
             "record_type": "header",
             "registry_hash": registry_hash,
@@ -62,7 +78,7 @@ pub(in crate::tests::conversations) fn write_terminal_recovery_snapshot_with_par
             "schema": "flow-productive-recovery-v0"
         }),
         serde_json::json!({
-            "cumulative_event_count": 2,
+            "cumulative_event_count": prior_event_count + 2,
             "failed": false,
             "history_object": format!("session-object:sha256:{history_digest}"),
             "record_type": "terminal",

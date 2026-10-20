@@ -1,3 +1,4 @@
+use super::attempt_codec::{cancelled_attempt_output, canonical_request_hash};
 #[cfg(test)]
 use super::observe_productive_result_persist;
 use super::provider_result::{
@@ -5,10 +6,10 @@ use super::provider_result::{
     provider_error_from_durable_output, provider_turn_from_durable_output,
     verify_provider_result_session_objects,
 };
-use super::tool::{canonical_request_hash, execute_productive_tool};
+use super::tool::execute_productive_tool;
 use super::{
-    PROVIDER_CANCELLED_SCHEMA_V0, ProductiveContext, ProductiveProvider, ProductiveToolExecutor,
-    emit_and_commit, mark_recovery_failure, message_delta_chunks, provider_dispatch_reservation,
+    ProductiveContext, ProductiveProvider, ProductiveToolExecutor, emit_and_commit,
+    mark_recovery_failure, message_delta_chunks, provider_dispatch_reservation,
 };
 use crate::runtime::{
     context::{CompiledContext, compile_provider_turn_context_with_agent_instructions},
@@ -20,8 +21,8 @@ use crate::runtime::{
         responses_request_input_bytes,
     },
     run_attempts::{
-        ProductiveAttemptLog, ProviderTerminalClassification, RunAttemptKind, RunAttemptOutcome,
-        RunAttemptResult,
+        ProductiveAttemptLog, ProviderTerminalClassification, RunAttemptIntent, RunAttemptKind,
+        RunAttemptOutcome, RunAttemptResult,
     },
     stream_signature::FlowInvocation,
     types::RuntimeError,
@@ -84,9 +85,7 @@ fn cancelled_provider_result(attempt_id: &str, timestamp: &str) -> RunAttemptRes
         ),
         exit_code: None,
         timestamp: timestamp.to_owned(),
-        durable_output: Some(serde_json::json!({
-            "schema": PROVIDER_CANCELLED_SCHEMA_V0,
-        })),
+        durable_output: Some(cancelled_attempt_output()),
     }
 }
 
@@ -149,14 +148,15 @@ where
     context.execution.workspace.verify_binding()?;
     context
         .sink
-        .reserve_productive_dispatch(provider_dispatch_reservation(compiled)?)?;
-    context.attempts.intent(
-        RunAttemptKind::Provider,
-        attempt_id,
-        request_hash,
-        None,
-        timestamp,
-    )?;
+        .reserve_productive_dispatch(provider_dispatch_reservation(compiled))?;
+    context.attempts.intent(&RunAttemptIntent {
+        attempt_id: attempt_id.to_owned(),
+        attempt_kind: RunAttemptKind::Provider,
+        expected_enforcement: None,
+        request_hash: request_hash.to_owned(),
+        tool_id: None,
+        timestamp: timestamp.to_owned(),
+    })?;
     let provider_turn = match crate::runtime::cancellation::claim_productive_effect_dispatch() {
         Ok(_dispatch) => context.provider.turn(context.execution.credential, body),
         Err(error) => Err(error),

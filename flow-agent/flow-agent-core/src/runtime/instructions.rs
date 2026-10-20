@@ -10,7 +10,7 @@ pub(crate) fn read_applicable_agent_instructions(
     global_home: &AnchoredDir,
     workspace: &AnchoredWorkspace,
 ) -> Result<String, RuntimeError> {
-    let global = read_global_agent_instructions(global_home)?;
+    let global = read_optional_agent_instructions(global_home)?;
     let local = read_workspace_agent_instructions(workspace)?;
     Ok(match (global.is_empty(), local.is_empty()) {
         (true, true) => String::new(),
@@ -18,12 +18,6 @@ pub(crate) fn read_applicable_agent_instructions(
         (true, false) => local,
         (false, false) => format!("{global}\n{local}"),
     })
-}
-
-pub(crate) fn read_global_agent_instructions(
-    global_home: &AnchoredDir,
-) -> Result<String, RuntimeError> {
-    read_optional_agent_instructions(global_home)
 }
 
 pub(crate) fn read_workspace_agent_instructions(

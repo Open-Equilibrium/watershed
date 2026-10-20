@@ -1,13 +1,12 @@
 use super::{
     flow_command,
-    process::wait_with_input_and_output_before,
+    process::{cli_child_watchdog, wait_with_input_and_output_before},
     test_support::{expected_stream, session_home_path, workspace_copy, workspace_session_dir},
 };
 use std::{
     fs,
     path::Path,
     process::{Output, Stdio},
-    time::Duration,
 };
 
 fn run_chat(workspace: &Path, input: &[u8]) -> Output {
@@ -19,15 +18,7 @@ fn run_chat(workspace: &Path, input: &[u8]) -> Output {
         .stderr(Stdio::piped())
         .spawn()
         .expect("flow binary should spawn");
-    wait_with_input_and_output_before(child, input, chat_child_watchdog())
-}
-
-fn chat_child_watchdog() -> Duration {
-    if cfg!(windows) || std::env::var_os("CARGO_LLVM_COV").is_some() {
-        Duration::from_secs(30)
-    } else {
-        Duration::from_secs(10)
-    }
+    wait_with_input_and_output_before(child, input, cli_child_watchdog())
 }
 
 #[test]

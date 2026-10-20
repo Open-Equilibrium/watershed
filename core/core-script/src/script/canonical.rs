@@ -39,35 +39,6 @@ pub(super) fn canonicalize_registry_value(value: &mut Value) {
             {
                 allowed_values.sort_by(|left, right| left.as_str().cmp(&right.as_str()));
             }
-            if let Some(Value::Array(allow)) = map.get_mut("allow")
-                && allow.iter().all(|entry| {
-                    entry.get("kind").and_then(Value::as_str).is_some()
-                        && entry.get("transport").and_then(Value::as_str).is_some()
-                        && entry.get("cidr").and_then(Value::as_str).is_some()
-                        && entry.get("port").and_then(Value::as_u64).is_some()
-                })
-            {
-                allow.sort_by(|left, right| {
-                    left.get("kind")
-                        .and_then(Value::as_str)
-                        .cmp(&right.get("kind").and_then(Value::as_str))
-                        .then_with(|| {
-                            left.get("transport")
-                                .and_then(Value::as_str)
-                                .cmp(&right.get("transport").and_then(Value::as_str))
-                        })
-                        .then_with(|| {
-                            left.get("cidr")
-                                .and_then(Value::as_str)
-                                .cmp(&right.get("cidr").and_then(Value::as_str))
-                        })
-                        .then_with(|| {
-                            left.get("port")
-                                .and_then(Value::as_u64)
-                                .cmp(&right.get("port").and_then(Value::as_u64))
-                        })
-                });
-            }
             if let Some(Value::Array(fields)) = map.get_mut("fields")
                 && fields.iter().all(|field| {
                     field.get("name").and_then(Value::as_str).is_some()
@@ -102,7 +73,6 @@ pub(super) fn registry_source_error(source_name: &str, error: RegistryError) -> 
 #[cfg(test)]
 mod tests {
     use super::canonicalize_registry_value;
-    use crate::script::{load::parse_registry_block, model::ResolvedRegistry};
     use serde_json::json;
 
     #[test]
@@ -128,32 +98,6 @@ mod tests {
             value["value_contract"]["Map"]["fields"][0]["value_contract"]["Map"]["fields"][0]["name"],
             "nested-a"
         );
-    }
-
-    #[test]
-    fn canonicalizes_network_allow_entries_independently_of_authored_order() {
-        let registry = |allow: &str| {
-            let block = parse_registry_block(
-                "network-order.yaml",
-                &format!(
-                    "tool:\n  id: network-order\n  name: NetworkOrder\n  tool_kind: predefined-command\n  command:\n    command_id: read-file\n    argv: []\n  allowed_parameters: []\n  read_scope: []\n  write_scope: []\n  protected_path_grants: []\n  network:\n    default: deny\n    allow:\n{allow}"
-                ),
-            )
-            .expect("network allowlist parses");
-            ResolvedRegistry::from_blocks([block])
-                .expect("network allowlist resolves")
-                .canonical_json()
-                .expect("registry canonicalizes")
-        };
-
-        let tcp_then_udp = registry(
-            "      - kind: cidr\n        transport: tcp\n        cidr: 192.0.2.0/24\n        port: 443\n      - kind: cidr\n        transport: udp\n        cidr: 198.51.100.0/24\n        port: 53\n",
-        );
-        let udp_then_tcp = registry(
-            "      - kind: cidr\n        transport: udp\n        cidr: 198.51.100.0/24\n        port: 53\n      - kind: cidr\n        transport: tcp\n        cidr: 192.0.2.0/24\n        port: 443\n",
-        );
-
-        assert_eq!(tcp_then_udp, udp_then_tcp);
     }
 
     #[test]

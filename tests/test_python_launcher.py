@@ -2,6 +2,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -55,6 +56,31 @@ class PythonLauncherTest(unittest.TestCase):
         self.assertEqual("ok", result.stdout)
         self.assertEqual("", result.stderr)
         self.assertEqual(0, result.returncode)
+
+    def test_launcher_rejects_python_without_the_required_standard_library(self) -> None:
+        self.assert_launcher_module_test(
+            f"""
+            import {{ spawnSync }} from "node:child_process";
+            for (const minor of [10, 11]) {{
+              let launched = false;
+              const stderr = {{ write() {{}} }};
+              const status = runPython(["script.py"], {{
+                platform: "darwin", stderr,
+                spawnSync(executable, args) {{
+                  if (args[0] === "-c") {{
+                    const version = "import sys, collections; " +
+                      "sys.version_info = collections.namedtuple('Version', 'major minor')(3, " + minor + "); ";
+                    return spawnSync({json.dumps(sys.executable)}, ["-c", version + args[1]], {{ stdio: "ignore" }});
+                  }}
+                  launched = true;
+                  return {{ status: 7 }};
+                }},
+              }});
+              assert.equal(status, minor < 11 ? 127 : 7);
+              assert.equal(launched, minor >= 11);
+            }}
+            """
+        )
 
     def test_python_launcher_flushes_usage_error_before_exit(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -133,11 +159,11 @@ process.stderr.write = (message) => {
             }});
             assert.equal(exhaustionStatus, 127);
             assert.deepEqual(exhaustionCalls, ["python3", "python"]);
-            assert.equal(stderr.text, "missing Python 3 interpreter: tried python3, python\\n");
+            assert.equal(stderr.text, "missing Python 3.11+ interpreter: tried python3, python\\n");
             """
         )
 
-    def test_python_launcher_requires_python_three_for_fallbacks(self) -> None:
+    def test_python_launcher_requires_a_compatible_interpreter_for_fallbacks(self) -> None:
         self.assert_launcher_module_test(
             f"""
             const missing = () => ({{
@@ -157,7 +183,7 @@ process.stderr.write = (message) => {
             }});
             assert.equal(rejected, 127);
             assert.deepEqual(rejectedCalls.map((call) => call.executable), ["python3", "python"]);
-            assert.match(stderr.text, /missing Python 3 interpreter/);
+            assert.match(stderr.text, /missing Python 3[.]11[+] interpreter/);
 
             const compatibleCalls = [];
             const compatible = runPython(["script.py"], {{

@@ -3,6 +3,7 @@ pub(super) mod error;
 pub(super) mod load;
 pub(super) mod model;
 pub(super) mod naming;
+mod parameter;
 pub(super) mod parser;
 pub(super) mod paths;
 mod registry;

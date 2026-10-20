@@ -1,4 +1,4 @@
-use super::{FLOW_AGENT_EVENT_SOURCE, runtime_event_id};
+use super::{ConstructedRuntimeEvent, FLOW_AGENT_EVENT_SOURCE, runtime_event_id};
 use crate::runtime::{
     execution_plan::{PlannedFailureTransition, PlannedFlowFailureBoundary, RuntimeFailure},
     stream_signature::FlowInvocation,
@@ -13,12 +13,6 @@ pub(crate) struct PlannedRuntimeEvent {
     pub(crate) invocation: Option<FlowInvocation>,
     pub(crate) event_type: EventType,
     pub(crate) payload: serde_json::Value,
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct ConstructedRuntimeEvent {
-    pub(crate) canonical_jsonl: String,
-    pub(crate) event: EventEnvelope,
 }
 
 #[derive(Clone, Debug)]
@@ -179,18 +173,15 @@ pub(crate) fn construct_runtime_transition(
             event.validate_v0().map_err(|error| {
                 RuntimeError::Protocol(format!("constructed runtime event is invalid: {error}"))
             })?;
-            let canonical_jsonl = event.canonical_jsonl().map_err(|error| {
+            let constructed = ConstructedRuntimeEvent::new(event).map_err(|error| {
                 RuntimeError::Protocol(format!("failed to serialize runtime event: {error}"))
             })?;
             validate_event_size(
                 Path::new("runtime.jsonl"),
                 usize::try_from(sequence).unwrap_or(usize::MAX),
-                canonical_jsonl.len(),
+                constructed.canonical_jsonl().len(),
             )?;
-            Ok(ConstructedRuntimeEvent {
-                canonical_jsonl,
-                event,
-            })
+            Ok(constructed)
         })
         .collect()
 }
@@ -208,7 +199,7 @@ pub(crate) fn validate_runtime_transition_capacity(
         )));
     }
     let transition_bytes = alternative.events.iter().fold(0usize, |total, event| {
-        total.saturating_add(event.canonical_jsonl.len())
+        total.saturating_add(event.canonical_jsonl().len())
     });
     let prospective_bytes = prefix_bytes.saturating_add(transition_bytes);
     if u64::try_from(prospective_bytes).unwrap_or(u64::MAX) > MAX_SESSION_EVENT_BYTES {

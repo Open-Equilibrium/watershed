@@ -12,6 +12,11 @@ use crate::runtime::{
     },
 };
 
+pub(super) struct ProductiveMetadataUsage {
+    pub(super) total_bytes: u64,
+    pub(super) run_log_byte_limit: u64,
+}
+
 pub(super) fn productive_storage_usage(
     events_file: &AnchoredFile,
     contexts_file: &AnchoredFile,
@@ -20,7 +25,7 @@ pub(super) fn productive_storage_usage(
 ) -> Result<ProductiveStorageUsage, RuntimeError> {
     let events = session_stream_inventory(events_file, EVENT_STREAM_LIMITS)?;
     let contexts = session_stream_inventory(contexts_file, CONTEXT_MANIFEST_STREAM_LIMITS)?;
-    let metadata_bytes = productive_metadata_bytes(&events_file.parent)?;
+    let metadata_bytes = productive_metadata_usage(&events_file.parent)?.total_bytes;
     Ok(ProductiveStorageUsage {
         context_bytes: contexts.total_bytes,
         context_segment_count: contexts.current_ordinal,
@@ -35,7 +40,9 @@ pub(super) fn productive_storage_usage(
     })
 }
 
-fn productive_metadata_bytes(run: &AnchoredDir) -> Result<u64, RuntimeError> {
+pub(super) fn productive_metadata_usage(
+    run: &AnchoredDir,
+) -> Result<ProductiveMetadataUsage, RuntimeError> {
     let run_log_bytes = session_stream_inventory(
         &run.file(RUN_LOG_LEAF),
         SessionStreamLimits {
@@ -59,14 +66,17 @@ fn productive_metadata_bytes(run: &AnchoredDir) -> Result<u64, RuntimeError> {
     if bytes > MAX_SESSION_METADATA_BYTES {
         return Err(protocol("productive metadata exceeds its byte limit"));
     }
-    Ok(bytes)
+    Ok(ProductiveMetadataUsage {
+        total_bytes: bytes,
+        run_log_byte_limit: MAX_SESSION_METADATA_BYTES - recovery_bytes,
+    })
 }
 
 pub(super) fn ensure_productive_metadata_growth(
     run: &AnchoredDir,
     appended_bytes: usize,
 ) -> Result<(), RuntimeError> {
-    let current = productive_metadata_bytes(run)?;
+    let current = productive_metadata_usage(run)?.total_bytes;
     let appended = u64::try_from(appended_bytes).unwrap_or(u64::MAX);
     if current
         .checked_add(appended)

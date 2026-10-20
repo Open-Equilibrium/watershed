@@ -3,11 +3,12 @@ use super::{
     support::assert_active_session,
 };
 use crate::runtime::{
-    fs_guards::{AnchoredWorkspace, ensure_runtime_dirs},
+    fs_guards::AnchoredWorkspace,
     session_authority::{
         SessionOwnershipLease, SessionOwnershipObserver, stable_native_path_bytes,
     },
     session_reservation::{acquire_anchored_session_lock, write_reserved_session_metadata},
+    session_store::ensure_runtime_dirs,
 };
 use std::{
     fs,
@@ -189,7 +190,7 @@ fn ownership_authority_uses_the_session_store() {
             .is_dir(),
         "tests keep session data and ownership in one scoped store"
     );
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
 }
 
 #[test]
@@ -212,10 +213,9 @@ fn adjacent_workspace_files_do_not_select_session_authority() {
             .is_dir(),
         "the session store owns its lease namespace"
     );
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
 }
 
-#[cfg(unix)]
 #[test]
 fn adjacent_directory_permissions_do_not_select_session_authority() {
     use std::os::unix::fs::PermissionsExt;
@@ -237,10 +237,9 @@ fn adjacent_directory_permissions_do_not_select_session_authority() {
             .is_dir(),
         "the session store owns its lease namespace"
     );
-    reservation.rollback().expect("reservation rolls back");
+    reservation.release_lock().expect("reservation rolls back");
 }
 
-#[cfg(unix)]
 #[test]
 fn session_authority_keys_preserve_native_unix_path_bytes() {
     use std::os::unix::ffi::OsStringExt;
@@ -248,19 +247,6 @@ fn session_authority_keys_preserve_native_unix_path_bytes() {
     let path = PathBuf::from(std::ffi::OsString::from_vec(vec![b'a', 0xff, b'z']));
 
     assert_eq!(stable_native_path_bytes(&path), [b'a', 0xff, b'z']);
-}
-
-#[cfg(windows)]
-#[test]
-fn session_authority_keys_use_stable_little_endian_utf16() {
-    use std::os::windows::ffi::OsStringExt;
-
-    let path = PathBuf::from(std::ffi::OsString::from_wide(&[0x0061, 0xd800, 0x20ac]));
-
-    assert_eq!(
-        stable_native_path_bytes(&path),
-        [0x61, 0x00, 0x00, 0xd8, 0xac, 0x20]
-    );
 }
 
 fn spawn_session_ownership_child(workspace: &Path, session_id: &str) -> std::process::Child {
