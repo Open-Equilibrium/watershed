@@ -1,0 +1,11 @@
+[package]
+name = "meta-harness-core"
+description = "Meta-Harness core: agent sessions behind an agent-neutral model."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]

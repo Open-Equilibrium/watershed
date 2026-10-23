@@ -5,6 +5,7 @@ members = [
     "flow-agent/flow-agent-cli",
     "flow-agent/flow-agent-core",
     "flow-agent/flow-agent-executor",
+    "meta-harness/meta-harness-core",
     "proto/proto",
 ]
 resolver = "3"
