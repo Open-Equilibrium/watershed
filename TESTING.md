@@ -172,6 +172,17 @@ Node is a dev/CI-only toolchain for documentation gates (HTML rendering and link
 
 Repository tooling requires Python 3.11 or newer for its standard-library TOML parser. The launcher verifies this before running a script and reports missing prerequisites without installing them.
 
+Liquid clients use Flutter (ADR-0181), which builds desktop apps only on their own operating system. Each Liquid target in [PLATFORMS.md](PLATFORMS.md) needs:
+
+| Target | Build host | Toolchain |
+|---|---|---|
+| macOS | macOS | Xcode; installing it requires a free Apple ID. Command Line Tools alone lack `xcodebuild`, `actool` and `ibtool`. |
+| Windows | Windows | Visual Studio with the "Desktop development with C++" workload |
+| Linux | Linux | clang, CMake, Ninja, pkg-config and GTK 3 development headers |
+| Android | Linux, macOS or Windows | Android SDK |
+
+Without Xcode, a Mac still runs Rust core tests, `flutter test` and `flutter analyze`. Native CI hosts can supply the other desktop builds.
+
 ## CI
 
 - Required job names remain present for changes limited to [repository agent setup](AGENTS.md#conventions), but no product gates run. Mixed changes and manual runs retain every gate; pull requests compare their complete change against the base commit. Documentation-link inputs exclude repository agent setup.
