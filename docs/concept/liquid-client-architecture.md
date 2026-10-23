@@ -1,6 +1,6 @@
 # Liquid client architecture
 
-This document turns the accepted Liquid client stack (Flutter UI over a Rust Liquid core) and its performance and stability invariants (ADR-0181, ADR-0182) into implementation rules. Product behavior is canonical in the [Liquid V-Spec](V-Spec_Liquid.html), targets in [`PLATFORMS.md`](../../PLATFORMS.md), performance evidence in [`PERFORMANCE.md`](../../PERFORMANCE.md#liquid), security in [`SECURITY.md`](../../SECURITY.md) and pass/fail evidence in [`TESTING.md`](../../TESTING.md). The bridge library, History model, storage engine and CRDT library remain [D-068](../decisions/open-decisions.html#d-068), [D-028](../decisions/open-decisions.html#d-028), [D-029](../decisions/open-decisions.html#d-029) and [D-035](../decisions/open-decisions.html#d-035).
+This document turns the accepted Liquid client stack (Flutter UI over a Rust Liquid core) and its performance and stability invariants (ADR-0181, ADR-0182) into implementation rules. Product behavior is canonical in the [Liquid V-Spec](V-Spec_Liquid.html), targets in [`PLATFORMS.md`](../../PLATFORMS.md), performance evidence in [`PERFORMANCE.md`](../../PERFORMANCE.md#liquid), security in [`SECURITY.md`](../../SECURITY.md) and pass/fail evidence in [`TESTING.md`](../../TESTING.md). The bridge is flutter_rust_bridge v2 (ADR-0186); the History model, storage engine and CRDT library remain [D-028](../decisions/open-decisions.html#d-028), [D-029](../decisions/open-decisions.html#d-029) and [D-035](../decisions/open-decisions.html#d-035).
 
 ## Priority
 
@@ -10,7 +10,7 @@ Input responsiveness and zero loss of acknowledged local changes take precedence
 
 ```mermaid
 flowchart TD
-  UI["Flutter UI<br/>main isolate: input, layout, paint"] -->|"async intents"| BR["Bridge (D-068)"]
+  UI["Flutter UI<br/>main isolate: input, layout, paint"] -->|"async intents"| BR["Bridge (flutter_rust_bridge v2)"]
   BR --> CORE["Rust Liquid core<br/>mutation pipeline, History, queries"]
   CORE --> ST["Local replica<br/>durable store (D-029)"]
   CORE --> SY["Sync client<br/>committed changes, CRDT merge (D-035)"]

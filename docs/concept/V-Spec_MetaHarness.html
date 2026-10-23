@@ -155,7 +155,7 @@ meta approvals</code></pre></div>
         </ul></div>
       </div>
       <h3>Service / daemon surface</h3>
-      <p>The same service can run as a Liquid sidecar, standalone daemon or server-host service. This changes client reachability, not Meta-Harness agent-executor ownership. Concrete service/API transport is <a href="../decisions/open-decisions.html#d-023">D-023</a>; state storage is <a href="../decisions/open-decisions.html#d-024">D-024</a>. Flow Agent's designed local control transport baseline is ADR-0029.</p>
+      <p>The same service can run embedded in the Liquid app, as a Liquid sidecar, standalone daemon or server-host service. This changes client reachability, not Meta-Harness agent-executor ownership. One command set travels over a private local connection on the host and an authenticated network connection remotely (ADR-0185); state storage is <a href="../decisions/open-decisions.html#d-024">D-024</a>. Flow Agent's designed local control transport baseline is ADR-0029.</p>
     </div></section>
 
     <section id="architecture" class="section"><h2>7. Architecture</h2><div class="body">
@@ -237,11 +237,11 @@ liquid integration
     </div></section>
 
     <section id="m2" class="section"><h2>12. M2 implementation reference</h2><div class="body">
-      <p>See the canonical M2 scope and Definition of Done in <a href="../../PLAN.md">PLAN.md</a>; <a href="../decisions/open-decisions.html#d-023">D-023</a> selects the service/API bindings. This V-Spec defines the product and runtime shape without moving agent-process ownership across hosts.</p>
+      <p>See the canonical M2 scope and Definition of Done in <a href="../../PLAN.md">PLAN.md</a>. This V-Spec defines the product and runtime shape without moving agent-process ownership across hosts.</p>
     </div></section>
 
     <section id="open" class="section"><h2>13. Open decisions</h2><div class="body">
-      <p>See <a href="../decisions/open-decisions.html">open-decisions.html</a>: product packaging (<a href="../decisions/open-decisions.html#d-021">D-021</a>), service/API transport (<a href="../decisions/open-decisions.html#d-023">D-023</a>), state storage (<a href="../decisions/open-decisions.html#d-024">D-024</a>), CLI-agent backend integration (<a href="../decisions/open-decisions.html#d-048">D-048</a>) and AgentPulse formulas (<a href="../decisions/open-decisions.html#d-010">D-010</a>). Host-scoped execution and multi-instance projection ownership are decided, not open.</p>
+      <p>See <a href="../decisions/open-decisions.html">open-decisions.html</a>: product packaging (<a href="../decisions/open-decisions.html#d-021">D-021</a>), state storage (<a href="../decisions/open-decisions.html#d-024">D-024</a>), CLI-agent backend integration (<a href="../decisions/open-decisions.html#d-048">D-048</a>) and AgentPulse formulas (<a href="../decisions/open-decisions.html#d-010">D-010</a>). Host-scoped execution and multi-instance projection ownership are decided, not open.</p>
     </div></section>
   </main>
 </div>
