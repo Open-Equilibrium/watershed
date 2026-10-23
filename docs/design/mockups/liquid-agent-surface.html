@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="en"><head><title>Liquid agent surface mockups</title>
+<link rel="stylesheet" href="../tokens.css"><script>(function(){var s=document.getElementById("t3-theme"),n=0;if(!s)return;var b="html{background:var(--background);color:var(--foreground);font-family:var(--font-sans);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased;-webkit-text-size-adjust:100%;scrollbar-width:none}html::-webkit-scrollbar{display:none}body{margin:0}code,kbd,pre,samp{font-family:var(--font-mono)}:where(:focus-visible){outline:2px solid var(--ring)}:focus-visible{outline-width:2px!important;outline-offset:-2px!important}:where(img:not(a[href] img,button img)){cursor:zoom-in}";function a(t){if(!t||typeof t!=="object"||!t.variables||typeof t.variables!=="object")return;var c=":root{color-scheme:"+(t.appearance==="light"?"light":"dark")+";";for(var k in t.variables){if(/^--[a-z0-9-]+$/.test(k))c+=k+":"+String(t.variables[k]).replace(/[;{}<>]/g,"")+";";}s.textContent=c+"}"+b;}try{var m=/[#&]t3-theme=([^&]*)/.exec(location.hash);if(m){a(JSON.parse(decodeURIComponent(m[1])));history.replaceState(history.state,"",location.pathname+location.search);}}catch(e){}window.addEventListener("message",function(e){var d=e.data,p=d&&d.params;if(d&&d.jsonrpc==="2.0"&&d.method==="ui/notifications/host-context-changed"&&p&&p.styles)a({appearance:p.theme,variables:p.styles.variables});});document.addEventListener("click",function(e){var l=e.isTrusted?e.composedPath().find(function(t){return t&&t.matches&&t.matches("a[href]");}):null,u;if(!l)return;try{u=new URL(l.getAttribute("href"),document.baseURI);}catch(x){return;}if(!/^https?:$/.test(u.protocol)||u.href.split("#")[0]===location.href.split("#")[0])return;if(window.parent!==window){e.preventDefault();window.parent.postMessage({jsonrpc:"2.0",id:"t3-link-"+(++n),method:"ui/open-link",params:{url:u.href,metaKey:e.metaKey,ctrlKey:e.ctrlKey}},"*");}else{l.setAttribute("target","_blank");l.setAttribute("rel","noopener");}},true);if(window.parent!==window){var h,o,z=function(){var r=document.documentElement,v=Math.ceil(r.scrollHeight>r.clientHeight?r.scrollHeight:r.getBoundingClientRect().height);if(v===h)return;h=v;window.parent.postMessage({jsonrpc:"2.0",method:"ui/notifications/size-changed",params:{height:v}},"*");};if(window.ResizeObserver){o=new ResizeObserver(z);o.observe(document.documentElement);}document.addEventListener("DOMContentLoaded",function(){if(o&&document.body)o.observe(document.body);z();});window.addEventListener("load",z);window.addEventListener("click",function(e){var t=e.composedPath()[0],u;if(!e.isTrusted||e.defaultPrevented||e.button!==0||e.metaKey||e.ctrlKey||e.shiftKey||e.altKey||!t||t.tagName!=="IMG"||t.closest("a[href],button"))return;u=t.currentSrc||t.src;if(u)setTimeout(function(){if(!e.defaultPrevented)window.parent.postMessage({jsonrpc:"2.0",method:"t3/notifications/open-image",params:{src:u,name:t.alt||t.title||""}},"*");});});var K=[],B=[],C={"Backquote":"`","Backslash":"\\","BracketLeft":"[","BracketRight":"]","Comma":",","Digit0":"0","Digit1":"1","Digit2":"2","Digit3":"3","Digit4":"4","Digit5":"5","Digit6":"6","Digit7":"7","Digit8":"8","Digit9":"9","Equal":"=","Minus":"-","Period":".","Quote":"'","Semicolon":";","Slash":"/"};window.addEventListener("message",function(e){var d=e.data,p=d&&d.params;if(e.source===window.parent&&d&&d.jsonrpc==="2.0"&&d.method==="t3/notifications/shortcuts"&&p&&Array.isArray(p.shortcuts)&&Array.isArray(p.blocked)){K=p.shortcuts;B=p.blocked;}});window.addEventListener("keydown",function(e){var t=e.composedPath()[0],c=e.code||"",l=e.key.toLowerCase(),x=/^[a-z]$/.test(l)?[l]:[l,/^Key[A-Z]$/.test(c)?c.slice(3).toLowerCase():"",C.hasOwnProperty(c)?C[c]:""],f,m=function(s){return s&&s.metaKey===e.metaKey&&s.ctrlKey===e.ctrlKey&&s.shiftKey===e.shiftKey&&s.altKey===e.altKey&&x.indexOf(s.key)>-1;};if(!e.isTrusted||e.isComposing||e.getModifierState("AltGraph")&&!/^[a-z0-9]$/i.test(e.key)||t&&(t.isContentEditable||/^(?:INPUT|TEXTAREA|SELECT)$/.test(t.tagName))||!K.some(m)||B.some(m))return;f=function(v){window.removeEventListener("keydown",f);if(v!==e||e.defaultPrevented)return;e.preventDefault();window.parent.postMessage({jsonrpc:"2.0",method:"t3/notifications/keydown",params:{key:e.key,code:e.code,metaKey:e.metaKey,ctrlKey:e.ctrlKey,shiftKey:e.shiftKey,altKey:e.altKey,repeat:e.repeat}},"*");};window.addEventListener("keydown",f);setTimeout(function(){window.removeEventListener("keydown",f);});},true);}})();</script><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+.chrome{--foreground:var(--ws-text);--muted-foreground:var(--ws-text-muted);--muted:var(--ws-subtle);--border:var(--ws-border-strong);--secondary:var(--ws-hover);--radius:8px;background:var(--ws-canvas);padding:24px}
+body{margin:0;font-family:var(--font-sans,system-ui,sans-serif);color:var(--foreground)}
+.page{display:flex;flex-direction:column;gap:28px}
+.toolbar{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;font-size:13px;color:var(--muted-foreground)}
+.toolbar>div{display:flex;gap:8px;align-items:center}
+.seg{display:inline-flex;border:1px solid var(--border);border-radius:calc(var(--radius,8px) - 2px);overflow:hidden}
+.seg button{all:unset;cursor:pointer;padding:4px 10px;font-size:12.5px;color:var(--muted-foreground)}
+.seg button.on{background:var(--secondary);color:var(--foreground)}
+h3.sec{margin:0 0 4px;font-size:15px;font-weight:600}
+p.sub{margin:0 0 10px;font-size:13px;color:var(--muted-foreground);line-height:1.5}
+.stage{padding:16px;border-radius:var(--radius,8px);background:var(--muted);overflow:hidden}
+.scaler{position:relative}
+.scaler>.win{position:absolute;top:0;left:0;transform-origin:0 0}
+.win,.ws{font-family:ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI Variable Display","Segoe UI",Helvetica,"Apple Color Emoji",Arial,sans-serif;color:var(--ws-text);font-size:14px;line-height:20px;-webkit-font-smoothing:antialiased}
+.win{width:1240px;background:var(--ws-canvas);border-radius:12px;overflow:hidden;box-shadow:var(--ws-shadow)}
+.win code,.win kbd,.mono,.ws code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.tbar{height:38px;background:var(--ws-titlebar);display:flex;align-items:center;padding:0 14px;position:relative}
+.lights{display:flex;gap:8px}.lights i{width:12px;height:12px;border-radius:50%;display:block}
+.body{display:flex;height:var(--h)}
+.side{width:264px;flex:none;background:var(--ws-subtle);padding:4px 8px 12px;display:flex;flex-direction:column;gap:1px;box-shadow:inset -1px 0 0 var(--ws-border)}
+.wsw{display:flex;align-items:center;gap:8px;height:32px;padding:0 8px;font-weight:500;border-radius:6px}
+.av{width:22px;height:22px;border-radius:4px;background:var(--ws-accent);color:var(--ws-on-accent);display:grid;place-items:center;font-size:12px;font-weight:600}
+.srch{height:30px;display:flex;align-items:center;gap:8px;padding:0 8px;border-radius:6px;color:var(--ws-text-muted)}
+.srch kbd{margin-left:auto}
+.side h6{font-size:12px;line-height:16px;color:var(--ws-text-faint);font-weight:500;margin:16px 8px 4px;display:flex;justify-content:space-between}
+.nav{display:flex;align-items:center;gap:8px;height:28px;padding:0 8px;border-radius:6px;color:var(--ws-text-muted);white-space:nowrap;overflow:hidden}
+.ico{width:18px;text-align:center;color:var(--ws-text-faint);flex:none;display:inline-flex;justify-content:center}
+.proj{display:flex;align-items:center;gap:6px;height:28px;padding:0 8px;color:var(--ws-text-muted);font-weight:500}
+.proj .f{color:var(--ws-text-faint);font-weight:400;font-size:12px}
+.sess{padding:5px 8px 6px 30px;border-radius:6px;color:var(--ws-text-muted)}
+.sess.on{background:var(--ws-hover);color:var(--ws-text)}
+.sess .l1{display:flex;align-items:center;gap:8px;white-space:nowrap;height:20px}
+.sess .l1 .end{margin-left:auto;font-size:12px}
+.sess .l2{display:flex;align-items:center;gap:5px;font-size:12px;line-height:18px;color:var(--ws-text-faint);white-space:nowrap;overflow:hidden;margin-left:15px}
+.sess .l2 svg{flex:none}
+.dot{width:7px;height:7px;border-radius:50%;flex:none;display:inline-block}
+.main{flex:1;display:flex;flex-direction:column;min-width:0}
+.head{height:44px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:0 24px}
+.head b{font-size:14px;font-weight:600}
+.tabs{display:flex;gap:2px;padding:0 20px;height:38px;flex:none;align-items:flex-end;box-shadow:inset 0 -1px 0 var(--ws-border)}
+.tab{height:36px;padding:0 10px;color:var(--ws-text-muted);border-bottom:2px solid transparent;display:flex;gap:6px;align-items:center}
+.tab.on{color:var(--ws-text);border-color:var(--ws-text);font-weight:500}
+.tab kbd{opacity:.4}
+.badge{font-size:12px;padding:0 6px;border-radius:4px;background:var(--ws-hover);color:var(--ws-text-muted);line-height:18px}
+kbd{font-size:11px;padding:0 4px;border-radius:4px;border:1px solid currentColor;opacity:.6;line-height:16px;font-weight:400}
+.chip{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 8px;border-radius:6px;color:var(--ws-text-muted);font-size:13px;white-space:nowrap}
+.chip.on{background:var(--ws-accent-subtle);color:var(--ws-accent)}
+.chip.box{box-shadow:inset 0 0 0 1px var(--ws-border-strong)}
+.btn{height:28px;padding:0 10px;border-radius:6px;background:var(--ws-canvas);box-shadow:inset 0 0 0 1px var(--ws-border-strong);color:var(--ws-text);font-size:13px;display:inline-flex;align-items:center;gap:8px;font-weight:500;white-space:nowrap}
+.btn.pri{background:var(--ws-accent);color:var(--ws-on-accent);box-shadow:none}
+.btn.ghost{box-shadow:none;background:transparent;color:var(--ws-text-muted)}
+.btn.dng{color:var(--ws-danger)}
+.ok,.add{color:var(--ws-success)}.del{color:var(--ws-danger)}
+.wid{flex:none;height:36px;display:flex;justify-content:center;align-items:flex-end;padding-bottom:6px;box-sizing:border-box}
+.wid>div{width:740px;display:flex;gap:16px;align-items:center;font-size:12px;color:var(--ws-text-muted);padding:0 12px}
+.wid b{font-weight:500;color:var(--ws-text-faint)}
+.act{flex:none;height:132px;padding:0 0 12px;box-sizing:border-box;display:flex;justify-content:center}
+.actbox{width:740px;height:120px;box-sizing:border-box;border-radius:12px;background:var(--ws-surface);box-shadow:var(--ws-shadow);padding:12px 14px;display:flex;flex-direction:column}
+.actbox .ph{flex:1;color:var(--ws-text-faint);font-size:15px;line-height:24px}
+.actbox .bar{display:flex;align-items:center;gap:6px}
+.actbox.appr{box-shadow:0 0 0 1px var(--ws-warning-border),0 3px 6px rgba(15,15,15,.08),0 9px 24px rgba(15,15,15,.12);gap:10px}
+.appr .top{display:flex;gap:10px;align-items:center}
+.appr .ic{width:22px;height:22px;border-radius:4px;background:var(--ws-warning-subtle);color:var(--ws-warning);display:grid;place-items:center;font-weight:700;font-size:12px}
+.appr .ttl{font-weight:600}
+.appr .top .end{margin-left:auto;color:var(--ws-text-faint);font-size:12px}
+.appr .cmd{display:flex;gap:10px;align-items:center;padding:6px 10px;background:var(--ws-code);border-radius:6px;font-size:13px}
+.appr .cmd span{color:var(--ws-text-faint)}
+.appr .cmd i{margin-left:auto;font-style:normal;font-family:ui-sans-serif,-apple-system,sans-serif;font-size:12px;color:var(--ws-text-muted)}
+.status{height:30px;flex:none;display:flex;align-items:center;gap:18px;padding:0 16px;font-size:12px;color:var(--ws-text-muted);font-variant-numeric:tabular-nums;white-space:nowrap;box-shadow:inset 0 1px 0 var(--ws-border)}
+.status .end{margin-left:auto;color:var(--ws-text-faint)}
+.chat{flex:1;overflow:hidden;display:flex;flex-direction:column;justify-content:flex-end;padding-bottom:8px;min-height:0;-webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 64px);mask-image:linear-gradient(to bottom,transparent 0,#000 64px)}
+.col{width:740px;margin:0 auto;display:flex;flex-direction:column;gap:12px}
+.user{align-self:flex-end;background:var(--ws-hover);padding:10px 14px;border-radius:12px;max-width:80%;font-size:16px;line-height:24px}
+.prose{font-size:16px;line-height:24px;margin:2px 0}
+.tool{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ws-text-muted);height:32px;padding:0 10px;border-radius:6px;background:var(--ws-subtle)}
+.tool code{color:var(--ws-text);font-size:13px}
+.tool .r{margin-left:auto;display:flex;gap:10px;font-variant-numeric:tabular-nums}
+.tool.wait{background:var(--ws-warning-subtle);color:var(--ws-warning)}
+.ttb{height:44px;flex:none;display:flex;align-items:center;gap:6px;padding:0 16px}
+.ttb .sch{width:220px;height:28px;border-radius:6px;display:flex;align-items:center;justify-content:space-between;padding:0 8px;color:var(--ws-text-faint);font-size:13px;background:var(--ws-subtle)}
+.ttb .end{margin-left:auto;display:flex;gap:6px;align-items:center}
+.sg2{display:inline-flex;background:var(--ws-subtle);border-radius:6px;padding:2px;font-size:13px}
+.sg2 span{padding:2px 10px;color:var(--ws-text-muted);border-radius:4px;line-height:20px}.sg2 span.on{background:var(--ws-canvas);color:var(--ws-text);box-shadow:0 0 0 1px var(--ws-border),0 1px 2px rgba(15,15,15,.06)}
+.ov{flex:none;padding:10px 16px 12px;background:var(--ws-subtle);box-shadow:inset 0 1px 0 var(--ws-border),inset 0 -1px 0 var(--ws-border)}
+.ovh{display:flex;gap:14px;align-items:center;font-size:12px;color:var(--ws-text-faint);margin-bottom:8px}
+.ovh b{color:var(--ws-text-muted);font-weight:500}
+.ovh .end{margin-left:auto;color:var(--ws-accent)}
+.ovg{display:grid;grid-template-columns:56px 1fr;row-gap:6px;font-size:12px;color:var(--ws-text-faint);align-items:center}
+.trk{position:relative;height:12px}
+.trk.axis{height:14px;box-shadow:inset 0 -1px 0 var(--ws-border)}
+.trk.axis span.x{position:absolute;top:-2px;transform:translateX(-50%);font-size:11px;line-height:14px}
+.trk i{position:absolute;top:1px;bottom:1px;border-radius:2px;min-width:2px}
+.brush{position:absolute;top:-2px;bottom:-2px;background:color-mix(in srgb,var(--ws-accent) 10%,transparent);border-left:2px solid var(--ws-accent);border-right:2px solid var(--ws-accent)}
+.mark{position:absolute;top:7px;width:9px;height:9px;transform:translate(-50%,0) rotate(45deg);background:var(--ws-canvas);border:2px solid var(--ws-accent);box-sizing:border-box}
+.tbody{flex:1;display:flex;min-height:0}
+.led{flex:1;min-width:0;overflow:hidden;-webkit-mask-image:linear-gradient(to top,transparent 0,#000 48px);mask-image:linear-gradient(to top,transparent 0,#000 48px)}
+.lr{display:grid;grid-template-columns:28px 84px 1fr 64px 60px 50px 50px;gap:8px;align-items:center;height:34px;padding:0 16px;font-size:14px;white-space:nowrap;box-shadow:inset 0 -1px 0 var(--ws-border)}
+.lr>span{overflow:hidden;text-overflow:ellipsis}
+.lr.hd{height:30px;color:var(--ws-text-faint);font-size:12px}
+.lr .n{color:var(--ws-text-faint);font-variant-numeric:tabular-nums;font-size:13px}
+.lr .num{text-align:right;font-variant-numeric:tabular-nums;color:var(--ws-text-muted);font-size:13px}
+.lr.sel{background:var(--ws-selected)}
+.lr.dim{opacity:.4}
+.lr code{font-size:13px}
+.tg{display:inline-block;font-size:12px;font-weight:500;padding:0 6px;border-radius:4px;line-height:20px}
+.tg.User{background:var(--ws-hover);color:var(--ws-text-muted)}.tg.Message{background:var(--ws-accent-subtle);color:var(--ws-accent)}.tg.Tool{background:color-mix(in srgb,var(--ws-data-2) 14%,transparent);color:var(--ws-data-2)}.tg.Approval{background:var(--ws-warning-subtle);color:var(--ws-warning)}
+.turn{display:flex;gap:10px;align-items:center;height:34px;padding:0 16px;font-size:14px;white-space:nowrap;box-shadow:inset 0 -1px 0 var(--ws-border)}
+.turn b{font-weight:600}.turn .q{color:var(--ws-text-muted);overflow:hidden;text-overflow:ellipsis}.turn .end{margin-left:auto;color:var(--ws-text-faint);font-size:12px;font-variant-numeric:tabular-nums}
+.insp{margin:8px 16px 10px 52px;border-radius:8px;background:var(--ws-surface);box-shadow:0 0 0 1px var(--ws-border);overflow:hidden}
+.itabs{display:flex;gap:16px;align-items:center;padding:0 12px;height:38px;font-size:13px;color:var(--ws-text-muted);box-shadow:inset 0 -1px 0 var(--ws-border)}
+.itabs .on{color:var(--ws-text);font-weight:500}
+.itabs .end{margin-left:auto}
+.igrid{display:grid;grid-template-columns:1fr 1.15fr}
+.igrid>div{padding:12px 14px;font-size:13px}
+.igrid>div+div{box-shadow:inset 1px 0 0 var(--ws-border)}
+.igrid h5{margin:0 0 8px;font-size:12px;color:var(--ws-text-faint);font-weight:500}
+.kv{display:grid;grid-template-columns:1fr auto;gap:4px 12px;font-variant-numeric:tabular-nums}
+.kv .t{color:var(--ws-text-muted)}.kv .v{text-align:right}
+.kv .t i{font-style:normal;color:var(--ws-text-faint)}
+.stack{display:flex;height:6px;border-radius:3px;overflow:hidden;margin:0 0 10px;gap:2px}
+.sq{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:6px}
+.newc{margin-top:10px;background:var(--ws-accent-subtle);color:var(--ws-accent);border-radius:6px;padding:6px 10px;font-size:12px}
+.tree{width:300px;flex:none;padding:8px 12px;overflow:hidden;box-shadow:inset 1px 0 0 var(--ws-border)}
+.tree .th{display:flex;justify-content:space-between;align-items:center;font-size:12px;font-weight:500;color:var(--ws-text-faint);height:28px;margin-bottom:2px}
+.gg{position:relative}
+.gg svg{position:absolute;left:0;top:0}
+.gr{height:28px;display:flex;align-items:center;gap:6px;padding-left:70px;padding-right:6px;border-radius:6px;font-size:13px;white-space:nowrap;color:var(--ws-text-muted);overflow:hidden}
+.gr.sel{background:var(--ws-selected);color:var(--ws-text)}
+.gr .n{color:var(--ws-text-faint);font-variant-numeric:tabular-nums;min-width:16px}
+.ref{font-size:12px;font-weight:500;padding:0 6px;border-radius:4px;line-height:18px;color:#fff}
+.gr .nm{color:var(--ws-text);overflow:hidden;text-overflow:ellipsis}
+.gr .r{margin-left:auto;font-size:12px;color:var(--ws-text-faint);font-variant-numeric:tabular-nums}
+.gr .cb{width:13px;height:13px;border-radius:3px;box-shadow:inset 0 0 0 1.5px var(--ws-border-strong);display:grid;place-items:center;font-size:9px;flex:none}
+.gr .cb.on{background:var(--ws-accent);box-shadow:none;color:var(--ws-on-accent)}
+.cmp{flex:1;min-width:0;display:flex;flex-direction:column;gap:12px;padding:14px 16px;overflow:hidden;-webkit-mask-image:linear-gradient(to top,transparent 0,#000 48px);mask-image:linear-gradient(to top,transparent 0,#000 48px)}
+.mets{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.met{border-radius:8px;padding:8px 12px;background:var(--ws-subtle)}
+.met .l{font-size:12px;color:var(--ws-text-muted)}
+.met .v{font-size:16px;font-weight:600;line-height:24px;font-variant-numeric:tabular-nums}
+.met .v span{font-weight:400;color:var(--ws-text-faint);margin:0 4px}
+.met .d{font-size:12px}
+.cgrid{display:grid;grid-template-columns:1fr 1fr;border-radius:8px;overflow:hidden;box-shadow:0 0 0 1px var(--ws-border)}
+.cgrid .h{padding:0 12px;height:34px;display:flex;align-items:center;gap:8px;font-weight:600;font-size:14px;background:var(--ws-subtle)}
+.cgrid .h span.q{font-weight:400;color:var(--ws-text-muted)}
+.cgrid .same{grid-column:1/3;height:30px;display:grid;place-items:center;color:var(--ws-text-faint);font-size:12px;box-shadow:inset 0 1px 0 var(--ws-border)}
+.cc{height:34px;box-sizing:border-box;padding:0 12px;display:flex;gap:8px;align-items:center;font-size:14px;white-space:nowrap;overflow:hidden;box-shadow:inset 0 1px 0 var(--ws-border)}
+.cc:nth-child(odd){box-shadow:inset 0 1px 0 var(--ws-border),inset 1px 0 0 var(--ws-border)}
+.cc.only{background:var(--ws-warning-subtle)}
+.cc .r{margin-left:auto;color:var(--ws-text-muted);font-variant-numeric:tabular-nums;font-size:13px}
+.cc code{font-size:13px}
+.ftag{font-size:12px;color:var(--ws-warning);padding:0 6px;border-radius:4px;background:var(--ws-canvas);line-height:18px}
+.files{width:264px;flex:none;padding:10px 8px;display:flex;flex-direction:column;gap:1px;box-shadow:inset -1px 0 0 var(--ws-border)}
+.files h6{font-size:12px;color:var(--ws-text-faint);font-weight:500;margin:4px 8px 6px}
+.fl{display:flex;gap:6px;align-items:center;height:28px;padding:0 8px 0 calc(8px + var(--d,0) * 16px);border-radius:6px;font-size:13px;white-space:nowrap;color:var(--ws-text-muted)}
+.fl.on{background:var(--ws-selected);color:var(--ws-text)}
+.fl .tw{width:12px;color:var(--ws-text-faint);font-size:12px;text-align:center}
+.fl .st{width:14px;font-weight:600;font-size:12px}
+.st.M{color:var(--ws-warning)}.st.A{color:var(--ws-success)}
+.fl .r{margin-left:auto;font-size:12px;font-variant-numeric:tabular-nums}
+.dv{flex:1;min-width:0;padding:14px 24px;display:flex;flex-direction:column;gap:12px;overflow:hidden;-webkit-mask-image:linear-gradient(to top,transparent 0,#000 48px);mask-image:linear-gradient(to top,transparent 0,#000 48px)}
+.fh{display:flex;align-items:center;gap:10px;height:36px;padding:0 12px;background:var(--ws-subtle);border-radius:8px 8px 0 0;font-size:13px}
+.fh .r{margin-left:auto;font-size:12px}
+.dbox{border-radius:0 0 8px 8px;overflow:hidden;box-shadow:0 0 0 1px var(--ws-border);background:var(--ws-canvas)}
+.hunk{padding:0 12px;line-height:24px;color:var(--ws-text-faint);background:var(--ws-subtle);font-size:12px}
+.dl{display:grid;grid-template-columns:44px 44px 20px 1fr;line-height:22px}
+.dl .ln{color:var(--ws-text-faint);text-align:right;padding-right:10px;font-size:12px;font-variant-numeric:tabular-nums}
+.dl code{white-space:pre;font-size:13px}
+.dl.a{background:var(--ws-diff-add)}.dl.a .sg{color:var(--ws-success)}.dl.a .ln{background:var(--ws-diff-add-strong)}
+.dl.d{background:var(--ws-diff-del)}.dl.d .sg{color:var(--ws-danger)}.dl.d .ln{background:var(--ws-diff-del-strong)}
+.sg{text-align:center}
+i.kw{font-style:normal;color:var(--ws-syn-kw)}i.st{font-style:normal;color:var(--ws-syn-str)}i.cm{font-style:italic;color:var(--ws-syn-com)}i.nu{font-style:normal;color:var(--ws-syn-num)}
+.found{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.panel{padding:16px;border-radius:var(--radius,8px);background:var(--ws-canvas);box-shadow:0 0 0 1px var(--ws-border-strong);color:var(--ws-text)}
+.panel h5{margin:0 0 12px;font-size:12px;color:var(--ws-text-muted);font-weight:500}
+.swg{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.swi{display:flex;gap:8px;align-items:center;font-size:12px;min-width:0;line-height:16px}
+.swi i{width:28px;height:28px;border-radius:6px;box-shadow:inset 0 0 0 1px var(--ws-border-strong);flex:none}
+.swi span{display:block;color:var(--ws-text-faint);font-size:11px}
+.typo div{display:flex;align-items:baseline;gap:12px;padding:4px 0;box-shadow:inset 0 -1px 0 var(--ws-border)}
+.typo span.l{width:120px;flex:none;font-size:11px;color:var(--ws-text-faint)}
+@media (max-width:560px){.found{grid-template-columns:1fr}.swg{grid-template-columns:repeat(2,1fr)}}
+</style></head><body class="theme-light chrome">
+<div class="page">
+  <div class="toolbar">
+    <div>Theme <span class="seg" id="theme"><button data-v="light">Light</button><button data-v="dark">Dark</button><button data-v="system" class="on">System</button></span></div>
+    <div>Size <span class="seg" id="size"><button data-v="fit" class="on">Fit</button><button data-v="full">100 %</button></span></div>
+  </div>
+  <section>
+    <h3 class="sec">Foundations</h3>
+    <p class="sub">Approved mockups for the Liquid agent surface slice in <a href="../../../PLAN.md">PLAN.md</a>. Values and rules live in <a href="../guidelines.md">guidelines.md</a> and <a href="../tokens.css">tokens.css</a>.</p>
+    <div class="found">
+      <div class="panel ws theme-light"><h5>Color tokens · light</h5><div class="swg" data-sw></div></div>
+      <div class="panel ws theme-dark"><h5>Color tokens · dark</h5><div class="swg" data-sw></div></div>
+      <div class="panel ws theme-light" style="grid-column:1/3"><h5>Type · platform UI font, AppFlowy sizes</h5>
+        <div class="typo">
+          <div><span class="l">display · 32/40 · 700</span><b style="font-size:32px;line-height:40px;font-weight:700">Roadmap</b></div>
+          <div><span class="l">h1 · 24/32 · 600</span><b style="font-size:24px;line-height:32px;font-weight:600">Agent sessions</b></div>
+          <div><span class="l">h2 · 20/28 · 600</span><b style="font-size:20px;line-height:28px;font-weight:600">What the model saw</b></div>
+          <div><span class="l">h3 · 16/22 · 600</span><b style="font-size:16px;line-height:22px;font-weight:600">Timing and usage</b></div>
+          <div><span class="l">prose · 16/24</span><span style="font-size:16px;line-height:24px">Text in Pages and agent replies reads like Notion.</span></div>
+          <div><span class="l">ui · 14/20</span><span>Lists, tabs, buttons, tables</span></div>
+          <div><span class="l">small · 12/18</span><span style="font-size:12px;line-height:18px;color:var(--ws-text-muted)">Metadata, status bar, column headers</span></div>
+          <div><span class="l">mono · 13/20</span><code style="font-size:13px">npm test -- login</code></div>
+        </div>
+      </div>
+    </div>
+  </section>
+  <section>
+    <h3 class="sec">1 · Agent view</h3>
+    <p class="sub">The sidebar shows project, harness, branch and device per session. Widgets sit directly above the input area, which keeps one position and height in every tab; approvals appear inside it and keep the draft.</p>
+    <div class="stage"><div class="scaler"><div class="win" id="w-chat"></div></div></div>
+  </section>
+  <section>
+    <h3 class="sec">2 · Trajectory</h3>
+    <p class="sub">One overview timeline on top; dragging focuses a range and dims steps outside it. Steps are grouped by turn, and the selected step expands in place. The session graph on the right draws one line per branch and one dot per step; a click or ⌥↑↓ jumps to a step.</p>
+    <div class="stage"><div class="scaler"><div class="win" id="w-traj"></div></div></div>
+  </section>
+  <section>
+    <h3 class="sec">3 · Compare</h3>
+    <p class="sub">Both branches share one time axis, followed by metrics and aligned steps. Checkboxes in the graph select the two branches.</p>
+    <div class="stage"><div class="scaler"><div class="win" id="w-cmp"></div></div></div>
+  </section>
+  <section>
+    <h3 class="sec">4 · Diff</h3>
+    <p class="sub">A run's changes against the project before the run. The file list is a collapsible folder tree, and only the file header shows the full path. Branch and commit actions follow in the next slice.</p>
+    <div class="stage"><div class="scaler"><div class="win" id="w-diff"></div></div></div>
+  </section>
+</div>
+<script>
+const DW=1240;
+const esc=s=>s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+const I={br:'<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="4.5" cy="3.5" r="1.5"/><circle cx="4.5" cy="12.5" r="1.5"/><circle cx="11.5" cy="5" r="1.5"/><path d="M4.5 5v6M11.5 6.5c0 3-7 2-7 4.5"/></svg>',
+lap:'<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="3" y="3.5" width="10" height="7" rx="1"/><path d="M1.5 12.5h13"/></svg>',
+srv:'<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2.5" y="2.5" width="11" height="4.5" rx="1"/><rect x="2.5" y="9" width="11" height="4.5" rx="1"/></svg>',
+hx:'<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M8 1.8l5.4 3.1v6.2L8 14.2l-5.4-3.1V4.9z"/></svg>',
+srch:'<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5l3 3"/></svg>',
+page:'<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M4 2h5l3 3v9H4z"/><path d="M9 2v3h3"/></svg>',
+dir:'<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M1.8 4.2c0-.6.4-1 1-1h3.4l1.4 1.6h5.6c.6 0 1 .4 1 1v6.9c0 .6-.4 1-1 1H2.8c-.6 0-1-.4-1-1z"/></svg>'};
+const meta=(h,b,d,dev)=>`<div class="l2">${I.hx}${h}<span>·</span>${I.br}${b}<span>·</span>${dev=='srv'?I.srv:I.lap}${d}</div>`;
+function side(st){const w=st=='wait';return `<div class="side"><div class="wsw"><span class="av">B</span>Benni's Workspace<span style="margin-left:auto;color:var(--ws-text-faint)">⌄</span></div>
+<div class="srch">${I.srch}<span>Search or run a command</span><kbd>⌘K</kbd></div>
+<h6>Pages</h6><div class="nav"><span class="ico">${I.page}</span>Roadmap</div><div class="nav"><span class="ico">${I.page}</span>API design</div>
+<h6>Agent sessions <kbd>⌘N</kbd></h6>
+<div class="proj"><span class="ico">⌄</span>acme-api <span class="f">~/code/acme-api</span></div>
+<div class="sess on"><div class="l1"><span class="dot" style="background:${w?'var(--ws-warning)':'var(--ws-text-faint)'}"></span><span>Rate limit for /login</span><span class="end" style="color:${w?'var(--ws-warning)':'var(--ws-text-faint)'}">${w?'waiting':'idle'}</span></div>${meta('pi','main','MacBook')}</div>
+<div class="sess"><div class="l1"><span class="dot" style="background:var(--ws-accent)"></span><span>Fix flaky sync test</span><span class="end">running</span></div>${meta('pi','fix/sync-flake','MacBook')}</div>
+<div class="proj"><span class="ico">⌄</span>watershed <span class="f">~/workspaces/watershed</span></div>
+<div class="sess"><div class="l1"><span class="dot" style="background:var(--ws-text-faint)"></span><span>Refactor auth middleware</span><span class="end">done</span></div>${meta('pi','feat/auth','build-server','srv')}</div>
+<div class="nav" style="color:var(--ws-text-faint);margin-top:2px"><span class="ico">+</span>New agent session</div></div>`}
+const composer=`<div class="actbox"><div class="ph">Steer the agent or queue a follow-up…</div><div class="bar"><span class="chip box">◐ Ask ⌄</span><span class="chip">＋ Context</span><span style="flex:1"></span><kbd style="color:var(--ws-text-faint)">⌘L</kbd><span class="btn pri">Send <kbd>⏎</kbd></span></div></div>`;
+const approval=`<div class="actbox appr"><div class="top"><span class="ic">!</span><span class="ttl">Run a shell command?</span><span class="end">bash · step 9 · mode Ask</span></div>
+<div class="cmd mono"><span>$</span>npm test -- login<i>in ~/code/acme-api · not read-only</i></div>
+<div class="bar"><span class="btn pri">Allow once <kbd>⏎</kbd></span><span class="btn">Allow for this session <kbd>⌘⏎</kbd></span><span style="flex:1"></span><span style="font-size:12px;color:var(--ws-text-faint)">your draft is kept</span><span class="btn ghost dng">Reject <kbd>esc</kbd></span></div></div>`;
+function frame(id,tab,main,h,o){const tabs=[['chat','Chat','','⌘1'],['traj','Trajectory','','⌘2'],['diff','Diff','3','⌘3']].map(([k,l,b,s])=>`<div class="tab ${k==tab?'on':''}">${l}${b?`<span class="badge">${b}</span>`:''}<kbd>${s}</kbd></div>`).join('');
+const w=o.st=='wait';
+document.getElementById(id).innerHTML=`<div class="tbar"><div class="lights"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></div></div>
+<div class="body" style="--h:${h}px">${side(o.st)}<div class="main"><div class="head"><b>Rate limit for /login</b><span style="color:var(--ws-text-faint)">···</span></div><div class="tabs">${tabs}</div>${main}
+<div class="wid"><div class="mono"><b>todo</b><span>✓ limiter</span><span>✓ tests</span><span>${w?'○':'✓'} run tests</span></div></div>
+<div class="act">${w?approval:composer}</div>
+<div class="status"><span style="color:${w?'var(--ws-warning)':'var(--ws-text-muted)'}">● ${w?'Waiting for approval':'Idle · finished 10:43'}</span><span>Context ${w?'7.4k':'9.9k'} / 200k</span><span>Session ${w?'18.3k in · 1.2k out':'28.2k in · 1.6k out'}</span><span>≈ $${w?'0.05':'0.08'}</span><span class="end">${o.keys}</span></div></div></div>`}
+
+frame('w-chat','chat',`<div class="chat"><div class="col">
+<div class="user">Add rate limiting to the /login endpoint (at most 5 failed attempts per minute per IP) and cover it with tests.</div>
+<p class="prose">I'll look at the current handler first.</p>
+<div class="tool"><span class="ok">✓</span>read <code>src/routes/login.ts</code><span class="r">18 ms</span></div>
+<p class="prose">There is no limiter yet. I'll add a sliding-window middleware that counts only failed attempts, and two tests.</p>
+<div class="tool"><span class="ok">✓</span>edit <code>src/routes/login.ts</code><span class="r"><span class="add">+9</span><span class="del">−2</span></span></div>
+<div class="tool"><span class="ok">✓</span>write <code>src/middleware/rateLimit.ts</code><span class="r"><span class="add">+38</span></span></div>
+<div class="tool"><span class="ok">✓</span>edit <code>test/login.test.ts</code><span class="r"><span class="add">+12</span><span class="del">−3</span></span></div>
+<p class="prose">Now I'll run the login tests.</p>
+<div class="tool wait"><span>◷</span>bash <code>npm test -- login</code><span class="r">waiting for approval</span></div>
+</div></div>`,760,{st:'wait',keys:'⌘K commands · ⌘1–3 tabs · ⌘↑↓ sessions'});
+
+const T=26,P=s=>(s/T*100).toFixed(2)+'%';
+const bars=(segs,c)=>segs.map(([a,b])=>`<i style="left:${P(a)};width:${P(b-a)};background:${c}"></i>`).join('');
+const model=segs=>segs.map(([a,b,t])=>`<i style="left:${P(a)};width:${P(t)};background:color-mix(in srgb,var(--ws-accent) 35%,transparent);border-radius:2px 0 0 2px"></i><i style="left:${P(a+t)};width:${P(b-a-t)};background:var(--ws-accent);border-radius:0 2px 2px 0"></i>`).join('');
+const WAIT='repeating-linear-gradient(45deg,var(--ws-warning) 0 3px,transparent 3px 6px)';
+const axis=`<span></span><div class="trk axis">${[0,5,10,15,20,25].map(x=>`<span class="x" style="left:${P(x)}">${x} s</span>`).join('')}<span class="mark" style="left:${P(2.28)}"></span></div>`;
+const A={m:[[.1,2.2,.7],[2.3,5.7,.9],[5.9,7.1,.4],[23.45,25.9,.6]],t:[[2.25,2.27],[5.75,5.76],[5.8,5.81],[5.85,5.86],[16.6,23.4]],w:[[7.15,16.55]]};
+const B={m:[[.1,2.2,.7],[2.3,5.2,.8],[5.3,6.3,.3],[16.35,18.45,.5]],t:[[2.25,2.27],[5.25,5.26],[5.27,5.28],[10.3,16.3]],w:[[6.35,10.25]]};
+const toolbar=c=>`<div class="ttb"><span class="sg2"><span class="on">Real time</span><span>Equal width</span></span><span class="btn ghost">Fold turns <kbd>⌥←</kbd></span><span class="sch"><span>Search steps</span><kbd>/</kbd></span><span class="end">${c?'<span class="chip on">Compare A ↔ B <kbd>C</kbd></span>':'<span class="btn">Compare <kbd>C</kbd></span>'}</span></div>`;
+const LX=[14,32,50],RH=28,GC=['var(--ws-data-1)','var(--ws-data-2)','var(--ws-data-3)'];
+function graph(c){
+ const rows=[{l:0,t:'<b style="color:var(--ws-text);font-weight:600">Turn 1</b> Add rate limiting…'},{l:0,n:2,t:'Message'},{l:0,n:3,t:'read login.ts'},
+  {l:0,n:4,t:'Message',sel:!c},{l:0,n:8,t:'Message'},{l:0,n:9,t:'Approval'},{l:0,n:11,ref:'A',name:'sliding window',d:'25.9 s'},
+  {l:1,n:4,t:'Message'},{l:1,n:7,t:'Message'},{l:1,n:10,ref:'B',name:'token bucket',d:'18.5 s'},
+  {l:2,n:4,t:'Message'},{l:2,n:9,ref:'C',name:'fixed window',d:'21.0 s'}];
+ const cy=i=>i*RH+RH/2;
+ let s=`<svg width="64" height="${rows.length*RH}" fill="none" stroke-width="2">`;
+ s+=`<path d="M${LX[0]} ${cy(0)}V${cy(6)}" stroke="${GC[0]}"/>`;
+ s+=`<path d="M${LX[0]} ${cy(2)}C${LX[0]} ${cy(2)+18} ${LX[1]} ${cy(2)+10} ${LX[1]} ${cy(3)}V${cy(9)}" stroke="${GC[1]}"/>`;
+ s+=`<path d="M${LX[0]} ${cy(2)}C${LX[0]} ${cy(2)+22} ${LX[2]} ${cy(2)+12} ${LX[2]} ${cy(3)+4}V${cy(11)}" stroke="${GC[2]}"/>`;
+ rows.forEach((r,i)=>{s+=r.ref?`<circle cx="${LX[r.l]}" cy="${cy(i)}" r="5" fill="${GC[r.l]}"/>`:`<circle cx="${LX[r.l]}" cy="${cy(i)}" r="4" fill="var(--ws-canvas)" stroke="${GC[r.l]}" stroke-width="2"/>`});
+ s+='</svg>';
+ const pick={A:true,B:true,C:false};
+ return `<div class="gg">${s}${rows.map(r=>`<div class="gr ${r.sel?'sel':''}">${r.n?`<span class="n">${r.n}</span>`:''}${r.ref?`<span class="ref" style="background:${GC[r.l]}">${r.ref}</span><span class="nm">${r.name}</span><span class="r">${c?`<span class="cb ${pick[r.ref]?'on':''}">${pick[r.ref]?'✓':''}</span>`:r.d}</span>`:`<span>${r.t}</span>`}</div>`).join('')}</div>`;}
+const tree=c=>`<div class="tree"><div class="th">Session tree <kbd>⌥↑↓</kbd></div>${graph(c)}</div>`;
+const L=[[1,'User','Add rate limiting to the /login endpoint (at most 5 failed attempts…','+0 s','','',''],[2,'Message','I\'ll look at the current handler first.','+2.1 s','4,812','312','0'],[3,'Tool','<code>read · src/routes/login.ts</code>','+18 ms','','',''],[4,'Message','There is no limiter yet. I\'ll add a sliding-window middleware…','+3.4 s','6,140','820','214'],[5,'Tool','<code>edit · src/routes/login.ts</code> <span class="add">+9</span> <span class="del">−2</span>','+9 ms','','',''],[6,'Tool','<code>write · src/middleware/rateLimit.ts</code> <span class="add">+38</span>','+6 ms','','',''],[7,'Tool','<code>edit · test/login.test.ts</code> <span class="add">+12</span> <span class="del">−3</span>','+7 ms','','',''],[8,'Message','Now I\'ll run the login tests.','+1.2 s','7,410','96','0'],[9,'Approval','<code>bash · npm test -- login</code> · allowed once','+9.4 s','','',''],[10,'Tool','<code>bash · npm test -- login</code> · exit 0','+6.8 s','','',''],[11,'Message','Done. The limiter counts failed attempts per IP…','+2.5 s','9,920','410','58']];
+const insp=`<div class="insp"><div class="itabs"><span class="on">Summary</span><span>Context</span><span>Raw</span><span class="end"><span class="btn pri">Branch from here <kbd>B</kbd></span></span></div>
+<div class="igrid"><div><h5>Timing and usage</h5><div class="kv"><span class="t">First token</span><span class="v">0.9 s</span><span class="t">Generation</span><span class="v">2.5 s · 328 tok/s</span><span class="t">Tokens</span><span class="v">6,140 in · 820 out · 214 think</span><span class="t">Cost</span><span class="v">≈ $0.02</span></div></div>
+<div><h5>What the model saw · 6,140 tokens</h5><div class="stack"><span style="flex:2310;background:var(--ws-data-1)"></span><span style="flex:1050;background:var(--ws-data-2)"></span><span style="flex:2780;background:var(--ws-data-3)"></span></div>
+<div class="kv"><span class="t"><span class="sq" style="background:var(--ws-data-1)"></span>System prompt <i>· base, AGENTS.md, 2 skills</i></span><span class="v">2,310</span><span class="t"><span class="sq" style="background:var(--ws-data-2)"></span>Tools <i>· 7</i></span><span class="v">1,050</span><span class="t"><span class="sq" style="background:var(--ws-data-3)"></span>Messages <i>· prompt, 1 reply, 1 tool result</i></span><span class="v">2,780</span></div>
+<div class="newc">New since step 2: result of <span class="mono">read src/routes/login.ts</span> · 2,372 tokens</div></div></div></div>`;
+const rows=L.map(([n,k,s,t,i,o,th])=>`<div class="lr ${n==4?'sel':''} ${n<4||n>8?'dim':''}"><span class="n">${n}</span><span><span class="tg ${k}">${k}</span></span><span>${s}</span><span class="num">${t}</span><span class="num">${i}</span><span class="num">${o}</span><span class="num">${th}</span></div>${n==4?insp:''}`).join('');
+frame('w-traj','traj',`${toolbar(false)}<div class="ov"><div class="ovh"><b>Overview</b><span>branch A · 11 steps · 25.9 s</span><span>drag to focus · scroll to zoom</span><span class="end">2.3–7.1 s · 5 steps <kbd>esc</kbd></span></div>
+<div class="ovg">${axis}<span>Model</span><div class="trk">${model(A.m)}<div class="brush" style="left:${P(2.3)};width:${P(4.8)}"></div></div><span>Tools</span><div class="trk">${bars(A.t,'var(--ws-data-2)')}<div class="brush" style="left:${P(2.3)};width:${P(4.8)}"></div></div><span>You</span><div class="trk">${bars(A.w,WAIT)}<div class="brush" style="left:${P(2.3)};width:${P(4.8)}"></div></div></div></div>
+<div class="tbody"><div class="led"><div class="lr hd"><span>#</span><span>Kind</span><span>Step</span><span class="num">Time</span><span class="num">In</span><span class="num">Out</span><span class="num">Think</span></div>
+<div class="turn"><span style="color:var(--ws-text-faint)">⌄</span><b>Turn 1</b><span class="q">Add rate limiting to the /login endpoint…</span><span class="end">25.9 s · read 1 · edit 2 · write 1 · bash 1</span></div>${rows}</div>${tree(false)}</div>`,1000,{st:'done',keys:'↑↓ step · ←→ fold · ⏎ open · B branch · C compare · / search'});
+
+const lane=(R)=>model(R.m)+bars(R.t,'var(--ws-data-2)')+bars(R.w,WAIT);
+const r1=[['Message','','3.4 s · 6.1k → 820'],['Tool','edit · login.ts','+9 −2'],['Tool','write · rateLimit.ts','+38'],['Tool','edit · login.test.ts','+12 −3','only'],['Message','','1.2 s · 7.4k → 96'],['Approval','bash','allowed once · 9.4 s'],['Tool','bash · npm test','exit 0 · 14 ✓'],['Message','','2.5 s · 9.9k → 410']];
+const r2=[['Message','','2.9 s · 6.2k → 640'],['Tool','write · tokenBucket.ts','+31'],['Tool','edit · login.ts','+6 −2'],null,['Message','','1.0 s · 7.0k → 88'],['Approval','bash','for session · 3.9 s'],['Tool','bash · npm test','exit 0 · 12 ✓'],['Message','','2.1 s · 8.9k → 352']];
+const cell=(x,n)=>x?`<div class="cc ${x[3]?'only':''}"><span style="color:var(--ws-text-faint);width:18px;font-size:13px">${n}</span><span class="tg ${x[0]}">${x[0]}</span>${x[1]?`<code>${esc(x[1])}</code>`:''}${x[3]?'<span class="ftag">only in A</span>':''}<span class="r">${x[2]}</span></div>`:`<div class="cc"></div>`;
+let cr='',m=4;for(let i=0;i<8;i++){cr+=cell(r1[i],i+4)+cell(r2[i],r2[i]?m:'');if(r2[i])m++}
+frame('w-cmp','traj',`${toolbar(true)}<div class="ov"><div class="ovh"><b>Overview</b><span>A ↔ B on one time axis</span><span>◆ branch point after step 3</span><span class="end" style="color:var(--ws-text-faint)">drag to focus · scroll to zoom</span></div>
+<div class="ovg">${axis}<span>A</span><div class="trk">${lane(A)}</div><span>B</span><div class="trk">${lane(B)}</div><span></span><div style="font-size:11px;display:flex;gap:16px"><span><span class="sq" style="background:var(--ws-accent)"></span>model</span><span><span class="sq" style="background:var(--ws-data-2)"></span>tool</span><span><span class="sq" style="background:var(--ws-warning)"></span>waiting for you</span></div></div></div>
+<div class="tbody"><div class="cmp"><div class="mets"><div class="met"><div class="l">Duration</div><div class="v">25.9 s<span>→</span>18.5 s</div><div class="d ok">−29 %</div></div><div class="met"><div class="l">Tokens in / out</div><div class="v">28.2k<span>→</span>26.9k</div><div class="d" style="color:var(--ws-text-muted)">1.6k → 1.4k out</div></div><div class="met"><div class="l">Files changed</div><div class="v">3<span>→</span>2</div><div class="d" style="color:var(--ws-warning)">no test changes in B</div></div><div class="met"><div class="l">Tests</div><div class="v">14<span>→</span>12</div><div class="d" style="color:var(--ws-text-muted)">all passed in both</div></div></div>
+<div class="cgrid"><div class="h"><span class="ref" style="background:${GC[0]}">A</span>sliding window</div><div class="h" style="box-shadow:inset 1px 0 0 var(--ws-border)"><span class="ref" style="background:${GC[1]}">B</span><span class="q">“Use a token bucket instead.”</span></div><div class="same">Steps 1–3 shared · prompt, message, read src/routes/login.ts</div>${cr}</div></div>${tree(true)}</div>`,1000,{st:'done',keys:'⌥↑↓ tree · Space select branch · C leave compare'});
+
+const D=[[1,1,' ','import { Router } from "express";'],[2,2,' ','import { verifyPassword, issueToken } from "../auth";'],[0,3,'+','import { rateLimit } from "../middleware/rateLimit";'],[3,4,' ',''],[4,5,' ','export const login = Router();'],[5,6,' ',''],[6,0,'-','login.post("/login", async (req, res) => {'],[0,7,'+','const limiter = rateLimit({ windowMs: 60_000, max: 5 });'],[0,8,'+',''],[0,9,'+','login.post("/login", limiter, async (req, res) => {'],[7,10,' ','  const { email, password } = req.body;'],[8,11,' ','  const ok = await verifyPassword(email, password);'],[9,0,'-','  if (!ok) return res.status(401).end();'],[0,12,'+','  if (!ok) {'],[0,13,'+','    // Count failed attempts only.'],[0,14,'+','    limiter.hit(req.ip);'],[0,15,'+','    return res.status(401).json({ error: "invalid_credentials" });'],[0,16,'+','  }'],[10,17,' ','  res.json({ token: await issueToken(email) });'],[11,18,' ','});']];
+const hl=s=>esc(s).replace(/(\/\/.*$)|("[^"]*")|\b(import|from|export|const|async|await|return|if)\b|\b(\d[\d_]*)\b/g,(m,c,st,kw,nu)=>c?`<i class="cm">${c}</i>`:st?`<i class="st">${st}</i>`:kw?`<i class="kw">${kw}</i>`:`<i class="nu">${nu}</i>`);
+const dl=D.map(([o,n,t,x])=>`<div class="dl ${t=='+'?'a':t=='-'?'d':''}"><span class="ln">${o||''}</span><span class="ln">${n||''}</span><span class="sg">${t=='-'?'−':t.trim()}</span><code>${hl(x)||' '}</code></div>`).join('');
+const fold=(d,n)=>`<div class="fl" style="--d:${d}"><span class="tw">⌄</span><span class="ico">${I.dir}</span>${n}</div>`;
+const file=(d,st,n,r,on)=>`<div class="fl ${on?'on':''}" style="--d:${d}"><span class="tw"></span><span class="st ${st}">${st}</span>${n}<span class="r">${r}</span></div>`;
+frame('w-diff','diff',`<div class="tbody"><div class="files"><h6>3 files · <span class="add">+59</span> <span class="del">−5</span></h6>
+${fold(0,'src')}${fold(1,'middleware')}${file(2,'A','rateLimit.ts','<span class="add">+38</span>')}${fold(1,'routes')}${file(2,'M','login.ts','<span class="add">+9</span> <span class="del">−2</span>',1)}${fold(0,'test')}${file(1,'M','login.test.ts','<span class="add">+12</span> <span class="del">−3</span>')}</div>
+<div class="dv"><div style="display:flex;align-items:center;gap:10px"><b style="font-size:14px;font-weight:600">Changes in this run</b><span style="color:var(--ws-text-muted);font-size:12px">compared with the project before the run · 10:42</span><span style="margin-left:auto" class="sg2"><span class="on">Unified</span><span>Split</span></span></div>
+<div><div class="fh"><span class="st M" style="font-weight:600;font-size:12px">M</span><code style="font-size:13px">src/routes/login.ts</code><span class="r"><span class="add">+9</span> <span class="del">−2</span></span></div>
+<div class="dbox mono"><div class="hunk">@@ -1,11 +1,18 @@</div>${dl}</div></div></div></div>`,820,{st:'done',keys:'↑↓ file · ←→ folder · ⌥↑↓ hunk · U unified/split'});
+
+document.querySelectorAll('[data-sw]').forEach(g=>{const p=g.closest('.panel');const cs=getComputedStyle(p);g.innerHTML=['canvas','subtle','hover','border','text','text-muted','accent','accent-subtle','success','warning','warning-subtle','danger','diff-add','diff-del','selected'].map(n=>`<div class="swi"><i style="background:var(--ws-${n})"></i><div>${n}<span>${cs.getPropertyValue('--ws-'+n).trim()}</span></div></div>`).join('')});
+let mode='system',fit=true;const mq=matchMedia('(prefers-color-scheme: dark)');
+function hostDark(){const v=getComputedStyle(document.documentElement).getPropertyValue('--background').trim();if(!v)return mq.matches;const c=document.createElement('canvas');c.width=c.height=1;const x=c.getContext('2d');x.fillStyle='#808080';x.fillStyle=v;x.fillRect(0,0,1,1);const d=x.getImageData(0,0,1,1).data;return .2126*d[0]+.7152*d[1]+.0722*d[2]<128}
+function applyTheme(){const dark=mode=='dark'||(mode=='system'&&hostDark());document.querySelectorAll('.win').forEach(w=>{w.classList.toggle('theme-dark',dark);w.classList.toggle('theme-light',!dark)});document.querySelectorAll('#theme button').forEach(b=>b.classList.toggle('on',b.dataset.v==mode))}
+function layout(){document.querySelectorAll('.stage').forEach(st=>{const sc=st.querySelector('.scaler'),w=sc.firstElementChild;const s=fit?Math.min(1,(st.clientWidth-32)/DW):1;w.style.transform=`scale(${s})`;sc.style.width=DW*s+'px';sc.style.height=w.offsetHeight*s+'px';st.style.overflowX=fit?'hidden':'auto'});document.querySelectorAll('#size button').forEach(b=>b.classList.toggle('on',(b.dataset.v=='fit')==fit))}
+document.querySelectorAll('#theme button').forEach(b=>b.onclick=()=>{mode=b.dataset.v;applyTheme()});
+document.querySelectorAll('#size button').forEach(b=>b.onclick=()=>{fit=b.dataset.v=='fit';layout()});
+mq.addEventListener('change',applyTheme);addEventListener('resize',layout);setInterval(()=>{if(mode=='system')applyTheme()},1500);
+applyTheme();layout();
+</script>
+</body></html>
