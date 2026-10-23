@@ -129,9 +129,9 @@ No implementation or release claim follows from a documentation decision alone. 
 
 **DoD:** Verify the accepted boundary on both native Flow Agent targets in [PLATFORMS.md](PLATFORMS.md), prove the prebuilt installation contract, and complete the canonical test, performance and review gates. Cross-compilation, historical isolation tests and mechanism experiments do not prove the replacement. Meta-Harness and Liquid never acquire ownership of Flow's Executor or Tool protection.
 
-### M2 — Meta-Harness MVP + AgentPulse
+### M2 — Meta-Harness MVP
 
-**Wedge:** Meta-Harness team/control/governance wedge — turn Flow Agent and external agents into a controllable, observable, measurable system. Emphasize transparent, self-hostable, AGPL-aligned control; do not frame this as a monetization step.
+**Wedge:** Meta-Harness team/control/governance wedge — turn Flow Agent and external agents into a controllable, observable system. Emphasize transparent, self-hostable, AGPL-aligned control; do not frame this as a monetization step.
 
 M2 delivers Meta-Harness as a **self-contained, host-scoped headless control plane** with CLI/API/service surfaces — usable without Liquid. Each instance controls only CLI agents on its own host. Its public API is one command set over a private local connection on the host and an authenticated network connection remotely (ADR-0185). Liquid integrates later as a client of one or more instances. Full product/runtime detail: [`docs/concept/V-Spec_MetaHarness.html`](docs/concept/V-Spec_MetaHarness.html).
 
@@ -139,17 +139,16 @@ M2 delivers Meta-Harness as a **self-contained, host-scoped headless control pla
 
 - Meta-Harness CLI (headless user/admin: run/session/config/metrics commands).
 - Local service/daemon shape (embedded in Liquid, sidecar or standalone daemon) serving that API over both connections.
-- API/protocol surface for Liquid and BYOA: session registry, live event and transcript streams, artifact/log/handoff queries, config read/write proposals, agent schedule/trigger control, AgentPulse queries, approval/reject/revert.
+- API/protocol surface for Liquid and BYOA: session registry, live event and transcript streams, artifact/log/handoff queries, config read/write proposals, agent schedule/trigger control, approval/reject/revert.
 - Central configuration model that resolves shared Watershed building blocks to each target's documented config surface. Flow Agent receives only its global authority and explicit Flows rather than a project-local config layer; device-local Runtime bindings remain owned by the execution host.
 - Control plane: session registry, routing, task state, attention state and agent schedule/trigger skeleton.
 - Host-local Meta-Harness agent executor that rejects cross-host agent-process control and never manages a Flow Executor or Tool Sandbox (backend integration: [D-048](docs/decisions/open-decisions.html#d-048)).
 - Adapters: Flow Agent (via its public runtime surfaces) + at least one external CLI adapter.
 - Event/transcript ingestion from agents; artifact/log/handoff indexing (logs, structured summaries, host-provided diffs, handoff packs, checkpoints).
-- AgentPulse v0 metrics: rework ratio, first-attempt success and cost-per-productive-outcome using formulas decided before M2 implementation; computed and stored by Meta-Harness and queryable through CLI/API.
 - Policy-gated configuration writes with audit trail and review flow.
 - **No rich standalone GUI**; M2 packaging, including whether it adds a small status screen after the headless controller works, remains D-021.
 
-**DoD:** monitor, steer and configure at least two different CLI agents on the Meta-Harness host from one control surface, with both represented through one normalized session/event model; reject attempts to claim or control a process on another host; run without Liquid; expose the public API/protocol over both connections; integrate Flow Agent through its public runtime surfaces (not its internals); resolve shared config without duplicated per-agent config directories for the same capability; report decided AgentPulse v0 metrics through CLI/API; and require approval plus an audit record for every sensitive config change.
+**DoD:** monitor, steer and configure at least two different CLI agents on the Meta-Harness host from one control surface, with both represented through one normalized session/event model; reject attempts to claim or control a process on another host; run without Liquid; expose the public API/protocol over both connections; integrate Flow Agent through its public runtime surfaces (not its internals); resolve shared config without duplicated per-agent config directories for the same capability; and require approval plus an audit record for every sensitive config change.
 
 ### M3 — Liquid (staged standalone workspace product)
 
@@ -227,3 +226,7 @@ These entries retain scope and decision context, not detailed future-feature spe
 ### Protection of other independent Flow installations
 
 **Discussion only; no feature commitment (ADR-0174).** The first release protects this installation's required objects under [SECURITY.md](SECURITY.md#native-self-protection-and-its-limits). Multiple Runs can share that home. Earlier discussion considered an administrator-listed set of other homes: it could protect deliberately separate installations from each other's Tools, but adds discovery, publication coordination and maintenance complexity. First establish whether users need separate homes instead of shared-home Runs; decide whether to add this protection before specifying it. No automatic whole-disk discovery or future delivery is approved.
+
+## AgentPulse — last roadmap item
+
+Low priority; scheduled after every other roadmap entry (ADR-0187). Meta-Harness computes and stores AgentPulse v0 metrics — rework ratio, first-attempt success and cost-per-productive-outcome — and exposes them through its CLI/API. The formulas remain [D-010](docs/decisions/open-decisions.html#d-010).

@@ -21,6 +21,7 @@ summary{cursor:pointer}summary h3{display:inline;margin:0}summary:focus-visible{
       <a href="#m2">Meta-Harness (M2)</a>
       <a href="#m3">Liquid (M3)</a>
       <a href="#post-m1">Flow Agent: extended capabilities</a>
+      <a href="#later">Later: AgentPulse</a>
     </nav>
   </header>
 
@@ -68,15 +69,8 @@ summary{cursor:pointer}summary h3{display:inline;margin:0}summary:focus-visible{
   </section>
 
   <section id="m2">
-    <h2>M2 - Meta-Harness And AgentPulse</h2>
+    <h2>M2 - Meta-Harness</h2>
     <div class="grid">
-      <details id="d-010" class="decision">
-        <summary><h3>D-010 - AgentPulse v0 Formulas</h3></summary>
-        <p><strong>Status:</strong> Open, M2 blocker.</p>
-        <p><strong>Question:</strong> Should the three scores use only facts already recorded during runs, or also an AI judgment?</p>
-        <ul><li><strong>A:</strong> Use recorded run facts only. Pro: the same input always gives the same auditable score. Con: the first version captures fewer nuances.</li><li><strong>B:</strong> Add AI-assigned quality labels. Pro: captures more nuance. Con: scores become subjective and harder to test.</li></ul>
-        <p><strong>Recommendation:</strong> A for M2; reserve model-scored labels for later evaluation.</p>
-      </details>
       <details id="d-021" class="decision">
         <summary><h3>D-021 - Meta-Harness Packaging</h3></summary>
         <p><strong>Status:</strong> Open implementation detail before M2; ADR-0018 already requires a non-graphical controller.</p>
@@ -216,6 +210,19 @@ summary{cursor:pointer}summary h3{display:inline;margin:0}summary:focus-visible{
         <ul><li><strong>A:</strong> Sign the canonical root manifest with a source device/user key chained to a known identity. Pro: offline attribution and tamper evidence. Con: enrollment, rotation, revocation and lost-device handling are required.</li><li><strong>B:</strong> Authenticate the root with a shared user/Workspace archive key. Pro: compact offline verification across devices. Con: shared-secret distribution weakens sender attribution and increases compromise impact.</li><li><strong>C:</strong> Import as explicitly unauthenticated, non-executable evidence, require human review and let the destination re-seal a new local root before any continuation. Pro: no cross-device key infrastructure. Con: cannot preserve trusted provenance or automatic continuation.</li></ul>
         <p><strong>Recommendation:</strong> A; retain C as a clearly separate recovery path that never claims verified source history.</p>
         <p><strong>Acceptance criterion:</strong> For A/B, define canonical signed/MACed bytes, identity binding, key storage/rotation/revocation limits, replay/downgrade rules, attribution and verification errors; tampering with the authenticated root, content, branch links or version must fail before destination mutation or provider/Tool effects. For C, label every record unauthenticated, permit no Portable continuation or effects, define explicit human review and destination resealing as new local evidence, and never claim source attribution or source-history verification.</p>
+      </details>
+    </div>
+  </section>
+
+  <section id="later">
+    <h2>Later - AgentPulse</h2>
+    <div class="grid">
+      <details id="d-010" class="decision">
+        <summary><h3>D-010 - AgentPulse v0 Formulas</h3></summary>
+        <p><strong>Status:</strong> Open; deferred with AgentPulse to the end of the roadmap (ADR-0187).</p>
+        <p><strong>Question:</strong> Should the three scores use only facts already recorded during runs, or also an AI judgment?</p>
+        <ul><li><strong>A:</strong> Use recorded run facts only. Pro: the same input always gives the same auditable score. Con: the first version captures fewer nuances.</li><li><strong>B:</strong> Add AI-assigned quality labels. Pro: captures more nuance. Con: scores become subjective and harder to test.</li></ul>
+        <p><strong>Recommendation:</strong> A for the first version; reserve model-scored labels for later evaluation.</p>
       </details>
     </div>
   </section>
