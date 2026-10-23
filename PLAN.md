@@ -165,10 +165,28 @@ A macOS Liquid app, built ahead of M2 and M3a, that controls pi through an embed
 - Agent view: send a prompt, follow the response live, steer and abort; pi dialogs, status and widgets.
 - Tool approvals in three modes (ADR-0188).
 - Trajectory tab, live and retrospective: steps, tokens, timing and what the model saw; fork from a step and compare both runs side by side.
+- Diff view of a run's changes in the agent's Git project (ADR-0190).
 - CI: `flutter analyze` and `flutter test` on Linux as required checks; a macOS app build on a macOS runner becomes required once it runs reliably.
 - Out of scope: Trajectory search and attribution of entries to the extension that produced them.
 
+**DoD (macOS):**
+
+1. The app starts a pi session through the embedded core; a user can send a prompt, follow the response live, steer and abort.
+2. pi dialogs (`select`, `confirm`, `input`, `editor`) appear and their answers reach pi; a cancelled dialog never leaves pi waiting; status and widgets render.
+3. Each approval mode pauses exactly its expected calls; a rejected call never runs; a session-wide allowance ends with its session; every decision is a custom entry in the pi session; a missing answer, including after a core or app crash, blocks the call.
+4. The Trajectory tab shows each step with tokens, timing and what the model saw, live and after the run, and looks the same after an app restart, rebuilt from the pi session file alone.
+5. Forking from a step creates a second run that can be compared side by side, while the original stays unchanged.
+6. The diff view shows a run's changes against the project state before the run.
+7. The UI never sees pi's protocol: CI tests drive a scripted fake agent behind the same session/event model, without model calls or credentials; one manual check uses real pi.
+8. A long token stream crosses the bridge as small deltas, the Dart main isolate never waits for Rust, and closing a view releases its streams.
+9. Quitting the app ends every pi process; a crashed pi process shows an error instead of hanging.
+10. Comparable observations for token streaming and long Trajectories are recorded under [PERFORMANCE.md](PERFORMANCE.md#liquid), without thresholds.
+
 **Closeout:** green CI plus one independent read-only review, instead of the session-workflow KPI reviews, Autoreview, Clawpatch and doc_sync.
+
+#### Liquid Git integration — next slice
+
+Completes the Git integration for the agent's Git project (ADR-0190, ADR-0191): branches, commits, push, pull requests and worktrees. Meta-Harness runs the host's `git` and `gh`; Liquid provides the UI.
 
 #### M3a — Local Workspace foundation
 
