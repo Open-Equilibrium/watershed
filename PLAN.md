@@ -161,10 +161,14 @@ The target product is canonical in [`docs/concept/V-Spec_Liquid.html`](docs/conc
 A macOS Liquid app, built ahead of M2 and M3a, that controls pi through an embedded Meta-Harness core and makes agent runs inspectable (ADR-0184).
 
 - Embedded Meta-Harness core in Rust with a pi adapter (`pi --mode rpc`) behind the agent-neutral session/event model; service mode, remote access and Android follow with multi-device.
+- pi session files are the only session store; Liquid-specific records are custom pi entries (ADR-0189).
 - Agent view: send a prompt, follow the response live, steer and abort; pi dialogs, status and widgets.
-- Tool approvals before tool calls run.
+- Tool approvals in three modes (ADR-0188).
 - Trajectory tab, live and retrospective: steps, tokens, timing and what the model saw; fork from a step and compare both runs side by side.
+- CI: `flutter analyze` and `flutter test` on Linux as required checks; a macOS app build on a macOS runner becomes required once it runs reliably.
 - Out of scope: Trajectory search and attribution of entries to the extension that produced them.
+
+**Closeout:** green CI plus one independent read-only review, instead of the session-workflow KPI reviews, Autoreview, Clawpatch and doc_sync.
 
 #### M3a — Local Workspace foundation
 

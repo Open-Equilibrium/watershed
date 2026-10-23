@@ -135,6 +135,10 @@ The same gate applies to **all Meta-Harness control surfaces** — its CLI, API/
 
 Execution ownership is host-local. A Meta-Harness agent executor may control only whole CLI agent processes created or adopted on its own host under an explicit local identity; it rejects cross-host process claims. This process supervisor is not a Flow Executor and has no authority to select, configure or manage Flow Tool Sandboxes. Exposing the API to another device requires authenticated, integrity-protected transport and does not expand agent-executor authority. Liquid must route live commands to the instance that owns the addressed session/configuration and must not treat cached state as controllable while that instance is unreachable.
 
+## Meta-Harness tool approvals
+
+Approvals (ADR-0188) let a user confirm an agent's tool calls before they run. They are a control, not a protection boundary: the agent, its extensions and every approved call run with the user's operating-system permissions, and pi has no sandbox.
+
 ## Liquid workspace access & external-agent edits
 
 Liquid is a standalone workspace product that external agents and tools can read and edit through its workspace CLI/API. That access is permissioned and auditable:
