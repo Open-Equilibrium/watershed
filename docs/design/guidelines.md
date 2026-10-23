@@ -17,8 +17,14 @@ References: Notion, AppFlowy, Microsoft Loop and T3 Code.
 
 ## Tokens
 
-- **Color:** neutral surfaces (`canvas`, `subtle`, `surface`, `hover`, `selected`), borders, three text levels, one accent, status colors (`success`, `warning`, `danger`), diff, syntax and data-series colors. Light and dark values share names; a GUI selects `.theme-light` or `.theme-dark`, and system mode follows the operating system.
-- **Type:** the platform UI font and a monospace font for code. Scale: title 28/600, h2 20/600, h3 16/600, prose 15 with line height 1.6, UI 13, small 12, caption 11, mono 12.
-- **Spacing:** a 4 px grid (4, 8, 12, 16, 24, 32).
-- **Radii:** 4 for chips and inputs, 8 for cards, 12 for windows and dialogs.
+- **Color:** Notion's warm neutrals (`canvas`, `subtle`, `surface`, `hover`, `selected`), very light borders, three text levels, Notion blue as the accent (darkened for AA contrast), status colors (`success`, `warning`, `danger`), GitHub-style diff and syntax colors and data-series colors. Surfaces are separated by background rather than borders. Light and dark values share names; a GUI selects `.theme-light` or `.theme-dark`, and system mode follows the operating system.
+- **Type:** Notion's platform UI font stack and a monospace font for code, with AppFlowy's sizes: display 32/40 bold, h1 24/32, h2 20/28 and h3 16/22 semibold, prose 16/24, UI 14/20, small 12/18, mono 13/20.
+- **Spacing:** 4, 6, 8, 12, 16, 20, 24 and 32 px.
+- **Radii:** 4 for tags, 6 for buttons, inputs and list items, 8 for cards and panels, 12 for windows, dialogs and the input area.
+- **Rows:** 28 px for navigation items, 34 px for table rows.
 - **Motion:** 120 ms for hover and press, 200 ms for panels, ease-out; none when the user prefers reduced motion.
+
+## Patterns
+
+- The input area keeps one position and height in every view of a session; approvals and agent dialogs appear inside it, and widgets sit directly above it.
+- Focusing a range dims everything outside it instead of filtering it out.
