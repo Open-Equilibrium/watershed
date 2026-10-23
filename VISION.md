@@ -103,7 +103,7 @@ Agents never receive authority merely because a Block is visible. They act throu
 Position Watershed as structured agent execution + a neutral host-scoped control plane + a safe local-first workspace. Do not position it as another generic coding agent, a Notion clone, three unrelated products, a status UI for Flow Agent or a proprietary/open-core service.
 
 - Liquid is an OS-abstracting app, not an operating system.
-- Watershed does not implement project-code VCS/history in the MVP; normal Git projects remain external. Liquid History covers only Liquid workspace data.
+- Watershed implements no project-code VCS of its own; agent projects remain normal Git repositories, which Liquid's Git integration operates through Meta-Harness (ADR-0190). Liquid History covers only Liquid workspace data.
 - Meta-Harness does not control processes on another host.
 - The Sync Server does not execute App Blocks or agent commands.
 - Liquid does not bypass Meta-Harness to manage CLI agents.

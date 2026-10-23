@@ -123,6 +123,8 @@ An offline device cannot learn a remote revocation while disconnected. No design
 
 Flow Agent runs inside normal Git projects in the MVP, but it does not own project history and does not implement project VCS behavior. Auditability comes from deterministic Flow state, structured logs, protocol events, manual configuration records and policy decisions; it does not come from an OS sandbox. Host Git may run only as an explicitly declared Tool and receives the same execution boundary as every other Tool; its implementation and invoked project code remain part of the Engineer's trust decision under ADR-0166.
 
+Meta-Harness Git operations on agent projects (ADR-0190) run on its own host under the host-local execution ownership [below](#meta-agent-configuration-writes); Liquid only presents them.
+
 ## Enforcement (per flow)
 
 Flow validation, native self-protection and durable lifecycle are the separate responsibilities defined [above](#m12-tool-execution-trust-boundary). [PROTOCOL.md](PROTOCOL.md#m12-executor-protocol-adr-0146-adr-0160-adr-0161-adr-0162) owns the exact resolved policy, receipt and Linux/Mac mechanics; do not infer general filesystem, network or resource containment from an enforcement receipt. Optional external containment follows the deployment limits in [native self-protection](#native-self-protection-and-its-limits).
