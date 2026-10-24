@@ -1,0 +1,252 @@
+//! Changes a run made to its Git project, read without touching the repository (ADR-0190,
+//! ADR-0191).
+
+use std::ffi::OsString;
+use std::fmt;
+use std::path::{Path, PathBuf};
+use std::process::Stdio;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+use tokio::io::AsyncReadExt;
+use tokio::process::Command;
+use tokio::sync::Mutex;
+
+/// Largest Git output read for one file list or patch; longer output is cut off.
+const MAX_OUTPUT_BYTES: u64 = 4 * 1024 * 1024;
+
+static STORES: AtomicU64 = AtomicU64::new(0);
+
+/// A project state captured as a Git tree in a private object store.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Snapshot(String);
+
+/// How a file changed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChangeStatus {
+    /// The file is new.
+    Added,
+    /// The file changed.
+    Modified,
+    /// The file was removed.
+    Deleted,
+}
+
+/// One changed file with its line counts; binary files count zero lines.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileChange {
+    /// The path relative to the repository root.
+    pub path: String,
+    /// How it changed.
+    pub status: ChangeStatus,
+    /// Added lines.
+    pub added: u64,
+    /// Removed lines.
+    pub removed: u64,
+}
+
+/// Error returned when the project cannot be read through Git.
+#[derive(Debug)]
+pub enum DiffError {
+    /// The directory is not inside a Git working tree.
+    NotARepository,
+    /// Git failed.
+    Git(String),
+    /// The private object store could not be prepared.
+    Io(std::io::Error),
+}
+
+impl fmt::Display for DiffError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NotARepository => f.write_str("not inside a Git working tree"),
+            Self::Git(error) => write!(f, "git failed: {error}"),
+            Self::Io(error) => write!(f, "snapshot store failed: {error}"),
+        }
+    }
+}
+
+impl std::error::Error for DiffError {}
+
+/// A Git working tree whose states can be captured and compared. Snapshots use a private index
+/// and object store, so the repository's own index and objects stay untouched.
+#[derive(Debug)]
+pub struct WorkingTree {
+    root: PathBuf,
+    index: PathBuf,
+    objects: PathBuf,
+    store: Store,
+    /// Serializes use of the private index.
+    busy: Mutex<()>,
+}
+
+/// A private temporary directory, removed on drop.
+#[derive(Debug)]
+struct Store(PathBuf);
+
+impl Drop for Store {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+impl WorkingTree {
+    /// Opens the working tree that contains `dir`.
+    pub async fn open(dir: &Path) -> Result<Self, DiffError> {
+        let lines = git(
+            dir,
+            &[],
+            &[
+                "rev-parse",
+                "--show-toplevel",
+                "--git-path",
+                "index",
+                "--git-path",
+                "objects",
+            ],
+        )
+        .await
+        .map_err(|_| DiffError::NotARepository)?;
+        let mut lines = lines.lines();
+        let (Some(root), Some(index), Some(objects)) = (lines.next(), lines.next(), lines.next())
+        else {
+            return Err(DiffError::NotARepository);
+        };
+        let absolute = |path: &str| {
+            let path = Path::new(path);
+            if path.is_absolute() {
+                path.to_owned()
+            } else {
+                dir.join(path)
+            }
+        };
+        let number = STORES.fetch_add(1, Ordering::Relaxed);
+        let store = std::env::temp_dir().join(format!(
+            "watershed-snapshots-{}-{number}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(store.join("objects")).map_err(DiffError::Io)?;
+        Ok(Self {
+            root: PathBuf::from(root),
+            index: absolute(index),
+            objects: absolute(objects),
+            store: Store(store),
+            busy: Mutex::new(()),
+        })
+    }
+
+    /// Captures the current state, including untracked files that are not ignored.
+    pub async fn snapshot(&self) -> Result<Snapshot, DiffError> {
+        Ok(Snapshot(self.write_tree().await?))
+    }
+
+    /// Lists the files that changed since `from`.
+    pub async fn changes(&self, from: &Snapshot) -> Result<Vec<FileChange>, DiffError> {
+        let now = self.write_tree().await?;
+        let numstat = self.diff(&["--numstat", "-z", &from.0, &now]).await?;
+        let statuses = self.diff(&["--name-status", "-z", &from.0, &now]).await?;
+        let mut statuses = statuses.split('\0');
+        let mut changes = Vec::new();
+        while let (Some(status), Some(path)) = (statuses.next(), statuses.next()) {
+            let status = match status {
+                "A" => ChangeStatus::Added,
+                "D" => ChangeStatus::Deleted,
+                _ => ChangeStatus::Modified,
+            };
+            changes.push(FileChange {
+                path: path.to_owned(),
+                status,
+                added: 0,
+                removed: 0,
+            });
+        }
+        for record in numstat.split('\0').filter(|record| !record.is_empty()) {
+            let mut fields = record.splitn(3, '\t');
+            let (Some(added), Some(removed), Some(path)) =
+                (fields.next(), fields.next(), fields.next())
+            else {
+                continue;
+            };
+            if let Some(change) = changes.iter_mut().find(|change| change.path == path) {
+                change.added = added.parse().unwrap_or(0);
+                change.removed = removed.parse().unwrap_or(0);
+            }
+        }
+        Ok(changes)
+    }
+
+    /// Returns the unified diff of one file since `from`.
+    pub async fn patch(&self, from: &Snapshot, path: &str) -> Result<String, DiffError> {
+        let now = self.write_tree().await?;
+        self.diff(&[&from.0, &now, "--", path]).await
+    }
+
+    async fn diff(&self, args: &[&str]) -> Result<String, DiffError> {
+        let mut command = vec!["diff", "--no-renames", "--no-ext-diff", "--no-color"];
+        command.extend_from_slice(args);
+        git(&self.root, &self.env(), &command).await
+    }
+
+    /// Writes the working tree into the private store and returns its tree id.
+    async fn write_tree(&self) -> Result<String, DiffError> {
+        let _busy = self.busy.lock().await;
+        let index = self.store.0.join("index");
+        match std::fs::copy(&self.index, &index) {
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                let _ = std::fs::remove_file(&index);
+            }
+            Err(error) => return Err(DiffError::Io(error)),
+        }
+        let env = self.env();
+        git(&self.root, &env, &["add", "--all", "--", "."]).await?;
+        Ok(git(&self.root, &env, &["write-tree"])
+            .await?
+            .trim()
+            .to_owned())
+    }
+
+    fn env(&self) -> Vec<(&'static str, OsString)> {
+        vec![
+            ("GIT_INDEX_FILE", self.store.0.join("index").into()),
+            ("GIT_OBJECT_DIRECTORY", self.store.0.join("objects").into()),
+            (
+                "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+                self.objects.clone().into(),
+            ),
+            ("GIT_OPTIONAL_LOCKS", "0".into()),
+        ]
+    }
+}
+
+/// Runs the host's `git` in `dir` and returns at most [`MAX_OUTPUT_BYTES`] of its output.
+async fn git(dir: &Path, env: &[(&str, OsString)], args: &[&str]) -> Result<String, DiffError> {
+    let mut child = Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .envs(env.iter().map(|(name, value)| (name, value)))
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .map_err(|error| DiffError::Git(error.to_string()))?;
+    let mut output = Vec::new();
+    // Dropping the pipe after the limit stops Git instead of buffering unbounded output.
+    let stdout = child.stdout.take().expect("stdout is piped");
+    stdout
+        .take(MAX_OUTPUT_BYTES)
+        .read_to_end(&mut output)
+        .await
+        .map_err(|error| DiffError::Git(error.to_string()))?;
+    let truncated = output.len() as u64 == MAX_OUTPUT_BYTES;
+    let result = child
+        .wait_with_output()
+        .await
+        .map_err(|error| DiffError::Git(error.to_string()))?;
+    if !result.status.success() && !truncated {
+        return Err(DiffError::Git(
+            String::from_utf8_lossy(&result.stderr).trim().to_owned(),
+        ));
+    }
+    Ok(String::from_utf8_lossy(&output).into_owned())
+}
