@@ -182,6 +182,25 @@ void main() {
     expect(composer.focusNode?.hasFocus, isTrue);
   });
 
+  testWidgets('branching at the first response hands its prompt back', (
+    tester,
+  ) async {
+    await show(tester, historyOf(branchA));
+    await press(tester, LogicalKeyboardKey.arrowDown);
+    await press(tester, LogicalKeyboardKey.arrowDown);
+    await press(tester, LogicalKeyboardKey.keyB);
+    expect(
+      backend.calls,
+      contains('branch e1'),
+      reason: 'pi redoes a response from before its prompt',
+    );
+    expect(state.notice.value, isNull);
+    final composer = tester.widget<TextField>(
+      find.byKey(const Key('composer')),
+    );
+    expect(composer.focusNode?.hasFocus, isTrue);
+  });
+
   testWidgets('a branch that did not move the session keeps the keyboard', (
     tester,
   ) async {

@@ -240,23 +240,25 @@ class _TrajectoryViewState extends State<TrajectoryView> {
   };
 
   /// Continues the session before the selected step, so the step and everything after it can
-  /// go differently on a new branch. A prompt branches at itself: the agent continues before it
-  /// and hands the prompt back to the input area for editing.
+  /// go differently on a new branch. A prompt branches at itself. pi continues before a
+  /// prompt and hands it back to the input area for editing, so a response right after its
+  /// prompt is redone from there too.
   Future<void> _branch() async {
     final index = _selectedIndex;
     if (index < 0 || _busy || _comparing) return;
-    final step = _records[index];
-    final from = step.kind == BridgeRecordKind.user
-        ? step.entry
-        : index > 0
-        ? _records[index - 1].entry
-        : null;
-    if (from == null) return;
+    final at = _records[index].kind == BridgeRecordKind.user
+        ? index
+        : index - 1;
+    if (at < 0) return;
+    final from = _records[at];
     // At a prompt the agent continues before it; elsewhere at the entry itself.
-    final expected = step.kind == BridgeRecordKind.user
-        ? _history?.tree.where((node) => node.id == from).firstOrNull?.parent
-        : from;
-    await widget.state.branch(from);
+    final expected = from.kind == BridgeRecordKind.user
+        ? _history?.tree
+              .where((node) => node.id == from.entry)
+              .firstOrNull
+              ?.parent
+        : from.entry;
+    await widget.state.branch(from.entry);
     bool moved;
     try {
       moved = (await widget.state.history()).leaf == expected;

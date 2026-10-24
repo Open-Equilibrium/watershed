@@ -76,7 +76,6 @@ class FakeBackend implements SessionBackend {
   /// Whether [branch] moves the session's leaf, as a successful branch does.
   bool branchMoves = true;
 
-  /// Moves the leaf like pi: to the entry, or before it for a prompt.
   /// Transcript pages by their `before` entry; the newest page has the key ''.
   final transcripts = <String, BridgeTranscript>{};
 
@@ -96,6 +95,7 @@ class FakeBackend implements SessionBackend {
     return contexts[entry];
   }
 
+  /// Moves the leaf like pi: to the entry, or before it for a prompt.
   @override
   Future<void> branch(String entry) async {
     calls.add('branch $entry');
