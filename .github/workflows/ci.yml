@@ -303,7 +303,7 @@ jobs:
             --locked --workspace --all-targets --all-features
           /bin/sh scripts/run-m12-readiness-negatives.sh
           cargo llvm-cov report --fail-under-lines 88 \
-            --ignore-filename-regex '((^|[\\/])(tests?|src[\\/]tests\.rs)([\\/]|$)|flow-agent[\\/]flow-agent-cli[\\/]src[\\/](main|parsing)\.rs$|flow-agent[\\/]flow-agent-core[\\/]src[\\/]runtime[\\/](m11_budget_evidence|m12_startup_evidence)(\.rs|[\\/])|flow-agent[\\/]flow-agent-core[\\/]src[\\/]runtime[\\/]tool_runner[\\/]unix_process(\.rs|[\\/]))' \
+            --ignore-filename-regex '((^|[\\/])(tests?|src[\\/]tests\.rs)([\\/]|$)|flow-agent[\\/]flow-agent-cli[\\/]src[\\/](main|parsing)\.rs$|flow-agent[\\/]flow-agent-core[\\/]src[\\/]runtime[\\/](m11_budget_evidence|m12_startup_evidence)(\.rs|[\\/])|flow-agent[\\/]flow-agent-core[\\/]src[\\/]runtime[\\/]tool_runner[\\/]unix_process(\.rs|[\\/])|liquid[\\/]liquid-bridge[\\/]src[\\/]frb_generated\.rs$)' \
             --show-missing-lines
 
       - name: Retain tested native download
