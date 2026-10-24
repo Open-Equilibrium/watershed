@@ -222,6 +222,32 @@ fn a_later_edit_brings_a_removed_message_back() {
     );
 }
 
+#[test]
+fn a_replacement_counts_its_own_size() {
+    let long = "x".repeat(1000);
+    let data: Value = serde_json::from_str(&format!(
+        r#"{{"entries":[
+          {{"type":"message","id":"u1","parentId":null,"message":{{"role":"user","content":"Read it"}}}},
+          {{"type":"message","id":"a1","parentId":"u1","message":{{"role":"assistant","content":[{{"type":"toolCall","id":"c1","name":"read","arguments":{{}}}}]}}}},
+          {{"type":"message","id":"r1","parentId":"a1","message":{{"role":"toolResult","toolCallId":"c1","toolName":"read","content":[{{"type":"text","text":"{long}"}}]}}}},
+          {{"type":"context_edit","id":"x1","parentId":"r1","targetId":"r1","replacement":"short"}},
+          {{"type":"message","id":"a2","parentId":"x1","message":{{"role":"assistant","content":[{{"type":"text","text":"Done."}}]}}}}
+        ],"leafId":"a2"}}"#
+    ))
+    .expect("JSON");
+    let detail = History::from_entries(&data).context("a2").expect("context");
+    let result = detail
+        .messages
+        .iter()
+        .find(|message| message.entry == "r1")
+        .expect("the tool result");
+    assert_eq!(
+        (result.chars, result.in_context),
+        (5, true),
+        "the model saw the replacement, not the original"
+    );
+}
+
 /// A response that writes, edits and tests, with the prompt and tools the model saw.
 const OUTCOMES: &str = r#"{"entries":[
   {"type":"message","id":"s1","parentId":null,"message":{"role":"system","content":"","sections":{"preamble":"You are pi."},"toolsAdded":[{"name":"write","description":"Write a file","parameters":{}},{"name":"bash","description":"Run","parameters":{}}]}},

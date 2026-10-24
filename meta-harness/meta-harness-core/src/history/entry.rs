@@ -91,8 +91,9 @@ pub(crate) enum Body {
     },
     ContextEdit {
         target: Option<String>,
-        /// Whether the edit takes its target out of the context rather than replacing it.
-        removes: bool,
+        /// The length of the content that replaces the target's; `None` takes the target out of
+        /// the context.
+        replacement: Option<usize>,
     },
     Label {
         target: Option<String>,
@@ -154,7 +155,10 @@ impl Entry {
             },
             "context_edit" => Body::ContextEdit {
                 target: text("targetId"),
-                removes: entry.get("replacement").is_none_or(Value::is_null),
+                replacement: entry
+                    .get("replacement")
+                    .filter(|replacement| !replacement.is_null())
+                    .map(|replacement| content_text(Some(replacement)).chars().count()),
             },
             "label" => Body::Label {
                 target: text("targetId"),

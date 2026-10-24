@@ -236,27 +236,38 @@ impl Projection {
                 }
                 self.note("compaction summary");
             }
-            Body::ContextEdit { target, removes } => {
+            Body::ContextEdit {
+                target,
+                replacement,
+            } => {
                 // The latest edit of a message wins: removing it takes it out of the context,
-                // replacing it brings back one that an earlier edit removed.
+                // replacing it puts the new content there, also for one an earlier edit removed.
                 let index = self.position(target.as_deref());
-                if *removes {
-                    if let Some(index) = index
-                        && self.log[index].message
-                    {
-                        self.forget(index);
-                        self.log[index].edited_out = true;
+                match replacement {
+                    None => {
+                        if let Some(index) = index
+                            && self.log[index].message
+                        {
+                            self.forget(index);
+                            self.log[index].edited_out = true;
+                        }
+                        self.note("removed message");
                     }
-                    self.note("removed message");
-                } else {
-                    if let Some(index) = index
-                        && std::mem::take(&mut self.log[index].edited_out)
-                    {
-                        self.log[index].message = true;
-                        self.messages += 1;
-                        self.message_chars += self.log[index].chars;
+                    Some(chars) => {
+                        if let Some(index) = index {
+                            let logged = &mut self.log[index];
+                            if logged.message {
+                                self.message_chars = self.message_chars - logged.chars + chars;
+                                logged.chars = *chars;
+                            } else if std::mem::take(&mut logged.edited_out) {
+                                logged.message = true;
+                                logged.chars = *chars;
+                                self.messages += 1;
+                                self.message_chars += chars;
+                            }
+                        }
+                        self.note("edited message");
                     }
-                    self.note("edited message");
                 }
             }
             Body::RequestTiming {
