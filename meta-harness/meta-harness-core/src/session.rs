@@ -471,6 +471,7 @@ impl Supervisor {
             return true;
         }
         for event in self.adapter.translate(&record, self.started.elapsed()) {
+            let mut expiry = None;
             let forward = match &event {
                 RuntimeEvent::RequestOpened {
                     request,
@@ -500,6 +501,10 @@ impl Supervisor {
                 }
                 RuntimeEvent::UserInputRequested { request, .. } => {
                     self.state.lock().questions.insert(request.clone());
+                    expiry = record
+                        .get("timeout")
+                        .and_then(Value::as_u64)
+                        .map(|timeout| (request.clone(), Duration::from_millis(timeout)));
                     true
                 }
                 RuntimeEvent::TurnStarted { .. } => {
@@ -522,8 +527,23 @@ impl Supervisor {
                     return false;
                 }
             }
+            if let Some((request, timeout)) = expiry {
+                self.expire(request, timeout);
+            }
         }
         true
+    }
+
+    /// Forgets a question once its time is up: pi then answers it itself without telling.
+    fn expire(&self, request: RequestId, timeout: Duration) {
+        let (state, events) = (self.state.clone(), self.events.clone());
+        tokio::spawn(async move {
+            tokio::time::sleep(timeout).await;
+            if state.lock().questions.remove(&request) {
+                let resolved = RuntimeEvent::UserInputResolved { request };
+                let _ = events.send(SessionEvent::Runtime(resolved)).await;
+            }
+        });
     }
 
     /// Fails the command an oversized response answers, or reports a skipped event; returns

@@ -381,6 +381,32 @@ fn answers_extension_questions() {
 }
 
 #[test]
+fn forgets_a_question_once_its_time_is_up() {
+    run(async {
+        // pi answers a dialog with a timeout itself once the time is up, without telling.
+        let (mut session, mut events) = fake_agent(
+            r#"printf '%s\n' '{"type":"extension_ui_request","id":"q1","method":"confirm","title":"Sure?","message":"Really","timeout":50}'
+IFS= read -r line || exit 0"#,
+        );
+        let request = RequestId("q1".to_owned());
+        assert!(matches!(
+            next(&mut events).await,
+            SessionEvent::Runtime(RuntimeEvent::UserInputRequested { .. })
+        ));
+        assert_eq!(
+            next(&mut events).await,
+            SessionEvent::Runtime(RuntimeEvent::UserInputResolved {
+                request: request.clone()
+            })
+        );
+        assert_eq!(
+            session.answer(&request, Answer::Confirmed(true)).await,
+            Err(CommandError::UnknownRequest)
+        );
+    });
+}
+
+#[test]
 fn asks_only_for_calls_the_approval_mode_does_not_allow() {
     run(async {
         let script = [
