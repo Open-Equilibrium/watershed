@@ -16,9 +16,12 @@ use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::approval::{ApprovalMode, needs_user};
-use crate::{Answer, Decision, History, LineFramer, PiAdapter, RequestId, RuntimeEvent};
+use crate::{
+    Answer, Decision, Frame, History, LineFramer, NotificationLevel, PiAdapter, RequestId,
+    RuntimeEvent,
+};
 
-/// Largest record accepted from an agent; a larger record ends the session.
+/// Largest record accepted from an agent; a larger one is skipped and fails its command.
 const MAX_RECORD_BYTES: usize = 16 * 1024 * 1024;
 /// Events buffered before the session stops reading agent output, which pauses the agent.
 const EVENT_BUFFER: usize = 256;
@@ -60,6 +63,8 @@ pub enum CommandError {
     UnknownRequest,
     /// The agent process is gone.
     Closed,
+    /// The agent's response exceeded the record limit and was skipped.
+    TooLarge,
 }
 
 type Reply = oneshot::Sender<Result<Value, CommandError>>;
@@ -114,6 +119,8 @@ pub struct Session {
     next_id: u64,
     kill: Option<oneshot::Sender<()>>,
     exited: oneshot::Receiver<bool>,
+    /// The stored entries read so far; later reads continue after the last one.
+    history: History,
 }
 
 impl Session {
@@ -155,6 +162,7 @@ impl Session {
             next_id: 0,
             kill: Some(kill),
             exited,
+            history: History::default(),
         };
         Ok((session, receiver))
     }
@@ -197,10 +205,24 @@ impl Session {
         })
     }
 
-    /// Reads every stored entry of the session, including abandoned branches.
+    /// Reads the session's stored entries, including abandoned branches. Only entries added
+    /// since the previous read cross the agent's output; when the agent no longer knows the
+    /// last one, everything is read again.
     pub async fn history(&mut self) -> Result<History, CommandError> {
-        let entries = self.command(json!({ "type": "get_entries" })).await?;
-        Ok(History { entries })
+        let since = self.history.last_id().map(str::to_owned);
+        let mut request = json!({ "type": "get_entries" });
+        if let Some(since) = &since {
+            request["since"] = json!(since);
+        }
+        let data = match self.command(request).await {
+            Err(CommandError::Rejected(_)) if since.is_some() => {
+                self.history = History::default();
+                self.command(json!({ "type": "get_entries" })).await?
+            }
+            result => result?,
+        };
+        self.history.append(&data);
+        Ok(self.history.clone())
     }
 
     /// Continues the session from `entry`, optionally labelling it; the next prompt starts a
@@ -345,18 +367,24 @@ impl Supervisor {
             let Some(read) = self.unless_killed(stdout.read(&mut buffer)).await else {
                 break None;
             };
-            let records = match read {
+            let frames = match read {
                 Ok(0) | Err(_) => break None,
-                Ok(length) => match framer.push(&buffer[..length]) {
-                    Ok(records) => records,
-                    Err(error) => break Some(format!("agent output broke framing: {error}")),
-                },
+                Ok(length) => framer.push(&buffer[..length]),
             };
-            for record in records {
+            for frame in frames {
+                let record = match frame {
+                    Frame::Record(record) => record,
+                    Frame::Oversized { start } => {
+                        if !self.skip(&start).await {
+                            break 'read None;
+                        }
+                        continue;
+                    }
+                };
                 let Ok(Value::Object(record)) = serde_json::from_slice::<Value>(&record) else {
                     break 'read Some("agent wrote a record that is not a JSON object".to_owned());
                 };
-                if !self.handle(&record).await {
+                if !self.handle(record).await {
                     break 'read None;
                 }
             }
@@ -385,12 +413,12 @@ impl Supervisor {
     }
 
     /// Routes one record; returns `false` once the session was killed.
-    async fn handle(&mut self, record: &Map<String, Value>) -> bool {
+    async fn handle(&mut self, record: Map<String, Value>) -> bool {
         if record.get("type").and_then(Value::as_str) == Some("response") {
             self.answer_command(record);
             return true;
         }
-        for event in self.adapter.translate(record, self.started.elapsed()) {
+        for event in self.adapter.translate(&record, self.started.elapsed()) {
             let forward = match &event {
                 RuntimeEvent::RequestOpened {
                     request,
@@ -438,8 +466,40 @@ impl Supervisor {
         true
     }
 
-    /// Resolves the command a response answers.
-    fn answer_command(&self, response: &Map<String, Value>) {
+    /// Fails the command an oversized response answers, or reports a skipped event; returns
+    /// `false` once the session was killed.
+    async fn skip(&mut self, start: &[u8]) -> bool {
+        let start = String::from_utf8_lossy(start);
+        if start.contains(r#""type":"response""#)
+            && let Some(id) = start
+                .split_once(r#""id":""#)
+                .and_then(|(_, rest)| rest.split_once('"'))
+                .and_then(|(id, _)| id.parse::<u64>().ok())
+            && let Some(reply) = self
+                .state
+                .lock()
+                .replies
+                .as_mut()
+                .and_then(|replies| replies.remove(&id))
+        {
+            let _ = reply.send(Err(CommandError::TooLarge));
+            return true;
+        }
+        let skipped = RuntimeEvent::Notification {
+            level: NotificationLevel::Warning,
+            message: format!(
+                "Skipped an agent record larger than {} MiB",
+                MAX_RECORD_BYTES / (1024 * 1024)
+            ),
+        };
+        let events = self.events.clone();
+        self.unless_killed(events.send(SessionEvent::Runtime(skipped)))
+            .await
+            .is_some()
+    }
+
+    /// Resolves the command a response answers, moving its data rather than copying it.
+    fn answer_command(&self, mut response: Map<String, Value>) {
         let id = response
             .get("id")
             .and_then(Value::as_str)
@@ -449,7 +509,7 @@ impl Supervisor {
             return;
         };
         let result = if response.get("success").and_then(Value::as_bool) == Some(true) {
-            Ok(response.get("data").cloned().unwrap_or(Value::Null))
+            Ok(response.remove("data").unwrap_or(Value::Null))
         } else {
             let error = response
                 .get("error")

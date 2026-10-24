@@ -42,6 +42,7 @@ pub(crate) fn describe(error: CommandError) -> String {
         CommandError::Rejected(reason) => format!("the agent rejected the command: {reason}"),
         CommandError::UnknownRequest => "the request is no longer open".to_owned(),
         CommandError::Closed => "the agent has exited".to_owned(),
+        CommandError::TooLarge => "the agent's answer exceeded 16 MiB and was skipped".to_owned(),
     }
 }
 

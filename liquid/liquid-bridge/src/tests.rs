@@ -144,6 +144,10 @@ fn the_exit_ends_the_stream_and_failures_explain_themselves() {
         describe(CommandError::Rejected("busy".to_owned())),
         "the agent rejected the command: busy"
     );
+    assert_eq!(
+        describe(CommandError::TooLarge),
+        "the agent's answer exceeded 16 MiB and was skipped"
+    );
 }
 
 #[test]

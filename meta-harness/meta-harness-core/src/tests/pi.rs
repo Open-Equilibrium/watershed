@@ -2,11 +2,10 @@ use std::time::Duration;
 
 use serde_json::{Map, Value};
 
-use crate::pi::session_tree;
 use crate::{
-    ContextSection, EntryKind, ItemDetail, ItemId, ItemKind, ItemStatus, NotificationLevel,
-    PiAdapter, RequestId, RequestKind, RuntimeEvent, SessionTree, StepId, TreeNode, TurnId, Usage,
-    UserInput,
+    ContextSection, EntryKind, History, ItemDetail, ItemId, ItemKind, ItemStatus,
+    NotificationLevel, PiAdapter, RequestId, RequestKind, RuntimeEvent, SessionTree, StepId,
+    TreeNode, TurnId, Usage, UserInput,
 };
 
 const TURN: TurnId = TurnId(1);
@@ -448,7 +447,7 @@ fn builds_the_session_tree_from_flat_entries() {
             at_ms: None,
         };
     assert_eq!(
-        session_tree(&data),
+        History::from_entries(&data).tree(),
         SessionTree {
             nodes: vec![
                 TreeNode {

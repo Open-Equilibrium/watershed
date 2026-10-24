@@ -1,7 +1,9 @@
 //! Observation workload for long Trajectories (PERFORMANCE.md, Liquid): a scripted agent answers
-//! `get_entries` with a session of 1,000 turns of eight entries each and eight forks of ten turns,
-//! and the core builds its tree and two Trajectories. It prints one JSON line per sample and a
-//! summary and never compares with a threshold. Run from the repository root:
+//! `get_entries` with a session of 1,000 turns of eight entries each and eight forks of ten turns.
+//! Each sample starts a session that reads the whole history, builds its tree and two
+//! Trajectories, then reads again, which only asks for entries after the last one. It prints one
+//! JSON line per sample and a summary and never compares with a threshold. Run from the
+//! repository root:
 //!
 //! ```sh
 //! cargo build --release -p meta-harness-core --example trajectory_observe
@@ -29,6 +31,7 @@ fn main() {
 
 async fn observe() {
     let (entries, fork_leaf) = session();
+    let leaf = entries["leafId"].as_str().expect("leaf").to_owned();
     let data = serde_json::to_string(&entries).expect("JSON");
     // Only the agent's copy and the core's own allocations remain in the measured process.
     drop(entries);
@@ -36,9 +39,9 @@ async fn observe() {
     std::fs::create_dir_all(&dir).expect("temporary directory");
     let file = dir.join("entries.json");
     std::fs::write(&file, &data).expect("entries file");
-    // Answers request `i` with the same stored entries.
+    // Answers the first request with every stored entry and later ones with none after it.
     let script = format!(
-        "i=1\nwhile IFS= read -r line; do\nprintf '%s' '{{\"id\":\"'$i'\",\"type\":\"response\",\"command\":\"get_entries\",\"success\":true,\"data\":'\ncat '{}'\nprintf '}}\\n'\ni=$((i+1))\ndone",
+        "IFS= read -r line\nprintf '%s' '{{\"id\":\"1\",\"type\":\"response\",\"command\":\"get_entries\",\"success\":true,\"data\":'\ncat '{}'\nprintf '}}\\n'\ni=2\nwhile IFS= read -r line; do\nprintf '%s\\n' '{{\"id\":\"'$i'\",\"type\":\"response\",\"command\":\"get_entries\",\"success\":true,\"data\":{{\"entries\":[],\"leafId\":\"{leaf}\"}}}}'\ni=$((i+1))\ndone",
         file.display()
     );
     let command = AgentCommand {
@@ -46,9 +49,9 @@ async fn observe() {
         args: vec!["-c".into(), script.into()],
         cwd: dir.clone(),
     };
-    let (mut session, _events) = Session::start(&command).expect("agent starts");
     let mut totals = Vec::new();
     for sample in 0..SAMPLES {
+        let (mut session, _events) = Session::start(&command).expect("agent starts");
         let started = Instant::now();
         let history = session.history().await.expect("history");
         let read = started.elapsed();
@@ -58,21 +61,27 @@ async fn observe() {
         let projected = started.elapsed();
         let fork = history.trajectory(Some(&fork_leaf));
         let done = started.elapsed();
+        drop(history);
+        let again = Instant::now();
+        let update = session.history().await.expect("update");
+        let updated = again.elapsed();
+        assert_eq!(update.tree().nodes.len(), tree.nodes.len(), "nothing new");
         let ms = |duration: std::time::Duration| duration.as_secs_f64() * 1000.0;
         println!(
-            r#"{{"sample":{sample},"read_ms":{:.3},"tree_ms":{:.3},"trajectory_ms":{:.3},"fork_trajectory_ms":{:.3},"total_ms":{:.3},"nodes":{},"records":{},"fork_records":{}}}"#,
+            r#"{{"sample":{sample},"read_ms":{:.3},"tree_ms":{:.3},"trajectory_ms":{:.3},"fork_trajectory_ms":{:.3},"total_ms":{:.3},"update_ms":{:.3},"nodes":{},"records":{},"fork_records":{}}}"#,
             ms(read),
             ms(built - read),
             ms(projected - built),
             ms(done - projected),
             ms(done),
+            ms(updated),
             tree.nodes.len(),
             current.records.len(),
             fork.records.len(),
         );
         totals.push(ms(done));
+        session.shutdown(std::time::Duration::from_secs(5)).await;
     }
-    session.shutdown(std::time::Duration::from_secs(5)).await;
     let _ = std::fs::remove_dir_all(&dir);
     totals.sort_by(f64::total_cmp);
     println!(

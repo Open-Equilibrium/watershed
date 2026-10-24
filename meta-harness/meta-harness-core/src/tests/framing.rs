@@ -1,4 +1,4 @@
-use crate::{FrameError, LineFramer};
+use crate::{Frame, LineFramer};
 
 #[test]
 fn frames_records_only_at_line_feeds() {
@@ -9,36 +9,54 @@ fn frames_records_only_at_line_feeds() {
         "\u{2028}b\u{2029}c\"}".as_bytes(),
         b"\n",
     ];
-    let records: Vec<Vec<u8>> = chunks
-        .iter()
-        .flat_map(|chunk| framer.push(chunk).expect("records stay within the limit"))
-        .collect();
+    let records: Vec<Frame> = chunks.iter().flat_map(|chunk| framer.push(chunk)).collect();
     assert_eq!(
         records,
         [
-            b"{\"type\":\"agent_start\"}".to_vec(),
-            "{\"type\":\"message_update\",\"delta\":\"a\u{2028}b\u{2029}c\"}"
-                .as_bytes()
-                .to_vec(),
+            Frame::Record(b"{\"type\":\"agent_start\"}".to_vec()),
+            Frame::Record(
+                "{\"type\":\"message_update\",\"delta\":\"a\u{2028}b\u{2029}c\"}"
+                    .as_bytes()
+                    .to_vec()
+            ),
         ]
     );
 }
 
 #[test]
-fn rejects_records_longer_than_the_limit() {
+fn skips_records_longer_than_the_limit_and_keeps_their_start() {
     let mut framer = LineFramer::new(8);
     assert_eq!(
         framer.push(b"{\"a\":12}\n"),
-        Ok(vec![b"{\"a\":12}".to_vec()])
+        [Frame::Record(b"{\"a\":12}".to_vec())]
     );
-    let error = framer
-        .push(b"{\"type\":")
-        .and_then(|_| framer.push(b"1"))
-        .expect_err("a partial record past the limit fails closed");
-    assert_eq!(error, FrameError::RecordTooLong { limit: 8 });
-    assert_eq!(error.to_string(), "record exceeds 8 bytes");
+    // A record past the limit is dropped up to its line feed; only its start is kept, and the
+    // records after it still arrive.
+    assert_eq!(framer.push(b"{\"type\":"), []);
+    assert_eq!(framer.push(b"1234567890"), []);
+    assert_eq!(
+        framer.push(b"}\n{\"b\":1}\n"),
+        [
+            Frame::Oversized {
+                start: b"{\"type\":1234567890".to_vec()
+            },
+            Frame::Record(b"{\"b\":1}".to_vec()),
+        ]
+    );
     assert_eq!(
         LineFramer::new(4).push(b"{\"a\":1}\n"),
-        Err(FrameError::RecordTooLong { limit: 4 })
+        [Frame::Oversized {
+            start: b"{\"a\":1}".to_vec()
+        }]
+    );
+    let mut huge = LineFramer::new(4);
+    let frames = huge.push(&[b'x'; 1000]);
+    assert!(frames.is_empty());
+    assert_eq!(
+        huge.push(b"\n"),
+        [Frame::Oversized {
+            start: vec![b'x'; 256]
+        }],
+        "the kept start is bounded"
     );
 }

@@ -18,7 +18,7 @@ pub use event::{
     NotificationLevel, RequestId, RequestKind, RuntimeEvent, SessionTree, StepId, TreeNode, TurnId,
     Usage, UserInput,
 };
-pub use framing::{FrameError, LineFramer};
+pub use framing::{Frame, LineFramer};
 pub use history::{History, RecordKind, StepContext, Trajectory, TrajectoryRecord};
 pub use pi::PiAdapter;
 pub use session::{AgentCommand, CommandError, Session, SessionEvent, SessionState};

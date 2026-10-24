@@ -1,18 +1,14 @@
 //! Adapter from pi's RPC session events to agent-neutral runtime events.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::HashMap;
 use std::time::Duration;
 
 use serde_json::{Map, Value};
 
 use crate::event::{
-    ContextSection, EntryKind, ItemDetail, ItemId, ItemKind, ItemStatus, NotificationLevel,
-    RequestId, RequestKind, RuntimeEvent, SessionTree, StepId, TreeNode, TurnId, Usage, UserInput,
+    ContextSection, ItemDetail, ItemId, ItemKind, ItemStatus, NotificationLevel, RequestId,
+    RequestKind, RuntimeEvent, StepId, TurnId, Usage, UserInput,
 };
-use crate::history::{RecordKind, StepContext, Trajectory, TrajectoryRecord};
-
-/// Longest preview kept for a tree entry, in characters.
-const PREVIEW_CHARS: usize = 80;
 
 /// Title prefix of the select dialog Watershed's pi extension uses to ask for an approval.
 pub(crate) const APPROVAL_PREFIX: &str = "watershed.approval ";
@@ -170,31 +166,11 @@ impl PiAdapter {
             return;
         };
         let millis = |duration: Duration| u64::try_from(duration.as_millis()).unwrap_or(u64::MAX);
-        let usage = message.get("usage").and_then(Value::as_object);
-        let count = |field| {
-            usage
-                .and_then(|u| u.get(field))
-                .and_then(Value::as_u64)
-                .unwrap_or(0)
-        };
-        let cost = usage
-            .and_then(|u| u.get("cost"))
-            .and_then(|c| c.get("total"))
-            .and_then(Value::as_f64)
-            .unwrap_or(0.0);
         events.push(RuntimeEvent::ModelRequestCompleted {
             turn,
             step: step.id,
             model: str_field(message, "model").to_owned(),
-            usage: Usage {
-                input: count("input"),
-                output: count("output"),
-                cache_read: count("cacheRead"),
-                cache_write: count("cacheWrite"),
-                reasoning: count("reasoning"),
-                // Saturating float-to-integer conversion; costs are small and non-negative.
-                cost_micro_usd: (cost * 1_000_000.0).round() as u64,
-            },
+            usage: usage(message.get("usage")),
             stop_reason: str_field(message, "stopReason").to_owned(),
             error: message
                 .get("errorMessage")
@@ -293,555 +269,6 @@ fn completed(turn: TurnId, item: ItemId, kind: ItemKind, text: String) -> Runtim
         status: ItemStatus::Completed,
         duration_ms: None,
     }
-}
-
-/// Rebuilds the branch ending at `leaf`, or at the session's leaf, as Trajectory rows from a
-/// `get_entries` response; timing comes from the extension's `watershed.timing` entries.
-pub(crate) fn trajectory(data: &Value, leaf: Option<&str>) -> Trajectory {
-    let entries = data
-        .get("entries")
-        .and_then(Value::as_array)
-        .map(Vec::as_slice)
-        .unwrap_or_default();
-    let by_id: HashMap<&str, &Value> = entries
-        .iter()
-        .filter_map(|entry| Some((entry.get("id")?.as_str()?, entry)))
-        .collect();
-    let mut path = Vec::new();
-    let mut next = leaf.or_else(|| data.get("leafId").and_then(Value::as_str));
-    while let Some(entry) = next.and_then(|id| by_id.get(id)) {
-        path.push(*entry);
-        next = entry.get("parentId").and_then(Value::as_str);
-    }
-    path.reverse();
-    // Times count from the first prompt, not from when the agent started; an entry without a
-    // timestamp takes the time of the entry before it.
-    let base = path
-        .iter()
-        .find(|entry| entry_summary(entry).0 == EntryKind::User)
-        .and_then(|entry| entry_millis(entry))
-        .or_else(|| path.iter().find_map(|entry| entry_millis(entry)))
-        .unwrap_or(0);
-    let mut projection = Projection::default();
-    let mut at = 0;
-    for entry in &path {
-        at = entry_millis(entry).map_or(at, |millis| millis.saturating_sub(base));
-        projection.add(entry, at);
-    }
-    Trajectory {
-        records: projection.records,
-        duration_ms: at,
-    }
-}
-
-/// State while walking one branch.
-#[derive(Default)]
-struct Projection {
-    records: Vec<TrajectoryRecord>,
-    turn: u64,
-    sections: BTreeMap<String, usize>,
-    appended_chars: usize,
-    tools: BTreeSet<String>,
-    /// Messages in `log` the model currently sees.
-    messages: usize,
-    /// Whether a compaction summary leads the model's context.
-    summarized: bool,
-    /// Every entry of the branch so far, in order.
-    log: Vec<Logged>,
-    /// The `log` length at the previous model request.
-    since: usize,
-    request_timing: Option<(Option<u64>, Option<u64>)>,
-    /// When each tool's timing entry was stored and how long the tool ran. pi runs a response's
-    /// tools in parallel and stores their results together, so a result's own time is the end
-    /// of the slowest tool.
-    tool_timing: HashMap<String, (u64, Option<u64>)>,
-    tool_calls: HashMap<String, String>,
-}
-
-/// One entry of a branch as the model's context sees it.
-#[derive(Default)]
-struct Logged {
-    id: String,
-    /// Whether the model currently sees this entry as a message.
-    message: bool,
-    /// What it adds to the context, as "new since the previous request" lists it.
-    new: Option<String>,
-    /// Whether it changed the context without being a message, such as a compaction.
-    event: bool,
-    /// Whether a context edit, not a compaction, took this message out; a later edit brings it
-    /// back.
-    edited_out: bool,
-}
-
-impl Projection {
-    /// Marks the entry just logged as a message the model sees, described by `new`.
-    fn count(&mut self, new: Option<String>) {
-        self.messages += 1;
-        if let Some(logged) = self.log.last_mut() {
-            logged.message = true;
-            logged.new = new;
-        }
-    }
-
-    /// Marks the entry just logged as a change of the context that is not a message.
-    fn note(&mut self, new: &str) {
-        if let Some(logged) = self.log.last_mut() {
-            logged.event = true;
-            logged.new = Some(new.to_owned());
-        }
-    }
-
-    /// Takes the entry at `index` out of the model's context for good.
-    fn forget(&mut self, index: usize) {
-        self.log[index].edited_out = false;
-        if std::mem::take(&mut self.log[index].message) {
-            self.messages -= 1;
-        }
-    }
-
-    /// What reached the context since the previous request and is still in it.
-    fn new_since_previous(&mut self) -> Vec<String> {
-        let new = self.log[self.since..]
-            .iter()
-            .filter(|logged| logged.event || logged.message)
-            .filter_map(|logged| logged.new.clone())
-            .collect();
-        self.since = self.log.len();
-        new
-    }
-
-    fn add(&mut self, entry: &Value, at: u64) {
-        let id = entry.get("id").and_then(Value::as_str).unwrap_or_default();
-        self.log.push(Logged {
-            id: id.to_owned(),
-            ..Logged::default()
-        });
-        let millis = |value: Option<&Value>| value.and_then(Value::as_u64);
-        let text = |field| {
-            entry
-                .get(field)
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_owned()
-        };
-        match entry.get("type").and_then(Value::as_str) {
-            Some("custom_message") => {
-                self.count(Some(format!("message from {}", text("customType"))));
-            }
-            Some("branch_summary") => self.count(Some("branch summary".to_owned())),
-            Some("compaction") => {
-                // The model now sees the summary and the entries kept from before it; a retained
-                // older compaction adds nothing.
-                let current = self.log.len() - 1;
-                let kept = entry
-                    .get("firstKeptEntryId")
-                    .and_then(Value::as_str)
-                    .and_then(|first| self.log.iter().position(|logged| logged.id == first))
-                    .unwrap_or(current);
-                for index in 0..kept {
-                    self.forget(index);
-                }
-                self.summarized = true;
-                if let Some(system) = entry.get("systemMessage") {
-                    self.sections.clear();
-                    self.appended_chars = 0;
-                    self.tools.clear();
-                    self.system(system);
-                }
-                self.note("compaction summary");
-            }
-            Some("context_edit") => {
-                // The latest edit of a message wins: removing it takes it out of the context,
-                // replacing it brings back one that an earlier edit removed.
-                let target = entry.get("targetId").and_then(Value::as_str);
-                let index = self
-                    .log
-                    .iter()
-                    .position(|logged| Some(logged.id.as_str()) == target);
-                if entry.get("replacement").is_none_or(Value::is_null) {
-                    if let Some(index) = index
-                        && self.log[index].message
-                    {
-                        self.forget(index);
-                        self.log[index].edited_out = true;
-                    }
-                    self.note("removed message");
-                } else {
-                    if let Some(index) = index
-                        && std::mem::take(&mut self.log[index].edited_out)
-                    {
-                        self.log[index].message = true;
-                        self.messages += 1;
-                    }
-                    self.note("edited message");
-                }
-            }
-            Some("custom") => {
-                let data = entry.get("data");
-                match entry.get("customType").and_then(Value::as_str) {
-                    Some("watershed.timing") => {
-                        match data.and_then(|d| d.get("kind")).and_then(Value::as_str) {
-                            Some("request") => {
-                                self.request_timing = Some((
-                                    millis(data.and_then(|d| d.get("firstTokenMs"))),
-                                    millis(data.and_then(|d| d.get("durationMs"))),
-                                ));
-                            }
-                            Some("tool") => {
-                                let call = data
-                                    .and_then(|d| d.get("toolCallId"))
-                                    .and_then(Value::as_str);
-                                self.tool_timing.insert(
-                                    call.unwrap_or_default().to_owned(),
-                                    (at, millis(data.and_then(|d| d.get("durationMs")))),
-                                );
-                            }
-                            _ => {}
-                        }
-                    }
-                    Some("watershed.approval") => {
-                        let waited = millis(data.and_then(|d| d.get("waitedMs")));
-                        let text = |field| {
-                            data.and_then(|d| d.get(field))
-                                .and_then(Value::as_str)
-                                .unwrap_or_default()
-                                .to_owned()
-                        };
-                        self.records.push(TrajectoryRecord {
-                            detail: text("decision"),
-                            ..row(
-                                id,
-                                self.turn,
-                                RecordKind::Approval,
-                                text("tool"),
-                                at.saturating_sub(waited.unwrap_or(0)),
-                                waited,
-                            )
-                        });
-                    }
-                    _ => {}
-                }
-            }
-            Some("message") => {
-                let Some(message) = entry.get("message") else {
-                    return;
-                };
-                match message.get("role").and_then(Value::as_str) {
-                    Some("system") => self.system(message),
-                    Some("user") => {
-                        self.turn += 1;
-                        let text = content_text(message.get("content"));
-                        self.records.push(row(
-                            id,
-                            self.turn,
-                            RecordKind::User,
-                            first_line(&text),
-                            at,
-                            None,
-                        ));
-                        self.count(Some("prompt".to_owned()));
-                    }
-                    Some("assistant") => {
-                        let (first_token_ms, duration_ms) =
-                            self.request_timing.take().unwrap_or((None, None));
-                        let mut text = content_text(message.get("content"));
-                        if text.trim().is_empty() {
-                            text = "(tool calls)".to_owned();
-                        }
-                        for call in message
-                            .get("content")
-                            .and_then(Value::as_array)
-                            .into_iter()
-                            .flatten()
-                        {
-                            if call.get("type").and_then(Value::as_str) == Some("toolCall") {
-                                let call_id =
-                                    call.get("id").and_then(Value::as_str).unwrap_or_default();
-                                let arguments = call
-                                    .get("arguments")
-                                    .map(Value::to_string)
-                                    .unwrap_or_default();
-                                self.tool_calls.insert(call_id.to_owned(), arguments);
-                            }
-                        }
-                        let stop_reason = message
-                            .get("stopReason")
-                            .and_then(Value::as_str)
-                            .unwrap_or_default();
-                        let context = StepContext {
-                            prompt_chars: self.sections.values().sum::<usize>()
-                                + self.appended_chars,
-                            tools: self.tools.iter().cloned().collect(),
-                            messages: self.messages + usize::from(self.summarized),
-                            new_since_previous: self.new_since_previous(),
-                        };
-                        self.records.push(TrajectoryRecord {
-                            first_token_ms,
-                            model: message
-                                .get("model")
-                                .and_then(Value::as_str)
-                                .unwrap_or_default()
-                                .to_owned(),
-                            usage: Some(usage(message.get("usage"))),
-                            stop_reason: stop_reason.to_owned(),
-                            failed: stop_reason == "error",
-                            context: Some(context),
-                            ..row(
-                                id,
-                                self.turn,
-                                RecordKind::Message,
-                                first_line(&text),
-                                at.saturating_sub(duration_ms.unwrap_or(0)),
-                                duration_ms,
-                            )
-                        });
-                        self.count(None);
-                    }
-                    Some("toolResult") => {
-                        let call_id = message
-                            .get("toolCallId")
-                            .and_then(Value::as_str)
-                            .unwrap_or_default();
-                        let tool = message
-                            .get("toolName")
-                            .and_then(Value::as_str)
-                            .unwrap_or_default();
-                        let (ended, duration_ms) =
-                            self.tool_timing.remove(call_id).unwrap_or((at, None));
-                        self.records.push(TrajectoryRecord {
-                            detail: self.tool_calls.remove(call_id).unwrap_or_default(),
-                            failed: message.get("isError").and_then(Value::as_bool) == Some(true),
-                            ..row(
-                                id,
-                                self.turn,
-                                RecordKind::Tool,
-                                tool.to_owned(),
-                                ended.saturating_sub(duration_ms.unwrap_or(0)),
-                                duration_ms,
-                            )
-                        });
-                        self.count(Some(format!("result of {tool}")));
-                    }
-                    // A shell command marked so stays out of the model's context.
-                    Some(_) if message.get("excludeFromContext") == Some(&Value::Bool(true)) => {}
-                    Some(other) => self.count(Some(format!("{other} message"))),
-                    None => {}
-                }
-            }
-            _ => {}
-        }
-    }
-
-    /// Applies a system message's prompt sections and tool changes.
-    fn system(&mut self, message: &Value) {
-        if let Some(sections) = message.get("sections").and_then(Value::as_object) {
-            for (name, text) in sections {
-                match text.as_str() {
-                    Some(text) => self.sections.insert(name.clone(), text.chars().count()),
-                    None => self.sections.remove(name),
-                };
-            }
-        }
-        self.appended_chars += content_text(message.get("content")).chars().count();
-        let names = |field| {
-            message
-                .get(field)
-                .and_then(Value::as_array)
-                .into_iter()
-                .flatten()
-                .filter_map(|tool| tool.get("name").and_then(Value::as_str))
-                .map(str::to_owned)
-                .collect::<Vec<_>>()
-        };
-        for tool in names("toolsRemoved") {
-            self.tools.remove(&tool);
-        }
-        self.tools.extend(names("toolsAdded"));
-    }
-}
-
-/// A Trajectory row with only the fields every kind has.
-fn row(
-    entry: &str,
-    turn: u64,
-    kind: RecordKind,
-    label: String,
-    start_ms: u64,
-    duration_ms: Option<u64>,
-) -> TrajectoryRecord {
-    TrajectoryRecord {
-        entry: entry.to_owned(),
-        turn,
-        kind,
-        label,
-        detail: String::new(),
-        start_ms,
-        duration_ms,
-        first_token_ms: None,
-        model: String::new(),
-        usage: None,
-        stop_reason: String::new(),
-        failed: false,
-        context: None,
-    }
-}
-
-fn usage(usage: Option<&Value>) -> Usage {
-    let count = |field| {
-        usage
-            .and_then(|u| u.get(field))
-            .and_then(Value::as_u64)
-            .unwrap_or(0)
-    };
-    let cost = usage
-        .and_then(|u| u.get("cost"))
-        .and_then(|c| c.get("total"))
-        .and_then(Value::as_f64)
-        .unwrap_or(0.0);
-    Usage {
-        input: count("input"),
-        output: count("output"),
-        cache_read: count("cacheRead"),
-        cache_write: count("cacheWrite"),
-        reasoning: count("reasoning"),
-        // Saturating float-to-integer conversion; costs are small and non-negative.
-        cost_micro_usd: (cost * 1_000_000.0).round() as u64,
-    }
-}
-
-fn first_line(text: &str) -> String {
-    let line = text
-        .lines()
-        .find(|line| !line.trim().is_empty())
-        .unwrap_or_default();
-    line.chars().take(PREVIEW_CHARS).collect()
-}
-
-/// Reads an entry's ISO 8601 UTC timestamp, such as `2026-10-24T10:00:03.500Z`, as Unix
-/// milliseconds.
-fn entry_millis(entry: &Value) -> Option<u64> {
-    let text = entry.get("timestamp")?.as_str()?.strip_suffix('Z')?;
-    let (date, time) = text.split_once('T')?;
-    let mut date = date.split('-').map(str::parse::<i64>);
-    let (year, month, day) = (date.next()?.ok()?, date.next()?.ok()?, date.next()?.ok()?);
-    let (clock, fraction) = time.split_once('.').unwrap_or((time, "0"));
-    let mut clock = clock.split(':').map(str::parse::<i64>);
-    let (hour, minute, second) = (
-        clock.next()?.ok()?,
-        clock.next()?.ok()?,
-        clock.next()?.ok()?,
-    );
-    let millis: i64 = format!("{fraction:0<3}").get(..3)?.parse().ok()?;
-    // Days from the civil calendar (Howard Hinnant's algorithm).
-    let year = if month <= 2 { year - 1 } else { year };
-    let era = year.div_euclid(400);
-    let year_of_era = year - era * 400;
-    let day_of_year = (153 * (month + if month > 2 { -3 } else { 9 }) + 2) / 5 + day - 1;
-    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
-    let days = era * 146_097 + day_of_era - 719_468;
-    u64::try_from(((days * 24 + hour) * 60 + minute) * 60_000 + second * 1000 + millis).ok()
-}
-
-/// Builds the branch tree from a `get_entries` response; label entries become node labels.
-pub(crate) fn session_tree(data: &Value) -> SessionTree {
-    let entries = data
-        .get("entries")
-        .and_then(Value::as_array)
-        .map(Vec::as_slice)
-        .unwrap_or_default();
-    // Label entries sit in the parent chain; resolve each one to its nearest real ancestor.
-    let mut label_parents: HashMap<&str, Option<&str>> = HashMap::new();
-    let mut labels: HashMap<&str, Option<&str>> = HashMap::new();
-    for entry in entries {
-        if entry.get("type").and_then(Value::as_str) == Some("label") {
-            let id = entry.get("id").and_then(Value::as_str).unwrap_or_default();
-            label_parents.insert(id, entry.get("parentId").and_then(Value::as_str));
-            if let Some(target) = entry.get("targetId").and_then(Value::as_str) {
-                labels.insert(target, entry.get("label").and_then(Value::as_str));
-            }
-        }
-    }
-    let nodes = entries
-        .iter()
-        .filter(|entry| entry.get("type").and_then(Value::as_str) != Some("label"))
-        .map(|entry| {
-            let id = entry.get("id").and_then(Value::as_str).unwrap_or_default();
-            let (kind, preview) = entry_summary(entry);
-            TreeNode {
-                id: id.to_owned(),
-                parent: resolve(
-                    &label_parents,
-                    entry.get("parentId").and_then(Value::as_str),
-                ),
-                kind,
-                preview,
-                label: labels.get(id).copied().flatten().map(str::to_owned),
-                at_ms: entry_millis(entry),
-            }
-        })
-        .collect();
-    SessionTree {
-        nodes,
-        leaf: resolve(&label_parents, data.get("leafId").and_then(Value::as_str)),
-    }
-}
-
-/// Follows label entries up to the nearest entry that is not a label.
-fn resolve<'a>(
-    label_parents: &HashMap<&'a str, Option<&'a str>>,
-    mut id: Option<&'a str>,
-) -> Option<String> {
-    while let Some(parent) = id.and_then(|id| label_parents.get(id)) {
-        id = *parent;
-    }
-    id.map(str::to_owned)
-}
-
-fn entry_summary(entry: &Value) -> (EntryKind, String) {
-    let entry_type = entry
-        .get("type")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
-    if entry_type == "custom" {
-        let custom = entry
-            .get("customType")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
-        if custom == "watershed.approval" {
-            let tool = entry
-                .get("data")
-                .and_then(|data| data.get("tool"))
-                .and_then(Value::as_str)
-                .unwrap_or_default();
-            return (EntryKind::Approval, tool.to_owned());
-        }
-        return (EntryKind::Custom(custom.to_owned()), String::new());
-    }
-    let message = entry.get("message");
-    let kind = match (
-        entry_type,
-        message.and_then(|m| m.get("role")).and_then(Value::as_str),
-    ) {
-        ("message", Some("user")) => EntryKind::User,
-        ("message", Some("assistant")) => EntryKind::Assistant,
-        ("message", Some("toolResult")) => EntryKind::ToolResult,
-        ("message", Some("system")) => EntryKind::System,
-        _ => return (EntryKind::Other(entry_type.to_owned()), String::new()),
-    };
-    let text = if kind == EntryKind::ToolResult {
-        message
-            .and_then(|m| m.get("toolName"))
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_owned()
-    } else {
-        content_text(message.and_then(|m| m.get("content")))
-    };
-    let line = text
-        .lines()
-        .find(|line| !line.trim().is_empty())
-        .unwrap_or_default();
-    (kind, line.chars().take(PREVIEW_CHARS).collect())
 }
 
 fn role(record: &Map<String, Value>) -> Option<&str> {
@@ -992,7 +419,7 @@ fn str_field<'a>(record: &'a Map<String, Value>, field: &str) -> &'a str {
 }
 
 /// Joins the text of pi message content, which is either a string or a list of blocks.
-fn content_text(content: Option<&Value>) -> String {
+pub(crate) fn content_text(content: Option<&Value>) -> String {
     match content {
         Some(Value::String(text)) => text.clone(),
         Some(Value::Array(blocks)) => blocks
@@ -1001,5 +428,29 @@ fn content_text(content: Option<&Value>) -> String {
             .filter_map(|block| block.get("text").and_then(Value::as_str))
             .collect(),
         _ => String::new(),
+    }
+}
+
+/// Reads pi's token usage and cost of one model response.
+pub(crate) fn usage(usage: Option<&Value>) -> Usage {
+    let count = |field| {
+        usage
+            .and_then(|u| u.get(field))
+            .and_then(Value::as_u64)
+            .unwrap_or(0)
+    };
+    let cost = usage
+        .and_then(|u| u.get("cost"))
+        .and_then(|c| c.get("total"))
+        .and_then(Value::as_f64)
+        .unwrap_or(0.0);
+    Usage {
+        input: count("input"),
+        output: count("output"),
+        cache_read: count("cacheRead"),
+        cache_write: count("cacheWrite"),
+        reasoning: count("reasoning"),
+        // Saturating float-to-integer conversion; costs are small and non-negative.
+        cost_micro_usd: (cost * 1_000_000.0).round() as u64,
     }
 }

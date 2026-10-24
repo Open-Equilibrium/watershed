@@ -1,7 +1,6 @@
 use serde_json::Value;
 
-use crate::pi::trajectory;
-use crate::{RecordKind, StepContext, Trajectory, TrajectoryRecord, Usage};
+use crate::{History, RecordKind, StepContext, Trajectory, TrajectoryRecord, Usage};
 
 /// A session with a branch after the first model response: `e7` continues the original run,
 /// `b1` a fork.
@@ -43,7 +42,7 @@ const PARALLEL: &str = r#"{"entries":[
 #[test]
 fn times_parallel_tools_from_their_own_end_and_follows_compaction() {
     let data: Value = serde_json::from_str(PARALLEL).expect("JSON");
-    let records = trajectory(&data, None).records;
+    let records = History::from_entries(&data).trajectory(None).records;
     let timing: Vec<_> = records
         .iter()
         .map(|record| (record.entry.as_str(), record.start_ms, record.duration_ms))
@@ -145,7 +144,7 @@ fn projects_the_selected_branch_with_timing_and_what_the_model_saw() {
         ..record("e4", 1, RecordKind::Tool, "bash", 12900, Some(6800))
     };
 
-    let original = trajectory(&data, Some("e7"));
+    let original = History::from_entries(&data).trajectory(Some("e7"));
     let finished = TrajectoryRecord {
         model: "faux-1".to_owned(),
         usage: Some(Usage {
@@ -170,7 +169,7 @@ fn projects_the_selected_branch_with_timing_and_what_the_model_saw() {
         }
     );
 
-    let fork = trajectory(&data, None);
+    let fork = History::from_entries(&data).trajectory(None);
     assert_eq!(
         fork.records,
         [
@@ -194,7 +193,7 @@ fn a_later_edit_brings_a_removed_message_back() {
         ],"leafId":"a2"}"#,
     )
     .expect("JSON");
-    let context = trajectory(&data, None).records[3]
+    let context = History::from_entries(&data).trajectory(None).records[3]
         .context
         .clone()
         .expect("context");

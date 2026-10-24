@@ -6,8 +6,8 @@ use tokio::time::timeout;
 
 use crate::{
     AgentCommand, Answer, ApprovalMode, CommandError, Decision, EntryKind, ItemDetail, ItemId,
-    ItemKind, ItemStatus, RecordKind, RequestId, RequestKind, RuntimeEvent, Session, SessionEvent,
-    SessionState, SessionTree, TreeNode, TurnId, UserInput,
+    ItemKind, ItemStatus, NotificationLevel, RecordKind, RequestId, RequestKind, RuntimeEvent,
+    Session, SessionEvent, SessionState, SessionTree, TreeNode, TurnId, UserInput,
 };
 
 const WAIT: Duration = Duration::from_secs(10);
@@ -127,6 +127,109 @@ fn shutdown_kills_an_agent_that_ignores_it() {
         let (session, _events) = fake_agent(r#"trap '' TERM; while :; do sleep 1; done"#);
         let stopped = timeout(WAIT, session.shutdown(Duration::from_millis(100))).await;
         assert_eq!(stopped, Ok(false));
+    });
+}
+
+#[test]
+fn reads_history_incrementally_and_rereads_when_the_cursor_is_gone() {
+    run(async {
+        let entry = |id: &str, parent: &str| {
+            format!(
+                r#"{{"type":"message","id":"{id}","parentId":{parent},"message":{{"role":"user","content":"{id}"}}}}"#
+            )
+        };
+        let respond = |id: u32, entries: String, leaf: &str| {
+            format!(
+                "printf '%s\\n' '{{\"id\":\"{id}\",\"type\":\"response\",\"command\":\"get_entries\",\"success\":true,\"data\":{{\"entries\":[{entries}],\"leafId\":\"{leaf}\"}}}}'\n"
+            )
+        };
+        let without_cursor = "case \"$line\" in *'\"since\"'*) exit 9 ;; esac\n";
+        let script = [
+            expect_response(&[r#""type":"get_entries""#, r#""id":"1""#]),
+            without_cursor.to_owned(),
+            respond(1, entry("e1", "null"), "e1"),
+            expect_response(&[r#""id":"2""#, r#""since":"e1""#]),
+            respond(2, entry("e2", r#""e1""#), "e2"),
+            expect_response(&[r#""id":"3""#, r#""since":"e2""#]),
+            r#"printf '%s\n' '{"id":"3","type":"response","command":"get_entries","success":false,"error":"unknown entry"}'
+"#
+            .to_owned(),
+            expect_response(&[r#""type":"get_entries""#, r#""id":"4""#]),
+            without_cursor.to_owned(),
+            respond(4, entry("x1", "null"), "x1"),
+        ]
+        .concat();
+        let (mut session, _events) = fake_agent(&script);
+        let mut ids = Vec::new();
+        for _ in 0..3 {
+            let history = session.history().await.expect("history");
+            let tree = history.tree();
+            ids.push((
+                tree.nodes
+                    .into_iter()
+                    .map(|node| node.id)
+                    .collect::<Vec<_>>(),
+                tree.leaf,
+            ));
+        }
+        assert_eq!(
+            ids,
+            [
+                (vec!["e1".to_owned()], Some("e1".to_owned())),
+                (
+                    vec!["e1".to_owned(), "e2".to_owned()],
+                    Some("e2".to_owned())
+                ),
+                (vec!["x1".to_owned()], Some("x1".to_owned())),
+            ],
+            "only new entries are read; an unknown cursor reads everything again"
+        );
+    });
+}
+
+#[test]
+fn skips_an_oversized_record_and_keeps_the_session() {
+    run(async {
+        // More than the 16 MiB record limit, without holding it in the script.
+        let huge = "head -c 17000000 /dev/zero | tr '\\0' a\n";
+        let script = [
+            format!(
+                r#"printf '%s' '{{"type":"message_update","assistantMessageEvent":{{"type":"text_delta","delta":"'
+{huge}printf '"}}}}\n'
+"#
+            ),
+            expect_response(&[r#""type":"get_entries""#, r#""id":"1""#]),
+            format!(
+                r#"printf '%s' '{{"id":"1","type":"response","command":"get_entries","success":true,"data":"'
+{huge}printf '"}}\n'
+"#
+            ),
+            expect_response(&[r#""type":"get_state""#, r#""id":"2""#]),
+            r#"printf '%s\n' '{"id":"2","type":"response","command":"get_state","success":true,"data":{"sessionId":"abc","isStreaming":false}}'
+"#
+            .to_owned(),
+        ]
+        .concat();
+        let (mut session, mut events) = fake_agent(&script);
+        let skipped = next(&mut events).await;
+        assert!(
+            matches!(
+                &skipped,
+                SessionEvent::Runtime(RuntimeEvent::Notification {
+                    level: NotificationLevel::Warning,
+                    message,
+                }) if message.starts_with("Skipped an agent record")
+            ),
+            "{skipped:?}"
+        );
+        assert_eq!(
+            session.history().await.map(drop),
+            Err(CommandError::TooLarge)
+        );
+        assert_eq!(
+            session.state().await.map(|state| state.session_id),
+            Ok("abc".to_owned())
+        );
     });
 }
 
