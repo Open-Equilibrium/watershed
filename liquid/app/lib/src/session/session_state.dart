@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../rust/api/events.dart';
+import '../rust/api/session.dart';
 import 'backend.dart';
 
 /// What the session is doing, as the status bar and sidebar show it.
@@ -64,12 +65,19 @@ class SessionState {
   final notification = ValueNotifier<(BridgeLevel, String)?>(null);
   final totals = ValueNotifier(const SessionTotals());
   final failure = ValueNotifier<String?>(null);
+  final mode = ValueNotifier(BridgeApprovalMode.ask);
 
   /// Sends a prompt, or steers the running turn.
   Future<void> send(String message) =>
       _turnActive ? _backend.steer(message) : _backend.prompt(message);
 
   Future<void> abort() => _backend.abort();
+
+  /// Changes which tool calls wait for the user.
+  Future<void> setMode(BridgeApprovalMode next) async {
+    await _backend.setApprovalMode(next);
+    mode.value = next;
+  }
 
   /// Answers the approval request in front.
   Future<void> decide(BridgeDecision decision) async {
