@@ -1,6 +1,6 @@
 # Design guidelines
 
-These rules apply to every Watershed GUI (ADR-0194). Every GUI change starts with HTML mockups that the maintainer approves; approved mockups live in [mockups/](mockups/liquid-agent-surface.html). Design tokens are canonical in [tokens.css](tokens.css); components use tokens, never raw values. Flutter reads them from `liquid/app/lib/src/theme/tokens.g.dart`, which `scripts/design_tokens.py` generates; a tooling test fails when it falls out of date.
+These rules apply to every Watershed GUI (ADR-0194). Every GUI change starts with HTML mockups that the maintainer approves; approved mockups live in [mockups/](mockups/liquid-agent-surface.html) and [session flows](mockups/liquid-session-flows.html). Design tokens are canonical in [tokens.css](tokens.css); components use tokens, never raw values. Flutter reads them from `liquid/app/lib/src/theme/tokens.g.dart`, which `scripts/design_tokens.py` generates; a tooling test fails when it falls out of date.
 
 References: Notion, AppFlowy, Microsoft Loop and T3 Code.
 
@@ -23,6 +23,7 @@ References: Notion, AppFlowy, Microsoft Loop and T3 Code.
 - **Radii:** 4 for tags, 6 for buttons, inputs and list items, 8 for cards and panels, 12 for windows, dialogs and the input area.
 - **Rows:** 28 px for navigation items, 34 px for table rows.
 - **Motion:** 120 ms for hover and press, 200 ms for panels, ease-out; none when the user prefers reduced motion.
+- **Icons:** Lucide (ISC), 16 px in rows and buttons, in the text color of their context; status icons always come with text (principle 5).
 
 ## Patterns
 
