@@ -67,7 +67,9 @@ class _TrajectoryViewState extends State<TrajectoryView> {
   bool _comparing = false;
   List<String> _picked = const [];
   String? _cursor;
-  bool _loading = false;
+
+  /// The history read in progress.
+  Future<void>? _loading;
   bool _again = false;
 
   List<BridgeRecord> get _records =>
@@ -98,39 +100,43 @@ class _TrajectoryViewState extends State<TrajectoryView> {
     return shown == null ? const [] : [shown];
   }
 
-  /// Reads the history again; changes during a read cause one more read, never a queue.
-  Future<void> _reload() async {
-    if (_loading) {
+  /// Reads the history again; changes during a read cause one more read, never a queue. The
+  /// future completes once the history is current.
+  Future<void> _reload() {
+    if (_loading case final loading?) {
       _again = true;
-      return;
+      return loading;
     }
-    _loading = true;
-    try {
-      do {
-        _again = false;
-        final leaves = _leaves;
-        final BridgeHistory history;
-        try {
-          history = await widget.state.history(leaves);
-        } on Object {
-          // The agent exited: keep showing the last history.
-          return;
-        }
-        if (!mounted) return;
-        final graph = sessionGraph(history.tree, history.leaf);
-        String grown(String tip) => graph.branchOf(tip)?.tip ?? tip;
-        setState(() {
-          _history = history;
-          _graph = graph;
-          if (_shown case final shown?) _shown = grown(shown);
-          _picked = [for (final tip in _picked) grown(tip)];
-        });
-        // A shown tip that grew is read again up to its new tip.
-        if (!listEquals(_leaves, leaves)) _again = true;
-      } while (_again && mounted);
-    } finally {
-      _loading = false;
-    }
+    return _loading = _read().whenComplete(() {
+      _loading = null;
+      // A change that arrived after the last check gets its own read.
+      if (_again && mounted) _reload();
+    });
+  }
+
+  Future<void> _read() async {
+    do {
+      _again = false;
+      final leaves = _leaves;
+      final BridgeHistory history;
+      try {
+        history = await widget.state.history(leaves);
+      } on Object {
+        // The agent exited: keep showing the last history.
+        return;
+      }
+      if (!mounted) return;
+      final graph = sessionGraph(history.tree, history.leaf);
+      String grown(String tip) => graph.branchOf(tip)?.tip ?? tip;
+      setState(() {
+        _history = history;
+        _graph = graph;
+        if (_shown case final shown?) _shown = grown(shown);
+        _picked = [for (final tip in _picked) grown(tip)];
+      });
+      // A shown tip that grew is read again up to its new tip.
+      if (!listEquals(_leaves, leaves)) _again = true;
+    } while (_again && mounted);
   }
 
   Future<void> _show(String? tip) {
@@ -240,16 +246,19 @@ class _TrajectoryViewState extends State<TrajectoryView> {
         ? _records[index - 1].entry
         : null;
     if (from == null) return;
-    final before = _history?.leaf;
+    // At a prompt the agent continues before it; elsewhere at the entry itself.
+    final expected = step.kind == BridgeRecordKind.user
+        ? _history?.tree.where((node) => node.id == from).firstOrNull?.parent
+        : from;
     await widget.state.branch(from);
-    String? after;
+    bool moved;
     try {
-      after = (await widget.state.history()).leaf;
+      moved = (await widget.state.history()).leaf == expected;
     } on Object {
-      after = before;
+      moved = false;
     }
     if (!mounted) return;
-    if (after == before) {
+    if (!moved) {
       widget.state.notification.value = (
         BridgeLevel.error,
         'The session could not branch at step ${index + 1}.',

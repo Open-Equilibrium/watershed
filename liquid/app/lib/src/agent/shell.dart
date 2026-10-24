@@ -57,7 +57,13 @@ class _AgentShellState extends State<AgentShell> {
 
   void _applyDraft() {
     final draft = widget.state.draft.value;
-    if (draft != null) _composer.text = draft;
+    if (draft == null) return;
+    _composer.value = TextEditingValue(
+      text: draft,
+      selection: TextSelection.collapsed(offset: draft.length),
+    );
+    // Taken, so the same text handed back again arrives again.
+    widget.state.draft.value = null;
   }
 
   @override

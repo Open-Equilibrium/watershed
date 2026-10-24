@@ -342,10 +342,14 @@ struct Projection {
     sections: BTreeMap<String, usize>,
     appended_chars: usize,
     tools: BTreeSet<String>,
+    /// Messages in `log` the model currently sees.
     messages: usize,
-    /// Every entry so far and whether the model sees it as a message; compaction keeps a suffix.
-    log: Vec<(String, bool)>,
-    new_since_previous: Vec<String>,
+    /// Whether a compaction summary leads the model's context.
+    summarized: bool,
+    /// Every entry of the branch so far, in order.
+    log: Vec<Logged>,
+    /// The `log` length at the previous model request.
+    since: usize,
     request_timing: Option<(Option<u64>, Option<u64>)>,
     /// When each tool's timing entry was stored and how long the tool ran. pi runs a response's
     /// tools in parallel and stores their results together, so a result's own time is the end
@@ -354,19 +358,60 @@ struct Projection {
     tool_calls: HashMap<String, String>,
 }
 
+/// One entry of a branch as the model's context sees it.
+#[derive(Default)]
+struct Logged {
+    id: String,
+    /// Whether the model currently sees this entry as a message.
+    message: bool,
+    /// What it adds to the context, as "new since the previous request" lists it.
+    new: Option<String>,
+    /// Whether it changed the context without being a message, such as a compaction.
+    event: bool,
+}
+
 impl Projection {
-    /// Counts the entry just logged as a message the model sees, described by `new`.
+    /// Marks the entry just logged as a message the model sees, described by `new`.
     fn count(&mut self, new: Option<String>) {
         self.messages += 1;
-        if let Some((_, message)) = self.log.last_mut() {
-            *message = true;
+        if let Some(logged) = self.log.last_mut() {
+            logged.message = true;
+            logged.new = new;
         }
-        self.new_since_previous.extend(new);
+    }
+
+    /// Marks the entry just logged as a change of the context that is not a message.
+    fn note(&mut self, new: &str) {
+        if let Some(logged) = self.log.last_mut() {
+            logged.event = true;
+            logged.new = Some(new.to_owned());
+        }
+    }
+
+    /// Takes the entry at `index` out of the model's context.
+    fn forget(&mut self, index: usize) {
+        if std::mem::take(&mut self.log[index].message) {
+            self.messages -= 1;
+        }
+    }
+
+    /// What reached the context since the previous request and is still in it.
+    fn new_since_previous(&mut self) -> Vec<String> {
+        let new = self.log[self.since..]
+            .iter()
+            .filter(|logged| logged.event || logged.message)
+            .filter_map(|logged| logged.new.clone())
+            .collect();
+        self.since = self.log.len();
+        new
     }
 
     fn add(&mut self, entry: &Value, at: u64) {
         let id = entry.get("id").and_then(Value::as_str).unwrap_or_default();
-        self.log.push((id.to_owned(), false));
+        self.log.push(Logged {
+            id: id.to_owned(),
+            ..Logged::default()
+        });
         let millis = |value: Option<&Value>| value.and_then(Value::as_u64);
         let text = |field| {
             entry
@@ -381,25 +426,40 @@ impl Projection {
             }
             Some("branch_summary") => self.count(Some("branch summary".to_owned())),
             Some("compaction") => {
-                // The model now sees the summary and the entries kept from before it.
+                // The model now sees the summary and the entries kept from before it; a retained
+                // older compaction adds nothing.
+                let current = self.log.len() - 1;
                 let kept = entry
                     .get("firstKeptEntryId")
                     .and_then(Value::as_str)
-                    .and_then(|first| self.log.iter().position(|(id, _)| id == first));
-                let kept_messages = kept.map_or(0, |index| {
-                    self.log[index..]
-                        .iter()
-                        .filter(|(_, message)| *message)
-                        .count()
-                });
-                self.messages = kept_messages;
+                    .and_then(|first| self.log.iter().position(|logged| logged.id == first))
+                    .unwrap_or(current);
+                for index in 0..kept {
+                    self.forget(index);
+                }
+                self.summarized = true;
                 if let Some(system) = entry.get("systemMessage") {
                     self.sections.clear();
                     self.appended_chars = 0;
                     self.tools.clear();
                     self.system(system);
                 }
-                self.count(Some("compaction summary".to_owned()));
+                self.note("compaction summary");
+            }
+            Some("context_edit") => {
+                let target = entry.get("targetId").and_then(Value::as_str);
+                if entry.get("replacement").is_none_or(Value::is_null) {
+                    if let Some(index) = self
+                        .log
+                        .iter()
+                        .position(|logged| Some(logged.id.as_str()) == target)
+                    {
+                        self.forget(index);
+                    }
+                    self.note("removed message");
+                } else {
+                    self.note("edited message");
+                }
             }
             Some("custom") => {
                 let data = entry.get("data");
@@ -497,8 +557,8 @@ impl Projection {
                             prompt_chars: self.sections.values().sum::<usize>()
                                 + self.appended_chars,
                             tools: self.tools.iter().cloned().collect(),
-                            messages: self.messages,
-                            new_since_previous: std::mem::take(&mut self.new_since_previous),
+                            messages: self.messages + usize::from(self.summarized),
+                            new_since_previous: self.new_since_previous(),
                         };
                         self.records.push(TrajectoryRecord {
                             first_token_ms,
@@ -547,6 +607,8 @@ impl Projection {
                         });
                         self.count(Some(format!("result of {tool}")));
                     }
+                    // A shell command marked so stays out of the model's context.
+                    Some(_) if message.get("excludeFromContext") == Some(&Value::Bool(true)) => {}
                     Some(other) => self.count(Some(format!("{other} message"))),
                     None => {}
                 }

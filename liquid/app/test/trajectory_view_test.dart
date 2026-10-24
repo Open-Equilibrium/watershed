@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -195,6 +197,67 @@ void main() {
     );
     expect(composer.focusNode?.hasFocus, isFalse);
     expect(state.notification.value?.$1, BridgeLevel.error);
+  });
+
+  testWidgets('a prompt branches before itself, also when already there', (
+    tester,
+  ) async {
+    await show(tester, historyOf(branchA));
+    Future<void> branchAtPrompt() async {
+      await tester.tap(find.byKey(const ValueKey('tree-e1')));
+      await tester.pumpAndSettle();
+      await press(tester, LogicalKeyboardKey.keyB);
+    }
+
+    final composer = find.byKey(const Key('composer'));
+    for (var round = 0; round < 2; round++) {
+      await branchAtPrompt();
+      expect(
+        tester.widget<TextField>(composer).focusNode?.hasFocus,
+        isTrue,
+        reason: 'round $round',
+      );
+    }
+    expect(backend.calls.where((call) => call == 'branch e1'), hasLength(2));
+    expect(state.notification.value, isNull);
+  });
+
+  testWidgets('a jump during a reload reveals its step once loaded', (
+    tester,
+  ) async {
+    final long = [
+      for (var index = 0; index < 40; index++)
+        record('s$index', 1, BridgeRecordKind.tool, 'read', index * 100),
+    ];
+    await show(tester, historyOf(branchA));
+    backend.histories['s39'] = historyOf(long);
+    backend.stored = historyOf(
+      branchA,
+      tree: [
+        ...historyOf(branchA).tree,
+        for (final (index, step) in long.indexed)
+          BridgeTreeNode(
+            id: step.entry,
+            parent: index == 0 ? 'e1' : long[index - 1].entry,
+            kind: BridgeEntryKind.toolResult,
+            preview: 'read',
+          ),
+      ],
+      leaf: 'e6',
+    );
+    backend.controller.add(event(BridgeEventKind.itemCompleted, item: item(1)));
+    await tester.pumpAndSettle();
+    backend.gate = Completer();
+    backend.controller.add(event(BridgeEventKind.itemCompleted, item: item(2)));
+    await tester.pump();
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.altLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.altLeft);
+    await tester.pump();
+    backend.gate!.complete();
+    backend.gate = null;
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('step-s39')), findsOneWidget);
   });
 
   testWidgets('the session tree jumps between steps with ⌥↑↓', (tester) async {

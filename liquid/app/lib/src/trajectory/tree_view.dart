@@ -157,7 +157,7 @@ class _RowContent extends StatelessWidget {
     final isPrompt = node.kind == BridgeEntryKind.user;
     return Row(
       children: [
-        if (!isPrompt && row.step > 0) ...[
+        if (row.isStep && !isPrompt) ...[
           ConstrainedBox(
             constraints: const BoxConstraints(minWidth: 16),
             child: Text('${row.step}', style: faint.copyWith(fontSize: 13)),
@@ -197,7 +197,8 @@ class _RowContent extends StatelessWidget {
               switch (node.kind) {
                 BridgeEntryKind.assistant => 'Message',
                 BridgeEntryKind.approval => 'Approval',
-                _ => node.preview,
+                BridgeEntryKind.toolResult => node.preview,
+                _ => 'Branch point',
               },
               overflow: TextOverflow.ellipsis,
               style: muted,

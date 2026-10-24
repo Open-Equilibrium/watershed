@@ -59,6 +59,9 @@ class GraphRow {
 
   /// Whether the next prompt starts a new branch here.
   final bool pending;
+
+  /// Whether the row is a Trajectory step rather than a fork or tip outside the steps.
+  bool get isStep => _steps.contains(node.kind);
 }
 
 /// The session tree as a graph with one lane per branch and one row per step, in depth-first
@@ -119,7 +122,8 @@ SessionGraph sessionGraph(List<BridgeTreeNode> nodes, String? leaf) {
     // Durations count from the first prompt, like the Trajectory.
     final startAt = visit.startAt ?? (isUser ? node.atMs : null);
     var parentRow = visit.parentRow;
-    if (isStep || kids.isEmpty || node.id == leaf) {
+    // Forks outside steps keep a row, so their branches stay connected.
+    if (isStep || kids.length != 1 || node.id == leaf) {
       Branch? branch;
       if (kids.isEmpty) {
         final at = node.atMs;

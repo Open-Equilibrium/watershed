@@ -33,8 +33,12 @@ const PARALLEL: &str = r#"{"entries":[
   {"type":"custom_message","id":"cm","parentId":"r2","timestamp":"2026-10-24T10:05:08.030Z","customType":"reminder","content":"Mind the style guide","display":true},
   {"type":"compaction","id":"k1","parentId":"cm","timestamp":"2026-10-24T10:05:09.000Z","summary":"Read a.ts and ran the tests.","firstKeptEntryId":"r2","tokensBefore":9000},
   {"type":"custom","id":"tq","parentId":"k1","timestamp":"2026-10-24T10:05:10.000Z","customType":"watershed.timing","data":{"kind":"request","firstTokenMs":300,"durationMs":1000}},
-  {"type":"message","id":"a2","parentId":"tq","timestamp":"2026-10-24T10:05:10.000Z","message":{"role":"assistant","content":[{"type":"text","text":"Done."}]}}
-],"leafId":"a2"}"#;
+  {"type":"message","id":"a2","parentId":"tq","timestamp":"2026-10-24T10:05:10.000Z","message":{"role":"assistant","content":[{"type":"text","text":"Done."}]}},
+  {"type":"compaction","id":"k2","parentId":"a2","timestamp":"2026-10-24T10:05:11.000Z","summary":"Everything so far.","firstKeptEntryId":"k1","tokensBefore":4000},
+  {"type":"context_edit","id":"ce","parentId":"k2","timestamp":"2026-10-24T10:05:12.000Z","targetId":"a2","replacement":null},
+  {"type":"message","id":"bx","parentId":"ce","timestamp":"2026-10-24T10:05:13.000Z","message":{"role":"bashExecution","command":"ls","output":"","excludeFromContext":true}},
+  {"type":"message","id":"a3","parentId":"bx","timestamp":"2026-10-24T10:05:14.000Z","message":{"role":"assistant","content":[{"type":"text","text":"Again."}]}}
+],"leafId":"a3"}"#;
 
 #[test]
 fn times_parallel_tools_from_their_own_end_and_follows_compaction() {
@@ -52,6 +56,7 @@ fn times_parallel_tools_from_their_own_end_and_follows_compaction() {
             ("r1", 2010, Some(20)),
             ("r2", 2000, Some(6000)),
             ("a2", 9000, Some(1000)),
+            ("a3", 14000, None),
         ],
         "times count from the first prompt; each tool ends when its timing entry was stored"
     );
@@ -61,13 +66,26 @@ fn times_parallel_tools_from_their_own_end_and_follows_compaction() {
         (
             3,
             vec![
-                "result of read".to_owned(),
                 "result of bash".to_owned(),
                 "message from reminder".to_owned(),
                 "compaction summary".to_owned(),
             ]
         ),
-        "after the compaction the model saw its summary, the kept tool result and the injected message"
+        "after the compaction the model saw its summary, the kept tool result and the injected \
+         message, but not the summarized read"
+    );
+    let context = records[5].context.clone().expect("context");
+    assert_eq!(
+        (context.messages, context.new_since_previous),
+        (
+            1,
+            vec![
+                "compaction summary".to_owned(),
+                "removed message".to_owned(),
+            ]
+        ),
+        "a retained older compaction adds no message, an edit removed the kept response and an \
+         excluded shell command stays out"
     );
 }
 

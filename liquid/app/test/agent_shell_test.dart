@@ -59,6 +59,22 @@ void main() {
     expect(composer.focusNode?.hasFocus, isTrue);
   });
 
+  testWidgets('takes the same handed-back text again after it was sent', (
+    tester,
+  ) async {
+    await show(tester);
+    final composer = find.byKey(const Key('composer'));
+    for (var round = 0; round < 2; round++) {
+      await emit(tester, event(BridgeEventKind.inputTextSet, text: 'Retry'));
+      expect(
+        tester.widget<TextField>(composer).controller?.text,
+        'Retry',
+        reason: 'round $round',
+      );
+      await tester.enterText(composer, '');
+    }
+  });
+
   testWidgets('decides approvals from the keyboard', (tester) async {
     await show(tester);
     await emit(tester, event(BridgeEventKind.turnStarted, turn: 1));

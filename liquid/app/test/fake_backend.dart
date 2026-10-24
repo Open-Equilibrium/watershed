@@ -52,19 +52,25 @@ class FakeBackend implements SessionBackend {
   Future<BridgeHistory> history(List<String> leaves) async {
     final key = leaves.join(' ');
     calls.add('history $key'.trim());
+    await gate?.future;
     return histories[key] ?? stored;
   }
+
+  /// Holds history reads until it completes.
+  Completer<void>? gate;
 
   /// Whether [branch] moves the session's leaf, as a successful branch does.
   bool branchMoves = true;
 
+  /// Moves the leaf like pi: to the entry, or before it for a prompt.
   @override
   Future<void> branch(String entry) async {
     calls.add('branch $entry');
     if (branchMoves) {
+      final node = stored.tree.where((node) => node.id == entry).firstOrNull;
       stored = BridgeHistory(
         tree: stored.tree,
-        leaf: entry,
+        leaf: node?.kind == BridgeEntryKind.user ? node?.parent : entry,
         trajectories: stored.trajectories,
       );
     }
@@ -158,10 +164,15 @@ BridgeHistory historyOf(
   tree:
       tree ??
       [
+        const BridgeTreeNode(
+          id: 'root',
+          kind: BridgeEntryKind.other,
+          preview: '',
+        ),
         for (final (index, record) in records.indexed)
           BridgeTreeNode(
             id: record.entry,
-            parent: index == 0 ? null : records[index - 1].entry,
+            parent: index == 0 ? 'root' : records[index - 1].entry,
             kind: switch (record.kind) {
               BridgeRecordKind.user => BridgeEntryKind.user,
               BridgeRecordKind.message => BridgeEntryKind.assistant,

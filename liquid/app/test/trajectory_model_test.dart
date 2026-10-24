@@ -75,6 +75,21 @@ void main() {
       },
     );
 
+    test('connects branches that fork before the first prompt', () {
+      final graph = sessionGraph([
+        node('e0', null, BridgeEntryKind.other),
+        node('e1', 'e0', BridgeEntryKind.user, preview: 'First'),
+        node('x1', 'e0', BridgeEntryKind.user, preview: 'Instead'),
+      ], 'x1');
+      expect(
+        [
+          for (final row in graph.rows)
+            (row.node.id, row.lane, row.parentRow, row.step),
+        ],
+        [('e0', 0, null, 0), ('e1', 0, 0, 1), ('x1', 1, 0, 1)],
+      );
+    });
+
     test('marks a leaf with children as the start of the next branch', () {
       final graph = sessionGraph(tree, 'e3');
       final row = graph.rows.singleWhere((row) => row.node.id == 'e3');
