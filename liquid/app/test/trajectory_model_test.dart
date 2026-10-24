@@ -98,6 +98,29 @@ void main() {
     });
   });
 
+  test('marks where the current branch leaves the others', () {
+    // e1 → e2 → e3 → e4 (A);  e2 → b1 → b2 (B)
+    final tree = [
+      node('e1', null, BridgeEntryKind.user, preview: 'Go'),
+      node('e2', 'e1', BridgeEntryKind.assistant),
+      node('e3', 'e2', BridgeEntryKind.toolResult, preview: 'read'),
+      node('e4', 'e3', BridgeEntryKind.assistant),
+      node('b1', 'e2', BridgeEntryKind.user, preview: 'Instead'),
+      node('b2', 'b1', BridgeEntryKind.assistant),
+    ];
+    final marker = branchMarker(tree, 'b2')!;
+    expect(
+      (marker.fork, marker.ref, marker.step, marker.other, marker.otherMore),
+      ('e2', 'B', 2, 'A', 2),
+    );
+    final pending = branchMarker(tree, 'e2')!;
+    expect(
+      (pending.fork, pending.ref, pending.step, pending.other),
+      ('e2', null, 2, 'A'),
+    );
+    expect(branchMarker(tree.take(4).toList(), 'e4'), isNull);
+  });
+
   test('groups records into turns with their tool counts', () {
     final records = [
       record('e1', 1, BridgeRecordKind.user, 'Add rate limiting', 0),

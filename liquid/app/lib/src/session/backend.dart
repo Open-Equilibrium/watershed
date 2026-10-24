@@ -2,6 +2,9 @@ import '../rust/api/events.dart';
 import '../rust/api/history.dart';
 import '../rust/api/session.dart';
 
+/// Stored entries the chat reads at a time.
+const chatPage = 200;
+
 /// What [SessionState] needs from a running agent session; tests substitute a fake.
 abstract interface class SessionBackend {
   Stream<BridgeEvent> events();
@@ -18,6 +21,7 @@ abstract interface class SessionBackend {
   Future<String> patch(String path);
   Future<BridgeHistory> history(List<String> leaves);
   Future<BridgeContextDetail?> context(String entry);
+  Future<BridgeTranscript> transcript(String? before);
   Future<void> branch(String entry);
 }
 
@@ -58,6 +62,9 @@ class RustSessionBackend implements SessionBackend {
   @override
   Future<BridgeHistory> history(List<String> leaves) =>
       _session.history(leaves: leaves);
+  @override
+  Future<BridgeTranscript> transcript(String? before) =>
+      _session.transcript(before: before, limit: chatPage);
   @override
   Future<BridgeContextDetail?> context(String entry) =>
       _session.context(entry: entry);

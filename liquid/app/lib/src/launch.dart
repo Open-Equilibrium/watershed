@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'agent/shell.dart';
@@ -44,8 +45,11 @@ Future<Launch> launchFromEnvironment(Map<String, String> environment) async {
         cwd: project,
       ),
     );
+    final state = SessionState(RustSessionBackend(session));
+    // A reopened session shows its current branch right away.
+    unawaited(state.loadChat());
     return Launch.session(
-      SessionState(RustSessionBackend(session)),
+      state,
       SessionInfo(
         title: 'Agent session',
         project: Directory(project).uri.pathSegments

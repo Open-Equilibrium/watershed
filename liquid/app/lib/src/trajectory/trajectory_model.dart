@@ -533,3 +533,85 @@ BridgeToolOutcome? lastTests(List<BridgeRecord> records) => records.reversed
     .map((record) => record.outcome)
     .where((outcome) => outcome.testsPassed != null)
     .firstOrNull;
+
+/// Where the current branch leaves the others, as the chat marks it.
+@immutable
+class BranchMarker {
+  const BranchMarker({
+    required this.fork,
+    required this.ref,
+    required this.lane,
+    required this.step,
+    required this.other,
+    required this.otherMore,
+  });
+
+  /// The entry after which the branches part.
+  final String fork;
+
+  /// The current branch's letter, or `null` while its first prompt is still to come.
+  final String? ref;
+  final int lane;
+
+  /// The step number of the fork.
+  final int step;
+
+  /// The other branch at the fork and how many steps it has beyond it.
+  final String? other;
+  final int otherMore;
+}
+
+/// The nearest fork on the path to `leaf`; `null` when the path never forks.
+BranchMarker? branchMarker(List<BridgeTreeNode> tree, String? leaf) {
+  if (leaf == null) return null;
+  final byId = {for (final node in tree) node.id: node};
+  final children = <String, List<String>>{};
+  for (final node in tree) {
+    if (node.parent case final parent?) {
+      (children[parent] ??= []).add(node.id);
+    }
+  }
+  String? fork;
+  String? onPath;
+  if (children[leaf]?.isNotEmpty ?? false) {
+    fork = leaf;
+  } else {
+    var current = leaf;
+    for (
+      var parent = byId[current]?.parent;
+      parent != null;
+      parent = byId[current]?.parent
+    ) {
+      if ((children[parent]?.length ?? 0) > 1) {
+        fork = parent;
+        onPath = current;
+        break;
+      }
+      current = parent;
+    }
+  }
+  if (fork == null) return null;
+  final graph = sessionGraph(tree, leaf);
+  final rows = {for (final row in graph.rows) row.node.id: row};
+  int stepAt(String? id) {
+    while (id != null) {
+      final row = rows[id];
+      if (row != null && row.isStep) return row.step;
+      id = byId[id]?.parent;
+    }
+    return 0;
+  }
+
+  final step = stepAt(fork);
+  final current = onPath == null ? null : graph.branchOf(leaf);
+  final otherChild = children[fork]!.firstWhere((child) => child != onPath);
+  final other = graph.branchOf(otherChild);
+  return BranchMarker(
+    fork: fork,
+    ref: current?.ref,
+    lane: current?.lane ?? 0,
+    step: step,
+    other: other?.ref,
+    otherMore: other == null ? 0 : stepAt(other.tip) - step,
+  );
+}

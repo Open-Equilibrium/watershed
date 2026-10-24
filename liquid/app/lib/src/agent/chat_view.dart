@@ -4,39 +4,98 @@ import '../rust/api/events.dart';
 import '../session/session_state.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
+import '../trajectory/trajectory_model.dart';
+import '../trajectory/tree_view.dart';
 
 /// Width of the reading column in the chat and the input area.
 const double readingWidth = 740;
 
-/// The chat timeline. It builds only visible items, and each item rebuilds alone while its text
-/// streams (client architecture rules 5 and 6).
+/// The chat timeline of the current branch. It builds only visible items, each item rebuilds
+/// alone while its text streams (client architecture rules 5 and 6), and scrolling to the top
+/// reads earlier stored entries.
 class ChatView extends StatelessWidget {
   const ChatView({super.key, required this.state});
 
   final SessionState state;
 
+  /// How close to the oldest item reading earlier entries starts, in pixels.
+  static const _readAhead = 600.0;
+
   @override
   Widget build(BuildContext context) {
-    return ValueListenableBuilder(
-      valueListenable: state.items,
-      builder: (context, items, _) => ListView.builder(
-        reverse: true,
-        padding: const EdgeInsets.symmetric(vertical: WsMetrics.space5),
-        itemCount: items.length,
-        itemBuilder: (context, index) {
-          final item = items[items.length - 1 - index];
-          return Center(
-            child: SizedBox(
-              width: readingWidth,
-              child: Padding(
-                padding: const EdgeInsets.only(bottom: WsMetrics.space4),
-                child: RepaintBoundary(
-                  child: ItemTile(item: item, state: state),
+    return NotificationListener<ScrollNotification>(
+      onNotification: (notification) {
+        final metrics = notification.metrics;
+        if (metrics.pixels >= metrics.maxScrollExtent - _readAhead) {
+          state.loadEarlier();
+        }
+        return false;
+      },
+      child: ValueListenableBuilder(
+        valueListenable: state.items,
+        builder: (context, items, _) => ListView.builder(
+          reverse: true,
+          padding: const EdgeInsets.symmetric(vertical: WsMetrics.space5),
+          itemCount: items.length,
+          itemBuilder: (context, index) {
+            final item = items[items.length - 1 - index];
+            return Center(
+              child: SizedBox(
+                width: readingWidth,
+                child: Padding(
+                  padding: const EdgeInsets.only(bottom: WsMetrics.space4),
+                  child: RepaintBoundary(
+                    child: switch (item.marker) {
+                      final marker? => BranchMark(marker: marker),
+                      null => ItemTile(item: item, state: state),
+                    },
+                  ),
                 ),
               ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+/// Where the current branch leaves the others (approved session-flow mockup).
+class BranchMark extends StatelessWidget {
+  const BranchMark({super.key, required this.marker});
+
+  final BranchMarker marker;
+
+  @override
+  Widget build(BuildContext context) {
+    final ws = context.ws;
+    final style = TextStyle(color: ws.accent, fontSize: WsMetrics.fsSmall);
+    final ref = marker.ref;
+    return Container(
+      height: 24,
+      padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space3),
+      decoration: BoxDecoration(
+        color: ws.accentSubtle,
+        borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
+      ),
+      child: Row(
+        children: [
+          Text('⑂', style: style),
+          const SizedBox(width: WsMetrics.space2),
+          if (ref != null) ...[
+            RefBadge(
+              branch: Branch(tip: '', ref: ref, name: '', lane: marker.lane),
             ),
-          );
-        },
+            const SizedBox(width: WsMetrics.space2),
+          ] else ...[
+            Text('New branch', style: style),
+            const SizedBox(width: WsMetrics.space1),
+          ],
+          Text('continues after step ${marker.step}', style: style),
+          const Spacer(),
+          if (marker.other case final other?)
+            Text('$other: ${marker.otherMore} more ⌘2', style: style),
+        ],
       ),
     );
   }

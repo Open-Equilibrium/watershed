@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/agent/shell.dart';
 import 'package:liquid/src/rust/api/events.dart';
+import 'package:liquid/src/rust/api/history.dart';
 import 'package:liquid/src/session/session_state.dart';
 import 'package:liquid/src/theme/theme.dart';
 
@@ -73,6 +74,58 @@ void main() {
       );
       await tester.enterText(composer, '');
     }
+  });
+
+  testWidgets('marks the branch in the rebuilt chat and reads earlier items', (
+    tester,
+  ) async {
+    await show(tester);
+    backend.stored = historyOf(
+      [],
+      tree: [
+        const BridgeTreeNode(
+          id: 'u1',
+          kind: BridgeEntryKind.user,
+          preview: 'Go',
+        ),
+        const BridgeTreeNode(
+          id: 'a1',
+          parent: 'u1',
+          kind: BridgeEntryKind.assistant,
+          preview: 'Looked',
+        ),
+        const BridgeTreeNode(
+          id: 'a2',
+          parent: 'a1',
+          kind: BridgeEntryKind.assistant,
+          preview: 'Done',
+        ),
+        const BridgeTreeNode(
+          id: 'b1',
+          parent: 'a1',
+          kind: BridgeEntryKind.user,
+          preview: 'Instead',
+        ),
+      ],
+      leaf: 'b1',
+    );
+    backend.transcripts[''] = BridgeTranscript(
+      items: [
+        for (var index = 0; index < 30; index++)
+          chatItem('u1', BridgeItemKind.assistantMessage, text: 'Line $index'),
+        chatItem('a1', BridgeItemKind.assistantMessage, text: 'Looked'),
+        chatItem('b1', BridgeItemKind.userMessage, text: 'Instead'),
+      ],
+      more: true,
+    );
+    await state.loadChat();
+    await tester.pumpAndSettle();
+    expect(find.text('continues after step 2'), findsOneWidget);
+    expect(find.text('A: 1 more ⌘2'), findsOneWidget);
+
+    await tester.drag(find.byType(ListView).first, const Offset(0, 4000));
+    await tester.pumpAndSettle();
+    expect(backend.calls, contains('transcript u1'));
   });
 
   testWidgets('decides approvals from the keyboard', (tester) async {

@@ -63,6 +63,16 @@ class FakeBackend implements SessionBackend {
   bool branchMoves = true;
 
   /// Moves the leaf like pi: to the entry, or before it for a prompt.
+  /// Transcript pages by their `before` entry; the newest page has the key ''.
+  final transcripts = <String, BridgeTranscript>{};
+
+  @override
+  Future<BridgeTranscript> transcript(String? before) async {
+    calls.add('transcript ${before ?? ''}'.trim());
+    return transcripts[before ?? ''] ??
+        const BridgeTranscript(items: [], more: false);
+  }
+
   /// Context details by response entry.
   final contexts = <String, BridgeContextDetail>{};
 
@@ -205,4 +215,17 @@ BridgeHistory historyOf(
         ),
       ),
   ],
+);
+
+BridgeTranscriptItem chatItem(
+  String entry,
+  BridgeItemKind kind, {
+  String text = '',
+  String? tool,
+}) => BridgeTranscriptItem(
+  entry: entry,
+  kind: kind,
+  text: text,
+  tool: tool,
+  failed: false,
 );

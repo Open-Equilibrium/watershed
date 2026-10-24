@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/rust/api/events.dart';
+import 'package:liquid/src/rust/api/history.dart';
 import 'package:liquid/src/session/session_state.dart';
 
 import 'fake_backend.dart';
@@ -227,9 +228,74 @@ void main() {
     backend.stored = historyOf([]);
     expect((await state.history(['e2'])).leaf, 'e1');
     await state.branch('e1');
-    expect(backend.calls, ['history e2', 'branch e1']);
+    expect(backend.calls, [
+      'history e2',
+      'branch e1',
+      'transcript',
+      'history',
+    ], reason: 'a branch rebuilds the chat');
     expect(changes.last, 4);
   });
+
+  test(
+    'rebuilds the chat of the current branch with its branch mark',
+    () async {
+      backend.stored = historyOf(
+        [],
+        tree: [
+          const BridgeTreeNode(
+            id: 'u1',
+            kind: BridgeEntryKind.user,
+            preview: 'Go',
+          ),
+          const BridgeTreeNode(
+            id: 'a1',
+            parent: 'u1',
+            kind: BridgeEntryKind.assistant,
+            preview: 'Looked',
+          ),
+          const BridgeTreeNode(
+            id: 'a2',
+            parent: 'a1',
+            kind: BridgeEntryKind.assistant,
+            preview: 'Done',
+          ),
+          const BridgeTreeNode(
+            id: 'b1',
+            parent: 'a1',
+            kind: BridgeEntryKind.user,
+            preview: 'Instead',
+          ),
+        ],
+        leaf: 'b1',
+      );
+      backend.transcripts[''] = BridgeTranscript(
+        items: [
+          chatItem('u1', BridgeItemKind.userMessage, text: 'Go'),
+          chatItem('a1', BridgeItemKind.assistantMessage, text: 'Looked'),
+          chatItem('b1', BridgeItemKind.userMessage, text: 'Instead'),
+        ],
+        more: true,
+      );
+      backend.transcripts['u1'] = BridgeTranscript(
+        items: [chatItem('u0', BridgeItemKind.userMessage, text: 'Earlier')],
+        more: false,
+      );
+      await state.loadChat();
+      String describe(ItemView view) =>
+          view.marker == null ? view.text.value : 'marker ${view.marker!.ref}';
+      expect(state.items.value.map(describe), [
+        'Go',
+        'Looked',
+        'marker B',
+        'Instead',
+      ]);
+      expect(state.chatMore.value, isTrue);
+      await state.loadEarlier();
+      expect(state.items.value.map(describe).first, 'Earlier');
+      expect(state.chatMore.value, isFalse);
+    },
+  );
 
   test('dispose releases the stream and stops the agent', () async {
     await state.dispose();
