@@ -16,8 +16,7 @@ use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::approval::{ApprovalMode, needs_user};
-use crate::pi::session_tree;
-use crate::{Answer, Decision, LineFramer, PiAdapter, RequestId, RuntimeEvent, SessionTree};
+use crate::{Answer, Decision, History, LineFramer, PiAdapter, RequestId, RuntimeEvent};
 
 /// Largest record accepted from an agent; a larger record ends the session.
 const MAX_RECORD_BYTES: usize = 16 * 1024 * 1024;
@@ -198,10 +197,10 @@ impl Session {
         })
     }
 
-    /// Reads every entry of the session, including abandoned branches, as a tree.
-    pub async fn tree(&mut self) -> Result<SessionTree, CommandError> {
-        let data = self.command(json!({ "type": "get_entries" })).await?;
-        Ok(session_tree(&data))
+    /// Reads every stored entry of the session, including abandoned branches.
+    pub async fn history(&mut self) -> Result<History, CommandError> {
+        let entries = self.command(json!({ "type": "get_entries" })).await?;
+        Ok(History { entries })
     }
 
     /// Continues the session from `entry` under a branch `label`; the next prompt starts the

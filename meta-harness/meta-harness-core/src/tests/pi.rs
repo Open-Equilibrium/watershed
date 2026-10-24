@@ -428,7 +428,7 @@ fn measures_model_requests_and_context_changes() {
 fn builds_the_session_tree_from_flat_entries() {
     let data: Value = serde_json::from_str(
         r#"{"entries":[
-          {"type":"message","id":"e1","parentId":null,"message":{"role":"user","content":"Add rate limiting to /login\nand tests"}},
+          {"type":"message","id":"e1","parentId":null,"timestamp":"2026-10-24T10:00:00.250Z","message":{"role":"user","content":"Add rate limiting to /login\nand tests"}},
           {"type":"message","id":"e2","parentId":"e1","message":{"role":"assistant","content":[{"type":"thinking","thinking":"hm"},{"type":"text","text":"I'll look first."}]}},
           {"type":"message","id":"e3","parentId":"e2","message":{"role":"toolResult","toolName":"read","content":[]}},
           {"type":"label","id":"l1","parentId":"e2","targetId":"e2","label":"A"},
@@ -445,18 +445,22 @@ fn builds_the_session_tree_from_flat_entries() {
             kind,
             preview: preview.to_owned(),
             label: label.map(str::to_owned),
+            at_ms: None,
         };
     assert_eq!(
         session_tree(&data),
         SessionTree {
             nodes: vec![
-                node(
-                    "e1",
-                    None,
-                    EntryKind::User,
-                    "Add rate limiting to /login",
-                    None
-                ),
+                TreeNode {
+                    at_ms: Some(1_792_836_000_250),
+                    ..node(
+                        "e1",
+                        None,
+                        EntryKind::User,
+                        "Add rate limiting to /login",
+                        None,
+                    )
+                },
                 node(
                     "e2",
                     Some("e1"),

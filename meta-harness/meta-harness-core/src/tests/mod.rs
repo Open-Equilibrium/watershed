@@ -3,3 +3,4 @@ mod diff;
 mod framing;
 mod pi;
 mod session;
+mod trajectory;

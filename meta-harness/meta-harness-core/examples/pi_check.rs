@@ -72,8 +72,12 @@ async fn check() {
                     session.prompt("again").await.expect("prompt accepted");
                     continue;
                 }
-                let tree = session.tree().await.expect("tree");
+                let history = session.history().await.expect("history");
+                let tree = history.tree();
                 println!("tree: {} entries, leaf {:?}", tree.nodes.len(), tree.leaf);
+                for record in history.trajectory(None).records {
+                    println!("trajectory: {record:?}");
+                }
                 println!("state: {:?}", session.state().await.expect("state"));
                 println!(
                     "clean exit: {}",

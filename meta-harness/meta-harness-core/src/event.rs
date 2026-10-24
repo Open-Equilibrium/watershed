@@ -99,6 +99,8 @@ pub struct TreeNode {
     pub preview: String,
     /// The branch label set on this entry.
     pub label: Option<String>,
+    /// Unix milliseconds when the entry was stored, if known.
+    pub at_ms: Option<u64>,
 }
 
 /// A session's entries as a tree, in append order.

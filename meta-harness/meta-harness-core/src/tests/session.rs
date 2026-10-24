@@ -6,7 +6,7 @@ use tokio::time::timeout;
 
 use crate::{
     AgentCommand, Answer, ApprovalMode, CommandError, Decision, EntryKind, ItemDetail, ItemId,
-    ItemKind, ItemStatus, RequestId, RequestKind, RuntimeEvent, Session, SessionEvent,
+    ItemKind, ItemStatus, RecordKind, RequestId, RequestKind, RuntimeEvent, Session, SessionEvent,
     SessionState, SessionTree, TreeNode, TurnId, UserInput,
 };
 
@@ -288,18 +288,28 @@ fn reads_state_and_tree_and_branches_through_the_extension() {
                 streaming: false,
             })
         );
+        let history = session.history().await.expect("history");
         assert_eq!(
-            session.tree().await,
-            Ok(SessionTree {
+            history.tree(),
+            SessionTree {
                 nodes: vec![TreeNode {
                     id: "e1".to_owned(),
                     parent: None,
                     kind: EntryKind::User,
                     preview: "hi".to_owned(),
                     label: None,
+                    at_ms: None,
                 }],
                 leaf: Some("e1".to_owned()),
-            })
+            }
+        );
+        let records = history.trajectory(None).records;
+        assert_eq!(
+            records
+                .iter()
+                .map(|record| (record.kind, record.label.as_str()))
+                .collect::<Vec<_>>(),
+            [(RecordKind::User, "hi")]
         );
         assert_eq!(session.branch("e1", "B").await, Ok(()));
     });

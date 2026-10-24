@@ -7,6 +7,7 @@ mod approval;
 mod diff;
 mod event;
 mod framing;
+mod history;
 mod pi;
 mod session;
 
@@ -18,6 +19,7 @@ pub use event::{
     Usage, UserInput,
 };
 pub use framing::{FrameError, LineFramer};
+pub use history::{History, RecordKind, StepContext, Trajectory, TrajectoryRecord};
 pub use pi::PiAdapter;
 pub use session::{AgentCommand, CommandError, Session, SessionEvent, SessionState};
 
