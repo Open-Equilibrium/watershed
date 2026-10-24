@@ -24,9 +24,14 @@ class FakeBackend implements SessionBackend {
     return controller.stream;
   }
 
+  /// What the agent rejects sends with, like the bridge does.
+  String? sendError;
+
   @override
-  Future<void> send(String message, {required bool followUp}) async =>
-      calls.add('${followUp ? 'follow-up' : 'send'} $message');
+  Future<void> send(String message, {required bool followUp}) async {
+    calls.add('${followUp ? 'follow-up' : 'send'} $message');
+    if (sendError case final error?) throw error;
+  }
 
   /// What clear_queue returns.
   BridgeQueue queued = const BridgeQueue(steering: [], followUp: []);

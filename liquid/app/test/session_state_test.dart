@@ -328,6 +328,40 @@ void main() {
     expect(state.chatMore.value, isFalse);
   });
 
+  test('keeps a rejected message in the input area and says why', () async {
+    backend.sendError = 'the agent rejected the command: no API key';
+    await state.send('Say hi');
+    expect(state.draft.value, 'Say hi');
+    expect(
+      (state.notice.value?.level, state.notice.value?.text),
+      (
+        BridgeLevel.error,
+        'The message was not sent: the agent rejected the command: no API key',
+      ),
+    );
+  });
+
+  test('says why a model request failed', () async {
+    await emit(
+      event(
+        BridgeEventKind.modelRequestCompleted,
+        turn: 1,
+        step: BridgeStep(
+          id: 1,
+          model: 'faux/faux-1',
+          usage: usage(0, 0, 0),
+          stopReason: 'error',
+          error: '401 invalid x-api-key',
+          durationMs: 120,
+        ),
+      ),
+    );
+    expect(
+      (state.notice.value?.level, state.notice.value?.text),
+      (BridgeLevel.error, 'The model request failed: 401 invalid x-api-key'),
+    );
+  });
+
   test('keeps the waiting messages and edits them', () async {
     await emit(
       event(

@@ -120,9 +120,15 @@ class SessionState {
 
   /// Sends a message: an idle agent starts with it, a running one takes it before its next
   /// model request or, with `followUp`, once it is done. pi decides, so no turn state races
-  /// the send.
-  Future<void> send(String message, {bool followUp = false}) =>
-      _backend.send(message, followUp: followUp);
+  /// the send. A message the agent rejects goes back to the input area.
+  Future<void> send(String message, {bool followUp = false}) async {
+    try {
+      await _backend.send(message, followUp: followUp);
+    } on Object catch (error) {
+      draft.value = message;
+      notify(BridgeLevel.error, 'The message was not sent: $error');
+    }
+  }
 
   /// Takes one waiting message out of the queue; pi clears the whole queue, so the others are
   /// sent again in their order.
@@ -352,6 +358,9 @@ class SessionState {
         }
       case BridgeEventKind.modelRequestCompleted:
         totals.value = totals.value.add(event.step!.usage);
+        if (event.step!.error case final error?) {
+          notify(BridgeLevel.error, 'The model request failed: $error');
+        }
       case BridgeEventKind.requestOpened:
         _approvals.add(event.request!);
       case BridgeEventKind.requestResolved:
