@@ -65,6 +65,10 @@ jobs:
         if: steps.scope.outputs.product == 'true'
         run: node scripts/run-python.mjs -m unittest discover -s tests -p "test_*.py"
 
+      - name: Test the Meta-Harness pi extension
+        if: steps.scope.outputs.product == 'true'
+        run: node --test meta-harness/pi-extension/watershed.test.ts
+
       - name: Establish experimental Mac unprotected red control
         if: steps.scope.outputs.product == 'true' && (matrix.os == 'xcode-27' && github.event_name == 'workflow_dispatch' && inputs.mac_self_protection_evaluation)
         timeout-minutes: 2
