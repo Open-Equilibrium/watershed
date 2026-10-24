@@ -16,4 +16,4 @@ Internal to the slice; it changes together with both sides.
 - **Approvals (ADR-0188):** before every tool call the extension opens a `select` dialog titled `watershed.approval ` followed by `{"tool", "arguments", "readOnly"}` as JSON. The core answers `allow-once`, `allow-session`, `reject` or `allow-auto`. Anything else, including a lost core, blocks the call. The extension records each user decision as a `watershed.approval` custom entry in the pi session.
 - **Branching:** the command `/watershed-branch <entry-id> [label]` continues the session from that entry, so the next prompt starts a new branch in the same session file.
 
-Test the extension with `node --test meta-harness/pi-extension/watershed.test.ts`.
+Test the extension with `node --test meta-harness/pi-extension/watershed.test.ts`. The manual check with real pi and a scripted model is `meta-harness-core/examples/pi_check.rs`; its header shows how to run it.
