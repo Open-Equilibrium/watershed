@@ -33,6 +33,9 @@ abstract class AgentSession implements RustOpaqueInterface {
   /// Files the latest run changed, compared with the project before it.
   Future<List<BridgeFileChange>> changes();
 
+  /// Removes the messages waiting for the running agent and returns them.
+  Future<BridgeQueue> clearQueue();
+
   /// Everything the model saw for the request behind the response `entry`; `None` unless
   /// `entry` is a response.
   Future<BridgeContextDetail?> context({required String entry});
@@ -56,9 +59,10 @@ abstract class AgentSession implements RustOpaqueInterface {
   /// The unified diff of one file since the latest run started.
   Future<String> patch({required String path});
 
-  /// Sends a prompt that starts a turn.
-  /// Captures the project first, so the diff view shows what this run changes.
-  Future<void> prompt({required String message});
+  /// Sends a message: an idle agent starts a run with it, a running one takes it before its
+  /// next model request or, with `follow_up`, once it is done. A new run first captures the
+  /// project, so the diff view shows what the run changes.
+  Future<void> send({required String message, required bool followUp});
 
   /// Changes which tool calls need the user's approval.
   Future<void> setApprovalMode({required BridgeApprovalMode mode});
@@ -70,9 +74,6 @@ abstract class AgentSession implements RustOpaqueInterface {
   /// Starts an agent; subscribe with [`AgentSession::events`].
   static Future<AgentSession> start({required SessionConfig config}) =>
       RustLib.instance.api.crateApiSessionAgentSessionStart(config: config);
-
-  /// Steers the running turn.
-  Future<void> steer({required String message});
 
   /// The chat of the current branch: the items of up to `limit` stored entries before
   /// `before`, or of the newest ones.

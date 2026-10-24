@@ -6,7 +6,7 @@ use std::time::Duration;
 use serde_json::{Map, Value};
 
 use crate::event::{
-    ContextSection, ItemDetail, ItemId, ItemKind, ItemStatus, NotificationLevel, RequestId,
+    ContextSection, ItemDetail, ItemId, ItemKind, ItemStatus, NotificationLevel, Queue, RequestId,
     RequestKind, RuntimeEvent, StepId, TurnId, Usage, UserInput,
 };
 
@@ -47,6 +47,11 @@ impl PiAdapter {
         let kind = record.get("type").and_then(Value::as_str);
         if kind == Some("extension_ui_request") {
             return extension_ui(record).into_iter().collect();
+        }
+        if kind == Some("queue_update") {
+            return vec![RuntimeEvent::QueueChanged(queue(&Value::Object(
+                record.clone(),
+            )))];
         }
         if kind == Some("extension_error") {
             let path = str_field(record, "extensionPath");
@@ -464,5 +469,22 @@ pub(crate) fn usage(usage: Option<&Value>) -> Usage {
         reasoning: count("reasoning"),
         // Saturating float-to-integer conversion; costs are small and non-negative.
         cost_micro_usd: (cost * 1_000_000.0).round() as u64,
+    }
+}
+
+/// Reads pi's queues of steering and follow-up messages.
+pub(crate) fn queue(data: &Value) -> Queue {
+    let texts = |field| {
+        data.get(field)
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .map(str::to_owned)
+            .collect()
+    };
+    Queue {
+        steering: texts("steering"),
+        follow_up: texts("followUp"),
     }
 }

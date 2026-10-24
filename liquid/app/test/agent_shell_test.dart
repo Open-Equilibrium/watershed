@@ -202,19 +202,45 @@ void main() {
     expect(find.byKey(const Key('composer')), findsOneWidget);
   });
 
-  testWidgets('sends from the composer and steers a running turn', (
-    tester,
-  ) async {
+  testWidgets('sends, steers and queues from the composer', (tester) async {
     await show(tester);
-    await tester.enterText(find.byKey(const Key('composer')), 'Say hi');
+    final composer = find.byKey(const Key('composer'));
+    await tester.enterText(composer, 'Say hi');
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pump();
-    expect(backend.calls, ['prompt Say hi']);
+    expect(backend.calls, ['send Say hi']);
+    expect(find.text('Send'), findsOneWidget);
+
     await emit(tester, event(BridgeEventKind.turnStarted, turn: 1));
-    await tester.enterText(find.byKey(const Key('composer')), 'Shorter');
+    expect(find.text('Steer'), findsOneWidget, reason: 'Enter steers a run');
+    expect(find.text('⌥⏎ queue'), findsOneWidget);
+    await tester.enterText(composer, 'Shorter');
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pump();
-    expect(backend.calls.last, 'steer Shorter');
+    expect(backend.calls.last, 'send Shorter');
+    await tester.enterText(composer, 'Also docs');
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.altLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.altLeft);
+    await tester.pump();
+    expect(backend.calls.last, 'follow-up Also docs');
+
+    await emit(
+      tester,
+      event(
+        BridgeEventKind.queueChanged,
+        queue: const BridgeQueue(steering: [], followUp: ['Also docs']),
+      ),
+    );
+    expect(find.text('Queued: Also docs'), findsOneWidget);
+    backend.queued = const BridgeQueue(steering: [], followUp: ['Also docs']);
+    await tester.tap(find.byKey(const Key('unqueue 0')));
+    await tester.pumpAndSettle();
+    expect(backend.calls.last, 'clear queue');
+
+    await tester.tap(find.text('Stop'));
+    await tester.pumpAndSettle();
+    expect(backend.calls.last, 'abort');
   });
 
   testWidgets(

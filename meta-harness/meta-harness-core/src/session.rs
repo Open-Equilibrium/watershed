@@ -16,9 +16,10 @@ use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::approval::{ApprovalMode, needs_user};
+use crate::pi::queue;
 use crate::{
-    Answer, Decision, Frame, History, LineFramer, NotificationLevel, PiAdapter, RequestId,
-    RuntimeEvent,
+    Answer, Decision, Delivery, Frame, History, LineFramer, NotificationLevel, PiAdapter, Queue,
+    RequestId, RuntimeEvent,
 };
 
 /// Largest record accepted from an agent; a larger one is skipped and fails its command.
@@ -99,6 +100,8 @@ struct Shared {
     approvals: HashMap<RequestId, String>,
     /// Open questions from agent extensions.
     questions: HashSet<RequestId>,
+    /// Whether a turn is running, from the agent's events.
+    running: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -174,11 +177,26 @@ impl Session {
             .map(drop)
     }
 
-    /// Steers the running turn with a further message.
-    pub async fn steer(&mut self, message: &str) -> Result<(), CommandError> {
-        self.command(json!({ "type": "steer", "message": message }))
-            .await
-            .map(drop)
+    /// Sends a message the agent starts with when idle and takes as `delivery` says while
+    /// running; pi decides which applies, so no turn state can race the send.
+    pub async fn send(&mut self, message: &str, delivery: Delivery) -> Result<(), CommandError> {
+        let behavior = match delivery {
+            Delivery::Steer => "steer",
+            Delivery::FollowUp => "followUp",
+        };
+        self.command(json!({
+            "type": "prompt",
+            "message": message,
+            "streamingBehavior": behavior,
+        }))
+        .await
+        .map(drop)
+    }
+
+    /// Removes the waiting messages and returns them, so the user can edit and send them again.
+    pub async fn clear_queue(&mut self) -> Result<Queue, CommandError> {
+        let data = self.command(json!({ "type": "clear_queue" })).await?;
+        Ok(queue(&data))
     }
 
     /// Aborts the running turn.
@@ -233,6 +251,11 @@ impl Session {
             None => format!("/watershed-branch {entry}"),
         };
         self.prompt(&message).await
+    }
+
+    /// Whether the agent is running a turn, as its latest events say.
+    pub fn running(&self) -> bool {
+        self.state.lock().running
     }
 
     /// Changes which tool calls need the user's approval.
@@ -448,6 +471,14 @@ impl Supervisor {
                 }
                 RuntimeEvent::UserInputRequested { request, .. } => {
                     self.state.lock().questions.insert(request.clone());
+                    true
+                }
+                RuntimeEvent::TurnStarted { .. } => {
+                    self.state.lock().running = true;
+                    true
+                }
+                RuntimeEvent::TurnCompleted { .. } | RuntimeEvent::TurnAborted { .. } => {
+                    self.state.lock().running = false;
                     true
                 }
                 _ => true,

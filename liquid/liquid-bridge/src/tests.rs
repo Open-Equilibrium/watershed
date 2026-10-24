@@ -5,7 +5,7 @@ use meta_harness_core::{
 
 use crate::api::events::{
     BridgeApproval, BridgeChangeStatus, BridgeDecision, BridgeEvent, BridgeEventKind,
-    BridgeFileChange, BridgeItemKind, BridgeQuestionKind, BridgeRequestKind,
+    BridgeFileChange, BridgeItemKind, BridgeQuestionKind, BridgeQueue, BridgeRequestKind,
 };
 use std::sync::mpsc;
 use std::time::Duration;
@@ -174,7 +174,7 @@ IFS= read -r line || exit 0"#;
         session.set_approval_mode(BridgeApprovalMode::FullAccess),
         Ok(())
     );
-    assert_eq!(session.prompt("Say hi".to_owned()), Ok(()));
+    assert_eq!(session.send("Say hi".to_owned(), false), Ok(()));
     let next = || {
         receiver
             .recv_timeout(Duration::from_secs(10))
@@ -186,7 +186,7 @@ IFS= read -r line || exit 0"#;
     assert!(session.shutdown());
     assert_eq!(next(), BridgeEventKind::Exited);
     assert_eq!(
-        session.prompt("again".to_owned()),
+        session.send("again".to_owned(), false),
         Err("the session was shut down".to_owned())
     );
 }
@@ -274,7 +274,7 @@ IFS= read -r line || exit 0"#;
     })
     .expect("agent starts");
     assert_eq!(session.changes(), Ok(Vec::new()), "no run yet");
-    assert_eq!(session.prompt("edit".to_owned()), Ok(()));
+    assert_eq!(session.send("edit".to_owned(), false), Ok(()));
     let changes = session.changes().expect("changes");
     assert_eq!(
         changes,
@@ -481,4 +481,20 @@ fn rebuilds_the_chat_of_the_current_branch() {
     );
     assert!(!transcript.more);
     assert!(session.shutdown());
+}
+
+#[test]
+fn passes_the_waiting_messages_to_dart() {
+    let changed = bridge(RuntimeEvent::QueueChanged(meta_harness_core::Queue {
+        steering: vec!["Use Redis".to_owned()],
+        follow_up: vec!["Also docs".to_owned()],
+    }));
+    assert_eq!(changed.kind, BridgeEventKind::QueueChanged);
+    assert_eq!(
+        changed.queue,
+        Some(BridgeQueue {
+            steering: vec!["Use Redis".to_owned()],
+            follow_up: vec!["Also docs".to_owned()],
+        })
+    );
 }

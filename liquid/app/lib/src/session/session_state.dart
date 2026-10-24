@@ -102,6 +102,9 @@ class SessionState {
   final failure = ValueNotifier<String?>(null);
   final mode = ValueNotifier(BridgeApprovalMode.ask);
 
+  /// Messages waiting for the running agent.
+  final queue = ValueNotifier(const BridgeQueue(steering: [], followUp: []));
+
   /// Whether earlier stored entries of the chat remain to be read.
   final chatMore = ValueNotifier(false);
   String? _firstEntry;
@@ -113,9 +116,40 @@ class SessionState {
   /// Counts the changes of the session's stored history; the Trajectory reloads on each.
   final stored = ValueNotifier(0);
 
-  /// Sends a prompt, or steers the running turn.
-  Future<void> send(String message) =>
-      _turnActive ? _backend.steer(message) : _backend.prompt(message);
+  /// Sends a message: an idle agent starts with it, a running one takes it before its next
+  /// model request or, with `followUp`, once it is done. pi decides, so no turn state races
+  /// the send.
+  Future<void> send(String message, {bool followUp = false}) =>
+      _backend.send(message, followUp: followUp);
+
+  /// Takes one waiting message out of the queue; pi clears the whole queue, so the others are
+  /// sent again in their order.
+  Future<void> unqueue(String message) async {
+    final waiting = await _backend.clearQueue();
+    var removed = false;
+    bool keep(String text) {
+      if (!removed && text == message) {
+        removed = true;
+        return false;
+      }
+      return true;
+    }
+
+    for (final text in waiting.steering.where(keep).toList()) {
+      await _backend.send(text, followUp: false);
+    }
+    for (final text in waiting.followUp.where(keep).toList()) {
+      await _backend.send(text, followUp: true);
+    }
+  }
+
+  /// Stops the run and hands the waiting messages back to the input area for editing.
+  Future<void> stop() async {
+    final waiting = await _backend.clearQueue();
+    await _backend.abort();
+    final texts = [...waiting.steering, ...waiting.followUp];
+    if (texts.isNotEmpty) draft.value = texts.join('\n\n');
+  }
 
   Future<void> abort() => _backend.abort();
 
@@ -337,6 +371,9 @@ class SessionState {
         title.value = event.text;
       case BridgeEventKind.inputTextSet:
         draft.value = event.text;
+      case BridgeEventKind.queueChanged:
+        queue.value =
+            event.queue ?? const BridgeQueue(steering: [], followUp: []);
       case BridgeEventKind.notification:
         notify(event.display?.level ?? BridgeLevel.info, event.text ?? '');
       case BridgeEventKind.failed:

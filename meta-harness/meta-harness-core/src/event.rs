@@ -364,4 +364,24 @@ pub enum RuntimeEvent {
         /// The text.
         text: String,
     },
+    /// The messages waiting for a running agent changed.
+    QueueChanged(Queue),
+}
+
+/// Messages waiting for a running agent, in order.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Queue {
+    /// Steering messages, delivered before the agent's next model request.
+    pub steering: Vec<String>,
+    /// Follow-up messages, delivered once the agent is done.
+    pub follow_up: Vec<String>,
+}
+
+/// How a message reaches an agent that is already running; an idle agent starts with it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Delivery {
+    /// Before the agent's next model request.
+    Steer,
+    /// Once the agent is done.
+    FollowUp,
 }

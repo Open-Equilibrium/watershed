@@ -8,8 +8,8 @@ const chatPage = 200;
 /// What [SessionState] needs from a running agent session; tests substitute a fake.
 abstract interface class SessionBackend {
   Stream<BridgeEvent> events();
-  Future<void> prompt(String message);
-  Future<void> steer(String message);
+  Future<void> send(String message, {required bool followUp});
+  Future<BridgeQueue> clearQueue();
   Future<void> abort();
   Future<void> setApprovalMode(BridgeApprovalMode mode);
   Future<void> decide(String request, BridgeDecision decision);
@@ -34,9 +34,10 @@ class RustSessionBackend implements SessionBackend {
   @override
   Stream<BridgeEvent> events() => _session.events();
   @override
-  Future<void> prompt(String message) => _session.prompt(message: message);
+  Future<void> send(String message, {required bool followUp}) =>
+      _session.send(message: message, followUp: followUp);
   @override
-  Future<void> steer(String message) => _session.steer(message: message);
+  Future<BridgeQueue> clearQueue() => _session.clearQueue();
   @override
   Future<void> abort() => _session.abort();
   @override

@@ -25,9 +25,18 @@ class FakeBackend implements SessionBackend {
   }
 
   @override
-  Future<void> prompt(String message) async => calls.add('prompt $message');
+  Future<void> send(String message, {required bool followUp}) async =>
+      calls.add('${followUp ? 'follow-up' : 'send'} $message');
+
+  /// What clear_queue returns.
+  BridgeQueue queued = const BridgeQueue(steering: [], followUp: []);
+
   @override
-  Future<void> steer(String message) async => calls.add('steer $message');
+  Future<BridgeQueue> clearQueue() async {
+    calls.add('clear queue');
+    return queued;
+  }
+
   @override
   Future<void> abort() async => calls.add('abort');
   @override
@@ -111,6 +120,7 @@ BridgeEvent event(
   String? text,
   BridgeDisplay? display,
   bool? success,
+  BridgeQueue? queue,
 }) => BridgeEvent(
   kind: kind,
   turn: turn,
@@ -120,6 +130,7 @@ BridgeEvent event(
   text: text,
   display: display,
   success: success,
+  queue: queue,
 );
 
 BridgeItem item(

@@ -7,7 +7,7 @@ import '../frb_generated.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
 /// A tool call awaiting approval.
 class BridgeApproval {
@@ -163,6 +163,9 @@ class BridgeEvent {
   /// Whether the agent process exited successfully.
   final bool? success;
 
+  /// The messages waiting for the running agent.
+  final BridgeQueue? queue;
+
   const BridgeEvent({
     required this.kind,
     this.turn,
@@ -173,6 +176,7 @@ class BridgeEvent {
     this.display,
     this.context,
     this.success,
+    this.queue,
   });
 
   @override
@@ -185,7 +189,8 @@ class BridgeEvent {
       text.hashCode ^
       display.hashCode ^
       context.hashCode ^
-      success.hashCode;
+      success.hashCode ^
+      queue.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -200,7 +205,8 @@ class BridgeEvent {
           text == other.text &&
           display == other.display &&
           context == other.context &&
-          success == other.success;
+          success == other.success &&
+          queue == other.queue;
 }
 
 /// What happened; the variant names the parts of [`BridgeEvent`] it fills.
@@ -267,6 +273,9 @@ enum BridgeEventKind {
 
   /// `success`; always the last event.
   exited,
+
+  /// The messages waiting for the running agent changed.
+  queueChanged,
 }
 
 /// One file a run changed.
@@ -438,6 +447,31 @@ enum BridgeQuestionKind {
 
   /// Edit multi-line text; `detail` is the initial text.
   editor,
+}
+
+/// Messages waiting for a running agent, in order.
+class BridgeQueue {
+  /// Steering messages, delivered before the agent's next model request.
+  final List<String> steering;
+
+  /// Follow-up messages, delivered once the agent is done.
+  final List<String> followUp;
+
+  const BridgeQueue({required this.steering, required this.followUp});
+
+  static Future<BridgeQueue> default_() =>
+      RustLib.instance.api.crateApiEventsBridgeQueueDefault();
+
+  @override
+  int get hashCode => steering.hashCode ^ followUp.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeQueue &&
+          runtimeType == other.runtimeType &&
+          steering == other.steering &&
+          followUp == other.followUp;
 }
 
 /// An open request and, depending on the event, what it asks or how it was answered.

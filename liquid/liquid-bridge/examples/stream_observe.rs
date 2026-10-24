@@ -41,7 +41,7 @@ fn main() {
             .forward(move |event| sender.send(event).is_ok())
             .expect("subscriber");
         let started = Instant::now();
-        session.prompt("stream".to_owned()).expect("prompt");
+        session.send("stream".to_owned(), false).expect("send");
         let (mut events, mut deltas, mut largest, mut text) = (0, 0, 0, 0);
         loop {
             let event = receiver

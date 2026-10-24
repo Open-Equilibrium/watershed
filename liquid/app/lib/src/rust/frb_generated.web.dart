@@ -92,6 +92,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeQuestion dco_decode_box_autoadd_bridge_question(dynamic raw);
 
   @protected
+  BridgeQueue dco_decode_box_autoadd_bridge_queue(dynamic raw);
+
+  @protected
   BridgeRequest dco_decode_box_autoadd_bridge_request(dynamic raw);
 
   @protected
@@ -168,6 +171,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeQuestionKind dco_decode_bridge_question_kind(dynamic raw);
+
+  @protected
+  BridgeQueue dco_decode_bridge_queue(dynamic raw);
 
   @protected
   BridgeRecord dco_decode_bridge_record(dynamic raw);
@@ -284,6 +290,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeQuestion? dco_decode_opt_box_autoadd_bridge_question(dynamic raw);
 
   @protected
+  BridgeQueue? dco_decode_opt_box_autoadd_bridge_queue(dynamic raw);
+
+  @protected
   BridgeRequest? dco_decode_opt_box_autoadd_bridge_request(dynamic raw);
 
   @protected
@@ -398,6 +407,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeQueue sse_decode_box_autoadd_bridge_queue(SseDeserializer deserializer);
+
+  @protected
   BridgeRequest sse_decode_box_autoadd_bridge_request(
     SseDeserializer deserializer,
   );
@@ -492,6 +504,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeQuestionKind sse_decode_bridge_question_kind(
     SseDeserializer deserializer,
   );
+
+  @protected
+  BridgeQueue sse_decode_bridge_queue(SseDeserializer deserializer);
 
   @protected
   BridgeRecord sse_decode_bridge_record(SseDeserializer deserializer);
@@ -644,6 +659,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeQueue? sse_decode_opt_box_autoadd_bridge_queue(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   BridgeRequest? sse_decode_opt_box_autoadd_bridge_request(
     SseDeserializer deserializer,
   );
@@ -784,6 +804,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_box_autoadd_bridge_queue(
+    BridgeQueue self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_box_autoadd_bridge_request(
     BridgeRequest self,
     SseSerializer serializer,
@@ -917,6 +943,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
     BridgeQuestionKind self,
     SseSerializer serializer,
   );
+
+  @protected
+  void sse_encode_bridge_queue(BridgeQueue self, SseSerializer serializer);
 
   @protected
   void sse_encode_bridge_record(BridgeRecord self, SseSerializer serializer);
@@ -1101,6 +1130,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_opt_box_autoadd_bridge_question(
     BridgeQuestion? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_bridge_queue(
+    BridgeQueue? self,
     SseSerializer serializer,
   );
 

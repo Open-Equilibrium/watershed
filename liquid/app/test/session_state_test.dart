@@ -21,7 +21,7 @@ void main() {
 
   test('streams a turn into items whose text grows in place', () async {
     await state.send('Say hi');
-    expect(backend.calls, ['prompt Say hi']);
+    expect(backend.calls, ['send Say hi']);
     await emit(event(BridgeEventKind.turnStarted, turn: 1));
     expect(state.status.value, RunStatus.running);
     await emit(
@@ -84,7 +84,11 @@ void main() {
       (100, 20, 5),
     );
     await state.send('Shorter please');
-    expect(backend.calls.last, 'steer Shorter please');
+    expect(
+      backend.calls.last,
+      'send Shorter please',
+      reason: 'pi decides whether a message starts or steers a run',
+    );
     await emit(event(BridgeEventKind.turnCompleted, turn: 1));
     expect(state.status.value, RunStatus.idle);
   });
@@ -300,6 +304,39 @@ void main() {
       expect(state.chatMore.value, isFalse);
     },
   );
+
+  test('keeps the waiting messages and edits them', () async {
+    await emit(
+      event(
+        BridgeEventKind.queueChanged,
+        queue: const BridgeQueue(
+          steering: ['Use Redis'],
+          followUp: ['Also docs', 'And tests'],
+        ),
+      ),
+    );
+    expect(state.queue.value.followUp, ['Also docs', 'And tests']);
+    backend.queued = const BridgeQueue(
+      steering: ['Use Redis'],
+      followUp: ['Also docs', 'And tests'],
+    );
+    await state.unqueue('Also docs');
+    expect(backend.calls, [
+      'clear queue',
+      'send Use Redis',
+      'follow-up And tests',
+    ]);
+
+    backend.calls.clear();
+    await emit(event(BridgeEventKind.turnStarted, turn: 1));
+    await state.stop();
+    expect(backend.calls, ['clear queue', 'abort']);
+    expect(
+      state.draft.value,
+      'Use Redis\n\nAlso docs\n\nAnd tests',
+      reason: 'stopping hands the waiting messages back for editing',
+    );
+  });
 
   test('dispose releases the stream and stops the agent', () async {
     await state.dispose();

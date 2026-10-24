@@ -5,9 +5,9 @@ use tokio::sync::mpsc::Receiver;
 use tokio::time::timeout;
 
 use crate::{
-    AgentCommand, Answer, ApprovalMode, CommandError, Decision, EntryKind, ItemDetail, ItemId,
-    ItemKind, ItemStatus, NotificationLevel, RecordKind, RequestId, RequestKind, RuntimeEvent,
-    Session, SessionEvent, SessionState, SessionTree, TreeNode, TurnId, UserInput,
+    AgentCommand, Answer, ApprovalMode, CommandError, Decision, Delivery, EntryKind, ItemDetail,
+    ItemId, ItemKind, ItemStatus, NotificationLevel, Queue, RecordKind, RequestId, RequestKind,
+    RuntimeEvent, Session, SessionEvent, SessionState, SessionTree, TreeNode, TurnId, UserInput,
 };
 
 const WAIT: Duration = Duration::from_secs(10);
@@ -230,6 +230,52 @@ fn skips_an_oversized_record_and_keeps_the_session() {
             session.state().await.map(|state| state.session_id),
             Ok("abc".to_owned())
         );
+    });
+}
+
+#[test]
+fn delivers_messages_as_pi_decides_and_clears_the_queue() {
+    run(async {
+        let script = [
+            expect_response(&[
+                r#""type":"prompt""#,
+                r#""message":"Use Redis""#,
+                r#""streamingBehavior":"steer""#,
+            ]),
+            r#"printf '%s\n' '{"id":"1","type":"response","command":"prompt","success":true,"data":{"disposition":"queued"}}'
+"#
+            .to_owned(),
+            expect_response(&[r#""message":"Also docs""#, r#""streamingBehavior":"followUp""#]),
+            r#"printf '%s\n' '{"id":"2","type":"response","command":"prompt","success":true,"data":{"disposition":"queued"}}'
+printf '%s\n' '{"type":"agent_start"}'
+printf '%s\n' '{"type":"queue_update","steering":["Use Redis"],"followUp":["Also docs"]}'
+"#
+            .to_owned(),
+            expect_response(&[r#""type":"clear_queue""#, r#""id":"3""#]),
+            r#"printf '%s\n' '{"id":"3","type":"response","command":"clear_queue","success":true,"data":{"steering":["Use Redis"],"followUp":["Also docs"]}}'
+IFS= read -r line || exit 0
+"#
+            .to_owned(),
+        ]
+        .concat();
+        let (mut session, mut events) = fake_agent(&script);
+        let queue = Queue {
+            steering: vec!["Use Redis".to_owned()],
+            follow_up: vec!["Also docs".to_owned()],
+        };
+        assert!(!session.running());
+        assert_eq!(session.send("Use Redis", Delivery::Steer).await, Ok(()));
+        assert_eq!(session.send("Also docs", Delivery::FollowUp).await, Ok(()));
+        assert!(matches!(
+            next(&mut events).await,
+            SessionEvent::Runtime(RuntimeEvent::TurnStarted { .. })
+        ));
+        assert!(session.running(), "a started turn makes the session run");
+        assert_eq!(
+            next(&mut events).await,
+            SessionEvent::Runtime(RuntimeEvent::QueueChanged(queue.clone()))
+        );
+        assert_eq!(session.clear_queue().await, Ok(queue));
     });
 }
 

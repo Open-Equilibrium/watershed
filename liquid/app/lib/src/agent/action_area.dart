@@ -67,7 +67,9 @@ BoxDecoration _box(BuildContext context, {Color? ring}) => BoxDecoration(
   ],
 );
 
-/// Text entry for prompts and steering; Enter sends, Shift+Enter adds a line.
+/// Text entry for prompts and steering (approved session-flow mockup): Enter sends or steers a
+/// running agent, ⌥Enter queues a follow-up, Esc stops the run, Shift+Enter adds a line.
+/// Waiting messages are chips inside the input area.
 class Composer extends StatelessWidget {
   const Composer({
     super.key,
@@ -80,15 +82,16 @@ class Composer extends StatelessWidget {
   final TextEditingController controller;
   final FocusNode? focusNode;
 
-  void _send() {
+  void _send({required bool followUp}) {
     final text = controller.text.trim();
     if (text.isEmpty) return;
     controller.clear();
-    state.send(text);
+    state.send(text, followUp: followUp);
   }
 
   @override
   Widget build(BuildContext context) {
+    final ws = context.ws;
     return Container(
       decoration: _box(context),
       padding: const EdgeInsets.fromLTRB(
@@ -97,38 +100,149 @@ class Composer extends StatelessWidget {
         WsMetrics.space4,
         WsMetrics.space4,
       ),
-      child: Column(
-        children: [
-          Expanded(
-            child: CallbackShortcuts(
-              bindings: {
-                const SingleActivator(LogicalKeyboardKey.enter): _send,
-              },
-              child: TextField(
-                key: const Key('composer'),
-                controller: controller,
-                focusNode: focusNode,
-                maxLines: null,
-                expands: true,
-                style: Theme.of(context).textTheme.bodyLarge,
-                decoration: InputDecoration.collapsed(
-                  hintText: 'Steer the agent or queue a follow-up…',
-                  hintStyle: TextStyle(color: context.ws.textFaint),
+      child: ValueListenableBuilder(
+        valueListenable: state.status,
+        builder: (context, status, _) {
+          final running = status == RunStatus.running;
+          return Column(
+            children: [
+              _QueueChips(state: state),
+              Expanded(
+                child: CallbackShortcuts(
+                  bindings: {
+                    const SingleActivator(LogicalKeyboardKey.enter): () =>
+                        _send(followUp: false),
+                    const SingleActivator(
+                      LogicalKeyboardKey.enter,
+                      alt: true,
+                    ): () =>
+                        _send(followUp: true),
+                    if (running)
+                      const SingleActivator(LogicalKeyboardKey.escape):
+                          state.stop,
+                  },
+                  child: TextField(
+                    key: const Key('composer'),
+                    controller: controller,
+                    focusNode: focusNode,
+                    maxLines: null,
+                    expands: true,
+                    style: Theme.of(context).textTheme.bodyLarge,
+                    decoration: InputDecoration.collapsed(
+                      hintText: 'Steer the agent or queue a follow-up…',
+                      hintStyle: TextStyle(color: ws.textFaint),
+                    ),
+                  ),
                 ),
               ),
+              Row(
+                children: [
+                  ModeChip(state: state),
+                  const Spacer(),
+                  if (running) ...[
+                    Text(
+                      '⌥⏎ queue',
+                      style: TextStyle(
+                        color: ws.textFaint,
+                        fontSize: WsMetrics.fsSmall,
+                      ),
+                    ),
+                    const SizedBox(width: WsMetrics.space3),
+                    SecondaryButton(
+                      label: 'Stop',
+                      shortcut: 'esc',
+                      onPressed: state.stop,
+                    ),
+                  ] else
+                    Hint('⌘L'),
+                  const SizedBox(width: WsMetrics.space3),
+                  PrimaryButton(
+                    label: running ? 'Steer' : 'Send',
+                    shortcut: '⏎',
+                    onPressed: () => _send(followUp: false),
+                  ),
+                ],
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+/// Messages waiting for the running agent; ✕ takes one out.
+class _QueueChips extends StatelessWidget {
+  const _QueueChips({required this.state});
+
+  final SessionState state;
+
+  @override
+  Widget build(BuildContext context) {
+    final ws = context.ws;
+    return ValueListenableBuilder(
+      valueListenable: state.queue,
+      builder: (context, queue, _) {
+        final waiting = [
+          for (final text in queue.steering) ('Steer', text),
+          for (final text in queue.followUp) ('Queued', text),
+        ];
+        if (waiting.isEmpty) return const SizedBox.shrink();
+        return Padding(
+          padding: const EdgeInsets.only(bottom: WsMetrics.space2),
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                for (final (index, (kind, text)) in waiting.indexed)
+                  Container(
+                    height: 22,
+                    margin: const EdgeInsets.only(right: WsMetrics.space2),
+                    padding: const EdgeInsets.only(left: WsMetrics.space2),
+                    decoration: BoxDecoration(
+                      color: ws.subtle,
+                      borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 260),
+                          child: Text(
+                            '$kind: $text',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: ws.textMuted,
+                              fontSize: WsMetrics.fsSmall,
+                            ),
+                          ),
+                        ),
+                        InkWell(
+                          key: Key('unqueue $index'),
+                          canRequestFocus: false,
+                          onTap: () => state.unqueue(text),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: WsMetrics.space2,
+                            ),
+                            child: Text(
+                              '✕',
+                              style: TextStyle(
+                                color: ws.textFaint,
+                                fontSize: WsMetrics.fsSmall,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+              ],
             ),
           ),
-          Row(
-            children: [
-              ModeChip(state: state),
-              const Spacer(),
-              Hint('⌘L'),
-              const SizedBox(width: WsMetrics.space3),
-              PrimaryButton(label: 'Send', shortcut: '⏎', onPressed: _send),
-            ],
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 }

@@ -2,7 +2,7 @@
 
 use meta_harness_core::{
     ApprovalMode, ChangeStatus, CommandError, ContextDetail, ContextMessage, ContextPart, Decision,
-    EntryKind, FileChange, ItemDetail, ItemKind, ItemStatus, NotificationLevel, RecordKind,
+    EntryKind, FileChange, ItemDetail, ItemKind, ItemStatus, NotificationLevel, Queue, RecordKind,
     RequestKind, RuntimeEvent, SessionEvent, StepContext, ToolOutcome, Trajectory,
     TrajectoryRecord, Transcript, TranscriptItem, TreeNode, Usage, UserInput,
 };
@@ -10,7 +10,8 @@ use meta_harness_core::{
 use crate::api::events::{
     BridgeApproval, BridgeChangeStatus, BridgeContext, BridgeDecision, BridgeDisplay, BridgeEvent,
     BridgeEventKind, BridgeFileChange, BridgeItem, BridgeItemKind, BridgeLevel, BridgeQuestion,
-    BridgeQuestionKind, BridgeRequest, BridgeRequestKind, BridgeSection, BridgeStep, BridgeUsage,
+    BridgeQuestionKind, BridgeQueue, BridgeRequest, BridgeRequestKind, BridgeSection, BridgeStep,
+    BridgeUsage,
 };
 use crate::api::history::{
     BridgeContextDetail, BridgeContextMessage, BridgeContextPart, BridgeEntryKind, BridgeRecord,
@@ -117,6 +118,15 @@ impl From<TrajectoryRecord> for BridgeRecord {
             failed: record.failed,
             context: record.context.map(Into::into),
             outcome: record.outcome.into(),
+        }
+    }
+}
+
+impl From<Queue> for BridgeQueue {
+    fn from(queue: Queue) -> Self {
+        Self {
+            steering: queue.steering,
+            follow_up: queue.follow_up,
         }
     }
 }
@@ -279,6 +289,7 @@ fn event(kind: BridgeEventKind) -> BridgeEvent {
         display: None,
         context: None,
         success: None,
+        queue: None,
     }
 }
 
@@ -539,6 +550,10 @@ impl From<RuntimeEvent> for BridgeEvent {
             RuntimeEvent::InputTextSet { text } => BridgeEvent {
                 text: Some(text),
                 ..event(Kind::InputTextSet)
+            },
+            RuntimeEvent::QueueChanged(queue) => BridgeEvent {
+                queue: Some(queue.into()),
+                ..event(Kind::QueueChanged)
             },
         }
     }

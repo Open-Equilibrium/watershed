@@ -5,12 +5,12 @@ use std::sync::{LazyLock, PoisonError};
 use std::time::Duration;
 
 use meta_harness_core::{
-    AgentCommand, Answer, RequestId, Session, SessionEvent, Snapshot, WorkingTree,
+    AgentCommand, Answer, Delivery, RequestId, Session, SessionEvent, Snapshot, WorkingTree,
 };
 use tokio::runtime::Runtime;
 use tokio::sync::{Mutex, mpsc};
 
-use crate::api::events::{BridgeDecision, BridgeEvent, BridgeFileChange};
+use crate::api::events::{BridgeDecision, BridgeEvent, BridgeFileChange, BridgeQueue};
 use crate::api::history::{BridgeContextDetail, BridgeHistory, BridgeTranscript};
 use crate::convert::{coalesce, describe};
 use crate::frb_generated::StreamSink;
@@ -116,17 +116,37 @@ impl AgentSession {
         Ok(())
     }
 
-    /// Sends a prompt that starts a turn.
-    /// Captures the project first, so the diff view shows what this run changes.
-    pub fn prompt(&self, message: String) -> Result<(), String> {
+    /// Sends a message: an idle agent starts a run with it, a running one takes it before its
+    /// next model request or, with `follow_up`, once it is done. A new run first captures the
+    /// project, so the diff view shows what the run changes.
+    pub fn send(&self, message: String, follow_up: bool) -> Result<(), String> {
         RUNTIME.block_on(async {
             let mut session = self.session.lock().await;
             let session = open(&mut session)?;
-            if let Some(project) = &self.project {
+            if !session.running()
+                && let Some(project) = &self.project
+            {
                 // Without a snapshot the run still starts; the diff view then shows nothing.
                 *self.before_run.lock().await = project.snapshot().await.ok();
             }
-            session.prompt(&message).await.map_err(describe)
+            let delivery = if follow_up {
+                Delivery::FollowUp
+            } else {
+                Delivery::Steer
+            };
+            session.send(&message, delivery).await.map_err(describe)
+        })
+    }
+
+    /// Removes the messages waiting for the running agent and returns them.
+    pub fn clear_queue(&self) -> Result<BridgeQueue, String> {
+        RUNTIME.block_on(async {
+            let mut session = self.session.lock().await;
+            Ok(open(&mut session)?
+                .clear_queue()
+                .await
+                .map_err(describe)?
+                .into())
         })
     }
 
@@ -217,14 +237,6 @@ impl AgentSession {
                 .branch(&entry, None)
                 .await
                 .map_err(describe)
-        })
-    }
-
-    /// Steers the running turn.
-    pub fn steer(&self, message: String) -> Result<(), String> {
-        RUNTIME.block_on(async {
-            let mut session = self.session.lock().await;
-            open(&mut session)?.steer(&message).await.map_err(describe)
         })
     }
 

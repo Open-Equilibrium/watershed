@@ -46,6 +46,8 @@ pub enum BridgeEventKind {
     Failed,
     /// `success`; always the last event.
     Exited,
+    /// The messages waiting for the running agent changed.
+    QueueChanged,
 }
 
 /// One session event for Dart.
@@ -69,6 +71,17 @@ pub struct BridgeEvent {
     pub context: Option<BridgeContext>,
     /// Whether the agent process exited successfully.
     pub success: Option<bool>,
+    /// The messages waiting for the running agent.
+    pub queue: Option<BridgeQueue>,
+}
+
+/// Messages waiting for a running agent, in order.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct BridgeQueue {
+    /// Steering messages, delivered before the agent's next model request.
+    pub steering: Vec<String>,
+    /// Follow-up messages, delivered once the agent is done.
+    pub follow_up: Vec<String>,
 }
 
 /// What an item represents.
