@@ -156,3 +156,27 @@ fn rejects_a_directory_outside_git() {
         assert!(outside.is_err());
     });
 }
+
+#[test]
+fn keeps_snapshots_private_to_the_user() {
+    use std::os::unix::fs::PermissionsExt;
+    run(async {
+        let repo = Repo::new("private");
+        repo.write("a.txt", "a\n");
+        let tree = WorkingTree::open(repo.path())
+            .await
+            .expect("repository opens");
+        tree.snapshot().await.expect("snapshot");
+        // Other tests' stores may come and go meanwhile; this tree's store stays until the end.
+        let prefix = format!("watershed-snapshots-{}-", std::process::id());
+        let modes: Vec<u32> = std::fs::read_dir(std::env::temp_dir())
+            .expect("temporary directory")
+            .flatten()
+            .filter(|entry| entry.file_name().to_string_lossy().starts_with(&prefix))
+            .filter_map(|entry| entry.metadata().ok())
+            .map(|metadata| metadata.permissions().mode() & 0o777)
+            .collect();
+        assert!(!modes.is_empty(), "the store exists");
+        assert!(modes.iter().all(|&mode| mode == 0o700), "{modes:?}");
+    });
+}

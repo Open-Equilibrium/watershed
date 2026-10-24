@@ -3,6 +3,10 @@
 
 use std::ffi::OsString;
 use std::fmt;
+use std::fs::DirBuilder;
+use std::hash::{BuildHasher, RandomState};
+use std::io::ErrorKind;
+use std::os::unix::fs::DirBuilderExt;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -89,6 +93,28 @@ impl Drop for Store {
     }
 }
 
+/// Creates a new temporary directory only the user can enter. Its name is unpredictable and an
+/// existing path is never reused, so another user cannot prepare it in a shared `/tmp`.
+fn private_dir() -> std::io::Result<PathBuf> {
+    let mut builder = DirBuilder::new();
+    builder.mode(0o700);
+    let mut attempts = 0;
+    loop {
+        // A randomly keyed hasher turns the counter into a name nobody can guess.
+        let tag = RandomState::new().hash_one(STORES.fetch_add(1, Ordering::Relaxed));
+        let dir = std::env::temp_dir().join(format!(
+            "watershed-snapshots-{}-{tag:016x}",
+            std::process::id()
+        ));
+        match builder.create(&dir) {
+            Err(error) if error.kind() == ErrorKind::AlreadyExists && attempts < 8 => {
+                attempts += 1;
+            }
+            result => return result.map(|()| dir),
+        }
+    }
+}
+
 impl WorkingTree {
     /// Opens the working tree that contains `dir`.
     pub async fn open(dir: &Path) -> Result<Self, DiffError> {
@@ -119,17 +145,13 @@ impl WorkingTree {
                 dir.join(path)
             }
         };
-        let number = STORES.fetch_add(1, Ordering::Relaxed);
-        let store = std::env::temp_dir().join(format!(
-            "watershed-snapshots-{}-{number}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(store.join("objects")).map_err(DiffError::Io)?;
+        let store = Store(private_dir().map_err(DiffError::Io)?);
+        std::fs::create_dir(store.0.join("objects")).map_err(DiffError::Io)?;
         Ok(Self {
             root: PathBuf::from(root),
             index: absolute(index),
             objects: absolute(objects),
-            store: Store(store),
+            store,
             busy: Mutex::new(()),
         })
     }
