@@ -721,6 +721,7 @@ name = "meta-harness-core"
 version = "0.0.0"
 dependencies = [
  "serde_json",
+ "tokio",
 ]
 
 [[package]]
@@ -1377,6 +1378,7 @@ dependencies = [
  "libc",
  "mio",
  "pin-project-lite",
+ "signal-hook-registry",
  "socket2",
  "windows-sys 0.61.2",
 ]

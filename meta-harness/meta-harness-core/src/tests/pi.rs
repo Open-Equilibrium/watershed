@@ -1,6 +1,6 @@
-use crate::{
-    AdapterError, ItemDetail, ItemId, ItemKind, ItemStatus, PiAdapter, RuntimeEvent, TurnId,
-};
+use serde_json::{Map, Value};
+
+use crate::{ItemDetail, ItemId, ItemKind, ItemStatus, PiAdapter, RuntimeEvent, TurnId};
 
 const TURN: TurnId = TurnId(1);
 
@@ -9,9 +9,9 @@ fn translate(records: &[&str]) -> Vec<RuntimeEvent> {
     records
         .iter()
         .flat_map(|record| {
-            adapter
-                .translate(record.as_bytes())
-                .expect("valid pi record")
+            let record: Map<String, Value> =
+                serde_json::from_str(record).expect("fixture records are JSON objects");
+            adapter.translate(&record)
         })
         .collect()
 }
@@ -171,17 +171,5 @@ fn classifies_tool_calls_and_reports_their_outcome() {
             tool(3, DynamicToolCall, "grep", r#"{"pattern":"x"}"#),
             finished(3, DynamicToolCall, "", ItemStatus::Completed, None),
         ]
-    );
-}
-
-#[test]
-fn rejects_records_that_are_not_json_objects() {
-    let mut adapter = PiAdapter::new();
-    for record in [&b"not json"[..], b"[1]"] {
-        assert_eq!(adapter.translate(record), Err(AdapterError::InvalidRecord));
-    }
-    assert_eq!(
-        AdapterError::InvalidRecord.to_string(),
-        "pi record is not a JSON object"
     );
 }

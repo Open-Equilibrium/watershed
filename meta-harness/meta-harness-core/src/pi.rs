@@ -1,7 +1,6 @@
 //! Adapter from pi's RPC session events to agent-neutral runtime events.
 
 use std::collections::HashMap;
-use std::fmt;
 
 use serde_json::{Map, Value};
 
@@ -25,11 +24,8 @@ impl PiAdapter {
         Self::default()
     }
 
-    /// Translates one framed pi record; records without a runtime meaning yield nothing.
-    pub fn translate(&mut self, record: &[u8]) -> Result<Vec<RuntimeEvent>, AdapterError> {
-        let value: Value =
-            serde_json::from_slice(record).map_err(|_| AdapterError::InvalidRecord)?;
-        let record = value.as_object().ok_or(AdapterError::InvalidRecord)?;
+    /// Translates one pi session event; events without a runtime meaning yield nothing.
+    pub fn translate(&mut self, record: &Map<String, Value>) -> Vec<RuntimeEvent> {
         let mut events = Vec::new();
         let kind = record.get("type").and_then(Value::as_str);
         if kind == Some("agent_start") && self.turn.is_none() {
@@ -40,7 +36,7 @@ impl PiAdapter {
             events.push(RuntimeEvent::TurnStarted { turn });
         }
         let Some(turn) = self.turn else {
-            return Ok(events);
+            return events;
         };
         match kind {
             Some("agent_settled") => {
@@ -91,7 +87,7 @@ impl PiAdapter {
             }
             _ => {}
         }
-        Ok(events)
+        events
     }
 
     fn user_message(
@@ -224,20 +220,3 @@ fn content_text(content: Option<&Value>) -> String {
         _ => String::new(),
     }
 }
-
-/// Error returned when a pi record violates the RPC protocol; the session is then unusable.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum AdapterError {
-    /// A record was not a JSON object.
-    InvalidRecord,
-}
-
-impl fmt::Display for AdapterError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::InvalidRecord => f.write_str("pi record is not a JSON object"),
-        }
-    }
-}
-
-impl std::error::Error for AdapterError {}

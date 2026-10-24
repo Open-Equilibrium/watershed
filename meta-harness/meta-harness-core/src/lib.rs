@@ -6,10 +6,12 @@
 mod event;
 mod framing;
 mod pi;
+mod session;
 
 pub use event::{ItemDetail, ItemId, ItemKind, ItemStatus, RuntimeEvent, TurnId};
 pub use framing::{FrameError, LineFramer};
-pub use pi::{AdapterError, PiAdapter};
+pub use pi::PiAdapter;
+pub use session::{AgentCommand, CommandError, Session, SessionEvent};
 
 #[cfg(test)]
 mod tests;
