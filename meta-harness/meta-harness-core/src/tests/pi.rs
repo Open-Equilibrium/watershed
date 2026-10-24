@@ -1,8 +1,10 @@
+use std::time::Duration;
+
 use serde_json::{Map, Value};
 
 use crate::{
-    ItemDetail, ItemId, ItemKind, ItemStatus, NotificationLevel, PiAdapter, RequestId, RequestKind,
-    RuntimeEvent, TurnId, UserInput,
+    ContextSection, ItemDetail, ItemId, ItemKind, ItemStatus, NotificationLevel, PiAdapter,
+    RequestId, RequestKind, RuntimeEvent, StepId, TurnId, Usage, UserInput,
 };
 
 const TURN: TurnId = TurnId(1);
@@ -14,7 +16,7 @@ fn translate(records: &[&str]) -> Vec<RuntimeEvent> {
         .flat_map(|record| {
             let record: Map<String, Value> =
                 serde_json::from_str(record).expect("fixture records are JSON objects");
-            adapter.translate(&record)
+            adapter.translate(&record, Duration::ZERO)
         })
         .collect()
 }
@@ -73,6 +75,10 @@ fn streams_a_turn_with_reasoning_and_text() {
             RuntimeEvent::TurnStarted { turn: TURN },
             started(1, ItemKind::UserMessage),
             completed(1, ItemKind::UserMessage, "Say hi"),
+            RuntimeEvent::ModelRequestStarted {
+                turn: TURN,
+                step: StepId(1),
+            },
             started(2, ItemKind::Reasoning),
             delta(2, "The user "),
             delta(2, "wants hi."),
@@ -81,6 +87,16 @@ fn streams_a_turn_with_reasoning_and_text() {
             delta(3, "Hi"),
             delta(3, " there"),
             completed(3, ItemKind::AssistantMessage, "Hi there"),
+            RuntimeEvent::ModelRequestCompleted {
+                turn: TURN,
+                step: StepId(1),
+                model: String::new(),
+                usage: Usage::default(),
+                stop_reason: String::new(),
+                error: None,
+                first_token_ms: Some(0),
+                duration_ms: 0,
+            },
             RuntimeEvent::TurnCompleted { turn: TURN },
         ]
     );
@@ -296,6 +312,112 @@ fn turns_watershed_approval_questions_into_requests() {
                 r#"{"path":"a"}"#,
                 true
             ),
+        ]
+    );
+}
+
+#[test]
+fn measures_model_requests_and_context_changes() {
+    let mut adapter = PiAdapter::new();
+    let records = [
+        (0, r#"{"type":"agent_start"}"#),
+        (
+            10,
+            r#"{"type":"message_end","message":{"role":"system","content":"Also be kind.","sections":{"preamble":"You are pi.","rules":"Be brief.","docs":null},"toolsAdded":[{"name":"read"},{"name":"bash"}],"toolsRemoved":[{"name":"grep"}]}}"#,
+        ),
+        (
+            100,
+            r#"{"type":"message_start","message":{"role":"assistant","content":[],"model":"faux-1","stopReason":"pending"}}"#,
+        ),
+        (
+            400,
+            r#"{"type":"message_update","assistantMessageEvent":{"type":"text_start","contentIndex":0}}"#,
+        ),
+        (
+            450,
+            r#"{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"Hi"}}"#,
+        ),
+        (
+            1100,
+            r#"{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"Hi"}],"model":"faux-1","stopReason":"stop","usage":{"input":6140,"output":820,"cacheRead":100,"cacheWrite":5,"reasoning":214,"totalTokens":6960,"cost":{"input":0.01,"output":0.008,"cacheRead":0,"cacheWrite":0,"total":0.0234567}}}}"#,
+        ),
+        (
+            1200,
+            r#"{"type":"message_start","message":{"role":"assistant","content":[],"model":"faux-1"}}"#,
+        ),
+        (
+            1300,
+            r#"{"type":"message_end","message":{"role":"assistant","content":[],"model":"faux-1","stopReason":"error","errorMessage":"529 overloaded","usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0,"cost":{"total":0}}}}"#,
+        ),
+    ];
+    let events: Vec<RuntimeEvent> = records
+        .iter()
+        .flat_map(|(at, record)| {
+            let record: Map<String, Value> = serde_json::from_str(record).expect("JSON object");
+            adapter.translate(&record, Duration::from_millis(*at))
+        })
+        .filter(|event| {
+            matches!(
+                event,
+                RuntimeEvent::ContextChanged { .. }
+                    | RuntimeEvent::ModelRequestStarted { .. }
+                    | RuntimeEvent::ModelRequestCompleted { .. }
+            )
+        })
+        .collect();
+    let section = |name: &str, chars| ContextSection {
+        name: name.to_owned(),
+        chars,
+    };
+    assert_eq!(
+        events,
+        [
+            RuntimeEvent::ContextChanged {
+                turn: TURN,
+                sections: vec![
+                    section("docs", None),
+                    section("preamble", Some(11)),
+                    section("rules", Some(9)),
+                ],
+                appended_chars: 13,
+                tools_added: vec!["read".to_owned(), "bash".to_owned()],
+                tools_removed: vec!["grep".to_owned()],
+            },
+            RuntimeEvent::ModelRequestStarted {
+                turn: TURN,
+                step: StepId(1),
+            },
+            RuntimeEvent::ModelRequestCompleted {
+                turn: TURN,
+                step: StepId(1),
+                model: "faux-1".to_owned(),
+                usage: Usage {
+                    input: 6140,
+                    output: 820,
+                    cache_read: 100,
+                    cache_write: 5,
+                    reasoning: 214,
+                    cost_micro_usd: 23457,
+                },
+                stop_reason: "stop".to_owned(),
+                error: None,
+                first_token_ms: Some(300),
+                duration_ms: 1000,
+            },
+            RuntimeEvent::ModelRequestStarted {
+                turn: TURN,
+                step: StepId(2),
+            },
+            RuntimeEvent::ModelRequestCompleted {
+                turn: TURN,
+                step: StepId(2),
+                model: "faux-1".to_owned(),
+                usage: Usage::default(),
+                stop_reason: "error".to_owned(),
+                error: Some("529 overloaded".to_owned()),
+                first_token_ms: None,
+                duration_ms: 100,
+            },
         ]
     );
 }

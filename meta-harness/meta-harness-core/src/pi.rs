@@ -1,12 +1,13 @@
 //! Adapter from pi's RPC session events to agent-neutral runtime events.
 
 use std::collections::HashMap;
+use std::time::Duration;
 
 use serde_json::{Map, Value};
 
 use crate::event::{
-    ItemDetail, ItemId, ItemKind, ItemStatus, NotificationLevel, RequestId, RequestKind,
-    RuntimeEvent, TurnId, UserInput,
+    ContextSection, ItemDetail, ItemId, ItemKind, ItemStatus, NotificationLevel, RequestId,
+    RequestKind, RuntimeEvent, StepId, TurnId, Usage, UserInput,
 };
 
 /// Title prefix of the select dialog Watershed's pi extension uses to ask for an approval.
@@ -22,6 +23,16 @@ pub struct PiAdapter {
     blocks: HashMap<u64, (ItemId, ItemKind)>,
     /// Running tool calls, keyed by pi's tool call id.
     tools: HashMap<String, (ItemId, ItemKind)>,
+    steps: u64,
+    /// The model request whose response is streaming.
+    step: Option<OpenStep>,
+}
+
+#[derive(Debug)]
+struct OpenStep {
+    id: StepId,
+    started: Duration,
+    first_token: Option<Duration>,
 }
 
 impl PiAdapter {
@@ -30,8 +41,9 @@ impl PiAdapter {
         Self::default()
     }
 
-    /// Translates one pi session event; events without a runtime meaning yield nothing.
-    pub fn translate(&mut self, record: &Map<String, Value>) -> Vec<RuntimeEvent> {
+    /// Translates one pi session event received `at` a time on the session's monotonic clock;
+    /// events without a runtime meaning yield nothing.
+    pub fn translate(&mut self, record: &Map<String, Value>, at: Duration) -> Vec<RuntimeEvent> {
         let kind = record.get("type").and_then(Value::as_str);
         if kind == Some("extension_ui_request") {
             return extension_ui(record).into_iter().collect();
@@ -52,6 +64,7 @@ impl PiAdapter {
                 self.turn = None;
                 self.blocks.clear();
                 self.tools.clear();
+                self.step = None;
                 events.push(
                     if record.get("aborted").and_then(Value::as_bool) == Some(true) {
                         RuntimeEvent::TurnAborted { turn }
@@ -60,8 +73,28 @@ impl PiAdapter {
                     },
                 );
             }
-            Some("message_end") => self.user_message(turn, record, &mut events),
+            Some("message_start") => {
+                if role(record) == Some("assistant") {
+                    self.steps += 1;
+                    let id = StepId(self.steps);
+                    self.step = Some(OpenStep {
+                        id,
+                        started: at,
+                        first_token: None,
+                    });
+                    events.push(RuntimeEvent::ModelRequestStarted { turn, step: id });
+                }
+            }
+            Some("message_end") => match role(record) {
+                Some("user") => self.user_message(turn, record, &mut events),
+                Some("assistant") => self.model_response(turn, record, at, &mut events),
+                Some("system") => events.extend(context_change(turn, record)),
+                _ => {}
+            },
             Some("message_update") => {
+                if let Some(step) = self.step.as_mut() {
+                    step.first_token.get_or_insert(at);
+                }
                 if let Some(update) = record
                     .get("assistantMessageEvent")
                     .and_then(Value::as_object)
@@ -108,9 +141,6 @@ impl PiAdapter {
         let Some(message) = record.get("message") else {
             return;
         };
-        if message.get("role").and_then(Value::as_str) != Some("user") {
-            return;
-        }
         let item = self.next_item();
         let kind = ItemKind::UserMessage;
         events.push(started(turn, item, kind, ItemDetail::None));
@@ -120,6 +150,57 @@ impl PiAdapter {
             kind,
             content_text(message.get("content")),
         ));
+    }
+
+    fn model_response(
+        &mut self,
+        turn: TurnId,
+        record: &Map<String, Value>,
+        at: Duration,
+        events: &mut Vec<RuntimeEvent>,
+    ) {
+        let (Some(step), Some(message)) = (
+            self.step.take(),
+            record.get("message").and_then(Value::as_object),
+        ) else {
+            return;
+        };
+        let millis = |duration: Duration| u64::try_from(duration.as_millis()).unwrap_or(u64::MAX);
+        let usage = message.get("usage").and_then(Value::as_object);
+        let count = |field| {
+            usage
+                .and_then(|u| u.get(field))
+                .and_then(Value::as_u64)
+                .unwrap_or(0)
+        };
+        let cost = usage
+            .and_then(|u| u.get("cost"))
+            .and_then(|c| c.get("total"))
+            .and_then(Value::as_f64)
+            .unwrap_or(0.0);
+        events.push(RuntimeEvent::ModelRequestCompleted {
+            turn,
+            step: step.id,
+            model: str_field(message, "model").to_owned(),
+            usage: Usage {
+                input: count("input"),
+                output: count("output"),
+                cache_read: count("cacheRead"),
+                cache_write: count("cacheWrite"),
+                reasoning: count("reasoning"),
+                // Saturating float-to-integer conversion; costs are small and non-negative.
+                cost_micro_usd: (cost * 1_000_000.0).round() as u64,
+            },
+            stop_reason: str_field(message, "stopReason").to_owned(),
+            error: message
+                .get("errorMessage")
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+            first_token_ms: step
+                .first_token
+                .map(|first| millis(first.saturating_sub(step.started))),
+            duration_ms: millis(at.saturating_sub(step.started)),
+        });
     }
 
     fn assistant_update(
@@ -208,6 +289,48 @@ fn completed(turn: TurnId, item: ItemId, kind: ItemKind, text: String) -> Runtim
         status: ItemStatus::Completed,
         duration_ms: None,
     }
+}
+
+fn role(record: &Map<String, Value>) -> Option<&str> {
+    record.get("message")?.get("role")?.as_str()
+}
+
+/// Reads a system message that changes prompt sections or tools.
+fn context_change(turn: TurnId, record: &Map<String, Value>) -> Option<RuntimeEvent> {
+    let message = record.get("message")?.as_object()?;
+    let sections = message
+        .get("sections")
+        .and_then(Value::as_object)
+        .map(|sections| {
+            sections
+                .iter()
+                .map(|(name, text)| ContextSection {
+                    name: name.clone(),
+                    chars: text.as_str().map(|text| text.chars().count()),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let names = |field| -> Vec<String> {
+        message
+            .get(field)
+            .and_then(Value::as_array)
+            .map(|tools| {
+                tools
+                    .iter()
+                    .filter_map(|tool| tool.get("name").and_then(Value::as_str))
+                    .map(str::to_owned)
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    Some(RuntimeEvent::ContextChanged {
+        turn,
+        sections,
+        appended_chars: content_text(message.get("content")).chars().count(),
+        tools_added: names("toolsAdded"),
+        tools_removed: names("toolsRemoved"),
+    })
 }
 
 /// Classifies one of pi's tool names.

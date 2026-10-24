@@ -11,8 +11,8 @@ mod session;
 
 pub use approval::ApprovalMode;
 pub use event::{
-    Answer, Decision, ItemDetail, ItemId, ItemKind, ItemStatus, NotificationLevel, RequestId,
-    RequestKind, RuntimeEvent, TurnId, UserInput,
+    Answer, ContextSection, Decision, ItemDetail, ItemId, ItemKind, ItemStatus, NotificationLevel,
+    RequestId, RequestKind, RuntimeEvent, StepId, TurnId, Usage, UserInput,
 };
 pub use framing::{FrameError, LineFramer};
 pub use pi::PiAdapter;

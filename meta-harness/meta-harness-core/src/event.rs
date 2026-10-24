@@ -39,6 +39,36 @@ pub enum ItemDetail {
     },
 }
 
+/// One model request within a turn: the agent sends its context and receives one response.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct StepId(pub u64);
+
+/// Tokens and cost of one model request, as the provider reported them.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Usage {
+    /// Input tokens.
+    pub input: u64,
+    /// Output tokens, including reasoning tokens.
+    pub output: u64,
+    /// Input tokens read from the provider's cache.
+    pub cache_read: u64,
+    /// Input tokens written to the provider's cache.
+    pub cache_write: u64,
+    /// Reasoning tokens, already counted in `output`.
+    pub reasoning: u64,
+    /// Cost in millionths of a US dollar.
+    pub cost_micro_usd: u64,
+}
+
+/// One named part of the agent's system prompt.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContextSection {
+    /// The section name.
+    pub name: String,
+    /// Its length in characters, or `None` when the section was removed.
+    pub chars: Option<usize>,
+}
+
 /// One open request from the agent that waits for the user.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct RequestId(pub String);
@@ -186,6 +216,45 @@ pub enum RuntimeEvent {
         status: ItemStatus,
         /// How long a tool ran, when the agent measured it.
         duration_ms: Option<u64>,
+    },
+    /// The agent changed what it sends to the model: prompt sections or tools.
+    ContextChanged {
+        /// The owning turn.
+        turn: TurnId,
+        /// Changed prompt sections, by name.
+        sections: Vec<ContextSection>,
+        /// Characters of instructions appended to the prompt.
+        appended_chars: usize,
+        /// Tools added, by name.
+        tools_added: Vec<String>,
+        /// Tools removed, by name.
+        tools_removed: Vec<String>,
+    },
+    /// The agent sent a request to the model.
+    ModelRequestStarted {
+        /// The owning turn.
+        turn: TurnId,
+        /// The request.
+        step: StepId,
+    },
+    /// The model finished its response to a request.
+    ModelRequestCompleted {
+        /// The owning turn.
+        turn: TurnId,
+        /// The request.
+        step: StepId,
+        /// The model that answered.
+        model: String,
+        /// Tokens and cost.
+        usage: Usage,
+        /// Why the response ended, such as `stop`, `toolUse`, `error` or `aborted`.
+        stop_reason: String,
+        /// The provider's error, if the request failed.
+        error: Option<String>,
+        /// Milliseconds until the first streamed content, if any arrived.
+        first_token_ms: Option<u64>,
+        /// Milliseconds from request to completed response.
+        duration_ms: u64,
     },
     /// A tool call waits for the user's approval.
     RequestOpened {

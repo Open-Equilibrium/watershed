@@ -8,7 +8,7 @@ use std::pin::{Pin, pin};
 use std::process::Stdio;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::task::Poll;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde_json::{Map, Value, json};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -130,6 +130,7 @@ impl Session {
             writer: writer.clone(),
             state: state.clone(),
             adapter: PiAdapter::new(),
+            started: Instant::now(),
             killed,
             kill_requested: false,
         };
@@ -279,6 +280,8 @@ struct Supervisor {
     writer: mpsc::Sender<Write>,
     state: State,
     adapter: PiAdapter,
+    /// The session's monotonic clock for request timing.
+    started: Instant,
     killed: oneshot::Receiver<()>,
     /// Set once `killed` completed; it must not be polled again.
     kill_requested: bool,
@@ -337,7 +340,7 @@ impl Supervisor {
             self.answer_command(record);
             return true;
         }
-        for event in self.adapter.translate(record) {
+        for event in self.adapter.translate(record, self.started.elapsed()) {
             let forward = match &event {
                 RuntimeEvent::RequestOpened {
                     request,
