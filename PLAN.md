@@ -160,7 +160,7 @@ The target product is canonical in [`docs/concept/V-Spec_Liquid.html`](docs/conc
 
 A macOS Liquid app, built ahead of M2 and M3a, that controls pi through an embedded Meta-Harness core and makes agent runs inspectable (ADR-0184).
 
-- Embedded Meta-Harness core in Rust with a pi adapter (`pi --mode rpc`) behind the agent-neutral session/event model; service mode, remote access and Android follow with multi-device.
+- Embedded Meta-Harness core in Rust with a pi adapter (`pi --mode rpc`) behind an agent-neutral in-process session/event model, mapped to the PROTOCOL.md v0 families with service mode (ADR-0195); service mode, remote access and Android follow with multi-device.
 - pi session files are the only session store; Liquid-specific records are custom pi entries (ADR-0189).
 - Agent view: send a prompt, follow the response live, steer and abort; pi dialogs, status and widgets.
 - Tool approvals in three modes (ADR-0188).
