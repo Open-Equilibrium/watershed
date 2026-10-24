@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::Duration;
 
 use crate::{ChangeStatus, FileChange, WorkingTree};
 
@@ -178,5 +179,25 @@ fn keeps_snapshots_private_to_the_user() {
             .collect();
         assert!(!modes.is_empty(), "the store exists");
         assert!(modes.iter().all(|&mode| mode == 0o700), "{modes:?}");
+    });
+}
+
+#[test]
+fn snapshots_a_project_whose_git_warns_a_lot() {
+    run(async {
+        let repo = Repo::new("warnings");
+        repo.git(&["config", "core.autocrlf", "true"]);
+        // Each file makes `git add` warn about line endings, far more than a pipe holds.
+        for number in 0..1500 {
+            repo.write(&format!("file-with-a-long-name-{number}.txt"), "line\n");
+        }
+        let tree = WorkingTree::open(repo.path())
+            .await
+            .expect("repository opens");
+        let snapshot = tokio::time::timeout(Duration::from_secs(30), tree.snapshot())
+            .await
+            .expect("snapshot finishes")
+            .expect("snapshot");
+        assert_eq!(tree.changes(&snapshot).await.expect("changes"), []);
     });
 }

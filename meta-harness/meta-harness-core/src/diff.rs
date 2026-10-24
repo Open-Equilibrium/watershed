@@ -11,12 +11,15 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::Command;
 use tokio::sync::Mutex;
 
 /// Largest Git output read for one file list or patch; longer output is cut off.
 const MAX_OUTPUT_BYTES: u64 = 4 * 1024 * 1024;
+
+/// Largest part of Git's error output kept for an error message.
+const MAX_ERROR_BYTES: usize = 64 * 1024;
 
 static STORES: AtomicU64 = AtomicU64::new(0);
 
@@ -252,6 +255,9 @@ async fn git(dir: &Path, env: &[(&str, OsString)], args: &[&str]) -> Result<Stri
         .kill_on_drop(true)
         .spawn()
         .map_err(|error| DiffError::Git(error.to_string()))?;
+    // Git's warnings drain meanwhile, so a full error pipe never blocks it.
+    let stderr = child.stderr.take().expect("stderr is piped");
+    let errors = tokio::spawn(keep_start(stderr, MAX_ERROR_BYTES));
     let mut output = Vec::new();
     // Dropping the pipe after the limit stops Git instead of buffering unbounded output.
     let stdout = child.stdout.take().expect("stdout is piped");
@@ -261,14 +267,26 @@ async fn git(dir: &Path, env: &[(&str, OsString)], args: &[&str]) -> Result<Stri
         .await
         .map_err(|error| DiffError::Git(error.to_string()))?;
     let truncated = output.len() as u64 == MAX_OUTPUT_BYTES;
-    let result = child
-        .wait_with_output()
+    let status = child
+        .wait()
         .await
         .map_err(|error| DiffError::Git(error.to_string()))?;
-    if !result.status.success() && !truncated {
+    if !status.success() && !truncated {
+        let errors = errors.await.unwrap_or_default();
         return Err(DiffError::Git(
-            String::from_utf8_lossy(&result.stderr).trim().to_owned(),
+            String::from_utf8_lossy(&errors).trim().to_owned(),
         ));
     }
     Ok(String::from_utf8_lossy(&output).into_owned())
+}
+
+/// Reads `reader` to its end and keeps at most `limit` bytes from its start.
+async fn keep_start(mut reader: impl AsyncRead + Unpin, limit: usize) -> Vec<u8> {
+    let mut kept = Vec::new();
+    let mut chunk = [0; 8192];
+    while let Ok(read @ 1..) = reader.read(&mut chunk).await {
+        let room = limit.saturating_sub(kept.len());
+        kept.extend_from_slice(&chunk[..read.min(room)]);
+    }
+    kept
 }
