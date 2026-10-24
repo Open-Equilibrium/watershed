@@ -2,9 +2,11 @@ use std::time::Duration;
 
 use serde_json::{Map, Value};
 
+use crate::pi::session_tree;
 use crate::{
-    ContextSection, ItemDetail, ItemId, ItemKind, ItemStatus, NotificationLevel, PiAdapter,
-    RequestId, RequestKind, RuntimeEvent, StepId, TurnId, Usage, UserInput,
+    ContextSection, EntryKind, ItemDetail, ItemId, ItemKind, ItemStatus, NotificationLevel,
+    PiAdapter, RequestId, RequestKind, RuntimeEvent, SessionTree, StepId, TreeNode, TurnId, Usage,
+    UserInput,
 };
 
 const TURN: TurnId = TurnId(1);
@@ -419,5 +421,66 @@ fn measures_model_requests_and_context_changes() {
                 duration_ms: 100,
             },
         ]
+    );
+}
+
+#[test]
+fn builds_the_session_tree_from_flat_entries() {
+    let data: Value = serde_json::from_str(
+        r#"{"entries":[
+          {"type":"message","id":"e1","parentId":null,"message":{"role":"user","content":"Add rate limiting to /login\nand tests"}},
+          {"type":"message","id":"e2","parentId":"e1","message":{"role":"assistant","content":[{"type":"thinking","thinking":"hm"},{"type":"text","text":"I'll look first."}]}},
+          {"type":"message","id":"e3","parentId":"e2","message":{"role":"toolResult","toolName":"read","content":[]}},
+          {"type":"label","id":"l1","parentId":"e2","targetId":"e2","label":"A"},
+          {"type":"custom","id":"e4","parentId":"l1","customType":"watershed.approval"},
+          {"type":"label","id":"l2","parentId":"e4","targetId":"e2","label":"A2"},
+          {"type":"model_change","id":"e5","parentId":"l2"}],
+          "leafId":"l2"}"#,
+    )
+    .expect("JSON");
+    let node =
+        |id: &str, parent: Option<&str>, kind, preview: &str, label: Option<&str>| TreeNode {
+            id: id.to_owned(),
+            parent: parent.map(str::to_owned),
+            kind,
+            preview: preview.to_owned(),
+            label: label.map(str::to_owned),
+        };
+    assert_eq!(
+        session_tree(&data),
+        SessionTree {
+            nodes: vec![
+                node(
+                    "e1",
+                    None,
+                    EntryKind::User,
+                    "Add rate limiting to /login",
+                    None
+                ),
+                node(
+                    "e2",
+                    Some("e1"),
+                    EntryKind::Assistant,
+                    "I'll look first.",
+                    Some("A2")
+                ),
+                node("e3", Some("e2"), EntryKind::ToolResult, "read", None),
+                node(
+                    "e4",
+                    Some("e2"),
+                    EntryKind::Custom("watershed.approval".to_owned()),
+                    "",
+                    None
+                ),
+                node(
+                    "e5",
+                    Some("e4"),
+                    EntryKind::Other("model_change".to_owned()),
+                    "",
+                    None
+                ),
+            ],
+            leaf: Some("e4".to_owned()),
+        }
     );
 }

@@ -16,7 +16,8 @@ use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::approval::{ApprovalMode, needs_user};
-use crate::{Answer, Decision, LineFramer, PiAdapter, RequestId, RuntimeEvent};
+use crate::pi::session_tree;
+use crate::{Answer, Decision, LineFramer, PiAdapter, RequestId, RuntimeEvent, SessionTree};
 
 /// Largest record accepted from an agent; a larger record ends the session.
 const MAX_RECORD_BYTES: usize = 16 * 1024 * 1024;
@@ -62,7 +63,20 @@ pub enum CommandError {
     Closed,
 }
 
-type Reply = oneshot::Sender<Result<(), CommandError>>;
+type Reply = oneshot::Sender<Result<Value, CommandError>>;
+
+/// What the agent reports about its session.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionState {
+    /// The session file, unless the session is in memory only.
+    pub session_file: Option<PathBuf>,
+    /// The agent's session id.
+    pub session_id: String,
+    /// The selected model as `provider/id`.
+    pub model: Option<String>,
+    /// Whether a turn is streaming.
+    pub streaming: bool,
+}
 
 enum Write {
     Record(Vec<u8>),
@@ -150,17 +164,51 @@ impl Session {
     pub async fn prompt(&mut self, message: &str) -> Result<(), CommandError> {
         self.command(json!({ "type": "prompt", "message": message }))
             .await
+            .map(drop)
     }
 
     /// Steers the running turn with a further message.
     pub async fn steer(&mut self, message: &str) -> Result<(), CommandError> {
         self.command(json!({ "type": "steer", "message": message }))
             .await
+            .map(drop)
     }
 
     /// Aborts the running turn.
     pub async fn abort(&mut self) -> Result<(), CommandError> {
-        self.command(json!({ "type": "abort" })).await
+        self.command(json!({ "type": "abort" })).await.map(drop)
+    }
+
+    /// Reads the session's file, id, model and streaming state.
+    pub async fn state(&mut self) -> Result<SessionState, CommandError> {
+        let data = self.command(json!({ "type": "get_state" })).await?;
+        let text = |field| data.get(field).and_then(Value::as_str);
+        let model = data.get("model").and_then(|model| {
+            Some(format!(
+                "{}/{}",
+                model.get("provider")?.as_str()?,
+                model.get("id")?.as_str()?
+            ))
+        });
+        Ok(SessionState {
+            session_file: text("sessionFile").map(PathBuf::from),
+            session_id: text("sessionId").unwrap_or_default().to_owned(),
+            model,
+            streaming: data.get("isStreaming").and_then(Value::as_bool) == Some(true),
+        })
+    }
+
+    /// Reads every entry of the session, including abandoned branches, as a tree.
+    pub async fn tree(&mut self) -> Result<SessionTree, CommandError> {
+        let data = self.command(json!({ "type": "get_entries" })).await?;
+        Ok(session_tree(&data))
+    }
+
+    /// Continues the session from `entry` under a branch `label`; the next prompt starts the
+    /// branch. Requires Watershed's pi extension.
+    pub async fn branch(&mut self, entry: &str, label: &str) -> Result<(), CommandError> {
+        let message = format!("/watershed-branch {entry} {label}");
+        self.prompt(&message).await
     }
 
     /// Changes which tool calls need the user's approval.
@@ -233,7 +281,7 @@ impl Session {
         exited.await.unwrap_or(false)
     }
 
-    async fn command(&mut self, mut command: Value) -> Result<(), CommandError> {
+    async fn command(&mut self, mut command: Value) -> Result<Value, CommandError> {
         self.next_id += 1;
         command["id"] = Value::String(self.next_id.to_string());
         let (reply, response) = oneshot::channel();
@@ -399,7 +447,7 @@ impl Supervisor {
             return;
         };
         let result = if response.get("success").and_then(Value::as_bool) == Some(true) {
-            Ok(())
+            Ok(response.get("data").cloned().unwrap_or(Value::Null))
         } else {
             let error = response
                 .get("error")

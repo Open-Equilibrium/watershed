@@ -6,9 +6,12 @@ use std::time::Duration;
 use serde_json::{Map, Value};
 
 use crate::event::{
-    ContextSection, ItemDetail, ItemId, ItemKind, ItemStatus, NotificationLevel, RequestId,
-    RequestKind, RuntimeEvent, StepId, TurnId, Usage, UserInput,
+    ContextSection, EntryKind, ItemDetail, ItemId, ItemKind, ItemStatus, NotificationLevel,
+    RequestId, RequestKind, RuntimeEvent, SessionTree, StepId, TreeNode, TurnId, Usage, UserInput,
 };
+
+/// Longest preview kept for a tree entry, in characters.
+const PREVIEW_CHARS: usize = 80;
 
 /// Title prefix of the select dialog Watershed's pi extension uses to ask for an approval.
 pub(crate) const APPROVAL_PREFIX: &str = "watershed.approval ";
@@ -289,6 +292,99 @@ fn completed(turn: TurnId, item: ItemId, kind: ItemKind, text: String) -> Runtim
         status: ItemStatus::Completed,
         duration_ms: None,
     }
+}
+
+/// Builds the branch tree from a `get_entries` response; label entries become node labels.
+pub(crate) fn session_tree(data: &Value) -> SessionTree {
+    let entries = data
+        .get("entries")
+        .and_then(Value::as_array)
+        .map(Vec::as_slice)
+        .unwrap_or_default();
+    // Label entries sit in the parent chain; resolve each one to its nearest real ancestor.
+    let mut label_parents: HashMap<&str, Option<&str>> = HashMap::new();
+    let mut labels: HashMap<&str, Option<&str>> = HashMap::new();
+    for entry in entries {
+        if entry.get("type").and_then(Value::as_str) == Some("label") {
+            let id = entry.get("id").and_then(Value::as_str).unwrap_or_default();
+            label_parents.insert(id, entry.get("parentId").and_then(Value::as_str));
+            if let Some(target) = entry.get("targetId").and_then(Value::as_str) {
+                labels.insert(target, entry.get("label").and_then(Value::as_str));
+            }
+        }
+    }
+    let nodes = entries
+        .iter()
+        .filter(|entry| entry.get("type").and_then(Value::as_str) != Some("label"))
+        .map(|entry| {
+            let id = entry.get("id").and_then(Value::as_str).unwrap_or_default();
+            let (kind, preview) = entry_summary(entry);
+            TreeNode {
+                id: id.to_owned(),
+                parent: resolve(
+                    &label_parents,
+                    entry.get("parentId").and_then(Value::as_str),
+                ),
+                kind,
+                preview,
+                label: labels.get(id).copied().flatten().map(str::to_owned),
+            }
+        })
+        .collect();
+    SessionTree {
+        nodes,
+        leaf: resolve(&label_parents, data.get("leafId").and_then(Value::as_str)),
+    }
+}
+
+/// Follows label entries up to the nearest entry that is not a label.
+fn resolve<'a>(
+    label_parents: &HashMap<&'a str, Option<&'a str>>,
+    mut id: Option<&'a str>,
+) -> Option<String> {
+    while let Some(parent) = id.and_then(|id| label_parents.get(id)) {
+        id = *parent;
+    }
+    id.map(str::to_owned)
+}
+
+fn entry_summary(entry: &Value) -> (EntryKind, String) {
+    let entry_type = entry
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if entry_type == "custom" {
+        let custom = entry
+            .get("customType")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        return (EntryKind::Custom(custom.to_owned()), String::new());
+    }
+    let message = entry.get("message");
+    let kind = match (
+        entry_type,
+        message.and_then(|m| m.get("role")).and_then(Value::as_str),
+    ) {
+        ("message", Some("user")) => EntryKind::User,
+        ("message", Some("assistant")) => EntryKind::Assistant,
+        ("message", Some("toolResult")) => EntryKind::ToolResult,
+        ("message", Some("system")) => EntryKind::System,
+        _ => return (EntryKind::Other(entry_type.to_owned()), String::new()),
+    };
+    let text = if kind == EntryKind::ToolResult {
+        message
+            .and_then(|m| m.get("toolName"))
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned()
+    } else {
+        content_text(message.and_then(|m| m.get("content")))
+    };
+    let line = text
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .unwrap_or_default();
+    (kind, line.chars().take(PREVIEW_CHARS).collect())
 }
 
 fn role(record: &Map<String, Value>) -> Option<&str> {

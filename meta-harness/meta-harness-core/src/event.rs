@@ -69,6 +69,47 @@ pub struct ContextSection {
     pub chars: Option<usize>,
 }
 
+/// What a session entry holds.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EntryKind {
+    /// A user message.
+    User,
+    /// A model response.
+    Assistant,
+    /// A tool result.
+    ToolResult,
+    /// A system message that changed prompt sections or tools.
+    System,
+    /// An extension's custom entry, with its type.
+    Custom(String),
+    /// Any other entry, with the agent's entry type.
+    Other(String),
+}
+
+/// One entry of a session's branch tree.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TreeNode {
+    /// The agent's entry id.
+    pub id: String,
+    /// The parent entry, or `None` for a root.
+    pub parent: Option<String>,
+    /// What the entry holds.
+    pub kind: EntryKind,
+    /// A one-line preview of its text or tool.
+    pub preview: String,
+    /// The branch label set on this entry.
+    pub label: Option<String>,
+}
+
+/// A session's entries as a tree, in append order.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SessionTree {
+    /// The entries; every parent precedes its children.
+    pub nodes: Vec<TreeNode>,
+    /// The entry the next message continues from.
+    pub leaf: Option<String>,
+}
+
 /// One open request from the agent that waits for the user.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct RequestId(pub String);

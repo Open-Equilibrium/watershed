@@ -5,8 +5,9 @@ use tokio::sync::mpsc::Receiver;
 use tokio::time::timeout;
 
 use crate::{
-    AgentCommand, Answer, ApprovalMode, CommandError, Decision, ItemDetail, ItemId, ItemKind,
-    ItemStatus, RequestId, RequestKind, RuntimeEvent, Session, SessionEvent, TurnId, UserInput,
+    AgentCommand, Answer, ApprovalMode, CommandError, Decision, EntryKind, ItemDetail, ItemId,
+    ItemKind, ItemStatus, RequestId, RequestKind, RuntimeEvent, Session, SessionEvent,
+    SessionState, SessionTree, TreeNode, TurnId, UserInput,
 };
 
 const WAIT: Duration = Duration::from_secs(10);
@@ -256,5 +257,50 @@ fn asks_only_for_calls_the_approval_mode_does_not_allow() {
             session.decide(&unknown, Decision::AllowOnce).await,
             Err(CommandError::UnknownRequest)
         );
+    });
+}
+
+#[test]
+fn reads_state_and_tree_and_branches_through_the_extension() {
+    run(async {
+        let script = [
+            expect_response(&[r#""type":"get_state""#, r#""id":"1""#]),
+            r#"printf '%s\n' '{"id":"1","type":"response","command":"get_state","success":true,"data":{"model":{"id":"faux-1","provider":"faux"},"isStreaming":false,"sessionFile":"/tmp/s.jsonl","sessionId":"abc"}}'
+"#
+            .to_owned(),
+            expect_response(&[r#""type":"get_entries""#, r#""id":"2""#]),
+            r#"printf '%s\n' '{"id":"2","type":"response","command":"get_entries","success":true,"data":{"entries":[{"type":"message","id":"e1","parentId":null,"message":{"role":"user","content":"hi"}}],"leafId":"e1"}}'
+"#
+            .to_owned(),
+            expect_response(&[r#""type":"prompt""#, r#""id":"3""#, r#""message":"/watershed-branch e1 B""#]),
+            r#"printf '%s\n' '{"id":"3","type":"response","command":"prompt","success":true,"data":{"disposition":"handled"}}'
+"#
+            .to_owned(),
+        ]
+        .concat();
+        let (mut session, _events) = fake_agent(&script);
+        assert_eq!(
+            session.state().await,
+            Ok(SessionState {
+                session_file: Some("/tmp/s.jsonl".into()),
+                session_id: "abc".to_owned(),
+                model: Some("faux/faux-1".to_owned()),
+                streaming: false,
+            })
+        );
+        assert_eq!(
+            session.tree().await,
+            Ok(SessionTree {
+                nodes: vec![TreeNode {
+                    id: "e1".to_owned(),
+                    parent: None,
+                    kind: EntryKind::User,
+                    preview: "hi".to_owned(),
+                    label: None,
+                }],
+                leaf: Some("e1".to_owned()),
+            })
+        );
+        assert_eq!(session.branch("e1", "B").await, Ok(()));
     });
 }

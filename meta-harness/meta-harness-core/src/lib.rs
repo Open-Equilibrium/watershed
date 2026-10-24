@@ -11,12 +11,13 @@ mod session;
 
 pub use approval::ApprovalMode;
 pub use event::{
-    Answer, ContextSection, Decision, ItemDetail, ItemId, ItemKind, ItemStatus, NotificationLevel,
-    RequestId, RequestKind, RuntimeEvent, StepId, TurnId, Usage, UserInput,
+    Answer, ContextSection, Decision, EntryKind, ItemDetail, ItemId, ItemKind, ItemStatus,
+    NotificationLevel, RequestId, RequestKind, RuntimeEvent, SessionTree, StepId, TreeNode, TurnId,
+    Usage, UserInput,
 };
 pub use framing::{FrameError, LineFramer};
 pub use pi::PiAdapter;
-pub use session::{AgentCommand, CommandError, Session, SessionEvent};
+pub use session::{AgentCommand, CommandError, Session, SessionEvent, SessionState};
 
 #[cfg(test)]
 mod tests;
