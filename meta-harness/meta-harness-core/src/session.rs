@@ -415,7 +415,11 @@ impl Supervisor {
         self.state.lock().replies = None;
         let stop = failure.is_some() || self.kill_requested;
         if let Some(reason) = failure {
-            let _ = self.events.send(SessionEvent::Failed(reason)).await;
+            // A full event buffer must not keep a kill from ending the agent.
+            let events = self.events.clone();
+            let _ = self
+                .unless_killed(events.send(SessionEvent::Failed(reason)))
+                .await;
         }
         // An agent that closed its output may still run; a kill request ends the wait.
         let status = if stop {
@@ -431,8 +435,9 @@ impl Supervisor {
             }
         };
         let success = status.is_ok_and(|status| status.success());
-        let _ = self.events.send(SessionEvent::Exited { success }).await;
+        // Shutdown learns of the exit first; the event waits for buffer space.
         let _ = exit.send(success);
+        let _ = self.events.send(SessionEvent::Exited { success }).await;
     }
 
     /// Routes one record; returns `false` once the session was killed.

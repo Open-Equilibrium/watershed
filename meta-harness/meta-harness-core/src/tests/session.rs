@@ -131,6 +131,21 @@ fn shutdown_kills_an_agent_that_ignores_it() {
 }
 
 #[test]
+fn shutdown_ends_an_agent_whose_events_nobody_reads() {
+    run(async {
+        // Fills the 256-event buffer, then breaks the protocol while nobody reads.
+        let (session, _events) = fake_agent(
+            r#"i=0
+while [ $i -lt 256 ]; do printf '%s\n' '{"type":"queue_update","steering":[],"followUp":[]}'; i=$((i+1)); done
+printf '%s\n' 'not json'
+trap '' TERM; while :; do sleep 1; done"#,
+        );
+        let stopped = timeout(WAIT, session.shutdown(Duration::from_millis(100))).await;
+        assert_eq!(stopped, Ok(false));
+    });
+}
+
+#[test]
 fn reads_history_incrementally_and_rereads_when_the_cursor_is_gone() {
     run(async {
         let entry = |id: &str, parent: &str| {
