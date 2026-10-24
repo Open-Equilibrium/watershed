@@ -1,21 +1,24 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import watershed, { APPROVAL_PREFIX } from "./watershed.ts";
+import { APPROVAL_PREFIX, watershedWith } from "./watershed.ts";
 
 type Handler = (event: unknown, ctx: unknown) => Promise<unknown>;
 
-function load() {
+function load(clock: () => number = () => 0) {
   const handlers = new Map<string, Handler>();
   const commands = new Map<string, { handler: (args: string, ctx: unknown) => Promise<void> }>();
   const entries: { customType: string; data: unknown }[] = [];
   const tools = [{ name: "read", annotations: { readOnlyHint: true } }, { name: "bash" }];
-  watershed({
+  watershedWith(clock)(
+    {
     on: (event: string, handler: Handler) => handlers.set(event, handler),
     registerCommand: (name: string, options: never) => commands.set(name, options),
     appendEntry: (customType: string, data: unknown) => entries.push({ customType, data }),
     getAllTools: () => tools,
-  } as never);
+  } as never,
+    clock,
+  );
   return { handlers, commands, entries };
 }
 
@@ -65,7 +68,12 @@ test("asks the core before every tool call and records user decisions", async ()
     assert.deepEqual(
       entries,
       recorded
-        ? [{ customType: "watershed.approval", data: { toolCallId: "c1", tool: "bash", decision: answer } }]
+        ? [
+            {
+              customType: "watershed.approval",
+              data: { toolCallId: "c1", tool: "bash", decision: answer, waitedMs: 0 },
+            },
+          ]
         : [],
     );
   }
@@ -95,4 +103,51 @@ test("branches the session at an entry", async () => {
   assert.deepEqual(plain.branches, [["6ed210af", {}]]);
   assert.deepEqual(empty.branches, []);
   assert.deepEqual(empty.notes, ["watershed-branch needs an entry id"]);
+});
+
+test("records request and tool timing for the Trajectory", async () => {
+  let now = 1000;
+  const { handlers, entries } = load(() => now);
+  const ctx = context(undefined).ctx;
+  const fire = (event: string, payload: unknown) => handlers.get(event)!(payload, ctx);
+  await fire("message_start", { message: { role: "user" } });
+  await fire("message_start", { message: { role: "assistant" } });
+  now = 1900;
+  await fire("message_update", { message: { role: "assistant" } });
+  now = 1950;
+  await fire("message_update", { message: { role: "assistant" } });
+  now = 4400;
+  await fire("message_end", { message: { role: "assistant" } });
+  await fire("message_start", { message: { role: "assistant" } });
+  now = 4500;
+  await fire("message_end", { message: { role: "assistant" } });
+  await fire("tool_execution_end", { toolCallId: "c1", durationMs: 12 });
+  await fire("tool_execution_end", { toolCallId: "c2" });
+  assert.deepEqual(entries, [
+    { customType: "watershed.timing", data: { kind: "request", firstTokenMs: 900, durationMs: 3400 } },
+    { customType: "watershed.timing", data: { kind: "request", firstTokenMs: null, durationMs: 100 } },
+    { customType: "watershed.timing", data: { kind: "tool", toolCallId: "c1", durationMs: 12 } },
+    { customType: "watershed.timing", data: { kind: "tool", toolCallId: "c2", durationMs: null } },
+  ]);
+});
+
+test("records how long an approval waited for the user", async () => {
+  let now = 0;
+  const { handlers, entries } = load(() => now);
+  const ctx = {
+    mode: "rpc",
+    ui: {
+      select: async () => {
+        now = 9400;
+        return "allow-once";
+      },
+    },
+  };
+  await handlers.get("tool_call")!({ toolCallId: "c9", toolName: "bash", input: {} }, ctx);
+  assert.deepEqual(entries, [
+    {
+      customType: "watershed.approval",
+      data: { toolCallId: "c9", tool: "bash", decision: "allow-once", waitedMs: 9400 },
+    },
+  ]);
 });
