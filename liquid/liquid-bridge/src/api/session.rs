@@ -1,15 +1,15 @@
 //! Agent sessions for the Liquid app. Calls run on flutter_rust_bridge's worker threads, never on
 //! the Dart main isolate, and events stream to Dart as they arrive (ADR-0182).
 
-use std::sync::LazyLock;
+use std::sync::{LazyLock, PoisonError};
 use std::time::Duration;
 
-use meta_harness_core::{AgentCommand, Answer, RequestId, Session};
+use meta_harness_core::{AgentCommand, Answer, RequestId, Session, SessionEvent};
 use tokio::runtime::Runtime;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, mpsc};
 
 use crate::api::events::{BridgeDecision, BridgeEvent};
-use crate::convert::describe;
+use crate::convert::{coalesce, describe};
 use crate::frb_generated::StreamSink;
 
 /// Time an agent gets to exit after its input closes before it is killed.
@@ -48,41 +48,60 @@ pub enum BridgeApprovalMode {
 #[flutter_rust_bridge::frb(opaque)]
 pub struct AgentSession {
     session: Mutex<Option<Session>>,
-}
-
-/// Starts an agent and streams its events into `events`.
-pub fn start_session(
-    config: SessionConfig,
-    events: StreamSink<BridgeEvent>,
-) -> Result<AgentSession, String> {
-    AgentSession::start(config, move |event| events.add(event).is_ok())
+    /// The session's events until Dart subscribes; the core buffers a bounded number and then
+    /// pauses the agent.
+    receiver: std::sync::Mutex<Option<mpsc::Receiver<SessionEvent>>>,
 }
 
 impl AgentSession {
-    /// Starts an agent and hands each event to `forward` until it returns `false`.
-    pub(crate) fn start(
-        config: SessionConfig,
-        mut forward: impl FnMut(BridgeEvent) -> bool + Send + 'static,
-    ) -> Result<Self, String> {
+    /// Starts an agent; subscribe with [`AgentSession::events`].
+    pub fn start(config: SessionConfig) -> Result<Self, String> {
         let command = AgentCommand {
             program: config.program.into(),
             args: config.args.into_iter().map(Into::into).collect(),
             cwd: config.cwd.into(),
         };
         let _runtime = RUNTIME.enter();
-        let (session, mut receiver) =
-            Session::start(&command).map_err(|error| error.to_string())?;
+        let (session, receiver) = Session::start(&command).map_err(|error| error.to_string())?;
+        Ok(Self {
+            session: Mutex::new(Some(session)),
+            receiver: std::sync::Mutex::new(Some(receiver)),
+        })
+    }
+
+    /// Streams the session's events; a session has one subscriber.
+    pub fn events(&self, sink: StreamSink<BridgeEvent>) -> Result<(), String> {
+        self.forward(move |event| sink.add(event).is_ok())
+    }
+
+    /// Hands each batch of events to `deliver` until it returns `false`.
+    pub(crate) fn forward(
+        &self,
+        mut deliver: impl FnMut(BridgeEvent) -> bool + Send + 'static,
+    ) -> Result<(), String> {
+        let mut receiver = self
+            .receiver
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take()
+            .ok_or_else(|| "the session's events already have a subscriber".to_owned())?;
         RUNTIME.spawn(async move {
-            // Dart closed the stream: stop forwarding; dropping the session ends the agent.
+            let mut batch = Vec::new();
             while let Some(event) = receiver.recv().await {
-                if !forward(BridgeEvent::from(event)) {
+                batch.push(BridgeEvent::from(event));
+                while let Ok(event) = receiver.try_recv() {
+                    batch.push(BridgeEvent::from(event));
+                }
+                // Dart closed the stream: stop; dropping the session ends the agent.
+                if !coalesce(std::mem::take(&mut batch))
+                    .into_iter()
+                    .all(&mut deliver)
+                {
                     break;
                 }
             }
         });
-        Ok(Self {
-            session: Mutex::new(Some(session)),
-        })
+        Ok(())
     }
 
     /// Sends a prompt that starts a turn.

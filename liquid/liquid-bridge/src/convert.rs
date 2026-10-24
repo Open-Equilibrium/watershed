@@ -12,6 +12,25 @@ use crate::api::events::{
 };
 use crate::api::session::BridgeApprovalMode;
 
+/// Merges consecutive content deltas of the same item, so a lagging UI receives the latest text
+/// in fewer events instead of every intermediate one (client architecture rule 4).
+pub(crate) fn coalesce(events: Vec<BridgeEvent>) -> Vec<BridgeEvent> {
+    let mut merged: Vec<BridgeEvent> = Vec::with_capacity(events.len());
+    for event in events {
+        if let Some(last) = merged.last_mut()
+            && last.kind == BridgeEventKind::ContentDelta
+            && event.kind == BridgeEventKind::ContentDelta
+            && last.item.as_ref().map(|item| item.id) == event.item.as_ref().map(|item| item.id)
+            && let (Some(text), Some(more)) = (last.text.as_mut(), event.text.as_deref())
+        {
+            text.push_str(more);
+            continue;
+        }
+        merged.push(event);
+    }
+    merged
+}
+
 /// Describes a failed command for Dart.
 pub(crate) fn describe(error: CommandError) -> String {
     match error {

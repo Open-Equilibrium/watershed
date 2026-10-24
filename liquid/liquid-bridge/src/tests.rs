@@ -11,7 +11,7 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use crate::api::session::{AgentSession, BridgeApprovalMode, SessionConfig};
-use crate::convert::describe;
+use crate::convert::{coalesce, describe};
 
 fn bridge(event: RuntimeEvent) -> BridgeEvent {
     SessionEvent::Runtime(event).into()
@@ -148,20 +148,23 @@ fn the_exit_ends_the_stream_and_failures_explain_themselves() {
 #[test]
 fn drives_an_agent_through_the_bridge() {
     let script = r#"IFS= read -r line
-printf '%s\n' '{"id":"1","type":"response","command":"set_approval_mode","success":true}' >/dev/null
 printf '%s\n' '{"id":"1","type":"response","command":"prompt","success":true,"data":{"disposition":"started"}}'
 printf '%s\n' '{"type":"agent_start"}' '{"type":"agent_settled","aborted":false}'
 IFS= read -r line || exit 0"#;
-    let (sender, receiver) = mpsc::channel();
-    let session = AgentSession::start(
-        SessionConfig {
-            program: "/bin/sh".to_owned(),
-            args: vec!["-c".to_owned(), script.to_owned()],
-            cwd: std::env::temp_dir().display().to_string(),
-        },
-        move |event| sender.send(event).is_ok(),
-    )
+    let session = AgentSession::start(SessionConfig {
+        program: "/bin/sh".to_owned(),
+        args: vec!["-c".to_owned(), script.to_owned()],
+        cwd: std::env::temp_dir().display().to_string(),
+    })
     .expect("agent starts");
+    let (sender, receiver) = mpsc::channel();
+    session
+        .forward(move |event| sender.send(event).is_ok())
+        .expect("first subscriber");
+    assert_eq!(
+        session.forward(|_| true),
+        Err("the session's events already have a subscriber".to_owned())
+    );
     assert_eq!(
         session.set_approval_mode(BridgeApprovalMode::FullAccess),
         Ok(())
@@ -180,5 +183,49 @@ IFS= read -r line || exit 0"#;
     assert_eq!(
         session.prompt("again".to_owned()),
         Err("the session was shut down".to_owned())
+    );
+}
+
+#[test]
+fn coalesces_consecutive_deltas_of_one_item() {
+    let delta = |item: u64, text: &str| {
+        bridge(RuntimeEvent::ContentDelta {
+            item: ItemId(item),
+            delta: text.to_owned(),
+        })
+    };
+    let merged = coalesce(vec![
+        delta(1, "He"),
+        delta(1, "llo"),
+        delta(2, "Hi"),
+        bridge(RuntimeEvent::TurnCompleted { turn: TurnId(1) }),
+        delta(2, "!"),
+    ]);
+    let summary: Vec<_> = merged
+        .iter()
+        .map(|event| {
+            (
+                event.kind,
+                event.item.as_ref().map(|item| item.id),
+                event.text.clone(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        summary,
+        [
+            (
+                BridgeEventKind::ContentDelta,
+                Some(1),
+                Some("Hello".to_owned())
+            ),
+            (
+                BridgeEventKind::ContentDelta,
+                Some(2),
+                Some("Hi".to_owned())
+            ),
+            (BridgeEventKind::TurnCompleted, None, None),
+            (BridgeEventKind::ContentDelta, Some(2), Some("!".to_owned())),
+        ]
     );
 }

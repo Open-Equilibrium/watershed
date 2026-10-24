@@ -68,7 +68,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.13.0';
 
   @override
-  int get rustContentHash => -1180620345;
+  int get rustContentHash => -1032773985;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -105,6 +105,10 @@ abstract class RustLibApi extends BaseApi {
     required String request,
   });
 
+  Stream<BridgeEvent> crateApiSessionAgentSessionEvents({
+    required AgentSession that,
+  });
+
   Future<void> crateApiSessionAgentSessionPrompt({
     required AgentSession that,
     required String message,
@@ -119,16 +123,16 @@ abstract class RustLibApi extends BaseApi {
     required AgentSession that,
   });
 
+  Future<AgentSession> crateApiSessionAgentSessionStart({
+    required SessionConfig config,
+  });
+
   Future<void> crateApiSessionAgentSessionSteer({
     required AgentSession that,
     required String message,
   });
 
   Future<BridgeUsage> crateApiEventsBridgeUsageDefault();
-
-  Stream<BridgeEvent> crateApiSessionStartSession({
-    required SessionConfig config,
-  });
 
   RustArcIncrementStrongCountFnType
   get rust_arc_increment_strong_count_AgentSession;
@@ -337,6 +341,47 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Stream<BridgeEvent> crateApiSessionAgentSessionEvents({
+    required AgentSession that,
+  }) {
+    final sink = RustStreamSink<BridgeEvent>();
+    unawaited(
+      handler.executeNormal(
+        NormalTask(
+          callFfi: (port_) {
+            final serializer = SseSerializer(generalizedFrbRustBinding);
+            sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerAgentSession(
+              that,
+              serializer,
+            );
+            sse_encode_StreamSink_bridge_event_Sse(sink, serializer);
+            pdeCallFfi(
+              generalizedFrbRustBinding,
+              serializer,
+              funcId: 6,
+              port: port_,
+            );
+          },
+          codec: SseCodec(
+            decodeSuccessData: sse_decode_unit,
+            decodeErrorData: sse_decode_String,
+          ),
+          constMeta: kCrateApiSessionAgentSessionEventsConstMeta,
+          argValues: [that, sink],
+          apiImpl: this,
+        ),
+      ),
+    );
+    return sink.stream;
+  }
+
+  TaskConstMeta get kCrateApiSessionAgentSessionEventsConstMeta =>
+      const TaskConstMeta(
+        debugName: "AgentSession_events",
+        argNames: ["that", "sink"],
+      );
+
+  @override
   Future<void> crateApiSessionAgentSessionPrompt({
     required AgentSession that,
     required String message,
@@ -353,7 +398,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 6,
+            funcId: 7,
             port: port_,
           );
         },
@@ -391,7 +436,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 7,
+            funcId: 8,
             port: port_,
           );
         },
@@ -427,7 +472,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 8,
+            funcId: 9,
             port: port_,
           );
         },
@@ -449,6 +494,40 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<AgentSession> crateApiSessionAgentSessionStart({
+    required SessionConfig config,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_box_autoadd_session_config(config, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 10,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData:
+              sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerAgentSession,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiSessionAgentSessionStartConstMeta,
+        argValues: [config],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiSessionAgentSessionStartConstMeta =>
+      const TaskConstMeta(
+        debugName: "AgentSession_start",
+        argNames: ["config"],
+      );
+
+  @override
   Future<void> crateApiSessionAgentSessionSteer({
     required AgentSession that,
     required String message,
@@ -465,7 +544,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 9,
+            funcId: 11,
             port: port_,
           );
         },
@@ -495,7 +574,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 10,
+            funcId: 12,
             port: port_,
           );
         },
@@ -512,45 +591,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   TaskConstMeta get kCrateApiEventsBridgeUsageDefaultConstMeta =>
       const TaskConstMeta(debugName: "bridge_usage_default", argNames: []);
-
-  @override
-  Stream<BridgeEvent> crateApiSessionStartSession({
-    required SessionConfig config,
-  }) {
-    final events = RustStreamSink<BridgeEvent>();
-    unawaited(
-      handler.executeNormal(
-        NormalTask(
-          callFfi: (port_) {
-            final serializer = SseSerializer(generalizedFrbRustBinding);
-            sse_encode_box_autoadd_session_config(config, serializer);
-            sse_encode_StreamSink_bridge_event_Sse(events, serializer);
-            pdeCallFfi(
-              generalizedFrbRustBinding,
-              serializer,
-              funcId: 11,
-              port: port_,
-            );
-          },
-          codec: SseCodec(
-            decodeSuccessData:
-                sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerAgentSession,
-            decodeErrorData: sse_decode_String,
-          ),
-          constMeta: kCrateApiSessionStartSessionConstMeta,
-          argValues: [config, events],
-          apiImpl: this,
-        ),
-      ),
-    );
-    return events.stream;
-  }
-
-  TaskConstMeta get kCrateApiSessionStartSessionConstMeta =>
-      const TaskConstMeta(
-        debugName: "start_session",
-        argNames: ["config", "events"],
-      );
 
   RustArcIncrementStrongCountFnType
   get rust_arc_increment_strong_count_AgentSession => wire
@@ -2303,6 +2343,10 @@ class AgentSessionImpl extends RustOpaque implements AgentSession {
   /// Dismisses a question.
   Future<void> dismiss({required String request}) => RustLib.instance.api
       .crateApiSessionAgentSessionDismiss(that: this, request: request);
+
+  /// Streams the session's events; a session has one subscriber.
+  Stream<BridgeEvent> events() =>
+      RustLib.instance.api.crateApiSessionAgentSessionEvents(that: this);
 
   /// Sends a prompt that starts a turn.
   Future<void> prompt({required String message}) => RustLib.instance.api

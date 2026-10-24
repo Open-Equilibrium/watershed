@@ -8,12 +8,8 @@ import 'events.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `answer`, `open`, `start`
+// These functions are ignored because they are not marked as `pub`: `answer`, `forward`, `open`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `clone`, `eq`, `fmt`
-
-/// Starts an agent and streams its events into `events`.
-Stream<BridgeEvent> startSession({required SessionConfig config}) =>
-    RustLib.instance.api.crateApiSessionStartSession(config: config);
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<AgentSession>>
 abstract class AgentSession implements RustOpaqueInterface {
@@ -38,6 +34,9 @@ abstract class AgentSession implements RustOpaqueInterface {
   /// Dismisses a question.
   Future<void> dismiss({required String request});
 
+  /// Streams the session's events; a session has one subscriber.
+  Stream<BridgeEvent> events();
+
   /// Sends a prompt that starts a turn.
   Future<void> prompt({required String message});
 
@@ -47,6 +46,10 @@ abstract class AgentSession implements RustOpaqueInterface {
   /// Asks the agent to exit and kills it after a grace period; returns whether it exited
   /// successfully.
   Future<bool> shutdown();
+
+  /// Starts an agent; subscribe with [`AgentSession::events`].
+  static Future<AgentSession> start({required SessionConfig config}) =>
+      RustLib.instance.api.crateApiSessionAgentSessionStart(config: config);
 
   /// Steers the running turn.
   Future<void> steer({required String message});
