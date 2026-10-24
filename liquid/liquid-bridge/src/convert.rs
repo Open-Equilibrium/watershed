@@ -1,14 +1,19 @@
 //! Conversions between the core's model and the types Dart receives.
 
 use meta_harness_core::{
-    ApprovalMode, ChangeStatus, CommandError, Decision, FileChange, ItemDetail, ItemKind,
-    ItemStatus, NotificationLevel, RequestKind, RuntimeEvent, SessionEvent, UserInput,
+    ApprovalMode, ChangeStatus, CommandError, Decision, EntryKind, FileChange, ItemDetail,
+    ItemKind, ItemStatus, NotificationLevel, RecordKind, RequestKind, RuntimeEvent, SessionEvent,
+    StepContext, Trajectory, TrajectoryRecord, TreeNode, Usage, UserInput,
 };
 
 use crate::api::events::{
     BridgeApproval, BridgeChangeStatus, BridgeContext, BridgeDecision, BridgeDisplay, BridgeEvent,
     BridgeEventKind, BridgeFileChange, BridgeItem, BridgeItemKind, BridgeLevel, BridgeQuestion,
     BridgeQuestionKind, BridgeRequest, BridgeRequestKind, BridgeSection, BridgeStep, BridgeUsage,
+};
+use crate::api::history::{
+    BridgeEntryKind, BridgeRecord, BridgeRecordKind, BridgeStepContext, BridgeTrajectory,
+    BridgeTreeNode,
 };
 use crate::api::session::BridgeApprovalMode;
 
@@ -42,6 +47,84 @@ pub(crate) fn describe(error: CommandError) -> String {
 
 fn int(value: impl TryInto<i64>) -> i64 {
     value.try_into().unwrap_or(i64::MAX)
+}
+
+impl From<Usage> for BridgeUsage {
+    fn from(usage: Usage) -> Self {
+        Self {
+            input: int(usage.input),
+            output: int(usage.output),
+            cache_read: int(usage.cache_read),
+            cache_write: int(usage.cache_write),
+            reasoning: int(usage.reasoning),
+            cost_micro_usd: int(usage.cost_micro_usd),
+        }
+    }
+}
+
+impl From<TreeNode> for BridgeTreeNode {
+    fn from(node: TreeNode) -> Self {
+        Self {
+            id: node.id,
+            parent: node.parent,
+            kind: match node.kind {
+                EntryKind::User => BridgeEntryKind::User,
+                EntryKind::Assistant => BridgeEntryKind::Assistant,
+                EntryKind::ToolResult => BridgeEntryKind::ToolResult,
+                EntryKind::System => BridgeEntryKind::System,
+                EntryKind::Custom(_) => BridgeEntryKind::Custom,
+                EntryKind::Other(_) => BridgeEntryKind::Other,
+            },
+            preview: node.preview,
+            label: node.label,
+            at_ms: node.at_ms.map(int),
+        }
+    }
+}
+
+impl From<Trajectory> for BridgeTrajectory {
+    fn from(trajectory: Trajectory) -> Self {
+        Self {
+            records: trajectory.records.into_iter().map(Into::into).collect(),
+            duration_ms: int(trajectory.duration_ms),
+        }
+    }
+}
+
+impl From<TrajectoryRecord> for BridgeRecord {
+    fn from(record: TrajectoryRecord) -> Self {
+        Self {
+            entry: record.entry,
+            turn: int(record.turn),
+            kind: match record.kind {
+                RecordKind::User => BridgeRecordKind::User,
+                RecordKind::Message => BridgeRecordKind::Message,
+                RecordKind::Tool => BridgeRecordKind::Tool,
+                RecordKind::Approval => BridgeRecordKind::Approval,
+            },
+            label: record.label,
+            detail: record.detail,
+            start_ms: int(record.start_ms),
+            duration_ms: record.duration_ms.map(int),
+            first_token_ms: record.first_token_ms.map(int),
+            model: record.model,
+            usage: record.usage.map(Into::into),
+            stop_reason: record.stop_reason,
+            failed: record.failed,
+            context: record.context.map(Into::into),
+        }
+    }
+}
+
+impl From<StepContext> for BridgeStepContext {
+    fn from(context: StepContext) -> Self {
+        Self {
+            prompt_chars: int(context.prompt_chars),
+            tools: context.tools,
+            messages: int(context.messages),
+            new_since_previous: context.new_since_previous,
+        }
+    }
 }
 
 impl From<FileChange> for BridgeFileChange {
@@ -284,14 +367,7 @@ impl From<RuntimeEvent> for BridgeEvent {
                 step: Some(BridgeStep {
                     id: int(step.0),
                     model,
-                    usage: BridgeUsage {
-                        input: int(usage.input),
-                        output: int(usage.output),
-                        cache_read: int(usage.cache_read),
-                        cache_write: int(usage.cache_write),
-                        reasoning: int(usage.reasoning),
-                        cost_micro_usd: int(usage.cost_micro_usd),
-                    },
+                    usage: usage.into(),
                     stop_reason,
                     error,
                     first_token_ms: first_token_ms.map(int),

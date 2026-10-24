@@ -10,6 +10,7 @@ use crate::api::events::{
 use std::sync::mpsc;
 use std::time::Duration;
 
+use crate::api::history::{BridgeEntryKind, BridgeRecordKind};
 use crate::api::session::{AgentSession, BridgeApprovalMode, SessionConfig};
 use crate::convert::{coalesce, describe};
 
@@ -287,4 +288,106 @@ IFS= read -r line || exit 0"#;
     );
     assert!(session.shutdown());
     let _ = std::fs::remove_dir_all(&repo);
+}
+
+#[test]
+fn reads_the_history_of_each_branch_and_branches_from_a_step() {
+    // A session forked after its first response: `e2` ends the original branch, `b1` the fork.
+    let entries = r#"{"entries":[{"type":"message","id":"e1","parentId":null,"timestamp":"2026-10-24T10:00:00.000Z","message":{"role":"user","content":"Add rate limiting"}},{"type":"message","id":"e2","parentId":"e1","timestamp":"2026-10-24T10:00:02.000Z","message":{"role":"assistant","model":"faux-1","usage":{"input":10,"output":2,"cost":{"total":0.001}},"content":[{"type":"text","text":"Done."}]}},{"type":"message","id":"b1","parentId":"e1","timestamp":"2026-10-24T10:01:00.000Z","message":{"role":"user","content":"Use a token bucket"}}],"leafId":"b1"}"#;
+    let respond = |id: &str| {
+        format!(
+            "IFS= read -r line\nprintf '%s\\n' '{{\"id\":\"{id}\",\"type\":\"response\",\"command\":\"get_entries\",\"success\":true,\"data\":{entries}}}'\n"
+        )
+    };
+    let script = [
+        respond("1"),
+        respond("2"),
+        r#"IFS= read -r line
+case "$line" in *'"message":"/watershed-branch e1"'*) ;; *) exit 9 ;; esac
+printf '%s\n' '{"id":"3","type":"response","command":"prompt","success":true,"data":{"disposition":"handled"}}'
+IFS= read -r line || exit 0"#
+            .to_owned(),
+    ]
+    .concat();
+    let session = AgentSession::start(SessionConfig {
+        program: "/bin/sh".to_owned(),
+        args: vec!["-c".to_owned(), script],
+        cwd: std::env::temp_dir().display().to_string(),
+    })
+    .expect("agent starts");
+
+    let current = session.history(Vec::new()).expect("history");
+    assert_eq!(current.leaf.as_deref(), Some("b1"));
+    let nodes: Vec<_> = current
+        .tree
+        .iter()
+        .map(|node| {
+            (
+                node.id.as_str(),
+                node.parent.as_deref(),
+                node.kind,
+                node.at_ms,
+            )
+        })
+        .collect();
+    assert_eq!(
+        nodes,
+        [
+            ("e1", None, BridgeEntryKind::User, Some(1_792_836_000_000)),
+            (
+                "e2",
+                Some("e1"),
+                BridgeEntryKind::Assistant,
+                Some(1_792_836_002_000)
+            ),
+            (
+                "b1",
+                Some("e1"),
+                BridgeEntryKind::User,
+                Some(1_792_836_060_000)
+            ),
+        ]
+    );
+    let steps =
+        |history: &crate::api::history::BridgeHistory| -> Vec<Vec<(BridgeRecordKind, String)>> {
+            history
+                .trajectories
+                .iter()
+                .map(|trajectory| {
+                    trajectory
+                        .records
+                        .iter()
+                        .map(|record| (record.kind, record.label.clone()))
+                        .collect()
+                })
+                .collect()
+        };
+    assert_eq!(
+        steps(&current),
+        [vec![
+            (BridgeRecordKind::User, "Add rate limiting".to_owned()),
+            (BridgeRecordKind::User, "Use a token bucket".to_owned()),
+        ]]
+    );
+
+    let both = session
+        .history(vec!["e2".to_owned(), "b1".to_owned()])
+        .expect("history");
+    assert_eq!(
+        steps(&both)[0][1],
+        (BridgeRecordKind::Message, "Done.".to_owned())
+    );
+    assert_eq!(both.trajectories[0].duration_ms, 2000);
+    let response = &both.trajectories[0].records[1];
+    assert_eq!(
+        (
+            response.duration_ms,
+            response.usage.map(|usage| usage.cost_micro_usd)
+        ),
+        (None, Some(1000))
+    );
+    assert_eq!(steps(&both)[1], steps(&current)[0]);
+
+    assert_eq!(session.branch("e1".to_owned()), Ok(()));
+    assert!(session.shutdown());
 }

@@ -5,6 +5,7 @@
 
 import '../frb_generated.dart';
 import 'events.dart';
+import 'history.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
@@ -25,6 +26,9 @@ abstract class AgentSession implements RustOpaqueInterface {
   /// Answers a selection, input or editor question with text.
   Future<void> answerText({required String request, required String text});
 
+  /// Continues the session from `entry`; the next prompt starts a new branch there.
+  Future<void> branch({required String entry});
+
   /// Files the latest run changed, compared with the project before it.
   Future<List<BridgeFileChange>> changes();
 
@@ -39,6 +43,10 @@ abstract class AgentSession implements RustOpaqueInterface {
 
   /// Streams the session's events; a session has one subscriber.
   Stream<BridgeEvent> events();
+
+  /// Reads the session's branch tree and the Trajectory of each branch ending at an entry in
+  /// `leaves`, or of the current branch when `leaves` is empty.
+  Future<BridgeHistory> history({required List<String> leaves});
 
   /// The unified diff of one file since the latest run started.
   Future<String> patch({required String path});

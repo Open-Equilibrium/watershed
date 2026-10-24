@@ -11,6 +11,7 @@ use tokio::runtime::Runtime;
 use tokio::sync::{Mutex, mpsc};
 
 use crate::api::events::{BridgeDecision, BridgeEvent, BridgeFileChange};
+use crate::api::history::BridgeHistory;
 use crate::convert::{coalesce, describe};
 use crate::frb_generated::StreamSink;
 
@@ -155,6 +156,40 @@ impl AgentSession {
                     .map_err(|error| error.to_string()),
                 _ => Ok(String::new()),
             }
+        })
+    }
+
+    /// Reads the session's branch tree and the Trajectory of each branch ending at an entry in
+    /// `leaves`, or of the current branch when `leaves` is empty.
+    pub fn history(&self, leaves: Vec<String>) -> Result<BridgeHistory, String> {
+        RUNTIME.block_on(async {
+            let mut session = self.session.lock().await;
+            let history = open(&mut session)?.history().await.map_err(describe)?;
+            let tree = history.tree();
+            let trajectories = if leaves.is_empty() {
+                vec![history.trajectory(None).into()]
+            } else {
+                leaves
+                    .iter()
+                    .map(|leaf| history.trajectory(Some(leaf)).into())
+                    .collect()
+            };
+            Ok(BridgeHistory {
+                tree: tree.nodes.into_iter().map(Into::into).collect(),
+                leaf: tree.leaf,
+                trajectories,
+            })
+        })
+    }
+
+    /// Continues the session from `entry`; the next prompt starts a new branch there.
+    pub fn branch(&self, entry: String) -> Result<(), String> {
+        RUNTIME.block_on(async {
+            let mut session = self.session.lock().await;
+            open(&mut session)?
+                .branch(&entry, None)
+                .await
+                .map_err(describe)
         })
     }
 

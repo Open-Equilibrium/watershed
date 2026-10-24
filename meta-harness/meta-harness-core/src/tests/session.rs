@@ -311,6 +311,6 @@ fn reads_state_and_tree_and_branches_through_the_extension() {
                 .collect::<Vec<_>>(),
             [(RecordKind::User, "hi")]
         );
-        assert_eq!(session.branch("e1", "B").await, Ok(()));
+        assert_eq!(session.branch("e1", Some("B")).await, Ok(()));
     });
 }

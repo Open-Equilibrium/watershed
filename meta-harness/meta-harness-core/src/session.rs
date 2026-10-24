@@ -203,10 +203,13 @@ impl Session {
         Ok(History { entries })
     }
 
-    /// Continues the session from `entry` under a branch `label`; the next prompt starts the
-    /// branch. Requires Watershed's pi extension.
-    pub async fn branch(&mut self, entry: &str, label: &str) -> Result<(), CommandError> {
-        let message = format!("/watershed-branch {entry} {label}");
+    /// Continues the session from `entry`, optionally labelling it; the next prompt starts a
+    /// new branch there. Requires Watershed's pi extension.
+    pub async fn branch(&mut self, entry: &str, label: Option<&str>) -> Result<(), CommandError> {
+        let message = match label {
+            Some(label) => format!("/watershed-branch {entry} {label}"),
+            None => format!("/watershed-branch {entry}"),
+        };
         self.prompt(&message).await
     }
 
