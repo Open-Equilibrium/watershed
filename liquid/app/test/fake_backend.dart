@@ -8,6 +8,8 @@ import 'package:liquid/src/session/backend.dart';
 class FakeBackend implements SessionBackend {
   final controller = StreamController<BridgeEvent>();
   final calls = <String>[];
+  List<BridgeFileChange> changed = const [];
+  Map<String, String> patches = const {};
   bool cancelled = false;
 
   @override
@@ -36,6 +38,10 @@ class FakeBackend implements SessionBackend {
       calls.add('confirm $request $confirmed');
   @override
   Future<void> dismiss(String request) async => calls.add('dismiss $request');
+  @override
+  Future<List<BridgeFileChange>> changes() async => changed;
+  @override
+  Future<String> patch(String path) async => patches[path] ?? '';
   @override
   Future<bool> shutdown() async {
     calls.add('shutdown');

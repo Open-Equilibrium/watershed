@@ -4,8 +4,8 @@ use meta_harness_core::{
 };
 
 use crate::api::events::{
-    BridgeApproval, BridgeDecision, BridgeEvent, BridgeEventKind, BridgeItemKind,
-    BridgeQuestionKind, BridgeRequestKind,
+    BridgeApproval, BridgeChangeStatus, BridgeDecision, BridgeEvent, BridgeEventKind,
+    BridgeFileChange, BridgeItemKind, BridgeQuestionKind, BridgeRequestKind,
 };
 use std::sync::mpsc;
 use std::time::Duration;
@@ -228,4 +228,63 @@ fn coalesces_consecutive_deltas_of_one_item() {
             (BridgeEventKind::ContentDelta, Some(2), Some("!".to_owned())),
         ]
     );
+}
+
+#[test]
+fn diffs_what_a_run_changed_in_its_project() {
+    let repo = std::env::temp_dir().join(format!("liquid-bridge-diff-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&repo);
+    std::fs::create_dir_all(&repo).expect("repository");
+    let git = |args: &[&str]| {
+        let status = std::process::Command::new("git")
+            .args([
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=test@example.com",
+                "-c",
+                "commit.gpgsign=false",
+            ])
+            .args(args)
+            .current_dir(&repo)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .status()
+            .expect("git runs");
+        assert!(status.success(), "git {args:?}");
+    };
+    git(&["init", "-q"]);
+    std::fs::write(repo.join("a.txt"), "old\n").expect("file");
+    git(&["add", "."]);
+    git(&["commit", "-q", "-m", "base"]);
+    // The stand-in agent edits the project only after the prompt arrives.
+    let script = r#"IFS= read -r line
+printf 'new\n' > a.txt
+printf '%s\n' '{"id":"1","type":"response","command":"prompt","success":true,"data":{"disposition":"started"}}'
+IFS= read -r line || exit 0"#;
+    let session = AgentSession::start(SessionConfig {
+        program: "/bin/sh".to_owned(),
+        args: vec!["-c".to_owned(), script.to_owned()],
+        cwd: repo.display().to_string(),
+    })
+    .expect("agent starts");
+    assert_eq!(session.changes(), Ok(Vec::new()), "no run yet");
+    assert_eq!(session.prompt("edit".to_owned()), Ok(()));
+    let changes = session.changes().expect("changes");
+    assert_eq!(
+        changes,
+        [BridgeFileChange {
+            path: "a.txt".to_owned(),
+            status: BridgeChangeStatus::Modified,
+            added: 1,
+            removed: 1,
+        }]
+    );
+    let patch = session.patch("a.txt".to_owned()).expect("patch");
+    assert!(
+        patch.contains("-old\n") && patch.contains("+new\n"),
+        "{patch}"
+    );
+    assert!(session.shutdown());
+    let _ = std::fs::remove_dir_all(&repo);
 }

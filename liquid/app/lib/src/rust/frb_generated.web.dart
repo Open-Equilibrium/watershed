@@ -106,6 +106,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeApprovalMode dco_decode_bridge_approval_mode(dynamic raw);
 
   @protected
+  BridgeChangeStatus dco_decode_bridge_change_status(dynamic raw);
+
+  @protected
   BridgeContext dco_decode_bridge_context(dynamic raw);
 
   @protected
@@ -119,6 +122,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeEventKind dco_decode_bridge_event_kind(dynamic raw);
+
+  @protected
+  BridgeFileChange dco_decode_bridge_file_change(dynamic raw);
 
   @protected
   BridgeItem dco_decode_bridge_item(dynamic raw);
@@ -158,6 +164,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<String> dco_decode_list_String(dynamic raw);
+
+  @protected
+  List<BridgeFileChange> dco_decode_list_bridge_file_change(dynamic raw);
 
   @protected
   List<BridgeSection> dco_decode_list_bridge_section(dynamic raw);
@@ -315,6 +324,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeChangeStatus sse_decode_bridge_change_status(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   BridgeContext sse_decode_bridge_context(SseDeserializer deserializer);
 
   @protected
@@ -328,6 +342,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeEventKind sse_decode_bridge_event_kind(SseDeserializer deserializer);
+
+  @protected
+  BridgeFileChange sse_decode_bridge_file_change(SseDeserializer deserializer);
 
   @protected
   BridgeItem sse_decode_bridge_item(SseDeserializer deserializer);
@@ -371,6 +388,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<String> sse_decode_list_String(SseDeserializer deserializer);
+
+  @protected
+  List<BridgeFileChange> sse_decode_list_bridge_file_change(
+    SseDeserializer deserializer,
+  );
 
   @protected
   List<BridgeSection> sse_decode_list_bridge_section(
@@ -581,6 +603,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_bridge_change_status(
+    BridgeChangeStatus self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_bridge_context(BridgeContext self, SseSerializer serializer);
 
   @protected
@@ -598,6 +626,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_bridge_event_kind(
     BridgeEventKind self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_file_change(
+    BridgeFileChange self,
     SseSerializer serializer,
   );
 
@@ -651,6 +685,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_list_String(List<String> self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_bridge_file_change(
+    List<BridgeFileChange> self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_list_bridge_section(

@@ -4,11 +4,13 @@
 use std::sync::{LazyLock, PoisonError};
 use std::time::Duration;
 
-use meta_harness_core::{AgentCommand, Answer, RequestId, Session, SessionEvent};
+use meta_harness_core::{
+    AgentCommand, Answer, RequestId, Session, SessionEvent, Snapshot, WorkingTree,
+};
 use tokio::runtime::Runtime;
 use tokio::sync::{Mutex, mpsc};
 
-use crate::api::events::{BridgeDecision, BridgeEvent};
+use crate::api::events::{BridgeDecision, BridgeEvent, BridgeFileChange};
 use crate::convert::{coalesce, describe};
 use crate::frb_generated::StreamSink;
 
@@ -51,6 +53,10 @@ pub struct AgentSession {
     /// The session's events until Dart subscribes; the core buffers a bounded number and then
     /// pauses the agent.
     receiver: std::sync::Mutex<Option<mpsc::Receiver<SessionEvent>>>,
+    /// The project's Git working tree, when the session runs inside one.
+    project: Option<WorkingTree>,
+    /// The project state before the latest prompt; the diff view compares against it.
+    before_run: Mutex<Option<Snapshot>>,
 }
 
 impl AgentSession {
@@ -62,10 +68,13 @@ impl AgentSession {
             cwd: config.cwd.into(),
         };
         let _runtime = RUNTIME.enter();
+        let project = RUNTIME.block_on(WorkingTree::open(&command.cwd)).ok();
         let (session, receiver) = Session::start(&command).map_err(|error| error.to_string())?;
         Ok(Self {
             session: Mutex::new(Some(session)),
             receiver: std::sync::Mutex::new(Some(receiver)),
+            project,
+            before_run: Mutex::new(None),
         })
     }
 
@@ -105,10 +114,47 @@ impl AgentSession {
     }
 
     /// Sends a prompt that starts a turn.
+    /// Captures the project first, so the diff view shows what this run changes.
     pub fn prompt(&self, message: String) -> Result<(), String> {
         RUNTIME.block_on(async {
             let mut session = self.session.lock().await;
-            open(&mut session)?.prompt(&message).await.map_err(describe)
+            let session = open(&mut session)?;
+            if let Some(project) = &self.project {
+                // Without a snapshot the run still starts; the diff view then shows nothing.
+                *self.before_run.lock().await = project.snapshot().await.ok();
+            }
+            session.prompt(&message).await.map_err(describe)
+        })
+    }
+
+    /// Files the latest run changed, compared with the project before it.
+    pub fn changes(&self) -> Result<Vec<BridgeFileChange>, String> {
+        RUNTIME.block_on(async {
+            let before = self.before_run.lock().await;
+            match (&self.project, before.as_ref()) {
+                (Some(project), Some(before)) => Ok(project
+                    .changes(before)
+                    .await
+                    .map_err(|error| error.to_string())?
+                    .into_iter()
+                    .map(Into::into)
+                    .collect()),
+                _ => Ok(Vec::new()),
+            }
+        })
+    }
+
+    /// The unified diff of one file since the latest run started.
+    pub fn patch(&self, path: String) -> Result<String, String> {
+        RUNTIME.block_on(async {
+            let before = self.before_run.lock().await;
+            match (&self.project, before.as_ref()) {
+                (Some(project), Some(before)) => project
+                    .patch(before, &path)
+                    .await
+                    .map_err(|error| error.to_string()),
+                _ => Ok(String::new()),
+            }
         })
     }
 

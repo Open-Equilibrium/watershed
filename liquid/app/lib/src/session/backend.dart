@@ -13,6 +13,8 @@ abstract interface class SessionBackend {
   Future<void> answerConfirm(String request, bool confirmed);
   Future<void> dismiss(String request);
   Future<bool> shutdown();
+  Future<List<BridgeFileChange>> changes();
+  Future<String> patch(String path);
 }
 
 /// A session in the embedded Meta-Harness core, reached through the Rust bridge.
@@ -45,4 +47,8 @@ class RustSessionBackend implements SessionBackend {
   Future<void> dismiss(String request) => _session.dismiss(request: request);
   @override
   Future<bool> shutdown() => _session.shutdown();
+  @override
+  Future<List<BridgeFileChange>> changes() => _session.changes();
+  @override
+  Future<String> patch(String path) => _session.patch(path: path);
 }

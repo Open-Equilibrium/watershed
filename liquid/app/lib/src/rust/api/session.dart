@@ -25,6 +25,9 @@ abstract class AgentSession implements RustOpaqueInterface {
   /// Answers a selection, input or editor question with text.
   Future<void> answerText({required String request, required String text});
 
+  /// Files the latest run changed, compared with the project before it.
+  Future<List<BridgeFileChange>> changes();
+
   /// Answers an approval request.
   Future<void> decide({
     required String request,
@@ -37,7 +40,11 @@ abstract class AgentSession implements RustOpaqueInterface {
   /// Streams the session's events; a session has one subscriber.
   Stream<BridgeEvent> events();
 
+  /// The unified diff of one file since the latest run started.
+  Future<String> patch({required String path});
+
   /// Sends a prompt that starts a turn.
+  /// Captures the project first, so the diff view shows what this run changes.
   Future<void> prompt({required String message});
 
   /// Changes which tool calls need the user's approval.

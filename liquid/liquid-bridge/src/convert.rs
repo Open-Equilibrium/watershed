@@ -1,14 +1,14 @@
 //! Conversions between the core's model and the types Dart receives.
 
 use meta_harness_core::{
-    ApprovalMode, CommandError, Decision, ItemDetail, ItemKind, ItemStatus, NotificationLevel,
-    RequestKind, RuntimeEvent, SessionEvent, UserInput,
+    ApprovalMode, ChangeStatus, CommandError, Decision, FileChange, ItemDetail, ItemKind,
+    ItemStatus, NotificationLevel, RequestKind, RuntimeEvent, SessionEvent, UserInput,
 };
 
 use crate::api::events::{
-    BridgeApproval, BridgeContext, BridgeDecision, BridgeDisplay, BridgeEvent, BridgeEventKind,
-    BridgeItem, BridgeItemKind, BridgeLevel, BridgeQuestion, BridgeQuestionKind, BridgeRequest,
-    BridgeRequestKind, BridgeSection, BridgeStep, BridgeUsage,
+    BridgeApproval, BridgeChangeStatus, BridgeContext, BridgeDecision, BridgeDisplay, BridgeEvent,
+    BridgeEventKind, BridgeFileChange, BridgeItem, BridgeItemKind, BridgeLevel, BridgeQuestion,
+    BridgeQuestionKind, BridgeRequest, BridgeRequestKind, BridgeSection, BridgeStep, BridgeUsage,
 };
 use crate::api::session::BridgeApprovalMode;
 
@@ -42,6 +42,21 @@ pub(crate) fn describe(error: CommandError) -> String {
 
 fn int(value: impl TryInto<i64>) -> i64 {
     value.try_into().unwrap_or(i64::MAX)
+}
+
+impl From<FileChange> for BridgeFileChange {
+    fn from(change: FileChange) -> Self {
+        Self {
+            path: change.path,
+            status: match change.status {
+                ChangeStatus::Added => BridgeChangeStatus::Added,
+                ChangeStatus::Modified => BridgeChangeStatus::Modified,
+                ChangeStatus::Deleted => BridgeChangeStatus::Deleted,
+            },
+            added: int(change.added),
+            removed: int(change.removed),
+        }
+    }
 }
 
 impl From<BridgeApprovalMode> for ApprovalMode {

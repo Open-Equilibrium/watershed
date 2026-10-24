@@ -103,6 +103,12 @@ class SessionState {
     }
   }
 
+  /// Files the latest run changed.
+  Future<List<BridgeFileChange>> changes() => _backend.changes();
+
+  /// One file's unified diff since the latest run started.
+  Future<String> patch(String path) => _backend.patch(path);
+
   /// Releases the event stream and stops the agent.
   Future<void> dispose() async {
     await _subscription.cancel();

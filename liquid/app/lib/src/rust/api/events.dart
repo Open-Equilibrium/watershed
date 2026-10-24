@@ -7,7 +7,7 @@ import '../frb_generated.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
 /// A tool call awaiting approval.
 class BridgeApproval {
@@ -43,6 +43,18 @@ class BridgeApproval {
           tool == other.tool &&
           arguments == other.arguments &&
           readOnly == other.readOnly;
+}
+
+/// How a file changed in a run.
+enum BridgeChangeStatus {
+  /// The file is new.
+  added,
+
+  /// The file changed.
+  modified,
+
+  /// The file was removed.
+  deleted,
 }
 
 /// A change to what the agent sends to the model.
@@ -255,6 +267,42 @@ enum BridgeEventKind {
 
   /// `success`; always the last event.
   exited,
+}
+
+/// One file a run changed.
+class BridgeFileChange {
+  /// The path relative to the project root.
+  final String path;
+
+  /// How it changed.
+  final BridgeChangeStatus status;
+
+  /// Added lines.
+  final PlatformInt64 added;
+
+  /// Removed lines.
+  final PlatformInt64 removed;
+
+  const BridgeFileChange({
+    required this.path,
+    required this.status,
+    required this.added,
+    required this.removed,
+  });
+
+  @override
+  int get hashCode =>
+      path.hashCode ^ status.hashCode ^ added.hashCode ^ removed.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeFileChange &&
+          runtimeType == other.runtimeType &&
+          path == other.path &&
+          status == other.status &&
+          added == other.added &&
+          removed == other.removed;
 }
 
 /// An item's identity and, depending on the event, its tool call or outcome.

@@ -258,3 +258,27 @@ pub struct BridgeSection {
     /// Its length in characters, or `None` when removed.
     pub chars: Option<i64>,
 }
+
+/// How a file changed in a run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BridgeChangeStatus {
+    /// The file is new.
+    Added,
+    /// The file changed.
+    Modified,
+    /// The file was removed.
+    Deleted,
+}
+
+/// One file a run changed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgeFileChange {
+    /// The path relative to the project root.
+    pub path: String,
+    /// How it changed.
+    pub status: BridgeChangeStatus,
+    /// Added lines.
+    pub added: i64,
+    /// Removed lines.
+    pub removed: i64,
+}

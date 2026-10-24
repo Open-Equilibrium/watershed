@@ -6,6 +6,7 @@ import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'action_area.dart';
 import 'chat_view.dart';
+import '../diff/diff_view.dart';
 
 /// What the sidebar shows about a session.
 @immutable
@@ -95,8 +96,8 @@ class _AgentShellState extends State<AgentShell> {
                         valueListenable: _tab,
                         builder: (context, tab, _) => switch (tab) {
                           AgentTab.chat => ChatView(state: widget.state),
-                          AgentTab.trajectory ||
-                          AgentTab.diff => const _NotBuiltYet(),
+                          AgentTab.diff => DiffView(state: widget.state),
+                          AgentTab.trajectory => const _NotBuiltYet(),
                         },
                       ),
                     ),
