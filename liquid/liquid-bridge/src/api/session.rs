@@ -84,8 +84,10 @@ impl AgentSession {
         self.forward(move |event| sink.add(event).is_ok())
     }
 
-    /// Hands each batch of events to `deliver` until it returns `false`.
-    pub(crate) fn forward(
+    /// Hands each batch of events to `deliver` until it returns `false`; Rust-side consumers
+    /// such as tests and observation workloads use it instead of a Dart stream.
+    #[flutter_rust_bridge::frb(ignore)]
+    pub fn forward(
         &self,
         mut deliver: impl FnMut(BridgeEvent) -> bool + Send + 'static,
     ) -> Result<(), String> {
