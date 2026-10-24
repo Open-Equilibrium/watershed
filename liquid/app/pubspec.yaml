@@ -22,3 +22,10 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  # Ships the font's license notice inside every app bundle.
+  assets:
+    - assets/fonts/LICENSE-lucide
+  fonts:
+    - family: Lucide
+      fonts:
+        - asset: assets/fonts/lucide.ttf

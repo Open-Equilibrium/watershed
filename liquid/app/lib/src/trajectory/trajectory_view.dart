@@ -8,6 +8,7 @@ import '../agent/action_area.dart';
 import '../rust/api/events.dart';
 import '../rust/api/history.dart';
 import '../session/session_state.dart';
+import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'compare_view.dart';
@@ -850,9 +851,10 @@ class _TurnRow extends StatelessWidget {
           children: [
             SizedBox(
               width: 14,
-              child: Text(
-                folded ? '›' : '⌄',
-                style: TextStyle(color: ws.textFaint),
+              child: Icon(
+                folded ? LucideIcons.chevronRight : LucideIcons.chevronDown,
+                size: 14,
+                color: ws.textFaint,
               ),
             ),
             const SizedBox(width: WsMetrics.space2),

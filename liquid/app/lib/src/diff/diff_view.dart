@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../rust/api/events.dart';
 import '../session/session_state.dart';
+import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'diff_model.dart';
@@ -154,11 +155,19 @@ class _FileTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final ws = context.ws;
     final change = row.change;
-    final (mark, color) = switch (change?.status) {
-      BridgeChangeStatus.added => ('A', ws.success),
-      BridgeChangeStatus.deleted => ('D', ws.danger),
-      BridgeChangeStatus.modified => ('M', ws.warning),
-      null => ('⌄', ws.textFaint),
+    Widget letter(String mark, Color color) => Text(
+      mark,
+      style: TextStyle(
+        color: color,
+        fontSize: WsMetrics.fsSmall,
+        fontWeight: WsMetrics.fwSemibold,
+      ),
+    );
+    final lead = switch (change?.status) {
+      BridgeChangeStatus.added => letter('A', ws.success),
+      BridgeChangeStatus.deleted => letter('D', ws.danger),
+      BridgeChangeStatus.modified => letter('M', ws.warning),
+      null => Icon(LucideIcons.chevronDown, size: 14, color: ws.textFaint),
     };
     return InkWell(
       canRequestFocus: false,
@@ -176,17 +185,11 @@ class _FileTile extends StatelessWidget {
         ),
         child: Row(
           children: [
-            SizedBox(
-              width: 16,
-              child: Text(
-                mark,
-                style: TextStyle(
-                  color: color,
-                  fontSize: WsMetrics.fsSmall,
-                  fontWeight: WsMetrics.fwSemibold,
-                ),
-              ),
-            ),
+            SizedBox(width: 16, child: lead),
+            if (change == null) ...[
+              const SizedBox(width: WsMetrics.space1),
+              Icon(LucideIcons.folder, size: 14, color: ws.textFaint),
+            ],
             const SizedBox(width: WsMetrics.space2),
             Expanded(
               child: Text(

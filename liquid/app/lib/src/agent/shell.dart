@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../rust/api/events.dart';
 import '../session/session_state.dart';
+import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'action_area.dart';
@@ -478,11 +479,10 @@ class _StatusBarState extends State<StatusBar> {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           if (notice != null) ...[
-                            Text(
+                            Icon(
                               _mark(notice.level),
-                              style: text.copyWith(
-                                color: _tone(context, notice.level),
-                              ),
+                              size: 13,
+                              color: _tone(context, notice.level),
                             ),
                             const SizedBox(width: WsMetrics.space2),
                           ],
@@ -540,9 +540,9 @@ class _StatusBarState extends State<StatusBar> {
 }
 
 /// The symbol that tells a notification's level apart without color.
-String _mark(BridgeLevel level) => switch (level) {
-  BridgeLevel.info => 'ⓘ',
-  BridgeLevel.warning || BridgeLevel.error => '⚠',
+IconData _mark(BridgeLevel level) => switch (level) {
+  BridgeLevel.info => LucideIcons.info,
+  BridgeLevel.warning || BridgeLevel.error => LucideIcons.triangleAlert,
 };
 
 Color _tone(BuildContext context, BridgeLevel level) => switch (level) {
@@ -620,12 +620,10 @@ class _NoticeList extends StatelessWidget {
                             child: Row(
                               children: [
                                 const SizedBox(width: WsMetrics.space2),
-                                Text(
+                                Icon(
                                   _mark(notice.level),
-                                  style: TextStyle(
-                                    color: _tone(context, notice.level),
-                                    fontSize: 13,
-                                  ),
+                                  size: 13,
+                                  color: _tone(context, notice.level),
                                 ),
                                 const SizedBox(width: WsMetrics.space3),
                                 Expanded(

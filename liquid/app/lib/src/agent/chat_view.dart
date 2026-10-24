@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../rust/api/events.dart';
 import '../session/session_state.dart';
+import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import '../trajectory/trajectory_model.dart';
@@ -80,7 +81,7 @@ class BranchMark extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Text('⑂', style: style),
+          Icon(LucideIcons.gitBranch, size: 13, color: ws.accent),
           const SizedBox(width: WsMetrics.space2),
           if (ref != null) ...[
             RefBadge(
@@ -131,9 +132,18 @@ class ItemTile extends StatelessWidget {
           ),
         ),
         BridgeItemKind.assistantMessage => SelectableText(text, style: prose),
-        BridgeItemKind.reasoning => Text(
-          '▸ Thinking',
-          style: TextStyle(color: ws.textFaint, fontSize: WsMetrics.fsSmall),
+        BridgeItemKind.reasoning => Row(
+          children: [
+            Icon(LucideIcons.chevronRight, size: 14, color: ws.textFaint),
+            const SizedBox(width: WsMetrics.space1),
+            Text(
+              'Thinking',
+              style: TextStyle(
+                color: ws.textFaint,
+                fontSize: WsMetrics.fsSmall,
+              ),
+            ),
+          ],
         ),
         _ => ToolRow(item: item, state: state),
       },
@@ -166,8 +176,12 @@ class ToolRow extends StatelessWidget {
             approval != null &&
             approval.approval?.tool == item.tool;
         final (mark, markColor) = item.completed
-            ? (item.failed ? ('✕', ws.danger) : ('✓', ws.success))
-            : (waiting ? ('◷', ws.warning) : ('…', ws.textFaint));
+            ? (item.failed
+                  ? (LucideIcons.x, ws.danger)
+                  : (LucideIcons.check, ws.success))
+            : (waiting
+                  ? (LucideIcons.clock, ws.warning)
+                  : (LucideIcons.loader, ws.textFaint));
         final trailing = waiting
             ? 'waiting for approval'
             : item.durationMs != null
@@ -182,7 +196,7 @@ class ToolRow extends StatelessWidget {
           ),
           child: Row(
             children: [
-              Text(mark, style: TextStyle(color: markColor)),
+              Icon(mark, size: 14, color: markColor),
               const SizedBox(width: WsMetrics.space3),
               Text(
                 item.tool ?? '',

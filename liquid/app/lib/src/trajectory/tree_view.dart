@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../agent/action_area.dart';
 import '../rust/api/history.dart';
+import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'trajectory_model.dart';
@@ -257,9 +258,7 @@ class _Check extends StatelessWidget {
         borderRadius: BorderRadius.circular(3),
         border: on ? null : Border.all(color: ws.borderStrong, width: 1.5),
       ),
-      child: on
-          ? Text('✓', style: TextStyle(color: ws.onAccent, fontSize: 9))
-          : null,
+      child: on ? Icon(LucideIcons.check, size: 10, color: ws.onAccent) : null,
     );
   }
 }

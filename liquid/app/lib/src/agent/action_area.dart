@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import '../rust/api/events.dart';
 import '../rust/api/session.dart';
 import '../session/session_state.dart';
+import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 
@@ -226,12 +227,10 @@ class _QueueChips extends StatelessWidget {
                             padding: const EdgeInsets.symmetric(
                               horizontal: WsMetrics.space2,
                             ),
-                            child: Text(
-                              '✕',
-                              style: TextStyle(
-                                color: ws.textFaint,
-                                fontSize: WsMetrics.fsSmall,
-                              ),
+                            child: Icon(
+                              LucideIcons.x,
+                              size: 12,
+                              color: ws.textFaint,
                             ),
                           ),
                         ),
@@ -279,9 +278,22 @@ class ModeChip extends StatelessWidget {
             borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
           ),
           alignment: Alignment.center,
-          child: Text(
-            '◐ ${labels[mode]} ⌄',
-            style: TextStyle(color: context.ws.textMuted, fontSize: 13),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(LucideIcons.shield, size: 13, color: context.ws.textMuted),
+              const SizedBox(width: WsMetrics.space1),
+              Text(
+                labels[mode]!,
+                style: TextStyle(color: context.ws.textMuted, fontSize: 13),
+              ),
+              const SizedBox(width: WsMetrics.space1),
+              Icon(
+                LucideIcons.chevronDown,
+                size: 13,
+                color: context.ws.textFaint,
+              ),
+            ],
           ),
         ),
       ),

@@ -5,6 +5,7 @@ import 'package:liquid/src/agent/shell.dart';
 import 'package:liquid/src/rust/api/events.dart';
 import 'package:liquid/src/rust/api/history.dart';
 import 'package:liquid/src/session/session_state.dart';
+import 'package:liquid/src/theme/icons.dart';
 import 'package:liquid/src/theme/theme.dart';
 
 import 'fake_backend.dart';
@@ -150,6 +151,7 @@ void main() {
     await notify(BridgeLevel.error, 'Could not branch: compacting');
     await tester.pump(const Duration(seconds: 7));
     expect(shown(), 'Could not branch: compacting', reason: 'errors stay');
+    expect(find.byIcon(LucideIcons.triangleAlert), findsOneWidget);
     expect(find.text('· 2 more'), findsOneWidget);
 
     await tester.tap(status);
@@ -294,6 +296,11 @@ void main() {
       );
       expect(find.text('Now I run the tests.'), findsOneWidget);
       expect(find.text('waiting for approval'), findsOneWidget);
+      expect(
+        find.byIcon(LucideIcons.clock),
+        findsOneWidget,
+        reason: 'a tool waiting for approval shows a clock with its text',
+      );
       expect(find.text('todo  ✓ limiter  ○ run tests'), findsOneWidget);
       expect(find.text('● waiting'), findsOneWidget);
     },
