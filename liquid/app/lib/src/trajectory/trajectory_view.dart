@@ -107,36 +107,38 @@ class _TrajectoryViewState extends State<TrajectoryView> {
       _again = true;
       return loading;
     }
-    return _loading = _read().whenComplete(() {
-      _loading = null;
-      // A change that arrived after the last check gets its own read.
-      if (_again && mounted) _reload();
-    });
+    return _loading = _read();
   }
 
   Future<void> _read() async {
-    do {
-      _again = false;
-      final leaves = _leaves;
-      final BridgeHistory history;
-      try {
-        history = await widget.state.history(leaves);
-      } on Object {
-        // The agent exited: keep showing the last history.
-        return;
-      }
-      if (!mounted) return;
-      final graph = sessionGraph(history.tree, history.leaf);
-      String grown(String tip) => graph.branchOf(tip)?.tip ?? tip;
-      setState(() {
-        _history = history;
-        _graph = graph;
-        if (_shown case final shown?) _shown = grown(shown);
-        _picked = [for (final tip in _picked) grown(tip)];
-      });
-      // A shown tip that grew is read again up to its new tip.
-      if (!listEquals(_leaves, leaves)) _again = true;
-    } while (_again && mounted);
+    // `_loading` is cleared in the same synchronous step as the last check of `_again`, so no
+    // caller waits for a read that missed its change.
+    try {
+      do {
+        _again = false;
+        final leaves = _leaves;
+        final BridgeHistory history;
+        try {
+          history = await widget.state.history(leaves);
+        } on Object {
+          // The agent exited: keep showing the last history.
+          return;
+        }
+        if (!mounted) return;
+        final graph = sessionGraph(history.tree, history.leaf);
+        String grown(String tip) => graph.branchOf(tip)?.tip ?? tip;
+        setState(() {
+          _history = history;
+          _graph = graph;
+          if (_shown case final shown?) _shown = grown(shown);
+          _picked = [for (final tip in _picked) grown(tip)];
+        });
+        // A shown tip that grew is read again up to its new tip.
+        if (!listEquals(_leaves, leaves)) _again = true;
+      } while (_again && mounted);
+    } finally {
+      _loading = null;
+    }
   }
 
   Future<void> _show(String? tip) {

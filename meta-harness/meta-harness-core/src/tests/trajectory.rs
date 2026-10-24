@@ -180,3 +180,34 @@ fn projects_the_selected_branch_with_timing_and_what_the_model_saw() {
         ]
     );
 }
+
+#[test]
+fn a_later_edit_brings_a_removed_message_back() {
+    let data: Value = serde_json::from_str(
+        r#"{"entries":[
+          {"type":"message","id":"u1","parentId":null,"timestamp":"2026-10-24T10:00:00.000Z","message":{"role":"user","content":"Read it"}},
+          {"type":"message","id":"a1","parentId":"u1","timestamp":"2026-10-24T10:00:01.000Z","message":{"role":"assistant","content":[{"type":"toolCall","id":"c1","name":"read","arguments":{}}]}},
+          {"type":"message","id":"r1","parentId":"a1","timestamp":"2026-10-24T10:00:02.000Z","message":{"role":"toolResult","toolCallId":"c1","toolName":"read","content":[]}},
+          {"type":"context_edit","id":"x1","parentId":"r1","timestamp":"2026-10-24T10:00:03.000Z","targetId":"r1","replacement":null},
+          {"type":"context_edit","id":"x2","parentId":"x1","timestamp":"2026-10-24T10:00:04.000Z","targetId":"r1","replacement":"shorter"},
+          {"type":"message","id":"a2","parentId":"x2","timestamp":"2026-10-24T10:00:05.000Z","message":{"role":"assistant","content":[{"type":"text","text":"Done."}]}}
+        ],"leafId":"a2"}"#,
+    )
+    .expect("JSON");
+    let context = trajectory(&data, None).records[3]
+        .context
+        .clone()
+        .expect("context");
+    assert_eq!(
+        (context.messages, context.new_since_previous),
+        (
+            3,
+            vec![
+                "result of read".to_owned(),
+                "removed message".to_owned(),
+                "edited message".to_owned(),
+            ]
+        ),
+        "the latest edit wins, so the replaced tool result is back in the context"
+    );
+}

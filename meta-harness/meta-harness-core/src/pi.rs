@@ -368,6 +368,9 @@ struct Logged {
     new: Option<String>,
     /// Whether it changed the context without being a message, such as a compaction.
     event: bool,
+    /// Whether a context edit, not a compaction, took this message out; a later edit brings it
+    /// back.
+    edited_out: bool,
 }
 
 impl Projection {
@@ -388,8 +391,9 @@ impl Projection {
         }
     }
 
-    /// Takes the entry at `index` out of the model's context.
+    /// Takes the entry at `index` out of the model's context for good.
     fn forget(&mut self, index: usize) {
+        self.log[index].edited_out = false;
         if std::mem::take(&mut self.log[index].message) {
             self.messages -= 1;
         }
@@ -447,17 +451,28 @@ impl Projection {
                 self.note("compaction summary");
             }
             Some("context_edit") => {
+                // The latest edit of a message wins: removing it takes it out of the context,
+                // replacing it brings back one that an earlier edit removed.
                 let target = entry.get("targetId").and_then(Value::as_str);
+                let index = self
+                    .log
+                    .iter()
+                    .position(|logged| Some(logged.id.as_str()) == target);
                 if entry.get("replacement").is_none_or(Value::is_null) {
-                    if let Some(index) = self
-                        .log
-                        .iter()
-                        .position(|logged| Some(logged.id.as_str()) == target)
+                    if let Some(index) = index
+                        && self.log[index].message
                     {
                         self.forget(index);
+                        self.log[index].edited_out = true;
                     }
                     self.note("removed message");
                 } else {
+                    if let Some(index) = index
+                        && std::mem::take(&mut self.log[index].edited_out)
+                    {
+                        self.log[index].message = true;
+                        self.messages += 1;
+                    }
                     self.note("edited message");
                 }
             }
