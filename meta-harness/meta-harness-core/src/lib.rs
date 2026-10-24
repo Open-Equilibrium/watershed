@@ -3,9 +3,13 @@
 
 #![deny(missing_docs)]
 
+mod event;
 mod framing;
+mod pi;
 
+pub use event::{ItemId, ItemKind, RuntimeEvent, TurnId};
 pub use framing::{FrameError, LineFramer};
+pub use pi::{AdapterError, PiAdapter};
 
 #[cfg(test)]
 mod tests;
