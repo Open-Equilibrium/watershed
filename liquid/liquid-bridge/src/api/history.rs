@@ -178,6 +178,9 @@ pub struct BridgeTranscript {
     pub items: Vec<BridgeTranscriptItem>,
     /// Whether earlier entries remain.
     pub more: bool,
+    /// The earliest entry the page covers, even when it shows none of them; the next page
+    /// ends before it.
+    pub start: Option<String>,
 }
 
 /// One chat item rebuilt from a stored entry.

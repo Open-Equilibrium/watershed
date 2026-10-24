@@ -118,6 +118,7 @@ void main() {
         chatItem('b1', BridgeItemKind.userMessage, text: 'Instead'),
       ],
       more: true,
+      start: 'u1',
     );
     await state.loadChat();
     await tester.pumpAndSettle();

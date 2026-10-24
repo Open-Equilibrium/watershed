@@ -404,10 +404,14 @@ class BridgeTranscript {
   /// Whether earlier entries remain.
   final bool more;
 
-  const BridgeTranscript({required this.items, required this.more});
+  /// The earliest entry the page covers, even when it shows none of them; the next page
+  /// ends before it.
+  final String? start;
+
+  const BridgeTranscript({required this.items, required this.more, this.start});
 
   @override
-  int get hashCode => items.hashCode ^ more.hashCode;
+  int get hashCode => items.hashCode ^ more.hashCode ^ start.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -415,7 +419,8 @@ class BridgeTranscript {
       other is BridgeTranscript &&
           runtimeType == other.runtimeType &&
           items == other.items &&
-          more == other.more;
+          more == other.more &&
+          start == other.start;
 }
 
 /// One chat item rebuilt from a stored entry.

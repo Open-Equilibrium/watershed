@@ -136,6 +136,7 @@ impl From<Transcript> for BridgeTranscript {
         Self {
             items: transcript.items.into_iter().map(Into::into).collect(),
             more: transcript.more,
+            start: transcript.start,
         }
     }
 }

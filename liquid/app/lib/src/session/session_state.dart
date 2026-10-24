@@ -107,7 +107,9 @@ class SessionState {
 
   /// Whether earlier stored entries of the chat remain to be read.
   final chatMore = ValueNotifier(false);
-  String? _firstEntry;
+
+  /// The earliest stored entry the chat covers; the next page ends before it.
+  String? _chatStart;
   bool _readingEarlier = false;
 
   /// Rebuilt items count down from -1, so they never meet live item ids.
@@ -230,20 +232,28 @@ class SessionState {
     }
     final arrived = items.value.where((view) => !before.contains(view));
     items.value = [...rebuilt, ...arrived];
-    _firstEntry = page.items.firstOrNull?.entry;
+    _chatStart = page.start;
     chatMore.value = page.more;
+    if (page.items.isEmpty) await loadEarlier();
   }
 
-  /// Reads the stored entries before the oldest one the chat shows.
+  /// Reads the stored entries before the earliest one the chat covers, passing over pages the
+  /// chat shows nothing of, such as tool results only.
   Future<void> loadEarlier() async {
-    final first = _firstEntry;
-    if (!chatMore.value || _readingEarlier || first == null) return;
+    if (_readingEarlier) return;
     _readingEarlier = true;
     try {
-      final page = await _backend.transcript(first);
-      items.value = [..._stored(page.items), ...items.value];
-      _firstEntry = page.items.firstOrNull?.entry ?? first;
-      chatMore.value = page.more;
+      while (chatMore.value && _chatStart != null) {
+        final before = _chatStart;
+        final page = await _backend.transcript(before);
+        _chatStart = page.start;
+        // A page that does not move back ends the reading, so it cannot repeat forever.
+        chatMore.value = page.more && page.start != before;
+        if (page.items.isNotEmpty) {
+          items.value = [..._stored(page.items), ...items.value];
+          return;
+        }
+      }
     } finally {
       _readingEarlier = false;
     }

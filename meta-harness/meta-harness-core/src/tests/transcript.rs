@@ -48,6 +48,7 @@ fn rebuilds_the_chat_of_the_current_branch_page_by_page() {
                 item("a2", ItemKind::AssistantMessage, "One test fails."),
             ],
             more: false,
+            start: Some("s0".to_owned()),
         },
         "approvals, timing and other branches stay out"
     );
@@ -69,7 +70,16 @@ fn rebuilds_the_chat_of_the_current_branch_page_by_page() {
                 command,
             ],
             more: false,
+            start: Some("s0".to_owned()),
         },
         "an earlier page still knows how its tool calls ended"
     );
+
+    let hidden = history.transcript(Some("a2"), 2);
+    assert_eq!(
+        (hidden.items.len(), hidden.more, hidden.start.as_deref()),
+        (0, true, Some("t1")),
+        "a page without chat items still tells where the next one ends"
+    );
+    assert_eq!(history.transcript(Some("t1"), 2).items.len(), 3);
 }

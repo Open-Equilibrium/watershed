@@ -284,10 +284,12 @@ void main() {
           chatItem('b1', BridgeItemKind.userMessage, text: 'Instead'),
         ],
         more: true,
+        start: 'u1',
       );
       backend.transcripts['u1'] = BridgeTranscript(
         items: [chatItem('u0', BridgeItemKind.userMessage, text: 'Earlier')],
         more: false,
+        start: 'u0',
       );
       await state.loadChat();
       String describe(ItemView view) =>
@@ -304,6 +306,27 @@ void main() {
       expect(state.chatMore.value, isFalse);
     },
   );
+
+  test('pages past entries that show nothing in the chat', () async {
+    backend.transcripts[''] = const BridgeTranscript(
+      items: [],
+      more: true,
+      start: 't1',
+    );
+    backend.transcripts['t1'] = const BridgeTranscript(
+      items: [],
+      more: true,
+      start: 'r1',
+    );
+    backend.transcripts['r1'] = BridgeTranscript(
+      items: [chatItem('u1', BridgeItemKind.userMessage, text: 'Go')],
+      more: false,
+      start: 'u1',
+    );
+    await state.loadChat();
+    expect(state.items.value.map((view) => view.text.value), ['Go']);
+    expect(state.chatMore.value, isFalse);
+  });
 
   test('keeps the waiting messages and edits them', () async {
     await emit(

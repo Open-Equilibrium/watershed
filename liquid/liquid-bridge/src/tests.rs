@@ -520,7 +520,10 @@ fn rebuilds_the_chat_of_the_current_branch() {
             ("a1", BridgeItemKind::FileChange, "", Some("edit")),
         ]
     );
-    assert!(!transcript.more);
+    assert_eq!(
+        (transcript.more, transcript.start.as_deref()),
+        (false, Some("u1"))
+    );
     assert!(session.shutdown());
 }
 

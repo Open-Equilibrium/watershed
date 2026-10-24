@@ -1427,11 +1427,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeTranscript dco_decode_bridge_transcript(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 2)
-      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    if (arr.length != 3)
+      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
     return BridgeTranscript(
       items: dco_decode_list_bridge_transcript_item(arr[0]),
       more: dco_decode_bool(arr[1]),
+      start: dco_decode_opt_String(arr[2]),
     );
   }
 
@@ -2311,7 +2312,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_items = sse_decode_list_bridge_transcript_item(deserializer);
     var var_more = sse_decode_bool(deserializer);
-    return BridgeTranscript(items: var_items, more: var_more);
+    var var_start = sse_decode_opt_String(deserializer);
+    return BridgeTranscript(items: var_items, more: var_more, start: var_start);
   }
 
   @protected
@@ -3327,6 +3329,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_list_bridge_transcript_item(self.items, serializer);
     sse_encode_bool(self.more, serializer);
+    sse_encode_opt_String(self.start, serializer);
   }
 
   @protected

@@ -1578,9 +1578,11 @@ impl SseDecode for crate::api::history::BridgeTranscript {
         let mut var_items =
             <Vec<crate::api::history::BridgeTranscriptItem>>::sse_decode(deserializer);
         let mut var_more = <bool>::sse_decode(deserializer);
+        let mut var_start = <Option<String>>::sse_decode(deserializer);
         return crate::api::history::BridgeTranscript {
             items: var_items,
             more: var_more,
+            start: var_start,
         };
     }
 }
@@ -2877,6 +2879,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::history::BridgeTranscript {
         [
             self.items.into_into_dart().into_dart(),
             self.more.into_into_dart().into_dart(),
+            self.start.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -3446,6 +3449,7 @@ impl SseEncode for crate::api::history::BridgeTranscript {
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <Vec<crate::api::history::BridgeTranscriptItem>>::sse_encode(self.items, serializer);
         <bool>::sse_encode(self.more, serializer);
+        <Option<String>>::sse_encode(self.start, serializer);
     }
 }
 

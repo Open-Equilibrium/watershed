@@ -79,6 +79,7 @@ pub(super) fn transcript(
     Transcript {
         items,
         more: start > 0,
+        start: path[start..end].first().map(|entry| entry.id.clone()),
     }
 }
 
