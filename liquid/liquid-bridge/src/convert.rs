@@ -72,6 +72,7 @@ impl From<TreeNode> for BridgeTreeNode {
                 EntryKind::Assistant => BridgeEntryKind::Assistant,
                 EntryKind::ToolResult => BridgeEntryKind::ToolResult,
                 EntryKind::System => BridgeEntryKind::System,
+                EntryKind::Approval => BridgeEntryKind::Approval,
                 EntryKind::Custom(_) => BridgeEntryKind::Custom,
                 EntryKind::Other(_) => BridgeEntryKind::Other,
             },

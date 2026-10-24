@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -6,6 +7,7 @@ import 'package:liquid/src/rust/api/events.dart';
 import 'package:liquid/src/rust/api/history.dart';
 import 'package:liquid/src/session/session_state.dart';
 import 'package:liquid/src/theme/theme.dart';
+import 'package:liquid/src/trajectory/overview.dart';
 
 import 'fake_backend.dart';
 
@@ -16,15 +18,20 @@ const info = SessionInfo(
   device: 'MacBook',
 );
 
-BridgeUsage tokens(int input, int output, {int reasoning = 0, int cost = 0}) =>
-    BridgeUsage(
-      input: input,
-      output: output,
-      cacheRead: 0,
-      cacheWrite: 0,
-      reasoning: reasoning,
-      costMicroUsd: cost,
-    );
+BridgeUsage tokens(
+  int input,
+  int output, {
+  int cached = 0,
+  int reasoning = 0,
+  int cost = 0,
+}) => BridgeUsage(
+  input: input,
+  output: output,
+  cacheRead: cached,
+  cacheWrite: 0,
+  reasoning: reasoning,
+  costMicroUsd: cost,
+);
 
 BridgeStepContext saw(int messages, List<String> added) => BridgeStepContext(
   promptChars: 2310,
@@ -64,7 +71,7 @@ final branchA = [
     2300,
     duration: 3400,
     firstToken: 900,
-    usage: tokens(6140, 820, reasoning: 214, cost: 20000),
+    usage: tokens(140, 820, cached: 6000, reasoning: 214, cost: 20000),
     context: saw(3, ['result of read']),
   ),
   record(
@@ -155,7 +162,10 @@ void main() {
     await press(tester, LogicalKeyboardKey.enter);
     expect(find.text('What the model saw · 6,140 tokens'), findsOneWidget);
     expect(find.text('900 ms'), findsOneWidget, reason: 'first token');
-    expect(find.text('6,140 in · 820 out · 214 think'), findsOneWidget);
+    expect(
+      find.text('6,140 in · 820 out · 214 think · 6,000 cached'),
+      findsOneWidget,
+    );
     expect(find.text('≈ \$0.02'), findsOneWidget);
     expect(find.text('Tools · bash, read'), findsOneWidget);
     expect(find.text('New since step 2: result of read'), findsOneWidget);
@@ -166,6 +176,52 @@ void main() {
       find.byKey(const Key('composer')),
     );
     expect(composer.focusNode?.hasFocus, isTrue);
+  });
+
+  testWidgets('a branch that did not move the session keeps the keyboard', (
+    tester,
+  ) async {
+    await show(tester, historyOf(branchA));
+    backend.branchMoves = false;
+    await press(tester, LogicalKeyboardKey.arrowDown);
+    await press(tester, LogicalKeyboardKey.keyB);
+    expect(
+      backend.calls,
+      contains('branch e1'),
+      reason: 'a prompt branches at itself',
+    );
+    final composer = tester.widget<TextField>(
+      find.byKey(const Key('composer')),
+    );
+    expect(composer.focusNode?.hasFocus, isFalse);
+    expect(state.notification.value?.$1, BridgeLevel.error);
+  });
+
+  testWidgets('the session tree jumps between steps with ⌥↑↓', (tester) async {
+    await show(tester, historyOf(branchA));
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.altLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.altLeft);
+    await tester.pumpAndSettle();
+    await press(tester, LogicalKeyboardKey.enter);
+    expect(find.text('What the model saw · 4,812 tokens'), findsOneWidget);
+  });
+
+  testWidgets('a trackpad swipe zooms the overview instead of focusing', (
+    tester,
+  ) async {
+    await show(tester, historyOf(branchA));
+    final tracks = tester.getCenter(find.byKey(const Key('overview-tracks')));
+    final trackpad = await tester.createGesture(
+      kind: PointerDeviceKind.trackpad,
+    );
+    await trackpad.panZoomStart(tracks);
+    await trackpad.panZoomUpdate(tracks, pan: const Offset(0, -120));
+    await trackpad.panZoomEnd();
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('range')), findsNothing);
+    expect(tester.widget<Overview>(find.byType(Overview)).window, isNotNull);
   });
 
   testWidgets('focusing a range dims the steps outside it', (tester) async {
@@ -223,6 +279,10 @@ void main() {
 
     await press(tester, LogicalKeyboardKey.keyC);
     expect(backend.calls.last, 'history e6 b2');
+    expect(
+      find.text('⌥↑↓ tree · Space select branch · C leave compare'),
+      findsOneWidget,
+    );
     expect(
       find.text('Steps 1–3 shared · prompt, message, read'),
       findsOneWidget,

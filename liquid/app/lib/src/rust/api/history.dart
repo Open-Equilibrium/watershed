@@ -24,6 +24,9 @@ enum BridgeEntryKind {
   /// A change of the system prompt or tools.
   system,
 
+  /// The user's decision on a tool call.
+  approval,
+
   /// An extension's entry.
   custom,
 

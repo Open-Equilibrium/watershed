@@ -41,6 +41,8 @@ pub enum BridgeEntryKind {
     ToolResult,
     /// A change of the system prompt or tools.
     System,
+    /// The user's decision on a tool call.
+    Approval,
     /// An extension's entry.
     Custom,
     /// Anything else.

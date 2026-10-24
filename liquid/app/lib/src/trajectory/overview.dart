@@ -65,6 +65,9 @@ class _OverviewState extends State<Overview> {
   /// Where the current drag started on the axis.
   double? _anchor;
 
+  /// The trackpad pinch scale seen last during the current gesture.
+  double _lastScale = 1;
+
   @override
   Widget build(BuildContext context) {
     final ws = context.ws;
@@ -142,6 +145,24 @@ class _OverviewState extends State<Overview> {
               double at(double x) =>
                   visible.$1 +
                   (x.clamp(0, width) / width) * (visible.$2 - visible.$1);
+              // Zooms around `x`; positive `delta` zooms out.
+              void zoom(double x, double delta, {double? scale}) {
+                if (scale != null) _lastScale = scale;
+                final pivot = at(x);
+                final factor = math.exp(delta / 500);
+                final length = ((visible.$2 - visible.$1) * factor).clamp(
+                  span / 1000,
+                  span,
+                );
+                final fraction =
+                    (pivot - visible.$1) / (visible.$2 - visible.$1);
+                final start = (pivot - fraction * length).clamp(
+                  0.0,
+                  span - length,
+                );
+                onWindow(length >= span ? null : (start, start + length));
+              }
+
               return Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -169,26 +190,30 @@ class _OverviewState extends State<Overview> {
                   ),
                   Expanded(
                     child: Listener(
+                      // A mouse wheel scrolls; a trackpad pans and pinches.
                       onPointerSignal: (signal) {
-                        if (signal is! PointerScrollEvent) return;
-                        final pivot = at(signal.localPosition.dx);
-                        final factor = math.exp(signal.scrollDelta.dy / 500);
-                        final length = ((visible.$2 - visible.$1) * factor)
-                            .clamp(span / 1000, span);
-                        final fraction =
-                            (pivot - visible.$1) / (visible.$2 - visible.$1);
-                        final start = (pivot - fraction * length).clamp(
-                          0.0,
-                          span - length,
-                        );
-                        onWindow(
-                          length >= span ? null : (start, start + length),
-                        );
+                        if (signal is PointerScrollEvent) {
+                          zoom(signal.localPosition.dx, signal.scrollDelta.dy);
+                        }
                       },
+                      onPointerPanZoomUpdate: (update) => zoom(
+                        update.localPosition.dx,
+                        update.localPanDelta.dy -
+                            500 * math.log(update.scale / _lastScale),
+                        scale: update.scale,
+                      ),
+                      onPointerPanZoomEnd: (_) => _lastScale = 1,
                       child: GestureDetector(
                         key: const Key('overview-tracks'),
                         behavior: HitTestBehavior.opaque,
                         dragStartBehavior: DragStartBehavior.down,
+                        // Trackpad gestures zoom; a pressed trackpad drags as a mouse.
+                        supportedDevices: const {
+                          PointerDeviceKind.mouse,
+                          PointerDeviceKind.touch,
+                          PointerDeviceKind.stylus,
+                          PointerDeviceKind.invertedStylus,
+                        },
                         onTap: () => onRange(null),
                         onHorizontalDragStart: (details) =>
                             _anchor = at(details.localPosition.dx),

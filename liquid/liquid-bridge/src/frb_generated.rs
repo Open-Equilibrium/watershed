@@ -996,8 +996,9 @@ impl SseDecode for crate::api::history::BridgeEntryKind {
             1 => crate::api::history::BridgeEntryKind::Assistant,
             2 => crate::api::history::BridgeEntryKind::ToolResult,
             3 => crate::api::history::BridgeEntryKind::System,
-            4 => crate::api::history::BridgeEntryKind::Custom,
-            5 => crate::api::history::BridgeEntryKind::Other,
+            4 => crate::api::history::BridgeEntryKind::Approval,
+            5 => crate::api::history::BridgeEntryKind::Custom,
+            6 => crate::api::history::BridgeEntryKind::Other,
             _ => unreachable!("Invalid variant for BridgeEntryKind: {}", inner),
         };
     }
@@ -1913,8 +1914,9 @@ impl flutter_rust_bridge::IntoDart for crate::api::history::BridgeEntryKind {
             Self::Assistant => 1.into_dart(),
             Self::ToolResult => 2.into_dart(),
             Self::System => 3.into_dart(),
-            Self::Custom => 4.into_dart(),
-            Self::Other => 5.into_dart(),
+            Self::Approval => 4.into_dart(),
+            Self::Custom => 5.into_dart(),
+            Self::Other => 6.into_dart(),
             _ => unreachable!(),
         }
     }
@@ -2562,8 +2564,9 @@ impl SseEncode for crate::api::history::BridgeEntryKind {
                 crate::api::history::BridgeEntryKind::Assistant => 1,
                 crate::api::history::BridgeEntryKind::ToolResult => 2,
                 crate::api::history::BridgeEntryKind::System => 3,
-                crate::api::history::BridgeEntryKind::Custom => 4,
-                crate::api::history::BridgeEntryKind::Other => 5,
+                crate::api::history::BridgeEntryKind::Approval => 4,
+                crate::api::history::BridgeEntryKind::Custom => 5,
+                crate::api::history::BridgeEntryKind::Other => 6,
                 _ => {
                     unimplemented!("");
                 }

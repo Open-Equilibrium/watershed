@@ -12,29 +12,25 @@ import 'trajectory_model.dart';
 Color laneColor(WsPalette ws, int lane) =>
     [ws.data1, ws.data2, ws.data3][lane % 3];
 
-/// The session's branches as a graph like GitHub's network view: prompts, forks and branch
-/// tips, one lane per branch. Each row paints its own slice, so long trees stay a lazy list.
+/// The session's branches as a graph like GitHub's network view: one lane per branch and one
+/// dot per step. Each row paints its own slice, so long trees stay a lazy list.
 class SessionTreeView extends StatelessWidget {
   const SessionTreeView({
     super.key,
     required this.graph,
-    required this.shown,
+    required this.selected,
     required this.onRow,
     this.picked,
-    this.cursor,
   });
 
   final SessionGraph graph;
 
-  /// The tip of the branch the ledger shows.
-  final String? shown;
+  /// The entry of the highlighted row: the selected step, or the cursor while comparing.
+  final String? selected;
   final ValueChanged<GraphRow> onRow;
 
   /// The tips selected for comparison, when comparing.
   final Set<String>? picked;
-
-  /// The tip the keyboard is on while comparing.
-  final String? cursor;
 
   @override
   Widget build(BuildContext context) {
@@ -80,10 +76,7 @@ class SessionTreeView extends StatelessWidget {
               itemCount: graph.rows.length,
               itemBuilder: (context, index) {
                 final row = graph.rows[index];
-                final tip = row.branch?.tip;
-                final highlighted = picked == null
-                    ? tip != null && tip == shown
-                    : tip != null && tip == cursor;
+                final highlighted = row.node.id == selected;
                 return InkWell(
                   key: ValueKey('tree-${row.node.id}'),
                   canRequestFocus: false,
@@ -153,71 +146,71 @@ class _RowContent extends StatelessWidget {
       color: highlighted ? ws.text : ws.textMuted,
       fontSize: 13,
     );
+    final faint = TextStyle(
+      color: ws.textFaint,
+      fontSize: WsMetrics.fsSmall,
+      fontFeatures: const [FontFeature.tabularFigures()],
+    );
     final branch = row.branch;
     final node = row.node;
-    final List<Widget> children;
-    if (branch != null) {
-      final picked = this.picked;
-      children = [
-        RefBadge(branch: branch),
-        const SizedBox(width: WsMetrics.space2),
-        Expanded(
-          child: Text(
-            branch.name,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(color: ws.text, fontSize: 13),
+    final picked = this.picked;
+    final isPrompt = node.kind == BridgeEntryKind.user;
+    return Row(
+      children: [
+        if (!isPrompt && row.step > 0) ...[
+          ConstrainedBox(
+            constraints: const BoxConstraints(minWidth: 16),
+            child: Text('${row.step}', style: faint.copyWith(fontSize: 13)),
           ),
-        ),
-        if (picked != null)
-          _Check(on: picked.contains(branch.tip))
-        else if (branch.durationMs != null)
-          Text(
-            formatDuration(branch.durationMs!),
-            style: TextStyle(
-              color: ws.textFaint,
-              fontSize: WsMetrics.fsSmall,
-              fontFeatures: const [FontFeature.tabularFigures()],
+          const SizedBox(width: WsMetrics.space2),
+        ],
+        if (branch != null) ...[
+          RefBadge(branch: branch),
+          const SizedBox(width: WsMetrics.space2),
+          Expanded(
+            child: Text(
+              branch.name,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(color: ws.text, fontSize: 13),
             ),
           ),
-      ];
-    } else if (row.pending) {
-      children = [
-        Text(
-          'Next prompt continues here',
-          style: muted.copyWith(color: ws.accent),
-        ),
-      ];
-    } else if (node.kind == BridgeEntryKind.user) {
-      children = [
-        Text(
-          'Turn ${row.turn}',
-          style: TextStyle(
-            color: ws.text,
-            fontSize: 13,
-            fontWeight: WsMetrics.fwSemibold,
+        ] else if (isPrompt) ...[
+          Text(
+            'Turn ${row.turn}',
+            style: TextStyle(
+              color: ws.text,
+              fontSize: 13,
+              fontWeight: WsMetrics.fwSemibold,
+            ),
           ),
-        ),
-        const SizedBox(width: WsMetrics.space2),
-        Expanded(
-          child: Text(
-            node.preview,
-            overflow: TextOverflow.ellipsis,
-            style: muted,
+          const SizedBox(width: WsMetrics.space2),
+          Expanded(
+            child: Text(
+              node.preview,
+              overflow: TextOverflow.ellipsis,
+              style: muted,
+            ),
           ),
-        ),
-      ];
-    } else {
-      children = [
-        Expanded(
-          child: Text(
-            node.kind == BridgeEntryKind.assistant ? 'Message' : node.preview,
-            overflow: TextOverflow.ellipsis,
-            style: muted,
+        ] else
+          Expanded(
+            child: Text(
+              switch (node.kind) {
+                BridgeEntryKind.assistant => 'Message',
+                BridgeEntryKind.approval => 'Approval',
+                _ => node.preview,
+              },
+              overflow: TextOverflow.ellipsis,
+              style: muted,
+            ),
           ),
-        ),
-      ];
-    }
-    return Row(children: children);
+        if (row.pending)
+          Text('continues here', style: faint.copyWith(color: ws.accent))
+        else if (branch != null && picked != null)
+          _Check(on: picked.contains(branch.tip))
+        else if (branch?.durationMs case final duration?)
+          Text(formatDuration(duration), style: faint),
+      ],
+    );
   }
 }
 

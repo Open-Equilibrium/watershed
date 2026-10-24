@@ -30,7 +30,7 @@ void main() {
         ('u', BridgeEntryKind.user, BridgeRecordKind.user),
         ('ta', BridgeEntryKind.custom, null),
         ('a', BridgeEntryKind.assistant, BridgeRecordKind.message),
-        ('p', BridgeEntryKind.custom, BridgeRecordKind.approval),
+        ('p', BridgeEntryKind.approval, BridgeRecordKind.approval),
         ('tt', BridgeEntryKind.custom, null),
         ('r', BridgeEntryKind.toolResult, BridgeRecordKind.tool),
         ('tb', BridgeEntryKind.custom, null),

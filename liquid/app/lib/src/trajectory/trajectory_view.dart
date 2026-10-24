@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../agent/action_area.dart';
+import '../rust/api/events.dart';
 import '../rust/api/history.dart';
 import '../session/session_state.dart';
 import '../theme/theme.dart';
@@ -18,6 +19,9 @@ import 'tree_view.dart';
 /// Keys of the Trajectory tab, for the status bar.
 const trajectoryKeys = '↑↓ step · ←→ fold · ⏎ open · B branch · C compare';
 
+/// Keys while comparing two branches.
+const compareKeys = '⌥↑↓ tree · Space select branch · C leave compare';
+
 /// Height of the inspector below a selected step; fixed so opening it never shifts more than
 /// one known amount.
 const _inspectorHeight = 232.0;
@@ -30,12 +34,16 @@ class TrajectoryView extends StatefulWidget {
     super.key,
     required this.state,
     required this.onBranched,
+    required this.keys,
   });
 
   final SessionState state;
 
   /// Called after branching, so the input area can take the new branch's prompt.
   final VoidCallback onBranched;
+
+  /// The keys the status bar shows for this tab.
+  final ValueNotifier<String> keys;
 
   @override
   State<TrajectoryView> createState() => _TrajectoryViewState();
@@ -125,13 +133,13 @@ class _TrajectoryViewState extends State<TrajectoryView> {
     }
   }
 
-  void _show(String? tip) {
+  Future<void> _show(String? tip) {
     setState(() {
       _shown = tip;
       _range = null;
       _window = null;
     });
-    _reload();
+    return _reload();
   }
 
   /// The tip of the branch the ledger shows, if it is a tip.
@@ -220,19 +228,34 @@ class _TrajectoryViewState extends State<TrajectoryView> {
   };
 
   /// Continues the session before the selected step, so the step and everything after it can
-  /// go differently on a new branch.
+  /// go differently on a new branch. A prompt branches at itself: the agent continues before it
+  /// and hands the prompt back to the input area for editing.
   Future<void> _branch() async {
     final index = _selectedIndex;
     if (index < 0 || _busy || _comparing) return;
-    final from = index > 0
+    final step = _records[index];
+    final from = step.kind == BridgeRecordKind.user
+        ? step.entry
+        : index > 0
         ? _records[index - 1].entry
-        : _history?.tree
-              .where((node) => node.id == _records[0].entry)
-              .firstOrNull
-              ?.parent;
+        : null;
     if (from == null) return;
+    final before = _history?.leaf;
     await widget.state.branch(from);
+    String? after;
+    try {
+      after = (await widget.state.history()).leaf;
+    } on Object {
+      after = before;
+    }
     if (!mounted) return;
+    if (after == before) {
+      widget.state.notification.value = (
+        BridgeLevel.error,
+        'The session could not branch at step ${index + 1}.',
+      );
+      return;
+    }
     setState(() {
       _inspecting = false;
       _selected = null;
@@ -243,6 +266,7 @@ class _TrajectoryViewState extends State<TrajectoryView> {
 
   void _toggleCompare() {
     if (_comparing) {
+      widget.keys.value = trajectoryKeys;
       setState(() => _comparing = false);
       _reload();
       return;
@@ -251,6 +275,7 @@ class _TrajectoryViewState extends State<TrajectoryView> {
     final first = _graph.branchOf(_shownTip);
     final other = branches.where((branch) => branch != first).lastOrNull;
     if (first == null || other == null) return;
+    widget.keys.value = compareKeys;
     setState(() {
       _comparing = true;
       _picked = _ordered([first.tip, other.tip]);
@@ -273,34 +298,48 @@ class _TrajectoryViewState extends State<TrajectoryView> {
     _reload();
   }
 
-  void _stepBranch(int step) {
-    final branches = _graph.branches;
-    if (branches.isEmpty) return;
-    final current = _comparing ? _cursor : _graph.branchOf(_shownTip)?.tip;
-    final index = branches.indexWhere((branch) => branch.tip == current);
-    final next = branches[(index + step).clamp(0, branches.length - 1)].tip;
+  /// Moves through the session tree's steps; while comparing, only the tree's cursor moves.
+  void _stepTree(int step) {
+    final rows = _graph.rows;
+    if (rows.isEmpty) return;
+    final current = rows.indexWhere(
+      (row) => row.node.id == (_comparing ? _cursor : _selected),
+    );
+    final next = current < 0
+        ? (step > 0 ? 0 : rows.length - 1)
+        : (current + step).clamp(0, rows.length - 1);
     if (_comparing) {
-      setState(() => _cursor = next);
+      setState(() => _cursor = rows[next].node.id);
     } else {
-      _show(next);
+      _jump(rows[next]);
     }
+  }
+
+  /// Selects a tree row's step, showing its branch when the ledger shows another one.
+  void _jump(GraphRow row) {
+    setState(() => _selected = row.node.id);
+    if (_records.any((record) => record.entry == row.node.id)) {
+      _reveal();
+      return;
+    }
+    final tip = row.branch?.tip ?? _graph.branchOf(row.node.id)?.tip;
+    if (tip != null) _show(tip).then((_) => _reveal());
+  }
+
+  /// Compares the branch of the tree's cursor with the other picked branch.
+  void _pickCursor() {
+    final tip = _graph.branchOf(_cursor)?.tip;
+    if (tip != null) _pick(tip);
   }
 
   void _onRow(GraphRow row) {
     _focus.requestFocus();
-    final tip = row.branch?.tip ?? _graph.branchOf(row.node.id)?.tip;
-    if (tip == null) return;
     if (_comparing) {
-      setState(() => _cursor = tip);
-      _pick(tip);
-      return;
+      setState(() => _cursor = row.node.id);
+      _pickCursor();
+    } else {
+      _jump(row);
     }
-    if (row.branch == null &&
-        _records.any((record) => record.entry == row.node.id)) {
-      setState(() => _selected = row.node.id);
-      _reveal();
-    }
-    if (tip != _shownTip) _show(tip);
   }
 
   void _escape() {
@@ -344,9 +383,9 @@ class _TrajectoryViewState extends State<TrajectoryView> {
         const SingleActivator(LogicalKeyboardKey.arrowLeft, alt: true):
             _foldAll,
         const SingleActivator(LogicalKeyboardKey.arrowUp, alt: true): () =>
-            _stepBranch(-1),
+            _stepTree(-1),
         const SingleActivator(LogicalKeyboardKey.arrowDown, alt: true): () =>
-            _stepBranch(1),
+            _stepTree(1),
         const SingleActivator(LogicalKeyboardKey.enter): () {
           if (_selected == null) return;
           setState(() => _inspecting = !_inspecting);
@@ -355,7 +394,7 @@ class _TrajectoryViewState extends State<TrajectoryView> {
         const SingleActivator(LogicalKeyboardKey.keyB): _branch,
         const SingleActivator(LogicalKeyboardKey.keyC): _toggleCompare,
         const SingleActivator(LogicalKeyboardKey.space): () {
-          if (_comparing && _cursor != null) _pick(_cursor!);
+          if (_comparing) _pickCursor();
         },
         const SingleActivator(LogicalKeyboardKey.escape): _escape,
       },
@@ -394,10 +433,9 @@ class _TrajectoryViewState extends State<TrajectoryView> {
                   ),
                   SessionTreeView(
                     graph: _graph,
-                    shown: _shownTip,
+                    selected: _comparing ? _cursor : _selected,
                     onRow: _onRow,
                     picked: _comparing ? _picked.toSet() : null,
-                    cursor: _cursor,
                   ),
                 ],
               ),
@@ -868,7 +906,10 @@ class _StepRow extends StatelessWidget {
                 : '+${formatDuration(duration)}',
             style: figures,
           ),
-          Text(usage == null ? '' : formatCount(usage.input), style: figures),
+          Text(
+            usage == null ? '' : formatCount(promptTokens(usage)),
+            style: figures,
+          ),
           Text(usage == null ? '' : formatCount(usage.output), style: figures),
           Text(
             usage == null ? '' : formatCount(usage.reasoning),
@@ -1073,7 +1114,7 @@ class _MessageSummary extends StatelessWidget {
                     (
                       'Tokens',
                       [
-                        '${formatCount(usage.input)} in',
+                        '${formatCount(promptTokens(usage))} in',
                         '${formatCount(usage.output)} out',
                         '${formatCount(usage.reasoning)} think',
                         if (usage.cacheRead > 0)

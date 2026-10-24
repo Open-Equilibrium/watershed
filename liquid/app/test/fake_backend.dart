@@ -55,8 +55,21 @@ class FakeBackend implements SessionBackend {
     return histories[key] ?? stored;
   }
 
+  /// Whether [branch] moves the session's leaf, as a successful branch does.
+  bool branchMoves = true;
+
   @override
-  Future<void> branch(String entry) async => calls.add('branch $entry');
+  Future<void> branch(String entry) async {
+    calls.add('branch $entry');
+    if (branchMoves) {
+      stored = BridgeHistory(
+        tree: stored.tree,
+        leaf: entry,
+        trajectories: stored.trajectories,
+      );
+    }
+  }
+
   @override
   Future<bool> shutdown() async {
     calls.add('shutdown');
@@ -153,7 +166,7 @@ BridgeHistory historyOf(
               BridgeRecordKind.user => BridgeEntryKind.user,
               BridgeRecordKind.message => BridgeEntryKind.assistant,
               BridgeRecordKind.tool => BridgeEntryKind.toolResult,
-              BridgeRecordKind.approval => BridgeEntryKind.custom,
+              BridgeRecordKind.approval => BridgeEntryKind.approval,
             },
             preview: record.label,
           ),

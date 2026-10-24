@@ -6,55 +6,74 @@ import 'fake_backend.dart';
 
 void main() {
   group('session graph', () {
-    // e1 user → e2 response → e3 tool result → e4 response (tip A)
-    //                       ↘ b1 user → b2 response (tip B)
-    //                       ↘ c1 user (tip C, labelled)
+    // e1 prompt → e2 response → p1 approval → e3 tool result → e4 response (tip A)
+    //                         ↘ b1 prompt → b2 response (tip B)
+    //                         ↘ c1 prompt (tip C, labelled)
     final tree = [
-      node('e0', null, BridgeEntryKind.other, at: 1000),
-      node('e1', 'e0', BridgeEntryKind.user, preview: 'Add rate limiting'),
+      node('e0', null, BridgeEntryKind.other),
+      node(
+        'e1',
+        'e0',
+        BridgeEntryKind.user,
+        preview: 'Add rate limiting',
+        at: 1000,
+      ),
       node('t1', 'e1', BridgeEntryKind.custom),
       node('e2', 't1', BridgeEntryKind.assistant, preview: 'I will look.'),
-      node('e3', 'e2', BridgeEntryKind.toolResult, preview: 'read'),
+      node('p1', 'e2', BridgeEntryKind.approval, preview: 'bash'),
+      node('e3', 'p1', BridgeEntryKind.toolResult, preview: 'bash'),
       node('e4', 'e3', BridgeEntryKind.assistant, preview: 'Done.', at: 26900),
       node('b1', 'e2', BridgeEntryKind.user, preview: 'Use a token bucket'),
       node('b2', 'b1', BridgeEntryKind.assistant, preview: 'Ok.', at: 19500),
       node('c1', 'e2', BridgeEntryKind.user, preview: 'Fixed', label: 'fixed'),
     ];
 
-    test('keeps prompts, forks and tips, one lane per branch', () {
+    test('draws one dot per step and one lane per branch', () {
       final graph = sessionGraph(tree, 'b2');
       expect(
-        [for (final row in graph.rows) (row.node.id, row.lane, row.parentRow)],
         [
-          ('e1', 0, null),
-          ('e2', 0, 0),
-          ('e4', 0, 1),
-          ('b1', 1, 1),
-          ('b2', 1, 3),
-          ('c1', 2, 1),
+          for (final row in graph.rows)
+            (row.node.id, row.lane, row.parentRow, row.step),
         ],
+        [
+          ('e1', 0, null, 1),
+          ('e2', 0, 0, 2),
+          ('p1', 0, 1, 3),
+          ('e3', 0, 2, 4),
+          ('e4', 0, 3, 5),
+          ('b1', 1, 1, 3),
+          ('b2', 1, 5, 4),
+          ('c1', 2, 1, 3),
+        ],
+        reason: 'the step numbers match the ledger of each branch',
       );
       expect(graph.lanes, 3);
-      expect(graph.rows[0].turn, 1);
-      expect(graph.rows[3].turn, 2);
+      expect([graph.rows[0].turn, graph.rows[5].turn], [1, 2]);
     });
 
-    test('names branches by label or latest prompt with their duration', () {
-      final graph = sessionGraph(tree, 'b2');
-      expect(
-        [
-          for (final branch in graph.branches)
-            (branch.ref, branch.tip, branch.name, branch.durationMs),
-        ],
-        [
-          ('A', 'e4', 'Add rate limiting', 25900),
-          ('B', 'b2', 'Use a token bucket', 18500),
-          ('C', 'c1', 'fixed', null),
-        ],
-      );
-      expect(graph.branchOf('e2')?.ref, 'A', reason: 'follows first children');
-      expect(graph.branchOf('b1')?.ref, 'B');
-    });
+    test(
+      'names branches by label or latest prompt, timed from the first prompt',
+      () {
+        final graph = sessionGraph(tree, 'b2');
+        expect(
+          [
+            for (final branch in graph.branches)
+              (branch.ref, branch.tip, branch.name, branch.durationMs),
+          ],
+          [
+            ('A', 'e4', 'Add rate limiting', 25900),
+            ('B', 'b2', 'Use a token bucket', 18500),
+            ('C', 'c1', 'fixed', null),
+          ],
+        );
+        expect(
+          graph.branchOf('e2')?.ref,
+          'A',
+          reason: 'follows first children',
+        );
+        expect(graph.branchOf('b1')?.ref, 'B');
+      },
+    );
 
     test('marks a leaf with children as the start of the next branch', () {
       final graph = sessionGraph(tree, 'e3');

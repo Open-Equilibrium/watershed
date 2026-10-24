@@ -45,11 +45,14 @@ class _AgentShellState extends State<AgentShell> {
   final _composer = TextEditingController();
   final _composerFocus = FocusNode(debugLabel: 'composer');
   final _tab = ValueNotifier(AgentTab.chat);
+  final _trajectoryKeys = ValueNotifier(trajectoryKeys);
 
   @override
   void initState() {
     super.initState();
     widget.state.draft.addListener(_applyDraft);
+    // A reopened Trajectory tab starts outside the comparison.
+    _tab.addListener(() => _trajectoryKeys.value = trajectoryKeys);
   }
 
   void _applyDraft() {
@@ -63,6 +66,7 @@ class _AgentShellState extends State<AgentShell> {
     _composer.dispose();
     _composerFocus.dispose();
     _tab.dispose();
+    _trajectoryKeys.dispose();
     super.dispose();
   }
 
@@ -103,6 +107,7 @@ class _AgentShellState extends State<AgentShell> {
                           AgentTab.trajectory => TrajectoryView(
                             state: widget.state,
                             onBranched: _composerFocus.requestFocus,
+                            keys: _trajectoryKeys,
                           ),
                         },
                       ),
@@ -121,12 +126,12 @@ class _AgentShellState extends State<AgentShell> {
                         ),
                       ),
                     ),
-                    ValueListenableBuilder(
-                      valueListenable: _tab,
-                      builder: (context, tab, _) => StatusBar(
+                    ListenableBuilder(
+                      listenable: Listenable.merge([_tab, _trajectoryKeys]),
+                      builder: (context, _) => StatusBar(
                         state: widget.state,
-                        keys: tab == AgentTab.trajectory
-                            ? trajectoryKeys
+                        keys: _tab.value == AgentTab.trajectory
+                            ? _trajectoryKeys.value
                             : '⌘1–3 tabs · ⌘L input',
                       ),
                     ),

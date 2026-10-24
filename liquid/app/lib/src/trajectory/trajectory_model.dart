@@ -28,7 +28,7 @@ class Branch {
   final int? durationMs;
 }
 
-/// One row of the session tree: a prompt, a fork, a tip or the entry the next prompt continues
+/// One row of the session tree: a step, a branch tip or the entry the next prompt continues
 /// from.
 @immutable
 class GraphRow {
@@ -37,6 +37,7 @@ class GraphRow {
     required this.lane,
     required this.parentRow,
     required this.turn,
+    required this.step,
     this.branch,
     this.pending = false,
   });
@@ -50,6 +51,9 @@ class GraphRow {
   /// Prompts on the path up to this row.
   final int turn;
 
+  /// The row's step number on its branch, as the ledger counts it.
+  final int step;
+
   /// The branch this row is the tip of.
   final Branch? branch;
 
@@ -57,8 +61,8 @@ class GraphRow {
   final bool pending;
 }
 
-/// The session tree as a graph with one lane per branch, in depth-first order like `git log
-/// --graph`.
+/// The session tree as a graph with one lane per branch and one row per step, in depth-first
+/// order like `git log --graph`.
 @immutable
 class SessionGraph {
   const SessionGraph(this.rows, this.branches, this.lanes, this._firstChild);
@@ -99,7 +103,8 @@ SessionGraph sessionGraph(List<BridgeTreeNode> nodes, String? leaf) {
   var lanes = 0;
   // An explicit stack instead of recursion: long sessions have deep trees.
   final stack = <_Visit>[
-    for (final root in roots.reversed) _Visit(root, null, null, 0, null, null),
+    for (final root in roots.reversed)
+      _Visit(root, null, null, 0, 0, null, null),
   ];
   while (stack.isNotEmpty) {
     final visit = stack.removeLast();
@@ -107,11 +112,14 @@ SessionGraph sessionGraph(List<BridgeTreeNode> nodes, String? leaf) {
     final lane = visit.lane ?? lanes++;
     final kids = children[node.id] ?? const [];
     final isUser = node.kind == BridgeEntryKind.user;
+    final isStep = _steps.contains(node.kind);
     final turn = visit.turn + (isUser ? 1 : 0);
+    final step = visit.step + (isStep ? 1 : 0);
     final prompt = isUser ? node.preview : visit.prompt;
-    final startAt = visit.startAt ?? node.atMs;
+    // Durations count from the first prompt, like the Trajectory.
+    final startAt = visit.startAt ?? (isUser ? node.atMs : null);
     var parentRow = visit.parentRow;
-    if (isUser || kids.length > 1 || kids.isEmpty || node.id == leaf) {
+    if (isStep || kids.isEmpty || node.id == leaf) {
       Branch? branch;
       if (kids.isEmpty) {
         final at = node.atMs;
@@ -130,6 +138,7 @@ SessionGraph sessionGraph(List<BridgeTreeNode> nodes, String? leaf) {
           lane: lane,
           parentRow: parentRow,
           turn: turn,
+          step: step,
           branch: branch,
           pending: kids.isNotEmpty && node.id == leaf,
         ),
@@ -143,6 +152,7 @@ SessionGraph sessionGraph(List<BridgeTreeNode> nodes, String? leaf) {
           index == 0 ? lane : null,
           parentRow,
           turn,
+          step,
           prompt,
           startAt,
         ),
@@ -154,12 +164,21 @@ SessionGraph sessionGraph(List<BridgeTreeNode> nodes, String? leaf) {
   });
 }
 
+/// Tree entries that are Trajectory steps.
+const _steps = {
+  BridgeEntryKind.user,
+  BridgeEntryKind.assistant,
+  BridgeEntryKind.toolResult,
+  BridgeEntryKind.approval,
+};
+
 class _Visit {
   const _Visit(
     this.node,
     this.lane,
     this.parentRow,
     this.turn,
+    this.step,
     this.prompt,
     this.startAt,
   );
@@ -170,6 +189,7 @@ class _Visit {
   final int? lane;
   final int? parentRow;
   final int turn;
+  final int step;
   final String? prompt;
   final int? startAt;
 }
