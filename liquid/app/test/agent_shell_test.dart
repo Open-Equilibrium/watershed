@@ -46,6 +46,19 @@ void main() {
     ),
   );
 
+  testWidgets('focuses the input area with ⌘L from any tab', (tester) async {
+    await show(tester);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.digit3);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyL);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pumpAndSettle();
+    final composer = tester.widget<TextField>(
+      find.byKey(const Key('composer')),
+    );
+    expect(composer.focusNode?.hasFocus, isTrue);
+  });
+
   testWidgets('decides approvals from the keyboard', (tester) async {
     await show(tester);
     await emit(tester, event(BridgeEventKind.turnStarted, turn: 1));

@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:liquid/src/rust/api/events.dart';
+import 'package:liquid/src/rust/api/history.dart';
 import 'package:liquid/src/rust/api/session.dart';
 import 'package:liquid/src/session/backend.dart';
 
@@ -10,6 +12,10 @@ class FakeBackend implements SessionBackend {
   final calls = <String>[];
   List<BridgeFileChange> changed = const [];
   Map<String, String> patches = const {};
+  BridgeHistory stored = historyOf([]);
+
+  /// Histories by the requested leaves, joined by spaces; others get [stored].
+  final histories = <String, BridgeHistory>{};
   bool cancelled = false;
 
   @override
@@ -42,6 +48,15 @@ class FakeBackend implements SessionBackend {
   Future<List<BridgeFileChange>> changes() async => changed;
   @override
   Future<String> patch(String path) async => patches[path] ?? '';
+  @override
+  Future<BridgeHistory> history(List<String> leaves) async {
+    final key = leaves.join(' ');
+    calls.add('history $key'.trim());
+    return histories[key] ?? stored;
+  }
+
+  @override
+  Future<void> branch(String entry) async => calls.add('branch $entry');
   @override
   Future<bool> shutdown() async {
     calls.add('shutdown');
@@ -90,4 +105,69 @@ BridgeUsage usage(int input, int output, int cost) => BridgeUsage(
   cacheWrite: 0,
   reasoning: 0,
   costMicroUsd: cost,
+);
+
+BridgeRecord record(
+  String entry,
+  int turn,
+  BridgeRecordKind kind,
+  String label,
+  int start, {
+  int? duration,
+  int? firstToken,
+  String detail = '',
+  BridgeUsage? usage,
+  BridgeStepContext? context,
+  bool failed = false,
+}) => BridgeRecord(
+  entry: entry,
+  turn: turn,
+  kind: kind,
+  label: label,
+  detail: detail,
+  startMs: start,
+  durationMs: duration,
+  firstTokenMs: firstToken,
+  model: kind == BridgeRecordKind.message ? 'faux-1' : '',
+  usage: usage,
+  stopReason: '',
+  failed: failed,
+  context: context,
+);
+
+/// A session whose current branch is `records`, as one tree path.
+BridgeHistory historyOf(
+  List<BridgeRecord> records, {
+  List<BridgeTreeNode>? tree,
+  String? leaf,
+  List<List<BridgeRecord>> others = const [],
+}) => BridgeHistory(
+  tree:
+      tree ??
+      [
+        for (final (index, record) in records.indexed)
+          BridgeTreeNode(
+            id: record.entry,
+            parent: index == 0 ? null : records[index - 1].entry,
+            kind: switch (record.kind) {
+              BridgeRecordKind.user => BridgeEntryKind.user,
+              BridgeRecordKind.message => BridgeEntryKind.assistant,
+              BridgeRecordKind.tool => BridgeEntryKind.toolResult,
+              BridgeRecordKind.approval => BridgeEntryKind.custom,
+            },
+            preview: record.label,
+          ),
+      ],
+  leaf: leaf ?? records.lastOrNull?.entry ?? 'e1',
+  trajectories: [
+    for (final branch in [records, ...others])
+      BridgeTrajectory(
+        records: branch,
+        durationMs: branch.fold(
+          0,
+          (end, record) =>
+              math.max(end, record.startMs + (record.durationMs ?? 0)),
+        ),
+      ),
+  ],
 );

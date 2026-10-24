@@ -1,4 +1,5 @@
 import '../rust/api/events.dart';
+import '../rust/api/history.dart';
 import '../rust/api/session.dart';
 
 /// What [SessionState] needs from a running agent session; tests substitute a fake.
@@ -15,6 +16,8 @@ abstract interface class SessionBackend {
   Future<bool> shutdown();
   Future<List<BridgeFileChange>> changes();
   Future<String> patch(String path);
+  Future<BridgeHistory> history(List<String> leaves);
+  Future<void> branch(String entry);
 }
 
 /// A session in the embedded Meta-Harness core, reached through the Rust bridge.
@@ -51,4 +54,9 @@ class RustSessionBackend implements SessionBackend {
   Future<List<BridgeFileChange>> changes() => _session.changes();
   @override
   Future<String> patch(String path) => _session.patch(path: path);
+  @override
+  Future<BridgeHistory> history(List<String> leaves) =>
+      _session.history(leaves: leaves);
+  @override
+  Future<void> branch(String entry) => _session.branch(entry: entry);
 }

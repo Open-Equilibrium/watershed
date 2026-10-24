@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../rust/api/events.dart';
+import '../rust/api/history.dart';
 import '../rust/api/session.dart';
 import 'backend.dart';
 
@@ -67,6 +68,9 @@ class SessionState {
   final failure = ValueNotifier<String?>(null);
   final mode = ValueNotifier(BridgeApprovalMode.ask);
 
+  /// Counts the changes of the session's stored history; the Trajectory reloads on each.
+  final stored = ValueNotifier(0);
+
   /// Sends a prompt, or steers the running turn.
   Future<void> send(String message) =>
       _turnActive ? _backend.steer(message) : _backend.prompt(message);
@@ -109,6 +113,17 @@ class SessionState {
   /// One file's unified diff since the latest run started.
   Future<String> patch(String path) => _backend.patch(path);
 
+  /// The branch tree and the Trajectory of each branch ending at an entry in `leaves`, or of
+  /// the current branch.
+  Future<BridgeHistory> history([List<String> leaves = const []]) =>
+      _backend.history(leaves);
+
+  /// Continues the session from `entry`; the next prompt starts a new branch there.
+  Future<void> branch(String entry) async {
+    await _backend.branch(entry);
+    stored.value++;
+  }
+
   /// Releases the event stream and stops the agent.
   Future<void> dispose() async {
     await _subscription.cancel();
@@ -121,6 +136,7 @@ class SessionState {
         _turnActive = true;
       case BridgeEventKind.turnCompleted || BridgeEventKind.turnAborted:
         _turnActive = false;
+        stored.value++;
       case BridgeEventKind.itemStarted:
         final started = event.item!;
         final view = ItemView(
@@ -139,6 +155,7 @@ class SessionState {
       case BridgeEventKind.itemUpdated:
         _byId[event.item!.id]?.text.value = event.text ?? '';
       case BridgeEventKind.itemCompleted:
+        stored.value++;
         final view = _byId[event.item!.id];
         if (view != null) {
           view
@@ -153,6 +170,7 @@ class SessionState {
         _approvals.add(event.request!);
       case BridgeEventKind.requestResolved:
         _approvals.removeWhere((request) => request.id == event.request!.id);
+        stored.value++;
       case BridgeEventKind.userInputRequested:
         _questions.add(event.request!);
       case BridgeEventKind.userInputResolved:

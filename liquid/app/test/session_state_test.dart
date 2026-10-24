@@ -202,6 +202,35 @@ void main() {
     );
   });
 
+  test('signals when the stored history changes and branches', () async {
+    final changes = <int>[];
+    state.stored.addListener(() => changes.add(state.stored.value));
+    await emit(event(BridgeEventKind.turnStarted, turn: 1));
+    await emit(
+      event(
+        BridgeEventKind.contentDelta,
+        item: item(1),
+        text: 'streaming text is not stored yet',
+      ),
+    );
+    expect(changes, isEmpty);
+    await emit(event(BridgeEventKind.itemCompleted, item: item(1)));
+    await emit(
+      event(
+        BridgeEventKind.requestResolved,
+        request: const BridgeRequest(id: 'a1'),
+      ),
+    );
+    await emit(event(BridgeEventKind.turnCompleted, turn: 1));
+    expect(changes, [1, 2, 3]);
+
+    backend.stored = historyOf([]);
+    expect((await state.history(['e2'])).leaf, 'e1');
+    await state.branch('e1');
+    expect(backend.calls, ['history e2', 'branch e1']);
+    expect(changes.last, 4);
+  });
+
   test('dispose releases the stream and stops the agent', () async {
     await state.dispose();
     expect(backend.cancelled, isTrue);

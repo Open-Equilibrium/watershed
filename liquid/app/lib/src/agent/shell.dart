@@ -7,6 +7,7 @@ import '../theme/tokens.g.dart';
 import 'action_area.dart';
 import 'chat_view.dart';
 import '../diff/diff_view.dart';
+import '../trajectory/trajectory_view.dart';
 
 /// What the sidebar shows about a session.
 @immutable
@@ -76,6 +77,8 @@ class _AgentShellState extends State<AgentShell> {
             _tab.value = AgentTab.trajectory,
         const SingleActivator(LogicalKeyboardKey.digit3, meta: true): () =>
             _tab.value = AgentTab.diff,
+        const SingleActivator(LogicalKeyboardKey.keyL, meta: true):
+            _composerFocus.requestFocus,
       },
       child: Focus(
         autofocus: true,
@@ -97,7 +100,10 @@ class _AgentShellState extends State<AgentShell> {
                         builder: (context, tab, _) => switch (tab) {
                           AgentTab.chat => ChatView(state: widget.state),
                           AgentTab.diff => DiffView(state: widget.state),
-                          AgentTab.trajectory => const _NotBuiltYet(),
+                          AgentTab.trajectory => TrajectoryView(
+                            state: widget.state,
+                            onBranched: _composerFocus.requestFocus,
+                          ),
                         },
                       ),
                     ),
@@ -110,11 +116,20 @@ class _AgentShellState extends State<AgentShell> {
                           child: ActionArea(
                             state: widget.state,
                             composer: _composer,
+                            composerFocus: _composerFocus,
                           ),
                         ),
                       ),
                     ),
-                    StatusBar(state: widget.state),
+                    ValueListenableBuilder(
+                      valueListenable: _tab,
+                      builder: (context, tab, _) => StatusBar(
+                        state: widget.state,
+                        keys: tab == AgentTab.trajectory
+                            ? trajectoryKeys
+                            : '⌘1–3 tabs · ⌘L input',
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -124,18 +139,6 @@ class _AgentShellState extends State<AgentShell> {
       ),
     );
   }
-}
-
-class _NotBuiltYet extends StatelessWidget {
-  const _NotBuiltYet();
-
-  @override
-  Widget build(BuildContext context) => Center(
-    child: Text(
-      'Coming in this slice',
-      style: Theme.of(context).textTheme.bodySmall,
-    ),
-  );
 }
 
 class _Header extends StatelessWidget {
@@ -396,9 +399,12 @@ class WidgetStrip extends StatelessWidget {
 
 /// Run status, tokens, cost and extension status entries.
 class StatusBar extends StatelessWidget {
-  const StatusBar({super.key, required this.state});
+  const StatusBar({super.key, required this.state, required this.keys});
 
   final SessionState state;
+
+  /// The keyboard keys of the active view.
+  final String keys;
 
   @override
   Widget build(BuildContext context) {
@@ -447,10 +453,7 @@ class StatusBar extends StatelessWidget {
                 Text('${entry.key} ${entry.value}', style: text),
               ],
               const Spacer(),
-              Text(
-                '⌘1–3 tabs · ⌘L input',
-                style: text.copyWith(color: ws.textFaint),
-              ),
+              Text(keys, style: text.copyWith(color: ws.textFaint)),
             ],
           );
         },
