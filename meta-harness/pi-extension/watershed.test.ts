@@ -22,10 +22,15 @@ function load(clock: () => number = () => 0) {
   return { handlers, commands, entries };
 }
 
-function context(answer: string | undefined, mode = "rpc") {
+function context(
+  answer: string | undefined,
+  mode = "rpc",
+  session: { entries?: Record<string, unknown>; navigate?: () => Promise<{ cancelled: boolean }> } = {},
+) {
   const questions: { title: string; options: string[] }[] = [];
   const notes: string[] = [];
   const branches: unknown[][] = [];
+  const drafts: string[] = [];
   const ctx = {
     mode,
     ui: {
@@ -34,13 +39,18 @@ function context(answer: string | undefined, mode = "rpc") {
         return answer;
       },
       notify: (message: string) => notes.push(message),
+      setEditorText: (text: string) => drafts.push(text),
+    },
+    sessionManager: {
+      getEntry: (id: string) =>
+        session.entries ? session.entries[id] : { type: "message", message: { role: "assistant", content: [] } },
     },
     navigateTree: async (...args: unknown[]) => {
       branches.push(args);
-      return { cancelled: false };
+      return session.navigate ? session.navigate() : { cancelled: false };
     },
   };
-  return { ctx, questions, notes, branches };
+  return { ctx, questions, notes, branches, drafts };
 }
 
 test("asks the core before every tool call and records user decisions", async () => {
@@ -103,6 +113,38 @@ test("branches the session at an entry", async () => {
   assert.deepEqual(plain.branches, [["6ed210af", {}]]);
   assert.deepEqual(empty.branches, []);
   assert.deepEqual(empty.notes, ["watershed-branch needs an entry id"]);
+});
+
+test("hands a prompt back for editing and reports a branch that did not happen", async () => {
+  const { commands } = load();
+  const branch = commands.get("watershed-branch")!;
+  const prompt = {
+    type: "message",
+    message: { role: "user", content: [{ type: "text", text: "Add rate limiting\nwith tests" }] },
+  };
+  const edit = context(undefined, "rpc", { entries: { u1: prompt } });
+  await branch.handler("u1", edit.ctx);
+  assert.deepEqual(edit.drafts, ["Add rate limiting\nwith tests"]);
+
+  const unknown = context(undefined, "rpc", { entries: {} });
+  await branch.handler("x9", unknown.ctx);
+  assert.deepEqual([unknown.branches, unknown.notes], [[], ["No entry x9 to branch from"]]);
+
+  const cancelled = context(undefined, "rpc", {
+    entries: { u1: prompt },
+    navigate: async () => ({ cancelled: true }),
+  });
+  await branch.handler("u1", cancelled.ctx);
+  assert.deepEqual([cancelled.drafts, cancelled.notes], [[], ["The branch was cancelled"]]);
+
+  const failed = context(undefined, "rpc", {
+    entries: { u1: prompt },
+    navigate: async () => {
+      throw new Error("compacting");
+    },
+  });
+  await branch.handler("u1", failed.ctx);
+  assert.deepEqual([failed.drafts, failed.notes], [[], ["Could not branch: compacting"]]);
 });
 
 test("records request and tool timing for the Trajectory", async () => {

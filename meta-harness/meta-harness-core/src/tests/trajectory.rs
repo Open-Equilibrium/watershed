@@ -19,6 +19,58 @@ const ENTRIES: &str = r#"{"entries":[
   {"type":"message","id":"b1","parentId":"l1","timestamp":"2026-10-24T10:01:05.000Z","message":{"role":"user","content":"Use a token bucket"}}
 ],"leafId":"b1"}"#;
 
+/// One response with two tools that pi runs in parallel and stores together, an injected
+/// message and a compaction, five minutes after the session started.
+const PARALLEL: &str = r#"{"entries":[
+  {"type":"model_change","id":"s0","parentId":null,"timestamp":"2026-10-24T10:00:00.000Z"},
+  {"type":"message","id":"u1","parentId":"s0","timestamp":"2026-10-24T10:05:00.000Z","message":{"role":"user","content":"Read and test"}},
+  {"type":"custom","id":"tr","parentId":"u1","timestamp":"2026-10-24T10:05:02.000Z","customType":"watershed.timing","data":{"kind":"request","firstTokenMs":500,"durationMs":2000}},
+  {"type":"message","id":"a1","parentId":"tr","timestamp":"2026-10-24T10:05:02.000Z","message":{"role":"assistant","content":[{"type":"toolCall","id":"c1","name":"read","arguments":{"path":"a.ts"}},{"type":"toolCall","id":"c2","name":"bash","arguments":{"command":"npm test"}}]}},
+  {"type":"custom","id":"x1","parentId":"a1","timestamp":"2026-10-24T10:05:02.030Z","customType":"watershed.timing","data":{"kind":"tool","toolCallId":"c1","durationMs":20}},
+  {"type":"custom","id":"x2","parentId":"x1","timestamp":"2026-10-24T10:05:08.000Z","customType":"watershed.timing","data":{"kind":"tool","toolCallId":"c2","durationMs":6000}},
+  {"type":"message","id":"r1","parentId":"x2","timestamp":"2026-10-24T10:05:08.010Z","message":{"role":"toolResult","toolCallId":"c1","toolName":"read","content":[]}},
+  {"type":"message","id":"r2","parentId":"r1","timestamp":"2026-10-24T10:05:08.020Z","message":{"role":"toolResult","toolCallId":"c2","toolName":"bash","content":[]}},
+  {"type":"custom_message","id":"cm","parentId":"r2","timestamp":"2026-10-24T10:05:08.030Z","customType":"reminder","content":"Mind the style guide","display":true},
+  {"type":"compaction","id":"k1","parentId":"cm","timestamp":"2026-10-24T10:05:09.000Z","summary":"Read a.ts and ran the tests.","firstKeptEntryId":"r2","tokensBefore":9000},
+  {"type":"custom","id":"tq","parentId":"k1","timestamp":"2026-10-24T10:05:10.000Z","customType":"watershed.timing","data":{"kind":"request","firstTokenMs":300,"durationMs":1000}},
+  {"type":"message","id":"a2","parentId":"tq","timestamp":"2026-10-24T10:05:10.000Z","message":{"role":"assistant","content":[{"type":"text","text":"Done."}]}}
+],"leafId":"a2"}"#;
+
+#[test]
+fn times_parallel_tools_from_their_own_end_and_follows_compaction() {
+    let data: Value = serde_json::from_str(PARALLEL).expect("JSON");
+    let records = trajectory(&data, None).records;
+    let timing: Vec<_> = records
+        .iter()
+        .map(|record| (record.entry.as_str(), record.start_ms, record.duration_ms))
+        .collect();
+    assert_eq!(
+        timing,
+        [
+            ("u1", 0, None),
+            ("a1", 0, Some(2000)),
+            ("r1", 2010, Some(20)),
+            ("r2", 2000, Some(6000)),
+            ("a2", 9000, Some(1000)),
+        ],
+        "times count from the first prompt; each tool ends when its timing entry was stored"
+    );
+    let context = records[4].context.clone().expect("context");
+    assert_eq!(
+        (context.messages, context.new_since_previous),
+        (
+            3,
+            vec![
+                "result of read".to_owned(),
+                "result of bash".to_owned(),
+                "message from reminder".to_owned(),
+                "compaction summary".to_owned(),
+            ]
+        ),
+        "after the compaction the model saw its summary, the kept tool result and the injected message"
+    );
+}
+
 #[test]
 fn projects_the_selected_branch_with_timing_and_what_the_model_saw() {
     let data: Value = serde_json::from_str(ENTRIES).expect("JSON");
@@ -37,7 +89,7 @@ fn projects_the_selected_branch_with_timing_and_what_the_model_saw() {
         failed: false,
         context: None,
     };
-    let user = record("e2", 1, RecordKind::User, "Add rate limiting", 100, None);
+    let user = record("e2", 1, RecordKind::User, "Add rate limiting", 0, None);
     let message = TrajectoryRecord {
         first_token_ms: Some(900),
         model: "faux-1".to_owned(),
@@ -61,18 +113,18 @@ fn projects_the_selected_branch_with_timing_and_what_the_model_saw() {
             1,
             RecordKind::Message,
             "I'll run the tests.",
-            100,
+            0,
             Some(3400),
         )
     };
     let approval = TrajectoryRecord {
         detail: "allow-once".to_owned(),
-        ..record("a1", 1, RecordKind::Approval, "bash", 3600, Some(9400))
+        ..record("a1", 1, RecordKind::Approval, "bash", 3500, Some(9400))
     };
     let tool = TrajectoryRecord {
         detail: r#"{"command":"npm test"}"#.to_owned(),
         failed: true,
-        ..record("e4", 1, RecordKind::Tool, "bash", 13000, Some(6800))
+        ..record("e4", 1, RecordKind::Tool, "bash", 12900, Some(6800))
     };
 
     let original = trajectory(&data, Some("e7"));
@@ -90,13 +142,13 @@ fn projects_the_selected_branch_with_timing_and_what_the_model_saw() {
             messages: 3,
             new_since_previous: vec!["result of bash".to_owned()],
         }),
-        ..record("e7", 1, RecordKind::Message, "Done.", 21000, None)
+        ..record("e7", 1, RecordKind::Message, "Done.", 20900, None)
     };
     assert_eq!(
         original,
         Trajectory {
             records: vec![user.clone(), message.clone(), approval, tool, finished],
-            duration_ms: 21000,
+            duration_ms: 20900,
         }
     );
 
@@ -106,7 +158,7 @@ fn projects_the_selected_branch_with_timing_and_what_the_model_saw() {
         [
             user,
             message,
-            record("b1", 2, RecordKind::User, "Use a token bucket", 65000, None),
+            record("b1", 2, RecordKind::User, "Use a token bucket", 64900, None),
         ]
     );
 }

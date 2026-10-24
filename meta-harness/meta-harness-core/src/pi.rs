@@ -314,10 +314,13 @@ pub(crate) fn trajectory(data: &Value, leaf: Option<&str>) -> Trajectory {
         next = entry.get("parentId").and_then(Value::as_str);
     }
     path.reverse();
-    // An entry without a timestamp takes the time of the entry before it.
+    // Times count from the first prompt, not from when the agent started; an entry without a
+    // timestamp takes the time of the entry before it.
     let base = path
         .iter()
-        .find_map(|entry| entry_millis(entry))
+        .find(|entry| entry_summary(entry).0 == EntryKind::User)
+        .and_then(|entry| entry_millis(entry))
+        .or_else(|| path.iter().find_map(|entry| entry_millis(entry)))
         .unwrap_or(0);
     let mut projection = Projection::default();
     let mut at = 0;
@@ -340,17 +343,64 @@ struct Projection {
     appended_chars: usize,
     tools: BTreeSet<String>,
     messages: usize,
+    /// Every entry so far and whether the model sees it as a message; compaction keeps a suffix.
+    log: Vec<(String, bool)>,
     new_since_previous: Vec<String>,
     request_timing: Option<(Option<u64>, Option<u64>)>,
-    tool_timing: HashMap<String, Option<u64>>,
+    /// When each tool's timing entry was stored and how long the tool ran. pi runs a response's
+    /// tools in parallel and stores their results together, so a result's own time is the end
+    /// of the slowest tool.
+    tool_timing: HashMap<String, (u64, Option<u64>)>,
     tool_calls: HashMap<String, String>,
 }
 
 impl Projection {
+    /// Counts the entry just logged as a message the model sees, described by `new`.
+    fn count(&mut self, new: Option<String>) {
+        self.messages += 1;
+        if let Some((_, message)) = self.log.last_mut() {
+            *message = true;
+        }
+        self.new_since_previous.extend(new);
+    }
+
     fn add(&mut self, entry: &Value, at: u64) {
         let id = entry.get("id").and_then(Value::as_str).unwrap_or_default();
+        self.log.push((id.to_owned(), false));
         let millis = |value: Option<&Value>| value.and_then(Value::as_u64);
+        let text = |field| {
+            entry
+                .get(field)
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned()
+        };
         match entry.get("type").and_then(Value::as_str) {
+            Some("custom_message") => {
+                self.count(Some(format!("message from {}", text("customType"))));
+            }
+            Some("branch_summary") => self.count(Some("branch summary".to_owned())),
+            Some("compaction") => {
+                // The model now sees the summary and the entries kept from before it.
+                let kept = entry
+                    .get("firstKeptEntryId")
+                    .and_then(Value::as_str)
+                    .and_then(|first| self.log.iter().position(|(id, _)| id == first));
+                let kept_messages = kept.map_or(0, |index| {
+                    self.log[index..]
+                        .iter()
+                        .filter(|(_, message)| *message)
+                        .count()
+                });
+                self.messages = kept_messages;
+                if let Some(system) = entry.get("systemMessage") {
+                    self.sections.clear();
+                    self.appended_chars = 0;
+                    self.tools.clear();
+                    self.system(system);
+                }
+                self.count(Some("compaction summary".to_owned()));
+            }
             Some("custom") => {
                 let data = entry.get("data");
                 match entry.get("customType").and_then(Value::as_str) {
@@ -368,7 +418,7 @@ impl Projection {
                                     .and_then(Value::as_str);
                                 self.tool_timing.insert(
                                     call.unwrap_or_default().to_owned(),
-                                    millis(data.and_then(|d| d.get("durationMs"))),
+                                    (at, millis(data.and_then(|d| d.get("durationMs")))),
                                 );
                             }
                             _ => {}
@@ -414,8 +464,7 @@ impl Projection {
                             at,
                             None,
                         ));
-                        self.messages += 1;
-                        self.new_since_previous.push("prompt".to_owned());
+                        self.count(Some("prompt".to_owned()));
                     }
                     Some("assistant") => {
                         let (first_token_ms, duration_ms) =
@@ -471,7 +520,7 @@ impl Projection {
                                 duration_ms,
                             )
                         });
-                        self.messages += 1;
+                        self.count(None);
                     }
                     Some("toolResult") => {
                         let call_id = message
@@ -482,7 +531,8 @@ impl Projection {
                             .get("toolName")
                             .and_then(Value::as_str)
                             .unwrap_or_default();
-                        let duration_ms = self.tool_timing.remove(call_id).flatten();
+                        let (ended, duration_ms) =
+                            self.tool_timing.remove(call_id).unwrap_or((at, None));
                         self.records.push(TrajectoryRecord {
                             detail: self.tool_calls.remove(call_id).unwrap_or_default(),
                             failed: message.get("isError").and_then(Value::as_bool) == Some(true),
@@ -491,14 +541,14 @@ impl Projection {
                                 self.turn,
                                 RecordKind::Tool,
                                 tool.to_owned(),
-                                at.saturating_sub(duration_ms.unwrap_or(0)),
+                                ended.saturating_sub(duration_ms.unwrap_or(0)),
                                 duration_ms,
                             )
                         });
-                        self.messages += 1;
-                        self.new_since_previous.push(format!("result of {tool}"));
+                        self.count(Some(format!("result of {tool}")));
                     }
-                    _ => {}
+                    Some(other) => self.count(Some(format!("{other} message"))),
+                    None => {}
                 }
             }
             _ => {}
@@ -680,6 +730,14 @@ fn entry_summary(entry: &Value) -> (EntryKind, String) {
             .get("customType")
             .and_then(Value::as_str)
             .unwrap_or_default();
+        if custom == "watershed.approval" {
+            let tool = entry
+                .get("data")
+                .and_then(|data| data.get("tool"))
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            return (EntryKind::Approval, tool.to_owned());
+        }
         return (EntryKind::Custom(custom.to_owned()), String::new());
     }
     let message = entry.get("message");

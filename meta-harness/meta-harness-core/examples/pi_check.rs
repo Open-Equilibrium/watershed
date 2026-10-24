@@ -1,5 +1,6 @@
 //! Manual check of the core against real pi: two turns with a scripted model, one allowed and one
-//! rejected command, then the branch tree and state. Run from the repository root:
+//! rejected command, the branch tree and Trajectory, a branch at the second prompt, then the
+//! state. Run from the repository root:
 //!
 //! ```sh
 //! PI_CODING_AGENT_DIR=$(mktemp -d) PI_OFFLINE=1 cargo run -p meta-harness-core --example pi_check
@@ -7,7 +8,7 @@
 
 use std::time::Duration;
 
-use meta_harness_core::{AgentCommand, Decision, RuntimeEvent, Session, SessionEvent};
+use meta_harness_core::{AgentCommand, Decision, RecordKind, RuntimeEvent, Session, SessionEvent};
 
 const WAIT: Duration = Duration::from_secs(30);
 
@@ -75,9 +76,27 @@ async fn check() {
                 let history = session.history().await.expect("history");
                 let tree = history.tree();
                 println!("tree: {} entries, leaf {:?}", tree.nodes.len(), tree.leaf);
-                for record in history.trajectory(None).records {
+                let records = history.trajectory(None).records;
+                for record in &records {
                     println!("trajectory: {record:?}");
                 }
+                // Branch at the second prompt: pi continues before it and hands it back.
+                let again = records
+                    .iter()
+                    .rfind(|record| record.kind == RecordKind::User)
+                    .expect("second prompt");
+                session.branch(&again.entry, None).await.expect("branched");
+                while let Some(event) = tokio::time::timeout(WAIT, events.recv())
+                    .await
+                    .expect("event in time")
+                {
+                    if let SessionEvent::Runtime(RuntimeEvent::InputTextSet { .. }) = &event {
+                        println!("branch handed back: {event:?}");
+                        break;
+                    }
+                }
+                let leaf = session.history().await.expect("history").tree().leaf;
+                println!("branched: leaf {:?} -> {leaf:?}", tree.leaf);
                 println!("state: {:?}", session.state().await.expect("state"));
                 println!(
                     "clean exit: {}",

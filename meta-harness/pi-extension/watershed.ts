@@ -53,8 +53,9 @@ function watershed(pi: ExtensionAPI, clock: Clock): void {
     return { block: true, reason };
   });
 
-  // pi runs these handlers before it stores the message or tool result, so each timing entry
-  // directly precedes the entry it measures.
+  // pi runs these handlers before it stores the message or tool result, so a request's timing
+  // entry directly precedes its response. A response's tools run in parallel and their results
+  // are stored together, so each tool's timing entry is stored when that tool ends.
   let request: { started: number; firstToken: number | null } | undefined;
   pi.on("message_start", (event) => {
     if (event.message.role === "assistant") {
@@ -94,7 +95,36 @@ function watershed(pi: ExtensionAPI, clock: Clock): void {
         ctx.ui.notify("watershed-branch needs an entry id", "error");
         return;
       }
-      await ctx.navigateTree(entryId, label ? { label } : {});
+      const target = ctx.sessionManager.getEntry(entryId);
+      if (!target) {
+        ctx.ui.notify(`No entry ${entryId} to branch from`, "error");
+        return;
+      }
+      try {
+        const { cancelled } = await ctx.navigateTree(entryId, label ? { label } : {});
+        if (cancelled) {
+          ctx.ui.notify("The branch was cancelled", "error");
+          return;
+        }
+      } catch (error) {
+        ctx.ui.notify(`Could not branch: ${error instanceof Error ? error.message : String(error)}`, "error");
+        return;
+      }
+      // Branching at a prompt continues before it; pi's own UI then offers the prompt for
+      // editing, so hand it to the client's input the same way.
+      if (target.type === "message" && target.message.role === "user") {
+        ctx.ui.setEditorText(promptText(target.message.content));
+      }
     },
   });
+}
+
+function promptText(content: string | readonly { type: string; text?: string }[]): string {
+  if (typeof content === "string") {
+    return content;
+  }
+  return content
+    .filter((part) => part.type === "text")
+    .map((part) => part.text ?? "")
+    .join("");
 }

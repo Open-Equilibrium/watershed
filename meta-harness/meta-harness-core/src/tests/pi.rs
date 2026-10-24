@@ -432,7 +432,7 @@ fn builds_the_session_tree_from_flat_entries() {
           {"type":"message","id":"e2","parentId":"e1","message":{"role":"assistant","content":[{"type":"thinking","thinking":"hm"},{"type":"text","text":"I'll look first."}]}},
           {"type":"message","id":"e3","parentId":"e2","message":{"role":"toolResult","toolName":"read","content":[]}},
           {"type":"label","id":"l1","parentId":"e2","targetId":"e2","label":"A"},
-          {"type":"custom","id":"e4","parentId":"l1","customType":"watershed.approval"},
+          {"type":"custom","id":"e4","parentId":"l1","customType":"watershed.approval","data":{"tool":"bash","decision":"reject"}},
           {"type":"label","id":"l2","parentId":"e4","targetId":"e2","label":"A2"},
           {"type":"model_change","id":"e5","parentId":"l2"}],
           "leafId":"l2"}"#,
@@ -469,13 +469,7 @@ fn builds_the_session_tree_from_flat_entries() {
                     Some("A2")
                 ),
                 node("e3", Some("e2"), EntryKind::ToolResult, "read", None),
-                node(
-                    "e4",
-                    Some("e2"),
-                    EntryKind::Custom("watershed.approval".to_owned()),
-                    "",
-                    None
-                ),
+                node("e4", Some("e2"), EntryKind::Approval, "bash", None),
                 node(
                     "e5",
                     Some("e4"),

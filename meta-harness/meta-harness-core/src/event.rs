@@ -80,6 +80,8 @@ pub enum EntryKind {
     ToolResult,
     /// A system message that changed prompt sections or tools.
     System,
+    /// The user's decision on a tool call, recorded by Watershed's pi extension.
+    Approval,
     /// An extension's custom entry, with its type.
     Custom(String),
     /// Any other entry, with the agent's entry type.
