@@ -208,6 +208,83 @@ void main() {
     );
   });
 
+  test('describes tool outcomes, shares and changed files', () {
+    expect(
+      [
+        outcomeText(const BridgeToolOutcome(added: 9, removed: 2)),
+        outcomeText(const BridgeToolOutcome(added: 38)),
+        outcomeText(
+          const BridgeToolOutcome(exitCode: 0, testsPassed: 14, testsFailed: 0),
+        ),
+        outcomeText(
+          const BridgeToolOutcome(exitCode: 1, testsPassed: 12, testsFailed: 2),
+        ),
+        outcomeText(const BridgeToolOutcome()),
+      ],
+      ['+9 −2', '+38', 'exit 0 · 14 ✓', 'exit 1 · 12 ✓ 2 ✗', null],
+    );
+    expect(shares(6140, [2310, 1050, 2780]), [2310, 1050, 2780]);
+    expect(shares(100, [1, 1, 2]), [25, 25, 50]);
+    expect(shares(100, [0, 0, 0]), [0, 0, 0]);
+    final edits = [
+      record(
+        'e1',
+        1,
+        BridgeRecordKind.tool,
+        'edit',
+        0,
+        detail: '{"path":"src/login.ts"}',
+      ),
+      record(
+        'e2',
+        1,
+        BridgeRecordKind.tool,
+        'write',
+        0,
+        detail: '{"path":"test/login.test.ts"}',
+      ),
+      record(
+        'e3',
+        1,
+        BridgeRecordKind.tool,
+        'edit',
+        0,
+        detail: '{"path":"src/login.ts"}',
+      ),
+      record(
+        'e4',
+        1,
+        BridgeRecordKind.tool,
+        'edit',
+        0,
+        detail: '{"path":"README.md"}',
+        failed: true,
+      ),
+      record(
+        'e5',
+        1,
+        BridgeRecordKind.tool,
+        'bash',
+        0,
+        outcome: const BridgeToolOutcome(testsPassed: 3, testsFailed: 0),
+      ),
+      record(
+        'e6',
+        1,
+        BridgeRecordKind.tool,
+        'bash',
+        0,
+        outcome: const BridgeToolOutcome(testsPassed: 14, testsFailed: 1),
+      ),
+    ];
+    expect(changedFiles(edits), {'src/login.ts', 'test/login.test.ts'});
+    expect(
+      [isTestPath('test/login.test.ts'), isTestPath('src/login.ts')],
+      [true, false],
+    );
+    expect(lastTests(edits)?.testsPassed, 14);
+  });
+
   test('formats durations, counts and tool arguments', () {
     expect(
       [formatDuration(18), formatDuration(3400), formatDuration(125000)],

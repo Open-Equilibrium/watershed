@@ -158,7 +158,7 @@ impl From<ContextMessage> for BridgeContextMessage {
             label: message.label,
             chars: int(message.chars),
             in_context: message.in_context,
-            new: message.new,
+            fresh: message.fresh,
         }
     }
 }

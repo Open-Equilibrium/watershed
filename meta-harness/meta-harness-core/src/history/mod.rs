@@ -188,7 +188,7 @@ pub struct ContextMessage {
     /// Whether the model saw it; a compaction or edit can take it out.
     pub in_context: bool,
     /// Whether it arrived since the previous request.
-    pub new: bool,
+    pub fresh: bool,
 }
 
 /// One branch of a session, from its first entry to its leaf.

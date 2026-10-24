@@ -63,6 +63,15 @@ class FakeBackend implements SessionBackend {
   bool branchMoves = true;
 
   /// Moves the leaf like pi: to the entry, or before it for a prompt.
+  /// Context details by response entry.
+  final contexts = <String, BridgeContextDetail>{};
+
+  @override
+  Future<BridgeContextDetail?> context(String entry) async {
+    calls.add('context $entry');
+    return contexts[entry];
+  }
+
   @override
   Future<void> branch(String entry) async {
     calls.add('branch $entry');
@@ -138,6 +147,7 @@ BridgeRecord record(
   BridgeUsage? usage,
   BridgeStepContext? context,
   bool failed = false,
+  BridgeToolOutcome outcome = const BridgeToolOutcome(),
 }) => BridgeRecord(
   entry: entry,
   turn: turn,
@@ -152,6 +162,7 @@ BridgeRecord record(
   stopReason: '',
   failed: failed,
   context: context,
+  outcome: outcome,
 );
 
 /// A session whose current branch is `records`, as one tree path.

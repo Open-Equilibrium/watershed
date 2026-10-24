@@ -55,14 +55,14 @@ class BridgeContextMessage {
   final bool inContext;
 
   /// Whether it arrived since the previous request.
-  final bool new_;
+  final bool fresh;
 
   const BridgeContextMessage({
     required this.entry,
     required this.label,
     required this.chars,
     required this.inContext,
-    required this.new_,
+    required this.fresh,
   });
 
   @override
@@ -71,7 +71,7 @@ class BridgeContextMessage {
       label.hashCode ^
       chars.hashCode ^
       inContext.hashCode ^
-      new_.hashCode;
+      fresh.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -82,7 +82,7 @@ class BridgeContextMessage {
           label == other.label &&
           chars == other.chars &&
           inContext == other.inContext &&
-          new_ == other.new_;
+          fresh == other.fresh;
 }
 
 /// A named part of the model's context.

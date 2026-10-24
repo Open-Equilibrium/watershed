@@ -118,6 +118,9 @@ class SessionState {
   Future<BridgeHistory> history([List<String> leaves = const []]) =>
       _backend.history(leaves);
 
+  /// Everything the model saw for the request behind the response `entry`.
+  Future<BridgeContextDetail?> context(String entry) => _backend.context(entry);
+
   /// Continues the session from `entry`; the next prompt starts a new branch there.
   Future<void> branch(String entry) async {
     await _backend.branch(entry);

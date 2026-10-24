@@ -1066,13 +1066,13 @@ impl SseDecode for crate::api::history::BridgeContextMessage {
         let mut var_label = <String>::sse_decode(deserializer);
         let mut var_chars = <i64>::sse_decode(deserializer);
         let mut var_inContext = <bool>::sse_decode(deserializer);
-        let mut var_new_ = <bool>::sse_decode(deserializer);
+        let mut var_fresh = <bool>::sse_decode(deserializer);
         return crate::api::history::BridgeContextMessage {
             entry: var_entry,
             label: var_label,
             chars: var_chars,
             in_context: var_inContext,
-            new: var_new_,
+            fresh: var_fresh,
         };
     }
 }
@@ -2106,7 +2106,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::history::BridgeContextMessage
             self.label.into_into_dart().into_dart(),
             self.chars.into_into_dart().into_dart(),
             self.in_context.into_into_dart().into_dart(),
-            self.new.into_into_dart().into_dart(),
+            self.fresh.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -2853,7 +2853,7 @@ impl SseEncode for crate::api::history::BridgeContextMessage {
         <String>::sse_encode(self.label, serializer);
         <i64>::sse_encode(self.chars, serializer);
         <bool>::sse_encode(self.in_context, serializer);
-        <bool>::sse_encode(self.new, serializer);
+        <bool>::sse_encode(self.fresh, serializer);
     }
 }
 

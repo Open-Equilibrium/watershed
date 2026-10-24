@@ -252,6 +252,7 @@ class _Cell extends StatelessWidget {
         decisionLabel(record.detail),
         ?time,
       ].join(' · '),
+      BridgeRecordKind.tool => outcomeText(record.outcome) ?? time ?? '',
       _ => time ?? '',
     };
   }
@@ -296,20 +297,8 @@ class _Metrics extends StatelessWidget {
             '${formatCompact(totalsA.output)} → ${formatCompact(totalsB.output)} out',
             ws.textMuted,
           ),
-          (
-            'Cost',
-            '≈ ${formatCost(totalsA.cost)} → ${formatCost(totalsB.cost)}',
-            change(totalsA.cost, totalsB.cost),
-            tone(totalsA.cost, totalsB.cost),
-          ),
-          (
-            'Tool calls',
-            '${totalsA.tools} → ${totalsB.tools}',
-            totalsA.failed + totalsB.failed == 0
-                ? 'none failed'
-                : '${totalsA.failed} → ${totalsB.failed} failed',
-            totalsA.failed + totalsB.failed == 0 ? ws.textMuted : ws.danger,
-          ),
+          _files(ws, changedFiles(a.records), changedFiles(b.records)),
+          _tests(ws, lastTests(a.records), lastTests(b.records)),
         ].indexed) ...[
           if (index > 0) const SizedBox(width: 10),
           Expanded(
@@ -357,6 +346,52 @@ class _Metrics extends StatelessWidget {
   }
 }
 
+/// Files the branches changed, and whether only one changed tests.
+(String, String, String, Color) _files(
+  WsPalette ws,
+  Set<String> a,
+  Set<String> b,
+) {
+  final testsA = a.any(isTestPath);
+  final testsB = b.any(isTestPath);
+  return (
+    'Files changed',
+    '${a.length} → ${b.length}',
+    testsA == testsB
+        ? (testsA ? 'tests changed in both' : 'no test changes')
+        : 'no test changes in ${testsA ? 'B' : 'A'}',
+    testsA == testsB ? ws.textMuted : ws.warning,
+  );
+}
+
+/// The branches' last test runs.
+(String, String, String, Color) _tests(
+  WsPalette ws,
+  BridgeToolOutcome? a,
+  BridgeToolOutcome? b,
+) {
+  String count(BridgeToolOutcome? run) => run?.testsPassed?.toString() ?? '–';
+  final failedA = a?.testsFailed ?? 0;
+  final failedB = b?.testsFailed ?? 0;
+  final note = a == null && b == null
+      ? 'no test runs'
+      : a == null || b == null
+      ? 'no test run in ${a == null ? 'A' : 'B'}'
+      : failedA + failedB == 0
+      ? 'all passed in both'
+      : '$failedA → $failedB failed';
+  return (
+    'Tests',
+    '${count(a)} → ${count(b)}',
+    note,
+    failedA + failedB > 0
+        ? ws.danger
+        : a == null || b == null
+        ? ws.warning
+        : ws.textMuted,
+  );
+}
+
 class _Totals {
   _Totals(BridgeTrajectory trajectory) {
     for (final record in trajectory.records) {
@@ -364,18 +399,10 @@ class _Totals {
       if (usage != null) {
         input += promptTokens(usage);
         output += usage.output;
-        cost += usage.costMicroUsd;
-      }
-      if (record.kind == BridgeRecordKind.tool) {
-        tools++;
-        if (record.failed) failed++;
       }
     }
   }
 
   int input = 0;
   int output = 0;
-  int cost = 0;
-  int tools = 0;
-  int failed = 0;
 }

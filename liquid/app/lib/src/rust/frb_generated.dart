@@ -1066,7 +1066,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       label: dco_decode_String(arr[1]),
       chars: dco_decode_i_64(arr[2]),
       inContext: dco_decode_bool(arr[3]),
-      new_: dco_decode_bool(arr[4]),
+      fresh: dco_decode_bool(arr[4]),
     );
   }
 
@@ -1838,13 +1838,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_label = sse_decode_String(deserializer);
     var var_chars = sse_decode_i_64(deserializer);
     var var_inContext = sse_decode_bool(deserializer);
-    var var_new_ = sse_decode_bool(deserializer);
+    var var_fresh = sse_decode_bool(deserializer);
     return BridgeContextMessage(
       entry: var_entry,
       label: var_label,
       chars: var_chars,
       inContext: var_inContext,
-      new_: var_new_,
+      fresh: var_fresh,
     );
   }
 
@@ -2844,7 +2844,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.label, serializer);
     sse_encode_i_64(self.chars, serializer);
     sse_encode_bool(self.inContext, serializer);
-    sse_encode_bool(self.new_, serializer);
+    sse_encode_bool(self.fresh, serializer);
   }
 
   @protected

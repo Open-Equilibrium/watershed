@@ -38,7 +38,9 @@ BridgeUsage tokens(
 BridgeStepContext saw(int messages, List<String> added) => BridgeStepContext(
   promptChars: 2310,
   tools: const ['bash', 'read'],
+  toolChars: 1050,
   messages: messages,
+  messageChars: 2780,
   newSincePrevious: added,
 );
 
@@ -169,7 +171,7 @@ void main() {
       findsOneWidget,
     );
     expect(find.text('≈ \$0.02'), findsOneWidget);
-    expect(find.text('Tools · bash, read'), findsOneWidget);
+    expect(find.text('Tools · 2'), findsOneWidget);
     expect(find.text('New since step 2: result of read'), findsOneWidget);
 
     await press(tester, LogicalKeyboardKey.keyB);
@@ -353,11 +355,97 @@ void main() {
     expect(find.text('“Use a token bucket”'), findsOneWidget);
     expect(find.text('only in A'), findsWidgets);
     expect(find.text('Duration'), findsOneWidget);
+    expect(find.text('Files changed'), findsOneWidget);
+    expect(find.text('Tests'), findsOneWidget);
 
     await press(tester, LogicalKeyboardKey.keyC);
     await tester.tap(find.byKey(const ValueKey('tree-e6')));
     await tester.pumpAndSettle();
     expect(backend.calls.last, 'history e6');
+  });
+
+  testWidgets('shows tool outcomes, the token split and the context tab', (
+    tester,
+  ) async {
+    const saw = BridgeStepContext(
+      promptChars: 2310,
+      tools: ['bash', 'edit'],
+      toolChars: 1050,
+      messages: 3,
+      messageChars: 2780,
+      newSincePrevious: ['result of edit'],
+    );
+    await show(
+      tester,
+      historyOf([
+        record('u1', 1, BridgeRecordKind.user, 'Add rate limiting', 0),
+        record(
+          'e1',
+          1,
+          BridgeRecordKind.tool,
+          'edit',
+          100,
+          duration: 9,
+          detail: '{"path":"src/login.ts"}',
+          outcome: const BridgeToolOutcome(added: 9, removed: 2),
+        ),
+        record(
+          'e2',
+          1,
+          BridgeRecordKind.tool,
+          'bash',
+          200,
+          duration: 900,
+          detail: '{"command":"npm test"}',
+          outcome: const BridgeToolOutcome(
+            exitCode: 0,
+            testsPassed: 14,
+            testsFailed: 0,
+          ),
+        ),
+        record(
+          'm1',
+          1,
+          BridgeRecordKind.message,
+          'Done.',
+          1200,
+          duration: 500,
+          usage: tokens(6140, 96),
+          context: saw,
+        ),
+      ]),
+    );
+    backend.contexts['m1'] = const BridgeContextDetail(
+      sections: [BridgeContextPart(name: 'AGENTS.md', chars: 920)],
+      tools: [BridgeContextPart(name: 'edit', chars: 500)],
+      messages: [
+        BridgeContextMessage(
+          entry: 'e1',
+          label: 'result of edit · src/login.ts',
+          chars: 2372,
+          inContext: true,
+          fresh: true,
+        ),
+      ],
+    );
+    expect(find.text('+9 −2', findRichText: true), findsOneWidget);
+    expect(find.text('exit 0 · 14 ✓', findRichText: true), findsOneWidget);
+
+    for (var step = 0; step < 4; step++) {
+      await press(tester, LogicalKeyboardKey.arrowDown);
+    }
+    await press(tester, LogicalKeyboardKey.enter);
+    expect(backend.calls, contains('context m1'));
+    expect(find.text('≈ 2,310'), findsOneWidget);
+    expect(find.text('≈ 1,050'), findsOneWidget);
+    expect(find.text('≈ 2,780'), findsOneWidget);
+    expect(find.text('System prompt · AGENTS.md'), findsOneWidget);
+
+    await tester.tap(find.text('Context'));
+    await tester.pumpAndSettle();
+    expect(find.text('AGENTS.md'), findsOneWidget);
+    expect(find.text('1 · result of edit · src/login.ts'), findsOneWidget);
+    expect(find.text('new'), findsOneWidget);
   });
 
   testWidgets('follows the run live as steps are stored', (tester) async {

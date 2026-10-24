@@ -471,3 +471,65 @@ String toolSummary(String tool, String arguments) {
   final text = primary ?? arguments;
   return '$tool · ${text.length > 120 ? '${text.substring(0, 119)}…' : text}';
 }
+
+/// A tool call's outcome as text, such as `+9 −2` or `exit 0 · 14 ✓`; `null` when the stored
+/// result shows none.
+String? outcomeText(BridgeToolOutcome outcome) {
+  final passed = outcome.testsPassed;
+  final failed = outcome.testsFailed ?? 0;
+  final parts = [
+    if (outcome.added != null || outcome.removed != null)
+      [
+        if (outcome.added case final added?) '+$added',
+        if (outcome.removed case final removed?) '−$removed',
+      ].join(' '),
+    if (outcome.exitCode case final code?) 'exit $code',
+    if (passed != null) ['$passed ✓', if (failed > 0) '$failed ✗'].join(' '),
+  ];
+  return parts.isEmpty ? null : parts.join(' · ');
+}
+
+/// `total` split in proportion to `parts`, such as a request's tokens by the characters of
+/// its system prompt, tools and messages.
+List<int> shares(int total, List<int> parts) {
+  final sum = parts.fold(0, (sum, part) => sum + part);
+  return [
+    for (final part in parts) sum == 0 ? 0 : (total * part / sum).round(),
+  ];
+}
+
+/// Tools whose successful calls change files.
+const _fileTools = {'edit', 'write'};
+
+/// Paths that successful edits and writes changed on a branch.
+Set<String> changedFiles(List<BridgeRecord> records) => {
+  for (final record in records)
+    if (record.kind == BridgeRecordKind.tool &&
+        _fileTools.contains(record.label) &&
+        !record.failed)
+      ?_path(record.detail),
+};
+
+String? _path(String arguments) {
+  try {
+    final parsed = jsonDecode(arguments);
+    if (parsed is! Map<String, Object?>) return null;
+    final path = parsed['path'] ?? parsed['file_path'];
+    return path is String ? path : null;
+  } on FormatException {
+    return null;
+  }
+}
+
+/// Whether `path` looks like a test file.
+bool isTestPath(String path) {
+  final lower = path.toLowerCase();
+  return RegExp(r'(^|[/_.\-])(tests?|spec|__tests__)([/_.\-]|$)')
+      .hasMatch(lower);
+}
+
+/// The outcome of the branch's last test run.
+BridgeToolOutcome? lastTests(List<BridgeRecord> records) => records.reversed
+    .map((record) => record.outcome)
+    .where((outcome) => outcome.testsPassed != null)
+    .firstOrNull;

@@ -281,12 +281,12 @@ fn reads_tool_outcomes_and_what_the_model_saw_in_parts() {
             .len(),
     };
     let detail = history.context("a2").expect("a2 is a response");
-    let message = |entry: &str, label: &str, chars, new| ContextMessage {
+    let message = |entry: &str, label: &str, chars, fresh| ContextMessage {
         entry: entry.to_owned(),
         label: label.to_owned(),
         chars,
         in_context: true,
-        new,
+        fresh,
     };
     let response_chars = "Writing.".len()
         + [

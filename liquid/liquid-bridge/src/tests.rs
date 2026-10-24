@@ -434,7 +434,7 @@ fn reads_tool_outcomes_and_what_the_model_saw() {
         detail
             .messages
             .iter()
-            .map(|message| (message.label.as_str(), message.new))
+            .map(|message| (message.label.as_str(), message.fresh))
             .collect::<Vec<_>>(),
         [
             ("prompt · Write it", false),

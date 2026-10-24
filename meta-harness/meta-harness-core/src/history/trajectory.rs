@@ -173,7 +173,7 @@ impl Projection {
                     label: logged.label.clone(),
                     chars: logged.chars,
                     in_context: logged.message || Some(index) == self.summary,
-                    new: index >= self.since,
+                    fresh: index >= self.since,
                 })
                 .collect(),
         }

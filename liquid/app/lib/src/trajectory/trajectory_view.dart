@@ -59,7 +59,10 @@ class _TrajectoryViewState extends State<TrajectoryView> {
   String? _shown;
   String? _selected;
   bool _inspecting = false;
-  bool _raw = false;
+  _InspectorTab _tab = _InspectorTab.summary;
+
+  /// What the model saw for each response, loaded when its inspector opens.
+  final _details = <String, BridgeContextDetail?>{};
   final _folded = <int>{};
   bool _equalWidth = false;
   (double, double)? _range;
@@ -353,6 +356,19 @@ class _TrajectoryViewState extends State<TrajectoryView> {
     }
   }
 
+  /// The context detail of a response, starting its load the first time it is asked for.
+  BridgeContextDetail? _detailFor(BridgeRecord record) {
+    if (record.kind != BridgeRecordKind.message) return null;
+    final entry = record.entry;
+    if (!_details.containsKey(entry)) {
+      _details[entry] = null;
+      widget.state.context(entry).then((detail) {
+        if (mounted && detail != null) setState(() => _details[entry] = detail);
+      }, onError: (_) {});
+    }
+    return _details[entry];
+  }
+
   void _escape() {
     if (_range != null || _window != null) {
       setState(() {
@@ -612,11 +628,12 @@ class _TrajectoryViewState extends State<TrajectoryView> {
                 ),
               ),
               _InspectorLine(index: final step) => _Inspector(
+                detail: _detailFor(records[step]),
                 records: records,
                 index: step,
-                raw: _raw,
+                tab: _tab,
                 canBranch: !_busy,
-                onRaw: (raw) => setState(() => _raw = raw),
+                onTab: (tab) => setState(() => _tab = tab),
                 onBranch: _branch,
               ),
             },
@@ -908,7 +925,13 @@ class _StepRow extends StatelessWidget {
         child: _columns([
           Text('$number', style: figures.copyWith(color: ws.textFaint)),
           KindTag(record.kind),
-          StepText(record),
+          Row(
+            children: [
+              Flexible(child: StepText(record)),
+              const SizedBox(width: WsMetrics.space3),
+              OutcomeText(record.outcome),
+            ],
+          ),
           Text(
             record.kind == BridgeRecordKind.user
                 ? '+0 s'
@@ -932,27 +955,35 @@ class _StepRow extends StatelessWidget {
   }
 }
 
+enum _InspectorTab { summary, context, raw }
+
 class _Inspector extends StatelessWidget {
   const _Inspector({
     required this.records,
     required this.index,
-    required this.raw,
+    required this.detail,
+    required this.tab,
     required this.canBranch,
-    required this.onRaw,
+    required this.onTab,
     required this.onBranch,
   });
 
   final List<BridgeRecord> records;
   final int index;
-  final bool raw;
+  final BridgeContextDetail? detail;
+  final _InspectorTab tab;
   final bool canBranch;
-  final ValueChanged<bool> onRaw;
+  final ValueChanged<_InspectorTab> onTab;
   final VoidCallback onBranch;
 
   @override
   Widget build(BuildContext context) {
     final ws = context.ws;
     final record = records[index];
+    final message = record.kind == BridgeRecordKind.message;
+    final shown = !message && tab == _InspectorTab.context
+        ? _InspectorTab.summary
+        : tab;
     return SizedBox(
       height: _inspectorHeight,
       child: Container(
@@ -975,17 +1006,18 @@ class _Inspector extends StatelessWidget {
               child: Row(
                 children: [
                   for (final (label, value) in [
-                    ('Summary', false),
-                    ('Raw', true),
+                    ('Summary', _InspectorTab.summary),
+                    if (message) ('Context', _InspectorTab.context),
+                    ('Raw', _InspectorTab.raw),
                   ]) ...[
                     GestureDetector(
-                      onTap: () => onRaw(value),
+                      onTap: () => onTab(value),
                       child: Text(
                         label,
                         style: TextStyle(
                           fontSize: 13,
-                          color: value == raw ? ws.text : ws.textMuted,
-                          fontWeight: value == raw
+                          color: value == shown ? ws.text : ws.textMuted,
+                          fontWeight: value == shown
                               ? WsMetrics.fwMedium
                               : WsMetrics.fwRegular,
                         ),
@@ -1004,11 +1036,19 @@ class _Inspector extends StatelessWidget {
               ),
             ),
             Expanded(
-              child: raw
-                  ? _Raw(record: record)
-                  : record.kind == BridgeRecordKind.message
-                  ? _MessageSummary(records: records, index: index)
-                  : _StepSummary(record: record),
+              child: switch (shown) {
+                _InspectorTab.raw => _Raw(record: record),
+                _InspectorTab.context => _ContextTab(
+                  record: record,
+                  detail: detail,
+                ),
+                _InspectorTab.summary when message => _MessageSummary(
+                  records: records,
+                  index: index,
+                  detail: detail,
+                ),
+                _InspectorTab.summary => _StepSummary(record: record),
+              },
             ),
           ],
         ),
@@ -1079,11 +1119,115 @@ class _Heading extends StatelessWidget {
   );
 }
 
+/// The token split of one request: system prompt, tools and messages, estimated from their
+/// characters' share of the measured input.
+List<int> _tokenSplit(BridgeRecord record) {
+  final usage = record.usage;
+  final saw = record.context;
+  if (usage == null || saw == null) return const [0, 0, 0];
+  return shares(promptTokens(usage), [
+    saw.promptChars,
+    saw.toolChars,
+    saw.messageChars,
+  ]);
+}
+
+/// Tokens of `chars` characters at this request's ratio of tokens to characters.
+int _tokensFor(BridgeRecord record, int chars) {
+  final usage = record.usage;
+  final saw = record.context;
+  if (usage == null || saw == null) return 0;
+  final total = saw.promptChars + saw.toolChars + saw.messageChars;
+  return total == 0 ? 0 : (promptTokens(usage) * chars / total).round();
+}
+
+/// System prompt, tools and messages as one bar.
+class _SplitBar extends StatelessWidget {
+  const _SplitBar(this.split);
+
+  final List<int> split;
+
+  @override
+  Widget build(BuildContext context) {
+    final ws = context.ws;
+    return SizedBox(
+      height: 6,
+      child: Row(
+        children: [
+          for (final (index, part) in split.indexed)
+            if (part > 0)
+              Expanded(
+                flex: part,
+                child: Container(
+                  margin: EdgeInsets.only(left: index == 0 ? 0 : 2),
+                  decoration: BoxDecoration(
+                    color: [ws.data1, ws.data2, ws.data3][index],
+                    borderRadius: BorderRadius.circular(3),
+                  ),
+                ),
+              ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A colored square, the label and an estimated token count.
+class _ShareRow extends StatelessWidget {
+  const _ShareRow(this.color, this.label, this.tokens);
+
+  final Color color;
+  final String label;
+  final int tokens;
+
+  @override
+  Widget build(BuildContext context) {
+    final ws = context.ws;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: WsMetrics.space1),
+      child: Row(
+        children: [
+          Container(
+            width: 8,
+            height: 8,
+            margin: const EdgeInsets.only(right: WsMetrics.space2),
+            decoration: BoxDecoration(
+              color: color,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(color: ws.textMuted, fontSize: 13),
+            ),
+          ),
+          const SizedBox(width: WsMetrics.space4),
+          Text(
+            '≈ ${formatCount(tokens)}',
+            style: const TextStyle(
+              fontSize: 13,
+              fontFeatures: [FontFeature.tabularFigures()],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _MessageSummary extends StatelessWidget {
-  const _MessageSummary({required this.records, required this.index});
+  const _MessageSummary({
+    required this.records,
+    required this.index,
+    required this.detail,
+  });
 
   final List<BridgeRecord> records;
   final int index;
+  final BridgeContextDetail? detail;
 
   @override
   Widget build(BuildContext context) {
@@ -1093,11 +1237,17 @@ class _MessageSummary extends StatelessWidget {
     final duration = record.durationMs;
     final firstToken = record.firstTokenMs;
     final generation = duration == null ? null : duration - (firstToken ?? 0);
-    final context_ = record.context;
+    final saw = record.context;
+    final detail = this.detail;
+    final split = _tokenSplit(record);
     final previous = records
         .take(index)
         .toList()
         .lastIndexWhere((step) => step.kind == BridgeRecordKind.message);
+    final sections = detail?.sections.map((part) => part.name).toList();
+    final freshChars = detail?.messages
+        .where((message) => message.fresh && message.inContext)
+        .fold(0, (sum, message) => sum + message.chars);
     return Row(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -1154,21 +1304,19 @@ class _MessageSummary extends StatelessWidget {
                       : 'What the model saw · '
                             '${formatCount(promptTokens(usage))} tokens',
                 ),
-                if (context_ != null) ...[
-                  _Pairs([
-                    (
-                      'System prompt',
-                      '${formatCount(context_.promptChars)} chars',
-                    ),
-                    ('Messages', '${context_.messages}'),
-                  ]),
-                  Text(
-                    'Tools · ${context_.tools.join(', ')}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(color: ws.textMuted, fontSize: 13),
+                if (saw != null) ...[
+                  _SplitBar(split),
+                  const SizedBox(height: 10),
+                  _ShareRow(
+                    ws.data1,
+                    sections == null || sections.isEmpty
+                        ? 'System prompt'
+                        : 'System prompt · ${_names(sections)}',
+                    split[0],
                   ),
-                  if (context_.newSincePrevious.isNotEmpty) ...[
+                  _ShareRow(ws.data2, 'Tools · ${saw.tools.length}', split[1]),
+                  _ShareRow(ws.data3, 'Messages · ${saw.messages}', split[2]),
+                  if (saw.newSincePrevious.isNotEmpty) ...[
                     const SizedBox(height: 10),
                     Container(
                       padding: const EdgeInsets.symmetric(
@@ -1180,8 +1328,12 @@ class _MessageSummary extends StatelessWidget {
                         borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
                       ),
                       child: Text(
-                        '${previous < 0 ? 'New since the session started' : 'New since step ${previous + 1}'}: '
-                        '${context_.newSincePrevious.join(', ')}',
+                        [
+                          '${previous < 0 ? 'New since the session started' : 'New since step ${previous + 1}'}: '
+                              '${saw.newSincePrevious.join(', ')}',
+                          if (freshChars != null && freshChars > 0)
+                            '≈ ${formatCount(_tokensFor(record, freshChars))} tokens',
+                        ].join(' · '),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
@@ -1197,6 +1349,175 @@ class _MessageSummary extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+
+  /// Up to three names and how many more.
+  static String _names(List<String> names) => names.length <= 3
+      ? names.join(', ')
+      : '${names.take(3).join(', ')}, ${names.length - 3} more';
+}
+
+/// Every part of what the model saw for one request (approved session-flow mockup).
+class _ContextTab extends StatelessWidget {
+  const _ContextTab({required this.record, required this.detail});
+
+  final BridgeRecord record;
+  final BridgeContextDetail? detail;
+
+  @override
+  Widget build(BuildContext context) {
+    final ws = context.ws;
+    final detail = this.detail;
+    final saw = record.context;
+    if (detail == null || saw == null) {
+      return Center(
+        child: Text(
+          'Reading what the model saw…',
+          style: TextStyle(color: ws.textFaint, fontSize: WsMetrics.fsSmall),
+        ),
+      );
+    }
+    final split = _tokenSplit(record);
+    int total(Iterable<int> chars) =>
+        chars.fold(0, (sum, value) => sum + value);
+    Widget group(String title, int tokens) => Padding(
+      padding: const EdgeInsets.only(top: WsMetrics.space2),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              title,
+              style: const TextStyle(
+                fontSize: WsMetrics.fsSmall,
+                fontWeight: WsMetrics.fwSemibold,
+              ),
+            ),
+          ),
+          Text(
+            '≈ ${formatCount(tokens)}',
+            style: const TextStyle(
+              fontSize: WsMetrics.fsSmall,
+              fontWeight: WsMetrics.fwSemibold,
+              fontFeatures: [FontFeature.tabularFigures()],
+            ),
+          ),
+        ],
+      ),
+    );
+    Widget part(
+      String label,
+      int chars,
+      int groupChars,
+      Color color, {
+      bool fresh = false,
+      bool gone = false,
+    }) => SizedBox(
+      height: 18,
+      child: Row(
+        children: [
+          Expanded(
+            child: Row(
+              children: [
+                Flexible(
+                  child: Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: gone ? ws.textFaint : ws.textMuted,
+                      fontSize: WsMetrics.fsSmall,
+                      decoration: gone ? TextDecoration.lineThrough : null,
+                    ),
+                  ),
+                ),
+                if (fresh) ...[
+                  const SizedBox(width: WsMetrics.space1),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    decoration: BoxDecoration(
+                      color: ws.accentSubtle,
+                      borderRadius: BorderRadius.circular(3),
+                    ),
+                    child: Text(
+                      'new',
+                      style: TextStyle(color: ws.accent, fontSize: 10),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(width: WsMetrics.space4),
+          Container(
+            width: 120,
+            height: 5,
+            decoration: BoxDecoration(
+              color: ws.hover,
+              borderRadius: BorderRadius.circular(3),
+            ),
+            alignment: Alignment.centerLeft,
+            child: FractionallySizedBox(
+              widthFactor: groupChars == 0 || gone ? 0 : chars / groupChars,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: color,
+                  borderRadius: BorderRadius.circular(3),
+                ),
+              ),
+            ),
+          ),
+          SizedBox(
+            width: 64,
+            child: Text(
+              gone ? '–' : '≈ ${formatCount(_tokensFor(record, chars))}',
+              textAlign: TextAlign.right,
+              style: TextStyle(
+                color: ws.textMuted,
+                fontSize: WsMetrics.fsSmall,
+                fontFeatures: const [FontFeature.tabularFigures()],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+    final sectionChars = total(detail.sections.map((part) => part.chars));
+    final toolChars = total(detail.tools.map((part) => part.chars));
+    final messageChars = total([
+      for (final message in detail.messages)
+        if (message.inContext) message.chars,
+    ]);
+    return SingleChildScrollView(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _SplitBar(split),
+          group('System prompt', split[0]),
+          for (final section in detail.sections)
+            part(section.name, section.chars, sectionChars, ws.data1),
+          group('Tools · ${detail.tools.length}', split[1]),
+          for (final tool in detail.tools)
+            part(tool.name, tool.chars, toolChars, ws.data2),
+          group('Messages · ${saw.messages}', split[2]),
+          for (final (index, message) in detail.messages.indexed)
+            part(
+              '${index + 1} · ${message.label}',
+              message.chars,
+              messageChars,
+              ws.data3,
+              fresh: message.fresh,
+              gone: !message.inContext,
+            ),
+          const SizedBox(height: WsMetrics.space3),
+          Text(
+            'Shares estimated from characters; the total is the provider\'s measured input. '
+            'Compacted or removed entries appear crossed out.',
+            style: TextStyle(color: ws.textFaint, fontSize: WsMetrics.fsSmall),
+          ),
+        ],
+      ),
     );
   }
 }
