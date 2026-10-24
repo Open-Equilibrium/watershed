@@ -441,7 +441,7 @@ Canonical byte limits count only the serialized JSON value, excluding record fra
 ## Contract rules
 
 - **Versioned.** Each parser accepts only its declared current schema.
-- **Normalized events.** Adapters must map native agent events into the families above; do not leak native shapes. Exception: the embedded Meta-Harness core of the Liquid agent-surface slice uses its own in-process model until its service mode (ADR-0195).
+- **Normalized events.** Adapters must map native agent events into the families above; do not leak native shapes. Exception: the embedded Meta-Harness core of the Liquid agent-surface slice uses its own in-process model, built on T3 Code's runtime event vocabulary, until its service mode (ADR-0195).
 - **Artifact contract over runtime parity.** Agents differ in runtime semantics; they must agree only on this message contract.
 - **Deterministic ordering within a session.** A participant must follow the event envelope's `sequence` rule per session.
 - **No exfiltration via protocol.** Events and future commands carrying writes are subject to the security policy in `SECURITY.md`.
