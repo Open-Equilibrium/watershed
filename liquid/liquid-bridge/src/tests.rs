@@ -7,7 +7,7 @@ use crate::api::events::{
     BridgeApproval, BridgeChangeStatus, BridgeDecision, BridgeEvent, BridgeEventKind,
     BridgeFileChange, BridgeItemKind, BridgeQuestionKind, BridgeQueue, BridgeRequestKind,
 };
-use std::sync::mpsc;
+use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
 use crate::api::history::{BridgeEntryKind, BridgeRecordKind};
@@ -189,6 +189,47 @@ IFS= read -r line || exit 0"#;
         session.send("again".to_owned(), false),
         Err("the session was shut down".to_owned())
     );
+}
+
+#[test]
+fn answers_a_question_the_agent_asks_before_taking_a_message() {
+    // pi accepts a message only after its command handlers ran, and they may ask first.
+    let script = r#"IFS= read -r line
+printf '%s\n' '{"type":"extension_ui_request","id":"q1","method":"input","title":"Name","placeholder":""}'
+IFS= read -r line
+case "$line" in *'"id":"q1"'*) ;; *) exit 9 ;; esac
+printf '%s\n' '{"id":"1","type":"response","command":"prompt","success":true,"data":{"disposition":"started"}}'
+IFS= read -r line || exit 0"#;
+    let session = Arc::new(
+        AgentSession::start(SessionConfig {
+            program: "/bin/sh".to_owned(),
+            args: vec!["-c".to_owned(), script.to_owned()],
+            cwd: std::env::temp_dir().display().to_string(),
+        })
+        .expect("agent starts"),
+    );
+    let (sender, receiver) = mpsc::channel();
+    session
+        .forward(move |event| sender.send(event).is_ok())
+        .expect("first subscriber");
+    let sending = {
+        let session = Arc::clone(&session);
+        std::thread::spawn(move || session.send("/ask".to_owned(), false))
+    };
+    let asked = receiver
+        .recv_timeout(Duration::from_secs(10))
+        .expect("question arrives");
+    assert_eq!(asked.kind, BridgeEventKind::UserInputRequested);
+    let (answered, answer) = mpsc::channel();
+    {
+        let session = Arc::clone(&session);
+        std::thread::spawn(move || {
+            answered.send(session.answer_text("q1".to_owned(), "Ada".to_owned()))
+        });
+    }
+    assert_eq!(answer.recv_timeout(Duration::from_secs(10)), Ok(Ok(())));
+    assert_eq!(sending.join().expect("send returns"), Ok(()));
+    assert!(session.shutdown());
 }
 
 #[test]

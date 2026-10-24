@@ -70,6 +70,19 @@ pub enum CommandError {
 
 type Reply = oneshot::Sender<Result<Value, CommandError>>;
 
+/// A command the agent received but has not answered yet. Waiting for it needs no access to the
+/// session, so the agent's questions can be answered meanwhile: pi accepts a prompt only after
+/// its command handlers ran, and they may ask the user first.
+#[derive(Debug)]
+pub struct Pending(oneshot::Receiver<Result<Value, CommandError>>);
+
+impl Pending {
+    /// Waits until the agent accepted or rejected the command.
+    pub async fn accepted(self) -> Result<(), CommandError> {
+        self.0.await.unwrap_or(Err(CommandError::Closed)).map(drop)
+    }
+}
+
 /// What the agent reports about its session.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionState {
@@ -171,26 +184,28 @@ impl Session {
     }
 
     /// Sends a prompt that starts a turn.
-    pub async fn prompt(&mut self, message: &str) -> Result<(), CommandError> {
-        self.command(json!({ "type": "prompt", "message": message }))
+    pub async fn prompt(&mut self, message: &str) -> Result<Pending, CommandError> {
+        self.submit(json!({ "type": "prompt", "message": message }))
             .await
-            .map(drop)
     }
 
     /// Sends a message the agent starts with when idle and takes as `delivery` says while
     /// running; pi decides which applies, so no turn state can race the send.
-    pub async fn send(&mut self, message: &str, delivery: Delivery) -> Result<(), CommandError> {
+    pub async fn send(
+        &mut self,
+        message: &str,
+        delivery: Delivery,
+    ) -> Result<Pending, CommandError> {
         let behavior = match delivery {
             Delivery::Steer => "steer",
             Delivery::FollowUp => "followUp",
         };
-        self.command(json!({
+        self.submit(json!({
             "type": "prompt",
             "message": message,
             "streamingBehavior": behavior,
         }))
         .await
-        .map(drop)
     }
 
     /// Removes the waiting messages and returns them, so the user can edit and send them again.
@@ -245,7 +260,11 @@ impl Session {
 
     /// Continues the session from `entry`, optionally labelling it; the next prompt starts a
     /// new branch there. Requires Watershed's pi extension.
-    pub async fn branch(&mut self, entry: &str, label: Option<&str>) -> Result<(), CommandError> {
+    pub async fn branch(
+        &mut self,
+        entry: &str,
+        label: Option<&str>,
+    ) -> Result<Pending, CommandError> {
         let message = match label {
             Some(label) => format!("/watershed-branch {entry} {label}"),
             None => format!("/watershed-branch {entry}"),
@@ -328,7 +347,12 @@ impl Session {
         exited.await.unwrap_or(false)
     }
 
-    async fn command(&mut self, mut command: Value) -> Result<Value, CommandError> {
+    async fn command(&mut self, command: Value) -> Result<Value, CommandError> {
+        let Pending(response) = self.submit(command).await?;
+        response.await.unwrap_or(Err(CommandError::Closed))
+    }
+
+    async fn submit(&mut self, mut command: Value) -> Result<Pending, CommandError> {
         self.next_id += 1;
         command["id"] = Value::String(self.next_id.to_string());
         let (reply, response) = oneshot::channel();
@@ -340,7 +364,7 @@ impl Session {
             .send(Write::Record(encode(&command)))
             .await
             .map_err(|_| CommandError::Closed)?;
-        response.await.unwrap_or(Err(CommandError::Closed))
+        Ok(Pending(response))
     }
 
     async fn respond(&self, request: &RequestId, mut reply: Value) -> Result<(), CommandError> {

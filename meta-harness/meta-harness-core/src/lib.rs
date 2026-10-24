@@ -24,7 +24,7 @@ pub use history::{
     ToolOutcome, Trajectory, TrajectoryRecord, Transcript, TranscriptItem,
 };
 pub use pi::PiAdapter;
-pub use session::{AgentCommand, CommandError, Session, SessionEvent, SessionState};
+pub use session::{AgentCommand, CommandError, Pending, Session, SessionEvent, SessionState};
 
 #[cfg(test)]
 mod tests;

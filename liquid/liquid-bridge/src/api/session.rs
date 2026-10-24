@@ -121,20 +121,25 @@ impl AgentSession {
     /// project, so the diff view shows what the run changes.
     pub fn send(&self, message: String, follow_up: bool) -> Result<(), String> {
         RUNTIME.block_on(async {
-            let mut session = self.session.lock().await;
-            let session = open(&mut session)?;
-            if !session.running()
-                && let Some(project) = &self.project
-            {
-                // Without a snapshot the run still starts; the diff view then shows nothing.
-                *self.before_run.lock().await = project.snapshot().await.ok();
-            }
-            let delivery = if follow_up {
-                Delivery::FollowUp
-            } else {
-                Delivery::Steer
+            let pending = {
+                let mut session = self.session.lock().await;
+                let session = open(&mut session)?;
+                if !session.running()
+                    && let Some(project) = &self.project
+                {
+                    // Without a snapshot the run still starts; the diff view then shows nothing.
+                    *self.before_run.lock().await = project.snapshot().await.ok();
+                }
+                let delivery = if follow_up {
+                    Delivery::FollowUp
+                } else {
+                    Delivery::Steer
+                };
+                session.send(&message, delivery).await.map_err(describe)?
             };
-            session.send(&message, delivery).await.map_err(describe)
+            // The session stays free meanwhile, so questions asked before acceptance can be
+            // answered.
+            pending.accepted().await.map_err(describe)
         })
     }
 
@@ -232,11 +237,11 @@ impl AgentSession {
     /// Continues the session from `entry`; the next prompt starts a new branch there.
     pub fn branch(&self, entry: String) -> Result<(), String> {
         RUNTIME.block_on(async {
-            let mut session = self.session.lock().await;
-            open(&mut session)?
+            let pending = open(&mut *self.session.lock().await)?
                 .branch(&entry, None)
                 .await
-                .map_err(describe)
+                .map_err(describe)?;
+            pending.accepted().await.map_err(describe)
         })
     }
 

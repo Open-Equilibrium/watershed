@@ -6,8 +6,9 @@ use tokio::time::timeout;
 
 use crate::{
     AgentCommand, Answer, ApprovalMode, CommandError, Decision, Delivery, EntryKind, ItemDetail,
-    ItemId, ItemKind, ItemStatus, NotificationLevel, Queue, RecordKind, RequestId, RequestKind,
-    RuntimeEvent, Session, SessionEvent, SessionState, SessionTree, TreeNode, TurnId, UserInput,
+    ItemId, ItemKind, ItemStatus, NotificationLevel, Pending, Queue, RecordKind, RequestId,
+    RequestKind, RuntimeEvent, Session, SessionEvent, SessionState, SessionTree, TreeNode, TurnId,
+    UserInput,
 };
 
 const WAIT: Duration = Duration::from_secs(10);
@@ -30,6 +31,11 @@ fn run<F: Future>(test: F) -> F::Output {
         .block_on(test)
 }
 
+/// Waits until the agent accepted a command that was sent.
+async fn accepted(sent: Result<Pending, CommandError>) -> Result<(), CommandError> {
+    sent?.accepted().await
+}
+
 async fn next(events: &mut Receiver<SessionEvent>) -> SessionEvent {
     timeout(WAIT, events.recv())
         .await
@@ -48,7 +54,7 @@ printf '%s\n' '{"id":"1","type":"response","command":"prompt","success":true,"da
 printf '%s\n' '{"type":"agent_start"}' '{"type":"message_end","message":{"role":"user","content":"Say hi"}}' '{"type":"agent_settled","aborted":false}'
 IFS= read -r line || exit 0"#,
         );
-        assert_eq!(session.prompt("Say hi").await, Ok(()));
+        assert_eq!(accepted(session.prompt("Say hi").await).await, Ok(()));
         let turn = TurnId(1);
         let (item, kind) = (ItemId(1), ItemKind::UserMessage);
         for expected in [
@@ -92,7 +98,7 @@ printf '%s\n' '{"id":"1","type":"response","command":"prompt","success":false,"e
 exit 3"#,
         );
         assert_eq!(
-            session.prompt("Say hi").await,
+            accepted(session.prompt("Say hi").await).await,
             Err(CommandError::Rejected("Agent is busy".to_owned()))
         );
         assert_eq!(
@@ -279,8 +285,14 @@ IFS= read -r line || exit 0
             follow_up: vec!["Also docs".to_owned()],
         };
         assert!(!session.running());
-        assert_eq!(session.send("Use Redis", Delivery::Steer).await, Ok(()));
-        assert_eq!(session.send("Also docs", Delivery::FollowUp).await, Ok(()));
+        assert_eq!(
+            accepted(session.send("Use Redis", Delivery::Steer).await).await,
+            Ok(())
+        );
+        assert_eq!(
+            accepted(session.send("Also docs", Delivery::FollowUp).await).await,
+            Ok(())
+        );
         assert!(matches!(
             next(&mut events).await,
             SessionEvent::Runtime(RuntimeEvent::TurnStarted { .. })
@@ -475,6 +487,9 @@ fn reads_state_and_tree_and_branches_through_the_extension() {
                 .collect::<Vec<_>>(),
             [(RecordKind::User, "hi")]
         );
-        assert_eq!(session.branch("e1", Some("B")).await, Ok(()));
+        assert_eq!(
+            accepted(session.branch("e1", Some("B")).await).await,
+            Ok(())
+        );
     });
 }

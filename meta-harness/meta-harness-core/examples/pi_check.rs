@@ -44,7 +44,13 @@ async fn check() {
         cwd: std::env::temp_dir(),
     };
     let (mut session, mut events) = Session::start(&command).expect("pi starts");
-    session.prompt("run it").await.expect("prompt accepted");
+    session
+        .prompt("run it")
+        .await
+        .expect("prompt sent")
+        .accepted()
+        .await
+        .expect("prompt accepted");
     let mut decisions = [Decision::AllowOnce, Decision::Reject].into_iter();
     let mut turns = 0;
     while let Some(event) = tokio::time::timeout(WAIT, events.recv())
@@ -70,7 +76,13 @@ async fn check() {
                 println!("{event:?}");
                 turns += 1;
                 if turns == 1 {
-                    session.prompt("again").await.expect("prompt accepted");
+                    session
+                        .prompt("again")
+                        .await
+                        .expect("prompt sent")
+                        .accepted()
+                        .await
+                        .expect("prompt accepted");
                     continue;
                 }
                 let history = session.history().await.expect("history");
@@ -85,7 +97,13 @@ async fn check() {
                     .iter()
                     .rfind(|record| record.kind == RecordKind::User)
                     .expect("second prompt");
-                session.branch(&again.entry, None).await.expect("branched");
+                session
+                    .branch(&again.entry, None)
+                    .await
+                    .expect("branch sent")
+                    .accepted()
+                    .await
+                    .expect("branched");
                 while let Some(event) = tokio::time::timeout(WAIT, events.recv())
                     .await
                     .expect("event in time")
