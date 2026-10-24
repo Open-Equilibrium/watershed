@@ -1,12 +1,12 @@
 //! A running agent process behind the runtime event model.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::future::{Future, poll_fn};
 use std::path::PathBuf;
-use std::pin::pin;
+use std::pin::{Pin, pin};
 use std::process::Stdio;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::task::Poll;
 use std::time::Duration;
 
@@ -15,12 +15,15 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tokio::sync::{mpsc, oneshot};
 
-use crate::{LineFramer, PiAdapter, RuntimeEvent};
+use crate::approval::{ApprovalMode, needs_user};
+use crate::{Answer, Decision, LineFramer, PiAdapter, RequestId, RuntimeEvent};
 
 /// Largest record accepted from an agent; a larger record ends the session.
 const MAX_RECORD_BYTES: usize = 16 * 1024 * 1024;
 /// Events buffered before the session stops reading agent output, which pauses the agent.
 const EVENT_BUFFER: usize = 256;
+/// Records buffered for the agent's input.
+const WRITE_BUFFER: usize = 64;
 const READ_BUFFER: usize = 64 * 1024;
 
 /// How to start an agent process that speaks pi's RPC protocol.
@@ -53,45 +56,48 @@ pub enum SessionEvent {
 pub enum CommandError {
     /// The agent rejected the command.
     Rejected(String),
+    /// The request is not open, for example because it was already answered.
+    UnknownRequest,
     /// The agent process is gone.
     Closed,
 }
 
 type Reply = oneshot::Sender<Result<(), CommandError>>;
 
-/// Commands awaiting their response; closed once the agent is gone.
-#[derive(Debug, Clone, Default)]
-struct Pending(Arc<Mutex<Option<HashMap<u64, Reply>>>>);
+enum Write {
+    Record(Vec<u8>),
+    Close,
+}
 
-impl Pending {
-    fn open() -> Self {
-        Self(Arc::new(Mutex::new(Some(HashMap::new()))))
-    }
+/// State shared between the session handle and its supervisor.
+#[derive(Debug, Default)]
+struct Shared {
+    /// Commands awaiting their response; `None` once the agent is gone.
+    replies: Option<HashMap<u64, Reply>>,
+    mode: ApprovalMode,
+    /// Tools the user allowed for the rest of the session.
+    allowed: HashSet<String>,
+    /// Open approval requests and the tool each one would call.
+    approvals: HashMap<RequestId, String>,
+    /// Open questions from agent extensions.
+    questions: HashSet<RequestId>,
+}
 
-    fn insert(&self, id: u64, reply: Reply) -> bool {
-        let mut guard = self.0.lock().unwrap_or_else(PoisonError::into_inner);
-        guard
-            .as_mut()
-            .map(|replies| replies.insert(id, reply))
-            .is_some()
-    }
+#[derive(Debug, Clone)]
+struct State(Arc<Mutex<Shared>>);
 
-    fn take(&self, id: u64) -> Option<Reply> {
-        let mut guard = self.0.lock().unwrap_or_else(PoisonError::into_inner);
-        guard.as_mut().and_then(|replies| replies.remove(&id))
-    }
-
-    /// Fails every waiting command by dropping its reply.
-    fn close(&self) {
-        self.0.lock().unwrap_or_else(PoisonError::into_inner).take();
+impl State {
+    fn lock(&self) -> MutexGuard<'_, Shared> {
+        self.0.lock().unwrap_or_else(PoisonError::into_inner)
     }
 }
 
 /// A running agent process; dropping it kills the process.
 #[derive(Debug)]
 pub struct Session {
-    stdin: Option<ChildStdin>,
-    pending: Pending,
+    writer: mpsc::Sender<Write>,
+    events: mpsc::Sender<SessionEvent>,
+    state: State,
     next_id: u64,
     kill: Option<oneshot::Sender<()>>,
     exited: oneshot::Receiver<bool>,
@@ -109,22 +115,29 @@ impl Session {
             .kill_on_drop(true)
             .spawn()?;
         let stdout = child.stdout.take().expect("stdout is piped");
-        let stdin = child.stdin.take();
+        let stdin = child.stdin.take().expect("stdin is piped");
+        let (writer, writes) = mpsc::channel(WRITE_BUFFER);
         let (events, receiver) = mpsc::channel(EVENT_BUFFER);
         let (kill, killed) = oneshot::channel();
         let (exit, exited) = oneshot::channel();
-        let pending = Pending::open();
-        tokio::spawn(supervise(
-            child,
-            stdout,
-            events,
-            pending.clone(),
+        let state = State(Arc::new(Mutex::new(Shared {
+            replies: Some(HashMap::new()),
+            ..Shared::default()
+        })));
+        tokio::spawn(write(stdin, writes));
+        let supervisor = Supervisor {
+            events: events.clone(),
+            writer: writer.clone(),
+            state: state.clone(),
+            adapter: PiAdapter::new(),
             killed,
-            exit,
-        ));
+            kill_requested: false,
+        };
+        tokio::spawn(supervisor.run(child, stdout, exit));
         let session = Self {
-            stdin,
-            pending,
+            writer,
+            events,
+            state,
             next_id: 0,
             kill: Some(kill),
             exited,
@@ -134,24 +147,81 @@ impl Session {
 
     /// Sends a prompt that starts a turn.
     pub async fn prompt(&mut self, message: &str) -> Result<(), CommandError> {
-        self.send(json!({ "type": "prompt", "message": message }))
+        self.command(json!({ "type": "prompt", "message": message }))
             .await
     }
 
     /// Steers the running turn with a further message.
     pub async fn steer(&mut self, message: &str) -> Result<(), CommandError> {
-        self.send(json!({ "type": "steer", "message": message }))
+        self.command(json!({ "type": "steer", "message": message }))
             .await
     }
 
     /// Aborts the running turn.
     pub async fn abort(&mut self) -> Result<(), CommandError> {
-        self.send(json!({ "type": "abort" })).await
+        self.command(json!({ "type": "abort" })).await
+    }
+
+    /// Changes which tool calls need the user's approval.
+    pub fn set_approval_mode(&self, mode: ApprovalMode) {
+        self.state.lock().mode = mode;
+    }
+
+    /// Answers an open approval request.
+    pub async fn decide(
+        &mut self,
+        request: &RequestId,
+        decision: Decision,
+    ) -> Result<(), CommandError> {
+        {
+            let mut shared = self.state.lock();
+            let tool = shared
+                .approvals
+                .remove(request)
+                .ok_or(CommandError::UnknownRequest)?;
+            if decision == Decision::AllowSession {
+                shared.allowed.insert(tool);
+            }
+        }
+        let value = match decision {
+            Decision::AllowOnce => "allow-once",
+            Decision::AllowSession => "allow-session",
+            Decision::Reject => "reject",
+        };
+        self.respond(request, json!({ "value": value })).await?;
+        let resolved = RuntimeEvent::RequestResolved {
+            request: request.clone(),
+            decision,
+        };
+        let _ = self.events.send(SessionEvent::Runtime(resolved)).await;
+        Ok(())
+    }
+
+    /// Answers an open question from an agent extension.
+    pub async fn answer(
+        &mut self,
+        request: &RequestId,
+        answer: Answer,
+    ) -> Result<(), CommandError> {
+        if !self.state.lock().questions.remove(request) {
+            return Err(CommandError::UnknownRequest);
+        }
+        let reply = match answer {
+            Answer::Value(value) => json!({ "value": value }),
+            Answer::Confirmed(confirmed) => json!({ "confirmed": confirmed }),
+            Answer::Cancelled => json!({ "cancelled": true }),
+        };
+        self.respond(request, reply).await?;
+        let resolved = RuntimeEvent::UserInputResolved {
+            request: request.clone(),
+        };
+        let _ = self.events.send(SessionEvent::Runtime(resolved)).await;
+        Ok(())
     }
 
     /// Asks the agent to exit and kills it after `grace`; returns whether it exited successfully.
     pub async fn shutdown(mut self, grace: Duration) -> bool {
-        drop(self.stdin.take());
+        let _ = self.writer.send(Write::Close).await;
         let mut exited = self.exited;
         if let Ok(success) = tokio::time::timeout(grace, &mut exited).await {
             return success.unwrap_or(false);
@@ -162,131 +232,196 @@ impl Session {
         exited.await.unwrap_or(false)
     }
 
-    async fn send(&mut self, mut command: Value) -> Result<(), CommandError> {
+    async fn command(&mut self, mut command: Value) -> Result<(), CommandError> {
         self.next_id += 1;
         command["id"] = Value::String(self.next_id.to_string());
         let (reply, response) = oneshot::channel();
-        if !self.pending.insert(self.next_id, reply) {
-            return Err(CommandError::Closed);
-        }
-        let mut line = command.to_string().into_bytes();
-        line.push(b'\n');
-        let stdin = self.stdin.as_mut().ok_or(CommandError::Closed)?;
-        if stdin.write_all(&line).await.is_err() || stdin.flush().await.is_err() {
-            return Err(CommandError::Closed);
-        }
+        match self.state.lock().replies.as_mut() {
+            Some(replies) => replies.insert(self.next_id, reply),
+            None => return Err(CommandError::Closed),
+        };
+        self.writer
+            .send(Write::Record(encode(&command)))
+            .await
+            .map_err(|_| CommandError::Closed)?;
         response.await.unwrap_or(Err(CommandError::Closed))
+    }
+
+    async fn respond(&self, request: &RequestId, mut reply: Value) -> Result<(), CommandError> {
+        reply["type"] = json!("extension_ui_response");
+        reply["id"] = json!(request.0);
+        self.writer
+            .send(Write::Record(encode(&reply)))
+            .await
+            .map_err(|_| CommandError::Closed)
+    }
+}
+
+/// Encodes one JSONL record.
+fn encode(value: &Value) -> Vec<u8> {
+    let mut line = value.to_string().into_bytes();
+    line.push(b'\n');
+    line
+}
+
+/// Writes records to the agent until asked to close its input or the agent stops reading.
+async fn write(mut stdin: ChildStdin, mut writes: mpsc::Receiver<Write>) {
+    while let Some(Write::Record(line)) = writes.recv().await {
+        if stdin.write_all(&line).await.is_err() || stdin.flush().await.is_err() {
+            break;
+        }
     }
 }
 
 /// Reads the agent's output until it exits, fails or is killed, then reports the exit.
-async fn supervise(
-    mut child: Child,
-    mut stdout: ChildStdout,
+struct Supervisor {
     events: mpsc::Sender<SessionEvent>,
-    pending: Pending,
-    mut killed: oneshot::Receiver<()>,
-    exit: oneshot::Sender<bool>,
-) {
-    let mut framer = LineFramer::new(MAX_RECORD_BYTES);
-    let mut adapter = PiAdapter::new();
-    let mut buffer = vec![0; READ_BUFFER];
-    let failure = loop {
-        let read = match first(stdout.read(&mut buffer), &mut killed).await {
-            Either::First(read) => read,
-            Either::Second(_) => break None,
-        };
-        let records = match read {
-            Ok(0) | Err(_) => break None,
-            Ok(length) => match framer.push(&buffer[..length]) {
-                Ok(records) => records,
-                Err(error) => break Some(format!("agent output broke framing: {error}")),
-            },
-        };
-        let mut failure = None;
-        for record in records {
-            let Ok(Value::Object(record)) = serde_json::from_slice::<Value>(&record) else {
-                failure = Some("agent wrote a record that is not a JSON object".to_owned());
-                break;
+    writer: mpsc::Sender<Write>,
+    state: State,
+    adapter: PiAdapter,
+    killed: oneshot::Receiver<()>,
+    /// Set once `killed` completed; it must not be polled again.
+    kill_requested: bool,
+}
+
+impl Supervisor {
+    async fn run(mut self, mut child: Child, mut stdout: ChildStdout, exit: oneshot::Sender<bool>) {
+        let mut framer = LineFramer::new(MAX_RECORD_BYTES);
+        let mut buffer = vec![0; READ_BUFFER];
+        let failure = 'read: loop {
+            let Some(read) = self.unless_killed(stdout.read(&mut buffer)).await else {
+                break None;
             };
-            if record.get("type").and_then(Value::as_str) == Some("response") {
-                answer(&pending, &record);
-                continue;
+            let records = match read {
+                Ok(0) | Err(_) => break None,
+                Ok(length) => match framer.push(&buffer[..length]) {
+                    Ok(records) => records,
+                    Err(error) => break Some(format!("agent output broke framing: {error}")),
+                },
+            };
+            for record in records {
+                let Ok(Value::Object(record)) = serde_json::from_slice::<Value>(&record) else {
+                    break 'read Some("agent wrote a record that is not a JSON object".to_owned());
+                };
+                if !self.handle(&record).await {
+                    break 'read None;
+                }
             }
-            for event in adapter.translate(&record) {
-                let sent = events.send(SessionEvent::Runtime(event));
-                if let Either::Second(_) = first(sent, &mut killed).await {
-                    break;
+        };
+        self.state.lock().replies = None;
+        let stop = failure.is_some() || self.kill_requested;
+        if let Some(reason) = failure {
+            let _ = self.events.send(SessionEvent::Failed(reason)).await;
+        }
+        // An agent that closed its output may still run; a kill request ends the wait.
+        let status = if stop {
+            None
+        } else {
+            self.unless_killed(child.wait()).await
+        };
+        let status = match status {
+            Some(status) => status,
+            None => {
+                let _ = child.start_kill();
+                child.wait().await
+            }
+        };
+        let success = status.is_ok_and(|status| status.success());
+        let _ = self.events.send(SessionEvent::Exited { success }).await;
+        let _ = exit.send(success);
+    }
+
+    /// Routes one record; returns `false` once the session was killed.
+    async fn handle(&mut self, record: &Map<String, Value>) -> bool {
+        if record.get("type").and_then(Value::as_str) == Some("response") {
+            self.answer_command(record);
+            return true;
+        }
+        for event in self.adapter.translate(record) {
+            let forward = match &event {
+                RuntimeEvent::RequestOpened {
+                    request,
+                    kind,
+                    tool,
+                    read_only,
+                    ..
+                } => {
+                    let ask = {
+                        let mut shared = self.state.lock();
+                        let allowed = shared.allowed.contains(tool);
+                        let ask = needs_user(shared.mode, *kind, *read_only, allowed);
+                        if ask {
+                            shared.approvals.insert(request.clone(), tool.clone());
+                        }
+                        ask
+                    };
+                    if !ask {
+                        let reply = json!({
+                            "type": "extension_ui_response",
+                            "id": request.0,
+                            "value": "allow-auto",
+                        });
+                        let _ = self.writer.send(Write::Record(encode(&reply))).await;
+                    }
+                    ask
+                }
+                RuntimeEvent::UserInputRequested { request, .. } => {
+                    self.state.lock().questions.insert(request.clone());
+                    true
+                }
+                _ => true,
+            };
+            if forward {
+                let events = self.events.clone();
+                if self
+                    .unless_killed(events.send(SessionEvent::Runtime(event)))
+                    .await
+                    .is_none()
+                {
+                    return false;
                 }
             }
         }
-        if failure.is_some() {
-            break failure;
-        }
-    };
-    pending.close();
-    let stop = failure.is_some() || killed.is_terminated();
-    if let Some(reason) = failure {
-        let _ = events.send(SessionEvent::Failed(reason)).await;
+        true
     }
-    // An agent that closed its output may still run; a kill request ends the wait.
-    let status = if stop {
-        None
-    } else {
-        match first(child.wait(), &mut killed).await {
-            Either::First(status) => Some(status),
-            Either::Second(_) => None,
-        }
-    };
-    let status = match status {
-        Some(status) => status,
-        None => {
-            let _ = child.start_kill();
-            child.wait().await
-        }
-    };
-    let success = status.is_ok_and(|status| status.success());
-    let _ = events.send(SessionEvent::Exited { success }).await;
-    let _ = exit.send(success);
-}
 
-enum Either<A, B> {
-    First(A),
-    Second(B),
-}
-
-/// Waits for whichever future completes first, preferring `a`.
-async fn first<A: Future, B: Future + Unpin>(a: A, b: &mut B) -> Either<A::Output, B::Output> {
-    let mut a = pin!(a);
-    poll_fn(|context| {
-        if let Poll::Ready(output) = a.as_mut().poll(context) {
-            return Poll::Ready(Either::First(output));
-        }
-        match std::pin::Pin::new(&mut *b).poll(context) {
-            Poll::Ready(output) => Poll::Ready(Either::Second(output)),
-            Poll::Pending => Poll::Pending,
-        }
-    })
-    .await
-}
-
-/// Resolves the command a response answers.
-fn answer(pending: &Pending, response: &Map<String, Value>) {
-    let id = response
-        .get("id")
-        .and_then(Value::as_str)
-        .and_then(|id| id.parse().ok());
-    let Some(reply) = id.and_then(|id| pending.take(id)) else {
-        return;
-    };
-    let result = if response.get("success").and_then(Value::as_bool) == Some(true) {
-        Ok(())
-    } else {
-        let error = response
-            .get("error")
+    /// Resolves the command a response answers.
+    fn answer_command(&self, response: &Map<String, Value>) {
+        let id = response
+            .get("id")
             .and_then(Value::as_str)
-            .unwrap_or("command failed");
-        Err(CommandError::Rejected(error.to_owned()))
-    };
-    let _ = reply.send(result);
+            .and_then(|id| id.parse::<u64>().ok());
+        let reply = id.and_then(|id| self.state.lock().replies.as_mut()?.remove(&id));
+        let Some(reply) = reply else {
+            return;
+        };
+        let result = if response.get("success").and_then(Value::as_bool) == Some(true) {
+            Ok(())
+        } else {
+            let error = response
+                .get("error")
+                .and_then(Value::as_str)
+                .unwrap_or("command failed");
+            Err(CommandError::Rejected(error.to_owned()))
+        };
+        let _ = reply.send(result);
+    }
+
+    /// Runs `work` unless a kill is requested first; then returns `None`.
+    async fn unless_killed<F: Future>(&mut self, work: F) -> Option<F::Output> {
+        if self.kill_requested {
+            return None;
+        }
+        let mut work = pin!(work);
+        let killed = &mut self.killed;
+        let outcome = poll_fn(|context| {
+            if let Poll::Ready(output) = work.as_mut().poll(context) {
+                return Poll::Ready(Some(output));
+            }
+            Pin::new(&mut *killed).poll(context).map(|_| None)
+        })
+        .await;
+        self.kill_requested = outcome.is_none();
+        outcome
+    }
 }

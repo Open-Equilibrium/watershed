@@ -39,6 +39,87 @@ pub enum ItemDetail {
     },
 }
 
+/// One open request from the agent that waits for the user.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct RequestId(pub String);
+
+/// What an approval request asks to allow.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RequestKind {
+    /// Running a shell command.
+    CommandExecutionApproval,
+    /// Changing project files.
+    FileChangeApproval,
+    /// Calling any other tool.
+    ToolApproval,
+}
+
+/// The user's answer to an approval request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Decision {
+    /// Allow this call only.
+    AllowOnce,
+    /// Allow this tool for the rest of the session.
+    AllowSession,
+    /// Block this call.
+    Reject,
+}
+
+/// A question an agent extension asks the user.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UserInput {
+    /// Choose one of several options.
+    Select {
+        /// The question.
+        title: String,
+        /// The options in display order.
+        options: Vec<String>,
+    },
+    /// Confirm or decline.
+    Confirm {
+        /// The question.
+        title: String,
+        /// Further explanation.
+        message: String,
+    },
+    /// Enter one line of text.
+    Input {
+        /// The question.
+        title: String,
+        /// Placeholder text.
+        placeholder: String,
+    },
+    /// Edit multi-line text.
+    Editor {
+        /// The question.
+        title: String,
+        /// The initial text.
+        prefill: String,
+    },
+}
+
+/// The user's reply to a [`UserInput`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Answer {
+    /// The chosen option or entered text.
+    Value(String),
+    /// The reply to a confirmation.
+    Confirmed(bool),
+    /// The user dismissed the question.
+    Cancelled,
+}
+
+/// How urgent a notification is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NotificationLevel {
+    /// Information.
+    Info,
+    /// A warning.
+    Warning,
+    /// An error.
+    Error,
+}
+
 /// How an item ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ItemStatus {
@@ -105,5 +186,68 @@ pub enum RuntimeEvent {
         status: ItemStatus,
         /// How long a tool ran, when the agent measured it.
         duration_ms: Option<u64>,
+    },
+    /// A tool call waits for the user's approval.
+    RequestOpened {
+        /// The request.
+        request: RequestId,
+        /// What the call would do.
+        kind: RequestKind,
+        /// The agent's tool name.
+        tool: String,
+        /// The call's arguments as JSON text.
+        arguments: String,
+        /// Whether the tool declares that it only reads.
+        read_only: bool,
+    },
+    /// The user answered an approval request.
+    RequestResolved {
+        /// The request.
+        request: RequestId,
+        /// The answer.
+        decision: Decision,
+    },
+    /// An agent extension asks the user a question.
+    UserInputRequested {
+        /// The request.
+        request: RequestId,
+        /// The question.
+        input: UserInput,
+    },
+    /// The user answered a question.
+    UserInputResolved {
+        /// The request.
+        request: RequestId,
+    },
+    /// An agent extension shows a notification.
+    Notification {
+        /// How urgent it is.
+        level: NotificationLevel,
+        /// The text.
+        message: String,
+    },
+    /// An agent extension set or cleared a status entry.
+    StatusChanged {
+        /// The extension's status key.
+        key: String,
+        /// The text, or `None` when cleared.
+        text: Option<String>,
+    },
+    /// An agent extension set or cleared a widget of text lines.
+    WidgetChanged {
+        /// The extension's widget key.
+        key: String,
+        /// The lines, or `None` when cleared.
+        lines: Option<Vec<String>>,
+    },
+    /// An agent extension set the session title.
+    TitleChanged {
+        /// The title.
+        title: String,
+    },
+    /// An agent extension replaced the text in the input area.
+    InputTextSet {
+        /// The text.
+        text: String,
     },
 }

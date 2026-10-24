@@ -5,8 +5,8 @@ use tokio::sync::mpsc::Receiver;
 use tokio::time::timeout;
 
 use crate::{
-    AgentCommand, CommandError, ItemDetail, ItemId, ItemKind, ItemStatus, RuntimeEvent, Session,
-    SessionEvent, TurnId,
+    AgentCommand, Answer, ApprovalMode, CommandError, Decision, ItemDetail, ItemId, ItemKind,
+    ItemStatus, RequestId, RequestKind, RuntimeEvent, Session, SessionEvent, TurnId, UserInput,
 };
 
 const WAIT: Duration = Duration::from_secs(10);
@@ -126,5 +126,135 @@ fn shutdown_kills_an_agent_that_ignores_it() {
         let (session, _events) = fake_agent(r#"trap '' TERM; while :; do sleep 1; done"#);
         let stopped = timeout(WAIT, session.shutdown(Duration::from_millis(100))).await;
         assert_eq!(stopped, Ok(false));
+    });
+}
+
+/// Shell lines that read one response and fail unless it contains every given fragment.
+fn expect_response(fragments: &[&str]) -> String {
+    let mut script = String::from("IFS= read -r line\n");
+    for fragment in fragments {
+        script.push_str(&format!(
+            "case \"$line\" in *'{fragment}'*) ;; *) exit 9 ;; esac\n"
+        ));
+    }
+    script
+}
+
+fn approval_request(id: &str, tool: &str, read_only: bool) -> String {
+    let payload = format!(r#"{{\"tool\":\"{tool}\",\"arguments\":{{}},\"readOnly\":{read_only}}}"#);
+    format!(
+        "printf '%s\\n' '{{\"type\":\"extension_ui_request\",\"id\":\"{id}\",\"method\":\"select\",\"title\":\"watershed.approval {payload}\",\"options\":[]}}'\n"
+    )
+}
+
+#[test]
+fn answers_extension_questions() {
+    run(async {
+        let script = [
+            r#"printf '%s\n' '{"type":"extension_ui_request","id":"q1","method":"select","title":"Pick","options":["A","B"]}'
+"#
+            .to_owned(),
+            expect_response(&[r#""type":"extension_ui_response""#, r#""id":"q1""#, r#""value":"B""#]),
+            r#"printf '%s\n' '{"type":"extension_ui_request","id":"q2","method":"confirm","title":"Sure?","message":"Really"}'
+"#
+            .to_owned(),
+            expect_response(&[r#""id":"q2""#, r#""confirmed":true"#]),
+            r#"printf '%s\n' '{"type":"extension_ui_request","id":"q3","method":"input","title":"Name","placeholder":""}'
+"#
+            .to_owned(),
+            expect_response(&[r#""id":"q3""#, r#""cancelled":true"#]),
+        ]
+        .concat();
+        let (mut session, mut events) = fake_agent(&script);
+        let questions = [
+            ("q1", Answer::Value("B".to_owned())),
+            ("q2", Answer::Confirmed(true)),
+            ("q3", Answer::Cancelled),
+        ];
+        for (id, answer) in questions {
+            let request = RequestId(id.to_owned());
+            let SessionEvent::Runtime(RuntimeEvent::UserInputRequested {
+                request: asked,
+                input,
+            }) = next(&mut events).await
+            else {
+                panic!("question {id} arrives");
+            };
+            assert_eq!(asked, request);
+            if id == "q1" {
+                assert_eq!(
+                    input,
+                    UserInput::Select {
+                        title: "Pick".to_owned(),
+                        options: vec!["A".to_owned(), "B".to_owned()],
+                    }
+                );
+            }
+            assert_eq!(session.answer(&request, answer).await, Ok(()));
+            assert_eq!(
+                next(&mut events).await,
+                SessionEvent::Runtime(RuntimeEvent::UserInputResolved { request })
+            );
+        }
+        assert_eq!(
+            next(&mut events).await,
+            SessionEvent::Exited { success: true }
+        );
+    });
+}
+
+#[test]
+fn asks_only_for_calls_the_approval_mode_does_not_allow() {
+    run(async {
+        let script = [
+            approval_request("a1", "bash", false),
+            expect_response(&[r#""id":"a1""#, r#""value":"allow-session""#]),
+            approval_request("a2", "bash", false),
+            expect_response(&[r#""id":"a2""#, r#""value":"allow-auto""#]),
+            approval_request("a3", "read", true),
+            expect_response(&[r#""id":"a3""#, r#""value":"allow-auto""#]),
+            approval_request("a4", "write", false),
+            expect_response(&[r#""id":"a4""#, r#""value":"allow-auto""#]),
+            approval_request("a5", "grep", false),
+            expect_response(&[r#""id":"a5""#, r#""value":"reject""#]),
+        ]
+        .concat();
+        let (mut session, mut events) = fake_agent(&script);
+        session.set_approval_mode(ApprovalMode::AllowEdits);
+        for (id, kind, tool, decision) in [
+            (
+                "a1",
+                RequestKind::CommandExecutionApproval,
+                "bash",
+                Decision::AllowSession,
+            ),
+            ("a5", RequestKind::ToolApproval, "grep", Decision::Reject),
+        ] {
+            let request = RequestId(id.to_owned());
+            assert_eq!(
+                next(&mut events).await,
+                SessionEvent::Runtime(RuntimeEvent::RequestOpened {
+                    request: request.clone(),
+                    kind,
+                    tool: tool.to_owned(),
+                    arguments: "{}".to_owned(),
+                    read_only: false,
+                })
+            );
+            assert_eq!(session.decide(&request, decision).await, Ok(()));
+            assert_eq!(
+                next(&mut events).await,
+                SessionEvent::Runtime(RuntimeEvent::RequestResolved { request, decision })
+            );
+        }
+        assert_eq!(
+            next(&mut events).await,
+            SessionEvent::Exited { success: true }
+        );
+        let unknown = RequestId("a1".to_owned());
+        assert_eq!(
+            session.decide(&unknown, Decision::AllowOnce).await,
+            Err(CommandError::UnknownRequest)
+        );
     });
 }

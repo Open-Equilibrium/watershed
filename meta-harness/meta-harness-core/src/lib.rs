@@ -3,12 +3,17 @@
 
 #![deny(missing_docs)]
 
+mod approval;
 mod event;
 mod framing;
 mod pi;
 mod session;
 
-pub use event::{ItemDetail, ItemId, ItemKind, ItemStatus, RuntimeEvent, TurnId};
+pub use approval::ApprovalMode;
+pub use event::{
+    Answer, Decision, ItemDetail, ItemId, ItemKind, ItemStatus, NotificationLevel, RequestId,
+    RequestKind, RuntimeEvent, TurnId, UserInput,
+};
 pub use framing::{FrameError, LineFramer};
 pub use pi::PiAdapter;
 pub use session::{AgentCommand, CommandError, Session, SessionEvent};

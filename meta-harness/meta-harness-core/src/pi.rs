@@ -4,7 +4,13 @@ use std::collections::HashMap;
 
 use serde_json::{Map, Value};
 
-use crate::event::{ItemDetail, ItemId, ItemKind, ItemStatus, RuntimeEvent, TurnId};
+use crate::event::{
+    ItemDetail, ItemId, ItemKind, ItemStatus, NotificationLevel, RequestId, RequestKind,
+    RuntimeEvent, TurnId, UserInput,
+};
+
+/// Title prefix of the select dialog Watershed's pi extension uses to ask for an approval.
+pub(crate) const APPROVAL_PREFIX: &str = "watershed.approval ";
 
 /// Translates pi RPC records into runtime events, one session at a time.
 #[derive(Debug, Default)]
@@ -26,8 +32,11 @@ impl PiAdapter {
 
     /// Translates one pi session event; events without a runtime meaning yield nothing.
     pub fn translate(&mut self, record: &Map<String, Value>) -> Vec<RuntimeEvent> {
-        let mut events = Vec::new();
         let kind = record.get("type").and_then(Value::as_str);
+        if kind == Some("extension_ui_request") {
+            return extension_ui(record).into_iter().collect();
+        }
+        let mut events = Vec::new();
         if kind == Some("agent_start") && self.turn.is_none() {
             // A retry starts another low-level run inside the same turn.
             self.turns += 1;
@@ -160,10 +169,10 @@ impl PiAdapter {
         events: &mut Vec<RuntimeEvent>,
     ) {
         let name = str_field(record, "toolName");
-        let kind = match name {
-            "bash" => ItemKind::CommandExecution,
-            "edit" | "write" => ItemKind::FileChange,
-            _ => ItemKind::DynamicToolCall,
+        let kind = match request_kind(name) {
+            RequestKind::CommandExecutionApproval => ItemKind::CommandExecution,
+            RequestKind::FileChangeApproval => ItemKind::FileChange,
+            RequestKind::ToolApproval => ItemKind::DynamicToolCall,
         };
         let item = self.next_item();
         self.tools
@@ -199,6 +208,104 @@ fn completed(turn: TurnId, item: ItemId, kind: ItemKind, text: String) -> Runtim
         status: ItemStatus::Completed,
         duration_ms: None,
     }
+}
+
+/// Classifies one of pi's tool names.
+pub(crate) fn request_kind(tool: &str) -> RequestKind {
+    match tool {
+        "bash" => RequestKind::CommandExecutionApproval,
+        "edit" | "write" => RequestKind::FileChangeApproval,
+        _ => RequestKind::ToolApproval,
+    }
+}
+
+/// Translates one extension UI request; unknown methods yield nothing.
+fn extension_ui(record: &Map<String, Value>) -> Option<RuntimeEvent> {
+    let request = RequestId(str_field(record, "id").to_owned());
+    let text = |field| str_field(record, field).to_owned();
+    let input = match str_field(record, "method") {
+        "select" => match str_field(record, "title").strip_prefix(APPROVAL_PREFIX) {
+            Some(payload) => return Some(approval(request, payload)),
+            None => UserInput::Select {
+                title: text("title"),
+                options: strings(record.get("options")).unwrap_or_default(),
+            },
+        },
+        "confirm" => UserInput::Confirm {
+            title: text("title"),
+            message: text("message"),
+        },
+        "input" => UserInput::Input {
+            title: text("title"),
+            placeholder: text("placeholder"),
+        },
+        "editor" => UserInput::Editor {
+            title: text("title"),
+            prefill: text("prefill"),
+        },
+        "notify" => {
+            let level = match str_field(record, "notifyType") {
+                "warning" => NotificationLevel::Warning,
+                "error" => NotificationLevel::Error,
+                _ => NotificationLevel::Info,
+            };
+            return Some(RuntimeEvent::Notification {
+                level,
+                message: text("message"),
+            });
+        }
+        "setStatus" => {
+            return Some(RuntimeEvent::StatusChanged {
+                key: text("statusKey"),
+                text: record
+                    .get("statusText")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
+            });
+        }
+        "setWidget" => {
+            return Some(RuntimeEvent::WidgetChanged {
+                key: text("widgetKey"),
+                lines: strings(record.get("widgetLines")),
+            });
+        }
+        "setTitle" => {
+            return Some(RuntimeEvent::TitleChanged {
+                title: text("title"),
+            });
+        }
+        "set_editor_text" => return Some(RuntimeEvent::InputTextSet { text: text("text") }),
+        _ => return None,
+    };
+    Some(RuntimeEvent::UserInputRequested { request, input })
+}
+
+/// Reads the approval payload; an unreadable payload still asks the user, so nothing runs
+/// without a decision.
+fn approval(request: RequestId, payload: &str) -> RuntimeEvent {
+    let payload: Map<String, Value> = serde_json::from_str(payload).unwrap_or_default();
+    let tool = str_field(&payload, "tool");
+    RuntimeEvent::RequestOpened {
+        request,
+        kind: request_kind(tool),
+        tool: tool.to_owned(),
+        arguments: payload
+            .get("arguments")
+            .map(Value::to_string)
+            .unwrap_or_default(),
+        read_only: payload.get("readOnly").and_then(Value::as_bool) == Some(true),
+    }
+}
+
+fn strings(value: Option<&Value>) -> Option<Vec<String>> {
+    let values = value?.as_array()?;
+    Some(
+        values
+            .iter()
+            .filter_map(Value::as_str)
+            .map(str::to_owned)
+            .collect(),
+    )
 }
 
 fn str_field<'a>(record: &'a Map<String, Value>, field: &str) -> &'a str {

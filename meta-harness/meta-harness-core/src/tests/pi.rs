@@ -1,6 +1,9 @@
 use serde_json::{Map, Value};
 
-use crate::{ItemDetail, ItemId, ItemKind, ItemStatus, PiAdapter, RuntimeEvent, TurnId};
+use crate::{
+    ItemDetail, ItemId, ItemKind, ItemStatus, NotificationLevel, PiAdapter, RequestId, RequestKind,
+    RuntimeEvent, TurnId, UserInput,
+};
 
 const TURN: TurnId = TurnId(1);
 
@@ -170,6 +173,129 @@ fn classifies_tool_calls_and_reports_their_outcome() {
             finished(2, FileChange, "No match", ItemStatus::Failed, Some(3)),
             tool(3, DynamicToolCall, "grep", r#"{"pattern":"x"}"#),
             finished(3, DynamicToolCall, "", ItemStatus::Completed, None),
+        ]
+    );
+}
+
+#[test]
+fn translates_extension_questions_and_display_updates() {
+    let events = translate(&[
+        r#"{"type":"extension_ui_request","id":"q1","method":"select","title":"Pick one","options":["A","B"],"timeout":5000}"#,
+        r#"{"type":"extension_ui_request","id":"q2","method":"confirm","title":"Sure?","message":"This cannot be undone."}"#,
+        r#"{"type":"extension_ui_request","id":"q3","method":"input","title":"Name","placeholder":"type a name"}"#,
+        r#"{"type":"extension_ui_request","id":"q4","method":"editor","title":"Edit","prefill":"a\nb"}"#,
+        r#"{"type":"extension_ui_request","id":"n1","method":"notify","message":"Blocked","notifyType":"warning"}"#,
+        r#"{"type":"extension_ui_request","id":"n2","method":"notify","message":"Saved"}"#,
+        r#"{"type":"extension_ui_request","id":"s1","method":"setStatus","statusKey":"todo","statusText":"2/3"}"#,
+        r#"{"type":"extension_ui_request","id":"s2","method":"setStatus","statusKey":"todo"}"#,
+        r#"{"type":"extension_ui_request","id":"w1","method":"setWidget","widgetKey":"todo","widgetLines":["one","two"]}"#,
+        r#"{"type":"extension_ui_request","id":"w2","method":"setWidget","widgetKey":"todo"}"#,
+        r#"{"type":"extension_ui_request","id":"t1","method":"setTitle","title":"pi - acme"}"#,
+        r#"{"type":"extension_ui_request","id":"e1","method":"set_editor_text","text":"draft"}"#,
+    ]);
+    let request = |id: &str| RequestId(id.to_owned());
+    let input = |id, input| RuntimeEvent::UserInputRequested {
+        request: request(id),
+        input,
+    };
+    assert_eq!(
+        events,
+        [
+            input(
+                "q1",
+                UserInput::Select {
+                    title: "Pick one".to_owned(),
+                    options: vec!["A".to_owned(), "B".to_owned()],
+                }
+            ),
+            input(
+                "q2",
+                UserInput::Confirm {
+                    title: "Sure?".to_owned(),
+                    message: "This cannot be undone.".to_owned(),
+                }
+            ),
+            input(
+                "q3",
+                UserInput::Input {
+                    title: "Name".to_owned(),
+                    placeholder: "type a name".to_owned(),
+                }
+            ),
+            input(
+                "q4",
+                UserInput::Editor {
+                    title: "Edit".to_owned(),
+                    prefill: "a\nb".to_owned(),
+                }
+            ),
+            RuntimeEvent::Notification {
+                level: NotificationLevel::Warning,
+                message: "Blocked".to_owned(),
+            },
+            RuntimeEvent::Notification {
+                level: NotificationLevel::Info,
+                message: "Saved".to_owned(),
+            },
+            RuntimeEvent::StatusChanged {
+                key: "todo".to_owned(),
+                text: Some("2/3".to_owned()),
+            },
+            RuntimeEvent::StatusChanged {
+                key: "todo".to_owned(),
+                text: None,
+            },
+            RuntimeEvent::WidgetChanged {
+                key: "todo".to_owned(),
+                lines: Some(vec!["one".to_owned(), "two".to_owned()]),
+            },
+            RuntimeEvent::WidgetChanged {
+                key: "todo".to_owned(),
+                lines: None,
+            },
+            RuntimeEvent::TitleChanged {
+                title: "pi - acme".to_owned(),
+            },
+            RuntimeEvent::InputTextSet {
+                text: "draft".to_owned(),
+            },
+        ]
+    );
+}
+
+#[test]
+fn turns_watershed_approval_questions_into_requests() {
+    let events = translate(&[
+        r#"{"type":"extension_ui_request","id":"a1","method":"select","title":"watershed.approval {\"tool\":\"bash\",\"arguments\":{\"command\":\"npm test\"},\"readOnly\":false}","options":["allow-once","allow-session","reject","allow-auto"]}"#,
+        r#"{"type":"extension_ui_request","id":"a2","method":"select","title":"watershed.approval {\"tool\":\"write\",\"arguments\":{},\"readOnly\":false}","options":[]}"#,
+        r#"{"type":"extension_ui_request","id":"a3","method":"select","title":"watershed.approval {\"tool\":\"read\",\"arguments\":{\"path\":\"a\"},\"readOnly\":true}","options":[]}"#,
+    ]);
+    let opened =
+        |id: &str, kind, tool: &str, arguments: &str, read_only| RuntimeEvent::RequestOpened {
+            request: RequestId(id.to_owned()),
+            kind,
+            tool: tool.to_owned(),
+            arguments: arguments.to_owned(),
+            read_only,
+        };
+    assert_eq!(
+        events,
+        [
+            opened(
+                "a1",
+                RequestKind::CommandExecutionApproval,
+                "bash",
+                r#"{"command":"npm test"}"#,
+                false
+            ),
+            opened("a2", RequestKind::FileChangeApproval, "write", "{}", false),
+            opened(
+                "a3",
+                RequestKind::ToolApproval,
+                "read",
+                r#"{"path":"a"}"#,
+                true
+            ),
         ]
     );
 }
