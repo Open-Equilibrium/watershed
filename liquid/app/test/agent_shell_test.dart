@@ -128,6 +128,45 @@ void main() {
     expect(backend.calls, contains('transcript u1'));
   });
 
+  testWidgets('shows notifications in the status bar', (tester) async {
+    await show(tester);
+    Future<void> notify(BridgeLevel level, String text) => emit(
+      tester,
+      event(
+        BridgeEventKind.notification,
+        display: BridgeDisplay(key: '', level: level),
+        text: text,
+      ),
+    );
+    final status = find.byKey(const Key('status'));
+    String shown() => tester.widget<Text>(status).data!;
+
+    await notify(BridgeLevel.info, 'Tests passed');
+    expect(shown(), 'Tests passed');
+    await tester.pump(const Duration(seconds: 7));
+    expect(shown(), contains('idle'), reason: 'information fades');
+
+    await notify(BridgeLevel.warning, 'lint: 2 warnings');
+    await notify(BridgeLevel.error, 'Could not branch: compacting');
+    await tester.pump(const Duration(seconds: 7));
+    expect(shown(), 'Could not branch: compacting', reason: 'errors stay');
+    expect(find.text('· 2 more'), findsOneWidget);
+
+    await tester.tap(status);
+    await tester.pumpAndSettle();
+    expect(find.text('Notifications'), findsOneWidget);
+    expect(find.text('lint: 2 warnings'), findsOneWidget);
+    await tester.tap(find.text('Clear all'));
+    await tester.pumpAndSettle();
+    expect(find.text('Notifications'), findsNothing);
+    expect(shown(), contains('idle'));
+
+    await notify(BridgeLevel.error, 'Again');
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(shown(), contains('idle'), reason: 'Esc dismisses');
+  });
+
   testWidgets('decides approvals from the keyboard', (tester) async {
     await show(tester);
     await emit(tester, event(BridgeEventKind.turnStarted, turn: 1));

@@ -481,3 +481,16 @@ fn builds_the_session_tree_from_flat_entries() {
         }
     );
 }
+
+#[test]
+fn reports_extension_errors_as_notifications() {
+    assert_eq!(
+        translate(&[
+            r#"{"type":"extension_error","extensionPath":"/home/me/.pi/extensions/lint.ts","event":"tool_call","error":"boom"}"#
+        ]),
+        [RuntimeEvent::Notification {
+            level: NotificationLevel::Error,
+            message: "lint.ts failed in tool_call: boom".to_owned(),
+        }]
+    );
+}

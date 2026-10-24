@@ -198,7 +198,7 @@ void main() {
       find.byKey(const Key('composer')),
     );
     expect(composer.focusNode?.hasFocus, isFalse);
-    expect(state.notification.value?.$1, BridgeLevel.error);
+    expect(state.notice.value?.level, BridgeLevel.error);
   });
 
   testWidgets('a prompt branches before itself, also when already there', (
@@ -221,7 +221,7 @@ void main() {
       );
     }
     expect(backend.calls.where((call) => call == 'branch e1'), hasLength(2));
-    expect(state.notification.value, isNull);
+    expect(state.notice.value, isNull);
   });
 
   testWidgets('a jump during a reload reveals its step once loaded', (

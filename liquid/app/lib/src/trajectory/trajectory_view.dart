@@ -264,7 +264,7 @@ class _TrajectoryViewState extends State<TrajectoryView> {
     }
     if (!mounted) return;
     if (!moved) {
-      widget.state.notification.value = (
+      widget.state.notify(
         BridgeLevel.error,
         'The session could not branch at step ${index + 1}.',
       );

@@ -39,6 +39,22 @@ class ItemView {
   int? durationMs;
 }
 
+/// A notification from the agent or Liquid, as the status bar shows it.
+@immutable
+class Notice {
+  const Notice(this.level, this.text, this.at);
+
+  final BridgeLevel level;
+  final String text;
+  final DateTime at;
+}
+
+/// Notifications the status bar keeps for its list.
+const _keptNotices = 20;
+
+/// How long information and warnings stay in the status bar; errors stay until dismissed.
+const _noticeFades = Duration(seconds: 6);
+
 /// Tokens and cost the session spent so far.
 @immutable
 class SessionTotals {
@@ -77,7 +93,11 @@ class SessionState {
   final statuses = ValueNotifier<Map<String, String>>(const {});
   final title = ValueNotifier<String?>(null);
   final draft = ValueNotifier<String?>(null);
-  final notification = ValueNotifier<(BridgeLevel, String)?>(null);
+
+  /// The notification the status bar shows, and the latest ones, newest first.
+  final notice = ValueNotifier<Notice?>(null);
+  final notices = ValueNotifier<List<Notice>>(const []);
+  Timer? _fade;
   final totals = ValueNotifier(const SessionTotals());
   final failure = ValueNotifier<String?>(null);
   final mode = ValueNotifier(BridgeApprovalMode.ask);
@@ -221,7 +241,33 @@ class SessionState {
   }
 
   /// Releases the event stream and stops the agent.
+  /// Shows a notification in the status bar and keeps it in the list.
+  void notify(BridgeLevel level, String text) {
+    final shown = Notice(level, text, DateTime.now());
+    notices.value = [shown, ...notices.value].take(_keptNotices).toList();
+    notice.value = shown;
+    _fade?.cancel();
+    if (level != BridgeLevel.error) {
+      _fade = Timer(_noticeFades, () {
+        if (notice.value == shown) notice.value = null;
+      });
+    }
+  }
+
+  /// Takes the notification out of the status bar; the list keeps it.
+  void dismissNotice() {
+    _fade?.cancel();
+    notice.value = null;
+  }
+
+  /// Empties the list and the status bar.
+  void clearNotices() {
+    dismissNotice();
+    notices.value = const [];
+  }
+
   Future<void> dispose() async {
+    _fade?.cancel();
     await _subscription.cancel();
     await _backend.shutdown();
   }
@@ -292,10 +338,7 @@ class SessionState {
       case BridgeEventKind.inputTextSet:
         draft.value = event.text;
       case BridgeEventKind.notification:
-        notification.value = (
-          event.display?.level ?? BridgeLevel.info,
-          event.text ?? '',
-        );
+        notify(event.display?.level ?? BridgeLevel.info, event.text ?? '');
       case BridgeEventKind.failed:
         failure.value = event.text;
       case BridgeEventKind.exited:

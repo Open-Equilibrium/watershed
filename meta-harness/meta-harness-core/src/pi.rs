@@ -48,6 +48,18 @@ impl PiAdapter {
         if kind == Some("extension_ui_request") {
             return extension_ui(record).into_iter().collect();
         }
+        if kind == Some("extension_error") {
+            let path = str_field(record, "extensionPath");
+            let extension = path.rsplit(['/', '\\']).next().unwrap_or(path);
+            return vec![RuntimeEvent::Notification {
+                level: NotificationLevel::Error,
+                message: format!(
+                    "{extension} failed in {}: {}",
+                    str_field(record, "event"),
+                    str_field(record, "error")
+                ),
+            }];
+        }
         let mut events = Vec::new();
         if kind == Some("agent_start") && self.turn.is_none() {
             // A retry starts another low-level run inside the same turn.

@@ -184,7 +184,11 @@ void main() {
     });
     expect(state.statuses.value, {'todo': '1/2'});
     expect((state.title.value, state.draft.value), ('pi - acme', 'draft'));
-    expect(state.notification.value, (BridgeLevel.warning, 'Careful'));
+    expect(
+      (state.notice.value?.level, state.notice.value?.text),
+      (BridgeLevel.warning, 'Careful'),
+    );
+    expect(state.notices.value.map((notice) => notice.text), ['Careful']);
     await emit(event(BridgeEventKind.widgetChanged, display: display('todo')));
     await emit(event(BridgeEventKind.statusChanged, display: display('todo')));
     expect(state.widgets.value, isEmpty);
