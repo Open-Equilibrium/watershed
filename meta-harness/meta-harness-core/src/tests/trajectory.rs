@@ -1,6 +1,9 @@
 use serde_json::Value;
 
-use crate::{History, RecordKind, StepContext, Trajectory, TrajectoryRecord, Usage};
+use crate::{
+    ContextDetail, ContextMessage, ContextPart, History, RecordKind, StepContext, TestCount,
+    ToolOutcome, Trajectory, TrajectoryRecord, Usage,
+};
 
 /// A session with a branch after the first model response: `e7` continues the original run,
 /// `b1` a fork.
@@ -105,6 +108,7 @@ fn projects_the_selected_branch_with_timing_and_what_the_model_saw() {
         stop_reason: String::new(),
         failed: false,
         context: None,
+        outcome: ToolOutcome::default(),
     };
     let user = record("e2", 1, RecordKind::User, "Add rate limiting", 0, None);
     let message = TrajectoryRecord {
@@ -122,7 +126,9 @@ fn projects_the_selected_branch_with_timing_and_what_the_model_saw() {
         context: Some(StepContext {
             prompt_chars: 20,
             tools: vec!["bash".to_owned(), "read".to_owned()],
+            tool_chars: 30,
             messages: 1,
+            message_chars: "Add rate limiting".len(),
             new_since_previous: vec!["prompt".to_owned()],
         }),
         ..record(
@@ -156,7 +162,12 @@ fn projects_the_selected_branch_with_timing_and_what_the_model_saw() {
         context: Some(StepContext {
             prompt_chars: 20,
             tools: vec!["bash".to_owned(), "read".to_owned()],
+            tool_chars: 30,
             messages: 3,
+            message_chars: "Add rate limiting".len()
+                + "I'll run the tests.\nThen fix.".len()
+                + r#"{"command":"npm test"}"#.len()
+                + "1 failed".len(),
             new_since_previous: vec!["result of bash".to_owned()],
         }),
         ..record("e7", 1, RecordKind::Message, "Done.", 20900, None)
@@ -209,4 +220,120 @@ fn a_later_edit_brings_a_removed_message_back() {
         ),
         "the latest edit wins, so the replaced tool result is back in the context"
     );
+}
+
+/// A response that writes, edits and tests, with the prompt and tools the model saw.
+const OUTCOMES: &str = r#"{"entries":[
+  {"type":"message","id":"s1","parentId":null,"message":{"role":"system","content":"","sections":{"preamble":"You are pi."},"toolsAdded":[{"name":"write","description":"Write a file","parameters":{}},{"name":"bash","description":"Run","parameters":{}}]}},
+  {"type":"message","id":"u1","parentId":"s1","message":{"role":"user","content":"Write and test"}},
+  {"type":"message","id":"a1","parentId":"u1","message":{"role":"assistant","content":[{"type":"text","text":"Writing."},{"type":"toolCall","id":"c1","name":"write","arguments":{"path":"a.ts","content":"one\ntwo\nthree\n"}},{"type":"toolCall","id":"c2","name":"edit","arguments":{"path":"b.ts","edits":[]}},{"type":"toolCall","id":"c3","name":"bash","arguments":{"command":"npm test"}}]}},
+  {"type":"message","id":"r1","parentId":"a1","message":{"role":"toolResult","toolCallId":"c1","toolName":"write","content":[{"type":"text","text":"Successfully wrote to a.ts"}]}},
+  {"type":"message","id":"r2","parentId":"r1","message":{"role":"toolResult","toolCallId":"c2","toolName":"edit","content":[{"type":"text","text":"Replaced 1 block."}],"details":{"patch":"--- b.ts\n+++ b.ts\n@@ -1,2 +1,3 @@\n one\n-two\n+three\n+four\n"}}},
+  {"type":"message","id":"r3","parentId":"r2","message":{"role":"toolResult","toolCallId":"c3","toolName":"bash","isError":true,"content":[{"type":"text","text":"Tests: 1 failed, 12 passed, 13 total\n\n\nCommand exited with code 3"}]}},
+  {"type":"message","id":"a2","parentId":"r3","message":{"role":"assistant","content":[{"type":"text","text":"Done."}]}}
+],"leafId":"a2"}"#;
+
+#[test]
+fn reads_tool_outcomes_and_what_the_model_saw_in_parts() {
+    let data: Value = serde_json::from_str(OUTCOMES).expect("JSON");
+    let history = History::from_entries(&data);
+    let records = history.trajectory(None).records;
+    let outcomes: Vec<_> = records
+        .iter()
+        .filter(|record| record.kind == RecordKind::Tool)
+        .map(|record| (record.label.as_str(), record.outcome))
+        .collect();
+    assert_eq!(
+        outcomes,
+        [
+            (
+                "write",
+                ToolOutcome {
+                    added: Some(3),
+                    ..ToolOutcome::default()
+                }
+            ),
+            (
+                "edit",
+                ToolOutcome {
+                    added: Some(2),
+                    removed: Some(1),
+                    ..ToolOutcome::default()
+                }
+            ),
+            (
+                "bash",
+                ToolOutcome {
+                    exit_code: Some(3),
+                    tests: Some(TestCount {
+                        passed: 12,
+                        failed: 1
+                    }),
+                    ..ToolOutcome::default()
+                }
+            ),
+        ]
+    );
+
+    let tool = |name: &str, description: &str| ContextPart {
+        name: name.to_owned(),
+        chars: format!(r#"{{"description":"{description}","name":"{name}","parameters":{{}}}}"#)
+            .len(),
+    };
+    let detail = history.context("a2").expect("a2 is a response");
+    let message = |entry: &str, label: &str, chars, new| ContextMessage {
+        entry: entry.to_owned(),
+        label: label.to_owned(),
+        chars,
+        in_context: true,
+        new,
+    };
+    let response_chars = "Writing.".len()
+        + [
+            r#"{"content":"one\ntwo\nthree\n","path":"a.ts"}"#,
+            r#"{"edits":[],"path":"b.ts"}"#,
+            r#"{"command":"npm test"}"#,
+        ]
+        .iter()
+        .map(|arguments| arguments.chars().count())
+        .sum::<usize>();
+    assert_eq!(
+        detail,
+        ContextDetail {
+            sections: vec![ContextPart {
+                name: "preamble".to_owned(),
+                chars: 11
+            }],
+            tools: vec![tool("bash", "Run"), tool("write", "Write a file")],
+            messages: vec![
+                message("u1", "prompt · Write and test", 14, false),
+                message("a1", "response · Writing.", response_chars, false),
+                message("r1", "result of write · a.ts", 26, true),
+                message("r2", "result of edit · b.ts", 17, true),
+                message(
+                    "r3",
+                    "result of bash · npm test",
+                    "Tests: 1 failed, 12 passed, 13 total\n\n\nCommand exited with code 3"
+                        .chars()
+                        .count(),
+                    true
+                ),
+            ],
+        }
+    );
+    let context = records[5].context.clone().expect("a2 context");
+    assert_eq!(
+        (
+            context.prompt_chars,
+            context.tool_chars,
+            context.message_chars
+        ),
+        (
+            11,
+            detail.tools.iter().map(|part| part.chars).sum(),
+            detail.messages.iter().map(|message| message.chars).sum()
+        ),
+        "the summary's totals match the detail"
+    );
+    assert_eq!(history.context("u1"), None, "only responses have a context");
 }

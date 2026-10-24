@@ -59,7 +59,7 @@ fn resolve<'a>(
 fn summary(body: &Body) -> (EntryKind, String) {
     let line = |text: &str| first_line(text, PREVIEW_CHARS);
     match body {
-        Body::User { text } => (EntryKind::User, line(text)),
+        Body::User { text, .. } => (EntryKind::User, line(text)),
         Body::Assistant { text, .. } => (EntryKind::Assistant, line(text)),
         Body::ToolResult { tool, .. } => (EntryKind::ToolResult, line(tool)),
         Body::System(_) => (EntryKind::System, String::new()),
@@ -73,7 +73,9 @@ fn summary(body: &Body) -> (EntryKind, String) {
         Body::CustomMessage { .. } => {
             (EntryKind::Other("custom_message".to_owned()), String::new())
         }
-        Body::BranchSummary => (EntryKind::Other("branch_summary".to_owned()), String::new()),
+        Body::BranchSummary { .. } => {
+            (EntryKind::Other("branch_summary".to_owned()), String::new())
+        }
         Body::Compaction { .. } => (EntryKind::Other("compaction".to_owned()), String::new()),
         Body::ContextEdit { .. } => (EntryKind::Other("context_edit".to_owned()), String::new()),
         Body::Label { .. } => (EntryKind::Other("label".to_owned()), String::new()),

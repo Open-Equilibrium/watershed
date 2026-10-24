@@ -11,7 +11,7 @@ use tokio::runtime::Runtime;
 use tokio::sync::{Mutex, mpsc};
 
 use crate::api::events::{BridgeDecision, BridgeEvent, BridgeFileChange};
-use crate::api::history::BridgeHistory;
+use crate::api::history::{BridgeContextDetail, BridgeHistory};
 use crate::convert::{coalesce, describe};
 use crate::frb_generated::StreamSink;
 
@@ -181,6 +181,16 @@ impl AgentSession {
                 leaf: tree.leaf,
                 trajectories,
             })
+        })
+    }
+
+    /// Everything the model saw for the request behind the response `entry`; `None` unless
+    /// `entry` is a response.
+    pub fn context(&self, entry: String) -> Result<Option<BridgeContextDetail>, String> {
+        RUNTIME.block_on(async {
+            let mut session = self.session.lock().await;
+            let history = open(&mut session)?.history().await.map_err(describe)?;
+            Ok(history.context(&entry).map(Into::into))
         })
     }
 

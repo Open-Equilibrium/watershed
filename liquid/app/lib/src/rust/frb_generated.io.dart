@@ -69,6 +69,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeContext dco_decode_box_autoadd_bridge_context(dynamic raw);
 
   @protected
+  BridgeContextDetail dco_decode_box_autoadd_bridge_context_detail(dynamic raw);
+
+  @protected
   BridgeDecision dco_decode_box_autoadd_bridge_decision(dynamic raw);
 
   @protected
@@ -99,6 +102,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeUsage dco_decode_box_autoadd_bridge_usage(dynamic raw);
 
   @protected
+  int dco_decode_box_autoadd_i_32(dynamic raw);
+
+  @protected
   PlatformInt64 dco_decode_box_autoadd_i_64(dynamic raw);
 
   @protected
@@ -115,6 +121,15 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeContext dco_decode_bridge_context(dynamic raw);
+
+  @protected
+  BridgeContextDetail dco_decode_bridge_context_detail(dynamic raw);
+
+  @protected
+  BridgeContextMessage dco_decode_bridge_context_message(dynamic raw);
+
+  @protected
+  BridgeContextPart dco_decode_bridge_context_part(dynamic raw);
 
   @protected
   BridgeDecision dco_decode_bridge_decision(dynamic raw);
@@ -174,6 +189,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeStepContext dco_decode_bridge_step_context(dynamic raw);
 
   @protected
+  BridgeToolOutcome dco_decode_bridge_tool_outcome(dynamic raw);
+
+  @protected
   BridgeTrajectory dco_decode_bridge_trajectory(dynamic raw);
 
   @protected
@@ -190,6 +208,14 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<String> dco_decode_list_String(dynamic raw);
+
+  @protected
+  List<BridgeContextMessage> dco_decode_list_bridge_context_message(
+    dynamic raw,
+  );
+
+  @protected
+  List<BridgeContextPart> dco_decode_list_bridge_context_part(dynamic raw);
 
   @protected
   List<BridgeFileChange> dco_decode_list_bridge_file_change(dynamic raw);
@@ -222,6 +248,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeContext? dco_decode_opt_box_autoadd_bridge_context(dynamic raw);
 
   @protected
+  BridgeContextDetail? dco_decode_opt_box_autoadd_bridge_context_detail(
+    dynamic raw,
+  );
+
+  @protected
   BridgeDecision? dco_decode_opt_box_autoadd_bridge_decision(dynamic raw);
 
   @protected
@@ -252,6 +283,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeUsage? dco_decode_opt_box_autoadd_bridge_usage(dynamic raw);
+
+  @protected
+  int? dco_decode_opt_box_autoadd_i_32(dynamic raw);
 
   @protected
   PlatformInt64? dco_decode_opt_box_autoadd_i_64(dynamic raw);
@@ -317,6 +351,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeContextDetail sse_decode_box_autoadd_bridge_context_detail(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   BridgeDecision sse_decode_box_autoadd_bridge_decision(
     SseDeserializer deserializer,
   );
@@ -359,6 +398,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeUsage sse_decode_box_autoadd_bridge_usage(SseDeserializer deserializer);
 
   @protected
+  int sse_decode_box_autoadd_i_32(SseDeserializer deserializer);
+
+  @protected
   PlatformInt64 sse_decode_box_autoadd_i_64(SseDeserializer deserializer);
 
   @protected
@@ -381,6 +423,21 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeContext sse_decode_bridge_context(SseDeserializer deserializer);
+
+  @protected
+  BridgeContextDetail sse_decode_bridge_context_detail(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeContextMessage sse_decode_bridge_context_message(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeContextPart sse_decode_bridge_context_part(
+    SseDeserializer deserializer,
+  );
 
   @protected
   BridgeDecision sse_decode_bridge_decision(SseDeserializer deserializer);
@@ -446,6 +503,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeToolOutcome sse_decode_bridge_tool_outcome(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   BridgeTrajectory sse_decode_bridge_trajectory(SseDeserializer deserializer);
 
   @protected
@@ -462,6 +524,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<String> sse_decode_list_String(SseDeserializer deserializer);
+
+  @protected
+  List<BridgeContextMessage> sse_decode_list_bridge_context_message(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<BridgeContextPart> sse_decode_list_bridge_context_part(
+    SseDeserializer deserializer,
+  );
 
   @protected
   List<BridgeFileChange> sse_decode_list_bridge_file_change(
@@ -504,6 +576,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeContext? sse_decode_opt_box_autoadd_bridge_context(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeContextDetail? sse_decode_opt_box_autoadd_bridge_context_detail(
     SseDeserializer deserializer,
   );
 
@@ -556,6 +633,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeUsage? sse_decode_opt_box_autoadd_bridge_usage(
     SseDeserializer deserializer,
   );
+
+  @protected
+  int? sse_decode_opt_box_autoadd_i_32(SseDeserializer deserializer);
 
   @protected
   PlatformInt64? sse_decode_opt_box_autoadd_i_64(SseDeserializer deserializer);
@@ -630,6 +710,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_box_autoadd_bridge_context_detail(
+    BridgeContextDetail self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_box_autoadd_bridge_decision(
     BridgeDecision self,
     SseSerializer serializer,
@@ -690,6 +776,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_box_autoadd_i_32(int self, SseSerializer serializer);
+
+  @protected
   void sse_encode_box_autoadd_i_64(
     PlatformInt64 self,
     SseSerializer serializer,
@@ -721,6 +810,24 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_bridge_context(BridgeContext self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_bridge_context_detail(
+    BridgeContextDetail self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_context_message(
+    BridgeContextMessage self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_context_part(
+    BridgeContextPart self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_bridge_decision(
@@ -810,6 +917,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_bridge_tool_outcome(
+    BridgeToolOutcome self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_bridge_trajectory(
     BridgeTrajectory self,
     SseSerializer serializer,
@@ -832,6 +945,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_list_String(List<String> self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_bridge_context_message(
+    List<BridgeContextMessage> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_bridge_context_part(
+    List<BridgeContextPart> self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_list_bridge_file_change(
@@ -884,6 +1009,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_opt_box_autoadd_bridge_context(
     BridgeContext? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_bridge_context_detail(
+    BridgeContextDetail? self,
     SseSerializer serializer,
   );
 
@@ -946,6 +1077,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
     BridgeUsage? self,
     SseSerializer serializer,
   );
+
+  @protected
+  void sse_encode_opt_box_autoadd_i_32(int? self, SseSerializer serializer);
 
   @protected
   void sse_encode_opt_box_autoadd_i_64(

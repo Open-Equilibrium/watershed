@@ -305,7 +305,12 @@ fn reads_the_history_of_each_branch_and_branches_from_a_step() {
     };
     let script = [
         respond("1"),
-        respond("2"),
+        // The second read continues after the last entry; nothing was added.
+        r#"IFS= read -r line
+case "$line" in *'"since":"b1"'*) ;; *) exit 9 ;; esac
+printf '%s\n' '{"id":"2","type":"response","command":"get_entries","success":true,"data":{"entries":[],"leafId":"b1"}}'
+"#
+        .to_owned(),
         r#"IFS= read -r line
 case "$line" in *'"message":"/watershed-branch e1"'*) ;; *) exit 9 ;; esac
 printf '%s\n' '{"id":"3","type":"response","command":"prompt","success":true,"data":{"disposition":"handled"}}'
@@ -393,5 +398,50 @@ IFS= read -r line || exit 0"#
     assert_eq!(steps(&both)[1], steps(&current)[0]);
 
     assert_eq!(session.branch("e1".to_owned()), Ok(()));
+    assert!(session.shutdown());
+}
+
+#[test]
+fn reads_tool_outcomes_and_what_the_model_saw() {
+    let entries = r#"{"entries":[{"type":"message","id":"s1","parentId":null,"message":{"role":"system","content":"","sections":{"preamble":"You are pi."},"toolsAdded":[{"name":"write"}]}},{"type":"message","id":"u1","parentId":"s1","message":{"role":"user","content":"Write it"}},{"type":"message","id":"a1","parentId":"u1","message":{"role":"assistant","content":[{"type":"toolCall","id":"c1","name":"write","arguments":{"path":"a.ts","content":"x\ny\n"}}]}},{"type":"message","id":"r1","parentId":"a1","message":{"role":"toolResult","toolCallId":"c1","toolName":"write","content":[{"type":"text","text":"ok"}]}},{"type":"message","id":"a2","parentId":"r1","message":{"role":"assistant","content":[{"type":"text","text":"Done."}]}}],"leafId":"a2"}"#;
+    let script = format!(
+        "IFS= read -r line\nprintf '%s\\n' '{{\"id\":\"1\",\"type\":\"response\",\"command\":\"get_entries\",\"success\":true,\"data\":{entries}}}'\nIFS= read -r line\nprintf '%s\\n' '{{\"id\":\"2\",\"type\":\"response\",\"command\":\"get_entries\",\"success\":true,\"data\":{{\"entries\":[],\"leafId\":\"a2\"}}}}'\nIFS= read -r line || exit 0"
+    );
+    let session = AgentSession::start(SessionConfig {
+        program: "/bin/sh".to_owned(),
+        args: vec!["-c".to_owned(), script],
+        cwd: std::env::temp_dir().display().to_string(),
+    })
+    .expect("agent starts");
+    let history = session.history(Vec::new()).expect("history");
+    let records = &history.trajectories[0].records;
+    assert_eq!(records[2].kind, BridgeRecordKind::Tool);
+    assert_eq!(records[2].outcome.added, Some(2), "lines the write wrote");
+    let context = records[3].context.as_ref().expect("a2 saw context");
+    assert_eq!(
+        (
+            context.prompt_chars,
+            context.tool_chars > 0,
+            context.messages
+        ),
+        (11, true, 3)
+    );
+    let detail = session
+        .context("a2".to_owned())
+        .expect("context")
+        .expect("a2 is a response");
+    assert_eq!(
+        detail
+            .messages
+            .iter()
+            .map(|message| (message.label.as_str(), message.new))
+            .collect::<Vec<_>>(),
+        [
+            ("prompt · Write it", false),
+            ("response · (tool calls)", false),
+            ("result of write · a.ts", true),
+        ]
+    );
+    assert_eq!(detail.tools[0].name, "write");
     assert!(session.shutdown());
 }

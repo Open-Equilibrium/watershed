@@ -19,7 +19,10 @@ pub use event::{
     Usage, UserInput,
 };
 pub use framing::{Frame, LineFramer};
-pub use history::{History, RecordKind, StepContext, Trajectory, TrajectoryRecord};
+pub use history::{
+    ContextDetail, ContextMessage, ContextPart, History, RecordKind, StepContext, TestCount,
+    ToolOutcome, Trajectory, TrajectoryRecord,
+};
 pub use pi::PiAdapter;
 pub use session::{AgentCommand, CommandError, Session, SessionEvent, SessionState};
 

@@ -1,8 +1,12 @@
 //! A session's stored history: its branch tree and the Trajectory of each branch.
 
 mod entry;
+mod outcome;
 mod trajectory;
 mod tree;
+
+#[cfg(test)]
+pub(crate) use outcome::test_counts;
 
 use std::sync::Arc;
 
@@ -58,6 +62,12 @@ impl History {
     pub fn trajectory(&self, leaf: Option<&str>) -> Trajectory {
         trajectory::trajectory(&self.entries, leaf.or(self.leaf.as_deref()))
     }
+
+    /// Everything the model saw for the request that produced the response `entry`, in parts;
+    /// `None` unless `entry` is a response.
+    pub fn context(&self, entry: &str) -> Option<ContextDetail> {
+        trajectory::context(&self.entries, entry)
+    }
 }
 
 /// What a Trajectory row shows.
@@ -80,6 +90,10 @@ pub struct StepContext {
     pub prompt_chars: usize,
     /// The tools the model could call, by name.
     pub tools: Vec<String>,
+    /// Characters of the tools' declarations.
+    pub tool_chars: usize,
+    /// Characters of the messages in the conversation, including a compaction summary.
+    pub message_chars: usize,
     /// Messages in the conversation before this request.
     pub messages: usize,
     /// What changed since the previous request, such as `prompt` or `result of bash`.
@@ -115,6 +129,66 @@ pub struct TrajectoryRecord {
     pub failed: bool,
     /// What the model saw for a response.
     pub context: Option<StepContext>,
+    /// What a tool call did.
+    pub outcome: ToolOutcome,
+}
+
+/// What a tool call did, as far as its stored result shows.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ToolOutcome {
+    /// Lines an edit added or a write wrote.
+    pub added: Option<u32>,
+    /// Lines an edit removed.
+    pub removed: Option<u32>,
+    /// A shell command's exit code.
+    pub exit_code: Option<i32>,
+    /// Tests a shell command ran, from a common test runner's output.
+    pub tests: Option<TestCount>,
+}
+
+/// Tests a run passed and failed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TestCount {
+    /// Tests that passed.
+    pub passed: u32,
+    /// Tests that failed.
+    pub failed: u32,
+}
+
+/// Everything the model saw for one request: system-prompt sections, tool declarations and
+/// messages, each with its length in characters.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ContextDetail {
+    /// Sections of the system prompt, by name.
+    pub sections: Vec<ContextPart>,
+    /// Declared tools, by name.
+    pub tools: Vec<ContextPart>,
+    /// Messages on the branch up to the request, including ones a compaction or edit removed.
+    pub messages: Vec<ContextMessage>,
+}
+
+/// A named part of the model's context.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContextPart {
+    /// Its name.
+    pub name: String,
+    /// Its length in characters.
+    pub chars: usize,
+}
+
+/// A message on the branch up to a request.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContextMessage {
+    /// The entry id.
+    pub entry: String,
+    /// What it is, such as `prompt · Add rate limiting` or `result of bash · npm test`.
+    pub label: String,
+    /// Its length in characters.
+    pub chars: usize,
+    /// Whether the model saw it; a compaction or edit can take it out.
+    pub in_context: bool,
+    /// Whether it arrived since the previous request.
+    pub new: bool,
 }
 
 /// One branch of a session, from its first entry to its leaf.

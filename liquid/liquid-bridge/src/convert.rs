@@ -1,9 +1,10 @@
 //! Conversions between the core's model and the types Dart receives.
 
 use meta_harness_core::{
-    ApprovalMode, ChangeStatus, CommandError, Decision, EntryKind, FileChange, ItemDetail,
-    ItemKind, ItemStatus, NotificationLevel, RecordKind, RequestKind, RuntimeEvent, SessionEvent,
-    StepContext, Trajectory, TrajectoryRecord, TreeNode, Usage, UserInput,
+    ApprovalMode, ChangeStatus, CommandError, ContextDetail, ContextMessage, ContextPart, Decision,
+    EntryKind, FileChange, ItemDetail, ItemKind, ItemStatus, NotificationLevel, RecordKind,
+    RequestKind, RuntimeEvent, SessionEvent, StepContext, ToolOutcome, Trajectory,
+    TrajectoryRecord, TreeNode, Usage, UserInput,
 };
 
 use crate::api::events::{
@@ -12,8 +13,8 @@ use crate::api::events::{
     BridgeQuestionKind, BridgeRequest, BridgeRequestKind, BridgeSection, BridgeStep, BridgeUsage,
 };
 use crate::api::history::{
-    BridgeEntryKind, BridgeRecord, BridgeRecordKind, BridgeStepContext, BridgeTrajectory,
-    BridgeTreeNode,
+    BridgeContextDetail, BridgeContextMessage, BridgeContextPart, BridgeEntryKind, BridgeRecord,
+    BridgeRecordKind, BridgeStepContext, BridgeToolOutcome, BridgeTrajectory, BridgeTreeNode,
 };
 use crate::api::session::BridgeApprovalMode;
 
@@ -114,6 +115,50 @@ impl From<TrajectoryRecord> for BridgeRecord {
             stop_reason: record.stop_reason,
             failed: record.failed,
             context: record.context.map(Into::into),
+            outcome: record.outcome.into(),
+        }
+    }
+}
+
+impl From<ToolOutcome> for BridgeToolOutcome {
+    fn from(outcome: ToolOutcome) -> Self {
+        Self {
+            added: outcome.added.map(int),
+            removed: outcome.removed.map(int),
+            exit_code: outcome.exit_code,
+            tests_passed: outcome.tests.map(|tests| int(tests.passed)),
+            tests_failed: outcome.tests.map(|tests| int(tests.failed)),
+        }
+    }
+}
+
+impl From<ContextDetail> for BridgeContextDetail {
+    fn from(detail: ContextDetail) -> Self {
+        let parts = |parts: Vec<ContextPart>| {
+            parts
+                .into_iter()
+                .map(|part| BridgeContextPart {
+                    name: part.name,
+                    chars: int(part.chars),
+                })
+                .collect()
+        };
+        Self {
+            sections: parts(detail.sections),
+            tools: parts(detail.tools),
+            messages: detail.messages.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+impl From<ContextMessage> for BridgeContextMessage {
+    fn from(message: ContextMessage) -> Self {
+        Self {
+            entry: message.entry,
+            label: message.label,
+            chars: int(message.chars),
+            in_context: message.in_context,
+            new: message.new,
         }
     }
 }
@@ -123,7 +168,9 @@ impl From<StepContext> for BridgeStepContext {
         Self {
             prompt_chars: int(context.prompt_chars),
             tools: context.tools,
+            tool_chars: int(context.tool_chars),
             messages: int(context.messages),
+            message_chars: int(context.message_chars),
             new_since_previous: context.new_since_previous,
         }
     }

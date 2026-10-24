@@ -33,6 +33,10 @@ abstract class AgentSession implements RustOpaqueInterface {
   /// Files the latest run changed, compared with the project before it.
   Future<List<BridgeFileChange>> changes();
 
+  /// Everything the model saw for the request behind the response `entry`; `None` unless
+  /// `entry` is a response.
+  Future<BridgeContextDetail?> context({required String entry});
+
   /// Answers an approval request.
   Future<void> decide({
     required String request,

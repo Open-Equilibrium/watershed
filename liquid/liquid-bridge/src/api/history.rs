@@ -87,6 +87,23 @@ pub struct BridgeRecord {
     pub failed: bool,
     /// What the model saw for a response.
     pub context: Option<BridgeStepContext>,
+    /// What a tool call did.
+    pub outcome: BridgeToolOutcome,
+}
+
+/// What a tool call did, as far as its stored result shows.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct BridgeToolOutcome {
+    /// Lines an edit added or a write wrote.
+    pub added: Option<i64>,
+    /// Lines an edit removed.
+    pub removed: Option<i64>,
+    /// A shell command's exit code.
+    pub exit_code: Option<i32>,
+    /// Tests that passed, from a common test runner's output.
+    pub tests_passed: Option<i64>,
+    /// Tests that failed.
+    pub tests_failed: Option<i64>,
 }
 
 /// What a Trajectory row shows.
@@ -109,8 +126,47 @@ pub struct BridgeStepContext {
     pub prompt_chars: i64,
     /// The tools the model could call.
     pub tools: Vec<String>,
+    /// Characters of the tools' declarations.
+    pub tool_chars: i64,
     /// Messages in the conversation before the request.
     pub messages: i64,
+    /// Characters of those messages.
+    pub message_chars: i64,
     /// What changed since the previous request.
     pub new_since_previous: Vec<String>,
+}
+
+/// Everything the model saw for one request, in parts with their length in characters.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgeContextDetail {
+    /// Sections of the system prompt.
+    pub sections: Vec<BridgeContextPart>,
+    /// Declared tools.
+    pub tools: Vec<BridgeContextPart>,
+    /// Messages on the branch up to the request.
+    pub messages: Vec<BridgeContextMessage>,
+}
+
+/// A named part of the model's context.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgeContextPart {
+    /// Its name.
+    pub name: String,
+    /// Its length in characters.
+    pub chars: i64,
+}
+
+/// A message on the branch up to a request.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgeContextMessage {
+    /// The entry id.
+    pub entry: String,
+    /// What it is, such as `result of bash · npm test`.
+    pub label: String,
+    /// Its length in characters.
+    pub chars: i64,
+    /// Whether the model saw it; a compaction or edit can take it out.
+    pub in_context: bool,
+    /// Whether it arrived since the previous request.
+    pub new: bool,
 }

@@ -3,8 +3,9 @@
 
 use serde_json::Value;
 
-use crate::Usage;
+use super::outcome::{exit_code, patch_lines, test_counts};
 use crate::pi::{content_text, usage};
+use crate::{ToolOutcome, Usage};
 
 /// Longest text kept per prompt or response, in characters.
 const TEXT_CHARS: usize = 64 * 1024;
@@ -28,6 +29,7 @@ pub(crate) struct Entry {
 pub(crate) enum Body {
     User {
         text: String,
+        chars: usize,
     },
     Assistant {
         text: String,
@@ -35,11 +37,15 @@ pub(crate) enum Body {
         model: String,
         stop_reason: String,
         usage: Usage,
+        /// Characters of its text and tool calls, as later requests send it.
+        chars: usize,
     },
     ToolResult {
         call: String,
         tool: String,
         failed: bool,
+        chars: usize,
+        outcome: ToolOutcome,
     },
     /// A system message that changes prompt sections or tools.
     System(SystemChange),
@@ -48,6 +54,7 @@ pub(crate) enum Body {
         role: String,
         /// Whether pi keeps it out of the model's context.
         excluded: bool,
+        chars: usize,
     },
     RequestTiming {
         first_token_ms: Option<u64>,
@@ -69,11 +76,16 @@ pub(crate) enum Body {
     /// A message an extension added to the model's context.
     CustomMessage {
         kind: String,
+        chars: usize,
     },
-    BranchSummary,
+    BranchSummary {
+        chars: usize,
+    },
     Compaction {
         first_kept: Option<String>,
         system: Option<SystemChange>,
+        /// Characters of the summary.
+        chars: usize,
     },
     ContextEdit {
         target: Option<String>,
@@ -96,6 +108,8 @@ pub(crate) struct Call {
     pub id: String,
     /// The arguments as JSON text, shortened when long.
     pub arguments: String,
+    /// Lines a `write` call writes.
+    pub written_lines: Option<u32>,
 }
 
 /// Changes of the system prompt's sections and tools.
@@ -104,7 +118,8 @@ pub(crate) struct SystemChange {
     /// Section lengths in characters; `None` removes a section.
     pub sections: Vec<(String, Option<usize>)>,
     pub appended_chars: usize,
-    pub tools_added: Vec<String>,
+    /// Added tools with the characters of their declaration.
+    pub tools_added: Vec<(String, usize)>,
     pub tools_removed: Vec<String>,
 }
 
@@ -113,16 +128,26 @@ impl Entry {
     pub fn parse(entry: &Value) -> Self {
         let text = |field| entry.get(field).and_then(Value::as_str).map(str::to_owned);
         let kind = text("type").unwrap_or_default();
+        let chars = |field| {
+            entry
+                .get(field)
+                .and_then(Value::as_str)
+                .map_or(0, |text| text.chars().count())
+        };
         let body = match kind.as_str() {
             "message" => message(entry.get("message")),
             "custom" => custom(text("customType").unwrap_or_default(), entry.get("data")),
             "custom_message" => Body::CustomMessage {
                 kind: text("customType").unwrap_or_default(),
+                chars: content_text(entry.get("content")).chars().count(),
             },
-            "branch_summary" => Body::BranchSummary,
+            "branch_summary" => Body::BranchSummary {
+                chars: chars("summary"),
+            },
             "compaction" => Body::Compaction {
                 first_kept: text("firstKeptEntryId"),
                 system: entry.get("systemMessage").map(system),
+                chars: chars("summary"),
             },
             "context_edit" => Body::ContextEdit {
                 target: text("targetId"),
@@ -159,39 +184,77 @@ fn message(message: Option<&Value>) -> Body {
             .unwrap_or_default()
             .to_owned()
     };
-    let text = || bounded(content_text(message.get("content")), TEXT_CHARS);
+    let content = content_text(message.get("content"));
+    let chars = content.chars().count();
     match message.get("role").and_then(Value::as_str) {
-        Some("user") => Body::User { text: text() },
-        Some("assistant") => Body::Assistant {
-            text: text(),
-            calls: message
+        Some("user") => Body::User {
+            text: bounded(content, TEXT_CHARS),
+            chars,
+        },
+        Some("assistant") => {
+            let blocks = message
                 .get("content")
                 .and_then(Value::as_array)
                 .into_iter()
                 .flatten()
-                .filter(|block| block.get("type").and_then(Value::as_str) == Some("toolCall"))
-                .map(|call| Call {
-                    id: call
-                        .get("id")
-                        .and_then(Value::as_str)
-                        .unwrap_or_default()
-                        .to_owned(),
-                    arguments: call.get("arguments").map(arguments).unwrap_or_default(),
+                .filter(|block| block.get("type").and_then(Value::as_str) == Some("toolCall"));
+            let mut call_chars = 0;
+            let calls = blocks
+                .map(|call| {
+                    let full = call.get("arguments").cloned().unwrap_or(Value::Null);
+                    let written = full.get("content").and_then(Value::as_str);
+                    call_chars += full.to_string().chars().count();
+                    Call {
+                        id: call
+                            .get("id")
+                            .and_then(Value::as_str)
+                            .unwrap_or_default()
+                            .to_owned(),
+                        arguments: arguments(&full),
+                        written_lines: (call.get("name").and_then(Value::as_str) == Some("write"))
+                            .then(|| written.map(|text| count(text.lines().count())))
+                            .flatten(),
+                    }
                 })
-                .collect(),
-            model: field("model"),
-            stop_reason: field("stopReason"),
-            usage: usage(message.get("usage")),
-        },
-        Some("toolResult") => Body::ToolResult {
-            call: field("toolCallId"),
-            tool: field("toolName"),
-            failed: message.get("isError").and_then(Value::as_bool) == Some(true),
-        },
+                .collect();
+            Body::Assistant {
+                text: bounded(content, TEXT_CHARS),
+                calls,
+                model: field("model"),
+                stop_reason: field("stopReason"),
+                usage: usage(message.get("usage")),
+                chars: chars + call_chars,
+            }
+        }
+        Some("toolResult") => {
+            let tool = field("toolName");
+            let failed = message.get("isError").and_then(Value::as_bool) == Some(true);
+            let patch = message
+                .get("details")
+                .and_then(|details| details.get("patch"))
+                .and_then(Value::as_str);
+            let (added, removed) = patch.map(patch_lines).unzip();
+            let shell = tool == "bash";
+            Body::ToolResult {
+                call: field("toolCallId"),
+                outcome: ToolOutcome {
+                    added,
+                    removed,
+                    exit_code: shell
+                        .then(|| exit_code(&content).or((!failed).then_some(0)))
+                        .flatten(),
+                    tests: shell.then(|| test_counts(&content)).flatten(),
+                },
+                tool,
+                failed,
+                chars,
+            }
+        }
         Some("system") => Body::System(system(message)),
         role => Body::Message {
             role: role.unwrap_or_default().to_owned(),
             excluded: message.get("excludeFromContext").and_then(Value::as_bool) == Some(true),
+            chars,
         },
     }
 }
@@ -227,15 +290,12 @@ fn custom(kind: String, data: Option<&Value>) -> Body {
 
 /// Reads a system message's prompt sections and tool changes.
 fn system(message: &Value) -> SystemChange {
-    let names = |field| {
+    let tools = || {
         message
-            .get(field)
+            .get("toolsAdded")
             .and_then(Value::as_array)
             .into_iter()
             .flatten()
-            .filter_map(|tool| tool.get("name").and_then(Value::as_str))
-            .map(str::to_owned)
-            .collect()
     };
     SystemChange {
         sections: message
@@ -246,8 +306,20 @@ fn system(message: &Value) -> SystemChange {
             .map(|(name, text)| (name.clone(), text.as_str().map(|text| text.chars().count())))
             .collect(),
         appended_chars: content_text(message.get("content")).chars().count(),
-        tools_added: names("toolsAdded"),
-        tools_removed: names("toolsRemoved"),
+        tools_added: tools()
+            .filter_map(|tool| {
+                let name = tool.get("name")?.as_str()?.to_owned();
+                Some((name, tool.to_string().chars().count()))
+            })
+            .collect(),
+        tools_removed: message
+            .get("toolsRemoved")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|tool| tool.get("name").and_then(Value::as_str))
+            .map(str::to_owned)
+            .collect(),
     }
 }
 
@@ -271,6 +343,10 @@ fn arguments(value: &Value) -> String {
         }
     }
     shorten(value).to_string()
+}
+
+fn count(lines: usize) -> u32 {
+    u32::try_from(lines).unwrap_or(u32::MAX)
 }
 
 /// `text` cut to `chars` characters, with an ellipsis when cut.

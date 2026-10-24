@@ -1,16 +1,21 @@
 //! A branch of a session's stored entries as Trajectory rows. Timing comes from the
 //! extension's `watershed.timing` entries.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, HashMap};
+
+use serde_json::Value;
 
 use super::entry::{Body, Entry, SystemChange, first_line};
-use super::{RecordKind, StepContext, Trajectory, TrajectoryRecord};
+use super::{
+    ContextDetail, ContextMessage, ContextPart, RecordKind, StepContext, ToolOutcome, Trajectory,
+    TrajectoryRecord,
+};
 
 /// Longest row label, in characters.
 const LABEL_CHARS: usize = 80;
 
-/// Rebuilds the branch ending at `leaf`.
-pub(super) fn trajectory(entries: &[Entry], leaf: Option<&str>) -> Trajectory {
+/// The entries from the root to `leaf`.
+fn path<'a>(entries: &'a [Entry], leaf: Option<&str>) -> Vec<&'a Entry> {
     let by_id: HashMap<&str, &Entry> = entries
         .iter()
         .map(|entry| (entry.id.as_str(), entry))
@@ -22,6 +27,26 @@ pub(super) fn trajectory(entries: &[Entry], leaf: Option<&str>) -> Trajectory {
         next = entry.parent.as_deref();
     }
     path.reverse();
+    path
+}
+
+/// What the model saw for the request that produced the response `entry`.
+pub(super) fn context(entries: &[Entry], entry: &str) -> Option<ContextDetail> {
+    let path = path(entries, Some(entry));
+    let (response, before) = path.split_last()?;
+    if !matches!(response.body, Body::Assistant { .. }) {
+        return None;
+    }
+    let mut projection = Projection::default();
+    for entry in before {
+        projection.add(entry, 0);
+    }
+    Some(projection.detail())
+}
+
+/// Rebuilds the branch ending at `leaf`.
+pub(super) fn trajectory(entries: &[Entry], leaf: Option<&str>) -> Trajectory {
+    let path = path(entries, leaf);
     // Times count from the first prompt, not from when the agent started; an entry without a
     // timestamp takes the time of the entry before it.
     let base = path
@@ -49,11 +74,13 @@ struct Projection {
     turn: u64,
     sections: BTreeMap<String, usize>,
     appended_chars: usize,
-    tools: BTreeSet<String>,
-    /// Messages in `log` the model currently sees.
+    /// Declared tools and the characters of their declaration.
+    tools: BTreeMap<String, usize>,
+    /// Messages in `log` the model currently sees, and their characters.
     messages: usize,
-    /// Whether a compaction summary leads the model's context.
-    summarized: bool,
+    message_chars: usize,
+    /// The `log` index of the compaction whose summary leads the model's context.
+    summary: Option<usize>,
     /// Every entry of the branch so far, in order.
     log: Vec<Logged>,
     /// The `log` length at the previous model request.
@@ -63,7 +90,8 @@ struct Projection {
     /// tools in parallel and stores their results together, so a result's own time is the end
     /// of the slowest tool.
     tool_timing: HashMap<String, (u64, Option<u64>)>,
-    tool_calls: HashMap<String, String>,
+    /// Arguments and written lines of each tool call awaiting its result.
+    tool_calls: HashMap<String, (String, Option<u32>)>,
 }
 
 /// One entry of a branch as the model's context sees it.
@@ -74,6 +102,11 @@ struct Logged {
     message: bool,
     /// What it adds to the context, as "new since the previous request" lists it.
     new: Option<String>,
+    /// What it is, as the context detail lists it.
+    label: String,
+    chars: usize,
+    /// Whether it ever was a message, so the detail lists it even once taken out.
+    was_message: bool,
     /// Whether it changed the context without being a message, such as a compaction.
     event: bool,
     /// Whether a context edit, not a compaction, took this message out; a later edit brings it
@@ -82,12 +115,17 @@ struct Logged {
 }
 
 impl Projection {
-    /// Marks the entry just logged as a message the model sees, described by `new`.
-    fn count(&mut self, new: Option<String>) {
+    /// Marks the entry just logged as a message the model sees, described by `new` and
+    /// `label`.
+    fn count(&mut self, new: Option<String>, label: String, chars: usize) {
         self.messages += 1;
+        self.message_chars += chars;
         if let Some(logged) = self.log.last_mut() {
             logged.message = true;
+            logged.was_message = true;
             logged.new = new;
+            logged.label = label;
+            logged.chars = chars;
         }
     }
 
@@ -104,6 +142,40 @@ impl Projection {
         self.log[index].edited_out = false;
         if std::mem::take(&mut self.log[index].message) {
             self.messages -= 1;
+            self.message_chars -= self.log[index].chars;
+        }
+    }
+
+    fn summary_chars(&self) -> usize {
+        self.summary.map_or(0, |index| self.log[index].chars)
+    }
+
+    /// The context's parts and messages at this point.
+    fn detail(&self) -> ContextDetail {
+        let parts = |map: &BTreeMap<String, usize>| {
+            map.iter()
+                .map(|(name, chars)| ContextPart {
+                    name: name.clone(),
+                    chars: *chars,
+                })
+                .collect()
+        };
+        ContextDetail {
+            sections: parts(&self.sections),
+            tools: parts(&self.tools),
+            messages: self
+                .log
+                .iter()
+                .enumerate()
+                .filter(|(index, logged)| logged.was_message || Some(*index) == self.summary)
+                .map(|(index, logged)| ContextMessage {
+                    entry: logged.id.clone(),
+                    label: logged.label.clone(),
+                    chars: logged.chars,
+                    in_context: logged.message || Some(index) == self.summary,
+                    new: index >= self.since,
+                })
+                .collect(),
         }
     }
 
@@ -131,9 +203,19 @@ impl Projection {
             ..Logged::default()
         });
         match &entry.body {
-            Body::CustomMessage { kind } => self.count(Some(format!("message from {kind}"))),
-            Body::BranchSummary => self.count(Some("branch summary".to_owned())),
-            Body::Compaction { first_kept, system } => {
+            Body::CustomMessage { kind, chars } => {
+                let label = format!("message from {kind}");
+                self.count(Some(label.clone()), label, *chars);
+            }
+            Body::BranchSummary { chars } => {
+                let label = "branch summary".to_owned();
+                self.count(Some(label.clone()), label, *chars);
+            }
+            Body::Compaction {
+                first_kept,
+                system,
+                chars,
+            } => {
                 // The model now sees the summary and the entries kept from before it; a retained
                 // older compaction adds nothing.
                 let current = self.log.len() - 1;
@@ -141,7 +223,11 @@ impl Projection {
                 for index in 0..kept {
                     self.forget(index);
                 }
-                self.summarized = true;
+                self.summary = Some(current);
+                if let Some(logged) = self.log.last_mut() {
+                    logged.label = "compaction summary".to_owned();
+                    logged.chars = *chars;
+                }
                 if let Some(system) = system {
                     self.sections.clear();
                     self.appended_chars = 0;
@@ -168,6 +254,7 @@ impl Projection {
                     {
                         self.log[index].message = true;
                         self.messages += 1;
+                        self.message_chars += self.log[index].chars;
                     }
                     self.note("edited message");
                 }
@@ -195,17 +282,22 @@ impl Projection {
                 )
             }),
             Body::System(change) => self.system(change),
-            Body::User { text } => {
+            Body::User { text, chars } => {
                 self.turn += 1;
+                let label = first_line(text, LABEL_CHARS);
                 self.records.push(row(
                     id,
                     self.turn,
                     RecordKind::User,
-                    first_line(text, LABEL_CHARS),
+                    label.clone(),
                     at,
                     None,
                 ));
-                self.count(Some("prompt".to_owned()));
+                self.count(
+                    Some("prompt".to_owned()),
+                    format!("prompt · {label}"),
+                    *chars,
+                );
             }
             Body::Assistant {
                 text,
@@ -213,12 +305,15 @@ impl Projection {
                 model,
                 stop_reason,
                 usage,
+                chars,
             } => {
                 let (first_token_ms, duration_ms) =
                     self.request_timing.take().unwrap_or((None, None));
                 for call in calls {
-                    self.tool_calls
-                        .insert(call.id.clone(), call.arguments.clone());
+                    self.tool_calls.insert(
+                        call.id.clone(),
+                        (call.arguments.clone(), call.written_lines),
+                    );
                 }
                 let label = if text.trim().is_empty() {
                     "(tool calls)".to_owned()
@@ -227,8 +322,10 @@ impl Projection {
                 };
                 let context = StepContext {
                     prompt_chars: self.sections.values().sum::<usize>() + self.appended_chars,
-                    tools: self.tools.iter().cloned().collect(),
-                    messages: self.messages + usize::from(self.summarized),
+                    tools: self.tools.keys().cloned().collect(),
+                    tool_chars: self.tools.values().sum(),
+                    messages: self.messages + usize::from(self.summary.is_some()),
+                    message_chars: self.message_chars + self.summary_chars(),
                     new_since_previous: self.new_since_previous(),
                 };
                 self.records.push(TrajectoryRecord {
@@ -242,18 +339,33 @@ impl Projection {
                         id,
                         self.turn,
                         RecordKind::Message,
-                        label,
+                        label.clone(),
                         at.saturating_sub(duration_ms.unwrap_or(0)),
                         duration_ms,
                     )
                 });
-                self.count(None);
+                self.count(None, format!("response · {label}"), *chars);
             }
-            Body::ToolResult { call, tool, failed } => {
+            Body::ToolResult {
+                call,
+                tool,
+                failed,
+                chars,
+                outcome,
+            } => {
                 let (ended, duration_ms) = self.tool_timing.remove(call).unwrap_or((at, None));
+                let (arguments, written) = self.tool_calls.remove(call).unwrap_or_default();
+                let label = match primary_argument(&arguments) {
+                    Some(argument) => format!("result of {tool} · {argument}"),
+                    None => format!("result of {tool}"),
+                };
                 self.records.push(TrajectoryRecord {
-                    detail: self.tool_calls.remove(call).unwrap_or_default(),
+                    detail: arguments,
                     failed: *failed,
+                    outcome: ToolOutcome {
+                        added: outcome.added.or(written),
+                        ..*outcome
+                    },
                     ..row(
                         id,
                         self.turn,
@@ -263,11 +375,14 @@ impl Projection {
                         duration_ms,
                     )
                 });
-                self.count(Some(format!("result of {tool}")));
+                self.count(Some(format!("result of {tool}")), label, *chars);
             }
             // A shell command marked so stays out of the model's context.
             Body::Message { excluded: true, .. } => {}
-            Body::Message { role, .. } => self.count(Some(format!("{role} message"))),
+            Body::Message { role, chars, .. } => {
+                let label = format!("{role} message");
+                self.count(Some(label.clone()), label, *chars);
+            }
             Body::Custom { .. } | Body::Label { .. } | Body::Other { .. } => {}
         }
     }
@@ -311,5 +426,15 @@ fn row(
         stop_reason: String::new(),
         failed: false,
         context: None,
+        outcome: ToolOutcome::default(),
     }
+}
+
+/// The argument that tells a tool call apart at a glance: a command or a path.
+fn primary_argument(arguments: &str) -> Option<String> {
+    let arguments: Value = serde_json::from_str(arguments).ok()?;
+    ["command", "path", "file_path"]
+        .iter()
+        .find_map(|name| arguments.get(*name)?.as_str())
+        .map(|text| first_line(text, LABEL_CHARS))
 }
