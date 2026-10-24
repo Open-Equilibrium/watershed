@@ -5,7 +5,7 @@ use std::fmt;
 
 use serde_json::{Map, Value};
 
-use crate::event::{ItemId, ItemKind, RuntimeEvent, TurnId};
+use crate::event::{ItemDetail, ItemId, ItemKind, ItemStatus, RuntimeEvent, TurnId};
 
 /// Translates pi RPC records into runtime events, one session at a time.
 #[derive(Debug, Default)]
@@ -15,6 +15,8 @@ pub struct PiAdapter {
     turn: Option<TurnId>,
     /// Open content blocks of the streaming assistant message, keyed by content index.
     blocks: HashMap<u64, (ItemId, ItemKind)>,
+    /// Running tool calls, keyed by pi's tool call id.
+    tools: HashMap<String, (ItemId, ItemKind)>,
 }
 
 impl PiAdapter {
@@ -29,33 +31,62 @@ impl PiAdapter {
             serde_json::from_slice(record).map_err(|_| AdapterError::InvalidRecord)?;
         let record = value.as_object().ok_or(AdapterError::InvalidRecord)?;
         let mut events = Vec::new();
-        match record.get("type").and_then(Value::as_str) {
+        let kind = record.get("type").and_then(Value::as_str);
+        if kind == Some("agent_start") && self.turn.is_none() {
             // A retry starts another low-level run inside the same turn.
-            Some("agent_start") if self.turn.is_none() => {
-                self.turns += 1;
-                let turn = TurnId(self.turns);
-                self.turn = Some(turn);
-                events.push(RuntimeEvent::TurnStarted { turn });
-            }
+            self.turns += 1;
+            let turn = TurnId(self.turns);
+            self.turn = Some(turn);
+            events.push(RuntimeEvent::TurnStarted { turn });
+        }
+        let Some(turn) = self.turn else {
+            return Ok(events);
+        };
+        match kind {
             Some("agent_settled") => {
-                if let Some(turn) = self.turn.take() {
-                    self.blocks.clear();
-                    events.push(
-                        if record.get("aborted").and_then(Value::as_bool) == Some(true) {
-                            RuntimeEvent::TurnAborted { turn }
-                        } else {
-                            RuntimeEvent::TurnCompleted { turn }
-                        },
-                    );
-                }
+                self.turn = None;
+                self.blocks.clear();
+                self.tools.clear();
+                events.push(
+                    if record.get("aborted").and_then(Value::as_bool) == Some(true) {
+                        RuntimeEvent::TurnAborted { turn }
+                    } else {
+                        RuntimeEvent::TurnCompleted { turn }
+                    },
+                );
             }
-            Some("message_end") => self.user_message(record, &mut events),
+            Some("message_end") => self.user_message(turn, record, &mut events),
             Some("message_update") => {
                 if let Some(update) = record
                     .get("assistantMessageEvent")
                     .and_then(Value::as_object)
                 {
-                    self.assistant_update(update, &mut events);
+                    self.assistant_update(turn, update, &mut events);
+                }
+            }
+            Some("tool_execution_start") => self.tool_start(turn, record, &mut events),
+            Some("tool_execution_update") => {
+                if let Some(&(item, _)) = self.tools.get(str_field(record, "toolCallId")) {
+                    let output =
+                        content_text(record.get("partialResult").and_then(|r| r.get("content")));
+                    events.push(RuntimeEvent::ItemUpdated { item, output });
+                }
+            }
+            Some("tool_execution_end") => {
+                if let Some((item, kind)) = self.tools.remove(str_field(record, "toolCallId")) {
+                    let failed = record.get("isError").and_then(Value::as_bool) == Some(true);
+                    events.push(RuntimeEvent::ItemCompleted {
+                        turn,
+                        item,
+                        kind,
+                        text: content_text(record.get("result").and_then(|r| r.get("content"))),
+                        status: if failed {
+                            ItemStatus::Failed
+                        } else {
+                            ItemStatus::Completed
+                        },
+                        duration_ms: record.get("durationMs").and_then(Value::as_u64),
+                    });
                 }
             }
             _ => {}
@@ -63,48 +94,37 @@ impl PiAdapter {
         Ok(events)
     }
 
-    fn user_message(&mut self, record: &Map<String, Value>, events: &mut Vec<RuntimeEvent>) {
-        let (Some(turn), Some(message)) =
-            (self.turn, record.get("message").and_then(Value::as_object))
-        else {
+    fn user_message(
+        &mut self,
+        turn: TurnId,
+        record: &Map<String, Value>,
+        events: &mut Vec<RuntimeEvent>,
+    ) {
+        let Some(message) = record.get("message") else {
             return;
         };
         if message.get("role").and_then(Value::as_str) != Some("user") {
             return;
         }
-        let text = match message.get("content") {
-            Some(Value::String(text)) => text.clone(),
-            Some(Value::Array(blocks)) => blocks
-                .iter()
-                .filter(|block| block.get("type").and_then(Value::as_str) == Some("text"))
-                .filter_map(|block| block.get("text").and_then(Value::as_str))
-                .collect(),
-            _ => String::new(),
-        };
         let item = self.next_item();
         let kind = ItemKind::UserMessage;
-        events.push(RuntimeEvent::ItemStarted { turn, item, kind });
-        events.push(RuntimeEvent::ItemCompleted {
+        events.push(started(turn, item, kind, ItemDetail::None));
+        events.push(completed(
             turn,
             item,
             kind,
-            text,
-        });
+            content_text(message.get("content")),
+        ));
     }
 
-    fn assistant_update(&mut self, update: &Map<String, Value>, events: &mut Vec<RuntimeEvent>) {
-        let (Some(turn), Some(index)) = (
-            self.turn,
-            update.get("contentIndex").and_then(Value::as_u64),
-        ) else {
+    fn assistant_update(
+        &mut self,
+        turn: TurnId,
+        update: &Map<String, Value>,
+        events: &mut Vec<RuntimeEvent>,
+    ) {
+        let Some(index) = update.get("contentIndex").and_then(Value::as_u64) else {
             return;
-        };
-        let text = |field| {
-            update
-                .get(field)
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_owned()
         };
         match update.get("type").and_then(Value::as_str) {
             Some(start @ ("text_start" | "thinking_start")) => {
@@ -115,33 +135,93 @@ impl PiAdapter {
                 };
                 let item = self.next_item();
                 self.blocks.insert(index, (item, kind));
-                events.push(RuntimeEvent::ItemStarted { turn, item, kind });
+                events.push(started(turn, item, kind, ItemDetail::None));
             }
             Some("text_delta" | "thinking_delta") => {
                 if let Some(&(item, _)) = self.blocks.get(&index) {
-                    events.push(RuntimeEvent::ContentDelta {
-                        item,
-                        delta: text("delta"),
-                    });
+                    let delta = str_field(update, "delta").to_owned();
+                    events.push(RuntimeEvent::ContentDelta { item, delta });
                 }
             }
             Some("text_end" | "thinking_end") => {
                 if let Some((item, kind)) = self.blocks.remove(&index) {
-                    events.push(RuntimeEvent::ItemCompleted {
+                    events.push(completed(
                         turn,
                         item,
                         kind,
-                        text: text("content"),
-                    });
+                        str_field(update, "content").to_owned(),
+                    ));
                 }
             }
             _ => {}
         }
     }
 
+    fn tool_start(
+        &mut self,
+        turn: TurnId,
+        record: &Map<String, Value>,
+        events: &mut Vec<RuntimeEvent>,
+    ) {
+        let name = str_field(record, "toolName");
+        let kind = match name {
+            "bash" => ItemKind::CommandExecution,
+            "edit" | "write" => ItemKind::FileChange,
+            _ => ItemKind::DynamicToolCall,
+        };
+        let item = self.next_item();
+        self.tools
+            .insert(str_field(record, "toolCallId").to_owned(), (item, kind));
+        let detail = ItemDetail::Tool {
+            name: name.to_owned(),
+            arguments: record.get("args").map(Value::to_string).unwrap_or_default(),
+        };
+        events.push(started(turn, item, kind, detail));
+    }
+
     fn next_item(&mut self) -> ItemId {
         self.items += 1;
         ItemId(self.items)
+    }
+}
+
+fn started(turn: TurnId, item: ItemId, kind: ItemKind, detail: ItemDetail) -> RuntimeEvent {
+    RuntimeEvent::ItemStarted {
+        turn,
+        item,
+        kind,
+        detail,
+    }
+}
+
+fn completed(turn: TurnId, item: ItemId, kind: ItemKind, text: String) -> RuntimeEvent {
+    RuntimeEvent::ItemCompleted {
+        turn,
+        item,
+        kind,
+        text,
+        status: ItemStatus::Completed,
+        duration_ms: None,
+    }
+}
+
+fn str_field<'a>(record: &'a Map<String, Value>, field: &str) -> &'a str {
+    record
+        .get(field)
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+}
+
+/// Joins the text of pi message content, which is either a string or a list of blocks.
+fn content_text(content: Option<&Value>) -> String {
+    match content {
+        Some(Value::String(text)) => text.clone(),
+        Some(Value::Array(blocks)) => blocks
+            .iter()
+            .filter(|block| block.get("type").and_then(Value::as_str) == Some("text"))
+            .filter_map(|block| block.get("text").and_then(Value::as_str))
+            .collect(),
+        _ => String::new(),
     }
 }
 

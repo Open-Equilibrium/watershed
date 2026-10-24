@@ -7,7 +7,7 @@ mod event;
 mod framing;
 mod pi;
 
-pub use event::{ItemId, ItemKind, RuntimeEvent, TurnId};
+pub use event::{ItemDetail, ItemId, ItemKind, ItemStatus, RuntimeEvent, TurnId};
 pub use framing::{FrameError, LineFramer};
 pub use pi::{AdapterError, PiAdapter};
 

@@ -17,6 +17,35 @@ pub enum ItemKind {
     AssistantMessage,
     /// The model's reasoning text.
     Reasoning,
+    /// A shell command.
+    CommandExecution,
+    /// A change to project files.
+    FileChange,
+    /// Any other tool call.
+    DynamicToolCall,
+}
+
+/// Kind-specific information about a started item.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ItemDetail {
+    /// No further information.
+    None,
+    /// A tool call.
+    Tool {
+        /// The agent's tool name.
+        name: String,
+        /// The call's arguments as JSON text.
+        arguments: String,
+    },
+}
+
+/// How an item ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ItemStatus {
+    /// The item completed.
+    Completed,
+    /// The item failed, such as a tool call that reported an error.
+    Failed,
 }
 
 /// An agent-neutral runtime event.
@@ -45,6 +74,15 @@ pub enum RuntimeEvent {
         item: ItemId,
         /// What the item represents.
         kind: ItemKind,
+        /// Kind-specific information.
+        detail: ItemDetail,
+    },
+    /// A running item reported its latest partial output.
+    ItemUpdated {
+        /// The item.
+        item: ItemId,
+        /// The latest partial output text.
+        output: String,
     },
     /// Text was appended to a streaming item.
     ContentDelta {
@@ -61,7 +99,11 @@ pub enum RuntimeEvent {
         item: ItemId,
         /// What the item represents.
         kind: ItemKind,
-        /// The complete text.
+        /// The complete text or tool output.
         text: String,
+        /// How the item ended.
+        status: ItemStatus,
+        /// How long a tool ran, when the agent measured it.
+        duration_ms: Option<u64>,
     },
 }
