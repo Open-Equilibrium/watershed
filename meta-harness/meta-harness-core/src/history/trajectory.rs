@@ -15,7 +15,7 @@ use super::{
 const LABEL_CHARS: usize = 80;
 
 /// The entries from the root to `leaf`.
-fn path<'a>(entries: &'a [Entry], leaf: Option<&str>) -> Vec<&'a Entry> {
+pub(super) fn path<'a>(entries: &'a [Entry], leaf: Option<&str>) -> Vec<&'a Entry> {
     let by_id: HashMap<&str, &Entry> = entries
         .iter()
         .map(|entry| (entry.id.as_str(), entry))
@@ -306,6 +306,7 @@ impl Projection {
                 stop_reason,
                 usage,
                 chars,
+                ..
             } => {
                 let (first_token_ms, duration_ms) =
                     self.request_timing.take().unwrap_or((None, None));

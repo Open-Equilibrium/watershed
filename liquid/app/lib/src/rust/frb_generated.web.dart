@@ -197,6 +197,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeTrajectory dco_decode_bridge_trajectory(dynamic raw);
 
   @protected
+  BridgeTranscript dco_decode_bridge_transcript(dynamic raw);
+
+  @protected
+  BridgeTranscriptItem dco_decode_bridge_transcript_item(dynamic raw);
+
+  @protected
   BridgeTreeNode dco_decode_bridge_tree_node(dynamic raw);
 
   @protected
@@ -230,6 +236,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<BridgeTrajectory> dco_decode_list_bridge_trajectory(dynamic raw);
+
+  @protected
+  List<BridgeTranscriptItem> dco_decode_list_bridge_transcript_item(
+    dynamic raw,
+  );
 
   @protected
   List<BridgeTreeNode> dco_decode_list_bridge_tree_node(dynamic raw);
@@ -297,6 +308,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   SessionConfig dco_decode_session_config(dynamic raw);
+
+  @protected
+  int dco_decode_u_32(dynamic raw);
 
   @protected
   int dco_decode_u_8(dynamic raw);
@@ -513,6 +527,14 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeTrajectory sse_decode_bridge_trajectory(SseDeserializer deserializer);
 
   @protected
+  BridgeTranscript sse_decode_bridge_transcript(SseDeserializer deserializer);
+
+  @protected
+  BridgeTranscriptItem sse_decode_bridge_transcript_item(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   BridgeTreeNode sse_decode_bridge_tree_node(SseDeserializer deserializer);
 
   @protected
@@ -554,6 +576,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<BridgeTrajectory> sse_decode_list_bridge_trajectory(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<BridgeTranscriptItem> sse_decode_list_bridge_transcript_item(
     SseDeserializer deserializer,
   );
 
@@ -647,6 +674,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   SessionConfig sse_decode_session_config(SseDeserializer deserializer);
+
+  @protected
+  int sse_decode_u_32(SseDeserializer deserializer);
 
   @protected
   int sse_decode_u_8(SseDeserializer deserializer);
@@ -931,6 +961,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_bridge_transcript(
+    BridgeTranscript self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_transcript_item(
+    BridgeTranscriptItem self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_bridge_tree_node(
     BridgeTreeNode self,
     SseSerializer serializer,
@@ -981,6 +1023,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_list_bridge_trajectory(
     List<BridgeTrajectory> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_bridge_transcript_item(
+    List<BridgeTranscriptItem> self,
     SseSerializer serializer,
   );
 
@@ -1094,6 +1142,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_session_config(SessionConfig self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_u_32(int self, SseSerializer serializer);
 
   @protected
   void sse_encode_u_8(int self, SseSerializer serializer);

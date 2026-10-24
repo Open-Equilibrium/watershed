@@ -3,6 +3,7 @@
 mod entry;
 mod outcome;
 mod trajectory;
+mod transcript;
 mod tree;
 
 #[cfg(test)]
@@ -12,7 +13,7 @@ use std::sync::Arc;
 
 use serde_json::Value;
 
-use crate::{SessionTree, Usage};
+use crate::{ItemKind, SessionTree, Usage};
 use entry::Entry;
 
 /// A snapshot of a session's stored entries. The session keeps it and reads only the entries
@@ -61,6 +62,12 @@ impl History {
     /// The branch ending at `leaf`, or at the session's leaf, as Trajectory rows.
     pub fn trajectory(&self, leaf: Option<&str>) -> Trajectory {
         trajectory::trajectory(&self.entries, leaf.or(self.leaf.as_deref()))
+    }
+
+    /// The chat of the session's current branch: the items of up to `limit` entries before
+    /// `before`, or of the newest entries.
+    pub fn transcript(&self, before: Option<&str>, limit: usize) -> Transcript {
+        transcript::transcript(&self.entries, self.leaf.as_deref(), before, limit)
     }
 
     /// Everything the model saw for the request that produced the response `entry`, in parts;
@@ -198,4 +205,32 @@ pub struct Trajectory {
     pub records: Vec<TrajectoryRecord>,
     /// Milliseconds from the first to the last entry.
     pub duration_ms: u64,
+}
+
+/// A page of the chat of a session's current branch.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Transcript {
+    /// The items in order.
+    pub items: Vec<TranscriptItem>,
+    /// Whether earlier entries remain.
+    pub more: bool,
+}
+
+/// One chat item rebuilt from a stored entry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TranscriptItem {
+    /// The entry it comes from; a response yields several items.
+    pub entry: String,
+    /// What it is.
+    pub kind: ItemKind,
+    /// A prompt's or response's text.
+    pub text: String,
+    /// A tool call's tool.
+    pub tool: Option<String>,
+    /// A tool call's arguments as JSON text.
+    pub arguments: Option<String>,
+    /// Whether a tool call failed.
+    pub failed: bool,
+    /// How long a tool call ran.
+    pub duration_ms: Option<u64>,
 }

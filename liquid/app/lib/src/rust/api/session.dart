@@ -73,6 +73,10 @@ abstract class AgentSession implements RustOpaqueInterface {
 
   /// Steers the running turn.
   Future<void> steer({required String message});
+
+  /// The chat of the current branch: the items of up to `limit` stored entries before
+  /// `before`, or of the newest ones.
+  Future<BridgeTranscript> transcript({String? before, required int limit});
 }
 
 /// How much an agent may do without asking.

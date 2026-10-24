@@ -33,6 +33,8 @@ pub(crate) enum Body {
     },
     Assistant {
         text: String,
+        /// Whether the response began with reasoning.
+        thinking: bool,
         calls: Vec<Call>,
         model: String,
         stop_reason: String,
@@ -106,6 +108,7 @@ pub(crate) enum Body {
 #[derive(Debug, Clone)]
 pub(crate) struct Call {
     pub id: String,
+    pub name: String,
     /// The arguments as JSON text, shortened when long.
     pub arguments: String,
     /// Lines a `write` call writes.
@@ -210,6 +213,11 @@ fn message(message: Option<&Value>) -> Body {
                             .and_then(Value::as_str)
                             .unwrap_or_default()
                             .to_owned(),
+                        name: call
+                            .get("name")
+                            .and_then(Value::as_str)
+                            .unwrap_or_default()
+                            .to_owned(),
                         arguments: arguments(&full),
                         written_lines: (call.get("name").and_then(Value::as_str) == Some("write"))
                             .then(|| written.map(|text| count(text.lines().count())))
@@ -217,8 +225,15 @@ fn message(message: Option<&Value>) -> Body {
                     }
                 })
                 .collect();
+            let thinking = message
+                .get("content")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .any(|block| block.get("type").and_then(Value::as_str) == Some("thinking"));
             Body::Assistant {
                 text: bounded(content, TEXT_CHARS),
+                thinking,
                 calls,
                 model: field("model"),
                 stop_reason: field("stopReason"),

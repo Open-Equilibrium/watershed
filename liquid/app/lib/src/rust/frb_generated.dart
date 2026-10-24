@@ -69,7 +69,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.13.0';
 
   @override
-  int get rustContentHash => 1485261933;
+  int get rustContentHash => -1403505905;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -155,6 +155,12 @@ abstract class RustLibApi extends BaseApi {
   Future<void> crateApiSessionAgentSessionSteer({
     required AgentSession that,
     required String message,
+  });
+
+  Future<BridgeTranscript> crateApiSessionAgentSessionTranscript({
+    required AgentSession that,
+    String? before,
+    required int limit,
   });
 
   Future<BridgeToolOutcome> crateApiHistoryBridgeToolOutcomeDefault();
@@ -781,6 +787,46 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<BridgeTranscript> crateApiSessionAgentSessionTranscript({
+    required AgentSession that,
+    String? before,
+    required int limit,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerAgentSession(
+            that,
+            serializer,
+          );
+          sse_encode_opt_String(before, serializer);
+          sse_encode_u_32(limit, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 17,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_bridge_transcript,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiSessionAgentSessionTranscriptConstMeta,
+        argValues: [that, before, limit],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiSessionAgentSessionTranscriptConstMeta =>
+      const TaskConstMeta(
+        debugName: "AgentSession_transcript",
+        argNames: ["that", "before", "limit"],
+      );
+
+  @override
   Future<BridgeToolOutcome> crateApiHistoryBridgeToolOutcomeDefault() {
     return handler.executeNormal(
       NormalTask(
@@ -789,7 +835,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 17,
+            funcId: 18,
             port: port_,
           );
         },
@@ -819,7 +865,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 18,
+            funcId: 19,
             port: port_,
           );
         },
@@ -1330,6 +1376,35 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgeTranscript dco_decode_bridge_transcript(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 2)
+      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    return BridgeTranscript(
+      items: dco_decode_list_bridge_transcript_item(arr[0]),
+      more: dco_decode_bool(arr[1]),
+    );
+  }
+
+  @protected
+  BridgeTranscriptItem dco_decode_bridge_transcript_item(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 7)
+      throw Exception('unexpected arr length: expect 7 but see ${arr.length}');
+    return BridgeTranscriptItem(
+      entry: dco_decode_String(arr[0]),
+      kind: dco_decode_bridge_item_kind(arr[1]),
+      text: dco_decode_String(arr[2]),
+      tool: dco_decode_opt_String(arr[3]),
+      arguments: dco_decode_opt_String(arr[4]),
+      failed: dco_decode_bool(arr[5]),
+      durationMs: dco_decode_opt_box_autoadd_i_64(arr[6]),
+    );
+  }
+
+  @protected
   BridgeTreeNode dco_decode_bridge_tree_node(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
@@ -1417,6 +1492,16 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   List<BridgeTrajectory> dco_decode_list_bridge_trajectory(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return (raw as List<dynamic>).map(dco_decode_bridge_trajectory).toList();
+  }
+
+  @protected
+  List<BridgeTranscriptItem> dco_decode_list_bridge_transcript_item(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>)
+        .map(dco_decode_bridge_transcript_item)
+        .toList();
   }
 
   @protected
@@ -1556,6 +1641,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       args: dco_decode_list_String(arr[1]),
       cwd: dco_decode_String(arr[2]),
     );
+  }
+
+  @protected
+  int dco_decode_u_32(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw as int;
   }
 
   @protected
@@ -2144,6 +2235,37 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgeTranscript sse_decode_bridge_transcript(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_items = sse_decode_list_bridge_transcript_item(deserializer);
+    var var_more = sse_decode_bool(deserializer);
+    return BridgeTranscript(items: var_items, more: var_more);
+  }
+
+  @protected
+  BridgeTranscriptItem sse_decode_bridge_transcript_item(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_entry = sse_decode_String(deserializer);
+    var var_kind = sse_decode_bridge_item_kind(deserializer);
+    var var_text = sse_decode_String(deserializer);
+    var var_tool = sse_decode_opt_String(deserializer);
+    var var_arguments = sse_decode_opt_String(deserializer);
+    var var_failed = sse_decode_bool(deserializer);
+    var var_durationMs = sse_decode_opt_box_autoadd_i_64(deserializer);
+    return BridgeTranscriptItem(
+      entry: var_entry,
+      kind: var_kind,
+      text: var_text,
+      tool: var_tool,
+      arguments: var_arguments,
+      failed: var_failed,
+      durationMs: var_durationMs,
+    );
+  }
+
+  @protected
   BridgeTreeNode sse_decode_bridge_tree_node(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_id = sse_decode_String(deserializer);
@@ -2285,6 +2407,20 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var ans_ = <BridgeTrajectory>[];
     for (var idx_ = 0; idx_ < len_; ++idx_) {
       ans_.add(sse_decode_bridge_trajectory(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
+  List<BridgeTranscriptItem> sse_decode_list_bridge_transcript_item(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <BridgeTranscriptItem>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_bridge_transcript_item(deserializer));
     }
     return ans_;
   }
@@ -2541,6 +2677,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_args = sse_decode_list_String(deserializer);
     var var_cwd = sse_decode_String(deserializer);
     return SessionConfig(program: var_program, args: var_args, cwd: var_cwd);
+  }
+
+  @protected
+  int sse_decode_u_32(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return deserializer.buffer.getUint32();
   }
 
   @protected
@@ -3076,6 +3218,31 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_bridge_transcript(
+    BridgeTranscript self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_list_bridge_transcript_item(self.items, serializer);
+    sse_encode_bool(self.more, serializer);
+  }
+
+  @protected
+  void sse_encode_bridge_transcript_item(
+    BridgeTranscriptItem self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.entry, serializer);
+    sse_encode_bridge_item_kind(self.kind, serializer);
+    sse_encode_String(self.text, serializer);
+    sse_encode_opt_String(self.tool, serializer);
+    sse_encode_opt_String(self.arguments, serializer);
+    sse_encode_bool(self.failed, serializer);
+    sse_encode_opt_box_autoadd_i_64(self.durationMs, serializer);
+  }
+
+  @protected
   void sse_encode_bridge_tree_node(
     BridgeTreeNode self,
     SseSerializer serializer,
@@ -3190,6 +3357,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_i_32(self.length, serializer);
     for (final item in self) {
       sse_encode_bridge_trajectory(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_list_bridge_transcript_item(
+    List<BridgeTranscriptItem> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_bridge_transcript_item(item, serializer);
     }
   }
 
@@ -3449,6 +3628,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_u_32(int self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    serializer.buffer.putUint32(self);
+  }
+
+  @protected
   void sse_encode_u_8(int self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     serializer.buffer.putUint8(self);
@@ -3570,4 +3755,13 @@ class AgentSessionImpl extends RustOpaque implements AgentSession {
   /// Steers the running turn.
   Future<void> steer({required String message}) => RustLib.instance.api
       .crateApiSessionAgentSessionSteer(that: this, message: message);
+
+  /// The chat of the current branch: the items of up to `limit` stored entries before
+  /// `before`, or of the newest ones.
+  Future<BridgeTranscript> transcript({String? before, required int limit}) =>
+      RustLib.instance.api.crateApiSessionAgentSessionTranscript(
+        that: this,
+        before: before,
+        limit: limit,
+      );
 }

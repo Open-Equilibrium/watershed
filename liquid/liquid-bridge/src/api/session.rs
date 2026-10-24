@@ -11,7 +11,7 @@ use tokio::runtime::Runtime;
 use tokio::sync::{Mutex, mpsc};
 
 use crate::api::events::{BridgeDecision, BridgeEvent, BridgeFileChange};
-use crate::api::history::{BridgeContextDetail, BridgeHistory};
+use crate::api::history::{BridgeContextDetail, BridgeHistory, BridgeTranscript};
 use crate::convert::{coalesce, describe};
 use crate::frb_generated::StreamSink;
 
@@ -181,6 +181,21 @@ impl AgentSession {
                 leaf: tree.leaf,
                 trajectories,
             })
+        })
+    }
+
+    /// The chat of the current branch: the items of up to `limit` stored entries before
+    /// `before`, or of the newest ones.
+    pub fn transcript(
+        &self,
+        before: Option<String>,
+        limit: u32,
+    ) -> Result<BridgeTranscript, String> {
+        RUNTIME.block_on(async {
+            let mut session = self.session.lock().await;
+            let history = open(&mut session)?.history().await.map_err(describe)?;
+            let limit = usize::try_from(limit).unwrap_or(usize::MAX);
+            Ok(history.transcript(before.as_deref(), limit).into())
         })
     }
 

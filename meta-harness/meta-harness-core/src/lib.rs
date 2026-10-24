@@ -21,7 +21,7 @@ pub use event::{
 pub use framing::{Frame, LineFramer};
 pub use history::{
     ContextDetail, ContextMessage, ContextPart, History, RecordKind, StepContext, TestCount,
-    ToolOutcome, Trajectory, TrajectoryRecord,
+    ToolOutcome, Trajectory, TrajectoryRecord, Transcript, TranscriptItem,
 };
 pub use pi::PiAdapter;
 pub use session::{AgentCommand, CommandError, Session, SessionEvent, SessionState};

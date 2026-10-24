@@ -1,6 +1,6 @@
 //! A session's stored history for the Trajectory tab: its branch tree and Trajectories.
 
-use crate::api::events::BridgeUsage;
+use crate::api::events::{BridgeItemKind, BridgeUsage};
 
 /// The session's branch tree and the requested Trajectories.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -169,4 +169,32 @@ pub struct BridgeContextMessage {
     pub in_context: bool,
     /// Whether it arrived since the previous request.
     pub fresh: bool,
+}
+
+/// A page of the chat of the session's current branch.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgeTranscript {
+    /// The items in order.
+    pub items: Vec<BridgeTranscriptItem>,
+    /// Whether earlier entries remain.
+    pub more: bool,
+}
+
+/// One chat item rebuilt from a stored entry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgeTranscriptItem {
+    /// The entry it comes from.
+    pub entry: String,
+    /// What it is.
+    pub kind: BridgeItemKind,
+    /// A prompt's or response's text.
+    pub text: String,
+    /// A tool call's tool.
+    pub tool: Option<String>,
+    /// A tool call's arguments as JSON text.
+    pub arguments: Option<String>,
+    /// Whether a tool call failed.
+    pub failed: bool,
+    /// How long a tool call ran.
+    pub duration_ms: Option<i64>,
 }

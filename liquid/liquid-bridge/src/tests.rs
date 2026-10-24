@@ -445,3 +445,40 @@ fn reads_tool_outcomes_and_what_the_model_saw() {
     assert_eq!(detail.tools[0].name, "write");
     assert!(session.shutdown());
 }
+
+#[test]
+fn rebuilds_the_chat_of_the_current_branch() {
+    let entries = r#"{"entries":[{"type":"message","id":"u1","parentId":null,"message":{"role":"user","content":"Fix it"}},{"type":"message","id":"a1","parentId":"u1","message":{"role":"assistant","content":[{"type":"text","text":"Editing."},{"type":"toolCall","id":"c1","name":"edit","arguments":{"path":"a.ts"}}]}},{"type":"message","id":"r1","parentId":"a1","message":{"role":"toolResult","toolCallId":"c1","toolName":"edit","content":[]}}],"leafId":"r1"}"#;
+    let script = format!(
+        "IFS= read -r line\nprintf '%s\\n' '{{\"id\":\"1\",\"type\":\"response\",\"command\":\"get_entries\",\"success\":true,\"data\":{entries}}}'\nIFS= read -r line || exit 0"
+    );
+    let session = AgentSession::start(SessionConfig {
+        program: "/bin/sh".to_owned(),
+        args: vec!["-c".to_owned(), script],
+        cwd: std::env::temp_dir().display().to_string(),
+    })
+    .expect("agent starts");
+    let transcript = session.transcript(None, 50).expect("transcript");
+    let items: Vec<_> = transcript
+        .items
+        .iter()
+        .map(|item| {
+            (
+                item.entry.as_str(),
+                item.kind,
+                item.text.as_str(),
+                item.tool.as_deref(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        items,
+        [
+            ("u1", BridgeItemKind::UserMessage, "Fix it", None),
+            ("a1", BridgeItemKind::AssistantMessage, "Editing.", None),
+            ("a1", BridgeItemKind::FileChange, "", Some("edit")),
+        ]
+    );
+    assert!(!transcript.more);
+    assert!(session.shutdown());
+}

@@ -5,3 +5,4 @@ mod outcome;
 mod pi;
 mod session;
 mod trajectory;
+mod transcript;

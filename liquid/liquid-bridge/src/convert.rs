@@ -4,7 +4,7 @@ use meta_harness_core::{
     ApprovalMode, ChangeStatus, CommandError, ContextDetail, ContextMessage, ContextPart, Decision,
     EntryKind, FileChange, ItemDetail, ItemKind, ItemStatus, NotificationLevel, RecordKind,
     RequestKind, RuntimeEvent, SessionEvent, StepContext, ToolOutcome, Trajectory,
-    TrajectoryRecord, TreeNode, Usage, UserInput,
+    TrajectoryRecord, Transcript, TranscriptItem, TreeNode, Usage, UserInput,
 };
 
 use crate::api::events::{
@@ -14,7 +14,8 @@ use crate::api::events::{
 };
 use crate::api::history::{
     BridgeContextDetail, BridgeContextMessage, BridgeContextPart, BridgeEntryKind, BridgeRecord,
-    BridgeRecordKind, BridgeStepContext, BridgeToolOutcome, BridgeTrajectory, BridgeTreeNode,
+    BridgeRecordKind, BridgeStepContext, BridgeToolOutcome, BridgeTrajectory, BridgeTranscript,
+    BridgeTranscriptItem, BridgeTreeNode,
 };
 use crate::api::session::BridgeApprovalMode;
 
@@ -116,6 +117,29 @@ impl From<TrajectoryRecord> for BridgeRecord {
             failed: record.failed,
             context: record.context.map(Into::into),
             outcome: record.outcome.into(),
+        }
+    }
+}
+
+impl From<Transcript> for BridgeTranscript {
+    fn from(transcript: Transcript) -> Self {
+        Self {
+            items: transcript.items.into_iter().map(Into::into).collect(),
+            more: transcript.more,
+        }
+    }
+}
+
+impl From<TranscriptItem> for BridgeTranscriptItem {
+    fn from(item: TranscriptItem) -> Self {
+        Self {
+            entry: item.entry,
+            kind: item.kind.into(),
+            text: item.text,
+            tool: item.tool,
+            arguments: item.arguments,
+            failed: item.failed,
+            duration_ms: item.duration_ms.map(int),
         }
     }
 }

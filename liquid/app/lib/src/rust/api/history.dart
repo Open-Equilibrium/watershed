@@ -8,7 +8,7 @@ import 'events.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
 /// Everything the model saw for one request, in parts with their length in characters.
 class BridgeContextDetail {
@@ -393,6 +393,85 @@ class BridgeTrajectory {
       other is BridgeTrajectory &&
           runtimeType == other.runtimeType &&
           records == other.records &&
+          durationMs == other.durationMs;
+}
+
+/// A page of the chat of the session's current branch.
+class BridgeTranscript {
+  /// The items in order.
+  final List<BridgeTranscriptItem> items;
+
+  /// Whether earlier entries remain.
+  final bool more;
+
+  const BridgeTranscript({required this.items, required this.more});
+
+  @override
+  int get hashCode => items.hashCode ^ more.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeTranscript &&
+          runtimeType == other.runtimeType &&
+          items == other.items &&
+          more == other.more;
+}
+
+/// One chat item rebuilt from a stored entry.
+class BridgeTranscriptItem {
+  /// The entry it comes from.
+  final String entry;
+
+  /// What it is.
+  final BridgeItemKind kind;
+
+  /// A prompt's or response's text.
+  final String text;
+
+  /// A tool call's tool.
+  final String? tool;
+
+  /// A tool call's arguments as JSON text.
+  final String? arguments;
+
+  /// Whether a tool call failed.
+  final bool failed;
+
+  /// How long a tool call ran.
+  final PlatformInt64? durationMs;
+
+  const BridgeTranscriptItem({
+    required this.entry,
+    required this.kind,
+    required this.text,
+    this.tool,
+    this.arguments,
+    required this.failed,
+    this.durationMs,
+  });
+
+  @override
+  int get hashCode =>
+      entry.hashCode ^
+      kind.hashCode ^
+      text.hashCode ^
+      tool.hashCode ^
+      arguments.hashCode ^
+      failed.hashCode ^
+      durationMs.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeTranscriptItem &&
+          runtimeType == other.runtimeType &&
+          entry == other.entry &&
+          kind == other.kind &&
+          text == other.text &&
+          tool == other.tool &&
+          arguments == other.arguments &&
+          failed == other.failed &&
           durationMs == other.durationMs;
 }
 
