@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'theme/theme.dart';
+
 /// The Liquid app. It holds no native state, so widget tests can build it without the Rust
 /// library.
 class LiquidApp extends StatelessWidget {
@@ -7,10 +9,12 @@ class LiquidApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const MaterialApp(
+    return MaterialApp(
       title: 'Liquid',
       debugShowCheckedModeBanner: false,
-      home: Scaffold(body: SizedBox.expand()),
+      theme: liquidTheme(Brightness.light),
+      darkTheme: liquidTheme(Brightness.dark),
+      home: const Scaffold(body: SizedBox.expand()),
     );
   }
 }

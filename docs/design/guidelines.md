@@ -1,6 +1,6 @@
 # Design guidelines
 
-These rules apply to every Watershed GUI (ADR-0194). Every GUI change starts with HTML mockups that the maintainer approves; approved mockups live in [mockups/](mockups/liquid-agent-surface.html). Design tokens are canonical in [tokens.css](tokens.css); components use tokens, never raw values.
+These rules apply to every Watershed GUI (ADR-0194). Every GUI change starts with HTML mockups that the maintainer approves; approved mockups live in [mockups/](mockups/liquid-agent-surface.html). Design tokens are canonical in [tokens.css](tokens.css); components use tokens, never raw values. Flutter reads them from `liquid/app/lib/src/theme/tokens.g.dart`, which `scripts/design_tokens.py` generates; a tooling test fails when it falls out of date.
 
 References: Notion, AppFlowy, Microsoft Loop and T3 Code.
 
