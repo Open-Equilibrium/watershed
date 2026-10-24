@@ -15,6 +15,16 @@ class Launch {
   final String? problem;
 }
 
+/// pi's arguments: RPC mode with Watershed's extension, reopening the stored `session` file
+/// when given, so its Trajectory and branches come back after a restart.
+List<String> piArguments(String extension, String? session) => [
+  '--mode',
+  'rpc',
+  '-e',
+  extension,
+  if (session != null) ...['--session', session],
+];
+
 /// Starts a session from the environment until the app has an approved flow for new sessions.
 /// Without Watershed's pi extension there would be no approvals, so the app refuses to start pi.
 Future<Launch> launchFromEnvironment(Map<String, String> environment) async {
@@ -30,7 +40,7 @@ Future<Launch> launchFromEnvironment(Map<String, String> environment) async {
     final session = await AgentSession.start(
       config: SessionConfig(
         program: environment['LIQUID_PI'] ?? 'pi',
-        args: ['--mode', 'rpc', '-e', extension],
+        args: piArguments(extension, environment['LIQUID_PI_SESSION']),
         cwd: project,
       ),
     );

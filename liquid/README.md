@@ -10,3 +10,12 @@ Native targets and current availability follow [PLATFORMS.md](../PLATFORMS.md).
 - `liquid-bridge/` — the Rust side of the flutter_rust_bridge bindings (ADR-0186). It embeds the Meta-Harness core (ADR-0184); its package is `liquid_bridge` because cargokit derives the library name from it.
 
 After changing `liquid-bridge/src/api`, run `flutter_rust_bridge_codegen generate` in `app/` and then `cargo fmt --all`. The generated files are committed.
+
+## Run
+
+Until the new-session flow exists, the app starts one pi session from the environment; `flutter run -d macos` in `app/` needs Xcode.
+
+- `LIQUID_PROJECT` — the agent's project directory (required).
+- `LIQUID_PI_EXTENSION` — the path of `meta-harness/pi-extension/watershed.ts` (required: without it pi would run tools without approvals).
+- `LIQUID_PI` — the pi executable; defaults to `pi`.
+- `LIQUID_PI_SESSION` — a stored pi session file to reopen, with its Trajectory and branches.
