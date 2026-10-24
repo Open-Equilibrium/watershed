@@ -105,7 +105,10 @@ exit 3"#,
             next(&mut events).await,
             SessionEvent::Exited { success: false }
         );
-        assert_eq!(session.abort().await, Err(CommandError::Closed));
+        assert_eq!(
+            accepted(session.abort().await).await,
+            Err(CommandError::Closed)
+        );
     });
 }
 

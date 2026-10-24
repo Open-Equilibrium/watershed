@@ -245,11 +245,16 @@ impl AgentSession {
         })
     }
 
-    /// Aborts the running turn.
+    /// Aborts the running turn; open approvals are rejected and questions dismissed, so the
+    /// agent can stop.
     pub fn abort(&self) -> Result<(), String> {
         RUNTIME.block_on(async {
-            let mut session = self.session.lock().await;
-            open(&mut session)?.abort().await.map_err(describe)
+            let pending = open(&mut *self.session.lock().await)?
+                .abort()
+                .await
+                .map_err(describe)?;
+            // pi answers once the agent is idle; the session stays free meanwhile.
+            pending.accepted().await.map_err(describe)
         })
     }
 

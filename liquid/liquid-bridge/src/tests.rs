@@ -233,6 +233,58 @@ IFS= read -r line || exit 0"#;
 }
 
 #[test]
+fn stopping_rejects_the_open_approval_the_agent_waits_for() {
+    // pi acknowledges an abort once the agent is idle, which needs its open dialogs answered.
+    let payload = r#"{\"tool\":\"bash\",\"arguments\":{},\"readOnly\":false}"#;
+    let script = format!(
+        r#"printf '%s\n' '{{"type":"extension_ui_request","id":"a1","method":"select","title":"watershed.approval {payload}","options":[]}}'
+IFS= read -r line
+case "$line" in *'"type":"abort"'*) ;; *) exit 9 ;; esac
+IFS= read -r line
+case "$line" in *'"id":"a1"'*) ;; *) exit 9 ;; esac
+case "$line" in *'"value":"reject"'*) ;; *) exit 9 ;; esac
+printf '%s\n' '{{"id":"1","type":"response","command":"abort","success":true}}'
+IFS= read -r line || exit 0"#
+    );
+    let session = Arc::new(
+        AgentSession::start(SessionConfig {
+            program: "/bin/sh".to_owned(),
+            args: vec!["-c".to_owned(), script],
+            cwd: std::env::temp_dir().display().to_string(),
+        })
+        .expect("agent starts"),
+    );
+    let (sender, receiver) = mpsc::channel();
+    session
+        .forward(move |event| sender.send(event).is_ok())
+        .expect("first subscriber");
+    let next = || {
+        receiver
+            .recv_timeout(Duration::from_secs(10))
+            .expect("event arrives")
+    };
+    assert_eq!(next().kind, BridgeEventKind::RequestOpened);
+    let (stopped, stop) = mpsc::channel();
+    {
+        let session = Arc::clone(&session);
+        std::thread::spawn(move || stopped.send(session.abort()));
+    }
+    assert_eq!(stop.recv_timeout(Duration::from_secs(10)), Ok(Ok(())));
+    let resolved = next();
+    assert_eq!(
+        (
+            resolved.kind,
+            resolved.request.and_then(|request| request.decision)
+        ),
+        (
+            BridgeEventKind::RequestResolved,
+            Some(BridgeDecision::Reject)
+        )
+    );
+    assert!(session.shutdown());
+}
+
+#[test]
 fn coalesces_consecutive_deltas_of_one_item() {
     let delta = |item: u64, text: &str| {
         bridge(RuntimeEvent::ContentDelta {

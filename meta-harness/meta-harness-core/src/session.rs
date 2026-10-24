@@ -214,9 +214,25 @@ impl Session {
         Ok(queue(&data))
     }
 
-    /// Aborts the running turn.
-    pub async fn abort(&mut self) -> Result<(), CommandError> {
-        self.command(json!({ "type": "abort" })).await.map(drop)
+    /// Aborts the running turn. pi answers once the agent is idle, which needs its open dialogs
+    /// answered, so open approvals are rejected and open questions dismissed.
+    pub async fn abort(&mut self) -> Result<Pending, CommandError> {
+        let pending = self.submit(json!({ "type": "abort" })).await?;
+        let (approvals, questions): (Vec<_>, Vec<_>) = {
+            let shared = self.state.lock();
+            (
+                shared.approvals.keys().cloned().collect(),
+                shared.questions.iter().cloned().collect(),
+            )
+        };
+        // One the user answered meanwhile is already resolved.
+        for request in approvals {
+            let _ = self.decide(&request, Decision::Reject).await;
+        }
+        for request in questions {
+            let _ = self.answer(&request, Answer::Cancelled).await;
+        }
+        Ok(pending)
     }
 
     /// Reads the session's file, id, model and streaming state.
