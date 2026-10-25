@@ -212,8 +212,14 @@ class SessionState {
   /// model request or, with `followUp`, once it is done. pi decides, so no turn state races
   /// the send. A message the agent rejects goes back to the input area.
   Future<void> send(String message, {bool followUp = false}) async {
-    // A message typed while the session changes goes to the new one.
+    // A message typed while the session changes goes to the new one, and one typed while the
+    // chat is restored follows it, so the restored chat does not hold its items twice.
     await _switching?.future;
+    try {
+      await _chatLoad;
+    } on Object {
+      // The chat reports its own failure; the message still goes out.
+    }
     try {
       await _backend.send(message, followUp: followUp);
     } on Object catch (error) {
@@ -307,7 +313,18 @@ class SessionState {
 
   /// Rebuilds the chat from the session's current branch, as the model sees it, and marks
   /// where it leaves the other branches. Items that arrive meanwhile stay after it.
-  Future<void> loadChat() async {
+  Future<void> loadChat() {
+    final load = _loadChat();
+    _chatLoad = load;
+    return load.whenComplete(() {
+      if (identical(_chatLoad, load)) _chatLoad = null;
+    });
+  }
+
+  /// A chat restore in progress; messages wait for it.
+  Future<void>? _chatLoad;
+
+  Future<void> _loadChat() async {
     final generation = _generation;
     final before = items.value;
     final page = await _backend.transcript(null);

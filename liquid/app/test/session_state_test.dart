@@ -391,6 +391,17 @@ void main() {
     );
   });
 
+  test('holds a message until the chat is restored', () async {
+    backend.gate = Completer();
+    final restoring = state.loadChat();
+    final sending = state.send('Hi');
+    await pumpEventQueue();
+    expect(backend.calls, isNot(contains('send Hi')));
+    backend.gate!.complete();
+    await Future.wait([restoring, sending]);
+    expect(backend.calls.last, 'send Hi');
+  });
+
   test('pages past entries that show nothing in the chat', () async {
     backend.transcripts[''] = const BridgeTranscript(
       items: [],
