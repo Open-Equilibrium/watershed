@@ -114,13 +114,18 @@ impl PiAdapter {
                 _ => {}
             },
             Some("message_update") => {
-                if let Some(step) = self.step.as_mut() {
+                let update = record
+                    .get("assistantMessageEvent")
+                    .and_then(Value::as_object);
+                // A block starts empty; the first token is its first content.
+                let content = update
+                    .and_then(|update| update.get("type"))
+                    .and_then(Value::as_str)
+                    .is_some_and(|kind| kind.ends_with("_delta"));
+                if content && let Some(step) = self.step.as_mut() {
                     step.first_token.get_or_insert(at);
                 }
-                if let Some(update) = record
-                    .get("assistantMessageEvent")
-                    .and_then(Value::as_object)
-                {
+                if let Some(update) = update {
                     self.assistant_update(turn, update, &mut events);
                 }
             }

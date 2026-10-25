@@ -405,7 +405,7 @@ fn measures_model_requests_and_context_changes() {
                 },
                 stop_reason: "stop".to_owned(),
                 error: None,
-                first_token_ms: Some(395),
+                first_token_ms: Some(445),
                 duration_ms: 1095,
             },
             RuntimeEvent::ModelRequestStarted {

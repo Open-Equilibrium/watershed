@@ -74,8 +74,9 @@ function watershed(pi: ExtensionAPI, clock: Clock): void {
       turnStarted = undefined;
     }
   });
-  pi.on("message_update", () => {
-    if (request && request.firstToken === null) {
+  pi.on("message_update", (event) => {
+    // A block starts empty; the first token is its first content.
+    if (request && request.firstToken === null && event.assistantMessageEvent?.type?.endsWith("_delta")) {
       request.firstToken = clock();
     }
   });

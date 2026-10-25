@@ -178,10 +178,13 @@ test("records request and tool timing for the Trajectory", async () => {
   now = 1100;
   await fire("message_start", { message: { role: "user" } });
   await fire("message_start", { message: { role: "assistant" } });
+  // A block starts empty; the first content arrives later.
+  now = 1500;
+  await fire("message_update", { assistantMessageEvent: { type: "thinking_start" } });
   now = 1900;
-  await fire("message_update", { message: { role: "assistant" } });
+  await fire("message_update", { assistantMessageEvent: { type: "thinking_delta", delta: "Hm" } });
   now = 1950;
-  await fire("message_update", { message: { role: "assistant" } });
+  await fire("message_update", { assistantMessageEvent: { type: "text_delta", delta: "Hi" } });
   now = 4400;
   await fire("message_end", { message: { role: "assistant" } });
   await fire("turn_start", {});
