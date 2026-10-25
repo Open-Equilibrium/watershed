@@ -9,8 +9,10 @@ struct Repo(PathBuf);
 
 impl Repo {
     fn new(name: &str) -> Self {
-        let dir =
-            std::env::temp_dir().join(format!("watershed-diff-{name}-{}", std::process::id()));
+        Self::at(std::env::temp_dir().join(format!("watershed-diff-{name}-{}", std::process::id())))
+    }
+
+    fn at(dir: PathBuf) -> Self {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("repository directory");
         let repo = Self(dir);
@@ -179,6 +181,47 @@ fn keeps_snapshots_private_to_the_user() {
             .collect();
         assert!(!modes.is_empty(), "the store exists");
         assert!(modes.iter().all(|&mode| mode == 0o700), "{modes:?}");
+    });
+}
+
+#[test]
+fn diffs_a_project_given_by_a_relative_path() {
+    run(async {
+        // Below the working directory, so the path stays relative wherever Git resolves it.
+        let relative = PathBuf::from(format!("watershed-diff-relative-{}", std::process::id()));
+        let repo = Repo::at(
+            std::env::current_dir()
+                .expect("working directory")
+                .join(&relative),
+        );
+        repo.write("a.txt", "old\n");
+        repo.write("b.txt", "kept\n");
+        repo.git(&["add", "."]);
+        repo.git(&["commit", "-q", "-m", "base"]);
+        // Clean index entries, so the snapshot reuses the repository's objects for b.txt.
+        let past = std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(1_600_000_000);
+        for name in ["a.txt", "b.txt"] {
+            std::fs::File::options()
+                .write(true)
+                .open(repo.path().join(name))
+                .and_then(|file| file.set_modified(past))
+                .expect("file time");
+        }
+        repo.git(&["update-index", "--refresh"]);
+        let tree = WorkingTree::open(&relative)
+            .await
+            .expect("repository opens");
+        let snapshot = tree.snapshot().await.expect("snapshot");
+        repo.write("a.txt", "new\n");
+        assert_eq!(
+            tree.changes(&snapshot).await.expect("changes"),
+            [FileChange {
+                path: "a.txt".to_owned(),
+                status: ChangeStatus::Modified,
+                added: 1,
+                removed: 1,
+            }]
+        );
     });
 }
 

@@ -128,6 +128,8 @@ fn private_dir() -> std::io::Result<PathBuf> {
 impl WorkingTree {
     /// Opens the working tree that contains `dir`.
     pub async fn open(dir: &Path) -> Result<Self, DiffError> {
+        // Git reports paths relative to `dir`; later commands run elsewhere and need them whole.
+        let dir = &std::path::absolute(dir).map_err(DiffError::Io)?;
         let lines = git(
             dir,
             &[],
