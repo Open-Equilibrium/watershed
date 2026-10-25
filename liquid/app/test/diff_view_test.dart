@@ -116,4 +116,34 @@ void main() {
       ),
     );
   });
+
+  testWidgets('scrolls a long line sideways to its end', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1200, 900));
+    final long = '${'x' * 400} changed at the end';
+    final backend = FakeBackend()
+      ..changed = [
+        BridgeFileChange(
+          path: 'wide.ts',
+          status: BridgeChangeStatus.modified,
+          added: 1,
+          removed: 0,
+        ),
+      ]
+      ..patches = {'wide.ts': '@@ -1 +1 @@\n+$long\n'};
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: liquidTheme(Brightness.light),
+        home: Material(child: DiffView(state: SessionState(backend))),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final line = find.textContaining('changed at the end', findRichText: true);
+    final before = tester.getTopLeft(line).dx;
+    await tester.dragFrom(
+      tester.getTopLeft(line) + const Offset(20, 5),
+      const Offset(-3000, 0),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.getTopLeft(line).dx, lessThan(before - 1000));
+  });
 }

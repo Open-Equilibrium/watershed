@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -297,9 +299,33 @@ class _Patch extends StatelessWidget {
                   bottom: Radius.circular(WsMetrics.radiusLg),
                 ),
               ),
-              child: ListView.builder(
-                itemCount: lines.length,
-                itemBuilder: (context, index) => _LineRow(line: lines[index]),
+              // Long lines scroll sideways together, so no change is out of reach.
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final char = (TextPainter(
+                    text: TextSpan(text: 'M', style: monoStyle(context)),
+                    textDirection: TextDirection.ltr,
+                  )..layout()).width;
+                  final widest = lines.fold(
+                    0,
+                    (widest, line) => math.max(widest, line.text.length),
+                  );
+                  return SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: SizedBox(
+                      width: math.max(
+                        constraints.maxWidth,
+                        _LineRow.gutter + widest * char + WsMetrics.space6,
+                      ),
+                      height: constraints.maxHeight,
+                      child: ListView.builder(
+                        itemCount: lines.length,
+                        itemBuilder: (context, index) =>
+                            _LineRow(line: lines[index]),
+                      ),
+                    ),
+                  );
+                },
               ),
             ),
           ),
@@ -312,6 +338,9 @@ class _Patch extends StatelessWidget {
 
 class _LineRow extends StatelessWidget {
   const _LineRow({required this.line});
+
+  /// Width of the two line numbers and the sign before the code.
+  static const gutter = 44.0 + 44.0 + 20.0;
 
   final DiffLine line;
 
