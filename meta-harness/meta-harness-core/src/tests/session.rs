@@ -680,6 +680,31 @@ fn stopping_rejects_an_approval_that_arrives_late() {
 }
 
 #[test]
+fn asks_the_user_again_once_an_abort_found_the_agent_idle() {
+    run(async {
+        // pi answers the abort of an idle agent without any turn event.
+        let script = [
+            expect_response(&[r#""type":"abort""#]),
+            r#"printf '%s\n' '{"id":"1","type":"response","command":"abort","success":true}' '{"type":"extension_ui_request","id":"q1","method":"select","title":"Start over?","options":["Yes","No"]}'
+"#
+            .to_owned(),
+            "IFS= read -r line || exit 0\n".to_owned(),
+        ]
+        .concat();
+        let (mut session, mut events) = fake_agent(&script);
+        let stopping = session.abort().await.expect("abort sent");
+        assert_eq!(timeout(WAIT, stopping.accepted()).await, Ok(Ok(())));
+        assert!(
+            matches!(
+                next(&mut events).await,
+                SessionEvent::Runtime(RuntimeEvent::UserInputRequested { .. })
+            ),
+            "the question reaches the user"
+        );
+    });
+}
+
+#[test]
 fn switches_sessions_and_models_through_pi() {
     run(async {
         let script = [

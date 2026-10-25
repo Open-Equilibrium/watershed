@@ -834,6 +834,11 @@ impl Supervisor {
                 .unwrap_or("command failed");
             Err(CommandError::Rejected(error.to_owned()))
         };
+        // pi answers an abort once the agent is idle, also when no turn ran to end; later
+        // dialogs belong to whatever comes next.
+        if response.get("command").and_then(Value::as_str) == Some("abort") {
+            self.state.lock().stopping = false;
+        }
         // Before any later record is read: tools allowed for the rest of a session need asking
         // again once the agent switched to another one.
         if switch && result.as_ref().is_ok_and(switched) {
