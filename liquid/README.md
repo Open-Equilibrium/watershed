@@ -19,3 +19,9 @@ The app starts pi for the project named in the environment and opens the start p
 - `LIQUID_PI_EXTENSION` — the path of `meta-harness/pi-extension/watershed.ts` (required: without it pi would run tools without approvals).
 - `LIQUID_PI` — the pi executable; defaults to `pi`.
 - `LIQUID_PI_SESSION` — a stored pi session file to reopen, with its Trajectory and branches.
+
+## Liquid key
+
+On a Mac the first start asks whether Caps Lock becomes the Liquid key; Settings → Shortcuts switches profiles later (ADR-0205, [mockups](../docs/design/mockups/liquid-shortcuts.html)). Settings live in `~/Library/Application Support/Liquid/shortcuts.json`.
+
+The key is the login item `LiquidKey.app` inside the app bundle, built by `app/macos/LiquidKey/build.sh` during the Xcode build. It maps Caps Lock to F18 on every keyboard until logout, opens Liquid on a tap in another app and toggles Caps Lock on Shift + Caps Lock, without extra permissions. Switching to Standard gives Caps Lock back at once; turning the item off under System Settings → General → Login Items does so from the next login. `app/macos/LiquidKey/test.sh` runs its checks.

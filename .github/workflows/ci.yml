@@ -406,6 +406,10 @@ jobs:
           flutter analyze
           flutter test
 
+      - name: Check the Liquid key helper
+        if: steps.scope.outputs.product == 'true' && (matrix.os == 'xcode-27')
+        run: sh liquid/app/macos/LiquidKey/test.sh
+
       # Not required until it runs reliably (TESTING.md).
       - name: Build the Liquid macOS app
         if: steps.scope.outputs.product == 'true' && (matrix.os == 'xcode-27')
