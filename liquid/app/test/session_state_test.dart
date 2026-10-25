@@ -455,6 +455,22 @@ void main() {
     expect(state.statuses.value, isEmpty);
   });
 
+  test('stops only after the queue is rebuilt', () async {
+    backend.queued = const BridgeQueue(steering: ['Keep'], followUp: ['Drop']);
+    backend.sendGate = Completer();
+    final removing = state.unqueue('Drop', followUp: true);
+    await pumpEventQueue();
+    final stopping = state.stop();
+    await pumpEventQueue();
+    expect(backend.calls, [
+      'clear queue',
+      'send Keep',
+    ], reason: 'Stop waits for the removal');
+    backend.sendGate!.complete();
+    await Future.wait([removing, stopping]);
+    expect(backend.calls, ['clear queue', 'send Keep', 'clear queue', 'abort']);
+  });
+
   test('pages past entries that show nothing in the chat', () async {
     backend.transcripts[''] = const BridgeTranscript(
       items: [],

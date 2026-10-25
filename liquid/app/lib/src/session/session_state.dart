@@ -244,9 +244,22 @@ class SessionState {
     }
   }
 
+  /// Queue changes run one after another: each clears pi's whole queue, and a removal sends the
+  /// others again, which a second removal or Stop must not overtake.
+  Future<void> _queueChange = Future.value();
+
+  Future<void> _changeQueue(Future<void> Function() change) {
+    final next = _queueChange.then((_) => change());
+    _queueChange = next.then((_) {}, onError: (Object _) {});
+    return next;
+  }
+
   /// Takes one waiting message out of the queue; pi clears the whole queue, so the others are
   /// sent again in their order.
-  Future<void> unqueue(String message, {required bool followUp}) async {
+  Future<void> unqueue(String message, {required bool followUp}) =>
+      _changeQueue(() => _unqueue(message, followUp: followUp));
+
+  Future<void> _unqueue(String message, {required bool followUp}) async {
     final waiting = await _backend.clearQueue();
     var removed = false;
     // Only the queue the chip belongs to loses the message; the same text may wait in both.
@@ -265,7 +278,9 @@ class SessionState {
   }
 
   /// Stops the run and hands the waiting messages back to the input area for editing.
-  Future<void> stop() async {
+  Future<void> stop() => _changeQueue(_stop);
+
+  Future<void> _stop() async {
     final waiting = await _backend.clearQueue();
     await _backend.abort();
     final texts = [...waiting.steering, ...waiting.followUp];

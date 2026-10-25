@@ -27,9 +27,13 @@ class FakeBackend implements SessionBackend {
   /// What the agent rejects sends with, like the bridge does.
   String? sendError;
 
+  /// Holds sends until it completes.
+  Completer<void>? sendGate;
+
   @override
   Future<void> send(String message, {required bool followUp}) async {
     calls.add('${followUp ? 'follow-up' : 'send'} $message');
+    await sendGate?.future;
     if (sendError case final error?) throw error;
   }
 
