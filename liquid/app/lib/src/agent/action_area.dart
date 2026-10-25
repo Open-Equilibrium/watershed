@@ -954,6 +954,8 @@ class _Button extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space4),
           child: Row(
             mainAxisSize: MainAxisSize.min,
+            // Centered when a layout stretches the button.
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Text(
                 label,

@@ -6,8 +6,10 @@ import 'package:flutter/material.dart';
 
 import '../rust/api/events.dart';
 import '../session/session_state.dart';
+import '../shortcuts/first_start.dart';
 import '../shortcuts/keymap.dart';
 import '../shortcuts/shortcut_store.dart';
+import '../shortcuts/shortcuts_page.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
@@ -62,6 +64,8 @@ class _AgentShellState extends State<AgentShell> {
   final _composerFocus = FocusNode(debugLabel: 'composer');
   final _tab = ValueNotifier(AgentTab.chat);
   final _comparing = ValueNotifier(false);
+  final _settings = ValueNotifier(false);
+  final _focus = FocusNode(debugLabel: 'shell');
   late final _shortcuts = widget.shortcuts ?? ShortcutController.memory();
 
   /// Stops the agent before the app exits, so no pi process outlives Liquid.
@@ -80,6 +84,26 @@ class _AgentShellState extends State<AgentShell> {
     unawaited(widget.state.loadStart());
     // A reopened Trajectory tab starts outside the comparison.
     _tab.addListener(() => _comparing.value = false);
+    _shortcuts.problem.addListener(_reportShortcuts);
+    if (_shortcuts.firstStart) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _askProfile());
+    }
+  }
+
+  Future<void> _askProfile() async {
+    final profile = await askProfile(context);
+    await _shortcuts.update(_shortcuts.value.choose(profile));
+  }
+
+  void _reportShortcuts() {
+    final problem = _shortcuts.problem.value;
+    if (problem != null) widget.state.notify(BridgeLevel.error, problem);
+  }
+
+  /// Settings replace the main area; closing them gives the keys back to the shell.
+  void _toggleSettings() {
+    _settings.value = !_settings.value;
+    if (!_settings.value) _focus.requestFocus();
   }
 
   void _applyDraft() {
@@ -101,6 +125,9 @@ class _AgentShellState extends State<AgentShell> {
     _composerFocus.dispose();
     _tab.dispose();
     _comparing.dispose();
+    _settings.dispose();
+    _focus.dispose();
+    _shortcuts.problem.removeListener(_reportShortcuts);
     if (widget.shortcuts == null) _shortcuts.dispose();
     super.dispose();
   }
@@ -131,6 +158,9 @@ class _AgentShellState extends State<AgentShell> {
           menus: [
             PlatformMenuItemGroup(
               members: [provided(PlatformProvidedMenuItemType.about)],
+            ),
+            PlatformMenuItemGroup(
+              members: [item(Command.settings, _toggleSettings)],
             ),
             PlatformMenuItemGroup(
               members: [
@@ -200,8 +230,10 @@ class _AgentShellState extends State<AgentShell> {
             Command.focusInput: _composerFocus.requestFocus,
             Command.newSession: _newSession,
             Command.dismissNotice: widget.state.dismissNotice,
+            Command.settings: _toggleSettings,
           }),
           child: Focus(
+            focusNode: _focus,
             autofocus: true,
             child: Material(
               color: ws.canvas,
@@ -210,57 +242,66 @@ class _AgentShellState extends State<AgentShell> {
                 children: [
                   Sidebar(state: widget.state, info: widget.info),
                   Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        _Header(title: widget.info.title),
-                        _Tabs(tab: _tab),
-                        Expanded(
-                          child: ValueListenableBuilder(
-                            valueListenable: _tab,
-                            builder: (context, tab, _) => switch (tab) {
-                              AgentTab.chat => ChatView(
-                                state: widget.state,
-                                project: widget.info.project,
-                              ),
-                              AgentTab.diff => DiffView(state: widget.state),
-                              AgentTab.trajectory => TrajectoryView(
-                                state: widget.state,
-                                onBranched: _composerFocus.requestFocus,
-                                comparing: _comparing,
-                              ),
-                            },
+                    child: ValueListenableBuilder(
+                      valueListenable: _settings,
+                      builder: (context, settings, main) => settings
+                          ? ShortcutsPage(
+                              shortcuts: _shortcuts,
+                              onClose: _toggleSettings,
+                            )
+                          : main!,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          _Header(title: widget.info.title),
+                          _Tabs(tab: _tab),
+                          Expanded(
+                            child: ValueListenableBuilder(
+                              valueListenable: _tab,
+                              builder: (context, tab, _) => switch (tab) {
+                                AgentTab.chat => ChatView(
+                                  state: widget.state,
+                                  project: widget.info.project,
+                                ),
+                                AgentTab.diff => DiffView(state: widget.state),
+                                AgentTab.trajectory => TrajectoryView(
+                                  state: widget.state,
+                                  onBranched: _composerFocus.requestFocus,
+                                  comparing: _comparing,
+                                ),
+                              },
+                            ),
                           ),
-                        ),
-                        WidgetStrip(state: widget.state),
-                        Padding(
-                          padding: const EdgeInsets.only(
-                            bottom: WsMetrics.space4,
-                          ),
-                          child: Center(
-                            child: SizedBox(
-                              width: readingWidth,
-                              child: ActionArea(
-                                state: widget.state,
-                                project: widget.info.project,
-                                composer: _composer,
-                                composerFocus: _composerFocus,
+                          WidgetStrip(state: widget.state),
+                          Padding(
+                            padding: const EdgeInsets.only(
+                              bottom: WsMetrics.space4,
+                            ),
+                            child: Center(
+                              child: SizedBox(
+                                width: readingWidth,
+                                child: ActionArea(
+                                  state: widget.state,
+                                  project: widget.info.project,
+                                  composer: _composer,
+                                  composerFocus: _composerFocus,
+                                ),
                               ),
                             ),
                           ),
-                        ),
-                        ListenableBuilder(
-                          listenable: Listenable.merge([_tab, _comparing]),
-                          builder: (context, _) => StatusBar(
-                            state: widget.state,
-                            keys: _tab.value != AgentTab.trajectory
-                                ? ''
-                                : _comparing.value
-                                ? compareKeys(keys)
-                                : trajectoryKeys(keys),
+                          ListenableBuilder(
+                            listenable: Listenable.merge([_tab, _comparing]),
+                            builder: (context, _) => StatusBar(
+                              state: widget.state,
+                              keys: _tab.value != AgentTab.trajectory
+                                  ? ''
+                                  : _comparing.value
+                                  ? compareKeys(keys)
+                                  : trajectoryKeys(keys),
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
                 ],
