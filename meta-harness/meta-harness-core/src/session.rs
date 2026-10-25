@@ -638,7 +638,9 @@ impl Supervisor {
                     };
                     match answer {
                         Some(answer) => {
-                            self.reply(request, answer).await;
+                            if !self.reply(request, answer).await {
+                                return false;
+                            }
                             false
                         }
                         None => true,
@@ -653,7 +655,9 @@ impl Supervisor {
                         shared.stopping
                     };
                     if stopping {
-                        self.reply(request, json!({ "cancelled": true })).await;
+                        if !self.reply(request, json!({ "cancelled": true })).await {
+                            return false;
+                        }
                         continue;
                     }
                     expiry = record
@@ -693,9 +697,13 @@ impl Supervisor {
         true
     }
 
-    /// Answers an agent dialog without the user.
-    async fn reply(&self, request: &RequestId, answer: Value) {
-        let _ = self.writer.send(ui_response(request, answer)).await;
+    /// Answers an agent dialog without the user; returns `false` once the session was killed,
+    /// so an agent that stopped reading cannot hold the kill up.
+    async fn reply(&mut self, request: &RequestId, answer: Value) -> bool {
+        let writer = self.writer.clone();
+        self.unless_killed(writer.send(ui_response(request, answer)))
+            .await
+            .is_some()
     }
 
     /// Forgets a question once its time is up: pi then answers it itself without telling.

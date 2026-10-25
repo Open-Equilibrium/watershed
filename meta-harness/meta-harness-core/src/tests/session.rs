@@ -346,6 +346,20 @@ fn shutdown_ends_an_agent_that_stopped_reading() {
 }
 
 #[test]
+fn shutdown_ends_an_agent_that_stopped_reading_its_automatic_answers() {
+    run(async {
+        // Read-only calls are allowed at once; the agent never reads the answers.
+        let (session, _events) = fake_agent(&format!(
+            "trap '' TERM\ni=0\nwhile [ $i -lt 3000 ]; do {}i=$((i+1)); done\nwhile :; do sleep 1; done",
+            approval_request("'$i'", "read", true)
+        ));
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        let stopped = timeout(WAIT, session.shutdown(Duration::from_millis(100))).await;
+        assert_eq!(stopped, Ok(false));
+    });
+}
+
+#[test]
 fn skips_an_oversized_record_and_keeps_the_session() {
     run(async {
         // More than the 16 MiB record limit, without holding it in the script.
