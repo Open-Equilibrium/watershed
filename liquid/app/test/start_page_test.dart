@@ -109,4 +109,40 @@ void main() {
     expect(backend.calls.last, 'model faux/faux-2');
     expect(find.text('Faux Two'), findsOneWidget);
   });
+
+  testWidgets('keeps Start reachable with long names in a narrow window', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(800, 600));
+    backend = FakeBackend()
+      ..modelList = const [
+        BridgeModel(
+          provider: 'faux',
+          id: 'faux-1',
+          name: 'A model with a remarkably long display name',
+        ),
+      ]
+      ..model = 'faux/faux-1';
+    state = SessionState(backend);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: liquidTheme(Brightness.light),
+        home: AgentShell(
+          state: state,
+          info: const SessionInfo(
+            title: 'Agent session',
+            project: 'a-project-with-a-rather-long-directory-name',
+            harness: 'pi',
+            device: 'MacBook',
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull, reason: 'nothing overflows');
+    await tester.enterText(find.byKey(const Key('composer')), 'Go');
+    await tester.tap(find.text('Start'));
+    await tester.pump();
+    expect(backend.calls, contains('send Go'));
+  });
 }

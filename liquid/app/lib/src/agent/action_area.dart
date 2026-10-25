@@ -153,12 +153,20 @@ class Composer extends StatelessWidget {
               ),
               Row(
                 children: [
-                  if (starting) ...[
-                    StartChips(state: state, project: project),
-                    const SizedBox(width: WsMetrics.space2),
-                  ],
-                  ModeChip(state: state),
-                  const Spacer(),
+                  // The setup chips shorten long names, so the buttons stay in view.
+                  Expanded(
+                    child: Row(
+                      children: [
+                        if (starting) ...[
+                          Flexible(
+                            child: StartChips(state: state, project: project),
+                          ),
+                          const SizedBox(width: WsMetrics.space2),
+                        ],
+                        ModeChip(state: state),
+                      ],
+                    ),
+                  ),
                   if (running) ...[
                     const Hint('⌥⏎ queue'),
                     const SizedBox(width: WsMetrics.space3),

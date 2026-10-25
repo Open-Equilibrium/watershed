@@ -119,30 +119,39 @@ class StartChips extends StatelessWidget {
   Widget build(BuildContext context) => Row(
     mainAxisSize: MainAxisSize.min,
     children: [
-      _Chip(icon: LucideIcons.hexagon, label: project),
+      Flexible(
+        child: _Chip(icon: LucideIcons.hexagon, label: project),
+      ),
       const SizedBox(width: WsMetrics.space2),
       _Chip(icon: LucideIcons.laptop, label: localDevice),
       const SizedBox(width: WsMetrics.space2),
-      ListenableBuilder(
-        listenable: Listenable.merge([state.models, state.model]),
-        builder: (context, _) {
-          final models = state.models.value;
-          final current = models
-              .where(
-                (model) => '${model.provider}/${model.id}' == state.model.value,
-              )
-              .firstOrNull;
-          final label = current?.name ?? state.model.value ?? 'Model';
-          return PopupMenuButton<BridgeModel>(
-            tooltip: 'Model',
-            onSelected: state.setModel,
-            itemBuilder: (context) => [
-              for (final model in models)
-                PopupMenuItem(value: model, child: Text(model.name)),
-            ],
-            child: _Chip(icon: LucideIcons.sparkles, label: label, menu: true),
-          );
-        },
+      Flexible(
+        child: ListenableBuilder(
+          listenable: Listenable.merge([state.models, state.model]),
+          builder: (context, _) {
+            final models = state.models.value;
+            final current = models
+                .where(
+                  (model) =>
+                      '${model.provider}/${model.id}' == state.model.value,
+                )
+                .firstOrNull;
+            final label = current?.name ?? state.model.value ?? 'Model';
+            return PopupMenuButton<BridgeModel>(
+              tooltip: 'Model',
+              onSelected: state.setModel,
+              itemBuilder: (context) => [
+                for (final model in models)
+                  PopupMenuItem(value: model, child: Text(model.name)),
+              ],
+              child: _Chip(
+                icon: LucideIcons.sparkles,
+                label: label,
+                menu: true,
+              ),
+            );
+          },
+        ),
       ),
     ],
   );
@@ -171,7 +180,14 @@ class _Chip extends StatelessWidget {
         children: [
           Icon(icon, size: 13, color: ws.textMuted),
           const SizedBox(width: WsMetrics.space1),
-          Text(label, style: TextStyle(color: ws.textMuted, fontSize: 13)),
+          Flexible(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(color: ws.textMuted, fontSize: 13),
+            ),
+          ),
           if (menu) ...[
             const SizedBox(width: WsMetrics.space1),
             Icon(LucideIcons.chevronDown, size: 13, color: ws.textFaint),
