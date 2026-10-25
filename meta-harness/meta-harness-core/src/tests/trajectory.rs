@@ -251,6 +251,30 @@ fn an_entry_too_large_to_read_keeps_its_place_in_the_branch() {
 }
 
 #[test]
+fn sums_what_every_stored_response_used() {
+    let data: Value = serde_json::from_str(
+        r#"{"entries":[
+          {"type":"message","id":"u1","parentId":null,"message":{"role":"user","content":"Go"}},
+          {"type":"message","id":"a1","parentId":"u1","message":{"role":"assistant","content":[],"usage":{"input":100,"output":20,"cacheRead":900,"cacheWrite":10,"cost":{"total":0.01}}}},
+          {"type":"message","id":"a2","parentId":"u1","message":{"role":"assistant","content":[],"usage":{"input":5,"output":2,"cacheRead":0,"cacheWrite":0,"cost":{"total":0.002}}}}
+        ],"leafId":"a2"}"#,
+    )
+    .expect("JSON");
+    let usage = History::from_entries(&data).usage();
+    assert_eq!(
+        (
+            usage.input,
+            usage.output,
+            usage.cache_read,
+            usage.cache_write,
+            usage.cost_micro_usd
+        ),
+        (105, 22, 900, 10, 12_000),
+        "abandoned branches cost too"
+    );
+}
+
+#[test]
 fn a_replacement_counts_its_own_size() {
     let long = "x".repeat(1000);
     let data: Value = serde_json::from_str(&format!(

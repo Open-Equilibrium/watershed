@@ -16,7 +16,7 @@ use std::sync::Arc;
 use serde_json::Value;
 
 use crate::{Frame, ItemKind, LineFramer, SessionTree, Usage};
-use entry::Entry;
+use entry::{Body, Entry};
 
 /// A snapshot of a session's stored entries. The session keeps it and reads only the entries
 /// added since, so each snapshot shares the entries read before.
@@ -82,6 +82,22 @@ impl History {
             .get("leafId")
             .and_then(Value::as_str)
             .map(str::to_owned);
+    }
+
+    /// What every stored response used, on every branch.
+    pub fn usage(&self) -> Usage {
+        let mut total = Usage::default();
+        for entry in self.entries.iter() {
+            if let Body::Assistant { usage, .. } = &entry.body {
+                total.input += usage.input;
+                total.output += usage.output;
+                total.cache_read += usage.cache_read;
+                total.cache_write += usage.cache_write;
+                total.reasoning += usage.reasoning;
+                total.cost_micro_usd += usage.cost_micro_usd;
+            }
+        }
+        total
     }
 
     /// The id of the last entry read, from which the next read continues.
