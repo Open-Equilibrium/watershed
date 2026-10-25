@@ -258,24 +258,48 @@ impl Session {
         })
     }
 
-    /// Reads the session's stored entries, including abandoned branches. Only entries added
-    /// since the previous read cross the agent's output; when the agent no longer knows the
-    /// last one, everything is read again.
+    /// Reads the session's stored entries, including abandoned branches. The first read takes
+    /// them from pi's session file line by line, so no single answer has to hold the whole
+    /// session; later reads ask the agent only for entries added since. When the agent no
+    /// longer knows the last one, everything is read again.
     pub async fn history(&mut self) -> Result<History, CommandError> {
-        let since = self.history.last_id().map(str::to_owned);
-        let mut request = json!({ "type": "get_entries" });
-        if let Some(since) = &since {
-            request["since"] = json!(since);
+        if self.history.last_id().is_none() {
+            self.read_stored().await?;
         }
-        let data = match self.command(request).await {
-            Err(CommandError::Rejected(_)) if since.is_some() => {
+        match self.read_newer().await {
+            Err(CommandError::Rejected(_)) if self.history.last_id().is_some() => {
                 self.history = History::default();
-                self.command(json!({ "type": "get_entries" })).await?
+                self.read_stored().await?;
+                self.read_newer().await?;
             }
             result => result?,
-        };
-        self.history.append(&data);
+        }
         Ok(self.history.clone())
+    }
+
+    /// Reads the entries pi stored in its session file; without a file yet, the agent's answer
+    /// holds them all.
+    async fn read_stored(&mut self) -> Result<(), CommandError> {
+        let Some(file) = self.state().await?.session_file else {
+            return Ok(());
+        };
+        let stored =
+            tokio::task::spawn_blocking(move || History::from_file(&file, MAX_RECORD_BYTES)).await;
+        if let Ok(Ok(stored)) = stored {
+            self.history = stored;
+        }
+        Ok(())
+    }
+
+    /// Asks the agent for the entries after the last one read and for its current leaf.
+    async fn read_newer(&mut self) -> Result<(), CommandError> {
+        let mut request = json!({ "type": "get_entries" });
+        if let Some(since) = self.history.last_id() {
+            request["since"] = json!(since);
+        }
+        let data = self.command(request).await?;
+        self.history.append(&data);
+        Ok(())
     }
 
     /// Continues the session from `entry`, optionally labelling it; the next prompt starts a

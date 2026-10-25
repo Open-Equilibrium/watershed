@@ -14,6 +14,13 @@ use crate::api::history::{BridgeEntryKind, BridgeRecordKind};
 use crate::api::session::{AgentSession, BridgeApprovalMode, SessionConfig};
 use crate::convert::{coalesce, describe};
 
+/// Answers the `get_state` that starts a first history read, for a session pi keeps in memory.
+fn no_session_file(id: u32) -> String {
+    format!(
+        "IFS= read -r line\ncase \"$line\" in *'\"type\":\"get_state\"'*) ;; *) exit 9 ;; esac\nprintf '%s\\n' '{{\"id\":\"{id}\",\"type\":\"response\",\"command\":\"get_state\",\"success\":true,\"data\":{{\"sessionId\":\"s\",\"isStreaming\":false}}}}'\n"
+    )
+}
+
 fn bridge(event: RuntimeEvent) -> BridgeEvent {
     SessionEvent::Runtime(event).into()
 }
@@ -397,16 +404,17 @@ fn reads_the_history_of_each_branch_and_branches_from_a_step() {
         )
     };
     let script = [
-        respond("1"),
+        no_session_file(1),
+        respond("2"),
         // The second read continues after the last entry; nothing was added.
         r#"IFS= read -r line
 case "$line" in *'"since":"b1"'*) ;; *) exit 9 ;; esac
-printf '%s\n' '{"id":"2","type":"response","command":"get_entries","success":true,"data":{"entries":[],"leafId":"b1"}}'
+printf '%s\n' '{"id":"3","type":"response","command":"get_entries","success":true,"data":{"entries":[],"leafId":"b1"}}'
 "#
         .to_owned(),
         r#"IFS= read -r line
 case "$line" in *'"message":"/watershed-branch e1"'*) ;; *) exit 9 ;; esac
-printf '%s\n' '{"id":"3","type":"response","command":"prompt","success":true,"data":{"disposition":"handled"}}'
+printf '%s\n' '{"id":"4","type":"response","command":"prompt","success":true,"data":{"disposition":"handled"}}'
 IFS= read -r line || exit 0"#
             .to_owned(),
     ]
@@ -497,9 +505,10 @@ IFS= read -r line || exit 0"#
 #[test]
 fn reads_tool_outcomes_and_what_the_model_saw() {
     let entries = r#"{"entries":[{"type":"message","id":"s1","parentId":null,"message":{"role":"system","content":"","sections":{"preamble":"You are pi."},"toolsAdded":[{"name":"write"}]}},{"type":"message","id":"u1","parentId":"s1","message":{"role":"user","content":"Write it"}},{"type":"message","id":"a1","parentId":"u1","message":{"role":"assistant","content":[{"type":"toolCall","id":"c1","name":"write","arguments":{"path":"a.ts","content":"x\ny\n"}}]}},{"type":"message","id":"r1","parentId":"a1","message":{"role":"toolResult","toolCallId":"c1","toolName":"write","content":[{"type":"text","text":"ok"}]}},{"type":"message","id":"a2","parentId":"r1","message":{"role":"assistant","content":[{"type":"text","text":"Done."}]}}],"leafId":"a2"}"#;
-    let script = format!(
-        "IFS= read -r line\nprintf '%s\\n' '{{\"id\":\"1\",\"type\":\"response\",\"command\":\"get_entries\",\"success\":true,\"data\":{entries}}}'\nIFS= read -r line\nprintf '%s\\n' '{{\"id\":\"2\",\"type\":\"response\",\"command\":\"get_entries\",\"success\":true,\"data\":{{\"entries\":[],\"leafId\":\"a2\"}}}}'\nIFS= read -r line || exit 0"
-    );
+    let script = no_session_file(1)
+        + &format!(
+            "IFS= read -r line\nprintf '%s\\n' '{{\"id\":\"2\",\"type\":\"response\",\"command\":\"get_entries\",\"success\":true,\"data\":{entries}}}'\nIFS= read -r line\nprintf '%s\\n' '{{\"id\":\"3\",\"type\":\"response\",\"command\":\"get_entries\",\"success\":true,\"data\":{{\"entries\":[],\"leafId\":\"a2\"}}}}'\nIFS= read -r line || exit 0"
+        );
     let session = AgentSession::start(SessionConfig {
         program: "/bin/sh".to_owned(),
         args: vec!["-c".to_owned(), script],
@@ -542,9 +551,10 @@ fn reads_tool_outcomes_and_what_the_model_saw() {
 #[test]
 fn rebuilds_the_chat_of_the_current_branch() {
     let entries = r#"{"entries":[{"type":"message","id":"u1","parentId":null,"message":{"role":"user","content":"Fix it"}},{"type":"message","id":"a1","parentId":"u1","message":{"role":"assistant","content":[{"type":"text","text":"Editing."},{"type":"toolCall","id":"c1","name":"edit","arguments":{"path":"a.ts"}}]}},{"type":"message","id":"r1","parentId":"a1","message":{"role":"toolResult","toolCallId":"c1","toolName":"edit","content":[]}}],"leafId":"r1"}"#;
-    let script = format!(
-        "IFS= read -r line\nprintf '%s\\n' '{{\"id\":\"1\",\"type\":\"response\",\"command\":\"get_entries\",\"success\":true,\"data\":{entries}}}'\nIFS= read -r line || exit 0"
-    );
+    let script = no_session_file(1)
+        + &format!(
+            "IFS= read -r line\nprintf '%s\\n' '{{\"id\":\"2\",\"type\":\"response\",\"command\":\"get_entries\",\"success\":true,\"data\":{entries}}}'\nIFS= read -r line || exit 0"
+        );
     let session = AgentSession::start(SessionConfig {
         program: "/bin/sh".to_owned(),
         args: vec!["-c".to_owned(), script],

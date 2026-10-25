@@ -1,11 +1,13 @@
 //! Manual check of the core against real pi: two turns with a scripted model, one allowed and one
-//! rejected command, the branch tree and Trajectory, a branch at the second prompt, then the
-//! state. Run from the repository root:
+//! rejected command, the branch tree and Trajectory, a branch at the second prompt, the state,
+//! then the history again after reopening the session file. Run from the repository root:
 //!
 //! ```sh
 //! PI_CODING_AGENT_DIR=$(mktemp -d) PI_OFFLINE=1 cargo run -p meta-harness-core --example pi_check
 //! ```
 
+use std::ffi::OsString;
+use std::path::Path;
 use std::time::Duration;
 
 use meta_harness_core::{AgentCommand, Decision, RecordKind, RuntimeEvent, Session, SessionEvent};
@@ -20,29 +22,56 @@ fn main() {
     runtime.block_on(check());
 }
 
-async fn check() {
+/// pi with the scripted model and Watershed's extension, storing the session as `session` says.
+fn pi(session: [OsString; 2]) -> AgentCommand {
     let extensions = std::env::current_dir()
         .expect("working directory")
         .join("meta-harness/pi-extension");
-    let mut args = vec![
+    let mut args: Vec<OsString> = [
         "--mode",
         "rpc",
-        "--no-session",
         "--provider",
         "faux",
         "--model",
         "faux-1",
-    ];
-    args.extend(["--no-skills", "--no-context-files"]);
-    let model = extensions.join("check/faux-model.ts");
-    let extension = extensions.join("watershed.ts");
-    let mut args: Vec<_> = args.into_iter().map(Into::into).collect();
-    args.extend(["-e".into(), model.into(), "-e".into(), extension.into()]);
-    let command = AgentCommand {
+        "--no-skills",
+        "--no-context-files",
+    ]
+    .into_iter()
+    .map(Into::into)
+    .collect();
+    args.extend(session);
+    for extension in ["check/faux-model.ts", "watershed.ts"] {
+        args.extend(["-e".into(), extensions.join(extension).into()]);
+    }
+    AgentCommand {
         program: "pi".into(),
         args,
         cwd: std::env::temp_dir(),
-    };
+    }
+}
+
+/// Starts pi again on the stored session file and reads its history from there.
+async fn reopen(file: &Path, entries: usize) {
+    let (mut session, _events) =
+        Session::start(&pi(["--session".into(), file.into()])).expect("pi starts again");
+    let tree = session.history().await.expect("history").tree();
+    println!(
+        "reopened from the session file: {} entries, leaf {:?}",
+        tree.nodes.len(),
+        tree.leaf
+    );
+    assert_eq!(
+        tree.nodes.len(),
+        entries,
+        "the stored history comes back whole"
+    );
+    session.shutdown(Duration::from_secs(5)).await;
+}
+
+async fn check() {
+    let dir = std::env::temp_dir().join(format!("pi-check-{}", std::process::id()));
+    let command = pi(["--session-dir".into(), dir.clone().into()]);
     let (mut session, mut events) = Session::start(&command).expect("pi starts");
     session
         .prompt("run it")
@@ -113,13 +142,17 @@ async fn check() {
                         break;
                     }
                 }
-                let leaf = session.history().await.expect("history").tree().leaf;
-                println!("branched: leaf {:?} -> {leaf:?}", tree.leaf);
-                println!("state: {:?}", session.state().await.expect("state"));
+                let branched = session.history().await.expect("history").tree();
+                println!("branched: leaf {:?} -> {:?}", tree.leaf, branched.leaf);
+                let state = session.state().await.expect("state");
+                println!("state: {state:?}");
                 println!(
                     "clean exit: {}",
                     session.shutdown(Duration::from_secs(5)).await
                 );
+                let file = state.session_file.expect("pi stores the session");
+                reopen(&file, branched.nodes.len()).await;
+                let _ = std::fs::remove_dir_all(&dir);
                 return;
             }
             _ => println!("{event:?}"),

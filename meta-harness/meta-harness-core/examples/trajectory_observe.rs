@@ -1,7 +1,8 @@
-//! Observation workload for long Trajectories (PERFORMANCE.md, Liquid): a scripted agent answers
-//! `get_entries` with a session of 1,000 turns of eight entries each and eight forks of ten turns.
-//! Each sample starts a session that reads the whole history, builds its tree and two
-//! Trajectories, then reads again, which only asks for entries after the last one. It prints one
+//! Observation workload for long Trajectories (PERFORMANCE.md, Liquid): a scripted agent reports a
+//! session file of 1,000 turns of eight entries each and eight forks of ten turns. Each sample
+//! starts a session that reads the stored history from that file, asks the agent for newer
+//! entries, builds its tree and two Trajectories, then reads again, which only asks for entries
+//! after the last one. It prints one
 //! JSON line per sample and a summary and never compares with a threshold. Run from the
 //! repository root:
 //!
@@ -32,16 +33,22 @@ fn main() {
 async fn observe() {
     let (entries, fork_leaf) = session();
     let leaf = entries["leafId"].as_str().expect("leaf").to_owned();
-    let data = serde_json::to_string(&entries).expect("JSON");
-    // Only the agent's copy and the core's own allocations remain in the measured process.
+    // pi's session file: a header line, then one line per entry.
+    let mut data = String::from(r#"{"type":"session","version":3,"id":"observe","cwd":"/tmp"}"#);
+    data.push('\n');
+    for entry in entries["entries"].as_array().expect("entries") {
+        data.push_str(&entry.to_string());
+        data.push('\n');
+    }
+    // Only the file and the core's own allocations remain in the measured process.
     drop(entries);
     let dir = std::env::temp_dir().join(format!("trajectory-observe-{}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("temporary directory");
-    let file = dir.join("entries.json");
-    std::fs::write(&file, &data).expect("entries file");
-    // Answers the first request with every stored entry and later ones with none after it.
+    let file = dir.join("session.jsonl");
+    std::fs::write(&file, &data).expect("session file");
+    // Reports the session file, then answers each read with nothing newer than it.
     let script = format!(
-        "IFS= read -r line\nprintf '%s' '{{\"id\":\"1\",\"type\":\"response\",\"command\":\"get_entries\",\"success\":true,\"data\":'\ncat '{}'\nprintf '}}\\n'\ni=2\nwhile IFS= read -r line; do\nprintf '%s\\n' '{{\"id\":\"'$i'\",\"type\":\"response\",\"command\":\"get_entries\",\"success\":true,\"data\":{{\"entries\":[],\"leafId\":\"{leaf}\"}}}}'\ni=$((i+1))\ndone",
+        "IFS= read -r line\nprintf '%s\\n' '{{\"id\":\"1\",\"type\":\"response\",\"command\":\"get_state\",\"success\":true,\"data\":{{\"sessionId\":\"observe\",\"isStreaming\":false,\"sessionFile\":\"{}\"}}}}'\ni=2\nwhile IFS= read -r line; do\nprintf '%s\\n' '{{\"id\":\"'$i'\",\"type\":\"response\",\"command\":\"get_entries\",\"success\":true,\"data\":{{\"entries\":[],\"leafId\":\"{leaf}\"}}}}'\ni=$((i+1))\ndone",
         file.display()
     );
     let command = AgentCommand {
@@ -85,7 +92,7 @@ async fn observe() {
     let _ = std::fs::remove_dir_all(&dir);
     totals.sort_by(f64::total_cmp);
     println!(
-        r#"{{"summary":"trajectory","entries_bytes":{},"samples":{SAMPLES},"p50_ms":{:.3},"p95_ms":{:.3},"max_ms":{:.3}}}"#,
+        r#"{{"summary":"trajectory","file_bytes":{},"samples":{SAMPLES},"p50_ms":{:.3},"p95_ms":{:.3},"max_ms":{:.3}}}"#,
         data.len(),
         rank(&totals, 0.50),
         rank(&totals, 0.95),

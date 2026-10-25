@@ -9,11 +9,13 @@ mod tree;
 #[cfg(test)]
 pub(crate) use outcome::test_counts;
 
+use std::io::Read;
+use std::path::Path;
 use std::sync::Arc;
 
 use serde_json::Value;
 
-use crate::{ItemKind, SessionTree, Usage};
+use crate::{Frame, ItemKind, LineFramer, SessionTree, Usage};
 use entry::Entry;
 
 /// A snapshot of a session's stored entries. The session keeps it and reads only the entries
@@ -31,6 +33,37 @@ impl History {
         let mut history = Self::default();
         history.append(data);
         history
+    }
+
+    /// Reads the entries pi stored in a session file, line by line. An entry longer than `limit`
+    /// is skipped and an unfinished last line is left to the agent's answer, so memory stays
+    /// bounded by one entry rather than by the session.
+    pub(crate) fn from_file(path: &Path, limit: usize) -> std::io::Result<Self> {
+        let mut file = std::fs::File::open(path)?;
+        let mut framer = LineFramer::new(limit);
+        let mut chunk = vec![0; 64 * 1024];
+        let mut entries = Vec::new();
+        loop {
+            let read = file.read(&mut chunk)?;
+            if read == 0 {
+                break;
+            }
+            for frame in framer.push(&chunk[..read]) {
+                let Frame::Record(line) = frame else {
+                    continue;
+                };
+                // The first line is the session header, not an entry.
+                if let Ok(entry @ Value::Object(_)) = serde_json::from_slice::<Value>(&line)
+                    && entry.get("type").and_then(Value::as_str) != Some("session")
+                {
+                    entries.push(Entry::parse(&entry));
+                }
+            }
+        }
+        Ok(Self {
+            entries: Arc::new(entries),
+            leaf: None,
+        })
     }
 
     /// Adds the entries of a `get_entries` response that continues this one.

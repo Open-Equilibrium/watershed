@@ -169,18 +169,20 @@ fn reads_history_incrementally_and_rereads_when_the_cursor_is_gone() {
         };
         let without_cursor = "case \"$line\" in *'\"since\"'*) exit 9 ;; esac\n";
         let script = [
-            expect_response(&[r#""type":"get_entries""#, r#""id":"1""#]),
+            no_session_file(1),
+            expect_response(&[r#""type":"get_entries""#, r#""id":"2""#]),
             without_cursor.to_owned(),
-            respond(1, entry("e1", "null"), "e1"),
-            expect_response(&[r#""id":"2""#, r#""since":"e1""#]),
-            respond(2, entry("e2", r#""e1""#), "e2"),
-            expect_response(&[r#""id":"3""#, r#""since":"e2""#]),
-            r#"printf '%s\n' '{"id":"3","type":"response","command":"get_entries","success":false,"error":"unknown entry"}'
+            respond(2, entry("e1", "null"), "e1"),
+            expect_response(&[r#""id":"3""#, r#""since":"e1""#]),
+            respond(3, entry("e2", r#""e1""#), "e2"),
+            expect_response(&[r#""id":"4""#, r#""since":"e2""#]),
+            r#"printf '%s\n' '{"id":"4","type":"response","command":"get_entries","success":false,"error":"unknown entry"}'
 "#
             .to_owned(),
-            expect_response(&[r#""type":"get_entries""#, r#""id":"4""#]),
+            no_session_file(5),
+            expect_response(&[r#""type":"get_entries""#, r#""id":"6""#]),
             without_cursor.to_owned(),
-            respond(4, entry("x1", "null"), "x1"),
+            respond(6, entry("x1", "null"), "x1"),
         ]
         .concat();
         let (mut session, _events) = fake_agent(&script);
@@ -212,6 +214,52 @@ fn reads_history_incrementally_and_rereads_when_the_cursor_is_gone() {
 }
 
 #[test]
+fn reopens_a_session_larger_than_one_record_from_its_file() {
+    run(async {
+        // 2,000 entries of 9 KB: more than the 16 MiB record limit together, small each.
+        let file =
+            std::env::temp_dir().join(format!("watershed-large-{}.jsonl", std::process::id()));
+        let text = "x".repeat(9000);
+        let mut stored = String::from(
+            r#"{"type":"session","version":3,"id":"s1","timestamp":"2026-10-25T10:00:00.000Z","cwd":"/tmp"}"#,
+        );
+        stored.push('\n');
+        let mut parent = "null".to_owned();
+        for number in 0..2000 {
+            stored.push_str(&format!(
+                r#"{{"type":"message","id":"e{number}","parentId":{parent},"message":{{"role":"user","content":"{text}"}}}}"#
+            ));
+            stored.push('\n');
+            parent = format!(r#""e{number}""#);
+        }
+        // pi is still writing the next entry; its answer holds it whole.
+        stored.push_str(r#"{"type":"message","id":"e2000","parentId":"e19"#);
+        std::fs::write(&file, stored).expect("session file");
+        let script = [
+            expect_response(&[r#""type":"get_state""#, r#""id":"1""#]),
+            format!(
+                "printf '%s\\n' '{{\"id\":\"1\",\"type\":\"response\",\"command\":\"get_state\",\"success\":true,\"data\":{{\"sessionId\":\"s1\",\"isStreaming\":false,\"sessionFile\":\"{}\"}}}}'\n",
+                file.display()
+            ),
+            expect_response(&[r#""type":"get_entries""#, r#""id":"2""#, r#""since":"e1999""#]),
+            r#"printf '%s\n' '{"id":"2","type":"response","command":"get_entries","success":true,"data":{"entries":[{"type":"message","id":"e2000","parentId":"e1999","message":{"role":"user","content":"last"}}],"leafId":"e2000"}}'
+"#
+            .to_owned(),
+        ]
+        .concat();
+        let (mut session, _events) = fake_agent(&script);
+        let history = session.history().await;
+        let _ = std::fs::remove_file(&file);
+        let tree = history.expect("history").tree();
+        assert_eq!(
+            (tree.nodes.len(), tree.leaf.as_deref()),
+            (2001, Some("e2000")),
+            "every stored entry once, and the one pi was still writing"
+        );
+    });
+}
+
+#[test]
 fn skips_an_oversized_record_and_keeps_the_session() {
     run(async {
         // More than the 16 MiB record limit, without holding it in the script.
@@ -222,14 +270,15 @@ fn skips_an_oversized_record_and_keeps_the_session() {
 {huge}printf '"}}}}\n'
 "#
             ),
-            expect_response(&[r#""type":"get_entries""#, r#""id":"1""#]),
+            no_session_file(1),
+            expect_response(&[r#""type":"get_entries""#, r#""id":"2""#]),
             format!(
-                r#"printf '%s' '{{"id":"1","type":"response","command":"get_entries","success":true,"data":"'
+                r#"printf '%s' '{{"id":"2","type":"response","command":"get_entries","success":true,"data":"'
 {huge}printf '"}}\n'
 "#
             ),
-            expect_response(&[r#""type":"get_state""#, r#""id":"2""#]),
-            r#"printf '%s\n' '{"id":"2","type":"response","command":"get_state","success":true,"data":{"sessionId":"abc","isStreaming":false}}'
+            expect_response(&[r#""type":"get_state""#, r#""id":"3""#]),
+            r#"printf '%s\n' '{"id":"3","type":"response","command":"get_state","success":true,"data":{"sessionId":"abc","isStreaming":false}}'
 "#
             .to_owned(),
         ]
@@ -318,6 +367,14 @@ fn expect_response(fragments: &[&str]) -> String {
         ));
     }
     script
+}
+
+/// Answers the `get_state` that starts a first history read, for a session pi keeps in memory.
+fn no_session_file(id: u32) -> String {
+    format!(
+        "{}printf '%s\\n' '{{\"id\":\"{id}\",\"type\":\"response\",\"command\":\"get_state\",\"success\":true,\"data\":{{\"sessionId\":\"s\",\"isStreaming\":false}}}}'\n",
+        expect_response(&[r#""type":"get_state""#, &format!(r#""id":"{id}""#)])
+    )
 }
 
 fn approval_request(id: &str, tool: &str, read_only: bool) -> String {
@@ -506,12 +563,13 @@ fn reads_state_and_tree_and_branches_through_the_extension() {
             r#"printf '%s\n' '{"id":"1","type":"response","command":"get_state","success":true,"data":{"model":{"id":"faux-1","provider":"faux"},"isStreaming":false,"sessionFile":"/tmp/s.jsonl","sessionId":"abc"}}'
 "#
             .to_owned(),
-            expect_response(&[r#""type":"get_entries""#, r#""id":"2""#]),
-            r#"printf '%s\n' '{"id":"2","type":"response","command":"get_entries","success":true,"data":{"entries":[{"type":"message","id":"e1","parentId":null,"message":{"role":"user","content":"hi"}}],"leafId":"e1"}}'
+            no_session_file(2),
+            expect_response(&[r#""type":"get_entries""#, r#""id":"3""#]),
+            r#"printf '%s\n' '{"id":"3","type":"response","command":"get_entries","success":true,"data":{"entries":[{"type":"message","id":"e1","parentId":null,"message":{"role":"user","content":"hi"}}],"leafId":"e1"}}'
 "#
             .to_owned(),
-            expect_response(&[r#""type":"prompt""#, r#""id":"3""#, r#""message":"/watershed-branch e1 B""#]),
-            r#"printf '%s\n' '{"id":"3","type":"response","command":"prompt","success":true,"data":{"disposition":"handled"}}'
+            expect_response(&[r#""type":"prompt""#, r#""id":"4""#, r#""message":"/watershed-branch e1 B""#]),
+            r#"printf '%s\n' '{"id":"4","type":"response","command":"prompt","success":true,"data":{"disposition":"handled"}}'
 "#
             .to_owned(),
         ]
