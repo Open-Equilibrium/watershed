@@ -68,11 +68,23 @@ def shadows(text, name):
     return rendered
 
 
+def unquoted(family):
+    """A CSS font family without its matching surrounding quotes."""
+    if len(family) >= 2 and family[0] == family[-1] and family[0] in "'\"":
+        return family[1:-1]
+    return family
+
+
+def dart_string(text):
+    """A single-quoted Dart literal of `text`."""
+    escaped = text.replace("\\", "\\\\").replace("'", "\\'").replace("$", "\\$")
+    return f"'{escaped}'"
+
+
 def metric(name, value):
     """Returns the Dart type and expression of one theme-independent token."""
     if name.startswith("font-"):
-        families = [family.strip().strip('"') for family in value.split(",")]
-        return "List<String>", [f"'{family}'" for family in families]
+        return "List<String>", [dart_string(unquoted(family.strip())) for family in value.split(",")]
     if name.startswith("fw-") and value.isdigit():
         return "FontWeight", f"FontWeight.w{value}"
     if match := re.fullmatch(r"([\d.]+)px", value):

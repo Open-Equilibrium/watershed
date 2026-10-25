@@ -48,6 +48,12 @@ class DesignTokens(unittest.TestCase):
         ]:
             self.assertIn(expected, dart)
 
+    def test_font_families_become_valid_dart_strings(self):
+        dart = TOKENS.render(SAMPLE.replace(
+            'ui-sans-serif, "Segoe UI", Arial', """'Inter', "Noto's Sans", Font$Name"""))
+        self.assertIn(
+            r"static const List<String> fontUi = ['Inter', 'Noto\'s Sans', 'Font\$Name'];", dart)
+
     def test_themes_must_define_the_same_tokens(self):
         with self.assertRaisesRegex(ValueError, "light and dark"):
             TOKENS.render(SAMPLE.replace("--ws-text-muted: #9b9b9b;", ""))
