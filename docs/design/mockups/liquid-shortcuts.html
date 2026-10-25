@@ -65,7 +65,7 @@ ul.notes{margin:0;padding-left:16px;font-size:13px;color:var(--muted-foreground)
 @media (max-width:640px){.cols,.choices,.hold{grid-template-columns:1fr}.set{grid-template-columns:1fr}.nav{display:none}}
 </style></head><body>
 <div class="wrap">
-<div class="top">Approved mockups for Liquid's shortcuts and the Liquid key (ADR-0204, ADR-0205); the rules live in <a href="../guidelines.md">guidelines.md</a>.</div>
+<div class="top">Approved mockups for Liquid's shortcuts and the Liquid key (ADR-0204, ADR-0205); the Rules below specify them, <a href="../guidelines.md">guidelines.md</a> states the general rule.</div>
 
 <h2>First start<span>shown once, before the start page; an explicit choice</span></h2>
 <div class="w first">
@@ -156,7 +156,7 @@ ul.notes{margin:0;padding-left:16px;font-size:13px;color:var(--muted-foreground)
 <div class="w strip">
  <div class="prof"><span class="m">Profile</span><span class="seg"><span>Liquid key</span><span>Standard</span><span class="on">Custom</span></span><span class="f s">based on Standard</span></div>
  <div class="row rec"><span class="l">Focus Input</span><kbd>⌘N</kbd><span class="lnk">Cancel</span></div>
- <div class="warn"><span>⌘N already starts a <b>New Session</b>.</span><span class="lnk">Use anyway, clear New Session</span></div>
+ <div class="warn"><span>⌘N already runs <b>New Session</b>.</span><span class="lnk">Use anyway, clear New Session</span></div>
  <div class="row chg"><span class="l">Diff</span><kbd>⌘D</kbd><span class="reset">Reset to ⌘3</span></div>
  <div class="foot"><span>1 shortcut changed</span><span class="lnk">Reset all to defaults</span></div>
 </div>
@@ -192,11 +192,11 @@ ul.notes{margin:0;padding-left:16px;font-size:13px;color:var(--muted-foreground)
 <li><b>Tap</b> means pressing and releasing Caps Lock within 0.6 s without another key. In another app it starts Liquid or brings it to the front. Inside Liquid a tap does nothing until the PowerBar exists; then it opens the PowerBar.</li>
 <li><b>Hold</b> for 0.6 s or more inside Liquid to show the badges. <b>⇪ + key</b> runs the command at once, without waiting for the badges. Holding Caps Lock in another app does nothing.</li>
 <li><b>⇧⇪</b> turns Caps Lock on or off in every app while the Liquid key is on.</li>
-<li><b>Profiles:</b> Liquid key, Standard and Custom; users can switch at any time. Standard uses ⌘ only and leaves Caps Lock unchanged. Switching to Standard restores Caps Lock at once and removes the background item. Changing a shortcut switches to Custom. Custom is based on the profile it came from, and its switch turns the Liquid key on or off.</li>
+<li><b>Profiles:</b> Liquid key, Standard and Custom; users can switch at any time. Standard uses ⌘ only and leaves Caps Lock unchanged. Switching to Standard restores Caps Lock at once and removes the background item. Changing a shortcut in Liquid key or Standard starts a new Custom profile from it. Custom is kept while another profile is active, and its switch decides whether ⇪ combinations exist. "Reset all to defaults" drops every change and never turns the Liquid key on or off. The Liquid key needs macOS 13; when it cannot be turned on, the previous profile stays and Liquid says why.</li>
 <li><b>Changing a shortcut:</b> click the shortcut, or press ⏎ on its row, to record. Press the new keys; esc cancels. Changed shortcuts are outlined and offer a reset.</li>
-<li><b>Conflicts:</b> if another action in the same area already uses the keys, a notice appears. Only "Use anyway" takes them and clears the other action. The same keys may be used in different areas; for example, esc stops a run in the input area and rejects in an approval.</li>
+<li><b>Conflicts:</b> if another action in the same area already uses the keys, a notice appears. Only "Use anyway" takes them and clears the other action. The same keys may be used in different areas; for example, esc stops a run in the input area and rejects in an approval. Keys of a fixed row, macOS standard shortcuts such as ⌘Q, and keys that type where the action works are refused with a notice.</li>
 <li><b>Liquid key bindings:</b> every Liquid ⌘ shortcut becomes ⇪ + the same key, and its ⌘ variant keeps working. Platform standards stay ⌘ only: Settings… (⌘,), Quit, Close, Hide, Minimize, copy, paste, undo and text editing. In the Liquid key profile, holding ⌘ shows no badges; in Standard it still does.</li>
-<li><b>Effect:</b> the menu bar, the badges and the key bindings follow the settings at once.</li>
+<li><b>Effect:</b> the menu bar, the badges and the key bindings follow the settings at once. Tabs show a badge only for keys the menu bar cannot show, such as ⇪1.</li>
 <li><b>First start:</b> nothing is preselected, and both buttons carry the same weight; esc chooses Standard. Turning on the Liquid key may make macOS show a notice that a background item was added.</li>
 <li><b>Saving:</b> a JSON file in the app data folder holds the profile and the changed shortcuts.</li>
 </ul>
