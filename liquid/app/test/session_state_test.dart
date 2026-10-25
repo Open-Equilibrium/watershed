@@ -331,6 +331,26 @@ void main() {
     expect(state.totals.value.input, 9150);
   });
 
+  test('restores what a continued session used', () async {
+    backend.stored = historyOf(
+      [],
+      usage: const BridgeUsage(
+        input: 100,
+        output: 20,
+        cacheRead: 900,
+        cacheWrite: 10,
+        reasoning: 0,
+        costMicroUsd: 12000,
+      ),
+    );
+    await state.loadChat();
+    final totals = state.totals.value;
+    expect(
+      (totals.input, totals.output, totals.costMicroUsd),
+      (1010, 20, 12000),
+    );
+  });
+
   test('pages past entries that show nothing in the chat', () async {
     backend.transcripts[''] = const BridgeTranscript(
       items: [],

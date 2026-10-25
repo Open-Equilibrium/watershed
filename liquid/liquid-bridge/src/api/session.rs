@@ -233,6 +233,7 @@ impl AgentSession {
                 tree: tree.nodes.into_iter().map(Into::into).collect(),
                 leaf: tree.leaf,
                 trajectories,
+                usage: history.usage().into(),
             })
         })
     }

@@ -549,6 +549,15 @@ IFS= read -r line || exit 0"#
     .expect("agent starts");
 
     let current = session.history(Vec::new()).expect("history");
+    assert_eq!(
+        (
+            current.usage.input,
+            current.usage.output,
+            current.usage.cost_micro_usd
+        ),
+        (10, 2, 1_000),
+        "what the stored responses used"
+    );
     assert_eq!(current.leaf.as_deref(), Some("b1"));
     let nodes: Vec<_> = current
         .tree

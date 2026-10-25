@@ -1616,10 +1616,12 @@ impl SseDecode for crate::api::history::BridgeHistory {
         let mut var_leaf = <Option<String>>::sse_decode(deserializer);
         let mut var_trajectories =
             <Vec<crate::api::history::BridgeTrajectory>>::sse_decode(deserializer);
+        let mut var_usage = <crate::api::events::BridgeUsage>::sse_decode(deserializer);
         return crate::api::history::BridgeHistory {
             tree: var_tree,
             leaf: var_leaf,
             trajectories: var_trajectories,
+            usage: var_usage,
         };
     }
 }
@@ -2898,6 +2900,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::history::BridgeHistory {
             self.tree.into_into_dart().into_dart(),
             self.leaf.into_into_dart().into_dart(),
             self.trajectories.into_into_dart().into_dart(),
+            self.usage.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -3680,6 +3683,7 @@ impl SseEncode for crate::api::history::BridgeHistory {
         <Vec<crate::api::history::BridgeTreeNode>>::sse_encode(self.tree, serializer);
         <Option<String>>::sse_encode(self.leaf, serializer);
         <Vec<crate::api::history::BridgeTrajectory>>::sse_encode(self.trajectories, serializer);
+        <crate::api::events::BridgeUsage>::sse_encode(self.usage, serializer);
     }
 }
 

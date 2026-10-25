@@ -291,6 +291,8 @@ class SessionState {
     final before = items.value;
     final page = await _backend.transcript(null);
     final history = await _backend.history(const []);
+    // What the stored responses used; live requests add to it.
+    totals.value = const SessionTotals().add(history.usage);
     final marker = branchMarker(history.tree, history.leaf);
     final rebuilt = _stored(page.items);
     if (marker != null) {

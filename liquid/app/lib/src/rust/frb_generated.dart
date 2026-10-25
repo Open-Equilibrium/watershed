@@ -1481,12 +1481,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeHistory dco_decode_bridge_history(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 3)
-      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+    if (arr.length != 4)
+      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
     return BridgeHistory(
       tree: dco_decode_list_bridge_tree_node(arr[0]),
       leaf: dco_decode_opt_String(arr[1]),
       trajectories: dco_decode_list_bridge_trajectory(arr[2]),
+      usage: dco_decode_bridge_usage(arr[3]),
     );
   }
 
@@ -2379,10 +2380,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_tree = sse_decode_list_bridge_tree_node(deserializer);
     var var_leaf = sse_decode_opt_String(deserializer);
     var var_trajectories = sse_decode_list_bridge_trajectory(deserializer);
+    var var_usage = sse_decode_bridge_usage(deserializer);
     return BridgeHistory(
       tree: var_tree,
       leaf: var_leaf,
       trajectories: var_trajectories,
+      usage: var_usage,
     );
   }
 
@@ -3502,6 +3505,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_list_bridge_tree_node(self.tree, serializer);
     sse_encode_opt_String(self.leaf, serializer);
     sse_encode_list_bridge_trajectory(self.trajectories, serializer);
+    sse_encode_bridge_usage(self.usage, serializer);
   }
 
   @protected

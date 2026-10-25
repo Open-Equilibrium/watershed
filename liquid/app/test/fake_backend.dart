@@ -148,6 +148,7 @@ class FakeBackend implements SessionBackend {
         tree: stored.tree,
         leaf: node?.kind == BridgeEntryKind.user ? node?.parent : entry,
         trajectories: stored.trajectories,
+        usage: stored.usage,
       );
     }
   }
@@ -240,7 +241,16 @@ BridgeHistory historyOf(
   List<BridgeTreeNode>? tree,
   String? leaf,
   List<List<BridgeRecord>> others = const [],
+  BridgeUsage usage = const BridgeUsage(
+    input: 0,
+    output: 0,
+    cacheRead: 0,
+    cacheWrite: 0,
+    reasoning: 0,
+    costMicroUsd: 0,
+  ),
 }) => BridgeHistory(
+  usage: usage,
   tree:
       tree ??
       [

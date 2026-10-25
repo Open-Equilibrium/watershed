@@ -11,6 +11,8 @@ pub struct BridgeHistory {
     pub leaf: Option<String>,
     /// One Trajectory per requested branch, in request order.
     pub trajectories: Vec<BridgeTrajectory>,
+    /// What every stored response used, on every branch.
+    pub usage: BridgeUsage,
 }
 
 /// One entry of the branch tree.

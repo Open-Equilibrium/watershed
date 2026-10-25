@@ -142,14 +142,19 @@ class BridgeHistory {
   /// One Trajectory per requested branch, in request order.
   final List<BridgeTrajectory> trajectories;
 
+  /// What every stored response used, on every branch.
+  final BridgeUsage usage;
+
   const BridgeHistory({
     required this.tree,
     this.leaf,
     required this.trajectories,
+    required this.usage,
   });
 
   @override
-  int get hashCode => tree.hashCode ^ leaf.hashCode ^ trajectories.hashCode;
+  int get hashCode =>
+      tree.hashCode ^ leaf.hashCode ^ trajectories.hashCode ^ usage.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -158,7 +163,8 @@ class BridgeHistory {
           runtimeType == other.runtimeType &&
           tree == other.tree &&
           leaf == other.leaf &&
-          trajectories == other.trajectories;
+          trajectories == other.trajectories &&
+          usage == other.usage;
 }
 
 /// One Trajectory row.
