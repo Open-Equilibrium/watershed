@@ -128,6 +128,29 @@ pub(crate) struct SystemChange {
 }
 
 impl Entry {
+    /// An entry too large to read, kept by the id and parent pi writes at its start, so the
+    /// entries after it still reach their ancestors.
+    pub fn skipped(start: &[u8]) -> Option<Self> {
+        let start = String::from_utf8_lossy(start);
+        let text = |key: &str| {
+            let (_, rest) = start.split_once(key)?;
+            rest.split_once('"').map(|(value, _)| value.to_owned())
+        };
+        let parent = if start.contains(r#""parentId":null"#) {
+            None
+        } else {
+            Some(text(r#""parentId":""#)?)
+        };
+        Some(Self {
+            id: text(r#""id":""#)?,
+            parent,
+            at_ms: None,
+            body: Body::Other {
+                kind: "too large to read".to_owned(),
+            },
+        })
+    }
+
     /// Reads one entry of a `get_entries` response.
     pub fn parse(entry: &Value) -> Self {
         let text = |field| entry.get(field).and_then(Value::as_str).map(str::to_owned);

@@ -49,14 +49,16 @@ impl History {
                 break;
             }
             for frame in framer.push(&chunk[..read]) {
-                let Frame::Record(line) = frame else {
-                    continue;
-                };
-                // The first line is the session header, not an entry.
-                if let Ok(entry @ Value::Object(_)) = serde_json::from_slice::<Value>(&line)
-                    && entry.get("type").and_then(Value::as_str) != Some("session")
-                {
-                    entries.push(Entry::parse(&entry));
+                match frame {
+                    // The first line is the session header, not an entry.
+                    Frame::Record(line) => {
+                        if let Ok(entry @ Value::Object(_)) = serde_json::from_slice::<Value>(&line)
+                            && entry.get("type").and_then(Value::as_str) != Some("session")
+                        {
+                            entries.push(Entry::parse(&entry));
+                        }
+                    }
+                    Frame::Oversized { start } => entries.extend(Entry::skipped(&start)),
                 }
             }
         }

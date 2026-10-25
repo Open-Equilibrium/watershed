@@ -223,6 +223,34 @@ fn a_later_edit_brings_a_removed_message_back() {
 }
 
 #[test]
+fn an_entry_too_large_to_read_keeps_its_place_in_the_branch() {
+    let file = std::env::temp_dir().join(format!("watershed-gap-{}.jsonl", std::process::id()));
+    let huge = "x".repeat(17_000_000);
+    std::fs::write(
+        &file,
+        format!(
+            r#"{{"type":"session","version":3,"id":"s1","cwd":"/tmp"}}
+{{"type":"message","id":"u1","parentId":null,"message":{{"role":"user","content":"Look"}}}}
+{{"type":"message","id":"r1","parentId":"u1","message":{{"role":"toolResult","toolCallId":"c1","toolName":"read","content":[{{"type":"image","data":"{huge}"}}]}}}}
+{{"type":"message","id":"a1","parentId":"r1","message":{{"role":"assistant","content":[{{"type":"text","text":"Seen."}}]}}}}
+"#
+        ),
+    )
+    .expect("session file");
+    let history = History::from_file(&file, 16 * 1024 * 1024);
+    let _ = std::fs::remove_file(&file);
+    let records = history.expect("history").trajectory(Some("a1")).records;
+    assert_eq!(
+        records
+            .iter()
+            .map(|record| record.entry.as_str())
+            .collect::<Vec<_>>(),
+        ["u1", "a1"],
+        "the prompt before the skipped entry stays on the branch"
+    );
+}
+
+#[test]
 fn a_replacement_counts_its_own_size() {
     let long = "x".repeat(1000);
     let data: Value = serde_json::from_str(&format!(

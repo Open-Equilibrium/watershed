@@ -260,6 +260,92 @@ fn reopens_a_session_larger_than_one_record_from_its_file() {
 }
 
 #[test]
+fn rereads_the_session_file_when_new_entries_exceed_one_record() {
+    run(async {
+        let file =
+            std::env::temp_dir().join(format!("watershed-grown-{}.jsonl", std::process::id()));
+        let header = r#"{"type":"session","version":3,"id":"s1","cwd":"/tmp"}"#;
+        let entry = |id: &str, parent: &str| {
+            format!(
+                r#"{{"type":"message","id":"{id}","parentId":{parent},"message":{{"role":"user","content":"{id}"}}}}"#
+            )
+        };
+        std::fs::write(&file, format!("{header}\n{}\n", entry("e1", "null"))).expect("file");
+        let huge = "head -c 17000000 /dev/zero | tr '\\0' a\n";
+        let state = |id: u32| {
+            format!(
+                "printf '%s\\n' '{{\"id\":\"{id}\",\"type\":\"response\",\"command\":\"get_state\",\"success\":true,\"data\":{{\"sessionId\":\"s1\",\"isStreaming\":false,\"sessionFile\":\"{}\"}}}}'\n",
+                file.display()
+            )
+        };
+        let script = [
+            expect_response(&[r#""type":"get_state""#, r#""id":"1""#]),
+            state(1),
+            expect_response(&[r#""id":"2""#, r#""since":"e1""#]),
+            r#"printf '%s\n' '{"id":"2","type":"response","command":"get_entries","success":true,"data":{"entries":[],"leafId":"e1"}}'
+"#
+            .to_owned(),
+            // A long run added more than one record holds before the next read.
+            expect_response(&[r#""id":"3""#, r#""since":"e1""#]),
+            format!(
+                r#"printf '%s' '{{"id":"3","type":"response","command":"get_entries","success":true,"data":"'
+{huge}printf '"}}\n'
+"#
+            ),
+            expect_response(&[r#""type":"get_state""#, r#""id":"4""#]),
+            state(4),
+            expect_response(&[r#""id":"5""#, r#""since":"e2""#]),
+            r#"printf '%s\n' '{"id":"5","type":"response","command":"get_entries","success":true,"data":{"entries":[],"leafId":"e2"}}'
+"#
+            .to_owned(),
+        ]
+        .concat();
+        let (mut session, _events) = fake_agent(&script);
+        assert_eq!(
+            session
+                .history()
+                .await
+                .map(|history| history.tree().nodes.len()),
+            Ok(1)
+        );
+        std::fs::write(
+            &file,
+            format!(
+                "{header}\n{}\n{}\n",
+                entry("e1", "null"),
+                entry("e2", r#""e1""#)
+            ),
+        )
+        .expect("file grows");
+        let grown = session.history().await;
+        let _ = std::fs::remove_file(&file);
+        let tree = grown.expect("history").tree();
+        assert_eq!((tree.nodes.len(), tree.leaf.as_deref()), (2, Some("e2")));
+    });
+}
+
+#[test]
+fn shutdown_ends_an_agent_that_stopped_reading() {
+    run(async {
+        let (mut session, _events) = fake_agent("trap '' TERM; while :; do sleep 1; done");
+        // Fills the pipe and the queue of records waiting to be written.
+        let message = "x".repeat(100_000);
+        for _ in 0..200 {
+            let sent = timeout(
+                Duration::from_millis(200),
+                session.send(&message, Delivery::Steer),
+            )
+            .await;
+            if sent.is_err() {
+                break;
+            }
+        }
+        let stopped = timeout(WAIT, session.shutdown(Duration::from_millis(100))).await;
+        assert_eq!(stopped, Ok(false));
+    });
+}
+
+#[test]
 fn skips_an_oversized_record_and_keeps_the_session() {
     run(async {
         // More than the 16 MiB record limit, without holding it in the script.

@@ -267,7 +267,11 @@ impl Session {
             self.read_stored().await?;
         }
         match self.read_newer().await {
-            Err(CommandError::Rejected(_)) if self.history.last_id().is_some() => {
+            // The agent no longer knows the last entry read, or what it added since does not fit
+            // one answer: the session file holds them.
+            Err(CommandError::Rejected(_) | CommandError::TooLarge)
+                if self.history.last_id().is_some() =>
+            {
                 self.history = History::default();
                 self.read_stored().await?;
                 self.read_newer().await?;
@@ -380,9 +384,15 @@ impl Session {
 
     /// Asks the agent to exit and kills it after `grace`; returns whether it exited successfully.
     pub async fn shutdown(mut self, grace: Duration) -> bool {
-        let _ = self.writer.send(Write::Close).await;
         let mut exited = self.exited;
-        if let Ok(success) = tokio::time::timeout(grace, &mut exited).await {
+        // The grace period includes waiting to close the input, which an agent that stopped
+        // reading never allows.
+        let writer = self.writer.clone();
+        let closed = async {
+            let _ = writer.send(Write::Close).await;
+            (&mut exited).await
+        };
+        if let Ok(success) = tokio::time::timeout(grace, closed).await {
             return success.unwrap_or(false);
         }
         if let Some(kill) = self.kill.take() {
