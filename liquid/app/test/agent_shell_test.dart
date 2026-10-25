@@ -1,3 +1,5 @@
+import 'dart:ui';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -540,5 +542,12 @@ void main() {
     await tester.pump();
     debugDefaultTargetPlatformOverride = null;
     expect(labels, containsAll(['Chat', 'Trajectory', 'Diff', 'Focus Input']));
+  });
+
+  testWidgets('stops the agent before the app exits', (tester) async {
+    await show(tester);
+    final response = await tester.runAsync(tester.binding.handleRequestAppExit);
+    expect(response, AppExitResponse.exit);
+    expect(backend.calls, contains('shutdown'));
   });
 }

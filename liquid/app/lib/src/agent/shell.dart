@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -53,9 +54,18 @@ class _AgentShellState extends State<AgentShell> {
   final _tab = ValueNotifier(AgentTab.chat);
   final _trajectoryKeys = ValueNotifier(trajectoryKeys);
 
+  /// Stops the agent before the app exits, so no pi process outlives Liquid.
+  late final _lifecycle = AppLifecycleListener(
+    onExitRequested: () async {
+      await widget.state.dispose();
+      return AppExitResponse.exit;
+    },
+  );
+
   @override
   void initState() {
     super.initState();
+    _lifecycle;
     widget.state.draft.addListener(_applyDraft);
     unawaited(widget.state.loadStart());
     // A reopened Trajectory tab starts outside the comparison.
@@ -75,6 +85,7 @@ class _AgentShellState extends State<AgentShell> {
 
   @override
   void dispose() {
+    _lifecycle.dispose();
     widget.state.draft.removeListener(_applyDraft);
     _composer.dispose();
     _composerFocus.dispose();
