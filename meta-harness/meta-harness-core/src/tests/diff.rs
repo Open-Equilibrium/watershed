@@ -185,6 +185,29 @@ fn keeps_snapshots_private_to_the_user() {
 }
 
 #[test]
+fn snapshots_without_running_the_repositorys_hooks() {
+    use std::os::unix::fs::PermissionsExt;
+    run(async {
+        let repo = Repo::new("hooks");
+        repo.write("a.txt", "a\n");
+        repo.git(&["add", "."]);
+        repo.git(&["commit", "-q", "-m", "base"]);
+        let hook = repo.path().join(".git/hooks/post-index-change");
+        std::fs::write(&hook, "#!/bin/sh\ntouch hook-ran\n").expect("hook");
+        std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).expect("mode");
+        repo.write("a.txt", "changed\n");
+        let tree = WorkingTree::open(repo.path())
+            .await
+            .expect("repository opens");
+        tree.snapshot().await.expect("snapshot");
+        assert!(
+            !repo.path().join("hook-ran").exists(),
+            "a snapshot leaves the project alone"
+        );
+    });
+}
+
+#[test]
 fn diffs_a_project_given_by_a_relative_path() {
     run(async {
         // Below the working directory, so the path stays relative wherever Git resolves it.

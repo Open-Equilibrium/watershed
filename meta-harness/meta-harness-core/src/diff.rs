@@ -257,6 +257,13 @@ impl WorkingTree {
 /// Runs the host's `git` in `dir` and returns at most [`MAX_OUTPUT_BYTES`] of its output.
 async fn git(dir: &Path, env: &[(&str, OsString)], args: &[&str]) -> Result<String, DiffError> {
     let mut child = Command::new("git")
+        // Reading the project runs none of its hooks or file monitors, which could change it.
+        .args([
+            "-c",
+            "core.hooksPath=/dev/null",
+            "-c",
+            "core.fsmonitor=false",
+        ])
         .args(args)
         .current_dir(dir)
         .envs(env.iter().map(|(name, value)| (name, value)))
