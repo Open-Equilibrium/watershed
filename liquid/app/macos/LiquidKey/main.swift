@@ -40,11 +40,12 @@ func unmap() {
 }
 
 /// Without its hotkeys the key would be dead, so Caps Lock comes back and the helper ends.
-/// macOS reports only a second registration in this process; another app holding the same
-/// keys goes unnoticed.
+/// Registering exclusively fails while any other app holds the same keys, which a plain
+/// registration would accept and then never hear.
 func register(_ modifiers: Int, _ id: EventHotKeyID, _ key: inout EventHotKeyRef?) {
     let status = RegisterEventHotKey(
-        UInt32(kVK_F18), UInt32(modifiers), id, GetApplicationEventTarget(), 0, &key)
+        UInt32(kVK_F18), UInt32(modifiers), id, GetApplicationEventTarget(),
+        OptionBits(kEventHotKeyExclusive), &key)
     if status != noErr {
         FileHandle.standardError.write(Data("Liquid Key: hotkey taken (\(status))\n".utf8))
         unmap()
