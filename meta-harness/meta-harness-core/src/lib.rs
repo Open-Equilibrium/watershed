@@ -26,7 +26,7 @@ pub use history::{
 };
 pub use pi::PiAdapter;
 pub use session::{
-    AgentCommand, CommandError, Model, Pending, Session, SessionEvent, SessionState,
+    AgentCommand, CommandError, Model, Pending, Session, SessionEvent, SessionState, Stopper,
 };
 pub use stored::{StoredSession, recent_sessions};
 

@@ -83,6 +83,8 @@ pub struct AgentSession {
     project: Option<WorkingTree>,
     /// The directory the agent works in.
     cwd: PathBuf,
+    /// Stops the agent even while a request holds the session.
+    stopper: std::sync::Mutex<Option<meta_harness_core::Stopper>>,
     /// The project state before the latest prompt; the diff view compares against it.
     before_run: Mutex<Option<Snapshot>>,
 }
@@ -97,8 +99,11 @@ impl AgentSession {
         };
         let _runtime = RUNTIME.enter();
         let project = RUNTIME.block_on(WorkingTree::open(&command.cwd)).ok();
-        let (session, receiver) = Session::start(&command).map_err(|error| error.to_string())?;
+        let (mut session, receiver) =
+            Session::start(&command).map_err(|error| error.to_string())?;
+        let stopper = session.stopper();
         Ok(Self {
+            stopper: std::sync::Mutex::new(stopper),
             session: Mutex::new(Some(session)),
             receiver: std::sync::Mutex::new(Some(receiver)),
             project,
@@ -408,12 +413,19 @@ impl AgentSession {
     /// Asks the agent to exit and kills it after a grace period; returns whether it exited
     /// successfully.
     pub fn shutdown(&self) -> bool {
+        let stopper = self
+            .stopper
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
         RUNTIME.block_on(async {
-            let session = self.session.lock().await.take();
-            match session {
-                Some(session) => session.shutdown(SHUTDOWN_GRACE).await,
+            let stopped = match stopper {
+                Some(stopper) => stopper.stop(SHUTDOWN_GRACE).await,
                 None => false,
-            }
+            };
+            // Requests still waiting end with the agent, so the session is free to drop.
+            self.session.lock().await.take();
+            stopped
         })
     }
 

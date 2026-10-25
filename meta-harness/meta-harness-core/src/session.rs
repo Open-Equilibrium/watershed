@@ -157,15 +157,44 @@ impl State {
     }
 }
 
-/// A running agent process; dropping it kills the process.
+/// Stops an agent without its session, so a request the agent never answers cannot hold the
+/// stop up; dropping it kills the process.
+#[derive(Debug)]
+pub struct Stopper {
+    writer: mpsc::Sender<Write>,
+    kill: Option<oneshot::Sender<()>>,
+    exited: oneshot::Receiver<bool>,
+}
+
+impl Stopper {
+    /// Asks the agent to exit and kills it after `grace`; returns whether it exited successfully.
+    pub async fn stop(mut self, grace: Duration) -> bool {
+        let mut exited = self.exited;
+        // The grace period includes waiting to close the input, which an agent that stopped
+        // reading never allows.
+        let writer = self.writer.clone();
+        let closed = async {
+            let _ = writer.send(Write::Close).await;
+            (&mut exited).await
+        };
+        if let Ok(success) = tokio::time::timeout(grace, closed).await {
+            return success.unwrap_or(false);
+        }
+        if let Some(kill) = self.kill.take() {
+            let _ = kill.send(());
+        }
+        exited.await.unwrap_or(false)
+    }
+}
+
+/// A running agent process; dropping it, and its [`Stopper`] if taken, kills the process.
 #[derive(Debug)]
 pub struct Session {
     writer: mpsc::Sender<Write>,
     events: mpsc::Sender<SessionEvent>,
     state: State,
     next_id: u64,
-    kill: Option<oneshot::Sender<()>>,
-    exited: oneshot::Receiver<bool>,
+    stopper: Option<Stopper>,
     /// The stored entries read so far; later reads continue after the last one.
     history: History,
 }
@@ -202,13 +231,17 @@ impl Session {
             kill_requested: false,
         };
         tokio::spawn(supervisor.run(child, stdout, exit));
+        let writer_for_stop = writer.clone();
         let session = Self {
             writer,
             events,
             state,
             next_id: 0,
-            kill: Some(kill),
-            exited,
+            stopper: Some(Stopper {
+                writer: writer_for_stop,
+                kill: Some(kill),
+                exited,
+            }),
             history: History::default(),
         };
         Ok((session, receiver))
@@ -454,21 +487,16 @@ impl Session {
 
     /// Asks the agent to exit and kills it after `grace`; returns whether it exited successfully.
     pub async fn shutdown(mut self, grace: Duration) -> bool {
-        let mut exited = self.exited;
-        // The grace period includes waiting to close the input, which an agent that stopped
-        // reading never allows.
-        let writer = self.writer.clone();
-        let closed = async {
-            let _ = writer.send(Write::Close).await;
-            (&mut exited).await
-        };
-        if let Ok(success) = tokio::time::timeout(grace, closed).await {
-            return success.unwrap_or(false);
+        match self.stopper.take() {
+            Some(stopper) => stopper.stop(grace).await,
+            None => false,
         }
-        if let Some(kill) = self.kill.take() {
-            let _ = kill.send(());
-        }
-        exited.await.unwrap_or(false)
+    }
+
+    /// Hands out what stops the agent, for an owner that must stop it while the session waits
+    /// for an answer; [`Session::shutdown`] then stops nothing.
+    pub fn stopper(&mut self) -> Option<Stopper> {
+        self.stopper.take()
     }
 
     async fn command(&mut self, command: Value) -> Result<Value, CommandError> {

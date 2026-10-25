@@ -414,6 +414,36 @@ IFS= read -r line || exit 0"#;
 }
 
 #[test]
+fn shuts_down_while_a_query_waits_for_a_hung_agent() {
+    // The agent reads the query and never answers or reads again.
+    let script = "IFS= read -r line\ntrap '' TERM\nwhile :; do sleep 1; done";
+    let session = Arc::new(
+        AgentSession::start(SessionConfig {
+            program: "/bin/sh".to_owned(),
+            args: vec!["-c".to_owned(), script.to_owned()],
+            cwd: std::env::temp_dir().display().to_string(),
+        })
+        .expect("agent starts"),
+    );
+    let querying = {
+        let session = Arc::clone(&session);
+        std::thread::spawn(move || session.models())
+    };
+    std::thread::sleep(Duration::from_millis(200));
+    let (stopped, stop) = mpsc::channel();
+    {
+        let session = Arc::clone(&session);
+        std::thread::spawn(move || stopped.send(session.shutdown()));
+    }
+    assert_eq!(
+        stop.recv_timeout(Duration::from_secs(20)),
+        Ok(false),
+        "killed after the grace period"
+    );
+    assert!(querying.join().expect("query returns").is_err());
+}
+
+#[test]
 fn coalesces_consecutive_deltas_of_one_item() {
     let delta = |item: u64, text: &str| {
         bridge(RuntimeEvent::ContentDelta {
