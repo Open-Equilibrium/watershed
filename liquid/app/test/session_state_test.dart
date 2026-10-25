@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/rust/api/events.dart';
 import 'package:liquid/src/rust/api/history.dart';
@@ -348,6 +350,23 @@ void main() {
     expect(
       (totals.input, totals.output, totals.costMicroUsd),
       (1010, 20, 12000),
+    );
+  });
+
+  test('holds messages and switches until the session has changed', () async {
+    backend.switchGate = Completer();
+    final switching = state.newSession();
+    final again = state.newSession();
+    final sending = state.send('Hi');
+    await pumpEventQueue();
+    expect(backend.calls, ['new session'], reason: 'one switch at a time');
+    backend.switchGate!.complete();
+    await Future.wait([switching, again, sending]);
+    expect(backend.calls.where((call) => call == 'new session'), hasLength(1));
+    expect(
+      backend.calls.last,
+      'send Hi',
+      reason: 'the message goes to the new session',
     );
   });
 

@@ -95,9 +95,13 @@ class FakeBackend implements SessionBackend {
   @override
   Future<List<BridgeStoredSession>> recentSessions() async => storedSessions;
 
+  /// Holds session switches until it completes.
+  Completer<void>? switchGate;
+
   @override
   Future<bool> newSession() async {
     calls.add('new session');
+    await switchGate?.future;
     return !switchCancelled;
   }
 

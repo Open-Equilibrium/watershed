@@ -151,15 +151,29 @@ class SessionState {
     busy: 'Stop the agent before continuing another session.',
   );
 
+  /// A session switch in progress; messages wait for it and other switches are ignored.
+  Completer<void>? _switching;
+
   /// Switches only while the agent is idle, then shows the session it continues.
   Future<void> _switch(
     Future<bool> Function() switchTo, {
     required String busy,
   }) async {
+    if (_switching != null) return;
     if (status.value case RunStatus.running || RunStatus.waitingForYou) {
       notify(BridgeLevel.info, busy);
       return;
     }
+    final switching = _switching = Completer<void>();
+    try {
+      await _replace(switchTo);
+    } finally {
+      _switching = null;
+      switching.complete();
+    }
+  }
+
+  Future<void> _replace(Future<bool> Function() switchTo) async {
     try {
       if (!await switchTo()) {
         notify(BridgeLevel.info, 'An extension kept the current session.');
@@ -194,6 +208,8 @@ class SessionState {
   /// model request or, with `followUp`, once it is done. pi decides, so no turn state races
   /// the send. A message the agent rejects goes back to the input area.
   Future<void> send(String message, {bool followUp = false}) async {
+    // A message typed while the session changes goes to the new one.
+    await _switching?.future;
     try {
       await _backend.send(message, followUp: followUp);
     } on Object catch (error) {
