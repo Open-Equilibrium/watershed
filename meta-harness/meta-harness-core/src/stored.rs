@@ -37,9 +37,9 @@ pub fn recent_sessions(
 ) -> std::io::Result<Vec<StoredSession>> {
     let mut files: Vec<(u64, PathBuf)> = std::fs::read_dir(dir)?
         .flatten()
-        // A pipe or device would block the read; pi writes plain files.
-        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_file()))
         .map(|entry| entry.path())
+        // A pipe or device would block the read; pi writes plain files, perhaps linked.
+        .filter(|path| path.metadata().is_ok_and(|metadata| metadata.is_file()))
         .filter(|path| {
             path.extension()
                 .is_some_and(|extension| extension == "jsonl")

@@ -126,12 +126,12 @@ test("branches the session at an entry", async () => {
   const { commands } = load();
   const branch = commands.get("watershed-branch")!;
   const labelled = context(undefined);
-  await branch.handler("874681ad Rate limit A", labelled.ctx);
+  await branch.handler("874681ad Rate  limit A", labelled.ctx);
   const plain = context(undefined);
   await branch.handler(" 6ed210af ", plain.ctx);
   const empty = context(undefined);
   await branch.handler("", empty.ctx);
-  assert.deepEqual(labelled.branches, [["874681ad", { label: "Rate limit A" }]]);
+  assert.deepEqual(labelled.branches, [["874681ad", { label: "Rate  limit A" }]]);
   assert.deepEqual(plain.branches, [["6ed210af", {}]]);
   assert.deepEqual(empty.branches, []);
   assert.deepEqual(empty.notes, ["watershed-branch needs an entry id"]);

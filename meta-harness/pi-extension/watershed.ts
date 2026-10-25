@@ -103,9 +103,8 @@ function watershed(pi: ExtensionAPI, clock: Clock): void {
   pi.registerCommand("watershed-branch", {
     description: "Continue the session from an earlier entry",
     handler: async (args, ctx) => {
-      // The label is the rest, so it may hold spaces.
-      const [entryId, ...words] = args.trim().split(/\s+/);
-      const label = words.join(" ");
+      // The label is the rest as written, so it may hold spaces.
+      const [, entryId = "", label = ""] = /^(\S*)\s*([\s\S]*)$/.exec(args.trim()) ?? [];
       if (!entryId) {
         ctx.ui.notify("watershed-branch needs an entry id", "error");
         return;
