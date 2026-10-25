@@ -43,7 +43,7 @@ if [ "${CODE_SIGNING_ALLOWED:-YES}" = YES ]; then
     set -- --force --sign "$identity"
     if [ "${ENABLE_HARDENED_RUNTIME:-NO}" = YES ]; then set -- "$@" --options runtime; fi
     if [ "$identity" != - ]; then set -- "$@" --timestamp; fi
-    # Xcode's extra flags, such as a keychain, apply here too; they are words by design.
-    # shellcheck disable=SC2086
-    codesign "$@" ${OTHER_CODE_SIGN_FLAGS:-} "$app"
+    # Xcode's extra flags, such as a keychain, apply here too, split as the shell splits them.
+    eval "set -- \"\$@\" ${OTHER_CODE_SIGN_FLAGS:-}"
+    codesign "$@" "$app"
 fi

@@ -32,6 +32,13 @@ var plain: EventHotKeyRef?
 var shifted: EventHotKeyRef?
 var pressedAt: TimeInterval?
 var shiftedDown = false
+/// Whether this user's session is in front; the remapping holds for every user's keyboards.
+var sessionActive = true
+
+/// Sets the remapping while this session is in front.
+func remap() {
+    if sessionActive { Mapping.apply(on: true) }
+}
 
 func openLiquid() {
     let configuration = NSWorkspace.OpenConfiguration()
@@ -108,12 +115,12 @@ IOServiceAddMatchingNotification(
         drain(iterator)
         // A keyboard's HID service appears some time after the device, a Bluetooth one later.
         for delay in [1.0, 5.0] {
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { Mapping.apply(on: true) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { remap() }
         }
     }, nil, &attached)
 drain(attached)
 
-Mapping.apply(on: true)
+remap()
 RegisterEventHotKey(
     UInt32(kVK_F18), UInt32(shiftKey), shiftedID, GetApplicationEventTarget(), 0, &shifted)
 follow(NSWorkspace.shared.frontmostApplication)
@@ -125,13 +132,27 @@ workspace.addObserver(
 }
 workspace.addObserver(
     forName: NSWorkspace.sessionDidResignActiveNotification, object: nil, queue: .main
-) { _ in Mapping.apply(on: false) }
+) { _ in
+    sessionActive = false
+    Mapping.apply(on: false)
+}
 workspace.addObserver(
     forName: NSWorkspace.sessionDidBecomeActiveNotification, object: nil, queue: .main
-) { _ in Mapping.apply(on: true) }
+) { _ in
+    sessionActive = true
+    remap()
+}
 NotificationCenter.default.addObserver(
     forName: NSApplication.willTerminateNotification, object: nil, queue: .main
 ) { _ in Mapping.apply(on: false) }
+// The system stops a login item that the user turns off with a termination signal.
+signal(SIGTERM, SIG_IGN)
+let terminate = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
+terminate.setEventHandler {
+    Mapping.apply(on: false)
+    exit(0)
+}
+terminate.resume()
 
 NSApplication.shared.setActivationPolicy(.prohibited)
 NSApplication.shared.run()
