@@ -56,10 +56,17 @@ function watershed(pi: ExtensionAPI, clock: Clock): void {
   // pi runs these handlers before it stores the message or tool result, so a request's timing
   // entry directly precedes its response. A response's tools run in parallel and their results
   // are stored together, so each tool's timing entry is stored when that tool ends.
+  // A request starts with pi's turn, before the provider answers with headers, so connection
+  // and retry time count.
+  let turnStarted: number | undefined;
   let request: { started: number; firstToken: number | null } | undefined;
+  pi.on("turn_start", () => {
+    turnStarted = clock();
+  });
   pi.on("message_start", (event) => {
     if (event.message.role === "assistant") {
-      request = { started: clock(), firstToken: null };
+      request = { started: turnStarted ?? clock(), firstToken: null };
+      turnStarted = undefined;
     }
   });
   pi.on("message_update", () => {

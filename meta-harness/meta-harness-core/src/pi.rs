@@ -24,6 +24,9 @@ pub struct PiAdapter {
     /// Running tool calls, keyed by pi's tool call id.
     tools: HashMap<String, (ItemId, ItemKind)>,
     steps: u64,
+    /// When pi's latest turn started; its model request starts then, before the provider
+    /// answers with headers.
+    turn_started: Option<Duration>,
     /// The model request whose response is streaming.
     step: Option<OpenStep>,
 }
@@ -82,6 +85,7 @@ impl PiAdapter {
                 self.blocks.clear();
                 self.tools.clear();
                 self.step = None;
+                self.turn_started = None;
                 events.push(
                     if record.get("aborted").and_then(Value::as_bool) == Some(true) {
                         RuntimeEvent::TurnAborted { turn }
@@ -90,13 +94,14 @@ impl PiAdapter {
                     },
                 );
             }
+            Some("turn_start") => self.turn_started = Some(at),
             Some("message_start") => {
                 if role(record) == Some("assistant") {
                     self.steps += 1;
                     let id = StepId(self.steps);
                     self.step = Some(OpenStep {
                         id,
-                        started: at,
+                        started: self.turn_started.take().unwrap_or(at),
                         first_token: None,
                     });
                     events.push(RuntimeEvent::ModelRequestStarted { turn, step: id });

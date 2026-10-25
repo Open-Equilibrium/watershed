@@ -322,6 +322,8 @@ fn measures_model_requests_and_context_changes() {
     let mut adapter = PiAdapter::new();
     let records = [
         (0, r#"{"type":"agent_start"}"#),
+        // The request starts with pi's turn, before the provider answers with headers.
+        (5, r#"{"type":"turn_start"}"#),
         (
             10,
             r#"{"type":"message_end","message":{"role":"system","content":"Also be kind.","sections":{"preamble":"You are pi.","rules":"Be brief.","docs":null},"toolsAdded":[{"name":"read"},{"name":"bash"}],"toolsRemoved":[{"name":"grep"}]}}"#,
@@ -342,6 +344,7 @@ fn measures_model_requests_and_context_changes() {
             1100,
             r#"{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"Hi"}],"model":"faux-1","stopReason":"stop","usage":{"input":6140,"output":820,"cacheRead":100,"cacheWrite":5,"reasoning":214,"totalTokens":6960,"cost":{"input":0.01,"output":0.008,"cacheRead":0,"cacheWrite":0,"total":0.0234567}}}}"#,
         ),
+        (1150, r#"{"type":"turn_start"}"#),
         (
             1200,
             r#"{"type":"message_start","message":{"role":"assistant","content":[],"model":"faux-1"}}"#,
@@ -402,8 +405,8 @@ fn measures_model_requests_and_context_changes() {
                 },
                 stop_reason: "stop".to_owned(),
                 error: None,
-                first_token_ms: Some(300),
-                duration_ms: 1000,
+                first_token_ms: Some(395),
+                duration_ms: 1095,
             },
             RuntimeEvent::ModelRequestStarted {
                 turn: TURN,
@@ -417,7 +420,7 @@ fn measures_model_requests_and_context_changes() {
                 stop_reason: "error".to_owned(),
                 error: Some("529 overloaded".to_owned()),
                 first_token_ms: None,
-                duration_ms: 100,
+                duration_ms: 150,
             },
         ]
     );

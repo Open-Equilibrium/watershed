@@ -152,6 +152,9 @@ test("records request and tool timing for the Trajectory", async () => {
   const { handlers, entries } = load(() => now);
   const ctx = context(undefined).ctx;
   const fire = (event: string, payload: unknown) => handlers.get(event)!(payload, ctx);
+  // A request starts with pi's turn, before the provider answers with headers.
+  await fire("turn_start", {});
+  now = 1100;
   await fire("message_start", { message: { role: "user" } });
   await fire("message_start", { message: { role: "assistant" } });
   now = 1900;
@@ -160,6 +163,8 @@ test("records request and tool timing for the Trajectory", async () => {
   await fire("message_update", { message: { role: "assistant" } });
   now = 4400;
   await fire("message_end", { message: { role: "assistant" } });
+  await fire("turn_start", {});
+  now = 4450;
   await fire("message_start", { message: { role: "assistant" } });
   now = 4500;
   await fire("message_end", { message: { role: "assistant" } });
