@@ -464,3 +464,67 @@ fn reads_tool_outcomes_and_what_the_model_saw_in_parts() {
     );
     assert_eq!(history.context("u1"), None, "only responses have a context");
 }
+
+#[test]
+fn reads_outcomes_from_what_tools_did_not_from_what_they_were_asked_or_printed() {
+    let data: Value = serde_json::from_str(r#"{"entries":[
+      {"type":"message","id":"u1","parentId":null,"message":{"role":"user","content":"Go"}},
+      {"type":"message","id":"a1","parentId":"u1","message":{"role":"assistant","content":[{"type":"toolCall","id":"c1","name":"write","arguments":{"path":"a.ts","content":"one\ntwo\n"}},{"type":"toolCall","id":"c2","name":"edit","arguments":{"path":"f.c","edits":[]}},{"type":"toolCall","id":"c3","name":"bash","arguments":{"command":"cat log"}}]}},
+      {"type":"message","id":"r1","parentId":"a1","message":{"role":"toolResult","toolCallId":"c1","toolName":"write","isError":true,"content":[{"type":"text","text":"Permission denied"}]}},
+      {"type":"message","id":"r2","parentId":"r1","message":{"role":"toolResult","toolCallId":"c2","toolName":"edit","content":[],"details":{"patch":"--- f.c\n+++ f.c\n@@ -1,2 +1,2 @@\n keep\n---counter;\n+++counter;\n"}}},
+      {"type":"message","id":"r3","parentId":"r2","message":{"role":"toolResult","toolCallId":"c3","toolName":"bash","content":[{"type":"text","text":"old run: Command exited with code 3"}]}}
+    ],"leafId":"r3"}"#)
+    .expect("JSON");
+    let records = History::from_entries(&data).trajectory(None).records;
+    let outcomes: Vec<_> = records
+        .iter()
+        .filter(|record| record.kind == RecordKind::Tool)
+        .map(|record| record.outcome)
+        .collect();
+    assert_eq!(
+        outcomes,
+        [
+            ToolOutcome::default(),
+            ToolOutcome {
+                added: Some(1),
+                removed: Some(1),
+                ..ToolOutcome::default()
+            },
+            ToolOutcome {
+                exit_code: Some(0),
+                ..ToolOutcome::default()
+            },
+        ],
+        "a failed write wrote nothing, signs in content are changes, and a successful \
+         command's output only quotes an exit code"
+    );
+}
+
+#[test]
+fn a_parent_cycle_ends_the_branch_instead_of_hanging() {
+    let (done, finished) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let data: Value = serde_json::from_str(
+            r#"{"entries":[
+          {"type":"message","id":"u1","parentId":"a1","message":{"role":"user","content":"Go"}},
+          {"type":"message","id":"a1","parentId":"u1","message":{"role":"assistant","content":[]}},
+          {"type":"label","id":"l1","parentId":"l2","targetId":"a1","label":"A"},
+          {"type":"label","id":"l2","parentId":"l1","targetId":"u1","label":"B"},
+          {"type":"message","id":"m1","parentId":"l2","message":{"role":"user","content":"More"}}
+        ],"leafId":"a1"}"#,
+        )
+        .expect("JSON");
+        let history = History::from_entries(&data);
+        let read = (
+            history.trajectory(None).records.len(),
+            history.transcript(None, 10).items.len(),
+            history.context("a1").is_some(),
+            history.tree().nodes.len(),
+        );
+        let _ = done.send(read);
+    });
+    let read = finished
+        .recv_timeout(std::time::Duration::from_secs(10))
+        .expect("a stored cycle must not hang the reader");
+    assert_eq!(read.3, 3, "every entry but the labels is a node");
+}

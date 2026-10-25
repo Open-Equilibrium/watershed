@@ -1,7 +1,7 @@
 //! A branch of a session's stored entries as Trajectory rows. Timing comes from the
 //! extension's `watershed.timing` entries.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use serde_json::Value;
 
@@ -21,8 +21,13 @@ pub(super) fn path<'a>(entries: &'a [Entry], leaf: Option<&str>) -> Vec<&'a Entr
         .map(|entry| (entry.id.as_str(), entry))
         .collect();
     let mut path = Vec::new();
+    let mut seen = HashSet::new();
     let mut next = leaf;
     while let Some(entry) = next.and_then(|id| by_id.get(id)) {
+        // A stored cycle ends the branch instead of the reader.
+        if !seen.insert(entry.id.as_str()) {
+            break;
+        }
         path.push(*entry);
         next = entry.parent.as_deref();
     }
@@ -383,7 +388,8 @@ impl Projection {
                     detail: arguments,
                     failed: *failed,
                     outcome: ToolOutcome {
-                        added: outcome.added.or(written),
+                        // A failed write wrote nothing it was asked to.
+                        added: outcome.added.or(if *failed { None } else { written }),
                         ..*outcome
                     },
                     ..row(

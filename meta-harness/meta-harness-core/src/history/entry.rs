@@ -292,8 +292,9 @@ fn message(message: Option<&Value>) -> Body {
                 outcome: ToolOutcome {
                     added,
                     removed,
+                    // A successful command's output may quote an exit code of something else.
                     exit_code: shell
-                        .then(|| exit_code(&content).or((!failed).then_some(0)))
+                        .then(|| if failed { exit_code(&content) } else { Some(0) })
                         .flatten(),
                     tests: shell.then(|| test_counts(&content)).flatten(),
                 },

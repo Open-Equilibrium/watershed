@@ -45,12 +45,18 @@ pub(super) fn session_tree(entries: &[Entry], leaf: Option<&str>) -> SessionTree
     }
 }
 
-/// Follows label entries up to the nearest entry that is not a label.
+/// Follows label entries up to the nearest entry that is not a label; labels that lead back to
+/// each other lead nowhere.
 fn resolve<'a>(
     label_parents: &HashMap<&'a str, Option<&'a str>>,
     mut id: Option<&'a str>,
 ) -> Option<String> {
+    let mut steps = label_parents.len();
     while let Some(parent) = id.and_then(|id| label_parents.get(id)) {
+        if steps == 0 {
+            return None;
+        }
+        steps -= 1;
         id = *parent;
     }
     id.map(str::to_owned)
