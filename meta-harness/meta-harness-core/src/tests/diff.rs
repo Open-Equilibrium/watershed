@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
-use crate::{ChangeStatus, FileChange, WorkingTree};
+use crate::{ChangeStatus, DiffError, FileChange, WorkingTree};
 
 /// A throwaway Git repository that ignores the user's Git configuration.
 struct Repo(PathBuf);
@@ -179,6 +179,26 @@ fn keeps_snapshots_private_to_the_user() {
             .collect();
         assert!(!modes.is_empty(), "the store exists");
         assert!(modes.iter().all(|&mode| mode == 0o700), "{modes:?}");
+    });
+}
+
+#[test]
+fn reports_a_diff_too_large_to_read_instead_of_cutting_it() {
+    run(async {
+        let repo = Repo::new("large");
+        repo.write("big.txt", "");
+        repo.git(&["add", "."]);
+        repo.git(&["commit", "-q", "-m", "base"]);
+        let tree = WorkingTree::open(repo.path())
+            .await
+            .expect("repository opens");
+        let snapshot = tree.snapshot().await.expect("snapshot");
+        // More than the 4 MiB Git output limit.
+        repo.write("big.txt", &"a line of changed text\n".repeat(200_000));
+        assert!(matches!(
+            tree.patch(&snapshot, "big.txt").await,
+            Err(DiffError::TooLarge)
+        ));
     });
 }
 

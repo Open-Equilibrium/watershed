@@ -87,4 +87,33 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('No changes in this run'), findsOneWidget);
   });
+
+  testWidgets('says why a diff cannot be shown', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1600, 900));
+    final backend = FakeBackend()
+      ..changed = [
+        BridgeFileChange(
+          path: 'big.txt',
+          status: BridgeChangeStatus.modified,
+          added: 200000,
+          removed: 0,
+        ),
+      ]
+      ..patchError = 'the diff is larger than 4 MiB';
+    final state = SessionState(backend);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: liquidTheme(Brightness.light),
+        home: Material(child: DiffView(state: state)),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      (state.notice.value?.level, state.notice.value?.text),
+      (
+        BridgeLevel.error,
+        'Could not show the changes: the diff is larger than 4 MiB',
+      ),
+    );
+  });
 }

@@ -43,9 +43,22 @@ class _DiffViewState extends State<DiffView> {
     if (widget.state.status.value == RunStatus.idle) _reload();
   }
 
+  /// Reports why changes cannot be read, such as a diff over Git's output limit.
+  Future<T?> _read<T>(Future<T> Function() read) async {
+    try {
+      return await read();
+    } on Object catch (error) {
+      widget.state.notify(
+        BridgeLevel.error,
+        'Could not show the changes: $error',
+      );
+      return null;
+    }
+  }
+
   Future<void> _reload() async {
-    final changes = await widget.state.changes();
-    if (!mounted) return;
+    final changes = await _read(widget.state.changes);
+    if (!mounted || changes == null) return;
     setState(() {
       _changes = changes;
       _rows = fileTree(changes);
@@ -59,8 +72,10 @@ class _DiffViewState extends State<DiffView> {
   }
 
   Future<void> _select(BridgeFileChange? change) async {
-    final patch = change == null ? '' : await widget.state.patch(change.path);
-    if (!mounted) return;
+    final patch = change == null
+        ? ''
+        : await _read(() => widget.state.patch(change.path));
+    if (!mounted || patch == null) return;
     setState(() {
       _selected = change;
       _lines = parsePatch(patch);

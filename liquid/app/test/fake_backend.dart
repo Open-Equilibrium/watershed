@@ -60,8 +60,16 @@ class FakeBackend implements SessionBackend {
   Future<void> dismiss(String request) async => calls.add('dismiss $request');
   @override
   Future<List<BridgeFileChange>> changes() async => changed;
+
+  /// What reading a patch fails with, like the bridge does.
+  String? patchError;
+
   @override
-  Future<String> patch(String path) async => patches[path] ?? '';
+  Future<String> patch(String path) async {
+    if (patchError case final error?) throw error;
+    return patches[path] ?? '';
+  }
+
   @override
   Future<BridgeHistory> history(List<String> leaves) async {
     final key = leaves.join(' ');

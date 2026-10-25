@@ -60,6 +60,8 @@ pub enum DiffError {
     Git(String),
     /// The private object store could not be prepared.
     Io(std::io::Error),
+    /// Git's output exceeded the limit, so only part of it could be read.
+    TooLarge,
 }
 
 impl fmt::Display for DiffError {
@@ -68,6 +70,11 @@ impl fmt::Display for DiffError {
             Self::NotARepository => f.write_str("not inside a Git working tree"),
             Self::Git(error) => write!(f, "git failed: {error}"),
             Self::Io(error) => write!(f, "snapshot store failed: {error}"),
+            Self::TooLarge => write!(
+                f,
+                "the diff is larger than {} MiB",
+                MAX_OUTPUT_BYTES / (1024 * 1024)
+            ),
         }
     }
 }
@@ -259,19 +266,22 @@ async fn git(dir: &Path, env: &[(&str, OsString)], args: &[&str]) -> Result<Stri
     let stderr = child.stderr.take().expect("stderr is piped");
     let errors = tokio::spawn(keep_start(stderr, MAX_ERROR_BYTES));
     let mut output = Vec::new();
-    // Dropping the pipe after the limit stops Git instead of buffering unbounded output.
+    // Reading one byte past the limit tells a cut-off output apart; dropping the child then
+    // stops Git instead of buffering unbounded output.
     let stdout = child.stdout.take().expect("stdout is piped");
     stdout
-        .take(MAX_OUTPUT_BYTES)
+        .take(MAX_OUTPUT_BYTES + 1)
         .read_to_end(&mut output)
         .await
         .map_err(|error| DiffError::Git(error.to_string()))?;
-    let truncated = output.len() as u64 == MAX_OUTPUT_BYTES;
+    if output.len() as u64 > MAX_OUTPUT_BYTES {
+        return Err(DiffError::TooLarge);
+    }
     let status = child
         .wait()
         .await
         .map_err(|error| DiffError::Git(error.to_string()))?;
-    if !status.success() && !truncated {
+    if !status.success() {
         let errors = errors.await.unwrap_or_default();
         return Err(DiffError::Git(
             String::from_utf8_lossy(&errors).trim().to_owned(),
