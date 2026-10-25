@@ -360,6 +360,45 @@ fn shutdown_ends_an_agent_that_stopped_reading_its_automatic_answers() {
 }
 
 #[test]
+fn cancels_a_dialog_too_large_to_read() {
+    run(async {
+        let huge = "head -c 17000000 /dev/zero | tr '\\0' a\n";
+        let script = [
+            format!(
+                r#"printf '%s' '{{"type":"extension_ui_request","id":"q9","method":"editor","title":"Edit","prefill":"'
+{huge}printf '"}}\n'
+"#
+            ),
+            expect_response(&[r#""id":"q9""#, r#""cancelled":true"#]),
+            r#"printf '%s\n' '{"type":"queue_update","steering":[],"followUp":[]}'
+IFS= read -r line || exit 0
+"#
+            .to_owned(),
+        ]
+        .concat();
+        let (_session, mut events) = fake_agent(&script);
+        let skipped = next(&mut events).await;
+        assert!(
+            matches!(
+                &skipped,
+                SessionEvent::Runtime(RuntimeEvent::Notification {
+                    level: NotificationLevel::Warning,
+                    ..
+                })
+            ),
+            "{skipped:?}"
+        );
+        assert!(
+            matches!(
+                next(&mut events).await,
+                SessionEvent::Runtime(RuntimeEvent::QueueChanged(_))
+            ),
+            "the agent got its answer instead of waiting"
+        );
+    });
+}
+
+#[test]
 fn skips_an_oversized_record_and_keeps_the_session() {
     run(async {
         // More than the 16 MiB record limit, without holding it in the script.

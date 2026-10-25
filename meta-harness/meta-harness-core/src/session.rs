@@ -722,11 +722,13 @@ impl Supervisor {
     /// `false` once the session was killed.
     async fn skip(&mut self, start: &[u8]) -> bool {
         let start = String::from_utf8_lossy(start);
+        // pi writes a record's type and id first, so its start names it.
+        let id = start
+            .split_once(r#""id":""#)
+            .and_then(|(_, rest)| rest.split_once('"'))
+            .map(|(id, _)| id.to_owned());
         if start.contains(r#""type":"response""#)
-            && let Some(id) = start
-                .split_once(r#""id":""#)
-                .and_then(|(_, rest)| rest.split_once('"'))
-                .and_then(|(id, _)| id.parse::<u64>().ok())
+            && let Some(id) = id.as_deref().and_then(|id| id.parse::<u64>().ok())
             && let Some(reply) = self
                 .state
                 .lock()
@@ -736,6 +738,16 @@ impl Supervisor {
         {
             let _ = reply.send(Err(CommandError::TooLarge));
             return true;
+        }
+        // The agent waits for an answer to its dialog; dismissing it fails the dialog instead,
+        // and an approval dismissed this way blocks its call.
+        if start.contains(r#""type":"extension_ui_request""#)
+            && let Some(id) = id
+            && !self
+                .reply(&RequestId(id), json!({ "cancelled": true }))
+                .await
+        {
+            return false;
         }
         let skipped = RuntimeEvent::Notification {
             level: NotificationLevel::Warning,
