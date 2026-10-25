@@ -6,6 +6,7 @@ void main() {
   const liquidN = Keys(LogicalKeyboardKey.keyN, liquid: true);
   const commandN = Keys(LogicalKeyboardKey.keyN, meta: true);
   const commandD = Keys(LogicalKeyboardKey.keyD, meta: true);
+  const liquidD = Keys(LogicalKeyboardKey.keyD, liquid: true);
 
   test(
     'the Liquid key profile adds ⇪ to Liquid commands and keeps their ⌘ keys',
@@ -78,37 +79,92 @@ void main() {
     expect(keys.label(Command.newSession), '⌘N');
   });
 
-  test(
-    'Custom can turn the Liquid key off and choosing a profile starts over',
-    () {
-      final custom = ShortcutSettings.liquidKey().withLiquidKey(false);
+  test('the Custom switch decides whether Liquid key combinations exist', () {
+    final off = ShortcutSettings.liquidKey().withLiquidKey(false);
+    expect(off.profile, Profile.custom);
+    expect(off.base, Profile.liquidKey);
+    expect(off.bindings(Command.newSession), [commandN]);
+    expect(off.label(Command.allowSession), '⌘⏎');
 
-      expect(custom.profile, Profile.custom);
-      expect(custom.liquidKey, isFalse);
-      final standard = custom.choose(Profile.standard);
-      expect(standard, ShortcutSettings.standard());
-      expect(custom.choose(Profile.liquidKey), ShortcutSettings.liquidKey());
-    },
-  );
+    final on = ShortcutSettings.standard().withLiquidKey(true);
+    expect(on.base, Profile.standard);
+    expect(on.bindings(Command.newSession), [liquidN, commandN]);
+  });
+
+  test('Custom is kept while another profile is active', () {
+    final custom = ShortcutSettings.liquidKey().change(Command.diff, liquidD);
+
+    final standard = custom.choose(Profile.standard);
+    expect(standard.liquidKey, isFalse);
+    expect(standard.bindings(Command.diff), [
+      const Keys(LogicalKeyboardKey.digit3, meta: true),
+    ]);
+    expect(standard.choose(Profile.custom), custom);
+    expect(
+      ShortcutSettings.liquidKey().choose(Profile.custom).base,
+      Profile.liquidKey,
+      reason: 'a first Custom profile starts from the active one',
+    );
+  });
+
+  test('resetting all never turns the Liquid key on or off', () {
+    final changed = ShortcutSettings.liquidKey().change(Command.diff, liquidD);
+    expect(changed.resetAll(), ShortcutSettings.liquidKey());
+
+    final off = changed.withLiquidKey(false).resetAll();
+    expect(off.profile, Profile.custom);
+    expect(off.liquidKey, isFalse);
+    expect(off.changed(Command.diff), isFalse);
+  });
+
+  test('keys macOS, a fixed row or typing use are reserved', () {
+    expect(
+      reserved(
+        Command.newSession,
+        const Keys(LogicalKeyboardKey.keyQ, meta: true),
+      ),
+      'Quit',
+    );
+    expect(
+      reserved(Command.branch, const Keys(LogicalKeyboardKey.arrowDown)),
+      'Previous or next step',
+    );
+    expect(
+      reserved(
+        Command.queue,
+        const Keys(LogicalKeyboardKey.enter, shift: true),
+      ),
+      'New line',
+    );
+    expect(
+      reserved(Command.newSession, const Keys(LogicalKeyboardKey.keyN)),
+      'typing',
+    );
+    expect(
+      reserved(Command.branch, const Keys(LogicalKeyboardKey.keyX)),
+      isNull,
+      reason: 'the Trajectory has no text field',
+    );
+    expect(reserved(Command.newSession, liquidN), isNull);
+  });
 
   test(
     'settings survive a JSON round trip and ignore what they do not know',
     () {
       final keys = ShortcutSettings.liquidKey()
-          .change(
-            Command.diff,
-            const Keys(LogicalKeyboardKey.keyD, liquid: true),
-          )
+          .change(Command.diff, liquidD)
           .change(Command.focusInput, null);
 
       expect(ShortcutSettings.fromJson(keys.toJson()), keys);
-      final json = keys.toJson()
-        ..['changes'] = <String, Object?>{
-          ...(keys.toJson()['changes'] as Map),
-          'gone': 'meta+0x6e',
-          'diff': 'not keys',
-        };
-      final read = ShortcutSettings.fromJson(json)!;
+      final json = keys.toJson();
+      final custom = {...json['custom']! as Map<String, Object?>};
+      custom['changes'] = <String, Object?>{
+        ...custom['changes']! as Map<String, Object?>,
+        'gone': ['meta+0x6e'],
+        'diff': 'not keys',
+        'chat': ['meta+0x31', 'meta+0x31'],
+      };
+      final read = ShortcutSettings.fromJson({...json, 'custom': custom})!;
       expect(read.bindings(Command.diff), [
         const Keys(LogicalKeyboardKey.digit3, liquid: true),
         const Keys(LogicalKeyboardKey.digit3, meta: true),
@@ -116,7 +172,18 @@ void main() {
       expect(read.bindings(Command.focusInput), [
         const Keys(LogicalKeyboardKey.keyL, meta: true),
       ]);
-      expect(ShortcutSettings.fromJson({'profile': 'unknown'}), isNull);
+      expect(read.bindings(Command.chat), [
+        const Keys(LogicalKeyboardKey.digit1, meta: true),
+      ], reason: 'keys listed twice would run the command twice');
+      expect(ShortcutSettings.fromJson({...json, 'version': 2}), isNull);
+      expect(
+        ShortcutSettings.fromJson({'version': 1, 'profile': 'custom'}),
+        isNull,
+      );
+      expect(
+        ShortcutSettings.fromJson({'version': 1, 'profile': 'unknown'}),
+        isNull,
+      );
     },
   );
 }

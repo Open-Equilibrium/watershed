@@ -54,10 +54,18 @@ class ShortcutStore {
 
 /// Turns the Liquid key on or off on this computer (ADR-0205).
 abstract interface class LiquidKeyHost {
-  /// Whether this platform has the Liquid key yet; macOS comes first.
+  /// Whether this computer can have the Liquid key.
   bool get available;
 
   Future<void> apply(bool on);
+}
+
+/// Whether `platform` at `version`, as [Platform.operatingSystemVersion] reports it, has the
+/// Liquid key: macOS 13 or later, which can register its login item. macOS comes first.
+bool liquidKeySupported(TargetPlatform platform, String version) {
+  if (platform != TargetPlatform.macOS) return false;
+  final major = RegExp(r'(\d+)\.').firstMatch(version)?.group(1);
+  return (int.tryParse(major ?? '') ?? 0) >= 13;
 }
 
 /// The macOS runner's Liquid key: it remaps Caps Lock and registers the login item that
@@ -68,14 +76,17 @@ class ChannelLiquidKeyHost implements LiquidKeyHost {
   static const _channel = MethodChannel('liquid/liquid_key');
 
   @override
-  bool get available => defaultTargetPlatform == TargetPlatform.macOS;
+  bool get available => liquidKeySupported(
+    defaultTargetPlatform,
+    Platform.operatingSystemVersion,
+  );
 
   @override
   Future<void> apply(bool on) =>
       _channel.invokeMethod<void>(on ? 'enable' : 'disable');
 }
 
-/// The shortcut settings in use; changes are saved and applied in order.
+/// The shortcut settings in use; changes are applied and saved in order.
 class ShortcutController extends ValueNotifier<ShortcutSettings> {
   ShortcutController._(super.value, this._store, this._host, this.firstStart);
 
@@ -83,8 +94,8 @@ class ShortcutController extends ValueNotifier<ShortcutSettings> {
   ShortcutController.memory([ShortcutSettings? settings])
     : this._(settings ?? ShortcutSettings.standard(), null, null, false);
 
-  /// The stored settings; a stored Liquid key is turned on again, since the remapping lasts
-  /// only until logout.
+  /// The stored settings. A stored Liquid key is turned on again, since a restart or a newly
+  /// attached keyboard can lose its remapping; the first frame does not wait for it.
   static Future<ShortcutController> load(
     ShortcutStore store,
     LiquidKeyHost host,
@@ -97,7 +108,7 @@ class ShortcutController extends ValueNotifier<ShortcutSettings> {
       stored == null && host.available,
     );
     if (stored != null && stored.liquidKey && host.available) {
-      await shortcuts._apply(true);
+      unawaited(shortcuts._apply(true));
     }
     return shortcuts;
   }
@@ -108,10 +119,29 @@ class ShortcutController extends ValueNotifier<ShortcutSettings> {
   /// Whether the user has not chosen a profile yet.
   bool firstStart;
 
-  /// What went wrong saving or applying the last change.
-  final problem = ValueNotifier<String?>(null);
-
   bool get liquidKeyAvailable => _host?.available ?? false;
+
+  /// Receives what goes wrong saving or applying shortcuts; problems wait until it is set.
+  set report(void Function(String problem)? report) {
+    _report = report;
+    if (report == null) return;
+    for (final problem in _unreported) {
+      report(problem);
+    }
+    _unreported.clear();
+  }
+
+  void Function(String problem)? _report;
+  final _unreported = <String>[];
+
+  void _problem(String problem) {
+    final report = _report;
+    if (report == null) {
+      _unreported.add(problem);
+    } else {
+      report(problem);
+    }
+  }
 
   Future<void> _pending = Future.value();
 
@@ -120,35 +150,37 @@ class ShortcutController extends ValueNotifier<ShortcutSettings> {
     value = next;
     firstStart = false;
     return _pending = _pending.then((_) async {
-      try {
-        await _store?.save(next);
-      } on FileSystemException catch (error) {
-        problem.value = 'Could not save the shortcuts: ${error.message}';
+      var saved = next;
+      if (before.liquidKey != next.liquidKey &&
+          !await _apply(next.liquidKey) &&
+          next.liquidKey) {
+        // Without the Liquid key, its profile would hide every shortcut hint.
+        saved = before;
+        if (value == next) value = before;
       }
-      if (before.liquidKey != next.liquidKey) await _apply(next.liquidKey);
+      try {
+        await _store?.save(saved);
+      } on FileSystemException catch (error) {
+        _problem('Could not save the shortcuts: ${error.message}');
+      }
     });
   }
 
-  Future<void> _apply(bool on) async {
+  /// Whether the Liquid key is now on or off as asked.
+  Future<bool> _apply(bool on) async {
     final host = _host;
-    if (host == null || !host.available) return;
+    if (host == null || !host.available) return true;
     try {
       await host.apply(on);
+      return true;
     } on PlatformException catch (error) {
       _failed(on, error.message ?? error.code);
     } on MissingPluginException {
       _failed(on, 'this build has no Liquid key');
     }
+    return false;
   }
 
-  void _failed(bool on, String reason) {
-    problem.value =
-        'Could not turn the Liquid key ${on ? 'on' : 'off'}: $reason';
-  }
-
-  @override
-  void dispose() {
-    problem.dispose();
-    super.dispose();
-  }
+  void _failed(bool on, String reason) =>
+      _problem('Could not turn the Liquid key ${on ? 'on' : 'off'}: $reason');
 }

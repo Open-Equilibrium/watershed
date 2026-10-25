@@ -142,8 +142,40 @@ void main() {
     expect(find.text('⌘1'), findsNothing);
     await tester.sendKeyUpEvent(liquidKey, platform: 'macos');
     await hold(tester, LogicalKeyboardKey.metaLeft);
-    expect(find.text('⌘1'), findsOneWidget);
+    expect(find.text('⏎'), findsOneWidget, reason: '⌘ reveals the hints');
+    expect(
+      find.text('⌘1'),
+      findsNothing,
+      reason: 'the menu bar shows the app-wide keys',
+    );
     await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft, platform: 'macos');
+  });
+
+  testWidgets('⇪⏎ on an approval allows for the session, not once as well', (
+    tester,
+  ) async {
+    await show(tester, ShortcutSettings.liquidKey());
+    backend.controller.add(event(BridgeEventKind.turnStarted, turn: 1));
+    backend.controller.add(
+      event(
+        BridgeEventKind.requestOpened,
+        request: const BridgeRequest(
+          id: 'a1',
+          approval: BridgeApproval(
+            kind: BridgeRequestKind.commandExecution,
+            tool: 'bash',
+            arguments: '{"command":"git push"}',
+            readOnly: false,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await liquid(tester, LogicalKeyboardKey.enter);
+    expect(backend.calls.where((call) => call.startsWith('decide')), [
+      'decide a1 allowSession',
+    ]);
   });
 
   testWidgets('the Trajectory keys in the status bar follow the shortcuts', (

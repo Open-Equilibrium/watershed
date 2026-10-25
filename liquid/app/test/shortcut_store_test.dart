@@ -110,12 +110,49 @@ void main() {
     expect(host.calls, [true]);
   });
 
-  test('a host that cannot turn the Liquid key on is reported', () async {
+  test('a Liquid key that cannot be turned on is reported and leaves the profile as it was', () async {
     final host = FakeHost()
-      ..failure = PlatformException(code: 'register', message: 'denied');
-    final shortcuts = await ShortcutController.load(ShortcutStore(file), host);
+      ..failure = PlatformException(code: 'approval', message: 'denied');
+    final store = ShortcutStore(file);
+    final shortcuts = await ShortcutController.load(store, host);
+    final reported = <String>[];
+    shortcuts.report = reported.add;
 
     await shortcuts.update(ShortcutSettings.liquidKey());
-    expect(shortcuts.problem.value, contains('denied'));
+    await shortcuts.update(ShortcutSettings.liquidKey());
+    expect(shortcuts.value, ShortcutSettings.standard());
+    expect(await store.load(), ShortcutSettings.standard());
+    expect(reported, [
+      'Could not turn the Liquid key on: denied',
+      'Could not turn the Liquid key on: denied',
+    ], reason: 'every failure is reported');
+  });
+
+  test('a problem at start is reported once someone listens', () async {
+    final store = ShortcutStore(file);
+    await store.save(ShortcutSettings.liquidKey());
+    final host = FakeHost()
+      ..failure = PlatformException(code: 'approval', message: 'denied');
+
+    final shortcuts = await ShortcutController.load(store, host);
+    await pumpEventQueue();
+    final reported = <String>[];
+    shortcuts.report = reported.add;
+    expect(reported, ['Could not turn the Liquid key on: denied']);
+  });
+
+  test('the Liquid key needs macOS 13 for its login item', () {
+    expect(
+      liquidKeySupported(TargetPlatform.macOS, 'Version 27.0 (Build 26A428)'),
+      isTrue,
+    );
+    expect(
+      liquidKeySupported(
+        TargetPlatform.macOS,
+        'Version 12.7.6 (Build 21H1320)',
+      ),
+      isFalse,
+    );
+    expect(liquidKeySupported(TargetPlatform.linux, '6.8.0'), isFalse);
   });
 }

@@ -771,7 +771,6 @@ class _QuestionCardState extends State<QuestionCard> {
                 decoration: InputDecoration.collapsed(
                   hintText: question.detail,
                 ),
-                onSubmitted: (text) => state.answerText(text),
               ),
             ),
           ),

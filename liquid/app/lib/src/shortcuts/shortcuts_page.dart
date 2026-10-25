@@ -124,12 +124,16 @@ class _ShortcutsPageState extends State<ShortcutsPage> {
   Keys? _pressed;
   Command? _conflict;
 
+  /// Why the keys pressed cannot be taken.
+  String? _refused;
+
   ShortcutController get _shortcuts => widget.shortcuts;
 
   @override
   void initState() {
     super.initState();
     _search.addListener(() => setState(() {}));
+    _keys.addListener(_focusChanged);
     // The shell keeps the focus otherwise, and esc would not reach the page.
     WidgetsBinding.instance.addPostFrameCallback((_) => _keys.requestFocus());
   }
@@ -146,6 +150,7 @@ class _ShortcutsPageState extends State<ShortcutsPage> {
       _recording = command;
       _pressed = null;
       _conflict = null;
+      _refused = null;
     });
     _keys.requestFocus();
   }
@@ -154,7 +159,15 @@ class _ShortcutsPageState extends State<ShortcutsPage> {
     _recording = null;
     _pressed = null;
     _conflict = null;
+    _refused = null;
   });
+
+  /// Leaving the recording row stops recording, unless the focus went on to "Use anyway".
+  void _focusChanged() {
+    if (_recording != null && !_keys.hasPrimaryFocus && _conflict == null) {
+      _stop();
+    }
+  }
 
   void _change(Command command, Keys keys, {Command? clear}) {
     _shortcuts.update(_shortcuts.value.change(command, keys, clear: clear));
@@ -178,10 +191,13 @@ class _ShortcutsPageState extends State<ShortcutsPage> {
   /// Tab still moves the focus, so "Use anyway" can be reached from the keyboard.
   static final _navigation = {LogicalKeyboardKey.tab};
 
-  /// While recording, every key goes to the recorder, so no shortcut runs meanwhile.
+  /// While the recording row has the focus, its keys go to the recorder, so no shortcut runs
+  /// meanwhile; keys for the search field or a link pass.
   KeyEventResult _onKey(FocusNode node, KeyEvent event) {
     final command = _recording;
-    if (command == null || _navigation.contains(event.logicalKey)) {
+    if (command == null ||
+        !node.hasPrimaryFocus ||
+        _navigation.contains(event.logicalKey)) {
       return KeyEventResult.ignored;
     }
     if (event is! KeyDownEvent || _modifiers.contains(event.logicalKey)) {
@@ -192,13 +208,19 @@ class _ShortcutsPageState extends State<ShortcutsPage> {
       _stop();
       return KeyEventResult.handled;
     }
+    final use = reserved(command, keys);
     final conflict = _shortcuts.value.conflict(command, keys);
-    if (conflict == null) {
+    if (use == null && conflict == null) {
       _change(command, keys);
     } else {
       setState(() {
         _pressed = keys;
-        _conflict = conflict;
+        _conflict = use == null ? conflict : null;
+        _refused = switch (use) {
+          null => null,
+          'typing' => '${keys.label} is for typing here.',
+          _ => '${keys.label} is kept for $use.',
+        };
       });
     }
     return KeyEventResult.handled;
@@ -444,11 +466,11 @@ class _ShortcutsPageState extends State<ShortcutsPage> {
     ShortcutSettings settings,
     Command command,
   ) {
-    final ws = context.ws;
     final bindings = settings.bindings(command);
     if (_recording == command) {
       final pressed = _pressed;
       final conflict = _conflict;
+      final refused = _refused;
       return [
         _Row(
           label: command.label,
@@ -458,49 +480,34 @@ class _ShortcutsPageState extends State<ShortcutsPage> {
             _Link('Cancel', onTap: _stop),
           ],
         ),
+        if (refused != null)
+          _Notice(children: [Text(refused, style: _Notice.text(context))]),
         if (pressed != null && conflict != null)
-          Container(
-            margin: const EdgeInsets.symmetric(vertical: WsMetrics.space1),
-            padding: const EdgeInsets.symmetric(
-              horizontal: WsMetrics.space3,
-              vertical: WsMetrics.space2,
-            ),
-            decoration: BoxDecoration(
-              color: ws.warningSubtle,
-              borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
-            ),
-            child: Wrap(
-              spacing: WsMetrics.space3,
-              children: [
-                Text.rich(
-                  TextSpan(
-                    text: '${pressed.label} already runs ',
-                    children: [
-                      TextSpan(
-                        text: conflict.label,
-                        style: const TextStyle(
-                          fontWeight: WsMetrics.fwSemibold,
-                        ),
-                      ),
-                      const TextSpan(text: '.'),
-                    ],
-                  ),
-                  style: TextStyle(
-                    color: ws.warning,
-                    fontSize: WsMetrics.fsSmall,
-                  ),
+          _Notice(
+            children: [
+              Text.rich(
+                TextSpan(
+                  text: '${pressed.label} already runs ',
+                  children: [
+                    TextSpan(
+                      text: conflict.label,
+                      style: const TextStyle(fontWeight: WsMetrics.fwSemibold),
+                    ),
+                    const TextSpan(text: '.'),
+                  ],
                 ),
-                _Link(
-                  'Use anyway, clear ${conflict.label}',
-                  onTap: () => _change(command, pressed, clear: conflict),
-                ),
-              ],
-            ),
+                style: _Notice.text(context),
+              ),
+              _Link(
+                'Use anyway, clear ${conflict.label}',
+                onTap: () => _change(command, pressed, clear: conflict),
+              ),
+            ],
           ),
       ];
     }
     final changed = settings.changed(command);
-    final defaults = settings.choose(settings.base).label(command);
+    final defaults = settings.defaultLabel(command);
     return [
       _Row(
         label: command.label,
@@ -741,6 +748,30 @@ class _Kbd extends StatelessWidget {
       ),
     );
   }
+}
+
+/// A warning below the recording row (approved mockup).
+class _Notice extends StatelessWidget {
+  const _Notice({required this.children});
+
+  final List<Widget> children;
+
+  static TextStyle text(BuildContext context) =>
+      TextStyle(color: context.ws.warning, fontSize: WsMetrics.fsSmall);
+
+  @override
+  Widget build(BuildContext context) => Container(
+    margin: const EdgeInsets.symmetric(vertical: WsMetrics.space1),
+    padding: const EdgeInsets.symmetric(
+      horizontal: WsMetrics.space3,
+      vertical: WsMetrics.space2,
+    ),
+    decoration: BoxDecoration(
+      color: context.ws.warningSubtle,
+      borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
+    ),
+    child: Wrap(spacing: WsMetrics.space3, children: children),
+  );
 }
 
 class _Link extends StatelessWidget {

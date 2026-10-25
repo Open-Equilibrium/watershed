@@ -84,7 +84,8 @@ class _AgentShellState extends State<AgentShell> {
     unawaited(widget.state.loadStart());
     // A reopened Trajectory tab starts outside the comparison.
     _tab.addListener(() => _comparing.value = false);
-    _shortcuts.problem.addListener(_reportShortcuts);
+    _shortcuts.report = (problem) =>
+        widget.state.notify(BridgeLevel.error, problem);
     if (_shortcuts.firstStart) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _askProfile());
     }
@@ -93,11 +94,6 @@ class _AgentShellState extends State<AgentShell> {
   Future<void> _askProfile() async {
     final profile = await askProfile(context);
     await _shortcuts.update(_shortcuts.value.choose(profile));
-  }
-
-  void _reportShortcuts() {
-    final problem = _shortcuts.problem.value;
-    if (problem != null) widget.state.notify(BridgeLevel.error, problem);
   }
 
   /// Settings replace the main area; closing them gives the keys back to the shell.
@@ -127,7 +123,7 @@ class _AgentShellState extends State<AgentShell> {
     _comparing.dispose();
     _settings.dispose();
     _focus.dispose();
-    _shortcuts.problem.removeListener(_reportShortcuts);
+    _shortcuts.report = null;
     if (widget.shortcuts == null) _shortcuts.dispose();
     super.dispose();
   }
@@ -146,7 +142,7 @@ class _AgentShellState extends State<AgentShell> {
     PlatformMenuItem item(Command command, VoidCallback action) =>
         PlatformMenuItem(
           label: command.label,
-          shortcut: keys.menu(command)?.activator as MenuSerializableShortcut?,
+          shortcut: keys.menu(command)?.menuShortcut,
           onSelected: action,
         );
     PlatformMenuItem provided(PlatformProvidedMenuItemType type) =>
@@ -391,7 +387,12 @@ class _Tabs extends StatelessWidget {
                               : WsMetrics.fwRegular,
                         ),
                       ),
-                      if (shown && keys.label(entry.value).isNotEmpty)
+                      // Keys the menu bar shows stay out of the GUI (ADR-0204); the Liquid
+                      // key, which it cannot show, gets a hint (ADR-0205).
+                      if (shown &&
+                          keys.label(entry.value).isNotEmpty &&
+                          keys.label(entry.value) !=
+                              keys.menu(entry.value)?.label)
                         Positioned(
                           top: -11,
                           right: -14,
@@ -688,7 +689,7 @@ class _StatusBarState extends State<StatusBar> {
                 Text('${entry.key} ${entry.value}', style: text),
               ],
               const Spacer(),
-              // The view's keys show only while ⌘ is held (ADR-0204).
+              // The view's keys show only while the reveal key is held (ADR-0204).
               if (ShortcutReveal.shown(context))
                 Text(widget.keys, style: text.copyWith(color: ws.textFaint)),
             ],

@@ -139,6 +139,37 @@ void main() {
     expect(shortcuts.value, ShortcutSettings.standard());
   });
 
+  testWidgets('keys that macOS or typing need are refused', (tester) async {
+    await show(tester, ShortcutSettings.standard());
+    await openSettings(tester);
+
+    await tester.tap(find.text('⌘N'));
+    await tester.pumpAndSettle();
+    await press(
+      tester,
+      LogicalKeyboardKey.keyQ,
+      holding: LogicalKeyboardKey.metaLeft,
+    );
+    expect(find.text('⌘Q is kept for Quit.'), findsOneWidget);
+    expect(find.textContaining('Use anyway'), findsNothing);
+    await press(tester, LogicalKeyboardKey.keyN);
+    expect(find.text('N is for typing here.'), findsOneWidget);
+    expect(shortcuts.value.changed(Command.newSession), isFalse);
+  });
+
+  testWidgets('leaving the recording row stops recording', (tester) async {
+    await show(tester, ShortcutSettings.standard());
+    await openSettings(tester);
+
+    await tester.tap(find.text('⌘3'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(TextField));
+    await tester.pumpAndSettle();
+    expect(find.text('Press keys…'), findsNothing);
+    await press(tester, LogicalKeyboardKey.keyX);
+    expect(shortcuts.value.changed(Command.diff), isFalse);
+  });
+
   testWidgets('choosing a profile applies it at once', (tester) async {
     await show(tester, ShortcutSettings.liquidKey());
     await openSettings(tester);
