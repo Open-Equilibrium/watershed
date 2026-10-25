@@ -616,6 +616,57 @@ fn switches_sessions_and_models_through_pi() {
 }
 
 #[test]
+fn allowances_for_a_session_end_with_it() {
+    run(async {
+        let script = [
+            approval_request("a1", "bash", false),
+            expect_response(&[r#""id":"a1""#, r#""value":"allow-session""#]),
+            expect_response(&[r#""type":"switch_session""#, r#""id":"1""#]),
+            r#"printf '%s\n' '{"id":"1","type":"response","command":"switch_session","success":true,"data":{"cancelled":true}}'
+"#
+            .to_owned(),
+            // A cancelled switch keeps the session and its allowance.
+            approval_request("a2", "bash", false),
+            expect_response(&[r#""id":"a2""#, r#""value":"allow-auto""#]),
+            expect_response(&[r#""type":"new_session""#, r#""id":"2""#]),
+            r#"printf '%s\n' '{"id":"2","type":"response","command":"new_session","success":true,"data":{"cancelled":false}}'
+"#
+            .to_owned(),
+            approval_request("a3", "bash", false),
+            "IFS= read -r line || exit 0\n".to_owned(),
+        ]
+        .concat();
+        let (mut session, mut events) = fake_agent(&script);
+        let opened = |event: SessionEvent, id: &str| {
+            matches!(
+                event,
+                SessionEvent::Runtime(RuntimeEvent::RequestOpened { request, .. })
+                    if request == RequestId(id.to_owned())
+            )
+        };
+        assert!(opened(next(&mut events).await, "a1"));
+        assert_eq!(
+            session
+                .decide(&RequestId("a1".to_owned()), Decision::AllowSession)
+                .await,
+            Ok(())
+        );
+        let _resolved = next(&mut events).await;
+        let kept = session
+            .switch_session(std::path::Path::new("/tmp/other.jsonl"))
+            .await
+            .expect("sent");
+        assert_eq!(kept.switched().await, Ok(false));
+        let started = session.new_session().await.expect("sent");
+        assert_eq!(started.switched().await, Ok(true));
+        assert!(
+            opened(next(&mut events).await, "a3"),
+            "the new session asks again"
+        );
+    });
+}
+
+#[test]
 fn forgets_a_question_once_its_time_is_up() {
     run(async {
         // pi answers a dialog with a timeout itself once the time is up, without telling.

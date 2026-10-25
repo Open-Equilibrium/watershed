@@ -81,11 +81,25 @@ impl Pending {
     pub async fn accepted(self) -> Result<(), CommandError> {
         self.0.await.unwrap_or(Err(CommandError::Closed)).map(drop)
     }
+}
 
-    /// Waits until the agent answered a session switch; `false` when an extension cancelled it.
+/// A session switch the agent received but has not answered yet.
+#[derive(Debug)]
+pub struct SessionSwitch {
+    pending: Pending,
+    state: State,
+}
+
+impl SessionSwitch {
+    /// Waits until the agent answered; `false` when an extension cancelled the switch. Tools
+    /// allowed for the rest of a session need asking again in the next one.
     pub async fn switched(self) -> Result<bool, CommandError> {
-        let data = self.0.await.unwrap_or(Err(CommandError::Closed))?;
-        Ok(data.get("cancelled").and_then(Value::as_bool) != Some(true))
+        let data = self.pending.0.await.unwrap_or(Err(CommandError::Closed))?;
+        let switched = data.get("cancelled").and_then(Value::as_bool) != Some(true);
+        if switched {
+            self.state.lock().allowed.clear();
+        }
+        Ok(switched)
     }
 }
 
@@ -258,17 +272,27 @@ impl Session {
 
     /// Starts a new session in the same agent; the stored one stays available. Extensions may
     /// ask the user first or cancel it.
-    pub async fn new_session(&mut self) -> Result<Pending, CommandError> {
-        self.submit(json!({ "type": "new_session" })).await
+    pub async fn new_session(&mut self) -> Result<SessionSwitch, CommandError> {
+        let pending = self.submit(json!({ "type": "new_session" })).await?;
+        Ok(self.switch(pending))
     }
 
     /// Continues the session stored in `file`; extensions may ask the user first or cancel it.
-    pub async fn switch_session(&mut self, file: &Path) -> Result<Pending, CommandError> {
-        self.submit(json!({
-            "type": "switch_session",
-            "sessionPath": file.to_string_lossy(),
-        }))
-        .await
+    pub async fn switch_session(&mut self, file: &Path) -> Result<SessionSwitch, CommandError> {
+        let pending = self
+            .submit(json!({
+                "type": "switch_session",
+                "sessionPath": file.to_string_lossy(),
+            }))
+            .await?;
+        Ok(self.switch(pending))
+    }
+
+    fn switch(&self, pending: Pending) -> SessionSwitch {
+        SessionSwitch {
+            pending,
+            state: self.state.clone(),
+        }
     }
 
     /// The models the agent can use.

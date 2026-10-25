@@ -314,7 +314,7 @@ impl AgentSession {
 
     /// Waits for a session switch without holding the session; the diff of the previous
     /// session's run no longer applies after it.
-    async fn switched(&self, pending: meta_harness_core::Pending) -> Result<bool, String> {
+    async fn switched(&self, pending: meta_harness_core::SessionSwitch) -> Result<bool, String> {
         let switched = pending.switched().await.map_err(describe)?;
         if switched {
             *self.before_run.lock().await = None;
