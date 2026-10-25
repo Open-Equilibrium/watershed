@@ -28,28 +28,35 @@ class StartPage extends StatelessWidget {
       children: [
         const SizedBox(height: WsMetrics.space6),
         Text('New agent session', style: faint),
-        const Spacer(),
-        ValueListenableBuilder(
-          valueListenable: state.recent,
-          builder: (context, recent, _) => recent.isEmpty
-              ? const SizedBox.shrink()
-              : SizedBox(
-                  width: readingWidth,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: WsMetrics.space3,
-                          vertical: WsMetrics.space2,
+        // The list sits above the input area and scrolls when the window is short.
+        Expanded(
+          child: Align(
+            alignment: Alignment.bottomCenter,
+            child: ValueListenableBuilder(
+              valueListenable: state.recent,
+              builder: (context, recent, _) => recent.isEmpty
+                  ? const SizedBox.shrink()
+                  : SingleChildScrollView(
+                      child: SizedBox(
+                        width: readingWidth,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: WsMetrics.space3,
+                                vertical: WsMetrics.space2,
+                              ),
+                              child: Text('Recent in $project', style: faint),
+                            ),
+                            for (final session in recent)
+                              _RecentRow(session: session, state: state),
+                          ],
                         ),
-                        child: Text('Recent in $project', style: faint),
                       ),
-                      for (final session in recent)
-                        _RecentRow(session: session, state: state),
-                    ],
-                  ),
-                ),
+                    ),
+            ),
+          ),
         ),
         const SizedBox(height: WsMetrics.space4),
       ],

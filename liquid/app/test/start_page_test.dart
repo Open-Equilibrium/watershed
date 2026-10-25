@@ -21,8 +21,12 @@ void main() {
   late FakeBackend backend;
   late SessionState state;
 
-  Future<void> show(WidgetTester tester, {void Function()? setUp}) async {
-    await tester.binding.setSurfaceSize(const Size(1600, 900));
+  Future<void> show(
+    WidgetTester tester, {
+    void Function()? setUp,
+    Size size = const Size(1600, 900),
+  }) async {
+    await tester.binding.setSurfaceSize(size);
     backend = FakeBackend()
       ..modelList = const [
         BridgeModel(provider: 'faux', id: 'faux-1', name: 'Faux One'),
@@ -144,5 +148,37 @@ void main() {
     await tester.tap(find.text('Start'));
     await tester.pump();
     expect(backend.calls, contains('send Go'));
+  });
+
+  testWidgets('scrolls a full list of recent sessions in a small window', (
+    tester,
+  ) async {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    await show(
+      tester,
+      size: const Size(800, 500),
+      setUp: () => backend.storedSessions = [
+        for (var number = 1; number <= 8; number++)
+          BridgeStoredSession(
+            path: '/sessions/$number.jsonl',
+            title: 'Session $number',
+            modifiedMs: now,
+          ),
+      ],
+    );
+    expect(tester.takeException(), isNull, reason: 'nothing overflows');
+    await tester.scrollUntilVisible(
+      find.text('Session 8'),
+      40,
+      scrollable: find
+          .ancestor(
+            of: find.text('Session 1'),
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
+    await tester.tap(find.text('Session 8'));
+    await tester.pumpAndSettle();
+    expect(backend.calls, contains('switch /sessions/8.jsonl'));
   });
 }
