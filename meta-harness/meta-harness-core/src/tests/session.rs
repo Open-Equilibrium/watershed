@@ -214,6 +214,50 @@ fn reads_history_incrementally_and_rereads_when_the_cursor_is_gone() {
 }
 
 #[test]
+fn reads_the_history_anew_after_a_session_switch() {
+    run(async {
+        let entries = |id: u32, entries: &str| {
+            format!(
+                "printf '%s\\n' '{{\"id\":\"{id}\",\"type\":\"response\",\"command\":\"get_entries\",\"success\":true,\"data\":{{\"entries\":[{entries}],\"leafId\":\"e1\"}}}}'\n"
+            )
+        };
+        let e1 = r#"{"type":"message","id":"e1","parentId":null,"message":{"role":"user","content":"Hi"}}"#;
+        let script = [
+            no_session_file(1),
+            expect_response(&[r#""type":"get_entries""#, r#""id":"2""#]),
+            entries(2, e1),
+            expect_response(&[r#""type":"new_session""#, r#""id":"3""#]),
+            r#"printf '%s\n' '{"id":"3","type":"response","command":"new_session","success":true,"data":{"cancelled":false}}'
+"#
+            .to_owned(),
+            // The new session shares the entry id, yet its history is read whole again.
+            no_session_file(4),
+            expect_response(&[r#""type":"get_entries""#, r#""id":"5""#]),
+            "case \"$line\" in *'\"since\"'*) exit 9 ;; esac\n".to_owned(),
+            entries(5, e1),
+            "IFS= read -r line || exit 0\n".to_owned(),
+        ]
+        .concat();
+        let (mut session, _events) = fake_agent(&script);
+        assert_eq!(
+            session
+                .history()
+                .await
+                .map(|history| history.tree().nodes.len()),
+            Ok(1)
+        );
+        assert_eq!(accepted(session.new_session().await).await, Ok(()));
+        assert_eq!(
+            session
+                .history()
+                .await
+                .map(|history| history.tree().nodes.len()),
+            Ok(1)
+        );
+    });
+}
+
+#[test]
 fn reopens_a_session_larger_than_one_record_from_its_file() {
     run(async {
         // 2,000 entries of 9 KB: more than the 16 MiB record limit together, small each.

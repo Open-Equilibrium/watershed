@@ -143,6 +143,9 @@ struct Shared {
     running: bool,
     /// Commands that switch the session, awaiting their response.
     switches: HashSet<u64>,
+    /// Whether the agent switched sessions since the history was read; the next read starts
+    /// over, since sessions can share entry ids.
+    switched: bool,
     /// Whether an abort waits for the turn to settle; dialogs arriving meanwhile are rejected
     /// or dismissed, since the agent stops only once they are answered.
     stopping: bool,
@@ -366,6 +369,9 @@ impl Session {
     /// session; later reads ask the agent only for entries added since. When the agent no
     /// longer knows the last one, everything is read again.
     pub async fn history(&mut self) -> Result<History, CommandError> {
+        if std::mem::take(&mut self.state.lock().switched) {
+            self.history = History::default();
+        }
         if self.history.last_id().is_none() {
             self.read_stored().await?;
         }
@@ -831,7 +837,9 @@ impl Supervisor {
         // Before any later record is read: tools allowed for the rest of a session need asking
         // again once the agent switched to another one.
         if switch && result.as_ref().is_ok_and(switched) {
-            self.state.lock().allowed.clear();
+            let mut shared = self.state.lock();
+            shared.allowed.clear();
+            shared.switched = true;
         }
         let _ = reply.send(result);
     }
