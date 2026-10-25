@@ -8,3 +8,5 @@ trap 'rm -rf "$work"' EXIT
 cp "$here/MappingTests.swift" "$work/main.swift"
 xcrun swiftc -swift-version 5 -o "$work/checks" "$here/Mapping.swift" "$work/main.swift"
 "$work/checks"
+# The helper itself must compile too.
+xcrun swiftc -swift-version 5 -typecheck "$here/Mapping.swift" "$here/main.swift"

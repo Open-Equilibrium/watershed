@@ -304,6 +304,7 @@
 /* Begin PBXShellScriptBuildPhase section */
 		4C1A9E0B2EBC000000000001 /* Build the Liquid key helper */ = {
 			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
 			buildActionMask = 2147483647;
 			files = (
 			);
