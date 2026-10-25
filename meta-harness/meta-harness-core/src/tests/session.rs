@@ -628,6 +628,10 @@ fn allowances_for_a_session_end_with_it() {
             // A cancelled switch keeps the session and its allowance.
             approval_request("a2", "bash", false),
             expect_response(&[r#""id":"a2""#, r#""value":"allow-auto""#]),
+            // Tells the test the allowance was used before it starts a new session.
+            r#"printf '%s\n' '{"type":"queue_update","steering":[],"followUp":[]}'
+"#
+            .to_owned(),
             expect_response(&[r#""type":"new_session""#, r#""id":"2""#]),
             r#"printf '%s\n' '{"id":"2","type":"response","command":"new_session","success":true,"data":{"cancelled":false}}'
 "#
@@ -657,6 +661,10 @@ fn allowances_for_a_session_end_with_it() {
             .await
             .expect("sent");
         assert_eq!(kept.switched().await, Ok(false));
+        assert!(matches!(
+            next(&mut events).await,
+            SessionEvent::Runtime(RuntimeEvent::QueueChanged(_))
+        ));
         let started = session.new_session().await.expect("sent");
         assert_eq!(started.switched().await, Ok(true));
         assert!(

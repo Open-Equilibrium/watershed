@@ -83,24 +83,17 @@ impl Pending {
     }
 }
 
-/// A session switch the agent received but has not answered yet.
-#[derive(Debug)]
-pub struct SessionSwitch {
-    pending: Pending,
-    state: State,
+impl Pending {
+    /// Waits until the agent answered a session switch; `false` when an extension cancelled it.
+    pub async fn switched(self) -> Result<bool, CommandError> {
+        let data = self.0.await.unwrap_or(Err(CommandError::Closed))?;
+        Ok(switched(&data))
+    }
 }
 
-impl SessionSwitch {
-    /// Waits until the agent answered; `false` when an extension cancelled the switch. Tools
-    /// allowed for the rest of a session need asking again in the next one.
-    pub async fn switched(self) -> Result<bool, CommandError> {
-        let data = self.pending.0.await.unwrap_or(Err(CommandError::Closed))?;
-        let switched = data.get("cancelled").and_then(Value::as_bool) != Some(true);
-        if switched {
-            self.state.lock().allowed.clear();
-        }
-        Ok(switched)
-    }
+/// Whether a session switch's answer says it happened.
+fn switched(data: &Value) -> bool {
+    data.get("cancelled").and_then(Value::as_bool) != Some(true)
 }
 
 /// A model the agent can use.
@@ -146,6 +139,8 @@ struct Shared {
     questions: HashSet<RequestId>,
     /// Whether a turn is running, from the agent's events.
     running: bool,
+    /// Commands that switch the session, awaiting their response.
+    switches: HashSet<u64>,
     /// Whether an abort waits for the turn to settle; dialogs arriving meanwhile are rejected
     /// or dismissed, since the agent stops only once they are answered.
     stopping: bool,
@@ -272,27 +267,17 @@ impl Session {
 
     /// Starts a new session in the same agent; the stored one stays available. Extensions may
     /// ask the user first or cancel it.
-    pub async fn new_session(&mut self) -> Result<SessionSwitch, CommandError> {
-        let pending = self.submit(json!({ "type": "new_session" })).await?;
-        Ok(self.switch(pending))
+    pub async fn new_session(&mut self) -> Result<Pending, CommandError> {
+        self.submit_as(json!({ "type": "new_session" }), true).await
     }
 
     /// Continues the session stored in `file`; extensions may ask the user first or cancel it.
-    pub async fn switch_session(&mut self, file: &Path) -> Result<SessionSwitch, CommandError> {
-        let pending = self
-            .submit(json!({
-                "type": "switch_session",
-                "sessionPath": file.to_string_lossy(),
-            }))
-            .await?;
-        Ok(self.switch(pending))
-    }
-
-    fn switch(&self, pending: Pending) -> SessionSwitch {
-        SessionSwitch {
-            pending,
-            state: self.state.clone(),
-        }
+    pub async fn switch_session(&mut self, file: &Path) -> Result<Pending, CommandError> {
+        let command = json!({
+            "type": "switch_session",
+            "sessionPath": file.to_string_lossy(),
+        });
+        self.submit_as(command, true).await
     }
 
     /// The models the agent can use.
@@ -490,14 +475,29 @@ impl Session {
         response.await.unwrap_or(Err(CommandError::Closed))
     }
 
-    async fn submit(&mut self, mut command: Value) -> Result<Pending, CommandError> {
+    async fn submit(&mut self, command: Value) -> Result<Pending, CommandError> {
+        self.submit_as(command, false).await
+    }
+
+    /// Sends `command`; a `switch` of the session ends its allowances once the agent did it.
+    async fn submit_as(
+        &mut self,
+        mut command: Value,
+        switch: bool,
+    ) -> Result<Pending, CommandError> {
         self.next_id += 1;
         command["id"] = Value::String(self.next_id.to_string());
         let (reply, response) = oneshot::channel();
-        match self.state.lock().replies.as_mut() {
-            Some(replies) => replies.insert(self.next_id, reply),
-            None => return Err(CommandError::Closed),
-        };
+        {
+            let mut shared = self.state.lock();
+            let Some(replies) = shared.replies.as_mut() else {
+                return Err(CommandError::Closed);
+            };
+            replies.insert(self.next_id, reply);
+            if switch {
+                shared.switches.insert(self.next_id);
+            }
+        }
         self.writer
             .send(Write::Record(encode(&command)))
             .await
@@ -747,7 +747,17 @@ impl Supervisor {
             .get("id")
             .and_then(Value::as_str)
             .and_then(|id| id.parse::<u64>().ok());
-        let reply = id.and_then(|id| self.state.lock().replies.as_mut()?.remove(&id));
+        let Some(id) = id else {
+            return;
+        };
+        let (reply, switch) = {
+            let mut shared = self.state.lock();
+            let reply = shared
+                .replies
+                .as_mut()
+                .and_then(|replies| replies.remove(&id));
+            (reply, shared.switches.remove(&id))
+        };
         let Some(reply) = reply else {
             return;
         };
@@ -760,6 +770,11 @@ impl Supervisor {
                 .unwrap_or("command failed");
             Err(CommandError::Rejected(error.to_owned()))
         };
+        // Before any later record is read: tools allowed for the rest of a session need asking
+        // again once the agent switched to another one.
+        if switch && result.as_ref().is_ok_and(switched) {
+            self.state.lock().allowed.clear();
+        }
         let _ = reply.send(result);
     }
 
