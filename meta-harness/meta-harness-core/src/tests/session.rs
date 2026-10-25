@@ -757,6 +757,33 @@ IFS= read -r line || exit 0"#,
 }
 
 #[test]
+fn keeps_a_dialog_without_a_time_limit_open() {
+    run(async {
+        // pi installs no timer for a zero timeout and waits for the answer.
+        let script = [
+            r#"printf '%s\n' '{"type":"extension_ui_request","id":"q1","method":"confirm","title":"Sure?","message":"Really","timeout":0}'
+"#
+            .to_owned(),
+            expect_response(&[r#""id":"q1""#, r#""confirmed":true"#]),
+            "IFS= read -r line || exit 0\n".to_owned(),
+        ]
+        .concat();
+        let (mut session, mut events) = fake_agent(&script);
+        assert!(matches!(
+            next(&mut events).await,
+            SessionEvent::Runtime(RuntimeEvent::UserInputRequested { .. })
+        ));
+        let early = timeout(Duration::from_millis(300), events.recv()).await;
+        assert!(early.is_err(), "nothing expires: {early:?}");
+        let request = RequestId("q1".to_owned());
+        assert_eq!(
+            session.answer(&request, Answer::Confirmed(true)).await,
+            Ok(())
+        );
+    });
+}
+
+#[test]
 fn reports_nothing_after_the_agent_exited() {
     run(async {
         let (_session, mut events) = fake_agent(

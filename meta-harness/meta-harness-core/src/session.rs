@@ -698,6 +698,8 @@ impl Supervisor {
                     expiry = record
                         .get("timeout")
                         .and_then(Value::as_u64)
+                        // Like pi, which sets no timer for a zero timeout.
+                        .filter(|timeout| *timeout > 0)
                         .map(|timeout| (request.clone(), Duration::from_millis(timeout)));
                     true
                 }
