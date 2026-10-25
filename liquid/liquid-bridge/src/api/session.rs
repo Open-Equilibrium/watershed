@@ -347,11 +347,12 @@ impl AgentSession {
     /// Selects the model the next requests use.
     pub fn set_model(&self, provider: String, id: String) -> Result<(), String> {
         RUNTIME.block_on(async {
-            let mut session = self.session.lock().await;
-            open(&mut session)?
+            let pending = open(&mut *self.session.lock().await)?
                 .set_model(&provider, &id)
                 .await
-                .map_err(describe)
+                .map_err(describe)?;
+            // pi runs extensions' handlers first; the session stays free for their questions.
+            pending.accepted().await.map_err(describe)
         })
     }
 

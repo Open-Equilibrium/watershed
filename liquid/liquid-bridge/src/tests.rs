@@ -374,6 +374,46 @@ fn starts_and_resumes_sessions_and_picks_models() {
 }
 
 #[test]
+fn answers_a_question_the_agent_asks_while_selecting_a_model() {
+    // pi runs extensions' model selection handlers before it answers, and they may ask first.
+    let script = r#"IFS= read -r line
+case "$line" in *'"type":"set_model"'*) ;; *) exit 9 ;; esac
+printf '%s\n' '{"type":"extension_ui_request","id":"q1","method":"confirm","title":"Switch?","message":"Costs more"}'
+IFS= read -r line
+case "$line" in *'"id":"q1"'*) ;; *) exit 9 ;; esac
+printf '%s\n' '{"id":"1","type":"response","command":"set_model","success":true,"data":{}}'
+IFS= read -r line || exit 0"#;
+    let session = Arc::new(
+        AgentSession::start(SessionConfig {
+            program: "/bin/sh".to_owned(),
+            args: vec!["-c".to_owned(), script.to_owned()],
+            cwd: std::env::temp_dir().display().to_string(),
+        })
+        .expect("agent starts"),
+    );
+    let (sender, receiver) = mpsc::channel();
+    session
+        .forward(move |event| sender.send(event).is_ok())
+        .expect("first subscriber");
+    let selecting = {
+        let session = Arc::clone(&session);
+        std::thread::spawn(move || session.set_model("faux".to_owned(), "faux-2".to_owned()))
+    };
+    let asked = receiver
+        .recv_timeout(Duration::from_secs(10))
+        .expect("question arrives");
+    assert_eq!(asked.kind, BridgeEventKind::UserInputRequested);
+    let (answered, answer) = mpsc::channel();
+    {
+        let session = Arc::clone(&session);
+        std::thread::spawn(move || answered.send(session.answer_confirm("q1".to_owned(), true)));
+    }
+    assert_eq!(answer.recv_timeout(Duration::from_secs(10)), Ok(Ok(())));
+    assert_eq!(selecting.join().expect("selection returns"), Ok(()));
+    assert!(session.shutdown());
+}
+
+#[test]
 fn coalesces_consecutive_deltas_of_one_item() {
     let delta = |item: u64, text: &str| {
         bridge(RuntimeEvent::ContentDelta {

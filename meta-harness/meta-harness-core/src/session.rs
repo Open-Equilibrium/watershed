@@ -71,8 +71,10 @@ pub enum CommandError {
 type Reply = oneshot::Sender<Result<Value, CommandError>>;
 
 /// A command the agent received but has not answered yet. Waiting for it needs no access to the
-/// session, so the agent's questions can be answered meanwhile: pi accepts a prompt only after
-/// its command handlers ran, and they may ask the user first.
+/// session, so the agent's questions can be answered meanwhile. Commands whose answer waits for
+/// extension handlers, which may ask the user, or for the agent return one: prompts, abort,
+/// session switches and model selection. pi answers every other command at once, since it
+/// handles each input line on its own.
 #[derive(Debug)]
 pub struct Pending(oneshot::Receiver<Result<Value, CommandError>>);
 
@@ -301,11 +303,10 @@ impl Session {
             .collect())
     }
 
-    /// Selects the model the next requests use.
-    pub async fn set_model(&mut self, provider: &str, id: &str) -> Result<(), CommandError> {
-        self.command(json!({ "type": "set_model", "provider": provider, "modelId": id }))
+    /// Selects the model the next requests use; pi runs extensions' handlers first.
+    pub async fn set_model(&mut self, provider: &str, id: &str) -> Result<Pending, CommandError> {
+        self.submit(json!({ "type": "set_model", "provider": provider, "modelId": id }))
             .await
-            .map(drop)
     }
 
     /// Reads the session's file, id, model and streaming state.

@@ -611,7 +611,10 @@ fn switches_sessions_and_models_through_pi() {
             session.models().await,
             Ok(vec![model("faux-1", "Faux One"), model("faux-2", "faux-2")])
         );
-        assert_eq!(session.set_model("faux", "faux-2").await, Ok(()));
+        assert_eq!(
+            accepted(session.set_model("faux", "faux-2").await).await,
+            Ok(())
+        );
     });
 }
 
