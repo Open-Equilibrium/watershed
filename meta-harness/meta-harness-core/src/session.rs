@@ -1,699 +1,701 @@
-//! A running agent process behind the runtime event model.
+use std::future::Future;
+use std::time::Duration;
 
-use std::collections::{HashMap, HashSet};
-use std::ffi::OsString;
-use std::future::{Future, poll_fn};
-use std::path::PathBuf;
-use std::pin::{Pin, pin};
-use std::process::Stdio;
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
-use std::task::Poll;
-use std::time::{Duration, Instant};
+use tokio::sync::mpsc::Receiver;
+use tokio::time::timeout;
 
-use serde_json::{Map, Value, json};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::process::{Child, ChildStdin, ChildStdout, Command};
-use tokio::sync::{mpsc, oneshot};
-
-use crate::approval::{ApprovalMode, needs_user};
-use crate::pi::queue;
 use crate::{
-    Answer, Decision, Delivery, Frame, History, LineFramer, NotificationLevel, PiAdapter, Queue,
-    RequestId, RuntimeEvent,
+    AgentCommand, Answer, ApprovalMode, CommandError, Decision, Delivery, EntryKind, ItemDetail,
+    ItemId, ItemKind, ItemStatus, NotificationLevel, Pending, Queue, RecordKind, RequestId,
+    RequestKind, RuntimeEvent, Session, SessionEvent, SessionState, SessionTree, TreeNode, TurnId,
+    UserInput,
 };
 
-/// Largest record accepted from an agent; a larger one is skipped and fails its command.
-const MAX_RECORD_BYTES: usize = 16 * 1024 * 1024;
-/// Events buffered before the session stops reading agent output, which pauses the agent.
-const EVENT_BUFFER: usize = 256;
-/// Records buffered for the agent's input.
-const WRITE_BUFFER: usize = 64;
-const READ_BUFFER: usize = 64 * 1024;
+const WAIT: Duration = Duration::from_secs(10);
 
-/// How to start an agent process that speaks pi's RPC protocol.
-#[derive(Debug, Clone)]
-pub struct AgentCommand {
-    /// The executable.
-    pub program: PathBuf,
-    /// Its arguments.
-    pub args: Vec<OsString>,
-    /// Its working directory.
-    pub cwd: PathBuf,
+/// Starts a scripted stand-in for `pi --mode rpc`.
+fn fake_agent(script: &str) -> (Session, Receiver<SessionEvent>) {
+    let command = AgentCommand {
+        program: "/bin/sh".into(),
+        args: vec!["-c".into(), script.into()],
+        cwd: std::env::temp_dir(),
+    };
+    Session::start(&command).expect("fake agent starts")
 }
 
-/// Something that happened in a session.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SessionEvent {
-    /// A runtime event from the agent.
-    Runtime(RuntimeEvent),
-    /// The agent broke its protocol, so the session stopped it.
-    Failed(String),
-    /// The agent process exited; this is always the last event.
-    Exited {
-        /// Whether the process exited successfully.
-        success: bool,
-    },
+fn run<F: Future>(test: F) -> F::Output {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("test runtime starts")
+        .block_on(test)
 }
 
-/// Error returned for a command the agent did not accept.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum CommandError {
-    /// The agent rejected the command.
-    Rejected(String),
-    /// The request is not open, for example because it was already answered.
-    UnknownRequest,
-    /// The agent process is gone.
-    Closed,
-    /// The agent's response exceeded the record limit and was skipped.
-    TooLarge,
+/// Waits until the agent accepted a command that was sent.
+async fn accepted(sent: Result<Pending, CommandError>) -> Result<(), CommandError> {
+    sent?.accepted().await
 }
 
-type Reply = oneshot::Sender<Result<Value, CommandError>>;
-
-/// A command the agent received but has not answered yet. Waiting for it needs no access to the
-/// session, so the agent's questions can be answered meanwhile: pi accepts a prompt only after
-/// its command handlers ran, and they may ask the user first.
-#[derive(Debug)]
-pub struct Pending(oneshot::Receiver<Result<Value, CommandError>>);
-
-impl Pending {
-    /// Waits until the agent accepted or rejected the command.
-    pub async fn accepted(self) -> Result<(), CommandError> {
-        self.0.await.unwrap_or(Err(CommandError::Closed)).map(drop)
-    }
-}
-
-/// What the agent reports about its session.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SessionState {
-    /// The session file, unless the session is in memory only.
-    pub session_file: Option<PathBuf>,
-    /// The agent's session id.
-    pub session_id: String,
-    /// The selected model as `provider/id`.
-    pub model: Option<String>,
-    /// Whether a turn is streaming.
-    pub streaming: bool,
-}
-
-enum Write {
-    Record(Vec<u8>),
-    Close,
-}
-
-/// State shared between the session handle and its supervisor.
-#[derive(Debug, Default)]
-struct Shared {
-    /// Commands awaiting their response; `None` once the agent is gone.
-    replies: Option<HashMap<u64, Reply>>,
-    mode: ApprovalMode,
-    /// Tools the user allowed for the rest of the session.
-    allowed: HashSet<String>,
-    /// Open approval requests and the tool each one would call.
-    approvals: HashMap<RequestId, String>,
-    /// Open questions from agent extensions.
-    questions: HashSet<RequestId>,
-    /// Whether a turn is running, from the agent's events.
-    running: bool,
-    /// Whether an abort waits for the turn to settle; dialogs arriving meanwhile are rejected
-    /// or dismissed, since the agent stops only once they are answered.
-    stopping: bool,
-}
-
-#[derive(Debug, Clone)]
-struct State(Arc<Mutex<Shared>>);
-
-impl State {
-    fn lock(&self) -> MutexGuard<'_, Shared> {
-        self.0.lock().unwrap_or_else(PoisonError::into_inner)
-    }
-}
-
-/// A running agent process; dropping it kills the process.
-#[derive(Debug)]
-pub struct Session {
-    writer: mpsc::Sender<Write>,
-    events: mpsc::Sender<SessionEvent>,
-    state: State,
-    next_id: u64,
-    kill: Option<oneshot::Sender<()>>,
-    exited: oneshot::Receiver<bool>,
-    /// The stored entries read so far; later reads continue after the last one.
-    history: History,
-}
-
-impl Session {
-    /// Starts the agent and returns the session with its event stream.
-    pub fn start(command: &AgentCommand) -> std::io::Result<(Self, mpsc::Receiver<SessionEvent>)> {
-        let mut child = Command::new(&command.program)
-            .args(&command.args)
-            .current_dir(&command.cwd)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .kill_on_drop(true)
-            .spawn()?;
-        let stdout = child.stdout.take().expect("stdout is piped");
-        let stdin = child.stdin.take().expect("stdin is piped");
-        let (writer, writes) = mpsc::channel(WRITE_BUFFER);
-        let (events, receiver) = mpsc::channel(EVENT_BUFFER);
-        let (kill, killed) = oneshot::channel();
-        let (exit, exited) = oneshot::channel();
-        let state = State(Arc::new(Mutex::new(Shared {
-            replies: Some(HashMap::new()),
-            ..Shared::default()
-        })));
-        tokio::spawn(write(stdin, writes));
-        let supervisor = Supervisor {
-            events: events.clone(),
-            writer: writer.clone(),
-            state: state.clone(),
-            adapter: PiAdapter::new(),
-            started: Instant::now(),
-            killed,
-            kill_requested: false,
-        };
-        tokio::spawn(supervisor.run(child, stdout, exit));
-        let session = Self {
-            writer,
-            events,
-            state,
-            next_id: 0,
-            kill: Some(kill),
-            exited,
-            history: History::default(),
-        };
-        Ok((session, receiver))
-    }
-
-    /// Sends a prompt that starts a turn.
-    pub async fn prompt(&mut self, message: &str) -> Result<Pending, CommandError> {
-        self.submit(json!({ "type": "prompt", "message": message }))
-            .await
-    }
-
-    /// Sends a message the agent starts with when idle and takes as `delivery` says while
-    /// running; pi decides which applies, so no turn state can race the send.
-    pub async fn send(
-        &mut self,
-        message: &str,
-        delivery: Delivery,
-    ) -> Result<Pending, CommandError> {
-        let behavior = match delivery {
-            Delivery::Steer => "steer",
-            Delivery::FollowUp => "followUp",
-        };
-        self.submit(json!({
-            "type": "prompt",
-            "message": message,
-            "streamingBehavior": behavior,
-        }))
+async fn next(events: &mut Receiver<SessionEvent>) -> SessionEvent {
+    timeout(WAIT, events.recv())
         .await
-    }
+        .expect("event arrives in time")
+        .expect("session reports an exit before closing its events")
+}
 
-    /// Removes the waiting messages and returns them, so the user can edit and send them again.
-    pub async fn clear_queue(&mut self) -> Result<Queue, CommandError> {
-        let data = self.command(json!({ "type": "clear_queue" })).await?;
-        Ok(queue(&data))
-    }
+#[test]
+fn prompts_the_agent_and_streams_its_turn() {
+    run(async {
+        let (mut session, mut events) = fake_agent(
+            r#"IFS= read -r line
+case "$line" in *'"type":"prompt"'*) ;; *) exit 9 ;; esac
+case "$line" in *'"message":"Say hi"'*) ;; *) exit 9 ;; esac
+printf '%s\n' '{"id":"1","type":"response","command":"prompt","success":true,"data":{"disposition":"started"}}'
+printf '%s\n' '{"type":"agent_start"}' '{"type":"message_end","message":{"role":"user","content":"Say hi"}}' '{"type":"agent_settled","aborted":false}'
+IFS= read -r line || exit 0"#,
+        );
+        assert_eq!(accepted(session.prompt("Say hi").await).await, Ok(()));
+        let turn = TurnId(1);
+        let (item, kind) = (ItemId(1), ItemKind::UserMessage);
+        for expected in [
+            RuntimeEvent::TurnStarted { turn },
+            RuntimeEvent::ItemStarted {
+                turn,
+                item,
+                kind,
+                detail: ItemDetail::None,
+            },
+            RuntimeEvent::ItemCompleted {
+                turn,
+                item,
+                kind,
+                text: "Say hi".to_owned(),
+                status: ItemStatus::Completed,
+                duration_ms: None,
+            },
+            RuntimeEvent::TurnCompleted { turn },
+        ] {
+            assert_eq!(next(&mut events).await, SessionEvent::Runtime(expected));
+        }
+        assert!(
+            timeout(WAIT, session.shutdown(WAIT))
+                .await
+                .expect("agent exits")
+        );
+        assert_eq!(
+            next(&mut events).await,
+            SessionEvent::Exited { success: true }
+        );
+    });
+}
 
-    /// Aborts the running turn. pi answers once the agent is idle, which needs its open dialogs
-    /// answered, so open approvals are rejected and open questions dismissed.
-    pub async fn abort(&mut self) -> Result<Pending, CommandError> {
-        self.state.lock().stopping = true;
-        let pending = self.submit(json!({ "type": "abort" })).await?;
-        let (approvals, questions): (Vec<_>, Vec<_>) = {
-            let shared = self.state.lock();
-            (
-                shared.approvals.keys().cloned().collect(),
-                shared.questions.iter().cloned().collect(),
+#[test]
+fn reports_rejected_commands_and_crashes() {
+    run(async {
+        let (mut session, mut events) = fake_agent(
+            r#"IFS= read -r line
+printf '%s\n' '{"id":"1","type":"response","command":"prompt","success":false,"error":"Agent is busy"}'
+exit 3"#,
+        );
+        assert_eq!(
+            accepted(session.prompt("Say hi").await).await,
+            Err(CommandError::Rejected("Agent is busy".to_owned()))
+        );
+        assert_eq!(
+            next(&mut events).await,
+            SessionEvent::Exited { success: false }
+        );
+        assert_eq!(
+            accepted(session.abort().await).await,
+            Err(CommandError::Closed)
+        );
+    });
+}
+
+#[test]
+fn stops_an_agent_that_breaks_the_protocol() {
+    run(async {
+        let (_session, mut events) = fake_agent(
+            r#"printf '%s\n' 'not json'
+while :; do sleep 1; done"#,
+        );
+        assert_eq!(
+            next(&mut events).await,
+            SessionEvent::Failed("agent wrote a record that is not a JSON object".to_owned())
+        );
+        assert_eq!(
+            next(&mut events).await,
+            SessionEvent::Exited { success: false }
+        );
+    });
+}
+
+#[test]
+fn shutdown_kills_an_agent_that_ignores_it() {
+    run(async {
+        let (session, _events) = fake_agent(r#"trap '' TERM; while :; do sleep 1; done"#);
+        let stopped = timeout(WAIT, session.shutdown(Duration::from_millis(100))).await;
+        assert_eq!(stopped, Ok(false));
+    });
+}
+
+#[test]
+fn shutdown_ends_an_agent_whose_events_nobody_reads() {
+    run(async {
+        // Fills the 256-event buffer, then breaks the protocol while nobody reads.
+        let (session, _events) = fake_agent(
+            r#"i=0
+while [ $i -lt 256 ]; do printf '%s\n' '{"type":"queue_update","steering":[],"followUp":[]}'; i=$((i+1)); done
+printf '%s\n' 'not json'
+trap '' TERM; while :; do sleep 1; done"#,
+        );
+        let stopped = timeout(WAIT, session.shutdown(Duration::from_millis(100))).await;
+        assert_eq!(stopped, Ok(false));
+    });
+}
+
+#[test]
+fn reads_history_incrementally_and_rereads_when_the_cursor_is_gone() {
+    run(async {
+        let entry = |id: &str, parent: &str| {
+            format!(
+                r#"{{"type":"message","id":"{id}","parentId":{parent},"message":{{"role":"user","content":"{id}"}}}}"#
             )
         };
-        // One the user answered meanwhile is already resolved.
-        for request in approvals {
-            let _ = self.decide(&request, Decision::Reject).await;
-        }
-        for request in questions {
-            let _ = self.answer(&request, Answer::Cancelled).await;
-        }
-        Ok(pending)
-    }
-
-    /// Reads the session's file, id, model and streaming state.
-    pub async fn state(&mut self) -> Result<SessionState, CommandError> {
-        let data = self.command(json!({ "type": "get_state" })).await?;
-        let text = |field| data.get(field).and_then(Value::as_str);
-        let model = data.get("model").and_then(|model| {
-            Some(format!(
-                "{}/{}",
-                model.get("provider")?.as_str()?,
-                model.get("id")?.as_str()?
-            ))
-        });
-        Ok(SessionState {
-            session_file: text("sessionFile").map(PathBuf::from),
-            session_id: text("sessionId").unwrap_or_default().to_owned(),
-            model,
-            streaming: data.get("isStreaming").and_then(Value::as_bool) == Some(true),
-        })
-    }
-
-    /// Reads the session's stored entries, including abandoned branches. The first read takes
-    /// them from pi's session file line by line, so no single answer has to hold the whole
-    /// session; later reads ask the agent only for entries added since. When the agent no
-    /// longer knows the last one, everything is read again.
-    pub async fn history(&mut self) -> Result<History, CommandError> {
-        if self.history.last_id().is_none() {
-            self.read_stored().await?;
-        }
-        match self.read_newer().await {
-            // The agent no longer knows the last entry read, or what it added since does not fit
-            // one answer: the session file holds them.
-            Err(CommandError::Rejected(_) | CommandError::TooLarge)
-                if self.history.last_id().is_some() =>
-            {
-                self.history = History::default();
-                self.read_stored().await?;
-                self.read_newer().await?;
-            }
-            result => result?,
-        }
-        Ok(self.history.clone())
-    }
-
-    /// Reads the entries pi stored in its session file; without a file yet, the agent's answer
-    /// holds them all.
-    async fn read_stored(&mut self) -> Result<(), CommandError> {
-        let Some(file) = self.state().await?.session_file else {
-            return Ok(());
+        let respond = |id: u32, entries: String, leaf: &str| {
+            format!(
+                "printf '%s\\n' '{{\"id\":\"{id}\",\"type\":\"response\",\"command\":\"get_entries\",\"success\":true,\"data\":{{\"entries\":[{entries}],\"leafId\":\"{leaf}\"}}}}'\n"
+            )
         };
-        let stored =
-            tokio::task::spawn_blocking(move || History::from_file(&file, MAX_RECORD_BYTES)).await;
-        if let Ok(Ok(stored)) = stored {
-            self.history = stored;
+        let without_cursor = "case \"$line\" in *'\"since\"'*) exit 9 ;; esac\n";
+        let script = [
+            no_session_file(1),
+            expect_response(&[r#""type":"get_entries""#, r#""id":"2""#]),
+            without_cursor.to_owned(),
+            respond(2, entry("e1", "null"), "e1"),
+            expect_response(&[r#""id":"3""#, r#""since":"e1""#]),
+            respond(3, entry("e2", r#""e1""#), "e2"),
+            expect_response(&[r#""id":"4""#, r#""since":"e2""#]),
+            r#"printf '%s\n' '{"id":"4","type":"response","command":"get_entries","success":false,"error":"unknown entry"}'
+"#
+            .to_owned(),
+            no_session_file(5),
+            expect_response(&[r#""type":"get_entries""#, r#""id":"6""#]),
+            without_cursor.to_owned(),
+            respond(6, entry("x1", "null"), "x1"),
+        ]
+        .concat();
+        let (mut session, _events) = fake_agent(&script);
+        let mut ids = Vec::new();
+        for _ in 0..3 {
+            let history = session.history().await.expect("history");
+            let tree = history.tree();
+            ids.push((
+                tree.nodes
+                    .into_iter()
+                    .map(|node| node.id)
+                    .collect::<Vec<_>>(),
+                tree.leaf,
+            ));
         }
-        Ok(())
-    }
-
-    /// Asks the agent for the entries after the last one read and for its current leaf.
-    async fn read_newer(&mut self) -> Result<(), CommandError> {
-        let mut request = json!({ "type": "get_entries" });
-        if let Some(since) = self.history.last_id() {
-            request["since"] = json!(since);
-        }
-        let data = self.command(request).await?;
-        self.history.append(&data);
-        Ok(())
-    }
-
-    /// Continues the session from `entry`, optionally labelling it; the next prompt starts a
-    /// new branch there. Requires Watershed's pi extension.
-    pub async fn branch(
-        &mut self,
-        entry: &str,
-        label: Option<&str>,
-    ) -> Result<Pending, CommandError> {
-        let message = match label {
-            Some(label) => format!("/watershed-branch {entry} {label}"),
-            None => format!("/watershed-branch {entry}"),
-        };
-        self.prompt(&message).await
-    }
-
-    /// Whether the agent is running a turn, as its latest events say.
-    pub fn running(&self) -> bool {
-        self.state.lock().running
-    }
-
-    /// Changes which tool calls need the user's approval.
-    pub fn set_approval_mode(&self, mode: ApprovalMode) {
-        self.state.lock().mode = mode;
-    }
-
-    /// Answers an open approval request.
-    pub async fn decide(
-        &mut self,
-        request: &RequestId,
-        decision: Decision,
-    ) -> Result<(), CommandError> {
-        {
-            let mut shared = self.state.lock();
-            let tool = shared
-                .approvals
-                .remove(request)
-                .ok_or(CommandError::UnknownRequest)?;
-            if decision == Decision::AllowSession {
-                shared.allowed.insert(tool);
-            }
-        }
-        let value = match decision {
-            Decision::AllowOnce => "allow-once",
-            Decision::AllowSession => "allow-session",
-            Decision::Reject => "reject",
-        };
-        self.respond(request, json!({ "value": value })).await?;
-        let resolved = RuntimeEvent::RequestResolved {
-            request: request.clone(),
-            decision,
-        };
-        let _ = self.events.send(SessionEvent::Runtime(resolved)).await;
-        Ok(())
-    }
-
-    /// Answers an open question from an agent extension.
-    pub async fn answer(
-        &mut self,
-        request: &RequestId,
-        answer: Answer,
-    ) -> Result<(), CommandError> {
-        if !self.state.lock().questions.remove(request) {
-            return Err(CommandError::UnknownRequest);
-        }
-        let reply = match answer {
-            Answer::Value(value) => json!({ "value": value }),
-            Answer::Confirmed(confirmed) => json!({ "confirmed": confirmed }),
-            Answer::Cancelled => json!({ "cancelled": true }),
-        };
-        self.respond(request, reply).await?;
-        let resolved = RuntimeEvent::UserInputResolved {
-            request: request.clone(),
-        };
-        let _ = self.events.send(SessionEvent::Runtime(resolved)).await;
-        Ok(())
-    }
-
-    /// Asks the agent to exit and kills it after `grace`; returns whether it exited successfully.
-    pub async fn shutdown(mut self, grace: Duration) -> bool {
-        let mut exited = self.exited;
-        // The grace period includes waiting to close the input, which an agent that stopped
-        // reading never allows.
-        let writer = self.writer.clone();
-        let closed = async {
-            let _ = writer.send(Write::Close).await;
-            (&mut exited).await
-        };
-        if let Ok(success) = tokio::time::timeout(grace, closed).await {
-            return success.unwrap_or(false);
-        }
-        if let Some(kill) = self.kill.take() {
-            let _ = kill.send(());
-        }
-        exited.await.unwrap_or(false)
-    }
-
-    async fn command(&mut self, command: Value) -> Result<Value, CommandError> {
-        let Pending(response) = self.submit(command).await?;
-        response.await.unwrap_or(Err(CommandError::Closed))
-    }
-
-    async fn submit(&mut self, mut command: Value) -> Result<Pending, CommandError> {
-        self.next_id += 1;
-        command["id"] = Value::String(self.next_id.to_string());
-        let (reply, response) = oneshot::channel();
-        match self.state.lock().replies.as_mut() {
-            Some(replies) => replies.insert(self.next_id, reply),
-            None => return Err(CommandError::Closed),
-        };
-        self.writer
-            .send(Write::Record(encode(&command)))
-            .await
-            .map_err(|_| CommandError::Closed)?;
-        Ok(Pending(response))
-    }
-
-    async fn respond(&self, request: &RequestId, answer: Value) -> Result<(), CommandError> {
-        self.writer
-            .send(ui_response(request, answer))
-            .await
-            .map_err(|_| CommandError::Closed)
-    }
+        assert_eq!(
+            ids,
+            [
+                (vec!["e1".to_owned()], Some("e1".to_owned())),
+                (
+                    vec!["e1".to_owned(), "e2".to_owned()],
+                    Some("e2".to_owned())
+                ),
+                (vec!["x1".to_owned()], Some("x1".to_owned())),
+            ],
+            "only new entries are read; an unknown cursor reads everything again"
+        );
+    });
 }
 
-/// The answer to an agent dialog.
-fn ui_response(request: &RequestId, mut answer: Value) -> Write {
-    answer["type"] = json!("extension_ui_response");
-    answer["id"] = json!(request.0);
-    Write::Record(encode(&answer))
-}
-
-/// Encodes one JSONL record.
-fn encode(value: &Value) -> Vec<u8> {
-    let mut line = value.to_string().into_bytes();
-    line.push(b'\n');
-    line
-}
-
-/// Writes records to the agent until asked to close its input or the agent stops reading.
-async fn write(mut stdin: ChildStdin, mut writes: mpsc::Receiver<Write>) {
-    while let Some(Write::Record(line)) = writes.recv().await {
-        if stdin.write_all(&line).await.is_err() || stdin.flush().await.is_err() {
-            break;
+#[test]
+fn reopens_a_session_larger_than_one_record_from_its_file() {
+    run(async {
+        // 2,000 entries of 9 KB: more than the 16 MiB record limit together, small each.
+        let file =
+            std::env::temp_dir().join(format!("watershed-large-{}.jsonl", std::process::id()));
+        let text = "x".repeat(9000);
+        let mut stored = String::from(
+            r#"{"type":"session","version":3,"id":"s1","timestamp":"2026-10-25T10:00:00.000Z","cwd":"/tmp"}"#,
+        );
+        stored.push('\n');
+        let mut parent = "null".to_owned();
+        for number in 0..2000 {
+            stored.push_str(&format!(
+                r#"{{"type":"message","id":"e{number}","parentId":{parent},"message":{{"role":"user","content":"{text}"}}}}"#
+            ));
+            stored.push('\n');
+            parent = format!(r#""e{number}""#);
         }
-    }
-}
-
-/// Reads the agent's output until it exits, fails or is killed, then reports the exit.
-struct Supervisor {
-    events: mpsc::Sender<SessionEvent>,
-    writer: mpsc::Sender<Write>,
-    state: State,
-    adapter: PiAdapter,
-    /// The session's monotonic clock for request timing.
-    started: Instant,
-    killed: oneshot::Receiver<()>,
-    /// Set once `killed` completed; it must not be polled again.
-    kill_requested: bool,
-}
-
-impl Supervisor {
-    async fn run(mut self, mut child: Child, mut stdout: ChildStdout, exit: oneshot::Sender<bool>) {
-        let mut framer = LineFramer::new(MAX_RECORD_BYTES);
-        let mut buffer = vec![0; READ_BUFFER];
-        let failure = 'read: loop {
-            let Some(read) = self.unless_killed(stdout.read(&mut buffer)).await else {
-                break None;
-            };
-            let frames = match read {
-                Ok(0) | Err(_) => break None,
-                Ok(length) => framer.push(&buffer[..length]),
-            };
-            for frame in frames {
-                let record = match frame {
-                    Frame::Record(record) => record,
-                    Frame::Oversized { start } => {
-                        if !self.skip(&start).await {
-                            break 'read None;
-                        }
-                        continue;
-                    }
-                };
-                let Ok(Value::Object(record)) = serde_json::from_slice::<Value>(&record) else {
-                    break 'read Some("agent wrote a record that is not a JSON object".to_owned());
-                };
-                if !self.handle(record).await {
-                    break 'read None;
-                }
-            }
-        };
-        self.state.lock().replies = None;
-        let stop = failure.is_some() || self.kill_requested;
-        if let Some(reason) = failure {
-            // A full event buffer must not keep a kill from ending the agent.
-            let events = self.events.clone();
-            let _ = self
-                .unless_killed(events.send(SessionEvent::Failed(reason)))
-                .await;
-        }
-        // An agent that closed its output may still run; a kill request ends the wait.
-        let status = if stop {
-            None
-        } else {
-            self.unless_killed(child.wait()).await
-        };
-        let status = match status {
-            Some(status) => status,
-            None => {
-                let _ = child.start_kill();
-                child.wait().await
-            }
-        };
-        let success = status.is_ok_and(|status| status.success());
-        // Shutdown learns of the exit first; the event waits for buffer space.
-        let _ = exit.send(success);
-        let _ = self.events.send(SessionEvent::Exited { success }).await;
-    }
-
-    /// Routes one record; returns `false` once the session was killed.
-    async fn handle(&mut self, record: Map<String, Value>) -> bool {
-        if record.get("type").and_then(Value::as_str) == Some("response") {
-            self.answer_command(record);
-            return true;
-        }
-        for event in self.adapter.translate(&record, self.started.elapsed()) {
-            let mut expiry = None;
-            let forward = match &event {
-                RuntimeEvent::RequestOpened {
-                    request,
-                    kind,
-                    tool,
-                    read_only,
-                    ..
-                } => {
-                    let answer = {
-                        let mut shared = self.state.lock();
-                        let allowed = shared.allowed.contains(tool);
-                        if shared.stopping {
-                            Some(json!({ "value": "reject" }))
-                        } else if needs_user(shared.mode, *kind, *read_only, allowed) {
-                            shared.approvals.insert(request.clone(), tool.clone());
-                            None
-                        } else {
-                            Some(json!({ "value": "allow-auto" }))
-                        }
-                    };
-                    match answer {
-                        Some(answer) => {
-                            self.reply(request, answer).await;
-                            false
-                        }
-                        None => true,
-                    }
-                }
-                RuntimeEvent::UserInputRequested { request, .. } => {
-                    let stopping = {
-                        let mut shared = self.state.lock();
-                        if !shared.stopping {
-                            shared.questions.insert(request.clone());
-                        }
-                        shared.stopping
-                    };
-                    if stopping {
-                        self.reply(request, json!({ "cancelled": true })).await;
-                        continue;
-                    }
-                    expiry = record
-                        .get("timeout")
-                        .and_then(Value::as_u64)
-                        .map(|timeout| (request.clone(), Duration::from_millis(timeout)));
-                    true
-                }
-                RuntimeEvent::TurnStarted { .. } => {
-                    let mut shared = self.state.lock();
-                    shared.running = true;
-                    shared.stopping = false;
-                    true
-                }
-                RuntimeEvent::TurnCompleted { .. } | RuntimeEvent::TurnAborted { .. } => {
-                    let mut shared = self.state.lock();
-                    shared.running = false;
-                    shared.stopping = false;
-                    true
-                }
-                _ => true,
-            };
-            if forward {
-                let events = self.events.clone();
-                if self
-                    .unless_killed(events.send(SessionEvent::Runtime(event)))
-                    .await
-                    .is_none()
-                {
-                    return false;
-                }
-            }
-            if let Some((request, timeout)) = expiry {
-                self.expire(request, timeout);
-            }
-        }
-        true
-    }
-
-    /// Answers an agent dialog without the user.
-    async fn reply(&self, request: &RequestId, answer: Value) {
-        let _ = self.writer.send(ui_response(request, answer)).await;
-    }
-
-    /// Forgets a question once its time is up: pi then answers it itself without telling.
-    fn expire(&self, request: RequestId, timeout: Duration) {
-        let (state, events) = (self.state.clone(), self.events.clone());
-        tokio::spawn(async move {
-            tokio::time::sleep(timeout).await;
-            if state.lock().questions.remove(&request) {
-                let resolved = RuntimeEvent::UserInputResolved { request };
-                let _ = events.send(SessionEvent::Runtime(resolved)).await;
-            }
-        });
-    }
-
-    /// Fails the command an oversized response answers, or reports a skipped event; returns
-    /// `false` once the session was killed.
-    async fn skip(&mut self, start: &[u8]) -> bool {
-        let start = String::from_utf8_lossy(start);
-        if start.contains(r#""type":"response""#)
-            && let Some(id) = start
-                .split_once(r#""id":""#)
-                .and_then(|(_, rest)| rest.split_once('"'))
-                .and_then(|(id, _)| id.parse::<u64>().ok())
-            && let Some(reply) = self
-                .state
-                .lock()
-                .replies
-                .as_mut()
-                .and_then(|replies| replies.remove(&id))
-        {
-            let _ = reply.send(Err(CommandError::TooLarge));
-            return true;
-        }
-        let skipped = RuntimeEvent::Notification {
-            level: NotificationLevel::Warning,
-            message: format!(
-                "Skipped an agent record larger than {} MiB",
-                MAX_RECORD_BYTES / (1024 * 1024)
+        // pi is still writing the next entry; its answer holds it whole.
+        stored.push_str(r#"{"type":"message","id":"e2000","parentId":"e19"#);
+        std::fs::write(&file, stored).expect("session file");
+        let script = [
+            expect_response(&[r#""type":"get_state""#, r#""id":"1""#]),
+            format!(
+                "printf '%s\\n' '{{\"id\":\"1\",\"type\":\"response\",\"command\":\"get_state\",\"success\":true,\"data\":{{\"sessionId\":\"s1\",\"isStreaming\":false,\"sessionFile\":\"{}\"}}}}'\n",
+                file.display()
             ),
-        };
-        let events = self.events.clone();
-        self.unless_killed(events.send(SessionEvent::Runtime(skipped)))
-            .await
-            .is_some()
-    }
+            expect_response(&[r#""type":"get_entries""#, r#""id":"2""#, r#""since":"e1999""#]),
+            r#"printf '%s\n' '{"id":"2","type":"response","command":"get_entries","success":true,"data":{"entries":[{"type":"message","id":"e2000","parentId":"e1999","message":{"role":"user","content":"last"}}],"leafId":"e2000"}}'
+"#
+            .to_owned(),
+        ]
+        .concat();
+        let (mut session, _events) = fake_agent(&script);
+        let history = session.history().await;
+        let _ = std::fs::remove_file(&file);
+        let tree = history.expect("history").tree();
+        assert_eq!(
+            (tree.nodes.len(), tree.leaf.as_deref()),
+            (2001, Some("e2000")),
+            "every stored entry once, and the one pi was still writing"
+        );
+    });
+}
 
-    /// Resolves the command a response answers, moving its data rather than copying it.
-    fn answer_command(&self, mut response: Map<String, Value>) {
-        let id = response
-            .get("id")
-            .and_then(Value::as_str)
-            .and_then(|id| id.parse::<u64>().ok());
-        let reply = id.and_then(|id| self.state.lock().replies.as_mut()?.remove(&id));
-        let Some(reply) = reply else {
-            return;
+#[test]
+fn rereads_the_session_file_when_new_entries_exceed_one_record() {
+    run(async {
+        let file =
+            std::env::temp_dir().join(format!("watershed-grown-{}.jsonl", std::process::id()));
+        let header = r#"{"type":"session","version":3,"id":"s1","cwd":"/tmp"}"#;
+        let entry = |id: &str, parent: &str| {
+            format!(
+                r#"{{"type":"message","id":"{id}","parentId":{parent},"message":{{"role":"user","content":"{id}"}}}}"#
+            )
         };
-        let result = if response.get("success").and_then(Value::as_bool) == Some(true) {
-            Ok(response.remove("data").unwrap_or(Value::Null))
-        } else {
-            let error = response
-                .get("error")
-                .and_then(Value::as_str)
-                .unwrap_or("command failed");
-            Err(CommandError::Rejected(error.to_owned()))
+        std::fs::write(&file, format!("{header}\n{}\n", entry("e1", "null"))).expect("file");
+        let huge = "head -c 17000000 /dev/zero | tr '\\0' a\n";
+        let state = |id: u32| {
+            format!(
+                "printf '%s\\n' '{{\"id\":\"{id}\",\"type\":\"response\",\"command\":\"get_state\",\"success\":true,\"data\":{{\"sessionId\":\"s1\",\"isStreaming\":false,\"sessionFile\":\"{}\"}}}}'\n",
+                file.display()
+            )
         };
-        let _ = reply.send(result);
-    }
+        let script = [
+            expect_response(&[r#""type":"get_state""#, r#""id":"1""#]),
+            state(1),
+            expect_response(&[r#""id":"2""#, r#""since":"e1""#]),
+            r#"printf '%s\n' '{"id":"2","type":"response","command":"get_entries","success":true,"data":{"entries":[],"leafId":"e1"}}'
+"#
+            .to_owned(),
+            // A long run added more than one record holds before the next read.
+            expect_response(&[r#""id":"3""#, r#""since":"e1""#]),
+            format!(
+                r#"printf '%s' '{{"id":"3","type":"response","command":"get_entries","success":true,"data":"'
+{huge}printf '"}}\n'
+"#
+            ),
+            expect_response(&[r#""type":"get_state""#, r#""id":"4""#]),
+            state(4),
+            expect_response(&[r#""id":"5""#, r#""since":"e2""#]),
+            r#"printf '%s\n' '{"id":"5","type":"response","command":"get_entries","success":true,"data":{"entries":[],"leafId":"e2"}}'
+"#
+            .to_owned(),
+        ]
+        .concat();
+        let (mut session, _events) = fake_agent(&script);
+        assert_eq!(
+            session
+                .history()
+                .await
+                .map(|history| history.tree().nodes.len()),
+            Ok(1)
+        );
+        std::fs::write(
+            &file,
+            format!(
+                "{header}\n{}\n{}\n",
+                entry("e1", "null"),
+                entry("e2", r#""e1""#)
+            ),
+        )
+        .expect("file grows");
+        let grown = session.history().await;
+        let _ = std::fs::remove_file(&file);
+        let tree = grown.expect("history").tree();
+        assert_eq!((tree.nodes.len(), tree.leaf.as_deref()), (2, Some("e2")));
+    });
+}
 
-    /// Runs `work` unless a kill is requested first; then returns `None`.
-    async fn unless_killed<F: Future>(&mut self, work: F) -> Option<F::Output> {
-        if self.kill_requested {
-            return None;
-        }
-        let mut work = pin!(work);
-        let killed = &mut self.killed;
-        let outcome = poll_fn(|context| {
-            if let Poll::Ready(output) = work.as_mut().poll(context) {
-                return Poll::Ready(Some(output));
+#[test]
+fn shutdown_ends_an_agent_that_stopped_reading() {
+    run(async {
+        let (mut session, _events) = fake_agent("trap '' TERM; while :; do sleep 1; done");
+        // Fills the pipe and the queue of records waiting to be written.
+        let message = "x".repeat(100_000);
+        for _ in 0..200 {
+            let sent = timeout(
+                Duration::from_millis(200),
+                session.send(&message, Delivery::Steer),
+            )
+            .await;
+            if sent.is_err() {
+                break;
             }
-            Pin::new(&mut *killed).poll(context).map(|_| None)
-        })
-        .await;
-        self.kill_requested = outcome.is_none();
-        outcome
+        }
+        let stopped = timeout(WAIT, session.shutdown(Duration::from_millis(100))).await;
+        assert_eq!(stopped, Ok(false));
+    });
+}
+
+#[test]
+fn skips_an_oversized_record_and_keeps_the_session() {
+    run(async {
+        // More than the 16 MiB record limit, without holding it in the script.
+        let huge = "head -c 17000000 /dev/zero | tr '\\0' a\n";
+        let script = [
+            format!(
+                r#"printf '%s' '{{"type":"message_update","assistantMessageEvent":{{"type":"text_delta","delta":"'
+{huge}printf '"}}}}\n'
+"#
+            ),
+            no_session_file(1),
+            expect_response(&[r#""type":"get_entries""#, r#""id":"2""#]),
+            format!(
+                r#"printf '%s' '{{"id":"2","type":"response","command":"get_entries","success":true,"data":"'
+{huge}printf '"}}\n'
+"#
+            ),
+            expect_response(&[r#""type":"get_state""#, r#""id":"3""#]),
+            r#"printf '%s\n' '{"id":"3","type":"response","command":"get_state","success":true,"data":{"sessionId":"abc","isStreaming":false}}'
+"#
+            .to_owned(),
+        ]
+        .concat();
+        let (mut session, mut events) = fake_agent(&script);
+        let skipped = next(&mut events).await;
+        assert!(
+            matches!(
+                &skipped,
+                SessionEvent::Runtime(RuntimeEvent::Notification {
+                    level: NotificationLevel::Warning,
+                    message,
+                }) if message.starts_with("Skipped an agent record")
+            ),
+            "{skipped:?}"
+        );
+        assert_eq!(
+            session.history().await.map(drop),
+            Err(CommandError::TooLarge)
+        );
+        assert_eq!(
+            session.state().await.map(|state| state.session_id),
+            Ok("abc".to_owned())
+        );
+    });
+}
+
+#[test]
+fn delivers_messages_as_pi_decides_and_clears_the_queue() {
+    run(async {
+        let script = [
+            expect_response(&[
+                r#""type":"prompt""#,
+                r#""message":"Use Redis""#,
+                r#""streamingBehavior":"steer""#,
+            ]),
+            r#"printf '%s\n' '{"id":"1","type":"response","command":"prompt","success":true,"data":{"disposition":"queued"}}'
+"#
+            .to_owned(),
+            expect_response(&[r#""message":"Also docs""#, r#""streamingBehavior":"followUp""#]),
+            r#"printf '%s\n' '{"id":"2","type":"response","command":"prompt","success":true,"data":{"disposition":"queued"}}'
+printf '%s\n' '{"type":"agent_start"}'
+printf '%s\n' '{"type":"queue_update","steering":["Use Redis"],"followUp":["Also docs"]}'
+"#
+            .to_owned(),
+            expect_response(&[r#""type":"clear_queue""#, r#""id":"3""#]),
+            r#"printf '%s\n' '{"id":"3","type":"response","command":"clear_queue","success":true,"data":{"steering":["Use Redis"],"followUp":["Also docs"]}}'
+IFS= read -r line || exit 0
+"#
+            .to_owned(),
+        ]
+        .concat();
+        let (mut session, mut events) = fake_agent(&script);
+        let queue = Queue {
+            steering: vec!["Use Redis".to_owned()],
+            follow_up: vec!["Also docs".to_owned()],
+        };
+        assert!(!session.running());
+        assert_eq!(
+            accepted(session.send("Use Redis", Delivery::Steer).await).await,
+            Ok(())
+        );
+        assert_eq!(
+            accepted(session.send("Also docs", Delivery::FollowUp).await).await,
+            Ok(())
+        );
+        assert!(matches!(
+            next(&mut events).await,
+            SessionEvent::Runtime(RuntimeEvent::TurnStarted { .. })
+        ));
+        assert!(session.running(), "a started turn makes the session run");
+        assert_eq!(
+            next(&mut events).await,
+            SessionEvent::Runtime(RuntimeEvent::QueueChanged(queue.clone()))
+        );
+        assert_eq!(session.clear_queue().await, Ok(queue));
+    });
+}
+
+/// Shell lines that read one response and fail unless it contains every given fragment.
+fn expect_response(fragments: &[&str]) -> String {
+    let mut script = String::from("IFS= read -r line\n");
+    for fragment in fragments {
+        script.push_str(&format!(
+            "case \"$line\" in *'{fragment}'*) ;; *) exit 9 ;; esac\n"
+        ));
     }
+    script
+}
+
+/// Answers the `get_state` that starts a first history read, for a session pi keeps in memory.
+fn no_session_file(id: u32) -> String {
+    format!(
+        "{}printf '%s\\n' '{{\"id\":\"{id}\",\"type\":\"response\",\"command\":\"get_state\",\"success\":true,\"data\":{{\"sessionId\":\"s\",\"isStreaming\":false}}}}'\n",
+        expect_response(&[r#""type":"get_state""#, &format!(r#""id":"{id}""#)])
+    )
+}
+
+fn approval_request(id: &str, tool: &str, read_only: bool) -> String {
+    let payload = format!(r#"{{\"tool\":\"{tool}\",\"arguments\":{{}},\"readOnly\":{read_only}}}"#);
+    format!(
+        "printf '%s\\n' '{{\"type\":\"extension_ui_request\",\"id\":\"{id}\",\"method\":\"select\",\"title\":\"watershed.approval {payload}\",\"options\":[]}}'\n"
+    )
+}
+
+#[test]
+fn answers_extension_questions() {
+    run(async {
+        let script = [
+            r#"printf '%s\n' '{"type":"extension_ui_request","id":"q1","method":"select","title":"Pick","options":["A","B"]}'
+"#
+            .to_owned(),
+            expect_response(&[r#""type":"extension_ui_response""#, r#""id":"q1""#, r#""value":"B""#]),
+            r#"printf '%s\n' '{"type":"extension_ui_request","id":"q2","method":"confirm","title":"Sure?","message":"Really"}'
+"#
+            .to_owned(),
+            expect_response(&[r#""id":"q2""#, r#""confirmed":true"#]),
+            r#"printf '%s\n' '{"type":"extension_ui_request","id":"q3","method":"input","title":"Name","placeholder":""}'
+"#
+            .to_owned(),
+            expect_response(&[r#""id":"q3""#, r#""cancelled":true"#]),
+        ]
+        .concat();
+        let (mut session, mut events) = fake_agent(&script);
+        let questions = [
+            ("q1", Answer::Value("B".to_owned())),
+            ("q2", Answer::Confirmed(true)),
+            ("q3", Answer::Cancelled),
+        ];
+        for (id, answer) in questions {
+            let request = RequestId(id.to_owned());
+            let SessionEvent::Runtime(RuntimeEvent::UserInputRequested {
+                request: asked,
+                input,
+            }) = next(&mut events).await
+            else {
+                panic!("question {id} arrives");
+            };
+            assert_eq!(asked, request);
+            if id == "q1" {
+                assert_eq!(
+                    input,
+                    UserInput::Select {
+                        title: "Pick".to_owned(),
+                        options: vec!["A".to_owned(), "B".to_owned()],
+                    }
+                );
+            }
+            assert_eq!(session.answer(&request, answer).await, Ok(()));
+            assert_eq!(
+                next(&mut events).await,
+                SessionEvent::Runtime(RuntimeEvent::UserInputResolved { request })
+            );
+        }
+        assert_eq!(
+            next(&mut events).await,
+            SessionEvent::Exited { success: true }
+        );
+    });
+}
+
+#[test]
+fn stopping_rejects_an_approval_that_arrives_late() {
+    run(async {
+        // The agent asked before the abort reached it; the request only arrives afterwards.
+        let script = [
+            expect_response(&[r#""type":"abort""#]),
+            approval_request("a1", "bash", false),
+            expect_response(&[r#""id":"a1""#, r#""value":"reject""#]),
+            r#"printf '%s\n' '{"id":"1","type":"response","command":"abort","success":true}' '{"type":"agent_start"}'
+"#
+            .to_owned(),
+            approval_request("a2", "bash", false),
+            "IFS= read -r line || exit 0\n".to_owned(),
+        ]
+        .concat();
+        let (mut session, mut events) = fake_agent(&script);
+        let stopping = session.abort().await.expect("abort sent");
+        assert_eq!(timeout(WAIT, stopping.accepted()).await, Ok(Ok(())));
+        assert!(matches!(
+            next(&mut events).await,
+            SessionEvent::Runtime(RuntimeEvent::TurnStarted { .. })
+        ));
+        assert!(
+            matches!(
+                next(&mut events).await,
+                SessionEvent::Runtime(RuntimeEvent::RequestOpened { request, .. })
+                    if request == RequestId("a2".to_owned())
+            ),
+            "the next turn asks again"
+        );
+    });
+}
+
+#[test]
+fn forgets_a_question_once_its_time_is_up() {
+    run(async {
+        // pi answers a dialog with a timeout itself once the time is up, without telling.
+        let (mut session, mut events) = fake_agent(
+            r#"printf '%s\n' '{"type":"extension_ui_request","id":"q1","method":"confirm","title":"Sure?","message":"Really","timeout":50}'
+IFS= read -r line || exit 0"#,
+        );
+        let request = RequestId("q1".to_owned());
+        assert!(matches!(
+            next(&mut events).await,
+            SessionEvent::Runtime(RuntimeEvent::UserInputRequested { .. })
+        ));
+        assert_eq!(
+            next(&mut events).await,
+            SessionEvent::Runtime(RuntimeEvent::UserInputResolved {
+                request: request.clone()
+            })
+        );
+        assert_eq!(
+            session.answer(&request, Answer::Confirmed(true)).await,
+            Err(CommandError::UnknownRequest)
+        );
+    });
+}
+
+#[test]
+fn asks_only_for_calls_the_approval_mode_does_not_allow() {
+    run(async {
+        let script = [
+            approval_request("a1", "bash", false),
+            expect_response(&[r#""id":"a1""#, r#""value":"allow-session""#]),
+            approval_request("a2", "bash", false),
+            expect_response(&[r#""id":"a2""#, r#""value":"allow-auto""#]),
+            approval_request("a3", "read", true),
+            expect_response(&[r#""id":"a3""#, r#""value":"allow-auto""#]),
+            approval_request("a4", "write", false),
+            expect_response(&[r#""id":"a4""#, r#""value":"allow-auto""#]),
+            approval_request("a5", "grep", false),
+            expect_response(&[r#""id":"a5""#, r#""value":"reject""#]),
+        ]
+        .concat();
+        let (mut session, mut events) = fake_agent(&script);
+        session.set_approval_mode(ApprovalMode::AllowEdits);
+        for (id, kind, tool, decision) in [
+            (
+                "a1",
+                RequestKind::CommandExecutionApproval,
+                "bash",
+                Decision::AllowSession,
+            ),
+            ("a5", RequestKind::ToolApproval, "grep", Decision::Reject),
+        ] {
+            let request = RequestId(id.to_owned());
+            assert_eq!(
+                next(&mut events).await,
+                SessionEvent::Runtime(RuntimeEvent::RequestOpened {
+                    request: request.clone(),
+                    kind,
+                    tool: tool.to_owned(),
+                    arguments: "{}".to_owned(),
+                    read_only: false,
+                })
+            );
+            assert_eq!(session.decide(&request, decision).await, Ok(()));
+            assert_eq!(
+                next(&mut events).await,
+                SessionEvent::Runtime(RuntimeEvent::RequestResolved { request, decision })
+            );
+        }
+        assert_eq!(
+            next(&mut events).await,
+            SessionEvent::Exited { success: true }
+        );
+        let unknown = RequestId("a1".to_owned());
+        assert_eq!(
+            session.decide(&unknown, Decision::AllowOnce).await,
+            Err(CommandError::UnknownRequest)
+        );
+    });
+}
+
+#[test]
+fn reads_state_and_tree_and_branches_through_the_extension() {
+    run(async {
+        let script = [
+            expect_response(&[r#""type":"get_state""#, r#""id":"1""#]),
+            r#"printf '%s\n' '{"id":"1","type":"response","command":"get_state","success":true,"data":{"model":{"id":"faux-1","provider":"faux"},"isStreaming":false,"sessionFile":"/tmp/s.jsonl","sessionId":"abc"}}'
+"#
+            .to_owned(),
+            no_session_file(2),
+            expect_response(&[r#""type":"get_entries""#, r#""id":"3""#]),
+            r#"printf '%s\n' '{"id":"3","type":"response","command":"get_entries","success":true,"data":{"entries":[{"type":"message","id":"e1","parentId":null,"message":{"role":"user","content":"hi"}}],"leafId":"e1"}}'
+"#
+            .to_owned(),
+            expect_response(&[r#""type":"prompt""#, r#""id":"4""#, r#""message":"/watershed-branch e1 B""#]),
+            r#"printf '%s\n' '{"id":"4","type":"response","command":"prompt","success":true,"data":{"disposition":"handled"}}'
+"#
+            .to_owned(),
+        ]
+        .concat();
+        let (mut session, _events) = fake_agent(&script);
+        assert_eq!(
+            session.state().await,
+            Ok(SessionState {
+                session_file: Some("/tmp/s.jsonl".into()),
+                session_id: "abc".to_owned(),
+                model: Some("faux/faux-1".to_owned()),
+                streaming: false,
+            })
+        );
+        let history = session.history().await.expect("history");
+        assert_eq!(
+            history.tree(),
+            SessionTree {
+                nodes: vec![TreeNode {
+                    id: "e1".to_owned(),
+                    parent: None,
+                    kind: EntryKind::User,
+                    preview: "hi".to_owned(),
+                    label: None,
+                    at_ms: None,
+                }],
+                leaf: Some("e1".to_owned()),
+            }
+        );
+        let records = history.trajectory(None).records;
+        assert_eq!(
+            records
+                .iter()
+                .map(|record| (record.kind, record.label.as_str()))
+                .collect::<Vec<_>>(),
+            [(RecordKind::User, "hi")]
+        );
+        assert_eq!(
+            accepted(session.branch("e1", Some("B")).await).await,
+            Ok(())
+        );
+    });
 }
