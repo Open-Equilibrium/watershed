@@ -512,6 +512,11 @@ class SessionState {
       case BridgeEventKind.failed:
         failure.value = event.text;
       case BridgeEventKind.exited:
+        // A gone agent asks nothing more; its open cards cannot be answered.
+        _approvals.clear();
+        _questions.clear();
+        approval.value = null;
+        question.value = null;
         status.value = event.success == true && failure.value == null
             ? RunStatus.exited
             : RunStatus.failed;

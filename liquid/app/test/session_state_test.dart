@@ -402,6 +402,29 @@ void main() {
     expect(backend.calls.last, 'send Hi');
   });
 
+  test('retires open cards when the agent exits', () async {
+    await emit(
+      event(
+        BridgeEventKind.requestOpened,
+        request: BridgeRequest(
+          id: 'a1',
+          approval: BridgeApproval(
+            kind: BridgeRequestKind.commandExecution,
+            tool: 'bash',
+            arguments: '{}',
+            readOnly: false,
+          ),
+        ),
+      ),
+    );
+    expect(state.approval.value?.id, 'a1');
+    await emit(event(BridgeEventKind.exited, success: false));
+    expect(
+      (state.approval.value, state.question.value, state.status.value),
+      (null, null, RunStatus.failed),
+    );
+  });
+
   test('pages past entries that show nothing in the chat', () async {
     backend.transcripts[''] = const BridgeTranscript(
       items: [],
