@@ -25,6 +25,7 @@ let shiftedID = EventHotKeyID(signature: 0x4C51_4B59, id: 2)
 var plain: EventHotKeyRef?
 var shifted: EventHotKeyRef?
 var pressedAt: TimeInterval?
+var lastPress: TimeInterval = 0
 var shiftedDown = false
 /// Whether this user's session is in front; the remapping holds for every user's keyboards.
 var sessionActive = true
@@ -99,9 +100,18 @@ InstallEventHandler(
         let now = ProcessInfo.processInfo.systemUptime
         // A held key may repeat its press; only the first one counts.
         switch (id.id, pressed) {
-        case (plainID.id, true): pressedAt = pressedAt ?? now
+        case (plainID.id, true):
+            pressedAt = pressedAt ?? now
+            lastPress = now
         case (plainID.id, false):
-            if let at = pressedAt, isTap(pressed: at, released: now) { openLiquid() }
+            // The time since any key went down tells whether another one did after this one.
+            let lastKeyDown =
+                now - CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .keyDown)
+            if let at = pressedAt,
+                isTap(pressed: at, released: now, lastPress: lastPress, lastKeyDown: lastKeyDown)
+            {
+                openLiquid()
+            }
             pressedAt = nil
         case (shiftedID.id, true):
             if !shiftedDown { toggleCapsLock() }

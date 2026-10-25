@@ -38,7 +38,13 @@ enum Mapping {
     }
 }
 
-/// A press and release of the Liquid key short enough to open Liquid, not a hold.
-func isTap(pressed: TimeInterval, released: TimeInterval) -> Bool {
-    released - pressed < 0.6
+/// A press and release of the Liquid key short enough to open Liquid, with no other key
+/// pressed meanwhile. `lastPress` is the key's latest press, its own repeats included;
+/// `lastKeyDown` is the latest key press of any key, which macOS reports without permission.
+func isTap(
+    pressed: TimeInterval, released: TimeInterval, lastPress: TimeInterval,
+    lastKeyDown: TimeInterval
+) -> Bool {
+    // The Liquid key's own press lands a moment after the hotkey reports it.
+    released - pressed < 0.6 && lastKeyDown - lastPress < 0.05
 }

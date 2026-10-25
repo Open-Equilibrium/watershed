@@ -45,8 +45,17 @@ check(pairs(Mapping.merged([], on: true)).count == 1, "turning it on adds the Li
 check(
     pairs(Mapping.merged(Mapping.merged([], on: true), on: true)).count == 1,
     "turning it on again keeps one mapping")
-check(isTap(pressed: 10, released: 10.3), "a short press is a tap")
-check(!isTap(pressed: 10, released: 10.75), "a hold is no tap")
+check(
+    isTap(pressed: 10, released: 10.3, lastPress: 10, lastKeyDown: 10.001),
+    "a short press is a tap")
+check(
+    !isTap(pressed: 10, released: 10.75, lastPress: 10, lastKeyDown: 10.001), "a hold is no tap")
+check(
+    !isTap(pressed: 10, released: 10.3, lastPress: 10, lastKeyDown: 10.15),
+    "another key pressed meanwhile makes it no tap")
+check(
+    isTap(pressed: 10, released: 10.55, lastPress: 10.5, lastKeyDown: 10.501),
+    "the key's own repeat is no other key")
 
 if failures > 0 { exit(1) }
 print("Liquid key helper checks passed")
