@@ -141,6 +141,8 @@ Execution ownership is host-local. A Meta-Harness agent executor may control onl
 
 Approvals (ADR-0188) let a user confirm an agent's tool calls before they run. They are a control, not a protection boundary: the agent, its extensions and every approved call run with the user's operating-system permissions, and pi has no sandbox.
 
+The diff view's snapshots run the host's `git` in the project with hooks, file monitors and textconv off. Other Git settings of the project, such as clean filters, still run: an agent allowed to edit files without asking can set them and so make Liquid run a command without an approval. The Allow edits mode says so (ADR-0206).
+
 ## Liquid workspace access & external-agent edits
 
 Liquid is a standalone workspace product that external agents and tools can read and edit through its workspace CLI/API. That access is permissioned and auditable:
