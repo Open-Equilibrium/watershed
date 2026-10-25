@@ -83,3 +83,21 @@ fn rebuilds_the_chat_of_the_current_branch_page_by_page() {
     );
     assert_eq!(history.transcript(Some("t1"), 2).items.len(), 3);
 }
+
+#[test]
+fn shows_a_call_that_never_finished_as_failed() {
+    let data: Value = serde_json::from_str(
+        r#"{"entries":[
+          {"type":"message","id":"u1","parentId":null,"message":{"role":"user","content":"Deploy"}},
+          {"type":"message","id":"a1","parentId":"u1","message":{"role":"assistant","content":[{"type":"toolCall","id":"c1","name":"bash","arguments":{"command":"./deploy.sh"}}]}}
+        ],"leafId":"a1"}"#,
+    )
+    .expect("JSON");
+    let items = History::from_entries(&data).transcript(None, 10).items;
+    let call = items.last().expect("the call");
+    assert_eq!(
+        (call.tool.as_deref(), call.failed, call.duration_ms),
+        (Some("bash"), true, None),
+        "no result means it did not succeed, for example after a crash"
+    );
+}

@@ -63,7 +63,8 @@ pub(super) fn transcript(
                 }
                 for call in calls {
                     let (failed, duration_ms) =
-                        ended.get(call.id.as_str()).copied().unwrap_or_default();
+                        // A call without a result never finished, such as after a crash.
+                        ended.get(call.id.as_str()).copied().unwrap_or((true, None));
                     items.push(TranscriptItem {
                         tool: Some(call.name.clone()),
                         arguments: Some(call.arguments.clone()),
