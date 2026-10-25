@@ -9,7 +9,16 @@ function load(clock: () => number = () => 0) {
   const handlers = new Map<string, Handler>();
   const commands = new Map<string, { handler: (args: string, ctx: unknown) => Promise<void> }>();
   const entries: { customType: string; data: unknown }[] = [];
-  const tools = [{ name: "read", annotations: { readOnlyHint: true } }, { name: "bash" }];
+  // As pi 1.3.0 reports them: its built-ins carry no annotations.
+  const builtin = { source: "builtin" };
+  const extension = { source: "local" };
+  const tools = [
+    { name: "read", sourceInfo: builtin },
+    { name: "grep", sourceInfo: builtin },
+    { name: "bash", sourceInfo: builtin },
+    { name: "lookup", annotations: { readOnlyHint: true }, sourceInfo: extension },
+    { name: "find", sourceInfo: extension },
+  ];
   watershedWith(clock)(
     {
     on: (event: string, handler: Handler) => handlers.set(event, handler),
@@ -91,10 +100,22 @@ test("asks the core before every tool call and records user decisions", async ()
 
 test("reports read-only tools and stays out of other modes", async () => {
   const { handlers } = load();
-  const rpc = context("allow-auto");
+  const readOnly = async (toolName: string) => {
+    const rpc = context("allow-auto");
+    await handlers.get("tool_call")!({ type: "tool_call", toolCallId: "c", toolName, input: {} }, rpc.ctx);
+    return JSON.parse(rpc.questions[0].title.slice(APPROVAL_PREFIX.length)).readOnly;
+  };
+  assert.deepEqual(
+    [await readOnly("read"), await readOnly("grep"), await readOnly("lookup")],
+    [true, true, true],
+    "pi's reading built-ins and annotated tools",
+  );
+  assert.deepEqual(
+    [await readOnly("bash"), await readOnly("find")],
+    [false, false],
+    "a built-in that changes things, and an extension tool named like a reading built-in",
+  );
   const read = { type: "tool_call", toolCallId: "c2", toolName: "read", input: { path: "a" } };
-  await handlers.get("tool_call")!(read, rpc.ctx);
-  assert.equal(JSON.parse(rpc.questions[0].title.slice(APPROVAL_PREFIX.length)).readOnly, true);
   const tui = context("reject", "tui");
   assert.equal(await handlers.get("tool_call")!(read, tui.ctx), undefined);
   assert.equal(tui.questions.length, 0);
