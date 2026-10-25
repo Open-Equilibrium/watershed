@@ -69,7 +69,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.13.0';
 
   @override
-  int get rustContentHash => 1836674500;
+  int get rustContentHash => -172557710;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -113,6 +113,10 @@ abstract class RustLibApi extends BaseApi {
     required String entry,
   });
 
+  Future<String?> crateApiSessionAgentSessionCurrentModel({
+    required AgentSession that,
+  });
+
   Future<void> crateApiSessionAgentSessionDecide({
     required AgentSession that,
     required String request,
@@ -133,9 +137,22 @@ abstract class RustLibApi extends BaseApi {
     required List<String> leaves,
   });
 
+  Future<List<BridgeModel>> crateApiSessionAgentSessionModels({
+    required AgentSession that,
+  });
+
+  Future<bool> crateApiSessionAgentSessionNewSession({
+    required AgentSession that,
+  });
+
   Future<String> crateApiSessionAgentSessionPatch({
     required AgentSession that,
     required String path,
+  });
+
+  Future<List<BridgeStoredSession>> crateApiSessionAgentSessionRecentSessions({
+    required AgentSession that,
+    required int limit,
   });
 
   Future<void> crateApiSessionAgentSessionSend({
@@ -149,12 +166,23 @@ abstract class RustLibApi extends BaseApi {
     required BridgeApprovalMode mode,
   });
 
+  Future<void> crateApiSessionAgentSessionSetModel({
+    required AgentSession that,
+    required String provider,
+    required String id,
+  });
+
   Future<bool> crateApiSessionAgentSessionShutdown({
     required AgentSession that,
   });
 
   Future<AgentSession> crateApiSessionAgentSessionStart({
     required SessionConfig config,
+  });
+
+  Future<bool> crateApiSessionAgentSessionSwitchSession({
+    required AgentSession that,
+    required String path,
   });
 
   Future<BridgeTranscript> crateApiSessionAgentSessionTranscript({
@@ -446,6 +474,42 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<String?> crateApiSessionAgentSessionCurrentModel({
+    required AgentSession that,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerAgentSession(
+            that,
+            serializer,
+          );
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 8,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_opt_String,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiSessionAgentSessionCurrentModelConstMeta,
+        argValues: [that],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiSessionAgentSessionCurrentModelConstMeta =>
+      const TaskConstMeta(
+        debugName: "AgentSession_current_model",
+        argNames: ["that"],
+      );
+
+  @override
   Future<void> crateApiSessionAgentSessionDecide({
     required AgentSession that,
     required String request,
@@ -464,7 +528,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 8,
+            funcId: 9,
             port: port_,
           );
         },
@@ -502,7 +566,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 9,
+            funcId: 10,
             port: port_,
           );
         },
@@ -541,7 +605,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             pdeCallFfi(
               generalizedFrbRustBinding,
               serializer,
-              funcId: 10,
+              funcId: 11,
               port: port_,
             );
           },
@@ -581,7 +645,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 11,
+            funcId: 12,
             port: port_,
           );
         },
@@ -603,6 +667,75 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<List<BridgeModel>> crateApiSessionAgentSessionModels({
+    required AgentSession that,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerAgentSession(
+            that,
+            serializer,
+          );
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 13,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_list_bridge_model,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiSessionAgentSessionModelsConstMeta,
+        argValues: [that],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiSessionAgentSessionModelsConstMeta =>
+      const TaskConstMeta(debugName: "AgentSession_models", argNames: ["that"]);
+
+  @override
+  Future<bool> crateApiSessionAgentSessionNewSession({
+    required AgentSession that,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerAgentSession(
+            that,
+            serializer,
+          );
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 14,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_bool,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiSessionAgentSessionNewSessionConstMeta,
+        argValues: [that],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiSessionAgentSessionNewSessionConstMeta =>
+      const TaskConstMeta(
+        debugName: "AgentSession_new_session",
+        argNames: ["that"],
+      );
+
+  @override
   Future<String> crateApiSessionAgentSessionPatch({
     required AgentSession that,
     required String path,
@@ -619,7 +752,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 12,
+            funcId: 15,
             port: port_,
           );
         },
@@ -641,6 +774,44 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<List<BridgeStoredSession>> crateApiSessionAgentSessionRecentSessions({
+    required AgentSession that,
+    required int limit,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerAgentSession(
+            that,
+            serializer,
+          );
+          sse_encode_u_32(limit, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 16,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_list_bridge_stored_session,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiSessionAgentSessionRecentSessionsConstMeta,
+        argValues: [that, limit],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiSessionAgentSessionRecentSessionsConstMeta =>
+      const TaskConstMeta(
+        debugName: "AgentSession_recent_sessions",
+        argNames: ["that", "limit"],
+      );
+
+  @override
   Future<void> crateApiSessionAgentSessionSend({
     required AgentSession that,
     required String message,
@@ -659,7 +830,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 13,
+            funcId: 17,
             port: port_,
           );
         },
@@ -697,7 +868,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 14,
+            funcId: 18,
             port: port_,
           );
         },
@@ -719,6 +890,46 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<void> crateApiSessionAgentSessionSetModel({
+    required AgentSession that,
+    required String provider,
+    required String id,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerAgentSession(
+            that,
+            serializer,
+          );
+          sse_encode_String(provider, serializer);
+          sse_encode_String(id, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 19,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiSessionAgentSessionSetModelConstMeta,
+        argValues: [that, provider, id],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiSessionAgentSessionSetModelConstMeta =>
+      const TaskConstMeta(
+        debugName: "AgentSession_set_model",
+        argNames: ["that", "provider", "id"],
+      );
+
+  @override
   Future<bool> crateApiSessionAgentSessionShutdown({
     required AgentSession that,
   }) {
@@ -733,7 +944,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 15,
+            funcId: 20,
             port: port_,
           );
         },
@@ -766,7 +977,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 16,
+            funcId: 21,
             port: port_,
           );
         },
@@ -789,6 +1000,44 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<bool> crateApiSessionAgentSessionSwitchSession({
+    required AgentSession that,
+    required String path,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerAgentSession(
+            that,
+            serializer,
+          );
+          sse_encode_String(path, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 22,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_bool,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiSessionAgentSessionSwitchSessionConstMeta,
+        argValues: [that, path],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiSessionAgentSessionSwitchSessionConstMeta =>
+      const TaskConstMeta(
+        debugName: "AgentSession_switch_session",
+        argNames: ["that", "path"],
+      );
+
+  @override
   Future<BridgeTranscript> crateApiSessionAgentSessionTranscript({
     required AgentSession that,
     String? before,
@@ -807,7 +1056,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 17,
+            funcId: 23,
             port: port_,
           );
         },
@@ -837,7 +1086,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 18,
+            funcId: 24,
             port: port_,
           );
         },
@@ -864,7 +1113,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 19,
+            funcId: 25,
             port: port_,
           );
         },
@@ -894,7 +1143,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 20,
+            funcId: 26,
             port: port_,
           );
         },
@@ -1270,6 +1519,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgeModel dco_decode_bridge_model(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 3)
+      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+    return BridgeModel(
+      provider: dco_decode_String(arr[0]),
+      id: dco_decode_String(arr[1]),
+      name: dco_decode_String(arr[2]),
+    );
+  }
+
+  @protected
   BridgeQuestion dco_decode_bridge_question(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
@@ -1393,6 +1655,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       messages: dco_decode_i_64(arr[3]),
       messageChars: dco_decode_i_64(arr[4]),
       newSincePrevious: dco_decode_list_String(arr[5]),
+    );
+  }
+
+  @protected
+  BridgeStoredSession dco_decode_bridge_stored_session(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 3)
+      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+    return BridgeStoredSession(
+      path: dco_decode_String(arr[0]),
+      title: dco_decode_String(arr[1]),
+      modifiedMs: dco_decode_i_64(arr[2]),
     );
   }
 
@@ -1526,6 +1801,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  List<BridgeModel> dco_decode_list_bridge_model(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_bridge_model).toList();
+  }
+
+  @protected
   List<BridgeRecord> dco_decode_list_bridge_record(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return (raw as List<dynamic>).map(dco_decode_bridge_record).toList();
@@ -1535,6 +1816,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   List<BridgeSection> dco_decode_list_bridge_section(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return (raw as List<dynamic>).map(dco_decode_bridge_section).toList();
+  }
+
+  @protected
+  List<BridgeStoredSession> dco_decode_list_bridge_stored_session(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>)
+        .map(dco_decode_bridge_stored_session)
+        .toList();
   }
 
   @protected
@@ -2131,6 +2420,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgeModel sse_decode_bridge_model(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_provider = sse_decode_String(deserializer);
+    var var_id = sse_decode_String(deserializer);
+    var var_name = sse_decode_String(deserializer);
+    return BridgeModel(provider: var_provider, id: var_id, name: var_name);
+  }
+
+  @protected
   BridgeQuestion sse_decode_bridge_question(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_kind = sse_decode_bridge_question_kind(deserializer);
@@ -2277,6 +2575,21 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       messages: var_messages,
       messageChars: var_messageChars,
       newSincePrevious: var_newSincePrevious,
+    );
+  }
+
+  @protected
+  BridgeStoredSession sse_decode_bridge_stored_session(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_path = sse_decode_String(deserializer);
+    var var_title = sse_decode_String(deserializer);
+    var var_modifiedMs = sse_decode_i_64(deserializer);
+    return BridgeStoredSession(
+      path: var_path,
+      title: var_title,
+      modifiedMs: var_modifiedMs,
     );
   }
 
@@ -2444,6 +2757,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  List<BridgeModel> sse_decode_list_bridge_model(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <BridgeModel>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_bridge_model(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
   List<BridgeRecord> sse_decode_list_bridge_record(
     SseDeserializer deserializer,
   ) {
@@ -2467,6 +2792,20 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var ans_ = <BridgeSection>[];
     for (var idx_ = 0; idx_ < len_; ++idx_) {
       ans_.add(sse_decode_bridge_section(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
+  List<BridgeStoredSession> sse_decode_list_bridge_stored_session(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <BridgeStoredSession>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_bridge_stored_session(deserializer));
     }
     return ans_;
   }
@@ -3192,6 +3531,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_bridge_model(BridgeModel self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.provider, serializer);
+    sse_encode_String(self.id, serializer);
+    sse_encode_String(self.name, serializer);
+  }
+
+  @protected
   void sse_encode_bridge_question(
     BridgeQuestion self,
     SseSerializer serializer,
@@ -3296,6 +3643,17 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_i_64(self.messages, serializer);
     sse_encode_i_64(self.messageChars, serializer);
     sse_encode_list_String(self.newSincePrevious, serializer);
+  }
+
+  @protected
+  void sse_encode_bridge_stored_session(
+    BridgeStoredSession self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.path, serializer);
+    sse_encode_String(self.title, serializer);
+    sse_encode_i_64(self.modifiedMs, serializer);
   }
 
   @protected
@@ -3430,6 +3788,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_list_bridge_model(
+    List<BridgeModel> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_bridge_model(item, serializer);
+    }
+  }
+
+  @protected
   void sse_encode_list_bridge_record(
     List<BridgeRecord> self,
     SseSerializer serializer,
@@ -3450,6 +3820,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_i_32(self.length, serializer);
     for (final item in self) {
       sse_encode_bridge_section(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_list_bridge_stored_session(
+    List<BridgeStoredSession> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_bridge_stored_session(item, serializer);
     }
   }
 
@@ -3788,7 +4170,8 @@ class AgentSessionImpl extends RustOpaque implements AgentSession {
         RustLib.instance.api.rust_arc_decrement_strong_count_AgentSessionPtr,
   );
 
-  /// Aborts the running turn.
+  /// Aborts the running turn; open approvals are rejected and questions dismissed, so the
+  /// agent can stop.
   Future<void> abort() =>
       RustLib.instance.api.crateApiSessionAgentSessionAbort(that: this);
 
@@ -3829,6 +4212,10 @@ class AgentSessionImpl extends RustOpaque implements AgentSession {
       .api
       .crateApiSessionAgentSessionContext(that: this, entry: entry);
 
+  /// The selected model as `provider/id`.
+  Future<String?> currentModel() =>
+      RustLib.instance.api.crateApiSessionAgentSessionCurrentModel(that: this);
+
   /// Answers an approval request.
   Future<void> decide({
     required String request,
@@ -3854,9 +4241,24 @@ class AgentSessionImpl extends RustOpaque implements AgentSession {
       .api
       .crateApiSessionAgentSessionHistory(that: this, leaves: leaves);
 
+  /// The models the agent can use.
+  Future<List<BridgeModel>> models() =>
+      RustLib.instance.api.crateApiSessionAgentSessionModels(that: this);
+
+  /// Starts a new session in the same agent; `false` when an extension cancelled it.
+  Future<bool> newSession() =>
+      RustLib.instance.api.crateApiSessionAgentSessionNewSession(that: this);
+
   /// The unified diff of one file since the latest run started.
   Future<String> patch({required String path}) => RustLib.instance.api
       .crateApiSessionAgentSessionPatch(that: this, path: path);
+
+  /// Up to `limit` stored sessions of this project, newest first, without the current one.
+  Future<List<BridgeStoredSession>> recentSessions({required int limit}) =>
+      RustLib.instance.api.crateApiSessionAgentSessionRecentSessions(
+        that: this,
+        limit: limit,
+      );
 
   /// Sends a message: an idle agent starts a run with it, a running one takes it before its
   /// next model request or, with `follow_up`, once it is done. A new run first captures the
@@ -3874,10 +4276,22 @@ class AgentSessionImpl extends RustOpaque implements AgentSession {
       .api
       .crateApiSessionAgentSessionSetApprovalMode(that: this, mode: mode);
 
+  /// Selects the model the next requests use.
+  Future<void> setModel({required String provider, required String id}) =>
+      RustLib.instance.api.crateApiSessionAgentSessionSetModel(
+        that: this,
+        provider: provider,
+        id: id,
+      );
+
   /// Asks the agent to exit and kills it after a grace period; returns whether it exited
   /// successfully.
   Future<bool> shutdown() =>
       RustLib.instance.api.crateApiSessionAgentSessionShutdown(that: this);
+
+  /// Continues the session stored in `path`; `false` when an extension cancelled it.
+  Future<bool> switchSession({required String path}) => RustLib.instance.api
+      .crateApiSessionAgentSessionSwitchSession(that: this, path: path);
 
   /// The chat of the current branch: the items of up to `limit` stored entries before
   /// `before`, or of the newest ones.

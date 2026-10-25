@@ -9,13 +9,14 @@ import 'history.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `answer`, `open`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `clone`, `eq`, `fmt`
+// These functions are ignored because they are not marked as `pub`: `answer`, `open`, `switched`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`
 // These functions are ignored (category: IgnoreBecauseExplicitAttribute): `forward`
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<AgentSession>>
 abstract class AgentSession implements RustOpaqueInterface {
-  /// Aborts the running turn.
+  /// Aborts the running turn; open approvals are rejected and questions dismissed, so the
+  /// agent can stop.
   Future<void> abort();
 
   /// Answers a confirmation question.
@@ -40,6 +41,9 @@ abstract class AgentSession implements RustOpaqueInterface {
   /// `entry` is a response.
   Future<BridgeContextDetail?> context({required String entry});
 
+  /// The selected model as `provider/id`.
+  Future<String?> currentModel();
+
   /// Answers an approval request.
   Future<void> decide({
     required String request,
@@ -56,8 +60,17 @@ abstract class AgentSession implements RustOpaqueInterface {
   /// `leaves`, or of the current branch when `leaves` is empty.
   Future<BridgeHistory> history({required List<String> leaves});
 
+  /// The models the agent can use.
+  Future<List<BridgeModel>> models();
+
+  /// Starts a new session in the same agent; `false` when an extension cancelled it.
+  Future<bool> newSession();
+
   /// The unified diff of one file since the latest run started.
   Future<String> patch({required String path});
+
+  /// Up to `limit` stored sessions of this project, newest first, without the current one.
+  Future<List<BridgeStoredSession>> recentSessions({required int limit});
 
   /// Sends a message: an idle agent starts a run with it, a running one takes it before its
   /// next model request or, with `follow_up`, once it is done. A new run first captures the
@@ -67,6 +80,9 @@ abstract class AgentSession implements RustOpaqueInterface {
   /// Changes which tool calls need the user's approval.
   Future<void> setApprovalMode({required BridgeApprovalMode mode});
 
+  /// Selects the model the next requests use.
+  Future<void> setModel({required String provider, required String id});
+
   /// Asks the agent to exit and kills it after a grace period; returns whether it exited
   /// successfully.
   Future<bool> shutdown();
@@ -74,6 +90,9 @@ abstract class AgentSession implements RustOpaqueInterface {
   /// Starts an agent; subscribe with [`AgentSession::events`].
   static Future<AgentSession> start({required SessionConfig config}) =>
       RustLib.instance.api.crateApiSessionAgentSessionStart(config: config);
+
+  /// Continues the session stored in `path`; `false` when an extension cancelled it.
+  Future<bool> switchSession({required String path});
 
   /// The chat of the current branch: the items of up to `limit` stored entries before
   /// `before`, or of the newest ones.
@@ -90,6 +109,66 @@ enum BridgeApprovalMode {
 
   /// Allow every call.
   fullAccess,
+}
+
+/// A model the agent can use.
+class BridgeModel {
+  /// The provider, such as `anthropic`.
+  final String provider;
+
+  /// The provider's model id.
+  final String id;
+
+  /// The name to show.
+  final String name;
+
+  const BridgeModel({
+    required this.provider,
+    required this.id,
+    required this.name,
+  });
+
+  @override
+  int get hashCode => provider.hashCode ^ id.hashCode ^ name.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeModel &&
+          runtimeType == other.runtimeType &&
+          provider == other.provider &&
+          id == other.id &&
+          name == other.name;
+}
+
+/// A session pi stored, as the start page lists it.
+class BridgeStoredSession {
+  /// The session file.
+  final String path;
+
+  /// Its name, or else the first line of its first prompt.
+  final String title;
+
+  /// When pi last wrote it, in Unix milliseconds.
+  final PlatformInt64 modifiedMs;
+
+  const BridgeStoredSession({
+    required this.path,
+    required this.title,
+    required this.modifiedMs,
+  });
+
+  @override
+  int get hashCode => path.hashCode ^ title.hashCode ^ modifiedMs.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeStoredSession &&
+          runtimeType == other.runtimeType &&
+          path == other.path &&
+          title == other.title &&
+          modifiedMs == other.modifiedMs;
 }
 
 /// How to start an agent process that speaks pi's RPC protocol.

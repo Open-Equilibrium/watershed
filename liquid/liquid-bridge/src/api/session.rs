@@ -4,8 +4,11 @@
 use std::sync::{LazyLock, PoisonError};
 use std::time::Duration;
 
+use std::path::{Path, PathBuf};
+
 use meta_harness_core::{
     AgentCommand, Answer, Delivery, RequestId, Session, SessionEvent, Snapshot, WorkingTree,
+    recent_sessions,
 };
 use tokio::runtime::Runtime;
 use tokio::sync::{Mutex, mpsc};
@@ -36,6 +39,28 @@ pub struct SessionConfig {
     pub cwd: String,
 }
 
+/// A session pi stored, as the start page lists it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgeStoredSession {
+    /// The session file.
+    pub path: String,
+    /// Its name, or else the first line of its first prompt.
+    pub title: String,
+    /// When pi last wrote it, in Unix milliseconds.
+    pub modified_ms: i64,
+}
+
+/// A model the agent can use.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgeModel {
+    /// The provider, such as `anthropic`.
+    pub provider: String,
+    /// The provider's model id.
+    pub id: String,
+    /// The name to show.
+    pub name: String,
+}
+
 /// How much an agent may do without asking.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BridgeApprovalMode {
@@ -56,6 +81,8 @@ pub struct AgentSession {
     receiver: std::sync::Mutex<Option<mpsc::Receiver<SessionEvent>>>,
     /// The project's Git working tree, when the session runs inside one.
     project: Option<WorkingTree>,
+    /// The directory the agent works in.
+    cwd: PathBuf,
     /// The project state before the latest prompt; the diff view compares against it.
     before_run: Mutex<Option<Snapshot>>,
 }
@@ -75,6 +102,7 @@ impl AgentSession {
             session: Mutex::new(Some(session)),
             receiver: std::sync::Mutex::new(Some(receiver)),
             project,
+            cwd: command.cwd,
             before_run: Mutex::new(None),
         })
     }
@@ -242,6 +270,88 @@ impl AgentSession {
                 .await
                 .map_err(describe)?;
             pending.accepted().await.map_err(describe)
+        })
+    }
+
+    /// Up to `limit` stored sessions of this project, newest first, without the current one.
+    pub fn recent_sessions(&self, limit: u32) -> Result<Vec<BridgeStoredSession>, String> {
+        let current = RUNTIME.block_on(async {
+            let mut session = self.session.lock().await;
+            open(&mut session)?.state().await.map_err(describe)
+        })?;
+        // A session pi keeps in memory has no directory to list.
+        let Some(file) = current.session_file else {
+            return Ok(Vec::new());
+        };
+        let dir = file.parent().unwrap_or(Path::new("."));
+        let limit = usize::try_from(limit).unwrap_or(usize::MAX);
+        let stored = recent_sessions(dir, &self.cwd, Some(&file), limit)
+            .map_err(|error| error.to_string())?;
+        Ok(stored.into_iter().map(Into::into).collect())
+    }
+
+    /// Starts a new session in the same agent; `false` when an extension cancelled it.
+    pub fn new_session(&self) -> Result<bool, String> {
+        RUNTIME.block_on(async {
+            let pending = open(&mut *self.session.lock().await)?
+                .new_session()
+                .await
+                .map_err(describe)?;
+            self.switched(pending).await
+        })
+    }
+
+    /// Continues the session stored in `path`; `false` when an extension cancelled it.
+    pub fn switch_session(&self, path: String) -> Result<bool, String> {
+        RUNTIME.block_on(async {
+            let pending = open(&mut *self.session.lock().await)?
+                .switch_session(Path::new(&path))
+                .await
+                .map_err(describe)?;
+            self.switched(pending).await
+        })
+    }
+
+    /// Waits for a session switch without holding the session; the diff of the previous
+    /// session's run no longer applies after it.
+    async fn switched(&self, pending: meta_harness_core::Pending) -> Result<bool, String> {
+        let switched = pending.switched().await.map_err(describe)?;
+        if switched {
+            *self.before_run.lock().await = None;
+        }
+        Ok(switched)
+    }
+
+    /// The models the agent can use.
+    pub fn models(&self) -> Result<Vec<BridgeModel>, String> {
+        RUNTIME.block_on(async {
+            let mut session = self.session.lock().await;
+            Ok(open(&mut session)?
+                .models()
+                .await
+                .map_err(describe)?
+                .into_iter()
+                .map(Into::into)
+                .collect())
+        })
+    }
+
+    /// The selected model as `provider/id`.
+    pub fn current_model(&self) -> Result<Option<String>, String> {
+        RUNTIME.block_on(async {
+            let mut session = self.session.lock().await;
+            Ok(open(&mut session)?.state().await.map_err(describe)?.model)
+        })
+    }
+
+    /// Selects the model the next requests use.
+    pub fn set_model(&self, provider: String, id: String) -> Result<(), String> {
+        RUNTIME.block_on(async {
+            let mut session = self.session.lock().await;
+            open(&mut session)?
+                .set_model(&provider, &id)
+                .await
+                .map_err(describe)
         })
     }
 

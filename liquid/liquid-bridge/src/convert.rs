@@ -2,9 +2,9 @@
 
 use meta_harness_core::{
     ApprovalMode, ChangeStatus, CommandError, ContextDetail, ContextMessage, ContextPart, Decision,
-    EntryKind, FileChange, ItemDetail, ItemKind, ItemStatus, NotificationLevel, Queue, RecordKind,
-    RequestKind, RuntimeEvent, SessionEvent, StepContext, ToolOutcome, Trajectory,
-    TrajectoryRecord, Transcript, TranscriptItem, TreeNode, Usage, UserInput,
+    EntryKind, FileChange, ItemDetail, ItemKind, ItemStatus, Model, NotificationLevel, Queue,
+    RecordKind, RequestKind, RuntimeEvent, SessionEvent, StepContext, StoredSession, ToolOutcome,
+    Trajectory, TrajectoryRecord, Transcript, TranscriptItem, TreeNode, Usage, UserInput,
 };
 
 use crate::api::events::{
@@ -18,7 +18,7 @@ use crate::api::history::{
     BridgeRecordKind, BridgeStepContext, BridgeToolOutcome, BridgeTrajectory, BridgeTranscript,
     BridgeTranscriptItem, BridgeTreeNode,
 };
-use crate::api::session::BridgeApprovalMode;
+use crate::api::session::{BridgeApprovalMode, BridgeModel, BridgeStoredSession};
 
 /// Merges consecutive content deltas of the same item, so a lagging UI receives the latest text
 /// in fewer events instead of every intermediate one (client architecture rule 4).
@@ -556,6 +556,26 @@ impl From<RuntimeEvent> for BridgeEvent {
                 queue: Some(queue.into()),
                 ..event(Kind::QueueChanged)
             },
+        }
+    }
+}
+
+impl From<StoredSession> for BridgeStoredSession {
+    fn from(stored: StoredSession) -> Self {
+        Self {
+            path: stored.path.display().to_string(),
+            title: stored.title,
+            modified_ms: int(stored.modified_ms),
+        }
+    }
+}
+
+impl From<Model> for BridgeModel {
+    fn from(model: Model) -> Self {
+        Self {
+            provider: model.provider,
+            id: model.id,
+            name: model.name,
         }
     }
 }

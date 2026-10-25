@@ -11,7 +11,9 @@ use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
 use crate::api::history::{BridgeEntryKind, BridgeRecordKind};
-use crate::api::session::{AgentSession, BridgeApprovalMode, SessionConfig};
+use crate::api::session::{
+    AgentSession, BridgeApprovalMode, BridgeModel, BridgeStoredSession, SessionConfig,
+};
 use crate::convert::{coalesce, describe};
 
 /// Answers the `get_state` that starts a first history read, for a session pi keeps in memory.
@@ -287,6 +289,86 @@ IFS= read -r line || exit 0"#
             BridgeEventKind::RequestResolved,
             Some(BridgeDecision::Reject)
         )
+    );
+    assert!(session.shutdown());
+}
+
+#[test]
+fn starts_and_resumes_sessions_and_picks_models() {
+    let project = std::env::temp_dir();
+    let dir = project.join(format!("watershed-bridge-stored-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("session directory");
+    let older = dir.join("older.jsonl");
+    std::fs::write(
+        &older,
+        format!(
+            "{{\"type\":\"session\",\"version\":3,\"id\":\"o1\",\"cwd\":\"{}\"}}\n{{\"type\":\"message\",\"id\":\"u1\",\"parentId\":null,\"message\":{{\"role\":\"user\",\"content\":\"Fix login\"}}}}\n",
+            project.display()
+        ),
+    )
+    .expect("stored session");
+    std::fs::File::options()
+        .write(true)
+        .open(&older)
+        .and_then(|file| file.set_modified(std::time::UNIX_EPOCH + Duration::from_secs(1_000)))
+        .expect("file time");
+    let current = dir.join("current.jsonl");
+    let respond = |id: u32, command: &str, data: &str| {
+        format!(
+            "IFS= read -r line\ncase \"$line\" in *'\"type\":\"{command}\"'*) ;; *) exit 9 ;; esac\nprintf '%s\\n' '{{\"id\":\"{id}\",\"type\":\"response\",\"command\":\"{command}\",\"success\":true,\"data\":{data}}}'\n"
+        )
+    };
+    let state = format!(
+        r#"{{"sessionId":"s","isStreaming":false,"sessionFile":"{}","model":{{"provider":"faux","id":"faux-1"}}}}"#,
+        current.display()
+    );
+    let script = [
+        respond(1, "get_state", &state),
+        respond(2, "new_session", r#"{"cancelled":false}"#),
+        respond(3, "switch_session", r#"{"cancelled":false}"#),
+        respond(
+            4,
+            "get_available_models",
+            r#"{"models":[{"provider":"faux","id":"faux-1","name":"Faux One"}]}"#,
+        ),
+        respond(5, "get_state", &state),
+        respond(6, "set_model", "{}"),
+        "IFS= read -r line || exit 0".to_owned(),
+    ]
+    .concat();
+    let session = AgentSession::start(SessionConfig {
+        program: "/bin/sh".to_owned(),
+        args: vec!["-c".to_owned(), script],
+        cwd: project.display().to_string(),
+    })
+    .expect("agent starts");
+    let recent = session.recent_sessions(5);
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(
+        recent,
+        Ok(vec![BridgeStoredSession {
+            path: older.display().to_string(),
+            title: "Fix login".to_owned(),
+            modified_ms: 1_000_000,
+        }])
+    );
+    assert_eq!(session.new_session(), Ok(true));
+    assert_eq!(
+        session.switch_session(older.display().to_string()),
+        Ok(true)
+    );
+    assert_eq!(
+        session.models(),
+        Ok(vec![BridgeModel {
+            provider: "faux".to_owned(),
+            id: "faux-1".to_owned(),
+            name: "Faux One".to_owned(),
+        }])
+    );
+    assert_eq!(session.current_model(), Ok(Some("faux/faux-1".to_owned())));
+    assert_eq!(
+        session.set_model("faux".to_owned(), "faux-1".to_owned()),
+        Ok(())
     );
     assert!(session.shutdown());
 }
