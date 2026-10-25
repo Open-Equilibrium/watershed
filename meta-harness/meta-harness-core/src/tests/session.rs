@@ -31,6 +31,22 @@ fn run<F: Future>(test: F) -> F::Output {
         .block_on(test)
 }
 
+/// A file the agent creates once it did everything a test waits for.
+fn marker(name: &str) -> std::path::PathBuf {
+    std::env::temp_dir().join(format!("meta-harness-{name}-{}", std::process::id()))
+}
+
+/// Waits until the agent created `marker`, then removes it.
+async fn reached(marker: &std::path::Path) {
+    let created = async {
+        while !marker.exists() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    };
+    timeout(WAIT, created).await.expect("the agent got there");
+    let _ = std::fs::remove_file(marker);
+}
+
 /// Waits until the agent accepted a command that was sent.
 async fn accepted(sent: Result<Pending, CommandError>) -> Result<(), CommandError> {
     sent?.accepted().await
@@ -143,12 +159,17 @@ fn shutdown_kills_an_agent_that_ignores_it() {
 fn shutdown_ends_an_agent_whose_events_nobody_reads() {
     run(async {
         // Fills the 256-event buffer, then breaks the protocol while nobody reads.
-        let (session, _events) = fake_agent(
+        let written = marker("unread");
+        let (session, _events) = fake_agent(&format!(
             r#"i=0
-while [ $i -lt 256 ]; do printf '%s\n' '{"type":"queue_update","steering":[],"followUp":[]}'; i=$((i+1)); done
+while [ $i -lt 256 ]; do printf '%s\n' '{{"type":"queue_update","steering":[],"followUp":[]}}'; i=$((i+1)); done
 printf '%s\n' 'not json'
-trap '' TERM; while :; do sleep 1; done"#,
-        );
+trap '' TERM; : > '{}'; while :; do sleep 1; done"#,
+            written.display()
+        ));
+        reached(&written).await;
+        // Time for the core to read it all and wait for room in the full buffer.
+        tokio::time::sleep(Duration::from_millis(200)).await;
         let stopped = timeout(WAIT, session.shutdown(Duration::from_millis(100))).await;
         assert_eq!(stopped, Ok(false));
     });
@@ -397,6 +418,8 @@ fn shutdown_ends_an_agent_that_stopped_reading_its_automatic_answers() {
             "trap '' TERM\ni=0\nwhile [ $i -lt 3000 ]; do {}i=$((i+1)); done\nwhile :; do sleep 1; done",
             approval_request("'$i'", "read", true)
         ));
+        // The core stops reading once the agent's full input blocks its answers, so the agent
+        // never finishes writing; a marker after its loop could not appear.
         tokio::time::sleep(Duration::from_millis(500)).await;
         let stopped = timeout(WAIT, session.shutdown(Duration::from_millis(100))).await;
         assert_eq!(stopped, Ok(false));
