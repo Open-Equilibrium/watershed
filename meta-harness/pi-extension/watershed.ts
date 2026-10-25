@@ -8,7 +8,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 export const APPROVAL_PREFIX = "watershed.approval ";
 
 /** pi's built-in tools that only read; pi gives its built-ins no annotations. */
-const READING_BUILTINS = new Set(["read", "grep", "find", "ls"]);
+const READING_BUILTINS = new Set(["read", "grep", "find", "ls", "tool_search"]);
 
 /** Answers the core may give; only the first three are user decisions. */
 const DECISIONS = ["allow-once", "allow-session", "reject", "allow-auto"];

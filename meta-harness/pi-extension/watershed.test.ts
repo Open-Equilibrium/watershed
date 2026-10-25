@@ -15,6 +15,7 @@ function load(clock: () => number = () => 0) {
   const tools = [
     { name: "read", sourceInfo: builtin },
     { name: "grep", sourceInfo: builtin },
+    { name: "tool_search", sourceInfo: builtin },
     { name: "bash", sourceInfo: builtin },
     { name: "lookup", annotations: { readOnlyHint: true }, sourceInfo: extension },
     { name: "find", sourceInfo: extension },
@@ -106,8 +107,8 @@ test("reports read-only tools and stays out of other modes", async () => {
     return JSON.parse(rpc.questions[0].title.slice(APPROVAL_PREFIX.length)).readOnly;
   };
   assert.deepEqual(
-    [await readOnly("read"), await readOnly("grep"), await readOnly("lookup")],
-    [true, true, true],
+    [await readOnly("read"), await readOnly("grep"), await readOnly("tool_search"), await readOnly("lookup")],
+    [true, true, true, true],
     "pi's reading built-ins and annotated tools",
   );
   assert.deepEqual(
