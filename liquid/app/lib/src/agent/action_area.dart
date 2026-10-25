@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -9,7 +11,7 @@ import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 
 /// Height of the input area; it never changes, so nothing above it moves (guidelines, patterns).
-const double actionAreaHeight = 120;
+const double actionAreaHeight = 150;
 
 /// The input area at the bottom of every tab: the composer, or in its place an approval or a
 /// question waiting for the user.
@@ -372,23 +374,8 @@ class _ApprovalCardState extends State<ApprovalCard> {
                 ],
               ),
               const SizedBox(height: WsMetrics.space3),
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: WsMetrics.space4,
-                  vertical: WsMetrics.space2,
-                ),
-                decoration: BoxDecoration(
-                  color: ws.code,
-                  borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
-                ),
-                child: Text(
-                  approval.arguments,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: monoStyle(context),
-                ),
-              ),
-              const Spacer(),
+              Expanded(child: _ScrollingCode(_call(approval))),
+              const SizedBox(height: WsMetrics.space3),
               Row(
                 children: [
                   PrimaryButton(
@@ -431,6 +418,233 @@ class _ApprovalCardState extends State<ApprovalCard> {
   }
 }
 
+/// What an approval shows: a shell command itself, other tools their arguments.
+String _call(BridgeApproval approval) {
+  if (approval.tool == 'bash') {
+    try {
+      if (jsonDecode(approval.arguments) case {
+        'command': final String command,
+      }) {
+        return command;
+      }
+    } on FormatException {
+      // Shown as the agent sent it.
+    }
+  }
+  return approval.arguments;
+}
+
+/// Code that scrolls inside a fixed height and says how many lines are below, so nothing is
+/// hidden without a hint (approved approval mockup).
+class _ScrollingCode extends StatefulWidget {
+  const _ScrollingCode(this.text);
+
+  final String text;
+
+  @override
+  State<_ScrollingCode> createState() => _ScrollingCodeState();
+}
+
+class _ScrollingCodeState extends State<_ScrollingCode> {
+  int _below = 0;
+
+  bool _measure(ScrollMetrics metrics, double lineHeight) {
+    final below = (metrics.extentAfter / lineHeight).ceil();
+    if (below != _below) setState(() => _below = below);
+    return false;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ws = context.ws;
+    final style = monoStyle(context);
+    final lineHeight = (TextPainter(
+      text: TextSpan(text: ' ', style: style),
+      textDirection: TextDirection.ltr,
+    )..layout()).height;
+    return Container(
+      decoration: BoxDecoration(
+        color: ws.code,
+        borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
+      ),
+      child: Stack(
+        children: [
+          NotificationListener<ScrollMetricsNotification>(
+            onNotification: (notification) =>
+                _measure(notification.metrics, lineHeight),
+            child: NotificationListener<ScrollUpdateNotification>(
+              onNotification: (notification) =>
+                  _measure(notification.metrics, lineHeight),
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: WsMetrics.space4,
+                  vertical: WsMetrics.space2,
+                ),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: Text(widget.text, style: style),
+                ),
+              ),
+            ),
+          ),
+          if (_below > 0)
+            Positioned(
+              right: WsMetrics.space3,
+              bottom: WsMetrics.space1,
+              child: Container(
+                color: ws.code,
+                padding: const EdgeInsets.only(left: WsMetrics.space2),
+                child: Text(
+                  '↓ $_below more line${_below == 1 ? '' : 's'}',
+                  style: TextStyle(
+                    color: ws.textFaint,
+                    fontSize: WsMetrics.fsSmall,
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A selection that narrows as the user types; arrows move and Enter picks (approved mockup).
+class _OptionList extends StatefulWidget {
+  const _OptionList({required this.options, required this.onPick});
+
+  final List<String> options;
+  final ValueChanged<String> onPick;
+
+  @override
+  State<_OptionList> createState() => _OptionListState();
+}
+
+class _OptionListState extends State<_OptionList> {
+  static const _rowHeight = 22.0;
+  final _filter = TextEditingController();
+  final _scroll = ScrollController();
+  int _highlight = 0;
+
+  @override
+  void dispose() {
+    _filter.dispose();
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  List<String> get _shown {
+    final query = _filter.text.toLowerCase();
+    return [
+      for (final option in widget.options)
+        if (option.toLowerCase().contains(query)) option,
+    ];
+  }
+
+  void _move(int by) {
+    final count = _shown.length;
+    if (count == 0) return;
+    setState(() => _highlight = (_highlight + by).clamp(0, count - 1));
+    if (!_scroll.hasClients) return;
+    // Keeps the highlighted option in view.
+    final top = _highlight * _rowHeight;
+    final position = _scroll.position;
+    if (top < position.pixels) {
+      _scroll.jumpTo(top);
+    } else if (top + _rowHeight >
+        position.pixels + position.viewportDimension) {
+      _scroll.jumpTo(top + _rowHeight - position.viewportDimension);
+    }
+  }
+
+  void _pick() {
+    final shown = _shown;
+    if (_highlight < shown.length) widget.onPick(shown[_highlight]);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ws = context.ws;
+    final shown = _shown;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: WsMetrics.space2,
+                  vertical: WsMetrics.space1,
+                ),
+                decoration: BoxDecoration(
+                  border: Border.all(color: ws.borderStrong),
+                  borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
+                ),
+                child: CallbackShortcuts(
+                  bindings: {
+                    const SingleActivator(LogicalKeyboardKey.arrowDown): () =>
+                        _move(1),
+                    const SingleActivator(LogicalKeyboardKey.arrowUp): () =>
+                        _move(-1),
+                    const SingleActivator(LogicalKeyboardKey.enter): _pick,
+                  },
+                  child: TextField(
+                    key: const Key('filter'),
+                    controller: _filter,
+                    autofocus: true,
+                    style: const TextStyle(fontSize: WsMetrics.fsSmall),
+                    decoration: const InputDecoration.collapsed(
+                      hintText: 'Type to filter · ↑↓ ⏎',
+                    ),
+                    onChanged: (_) => setState(() => _highlight = 0),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: WsMetrics.space3),
+            Text(
+              '${shown.length} / ${widget.options.length}',
+              style: TextStyle(
+                color: ws.textFaint,
+                fontSize: WsMetrics.fsSmall,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: WsMetrics.space1),
+        Expanded(
+          child: ListView.builder(
+            controller: _scroll,
+            itemExtent: _rowHeight,
+            itemCount: shown.length,
+            itemBuilder: (context, index) => InkWell(
+              canRequestFocus: false,
+              onTap: () => widget.onPick(shown[index]),
+              borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
+              child: Container(
+                alignment: Alignment.centerLeft,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: WsMetrics.space2,
+                ),
+                decoration: BoxDecoration(
+                  color: index == _highlight ? ws.selected : null,
+                  borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
+                ),
+                child: Text(
+                  shown[index],
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 /// A question from an agent extension, answered in place of the composer.
 class QuestionCard extends StatefulWidget {
   const QuestionCard({super.key, required this.request, required this.state});
@@ -460,15 +674,9 @@ class _QuestionCardState extends State<QuestionCard> {
     final question = widget.request.question!;
     final state = widget.state;
     final answer = switch (question.kind) {
-      BridgeQuestionKind.select => Wrap(
-        spacing: WsMetrics.space3,
-        children: [
-          for (final option in question.options)
-            SecondaryButton(
-              label: option,
-              onPressed: () => state.answerText(option),
-            ),
-        ],
+      BridgeQuestionKind.select => _OptionList(
+        options: question.options,
+        onPick: state.answerText,
       ),
       BridgeQuestionKind.confirm => Row(
         children: [
@@ -484,7 +692,63 @@ class _QuestionCardState extends State<QuestionCard> {
           ),
         ],
       ),
-      BridgeQuestionKind.input || BridgeQuestionKind.editor => Row(
+      // An editor fills the card: Enter adds a line, ⌘Enter answers (approved mockup).
+      BridgeQuestionKind.editor => Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(
+            child: CallbackShortcuts(
+              bindings: {
+                const SingleActivator(
+                  LogicalKeyboardKey.enter,
+                  meta: true,
+                ): () =>
+                    state.answerText(_text.text),
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: WsMetrics.space4,
+                  vertical: WsMetrics.space2,
+                ),
+                decoration: BoxDecoration(
+                  color: context.ws.code,
+                  borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
+                ),
+                child: TextField(
+                  key: const Key('answer'),
+                  controller: _text,
+                  autofocus: true,
+                  maxLines: null,
+                  expands: true,
+                  keyboardType: TextInputType.multiline,
+                  textAlignVertical: TextAlignVertical.top,
+                  style: monoStyle(context),
+                  decoration: const InputDecoration.collapsed(hintText: ''),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: WsMetrics.space2),
+          Row(
+            children: [
+              Text(
+                '⏎ new line',
+                style: TextStyle(
+                  color: context.ws.textFaint,
+                  fontSize: WsMetrics.fsSmall,
+                ),
+              ),
+              const Spacer(),
+              PrimaryButton(
+                label: 'Answer',
+                shortcut: '⌘⏎',
+                onPressed: () => state.answerText(_text.text),
+              ),
+            ],
+          ),
+        ],
+      ),
+      BridgeQuestionKind.input => Row(
         children: [
           Expanded(
             child: TextField(
@@ -511,9 +775,8 @@ class _QuestionCardState extends State<QuestionCard> {
               state.answerConfirm(true),
       },
       child: Focus(
-        autofocus:
-            question.kind != BridgeQuestionKind.input &&
-            question.kind != BridgeQuestionKind.editor,
+        // Text questions focus their field; a confirmation takes the keys itself.
+        autofocus: question.kind == BridgeQuestionKind.confirm,
         child: Container(
           decoration: _box(context, ring: context.ws.borderStrong),
           padding: const EdgeInsets.all(WsMetrics.space4),
@@ -541,8 +804,14 @@ class _QuestionCardState extends State<QuestionCard> {
                   question.detail,
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
-              const Spacer(),
-              answer,
+              if (question.kind == BridgeQuestionKind.select ||
+                  question.kind == BridgeQuestionKind.editor) ...[
+                const SizedBox(height: WsMetrics.space2),
+                Expanded(child: answer),
+              ] else ...[
+                const Spacer(),
+                answer,
+              ],
             ],
           ),
         ),

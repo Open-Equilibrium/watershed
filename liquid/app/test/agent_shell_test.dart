@@ -329,4 +329,106 @@ void main() {
     await tester.pump();
     expect(backend.calls.last, 'answer q1 Fixed');
   });
+
+  testWidgets('shows the whole call before it is allowed', (tester) async {
+    await show(tester);
+    final command = [
+      for (var part = 0; part < 30; part++) 'rm -rf /tmp/build-$part',
+    ].join(' && ');
+    await emit(
+      tester,
+      event(
+        BridgeEventKind.requestOpened,
+        request: BridgeRequest(
+          id: 'a1',
+          approval: BridgeApproval(
+            kind: BridgeRequestKind.commandExecution,
+            tool: 'bash',
+            arguments: '{"command":"$command"}',
+            readOnly: false,
+          ),
+        ),
+      ),
+    );
+    expect(find.text(command), findsOneWidget, reason: 'the command itself');
+    expect(find.textContaining('more lines'), findsOneWidget);
+    await tester.drag(
+      find.ancestor(
+        of: find.text(command),
+        matching: find.byType(SingleChildScrollView),
+      ),
+      const Offset(0, -2000),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      find.textContaining('more lines'),
+      findsNothing,
+      reason: 'nothing hidden at the end',
+    );
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    expect(backend.calls.last, 'decide a1 allowOnce');
+  });
+
+  testWidgets('filters a long selection and picks from the keyboard', (
+    tester,
+  ) async {
+    await show(tester);
+    await emit(
+      tester,
+      event(
+        BridgeEventKind.userInputRequested,
+        request: BridgeRequest(
+          id: 'q1',
+          question: BridgeQuestion(
+            kind: BridgeQuestionKind.select,
+            title: 'Pick a deployment target',
+            detail: '',
+            options: [
+              'staging-eu',
+              'staging-us',
+              'production-eu',
+              'production-us',
+              for (var number = 1; number <= 10; number++) 'preview-$number',
+            ],
+          ),
+        ),
+      ),
+    );
+    expect(find.text('14 / 14'), findsOneWidget);
+    await tester.enterText(find.byKey(const Key('filter')), 'PROD');
+    await tester.pump();
+    expect(find.text('2 / 14'), findsOneWidget);
+    expect(find.text('staging-eu'), findsNothing);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    expect(backend.calls.last, 'answer q1 production-us');
+  });
+
+  testWidgets('edits a multi-line answer and sends it with ⌘Enter', (
+    tester,
+  ) async {
+    await show(tester);
+    await emit(
+      tester,
+      event(
+        BridgeEventKind.userInputRequested,
+        request: BridgeRequest(
+          id: 'q1',
+          question: BridgeQuestion(
+            kind: BridgeQuestionKind.editor,
+            title: 'Edit the commit message',
+            detail: 'fix: limit /login',
+            options: const [],
+          ),
+        ),
+      ),
+    );
+    expect(find.text('⏎ new line'), findsOneWidget);
+    final editor = find.byKey(const Key('answer'));
+    await tester.enterText(editor, 'fix: limit /login\n\nAdd a limiter.');
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    expect(backend.calls.last, 'answer q1 fix: limit /login\n\nAdd a limiter.');
+  });
 }
