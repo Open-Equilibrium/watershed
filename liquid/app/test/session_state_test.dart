@@ -425,6 +425,36 @@ void main() {
     );
   });
 
+  test('ends extension displays with their session', () async {
+    Future<void> show() async {
+      await emit(
+        event(
+          BridgeEventKind.widgetChanged,
+          display: const BridgeDisplay(key: 'todo', lines: ['one']),
+        ),
+      );
+      await emit(
+        event(
+          BridgeEventKind.statusChanged,
+          display: const BridgeDisplay(key: 'todo'),
+          text: '1/2',
+        ),
+      );
+    }
+
+    await show();
+    backend.switchCancelled = true;
+    await state.newSession();
+    expect(state.widgets.value.keys, [
+      'todo',
+    ], reason: 'a cancelled switch keeps it');
+    expect(state.statuses.value.keys, ['todo']);
+    backend.switchCancelled = false;
+    await state.newSession();
+    expect(state.widgets.value, isEmpty);
+    expect(state.statuses.value, isEmpty);
+  });
+
   test('pages past entries that show nothing in the chat', () async {
     backend.transcripts[''] = const BridgeTranscript(
       items: [],
@@ -495,12 +525,24 @@ void main() {
       steering: ['Use Redis'],
       followUp: ['Also docs', 'And tests'],
     );
-    await state.unqueue('Also docs');
+    await state.unqueue('Also docs', followUp: true);
     expect(backend.calls, [
       'clear queue',
       'send Use Redis',
       'follow-up And tests',
     ]);
+
+    backend.calls.clear();
+    backend.queued = const BridgeQueue(steering: ['Same'], followUp: ['Same']);
+    await state.unqueue('Same', followUp: true);
+    expect(backend.calls, [
+      'clear queue',
+      'send Same',
+    ], reason: 'the follow-up goes, the steering message stays');
+    backend.queued = const BridgeQueue(
+      steering: ['Use Redis'],
+      followUp: ['Also docs', 'And tests'],
+    );
 
     backend.calls.clear();
     await emit(event(BridgeEventKind.turnStarted, turn: 1));

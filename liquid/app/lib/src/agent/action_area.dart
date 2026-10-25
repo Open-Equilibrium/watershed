@@ -209,8 +209,8 @@ class _QueueChips extends StatelessWidget {
       valueListenable: state.queue,
       builder: (context, queue, _) {
         final waiting = [
-          for (final text in queue.steering) ('Steer', text),
-          for (final text in queue.followUp) ('Queued', text),
+          for (final text in queue.steering) ('Steer', text, false),
+          for (final text in queue.followUp) ('Queued', text, true),
         ];
         if (waiting.isEmpty) return const SizedBox.shrink();
         return Padding(
@@ -219,7 +219,7 @@ class _QueueChips extends StatelessWidget {
             scrollDirection: Axis.horizontal,
             child: Row(
               children: [
-                for (final (index, (kind, text)) in waiting.indexed)
+                for (final (index, (kind, text, followUp)) in waiting.indexed)
                   Container(
                     height: 22,
                     margin: const EdgeInsets.only(right: WsMetrics.space2),
@@ -246,7 +246,7 @@ class _QueueChips extends StatelessWidget {
                         InkWell(
                           key: Key('unqueue $index'),
                           canRequestFocus: false,
-                          onTap: () => state.unqueue(text),
+                          onTap: () => state.unqueue(text, followUp: followUp),
                           child: Padding(
                             padding: const EdgeInsets.symmetric(
                               horizontal: WsMetrics.space2,

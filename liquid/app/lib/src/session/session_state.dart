@@ -168,23 +168,38 @@ class SessionState {
       return;
     }
     final switching = _switching = Completer<void>();
+    // Extension displays belong to their session. The new session's extensions may set theirs
+    // before pi confirms the switch, so the old ones go now and come back if it does not happen.
+    final (shownWidgets, shownStatuses, shownTitle) = (
+      widgets.value,
+      statuses.value,
+      title.value,
+    );
+    widgets.value = const {};
+    statuses.value = const {};
+    title.value = null;
     try {
-      await _replace(switchTo);
+      if (!await _replace(switchTo)) {
+        widgets.value = shownWidgets;
+        statuses.value = shownStatuses;
+        title.value = shownTitle;
+      }
     } finally {
       _switching = null;
       switching.complete();
     }
   }
 
-  Future<void> _replace(Future<bool> Function() switchTo) async {
+  /// Switches with `switchTo` and shows the session it continues; `false` when it did not.
+  Future<bool> _replace(Future<bool> Function() switchTo) async {
     try {
       if (!await switchTo()) {
         notify(BridgeLevel.info, 'An extension kept the current session.');
-        return;
+        return false;
       }
     } on Object catch (error) {
       notify(BridgeLevel.error, 'Could not change the session: $error');
-      return;
+      return false;
     }
     _generation++;
     _byId.clear();
@@ -196,6 +211,7 @@ class SessionState {
     stored.value++;
     await loadChat();
     await loadStart();
+    return true;
   }
 
   /// Selects the model the next requests use.
@@ -230,21 +246,20 @@ class SessionState {
 
   /// Takes one waiting message out of the queue; pi clears the whole queue, so the others are
   /// sent again in their order.
-  Future<void> unqueue(String message) async {
+  Future<void> unqueue(String message, {required bool followUp}) async {
     final waiting = await _backend.clearQueue();
     var removed = false;
-    bool keep(String text) {
-      if (!removed && text == message) {
-        removed = true;
-        return false;
-      }
-      return true;
+    // Only the queue the chip belongs to loses the message; the same text may wait in both.
+    List<String> kept(List<String> texts, {required bool inFollowUp}) {
+      final rest = [...texts];
+      if (!removed && inFollowUp == followUp) removed = rest.remove(message);
+      return rest;
     }
 
-    for (final text in waiting.steering.where(keep).toList()) {
+    for (final text in kept(waiting.steering, inFollowUp: false)) {
       await _backend.send(text, followUp: false);
     }
-    for (final text in waiting.followUp.where(keep).toList()) {
+    for (final text in kept(waiting.followUp, inFollowUp: true)) {
       await _backend.send(text, followUp: true);
     }
   }
