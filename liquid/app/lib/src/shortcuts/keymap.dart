@@ -40,12 +40,11 @@ class Keys {
           control: control,
         );
 
-  /// Whether, without ⌘, ⌃ or the Liquid key, these keys type or move in a text field.
+  /// Whether these keys type or edit in a text field: a character, alone or with ⇧ or ⌥, a
+  /// ⌃ character, which moves the cursor, or a cursor or delete key with any modifier.
   bool get types =>
-      !meta &&
-      !control &&
       !liquid &&
-      (key.keyLabel.runes.length == 1 || _editing.contains(key));
+      (_editing.contains(key) || (!meta && key.keyLabel.runes.length == 1));
 
   static final _editing = {
     LogicalKeyboardKey.arrowLeft,
@@ -272,8 +271,20 @@ enum Profile { liquidKey, standard, custom }
 /// What a command's keys may not be: keys a fixed row or macOS uses, or keys that type where the
 /// command works; null when the keys are free.
 String? reserved(Command command, Keys keys) {
+  // The menu bar ignores the Liquid key, so ⇪⌘Q still quits.
+  final menu = Keys(
+    keys.key,
+    meta: keys.meta,
+    alt: keys.alt,
+    shift: keys.shift,
+    control: keys.control,
+  );
   for (final (area, reserved, use) in _reserved) {
-    if ((area == null || area == command.area) && reserved == keys) return use;
+    if (area == null
+        ? reserved == menu
+        : area == command.area && reserved == keys) {
+      return use;
+    }
   }
   final typing = {Area.app, Area.input, Area.question}.contains(command.area);
   return typing && keys.types ? 'typing' : null;
@@ -492,6 +503,14 @@ class ShortcutSettings {
       CustomProfile(custom.base, on, custom.changes),
     );
   }
+
+  /// These settings without the Liquid key: Standard for the Liquid key profile, Custom with
+  /// its switch off otherwise.
+  ShortcutSettings withoutLiquidKey() => switch (profile) {
+    _ when !liquidKey => this,
+    Profile.liquidKey => ShortcutSettings._(Profile.standard, custom),
+    _ => withLiquidKey(false),
+  };
 
   /// Activates `profile`; Custom comes back as it was left, or starts from the active profile.
   ShortcutSettings choose(Profile profile) => switch (profile) {

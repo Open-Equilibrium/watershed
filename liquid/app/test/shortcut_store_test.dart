@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -105,6 +106,7 @@ void main() {
     final host = FakeHost();
 
     final shortcuts = await ShortcutController.load(store, host);
+    await pumpEventQueue();
     expect(shortcuts.firstStart, isFalse);
     expect(shortcuts.value, ShortcutSettings.liquidKey());
     expect(host.calls, [true]);
@@ -126,6 +128,49 @@ void main() {
       'Could not turn the Liquid key on: denied',
       'Could not turn the Liquid key on: denied',
     ], reason: 'every failure is reported');
+  });
+
+  test(
+    'a change queued behind a failing Liquid key leaves the key off',
+    () async {
+      final host = FakeHost()
+        ..failure = PlatformException(code: 'approval', message: 'denied')
+        ..gate = Completer();
+      final store = ShortcutStore(file);
+      final shortcuts = await ShortcutController.load(store, host);
+
+      final first = shortcuts.update(ShortcutSettings.liquidKey());
+      final second = shortcuts.update(
+        ShortcutSettings.liquidKey().change(
+          Command.diff,
+          const Keys(LogicalKeyboardKey.keyD, liquid: true),
+        ),
+      );
+      host.gate!.complete();
+      await Future.wait([first, second]);
+      expect(shortcuts.value.liquidKey, isFalse);
+      expect((await store.load())!.liquidKey, isFalse);
+      expect(
+        shortcuts.value.changed(Command.diff),
+        isTrue,
+        reason: 'the change itself stays',
+      );
+    },
+  );
+
+  test('the first frame does not wait for the Liquid key', () async {
+    final store = ShortcutStore(file);
+    await store.save(ShortcutSettings.liquidKey());
+    final host = FakeHost()..gate = Completer();
+
+    final shortcuts = await ShortcutController.load(
+      store,
+      host,
+    ).timeout(const Duration(seconds: 5));
+    expect(shortcuts.value, ShortcutSettings.liquidKey());
+    await pumpEventQueue();
+    expect(host.calls, [true]);
+    host.gate!.complete();
   });
 
   test('a problem at start is reported once someone listens', () async {

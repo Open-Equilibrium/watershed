@@ -771,6 +771,8 @@ class _QuestionCardState extends State<QuestionCard> {
                 decoration: InputDecoration.collapsed(
                   hintText: question.detail,
                 ),
+                // The answer keys answer; the field keeps the focus for them.
+                onEditingComplete: () {},
               ),
             ),
           ),

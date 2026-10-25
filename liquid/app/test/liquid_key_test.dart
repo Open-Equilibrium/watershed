@@ -178,6 +178,53 @@ void main() {
     ]);
   });
 
+  testWidgets(
+    'an input question answers with its keys, not with ⏎ once rebound',
+    (tester) async {
+      await show(
+        tester,
+        ShortcutSettings.standard().change(
+          Command.answer,
+          const Keys(LogicalKeyboardKey.keyY, meta: true),
+        ),
+      );
+      backend.controller.add(
+        event(
+          BridgeEventKind.userInputRequested,
+          request: BridgeRequest(
+            id: 'q1',
+            question: BridgeQuestion(
+              kind: BridgeQuestionKind.input,
+              title: 'Your name',
+              detail: '',
+              options: const [],
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const Key('answer')), 'Bob');
+      // An unbound ⏎ reaches the text field, which reports it as its done action.
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter, platform: 'macos');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+      expect(backend.calls.where((call) => call.startsWith('answer')), isEmpty);
+      await tester.sendKeyDownEvent(
+        LogicalKeyboardKey.metaLeft,
+        platform: 'macos',
+      );
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyY, platform: 'macos');
+      await tester.sendKeyUpEvent(
+        LogicalKeyboardKey.metaLeft,
+        platform: 'macos',
+      );
+      await tester.pumpAndSettle();
+      expect(backend.calls.where((call) => call.startsWith('answer')), [
+        'answer q1 Bob',
+      ]);
+    },
+  );
+
   testWidgets('the Trajectory keys in the status bar follow the shortcuts', (
     tester,
   ) async {

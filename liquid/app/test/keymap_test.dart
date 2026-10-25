@@ -146,6 +146,30 @@ void main() {
       reason: 'the Trajectory has no text field',
     );
     expect(reserved(Command.newSession, liquidN), isNull);
+    expect(
+      reserved(
+        Command.newSession,
+        const Keys(LogicalKeyboardKey.keyQ, meta: true, liquid: true),
+      ),
+      'Quit',
+      reason: 'the menu ignores the Liquid key',
+    );
+    expect(
+      reserved(
+        Command.queue,
+        const Keys(LogicalKeyboardKey.arrowLeft, meta: true),
+      ),
+      'typing',
+      reason: '⌘← moves the cursor',
+    );
+    expect(
+      reserved(
+        Command.queue,
+        const Keys(LogicalKeyboardKey.keyA, control: true),
+      ),
+      'typing',
+      reason: '⌃A moves the cursor',
+    );
   });
 
   test(

@@ -108,7 +108,7 @@ class ShortcutController extends ValueNotifier<ShortcutSettings> {
       stored == null && host.available,
     );
     if (stored != null && stored.liquidKey && host.available) {
-      unawaited(shortcuts._apply(true));
+      unawaited(shortcuts._sync(save: false));
     }
     return shortcuts;
   }
@@ -143,28 +143,38 @@ class ShortcutController extends ValueNotifier<ShortcutSettings> {
     }
   }
 
+  /// Whether this computer has the Liquid key on, as far as Liquid turned it.
+  bool _applied = false;
   Future<void> _pending = Future.value();
 
   Future<void> update(ShortcutSettings next) {
-    final before = value;
     value = next;
     firstStart = false;
-    return _pending = _pending.then((_) async {
-      var saved = next;
-      if (before.liquidKey != next.liquidKey &&
-          !await _apply(next.liquidKey) &&
-          next.liquidKey) {
-        // Without the Liquid key, its profile would hide every shortcut hint.
-        saved = before;
-        if (value == next) value = before;
-      }
-      try {
-        await _store?.save(saved);
-      } on FileSystemException catch (error) {
-        _problem('Could not save the shortcuts: ${error.message}');
-      }
-    });
+    return _sync(save: true);
   }
+
+  /// Turns the Liquid key on or off as the latest settings say, then saves them; one at a
+  /// time, so the last change wins. A Liquid key that cannot be turned on is left off, since
+  /// its profile would otherwise hide every shortcut hint.
+  Future<void> _sync({required bool save}) =>
+      _pending = _pending.then((_) async {
+        final want = value.liquidKey;
+        var changed = false;
+        if (want != _applied) {
+          if (await _apply(want)) {
+            _applied = want;
+          } else if (want) {
+            value = value.withoutLiquidKey();
+            changed = true;
+          }
+        }
+        if (!save && !changed) return;
+        try {
+          await _store?.save(value);
+        } on FileSystemException catch (error) {
+          _problem('Could not save the shortcuts: ${error.message}');
+        }
+      });
 
   /// Whether the Liquid key is now on or off as asked.
   Future<bool> _apply(bool on) async {
