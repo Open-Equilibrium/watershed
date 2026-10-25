@@ -59,8 +59,8 @@ void main() {
     );
     final command = state.items.value.last;
     expect(
-      (command.tool, command.failed, command.durationMs, command.text.value),
-      ('bash', true, 12, 'boom'),
+      (command.tool, command.outcome.value, command.text.value),
+      ('bash', (failed: true, durationMs: 12), 'boom'),
     );
     await emit(
       event(

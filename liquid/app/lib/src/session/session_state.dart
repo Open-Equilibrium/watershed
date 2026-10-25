@@ -34,10 +34,13 @@ class ItemView {
   /// Set on the row that marks where the current branch leaves the others.
   final BranchMarker? marker;
   final ValueNotifier<String> text = ValueNotifier('');
-  bool completed = false;
-  bool failed = false;
-  int? durationMs;
+
+  /// How the item ended, once it has; observable apart from its text.
+  final ValueNotifier<ItemOutcome?> outcome = ValueNotifier(null);
 }
+
+/// How a finished item ended.
+typedef ItemOutcome = ({bool failed, int? durationMs});
 
 /// A notification from the agent or Liquid, as the status bar shows it.
 @immutable
@@ -275,9 +278,7 @@ class SessionState {
           entry: item.entry,
         )
         ..text.value = item.text
-        ..completed = true
-        ..failed = item.failed
-        ..durationMs = item.durationMs,
+        ..outcome.value = (failed: item.failed, durationMs: item.durationMs),
   ];
 
   /// Each entry's position on the path from the root to `leaf`.
@@ -351,9 +352,10 @@ class SessionState {
         final view = _byId[event.item!.id];
         if (view != null) {
           view
-            ..completed = true
-            ..failed = event.item!.failed
-            ..durationMs = event.item!.durationMs
+            ..outcome.value = (
+              failed: event.item!.failed,
+              durationMs: event.item!.durationMs,
+            )
             ..text.value = event.text ?? view.text.value;
         }
       case BridgeEventKind.modelRequestCompleted:

@@ -168,24 +168,25 @@ class ToolRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ws = context.ws;
-    return ValueListenableBuilder(
-      valueListenable: state.approval,
-      builder: (context, approval, _) {
+    return ListenableBuilder(
+      listenable: Listenable.merge([state.approval, item.outcome]),
+      builder: (context, _) {
+        final approval = state.approval.value;
+        final outcome = item.outcome.value;
         final waiting =
-            !item.completed &&
+            outcome == null &&
             approval != null &&
             approval.approval?.tool == item.tool;
-        final (mark, markColor) = item.completed
-            ? (item.failed
-                  ? (LucideIcons.x, ws.danger)
-                  : (LucideIcons.check, ws.success))
-            : (waiting
-                  ? (LucideIcons.clock, ws.warning)
-                  : (LucideIcons.loader, ws.textFaint));
+        final (mark, markColor) = switch (outcome) {
+          (failed: true, durationMs: _) => (LucideIcons.x, ws.danger),
+          (failed: false, durationMs: _) => (LucideIcons.check, ws.success),
+          null when waiting => (LucideIcons.clock, ws.warning),
+          null => (LucideIcons.loader, ws.textFaint),
+        };
         final trailing = waiting
             ? 'waiting for approval'
-            : item.durationMs != null
-            ? '${item.durationMs} ms'
+            : outcome?.durationMs != null
+            ? '${outcome!.durationMs} ms'
             : '';
         return Container(
           height: 32,

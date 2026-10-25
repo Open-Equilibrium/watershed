@@ -431,4 +431,35 @@ void main() {
     await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
     expect(backend.calls.last, 'answer q1 fix: limit /login\n\nAdd a limiter.');
   });
+
+  testWidgets('marks a tool done when only its outcome changes', (
+    tester,
+  ) async {
+    await show(tester);
+    await emit(tester, event(BridgeEventKind.turnStarted, turn: 1));
+    await emit(
+      tester,
+      event(
+        BridgeEventKind.itemStarted,
+        turn: 1,
+        item: item(5, kind: BridgeItemKind.commandExecution, tool: 'bash'),
+      ),
+    );
+    expect(find.byIcon(LucideIcons.loader), findsOneWidget);
+    await emit(
+      tester,
+      event(
+        BridgeEventKind.itemCompleted,
+        turn: 1,
+        item: item(
+          5,
+          kind: BridgeItemKind.commandExecution,
+          tool: 'bash',
+          durationMs: 40,
+        ),
+      ),
+    );
+    expect(find.byIcon(LucideIcons.check), findsOneWidget);
+    expect(find.text('40 ms'), findsOneWidget);
+  });
 }
