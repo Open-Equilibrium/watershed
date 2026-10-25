@@ -251,6 +251,28 @@ fn an_entry_too_large_to_read_keeps_its_place_in_the_branch() {
 }
 
 #[test]
+fn lists_system_text_outside_named_sections() {
+    let data: Value = serde_json::from_str(
+        r#"{"entries":[
+          {"type":"message","id":"s1","parentId":null,"message":{"role":"system","content":"Also be kind.","sections":{"preamble":"You are pi."}}},
+          {"type":"message","id":"u1","parentId":"s1","message":{"role":"user","content":"Go"}},
+          {"type":"message","id":"a1","parentId":"u1","message":{"role":"assistant","content":[{"type":"text","text":"Done."}]}}
+        ],"leafId":"a1"}"#,
+    )
+    .expect("JSON");
+    let detail = History::from_entries(&data).context("a1").expect("context");
+    assert_eq!(
+        detail
+            .sections
+            .iter()
+            .map(|part| (part.name.as_str(), part.chars))
+            .collect::<Vec<_>>(),
+        [("preamble", 11), ("appended", 13)],
+        "the whole system prompt"
+    );
+}
+
+#[test]
 fn sums_what_every_stored_response_used() {
     let data: Value = serde_json::from_str(
         r#"{"entries":[

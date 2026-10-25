@@ -160,8 +160,16 @@ impl Projection {
                 })
                 .collect()
         };
+        let mut sections: Vec<ContextPart> = parts(&self.sections);
+        // System text outside named sections counts too, as the prompt total does.
+        if self.appended_chars > 0 {
+            sections.push(ContextPart {
+                name: "appended".to_owned(),
+                chars: self.appended_chars,
+            });
+        }
         ContextDetail {
-            sections: parts(&self.sections),
+            sections,
             tools: parts(&self.tools),
             messages: self
                 .log
