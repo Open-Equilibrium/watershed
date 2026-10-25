@@ -384,6 +384,39 @@ fn answers_extension_questions() {
 }
 
 #[test]
+fn stopping_rejects_an_approval_that_arrives_late() {
+    run(async {
+        // The agent asked before the abort reached it; the request only arrives afterwards.
+        let script = [
+            expect_response(&[r#""type":"abort""#]),
+            approval_request("a1", "bash", false),
+            expect_response(&[r#""id":"a1""#, r#""value":"reject""#]),
+            r#"printf '%s\n' '{"id":"1","type":"response","command":"abort","success":true}' '{"type":"agent_start"}'
+"#
+            .to_owned(),
+            approval_request("a2", "bash", false),
+            "IFS= read -r line || exit 0\n".to_owned(),
+        ]
+        .concat();
+        let (mut session, mut events) = fake_agent(&script);
+        let stopping = session.abort().await.expect("abort sent");
+        assert_eq!(timeout(WAIT, stopping.accepted()).await, Ok(Ok(())));
+        assert!(matches!(
+            next(&mut events).await,
+            SessionEvent::Runtime(RuntimeEvent::TurnStarted { .. })
+        ));
+        assert!(
+            matches!(
+                next(&mut events).await,
+                SessionEvent::Runtime(RuntimeEvent::RequestOpened { request, .. })
+                    if request == RequestId("a2".to_owned())
+            ),
+            "the next turn asks again"
+        );
+    });
+}
+
+#[test]
 fn forgets_a_question_once_its_time_is_up() {
     run(async {
         // pi answers a dialog with a timeout itself once the time is up, without telling.

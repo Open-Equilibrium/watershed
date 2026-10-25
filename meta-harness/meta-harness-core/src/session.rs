@@ -115,6 +115,9 @@ struct Shared {
     questions: HashSet<RequestId>,
     /// Whether a turn is running, from the agent's events.
     running: bool,
+    /// Whether an abort waits for the turn to settle; dialogs arriving meanwhile are rejected
+    /// or dismissed, since the agent stops only once they are answered.
+    stopping: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -217,6 +220,7 @@ impl Session {
     /// Aborts the running turn. pi answers once the agent is idle, which needs its open dialogs
     /// answered, so open approvals are rejected and open questions dismissed.
     pub async fn abort(&mut self) -> Result<Pending, CommandError> {
+        self.state.lock().stopping = true;
         let pending = self.submit(json!({ "type": "abort" })).await?;
         let (approvals, questions): (Vec<_>, Vec<_>) = {
             let shared = self.state.lock();
@@ -383,14 +387,19 @@ impl Session {
         Ok(Pending(response))
     }
 
-    async fn respond(&self, request: &RequestId, mut reply: Value) -> Result<(), CommandError> {
-        reply["type"] = json!("extension_ui_response");
-        reply["id"] = json!(request.0);
+    async fn respond(&self, request: &RequestId, answer: Value) -> Result<(), CommandError> {
         self.writer
-            .send(Write::Record(encode(&reply)))
+            .send(ui_response(request, answer))
             .await
             .map_err(|_| CommandError::Closed)
     }
+}
+
+/// The answer to an agent dialog.
+fn ui_response(request: &RequestId, mut answer: Value) -> Write {
+    answer["type"] = json!("extension_ui_response");
+    answer["id"] = json!(request.0);
+    Write::Record(encode(&answer))
 }
 
 /// Encodes one JSONL record.
@@ -496,27 +505,38 @@ impl Supervisor {
                     read_only,
                     ..
                 } => {
-                    let ask = {
+                    let answer = {
                         let mut shared = self.state.lock();
                         let allowed = shared.allowed.contains(tool);
-                        let ask = needs_user(shared.mode, *kind, *read_only, allowed);
-                        if ask {
+                        if shared.stopping {
+                            Some(json!({ "value": "reject" }))
+                        } else if needs_user(shared.mode, *kind, *read_only, allowed) {
                             shared.approvals.insert(request.clone(), tool.clone());
+                            None
+                        } else {
+                            Some(json!({ "value": "allow-auto" }))
                         }
-                        ask
                     };
-                    if !ask {
-                        let reply = json!({
-                            "type": "extension_ui_response",
-                            "id": request.0,
-                            "value": "allow-auto",
-                        });
-                        let _ = self.writer.send(Write::Record(encode(&reply))).await;
+                    match answer {
+                        Some(answer) => {
+                            self.reply(request, answer).await;
+                            false
+                        }
+                        None => true,
                     }
-                    ask
                 }
                 RuntimeEvent::UserInputRequested { request, .. } => {
-                    self.state.lock().questions.insert(request.clone());
+                    let stopping = {
+                        let mut shared = self.state.lock();
+                        if !shared.stopping {
+                            shared.questions.insert(request.clone());
+                        }
+                        shared.stopping
+                    };
+                    if stopping {
+                        self.reply(request, json!({ "cancelled": true })).await;
+                        continue;
+                    }
                     expiry = record
                         .get("timeout")
                         .and_then(Value::as_u64)
@@ -524,11 +544,15 @@ impl Supervisor {
                     true
                 }
                 RuntimeEvent::TurnStarted { .. } => {
-                    self.state.lock().running = true;
+                    let mut shared = self.state.lock();
+                    shared.running = true;
+                    shared.stopping = false;
                     true
                 }
                 RuntimeEvent::TurnCompleted { .. } | RuntimeEvent::TurnAborted { .. } => {
-                    self.state.lock().running = false;
+                    let mut shared = self.state.lock();
+                    shared.running = false;
+                    shared.stopping = false;
                     true
                 }
                 _ => true,
@@ -548,6 +572,11 @@ impl Supervisor {
             }
         }
         true
+    }
+
+    /// Answers an agent dialog without the user.
+    async fn reply(&self, request: &RequestId, answer: Value) {
+        let _ = self.writer.send(ui_response(request, answer)).await;
     }
 
     /// Forgets a question once its time is up: pi then answers it itself without telling.
