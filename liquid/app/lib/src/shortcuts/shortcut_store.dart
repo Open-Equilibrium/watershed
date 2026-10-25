@@ -80,8 +80,8 @@ class ShortcutController extends ValueNotifier<ShortcutSettings> {
   ShortcutController._(super.value, this._store, this._host, this.firstStart);
 
   /// Settings that are neither stored nor applied, for a Liquid without its app data.
-  ShortcutController.memory()
-    : this._(ShortcutSettings.standard(), null, null, false);
+  ShortcutController.memory([ShortcutSettings? settings])
+    : this._(settings ?? ShortcutSettings.standard(), null, null, false);
 
   /// The stored settings; a stored Liquid key is turned on again, since the remapping lasts
   /// only until logout.

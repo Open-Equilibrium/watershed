@@ -8,6 +8,7 @@ import '../agent/action_area.dart';
 import '../rust/api/events.dart';
 import '../rust/api/history.dart';
 import '../session/session_state.dart';
+import '../shortcuts/keymap.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
@@ -18,10 +19,20 @@ import 'trajectory_model.dart';
 import 'tree_view.dart';
 
 /// Keys of the Trajectory tab, for the status bar.
-const trajectoryKeys = '↑↓ step · ←→ fold · ⏎ open · B branch · C compare';
+String trajectoryKeys(ShortcutSettings keys) => [
+  '↑↓ step',
+  '←→ fold',
+  keys.hint(Command.openStep, 'open'),
+  keys.hint(Command.branch, 'branch'),
+  keys.hint(Command.compare, 'compare'),
+].where((part) => part.isNotEmpty).join(' · ');
 
 /// Keys while comparing two branches.
-const compareKeys = '⌥↑↓ tree · Space select branch · C leave compare';
+String compareKeys(ShortcutSettings keys) => [
+  '⌥↑↓ tree',
+  keys.hint(Command.selectBranch, 'select branch'),
+  keys.hint(Command.compare, 'leave compare'),
+].where((part) => part.isNotEmpty).join(' · ');
 
 /// Height of the inspector below a selected step; fixed so opening it never shifts more than
 /// one known amount.
@@ -35,7 +46,7 @@ class TrajectoryView extends StatefulWidget {
     super.key,
     required this.state,
     required this.onBranched,
-    required this.keys,
+    required this.comparing,
   });
 
   final SessionState state;
@@ -43,8 +54,8 @@ class TrajectoryView extends StatefulWidget {
   /// Called after branching, so the input area can take the new branch's prompt.
   final VoidCallback onBranched;
 
-  /// The keys the status bar shows for this tab.
-  final ValueNotifier<String> keys;
+  /// Whether two branches are compared, for the keys the status bar shows.
+  final ValueNotifier<bool> comparing;
 
   @override
   State<TrajectoryView> createState() => _TrajectoryViewState();
@@ -283,7 +294,7 @@ class _TrajectoryViewState extends State<TrajectoryView> {
 
   void _toggleCompare() {
     if (_comparing) {
-      widget.keys.value = trajectoryKeys;
+      widget.comparing.value = false;
       setState(() => _comparing = false);
       _reload();
       return;
@@ -292,7 +303,7 @@ class _TrajectoryViewState extends State<TrajectoryView> {
     final first = _graph.branchOf(_shownTip);
     final other = branches.where((branch) => branch != first).lastOrNull;
     if (first == null || other == null) return;
-    widget.keys.value = compareKeys;
+    widget.comparing.value = true;
     setState(() {
       _comparing = true;
       _picked = _ordered([first.tip, other.tip]);
@@ -403,30 +414,32 @@ class _TrajectoryViewState extends State<TrajectoryView> {
     final history = _history;
     final comparing =
         _comparing && history != null && history.trajectories.length > 1;
+    final keys = Keymap.of(context);
     return CallbackShortcuts(
       bindings: {
+        ...keys.bind({
+          Command.foldAll: _foldAll,
+          Command.openStep: () {
+            if (_selected == null) return;
+            setState(() => _inspecting = !_inspecting);
+            _reveal();
+          },
+          Command.branch: _branch,
+          Command.compare: _toggleCompare,
+          Command.selectBranch: () {
+            if (_comparing) _pickCursor();
+          },
+          Command.closeStep: _escape,
+        }),
         const SingleActivator(LogicalKeyboardKey.arrowDown): () => _move(1),
         const SingleActivator(LogicalKeyboardKey.arrowUp): () => _move(-1),
         const SingleActivator(LogicalKeyboardKey.arrowLeft): () => _fold(true),
         const SingleActivator(LogicalKeyboardKey.arrowRight): () =>
             _fold(false),
-        const SingleActivator(LogicalKeyboardKey.arrowLeft, alt: true):
-            _foldAll,
         const SingleActivator(LogicalKeyboardKey.arrowUp, alt: true): () =>
             _stepTree(-1),
         const SingleActivator(LogicalKeyboardKey.arrowDown, alt: true): () =>
             _stepTree(1),
-        const SingleActivator(LogicalKeyboardKey.enter): () {
-          if (_selected == null) return;
-          setState(() => _inspecting = !_inspecting);
-          _reveal();
-        },
-        const SingleActivator(LogicalKeyboardKey.keyB): _branch,
-        const SingleActivator(LogicalKeyboardKey.keyC): _toggleCompare,
-        const SingleActivator(LogicalKeyboardKey.space): () {
-          if (_comparing) _pickCursor();
-        },
-        const SingleActivator(LogicalKeyboardKey.escape): _escape,
       },
       child: Focus(
         focusNode: _focus,
@@ -743,7 +756,7 @@ class _Toolbar extends StatelessWidget {
               children: [
                 const Text('Fold turns'),
                 const SizedBox(width: WsMetrics.space3),
-                const Hint('⌥←'),
+                Hint(Keymap.of(context).label(Command.foldAll)),
               ],
             ),
           ),
@@ -763,14 +776,14 @@ class _Toolbar extends StatelessWidget {
                     style: TextStyle(color: ws.accent, fontSize: 13),
                   ),
                   const SizedBox(width: WsMetrics.space3),
-                  const Hint('C'),
+                  Hint(Keymap.of(context).label(Command.compare)),
                 ],
               ),
             )
           else
             SecondaryButton(
               label: 'Compare',
-              shortcut: 'C',
+              shortcut: Keymap.of(context).label(Command.compare),
               onPressed: onCompare,
             ),
         ],
@@ -1033,7 +1046,7 @@ class _Inspector extends StatelessWidget {
                   if (canBranch)
                     PrimaryButton(
                       label: 'Branch from here',
-                      shortcut: 'B',
+                      shortcut: Keymap.of(context).label(Command.branch),
                       onPressed: onBranch,
                     ),
                 ],

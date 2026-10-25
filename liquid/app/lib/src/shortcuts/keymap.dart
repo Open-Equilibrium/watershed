@@ -286,8 +286,22 @@ class ShortcutSettings {
   List<Keys> bindings(Command command) =>
       changes[command] ?? _defaults(command);
 
+  /// Shortcut bindings that run each command's action with all of its keys.
+  Map<ShortcutActivator, VoidCallback> bind(
+    Map<Command, VoidCallback> actions,
+  ) => {
+    for (final MapEntry(key: command, value: action) in actions.entries)
+      for (final keys in bindings(command)) keys.activator: action,
+  };
+
   /// What a badge shows for `command`; empty without keys.
   String label(Command command) => bindings(command).firstOrNull?.label ?? '';
+
+  /// A hint naming `command`'s keys and what they do; empty without keys.
+  String hint(Command command, String what) {
+    final keys = label(command);
+    return keys.isEmpty ? '' : '$keys $what';
+  }
 
   /// The keys the macOS menu bar can show: ⌘ without the Liquid key.
   Keys? menu(Command command) =>
@@ -401,4 +415,16 @@ class ShortcutSettings {
 
   @override
   int get hashCode => Object.hash(profile, base, liquidKey, changes.length);
+}
+
+/// Gives the widgets below the shortcut settings in use.
+class Keymap extends InheritedNotifier<ValueListenable<ShortcutSettings>> {
+  const Keymap({super.key, required super.notifier, required super.child});
+
+  /// The settings in use; Standard without a [Keymap] above `context`.
+  static ShortcutSettings of(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<Keymap>()?.notifier?.value ??
+      _standard;
+
+  static final _standard = ShortcutSettings.standard();
 }

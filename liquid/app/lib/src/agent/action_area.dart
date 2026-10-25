@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import '../rust/api/events.dart';
 import '../rust/api/session.dart';
 import '../session/session_state.dart';
+import '../shortcuts/keymap.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
@@ -118,23 +119,17 @@ class Composer extends StatelessWidget {
           final running = state.status.value == RunStatus.running;
           // Without a conversation yet, the input area starts a new session (ADR-0203).
           final starting = !running && state.items.value.isEmpty;
+          final keys = Keymap.of(context);
           return Column(
             children: [
               _QueueChips(state: state),
               Expanded(
                 child: CallbackShortcuts(
-                  bindings: {
-                    const SingleActivator(LogicalKeyboardKey.enter): () =>
-                        _send(followUp: false),
-                    const SingleActivator(
-                      LogicalKeyboardKey.enter,
-                      alt: true,
-                    ): () =>
-                        _send(followUp: true),
-                    if (running)
-                      const SingleActivator(LogicalKeyboardKey.escape):
-                          state.stop,
-                  },
+                  bindings: keys.bind({
+                    Command.send: () => _send(followUp: false),
+                    Command.queue: () => _send(followUp: true),
+                    if (running) Command.stop: state.stop,
+                  }),
                   child: TextField(
                     key: const Key('composer'),
                     controller: controller,
@@ -168,11 +163,11 @@ class Composer extends StatelessWidget {
                     ),
                   ),
                   if (running) ...[
-                    const Hint('⌥⏎ queue'),
+                    Hint(keys.hint(Command.queue, 'queue')),
                     const SizedBox(width: WsMetrics.space3),
                     SecondaryButton(
                       label: 'Stop',
-                      shortcut: 'esc',
+                      shortcut: keys.label(Command.stop),
                       onPressed: state.stop,
                     ),
                   ],
@@ -183,7 +178,7 @@ class Composer extends StatelessWidget {
                         : starting
                         ? 'Start'
                         : 'Send',
-                    shortcut: '⏎',
+                    shortcut: keys.label(Command.send),
                     onPressed: () => _send(followUp: false),
                   ),
                 ],
@@ -362,15 +357,13 @@ class _ApprovalCardState extends State<ApprovalCard> {
       BridgeRequestKind.fileChange => 'Change project files?',
       BridgeRequestKind.tool => 'Call ${approval.tool}?',
     };
+    final keys = Keymap.of(context);
     return CallbackShortcuts(
-      bindings: {
-        const SingleActivator(LogicalKeyboardKey.enter): () =>
-            state.decide(BridgeDecision.allowOnce),
-        const SingleActivator(LogicalKeyboardKey.enter, meta: true): () =>
-            state.decide(BridgeDecision.allowSession),
-        const SingleActivator(LogicalKeyboardKey.escape): () =>
-            state.decide(BridgeDecision.reject),
-      },
+      bindings: keys.bind({
+        Command.allowOnce: () => state.decide(BridgeDecision.allowOnce),
+        Command.allowSession: () => state.decide(BridgeDecision.allowSession),
+        Command.reject: () => state.decide(BridgeDecision.reject),
+      }),
       child: Focus(
         focusNode: _focus,
         child: Container(
@@ -402,13 +395,13 @@ class _ApprovalCardState extends State<ApprovalCard> {
                 children: [
                   PrimaryButton(
                     label: 'Allow once',
-                    shortcut: '⏎',
+                    shortcut: keys.label(Command.allowOnce),
                     onPressed: () => state.decide(BridgeDecision.allowOnce),
                   ),
                   const SizedBox(width: WsMetrics.space3),
                   SecondaryButton(
                     label: 'Allow for this session',
-                    shortcut: '⌘⏎',
+                    shortcut: keys.label(Command.allowSession),
                     onPressed: () => state.decide(BridgeDecision.allowSession),
                   ),
                   Expanded(
@@ -426,7 +419,7 @@ class _ApprovalCardState extends State<ApprovalCard> {
                   const SizedBox(width: WsMetrics.space3),
                   SecondaryButton(
                     label: 'Reject',
-                    shortcut: 'esc',
+                    shortcut: keys.label(Command.reject),
                     color: ws.danger,
                     onPressed: () => state.decide(BridgeDecision.reject),
                   ),
@@ -609,7 +602,10 @@ class _OptionListState extends State<_OptionList> {
                         _move(1),
                     const SingleActivator(LogicalKeyboardKey.arrowUp): () =>
                         _move(-1),
-                    const SingleActivator(LogicalKeyboardKey.enter): _pick,
+                    for (final keys in Keymap.of(
+                      context,
+                    ).bindings(Command.answer))
+                      keys.activator: _pick,
                   },
                   child: TextField(
                     key: const Key('filter'),
@@ -695,6 +691,7 @@ class _QuestionCardState extends State<QuestionCard> {
   Widget build(BuildContext context) {
     final question = widget.request.question!;
     final state = widget.state;
+    final keys = Keymap.of(context);
     final answer = switch (question.kind) {
       BridgeQuestionKind.select => _OptionList(
         options: question.options,
@@ -704,7 +701,7 @@ class _QuestionCardState extends State<QuestionCard> {
         children: [
           PrimaryButton(
             label: 'Yes',
-            shortcut: '⏎',
+            shortcut: keys.label(Command.answer),
             onPressed: () => state.answerConfirm(true),
           ),
           const SizedBox(width: WsMetrics.space3),
@@ -720,13 +717,9 @@ class _QuestionCardState extends State<QuestionCard> {
         children: [
           Expanded(
             child: CallbackShortcuts(
-              bindings: {
-                const SingleActivator(
-                  LogicalKeyboardKey.enter,
-                  meta: true,
-                ): () =>
-                    state.answerText(_text.text),
-              },
+              bindings: keys.bind({
+                Command.answerEditor: () => state.answerText(_text.text),
+              }),
               child: Container(
                 padding: const EdgeInsets.symmetric(
                   horizontal: WsMetrics.space4,
@@ -757,7 +750,7 @@ class _QuestionCardState extends State<QuestionCard> {
               const Spacer(),
               PrimaryButton(
                 label: 'Answer',
-                shortcut: '⌘⏎',
+                shortcut: keys.label(Command.answerEditor),
                 onPressed: () => state.answerText(_text.text),
               ),
             ],
@@ -767,29 +760,35 @@ class _QuestionCardState extends State<QuestionCard> {
       BridgeQuestionKind.input => Row(
         children: [
           Expanded(
-            child: TextField(
-              key: const Key('answer'),
-              controller: _text,
-              autofocus: true,
-              decoration: InputDecoration.collapsed(hintText: question.detail),
-              onSubmitted: (text) => state.answerText(text),
+            child: CallbackShortcuts(
+              bindings: keys.bind({
+                Command.answer: () => state.answerText(_text.text),
+              }),
+              child: TextField(
+                key: const Key('answer'),
+                controller: _text,
+                autofocus: true,
+                decoration: InputDecoration.collapsed(
+                  hintText: question.detail,
+                ),
+                onSubmitted: (text) => state.answerText(text),
+              ),
             ),
           ),
           PrimaryButton(
             label: 'Answer',
-            shortcut: '⏎',
+            shortcut: keys.label(Command.answer),
             onPressed: () => state.answerText(_text.text),
           ),
         ],
       ),
     };
     return CallbackShortcuts(
-      bindings: {
-        const SingleActivator(LogicalKeyboardKey.escape): state.dismiss,
+      bindings: keys.bind({
+        Command.dismissQuestion: state.dismiss,
         if (question.kind == BridgeQuestionKind.confirm)
-          const SingleActivator(LogicalKeyboardKey.enter): () =>
-              state.answerConfirm(true),
-      },
+          Command.answer: () => state.answerConfirm(true),
+      }),
       child: Focus(
         // Text questions focus their field; a confirmation takes the keys itself.
         autofocus: question.kind == BridgeQuestionKind.confirm,
@@ -809,7 +808,7 @@ class _QuestionCardState extends State<QuestionCard> {
                   ),
                   SecondaryButton(
                     label: 'Dismiss',
-                    shortcut: 'esc',
+                    shortcut: keys.label(Command.dismissQuestion),
                     onPressed: state.dismiss,
                   ),
                 ],
@@ -836,7 +835,7 @@ class _QuestionCardState extends State<QuestionCard> {
   }
 }
 
-/// A contextual shortcut hint, shown only while ⌘ is held (ADR-0204). It takes no space, so
+/// A contextual shortcut hint, shown only while the reveal key is held (ADR-0204). It takes no space, so
 /// nothing moves when it appears.
 class Hint extends StatelessWidget {
   const Hint(this.text, {super.key});
@@ -845,21 +844,23 @@ class Hint extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (!ShortcutReveal.shown(context)) return const SizedBox.shrink();
+    if (text.isEmpty || !ShortcutReveal.shown(context)) {
+      return const SizedBox.shrink();
+    }
     return SizedBox.shrink(
       child: OverflowBox(
         alignment: Alignment.centerLeft,
         maxWidth: double.infinity,
         maxHeight: double.infinity,
-        child: _Badge(text),
+        child: KeyBadge(text),
       ),
     );
   }
 }
 
 /// The look of a shortcut hint: small, dark and above what it labels (approved mockup).
-class _Badge extends StatelessWidget {
-  const _Badge(this.text);
+class KeyBadge extends StatelessWidget {
+  const KeyBadge(this.text, {super.key});
 
   final String text;
 
@@ -968,13 +969,15 @@ class _Button extends StatelessWidget {
       ),
     );
     final hint = shortcut;
-    if (hint == null || !ShortcutReveal.shown(context)) return button;
+    if (hint == null || hint.isEmpty || !ShortcutReveal.shown(context)) {
+      return button;
+    }
     // The hint sits on the button's corner, so the button keeps its size.
     return Stack(
       clipBehavior: Clip.none,
       children: [
         button,
-        Positioned(top: -9, right: -6, child: _Badge(hint)),
+        Positioned(top: -9, right: -6, child: KeyBadge(hint)),
       ],
     );
   }

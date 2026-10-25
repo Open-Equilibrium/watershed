@@ -3,10 +3,11 @@ import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../rust/api/events.dart';
 import '../session/session_state.dart';
+import '../shortcuts/keymap.dart';
+import '../shortcuts/shortcut_store.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
@@ -39,10 +40,18 @@ enum AgentTab { chat, trajectory, diff }
 /// The agent surface: sidebar, tabs, the active tab, the widget strip, the input area and the
 /// status bar. Every part keeps its position in every tab (guidelines, principle 8).
 class AgentShell extends StatefulWidget {
-  const AgentShell({super.key, required this.state, required this.info});
+  const AgentShell({
+    super.key,
+    required this.state,
+    required this.info,
+    this.shortcuts,
+  });
 
   final SessionState state;
   final SessionInfo info;
+
+  /// The shortcut settings; Standard, unsaved, without them.
+  final ShortcutController? shortcuts;
 
   @override
   State<AgentShell> createState() => _AgentShellState();
@@ -52,7 +61,8 @@ class _AgentShellState extends State<AgentShell> {
   final _composer = TextEditingController();
   final _composerFocus = FocusNode(debugLabel: 'composer');
   final _tab = ValueNotifier(AgentTab.chat);
-  final _trajectoryKeys = ValueNotifier(trajectoryKeys);
+  final _comparing = ValueNotifier(false);
+  late final _shortcuts = widget.shortcuts ?? ShortcutController.memory();
 
   /// Stops the agent before the app exits, so no pi process outlives Liquid.
   late final _lifecycle = AppLifecycleListener(
@@ -69,7 +79,7 @@ class _AgentShellState extends State<AgentShell> {
     widget.state.draft.addListener(_applyDraft);
     unawaited(widget.state.loadStart());
     // A reopened Trajectory tab starts outside the comparison.
-    _tab.addListener(() => _trajectoryKeys.value = trajectoryKeys);
+    _tab.addListener(() => _comparing.value = false);
   }
 
   void _applyDraft() {
@@ -90,7 +100,8 @@ class _AgentShellState extends State<AgentShell> {
     _composer.dispose();
     _composerFocus.dispose();
     _tab.dispose();
-    _trajectoryKeys.dispose();
+    _comparing.dispose();
+    if (widget.shortcuts == null) _shortcuts.dispose();
     super.dispose();
   }
 
@@ -102,18 +113,15 @@ class _AgentShellState extends State<AgentShell> {
   }
 
   /// App-wide shortcuts in the macOS menu bar, where they stay out of the GUI (ADR-0204);
-  /// the bindings below handle the same keys on every platform.
-  Widget _menus(Widget child) {
+  /// the menu shows ⌘ keys, the bindings below handle every key on every platform.
+  Widget _menus(ShortcutSettings keys, Widget child) {
     if (defaultTargetPlatform != TargetPlatform.macOS) return child;
-    PlatformMenuItem item(
-      String label,
-      LogicalKeyboardKey key,
-      VoidCallback action,
-    ) => PlatformMenuItem(
-      label: label,
-      shortcut: SingleActivator(key, meta: true),
-      onSelected: action,
-    );
+    PlatformMenuItem item(Command command, VoidCallback action) =>
+        PlatformMenuItem(
+          label: command.label,
+          shortcut: keys.menu(command)?.activator as MenuSerializableShortcut?,
+          onSelected: action,
+        );
     PlatformMenuItem provided(PlatformProvidedMenuItemType type) =>
         PlatformProvidedMenuItem(type: type);
     return PlatformMenuBar(
@@ -136,38 +144,23 @@ class _AgentShellState extends State<AgentShell> {
         ),
         PlatformMenu(
           label: 'Session',
-          menus: [item('New Session', LogicalKeyboardKey.keyN, _newSession)],
+          menus: [item(Command.newSession, _newSession)],
         ),
         PlatformMenu(
           label: 'View',
           menus: [
             PlatformMenuItemGroup(
               members: [
+                item(Command.chat, () => _tab.value = AgentTab.chat),
                 item(
-                  'Chat',
-                  LogicalKeyboardKey.digit1,
-                  () => _tab.value = AgentTab.chat,
-                ),
-                item(
-                  'Trajectory',
-                  LogicalKeyboardKey.digit2,
+                  Command.trajectory,
                   () => _tab.value = AgentTab.trajectory,
                 ),
-                item(
-                  'Diff',
-                  LogicalKeyboardKey.digit3,
-                  () => _tab.value = AgentTab.diff,
-                ),
+                item(Command.diff, () => _tab.value = AgentTab.diff),
               ],
             ),
             PlatformMenuItemGroup(
-              members: [
-                item(
-                  'Focus Input',
-                  LogicalKeyboardKey.keyL,
-                  _composerFocus.requestFocus,
-                ),
-              ],
+              members: [item(Command.focusInput, _composerFocus.requestFocus)],
             ),
             provided(PlatformProvidedMenuItemType.toggleFullScreen),
           ],
@@ -185,25 +178,29 @@ class _AgentShellState extends State<AgentShell> {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => Keymap(
+    notifier: _shortcuts,
+    child: ValueListenableBuilder(
+      valueListenable: _shortcuts,
+      builder: (context, keys, _) => _build(context, keys),
+    ),
+  );
+
+  Widget _build(BuildContext context, ShortcutSettings keys) {
     final ws = context.ws;
     return _menus(
+      keys,
       ShortcutReveal(
+        liquid: keys.liquidKey,
         child: CallbackShortcuts(
-          bindings: {
-            const SingleActivator(LogicalKeyboardKey.digit1, meta: true): () =>
-                _tab.value = AgentTab.chat,
-            const SingleActivator(LogicalKeyboardKey.digit2, meta: true): () =>
-                _tab.value = AgentTab.trajectory,
-            const SingleActivator(LogicalKeyboardKey.digit3, meta: true): () =>
-                _tab.value = AgentTab.diff,
-            const SingleActivator(LogicalKeyboardKey.keyL, meta: true):
-                _composerFocus.requestFocus,
-            const SingleActivator(LogicalKeyboardKey.keyN, meta: true):
-                _newSession,
-            const SingleActivator(LogicalKeyboardKey.escape):
-                widget.state.dismissNotice,
-          },
+          bindings: keys.bind({
+            Command.chat: () => _tab.value = AgentTab.chat,
+            Command.trajectory: () => _tab.value = AgentTab.trajectory,
+            Command.diff: () => _tab.value = AgentTab.diff,
+            Command.focusInput: _composerFocus.requestFocus,
+            Command.newSession: _newSession,
+            Command.dismissNotice: widget.state.dismissNotice,
+          }),
           child: Focus(
             autofocus: true,
             child: Material(
@@ -230,7 +227,7 @@ class _AgentShellState extends State<AgentShell> {
                               AgentTab.trajectory => TrajectoryView(
                                 state: widget.state,
                                 onBranched: _composerFocus.requestFocus,
-                                keys: _trajectoryKeys,
+                                comparing: _comparing,
                               ),
                             },
                           ),
@@ -253,12 +250,14 @@ class _AgentShellState extends State<AgentShell> {
                           ),
                         ),
                         ListenableBuilder(
-                          listenable: Listenable.merge([_tab, _trajectoryKeys]),
+                          listenable: Listenable.merge([_tab, _comparing]),
                           builder: (context, _) => StatusBar(
                             state: widget.state,
-                            keys: _tab.value == AgentTab.trajectory
-                                ? _trajectoryKeys.value
-                                : '',
+                            keys: _tab.value != AgentTab.trajectory
+                                ? ''
+                                : _comparing.value
+                                ? compareKeys(keys)
+                                : trajectoryKeys(keys),
                           ),
                         ),
                       ],
@@ -297,15 +296,17 @@ class _Tabs extends StatelessWidget {
 
   final ValueNotifier<AgentTab> tab;
 
-  static const _labels = {
-    AgentTab.chat: 'Chat',
-    AgentTab.trajectory: 'Trajectory',
-    AgentTab.diff: 'Diff',
+  static const _commands = {
+    AgentTab.chat: Command.chat,
+    AgentTab.trajectory: Command.trajectory,
+    AgentTab.diff: Command.diff,
   };
 
   @override
   Widget build(BuildContext context) {
     final ws = context.ws;
+    final keys = Keymap.of(context);
+    final shown = ShortcutReveal.shown(context);
     return Container(
       height: 38,
       padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space6),
@@ -317,7 +318,7 @@ class _Tabs extends StatelessWidget {
         builder: (context, active, _) => Row(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            for (final entry in _labels.entries)
+            for (final entry in _commands.entries)
               InkWell(
                 canRequestFocus: false,
                 onTap: () => tab.value = entry.key,
@@ -336,14 +337,26 @@ class _Tabs extends StatelessWidget {
                     ),
                   ),
                   alignment: Alignment.center,
-                  child: Text(
-                    entry.value,
-                    style: TextStyle(
-                      color: entry.key == active ? ws.text : ws.textMuted,
-                      fontWeight: entry.key == active
-                          ? WsMetrics.fwMedium
-                          : WsMetrics.fwRegular,
-                    ),
+                  // The hint sits on the label's corner, so the tab keeps its size.
+                  child: Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      Text(
+                        entry.value.label,
+                        style: TextStyle(
+                          color: entry.key == active ? ws.text : ws.textMuted,
+                          fontWeight: entry.key == active
+                              ? WsMetrics.fwMedium
+                              : WsMetrics.fwRegular,
+                        ),
+                      ),
+                      if (shown && keys.label(entry.value).isNotEmpty)
+                        Positioned(
+                          top: -11,
+                          right: -14,
+                          child: KeyBadge(keys.label(entry.value)),
+                        ),
+                    ],
                   ),
                 ),
               ),

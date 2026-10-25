@@ -4,6 +4,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 import '../agent/action_area.dart';
+import '../shortcuts/keymap.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'trajectory_model.dart';
@@ -134,7 +135,7 @@ class _OverviewState extends State<Overview> {
                   style: small.copyWith(color: ws.accent),
                 ),
                 const SizedBox(width: WsMetrics.space2),
-                const Hint('esc'),
+                Hint(Keymap.of(context).label(Command.closeStep)),
               ],
             ],
           ),
