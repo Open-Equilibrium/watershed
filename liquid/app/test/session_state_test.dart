@@ -307,6 +307,30 @@ void main() {
     },
   );
 
+  test('counts cached input in the session totals', () async {
+    await emit(
+      event(
+        BridgeEventKind.modelRequestCompleted,
+        turn: 1,
+        step: BridgeStep(
+          id: 1,
+          model: 'faux/faux-1',
+          usage: const BridgeUsage(
+            input: 100,
+            output: 20,
+            cacheRead: 9000,
+            cacheWrite: 50,
+            reasoning: 0,
+            costMicroUsd: 0,
+          ),
+          stopReason: 'stop',
+          durationMs: 900,
+        ),
+      ),
+    );
+    expect(state.totals.value.input, 9150);
+  });
+
   test('pages past entries that show nothing in the chat', () async {
     backend.transcripts[''] = const BridgeTranscript(
       items: [],

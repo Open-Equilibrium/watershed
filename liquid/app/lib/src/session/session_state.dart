@@ -68,7 +68,8 @@ class SessionTotals {
   final int costMicroUsd;
 
   SessionTotals add(BridgeUsage usage) => SessionTotals(
-    input: input + usage.input,
+    // Cached input is part of what the model read, as the Trajectory counts it.
+    input: input + usage.input + usage.cacheRead + usage.cacheWrite,
     output: output + usage.output,
     costMicroUsd: costMicroUsd + usage.costMicroUsd,
   );
