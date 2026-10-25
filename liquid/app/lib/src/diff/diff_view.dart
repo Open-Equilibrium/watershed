@@ -74,14 +74,17 @@ class _DiffViewState extends State<DiffView> {
   }
 
   Future<void> _select(BridgeFileChange? change) async {
+    // The selection moves at once, so quick arrow presses each move on from it.
+    setState(() {
+      _selected = change;
+      _lines = const [];
+    });
     final patch = change == null
         ? ''
         : await _read(() => widget.state.patch(change.path));
-    if (!mounted || patch == null) return;
-    setState(() {
-      _selected = change;
-      _lines = parsePatch(patch);
-    });
+    // A newer selection replaced this one while its patch loaded.
+    if (!mounted || patch == null || _selected != change) return;
+    setState(() => _lines = parsePatch(patch));
   }
 
   void _move(int step) {

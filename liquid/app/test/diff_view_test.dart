@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -145,5 +147,41 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(tester.getTopLeft(line).dx, lessThan(before - 1000));
+  });
+
+  testWidgets('keeps every arrow press while a patch loads', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1600, 900));
+    BridgeFileChange file(String path) => BridgeFileChange(
+      path: path,
+      status: BridgeChangeStatus.modified,
+      added: 1,
+      removed: 0,
+    );
+    final backend = FakeBackend()
+      ..changed = [file('a.ts'), file('b.ts'), file('c.ts')]
+      ..patches = {
+        for (final name in ['a', 'b', 'c'])
+          '$name.ts': '@@ -1 +1 @@\n+$name changed\n',
+      };
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: liquidTheme(Brightness.light),
+        home: Material(child: DiffView(state: SessionState(backend))),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      find.textContaining('a changed', findRichText: true),
+      findsOneWidget,
+    );
+    backend.patchGate = Completer();
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    backend.patchGate!.complete();
+    await tester.pumpAndSettle();
+    expect(
+      find.textContaining('c changed', findRichText: true),
+      findsOneWidget,
+    );
   });
 }

@@ -64,8 +64,12 @@ class FakeBackend implements SessionBackend {
   /// What reading a patch fails with, like the bridge does.
   String? patchError;
 
+  /// Holds patch reads until it completes.
+  Completer<void>? patchGate;
+
   @override
   Future<String> patch(String path) async {
+    await patchGate?.future;
     if (patchError case final error?) throw error;
     return patches[path] ?? '';
   }
