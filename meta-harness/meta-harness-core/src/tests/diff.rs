@@ -208,6 +208,31 @@ fn snapshots_without_running_the_repositorys_hooks() {
 }
 
 #[test]
+fn shows_a_patch_without_running_the_projects_textconv() {
+    run(async {
+        let repo = Repo::new("textconv");
+        repo.write("a.txt", "a\n");
+        repo.git(&["add", "."]);
+        repo.git(&["commit", "-q", "-m", "base"]);
+        let ran = repo.path().join("ran");
+        repo.git(&[
+            "config",
+            "diff.evil.textconv",
+            &format!("touch '{}'; cat", ran.display()),
+        ]);
+        repo.write(".gitattributes", "*.txt diff=evil\n");
+        let tree = WorkingTree::open(repo.path())
+            .await
+            .expect("repository opens");
+        let before = tree.snapshot().await.expect("snapshot");
+        repo.write("a.txt", "changed\n");
+        let patch = tree.patch(&before, "a.txt").await.expect("patch");
+        assert!(patch.contains("+changed"), "{patch}");
+        assert!(!ran.exists(), "the project's textconv did not run");
+    });
+}
+
+#[test]
 fn diffs_a_project_given_by_a_relative_path() {
     run(async {
         // Below the working directory, so the path stays relative wherever Git resolves it.

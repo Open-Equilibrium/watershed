@@ -219,7 +219,14 @@ impl WorkingTree {
     }
 
     async fn diff(&self, args: &[&str]) -> Result<String, DiffError> {
-        let mut command = vec!["diff", "--no-renames", "--no-ext-diff", "--no-color"];
+        // A project's textconv would run a command the project names (ADR-0206).
+        let mut command = vec![
+            "diff",
+            "--no-renames",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--no-color",
+        ];
         command.extend_from_slice(args);
         git(&self.root, &self.env(), &command).await
     }
