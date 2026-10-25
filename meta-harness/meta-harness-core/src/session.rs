@@ -769,10 +769,12 @@ impl Supervisor {
 
     /// Forgets a question once its time is up: pi then answers it itself without telling.
     fn expire(&self, request: RequestId, timeout: Duration) {
-        let (state, events) = (self.state.clone(), self.events.clone());
+        let (state, events, ended) = (self.state.clone(), self.events.clone(), self.ended.clone());
         tokio::spawn(async move {
             tokio::time::sleep(timeout).await;
-            if state.lock().questions.remove(&request) {
+            // Like a user's answer, it never follows the exit.
+            let ended = ended.lock().await;
+            if !*ended && state.lock().questions.remove(&request) {
                 let resolved = RuntimeEvent::UserInputResolved { request };
                 let _ = events.send(SessionEvent::Runtime(resolved)).await;
             }
