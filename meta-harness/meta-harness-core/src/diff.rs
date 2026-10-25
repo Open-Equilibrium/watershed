@@ -209,7 +209,9 @@ impl WorkingTree {
     /// Returns the unified diff of one file since `from`.
     pub async fn patch(&self, from: &Snapshot, path: &str) -> Result<String, DiffError> {
         let now = self.write_tree().await?;
-        self.diff(&[&from.0, &now, "--", path]).await
+        // A literal pathspec, so a name such as `a*.txt` selects only that file.
+        let path = format!(":(literal){path}");
+        self.diff(&[&from.0, &now, "--", &path]).await
     }
 
     async fn diff(&self, args: &[&str]) -> Result<String, DiffError> {

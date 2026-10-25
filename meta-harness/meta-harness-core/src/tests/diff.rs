@@ -183,6 +183,26 @@ fn keeps_snapshots_private_to_the_user() {
 }
 
 #[test]
+fn reads_the_patch_of_a_file_whose_name_looks_like_a_pattern() {
+    run(async {
+        let repo = Repo::new("pathspec");
+        repo.write("a.txt", "one\n");
+        repo.write("a*.txt", "one\n");
+        repo.git(&["add", "."]);
+        repo.git(&["commit", "-q", "-m", "base"]);
+        let tree = WorkingTree::open(repo.path())
+            .await
+            .expect("repository opens");
+        let snapshot = tree.snapshot().await.expect("snapshot");
+        repo.write("a.txt", "plain\n");
+        repo.write("a*.txt", "starred\n");
+        let patch = tree.patch(&snapshot, "a*.txt").await.expect("patch");
+        assert!(patch.contains("+starred"), "{patch}");
+        assert!(!patch.contains("+plain"), "only the named file: {patch}");
+    });
+}
+
+#[test]
 fn reports_a_diff_too_large_to_read_instead_of_cutting_it() {
     run(async {
         let repo = Repo::new("large");
