@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -8,6 +9,7 @@ import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'action_area.dart';
 import 'chat_view.dart';
+import 'shortcut_reveal.dart';
 import '../diff/diff_view.dart';
 import '../trajectory/trajectory_view.dart';
 
@@ -78,77 +80,162 @@ class _AgentShellState extends State<AgentShell> {
     super.dispose();
   }
 
+  /// App-wide shortcuts in the macOS menu bar, where they stay out of the GUI (ADR-0204);
+  /// the bindings below handle the same keys on every platform.
+  Widget _menus(Widget child) {
+    if (defaultTargetPlatform != TargetPlatform.macOS) return child;
+    PlatformMenuItem item(
+      String label,
+      LogicalKeyboardKey key,
+      VoidCallback action,
+    ) => PlatformMenuItem(
+      label: label,
+      shortcut: SingleActivator(key, meta: true),
+      onSelected: action,
+    );
+    PlatformMenuItem provided(PlatformProvidedMenuItemType type) =>
+        PlatformProvidedMenuItem(type: type);
+    return PlatformMenuBar(
+      menus: [
+        PlatformMenu(
+          label: 'Liquid',
+          menus: [
+            PlatformMenuItemGroup(
+              members: [provided(PlatformProvidedMenuItemType.about)],
+            ),
+            PlatformMenuItemGroup(
+              members: [
+                provided(PlatformProvidedMenuItemType.hide),
+                provided(PlatformProvidedMenuItemType.hideOtherApplications),
+                provided(PlatformProvidedMenuItemType.showAllApplications),
+              ],
+            ),
+            provided(PlatformProvidedMenuItemType.quit),
+          ],
+        ),
+        PlatformMenu(
+          label: 'View',
+          menus: [
+            PlatformMenuItemGroup(
+              members: [
+                item(
+                  'Chat',
+                  LogicalKeyboardKey.digit1,
+                  () => _tab.value = AgentTab.chat,
+                ),
+                item(
+                  'Trajectory',
+                  LogicalKeyboardKey.digit2,
+                  () => _tab.value = AgentTab.trajectory,
+                ),
+                item(
+                  'Diff',
+                  LogicalKeyboardKey.digit3,
+                  () => _tab.value = AgentTab.diff,
+                ),
+              ],
+            ),
+            PlatformMenuItemGroup(
+              members: [
+                item(
+                  'Focus Input',
+                  LogicalKeyboardKey.keyL,
+                  _composerFocus.requestFocus,
+                ),
+              ],
+            ),
+            provided(PlatformProvidedMenuItemType.toggleFullScreen),
+          ],
+        ),
+        PlatformMenu(
+          label: 'Window',
+          menus: [
+            provided(PlatformProvidedMenuItemType.minimizeWindow),
+            provided(PlatformProvidedMenuItemType.zoomWindow),
+          ],
+        ),
+      ],
+      child: child,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final ws = context.ws;
-    return CallbackShortcuts(
-      bindings: {
-        const SingleActivator(LogicalKeyboardKey.digit1, meta: true): () =>
-            _tab.value = AgentTab.chat,
-        const SingleActivator(LogicalKeyboardKey.digit2, meta: true): () =>
-            _tab.value = AgentTab.trajectory,
-        const SingleActivator(LogicalKeyboardKey.digit3, meta: true): () =>
-            _tab.value = AgentTab.diff,
-        const SingleActivator(LogicalKeyboardKey.keyL, meta: true):
-            _composerFocus.requestFocus,
-        const SingleActivator(LogicalKeyboardKey.escape):
-            widget.state.dismissNotice,
-      },
-      child: Focus(
-        autofocus: true,
-        child: Material(
-          color: ws.canvas,
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Sidebar(state: widget.state, info: widget.info),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    _Header(title: widget.info.title),
-                    _Tabs(tab: _tab),
-                    Expanded(
-                      child: ValueListenableBuilder(
-                        valueListenable: _tab,
-                        builder: (context, tab, _) => switch (tab) {
-                          AgentTab.chat => ChatView(state: widget.state),
-                          AgentTab.diff => DiffView(state: widget.state),
-                          AgentTab.trajectory => TrajectoryView(
-                            state: widget.state,
-                            onBranched: _composerFocus.requestFocus,
-                            keys: _trajectoryKeys,
-                          ),
-                        },
-                      ),
-                    ),
-                    WidgetStrip(state: widget.state),
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: WsMetrics.space4),
-                      child: Center(
-                        child: SizedBox(
-                          width: readingWidth,
-                          child: ActionArea(
-                            state: widget.state,
-                            composer: _composer,
-                            composerFocus: _composerFocus,
+    return _menus(
+      ShortcutReveal(
+        child: CallbackShortcuts(
+          bindings: {
+            const SingleActivator(LogicalKeyboardKey.digit1, meta: true): () =>
+                _tab.value = AgentTab.chat,
+            const SingleActivator(LogicalKeyboardKey.digit2, meta: true): () =>
+                _tab.value = AgentTab.trajectory,
+            const SingleActivator(LogicalKeyboardKey.digit3, meta: true): () =>
+                _tab.value = AgentTab.diff,
+            const SingleActivator(LogicalKeyboardKey.keyL, meta: true):
+                _composerFocus.requestFocus,
+            const SingleActivator(LogicalKeyboardKey.escape):
+                widget.state.dismissNotice,
+          },
+          child: Focus(
+            autofocus: true,
+            child: Material(
+              color: ws.canvas,
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Sidebar(state: widget.state, info: widget.info),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        _Header(title: widget.info.title),
+                        _Tabs(tab: _tab),
+                        Expanded(
+                          child: ValueListenableBuilder(
+                            valueListenable: _tab,
+                            builder: (context, tab, _) => switch (tab) {
+                              AgentTab.chat => ChatView(state: widget.state),
+                              AgentTab.diff => DiffView(state: widget.state),
+                              AgentTab.trajectory => TrajectoryView(
+                                state: widget.state,
+                                onBranched: _composerFocus.requestFocus,
+                                keys: _trajectoryKeys,
+                              ),
+                            },
                           ),
                         ),
-                      ),
+                        WidgetStrip(state: widget.state),
+                        Padding(
+                          padding: const EdgeInsets.only(
+                            bottom: WsMetrics.space4,
+                          ),
+                          child: Center(
+                            child: SizedBox(
+                              width: readingWidth,
+                              child: ActionArea(
+                                state: widget.state,
+                                composer: _composer,
+                                composerFocus: _composerFocus,
+                              ),
+                            ),
+                          ),
+                        ),
+                        ListenableBuilder(
+                          listenable: Listenable.merge([_tab, _trajectoryKeys]),
+                          builder: (context, _) => StatusBar(
+                            state: widget.state,
+                            keys: _tab.value == AgentTab.trajectory
+                                ? _trajectoryKeys.value
+                                : '',
+                          ),
+                        ),
+                      ],
                     ),
-                    ListenableBuilder(
-                      listenable: Listenable.merge([_tab, _trajectoryKeys]),
-                      builder: (context, _) => StatusBar(
-                        state: widget.state,
-                        keys: _tab.value == AgentTab.trajectory
-                            ? _trajectoryKeys.value
-                            : '⌘1–3 tabs · ⌘L input',
-                      ),
-                    ),
-                  ],
-                ),
+                  ),
+                ],
               ),
-            ],
+            ),
           ),
         ),
       ),
@@ -180,9 +267,9 @@ class _Tabs extends StatelessWidget {
   final ValueNotifier<AgentTab> tab;
 
   static const _labels = {
-    AgentTab.chat: ('Chat', '⌘1'),
-    AgentTab.trajectory: ('Trajectory', '⌘2'),
-    AgentTab.diff: ('Diff', '⌘3'),
+    AgentTab.chat: 'Chat',
+    AgentTab.trajectory: 'Trajectory',
+    AgentTab.diff: 'Diff',
   };
 
   @override
@@ -217,20 +304,15 @@ class _Tabs extends StatelessWidget {
                       ),
                     ),
                   ),
-                  child: Row(
-                    children: [
-                      Text(
-                        entry.value.$1,
-                        style: TextStyle(
-                          color: entry.key == active ? ws.text : ws.textMuted,
-                          fontWeight: entry.key == active
-                              ? WsMetrics.fwMedium
-                              : WsMetrics.fwRegular,
-                        ),
-                      ),
-                      const SizedBox(width: WsMetrics.space2),
-                      Hint(entry.value.$2),
-                    ],
+                  alignment: Alignment.center,
+                  child: Text(
+                    entry.value,
+                    style: TextStyle(
+                      color: entry.key == active ? ws.text : ws.textMuted,
+                      fontWeight: entry.key == active
+                          ? WsMetrics.fwMedium
+                          : WsMetrics.fwRegular,
+                    ),
                   ),
                 ),
               ),
@@ -273,13 +355,7 @@ class Sidebar extends StatelessWidget {
         children: [
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space3),
-            child: Row(
-              children: [
-                Text('Agent sessions', style: small),
-                const Spacer(),
-                Hint('⌘N'),
-              ],
-            ),
+            child: Row(children: [Text('Agent sessions', style: small)]),
           ),
           const SizedBox(height: WsMetrics.space2),
           Padding(
@@ -527,7 +603,9 @@ class _StatusBarState extends State<StatusBar> {
                 Text('${entry.key} ${entry.value}', style: text),
               ],
               const Spacer(),
-              Text(widget.keys, style: text.copyWith(color: ws.textFaint)),
+              // The view's keys show only while ⌘ is held (ADR-0204).
+              if (ShortcutReveal.shown(context))
+                Text(widget.keys, style: text.copyWith(color: ws.textFaint)),
             ],
           );
         },

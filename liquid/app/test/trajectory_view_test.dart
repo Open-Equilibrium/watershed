@@ -363,10 +363,15 @@ void main() {
 
     await press(tester, LogicalKeyboardKey.keyC);
     expect(backend.calls.last, 'history e6 b2');
+    // The view's keys show while ⌘ is held (ADR-0204).
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pump(const Duration(milliseconds: 700));
     expect(
       find.text('⌥↑↓ tree · Space select branch · C leave compare'),
       findsOneWidget,
     );
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pump();
     expect(
       find.text('Steps 1–3 shared · prompt, message, read'),
       findsOneWidget,

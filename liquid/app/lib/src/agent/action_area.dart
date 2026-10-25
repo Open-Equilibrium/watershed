@@ -9,6 +9,7 @@ import '../session/session_state.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
+import 'shortcut_reveal.dart';
 
 /// Height of the input area; it never changes, so nothing above it moves (guidelines, patterns).
 const double actionAreaHeight = 150;
@@ -143,21 +144,14 @@ class Composer extends StatelessWidget {
                   ModeChip(state: state),
                   const Spacer(),
                   if (running) ...[
-                    Text(
-                      '⌥⏎ queue',
-                      style: TextStyle(
-                        color: ws.textFaint,
-                        fontSize: WsMetrics.fsSmall,
-                      ),
-                    ),
+                    const Hint('⌥⏎ queue'),
                     const SizedBox(width: WsMetrics.space3),
                     SecondaryButton(
                       label: 'Stop',
                       shortcut: 'esc',
                       onPressed: state.stop,
                     ),
-                  ] else
-                    Hint('⌘L'),
+                  ],
                   const SizedBox(width: WsMetrics.space3),
                   PrimaryButton(
                     label: running ? 'Steer' : 'Send',
@@ -595,7 +589,7 @@ class _OptionListState extends State<_OptionList> {
                     autofocus: true,
                     style: const TextStyle(fontSize: WsMetrics.fsSmall),
                     decoration: const InputDecoration.collapsed(
-                      hintText: 'Type to filter · ↑↓ ⏎',
+                      hintText: 'Type to filter',
                     ),
                     onChanged: (_) => setState(() => _highlight = 0),
                   ),
@@ -731,13 +725,7 @@ class _QuestionCardState extends State<QuestionCard> {
           const SizedBox(height: WsMetrics.space2),
           Row(
             children: [
-              Text(
-                '⏎ new line',
-                style: TextStyle(
-                  color: context.ws.textFaint,
-                  fontSize: WsMetrics.fsSmall,
-                ),
-              ),
+              const Hint('⏎ new line'),
               const Spacer(),
               PrimaryButton(
                 label: 'Answer',
@@ -820,25 +808,51 @@ class _QuestionCardState extends State<QuestionCard> {
   }
 }
 
-/// A small keyboard hint such as ⌘L.
+/// A contextual shortcut hint, shown only while ⌘ is held (ADR-0204). It takes no space, so
+/// nothing moves when it appears.
 class Hint extends StatelessWidget {
-  const Hint(this.text, {super.key, this.color});
+  const Hint(this.text, {super.key});
 
   final String text;
-  final Color? color;
 
   @override
   Widget build(BuildContext context) {
-    final shade = (color ?? context.ws.textFaint).withValues(alpha: 0.7);
+    if (!ShortcutReveal.shown(context)) return const SizedBox.shrink();
+    return SizedBox.shrink(
+      child: OverflowBox(
+        alignment: Alignment.centerLeft,
+        maxWidth: double.infinity,
+        maxHeight: double.infinity,
+        child: _Badge(text),
+      ),
+    );
+  }
+}
+
+/// The look of a shortcut hint: small, dark and above what it labels (approved mockup).
+class _Badge extends StatelessWidget {
+  const _Badge(this.text);
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final ws = context.ws;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space1),
       decoration: BoxDecoration(
-        border: Border.all(color: shade),
+        color: ws.text,
         borderRadius: BorderRadius.circular(WsMetrics.radiusSm),
+        boxShadow: ws.shadow,
       ),
       child: Text(
         text,
-        style: TextStyle(fontSize: 11, height: 16 / 11, color: shade),
+        style: TextStyle(
+          fontSize: 10,
+          height: 14 / 10,
+          fontWeight: WsMetrics.fwSemibold,
+          color: ws.surface,
+        ),
       ),
     );
   }
@@ -896,7 +910,7 @@ class _Button extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Material(
+    final button = Material(
       color: background,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
@@ -920,14 +934,20 @@ class _Button extends StatelessWidget {
                   fontSize: 13,
                 ),
               ),
-              if (shortcut != null) ...[
-                const SizedBox(width: WsMetrics.space3),
-                Hint(shortcut!, color: foreground),
-              ],
             ],
           ),
         ),
       ),
+    );
+    final hint = shortcut;
+    if (hint == null || !ShortcutReveal.shown(context)) return button;
+    // The hint sits on the button's corner, so the button keeps its size.
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        button,
+        Positioned(top: -9, right: -6, child: _Badge(hint)),
+      ],
     );
   }
 }

@@ -134,7 +134,7 @@ class _OverviewState extends State<Overview> {
                   style: small.copyWith(color: ws.accent),
                 ),
                 const SizedBox(width: WsMetrics.space2),
-                Hint('esc'),
+                const Hint('esc'),
               ],
             ],
           ),

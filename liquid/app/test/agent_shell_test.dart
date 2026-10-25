@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -31,6 +32,12 @@ void main() {
         home: AgentShell(state: state, info: info),
       ),
     );
+  }
+
+  /// Holds ⌘ long enough for the contextual shortcuts to show (ADR-0204).
+  Future<void> holdCommand(WidgetTester tester) async {
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pump(const Duration(milliseconds: 700));
   }
 
   Future<void> emit(WidgetTester tester, BridgeEvent event) async {
@@ -123,7 +130,7 @@ void main() {
     await state.loadChat();
     await tester.pumpAndSettle();
     expect(find.text('continues after step 2'), findsOneWidget);
-    expect(find.text('A: 1 more ⌘2'), findsOneWidget);
+    expect(find.text('A: 1 more'), findsOneWidget);
 
     await tester.drag(find.byType(ListView).first, const Offset(0, 4000));
     await tester.pumpAndSettle();
@@ -216,7 +223,14 @@ void main() {
 
     await emit(tester, event(BridgeEventKind.turnStarted, turn: 1));
     expect(find.text('Steer'), findsOneWidget, reason: 'Enter steers a run');
+    expect(
+      find.text('⌥⏎ queue'),
+      findsNothing,
+      reason: 'shown while ⌘ is held',
+    );
+    await holdCommand(tester);
     expect(find.text('⌥⏎ queue'), findsOneWidget);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
     await tester.enterText(composer, 'Shorter');
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pump();
@@ -423,7 +437,9 @@ void main() {
         ),
       ),
     );
+    await holdCommand(tester);
     expect(find.text('⏎ new line'), findsOneWidget);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
     final editor = find.byKey(const Key('answer'));
     await tester.enterText(editor, 'fix: limit /login\n\nAdd a limiter.');
     await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
@@ -461,5 +477,64 @@ void main() {
     );
     expect(find.byIcon(LucideIcons.check), findsOneWidget);
     expect(find.text('40 ms'), findsOneWidget);
+  });
+
+  testWidgets('shows contextual shortcuts only while Cmd alone is held', (
+    tester,
+  ) async {
+    await show(tester);
+    await emit(tester, event(BridgeEventKind.turnStarted, turn: 1));
+    await emit(
+      tester,
+      event(BridgeEventKind.requestOpened, request: approval('a1')),
+    );
+    expect(find.text('⌘⏎'), findsNothing, reason: 'hidden by default');
+    expect(
+      find.text('⌘1'),
+      findsNothing,
+      reason: 'app-wide ones live in menus',
+    );
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.sendKeyEvent(LogicalKeyboardKey.digit1);
+    await tester.pump(const Duration(milliseconds: 700));
+    expect(find.text('⌘⏎'), findsNothing, reason: 'a shortcut was used');
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pump(const Duration(milliseconds: 700));
+    expect(find.text('⌘⏎'), findsOneWidget);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pump();
+    expect(find.text('⌘⏎'), findsNothing);
+  });
+
+  testWidgets('puts app-wide shortcuts into the macOS menu bar', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+    final labels = <String>[];
+    void collect(Object? items) {
+      for (final item in (items as List?) ?? const []) {
+        final map = item as Map;
+        if (map['label'] case final String label) labels.add(label);
+        collect(map['children']);
+      }
+    }
+
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.menu,
+      (call) async {
+        if (call.method == 'Menu.setMenus') {
+          collect((call.arguments as Map)['0']);
+        }
+        return null;
+      },
+    );
+    await show(tester);
+    await tester.pump();
+    debugDefaultTargetPlatformOverride = null;
+    expect(labels, containsAll(['Chat', 'Trajectory', 'Diff', 'Focus Input']));
   });
 }

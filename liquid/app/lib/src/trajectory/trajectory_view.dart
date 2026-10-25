@@ -743,7 +743,7 @@ class _Toolbar extends StatelessWidget {
               children: [
                 const Text('Fold turns'),
                 const SizedBox(width: WsMetrics.space3),
-                Hint('⌥←'),
+                const Hint('⌥←'),
               ],
             ),
           ),
@@ -763,7 +763,7 @@ class _Toolbar extends StatelessWidget {
                     style: TextStyle(color: ws.accent, fontSize: 13),
                   ),
                   const SizedBox(width: WsMetrics.space3),
-                  Hint('C', color: ws.accent),
+                  const Hint('C'),
                 ],
               ),
             )

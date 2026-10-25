@@ -95,7 +95,7 @@ class BranchMark extends StatelessWidget {
           Text('continues after step ${marker.step}', style: style),
           const Spacer(),
           if (marker.other case final other?)
-            Text('$other: ${marker.otherMore} more ⌘2', style: style),
+            Text('$other: ${marker.otherMore} more', style: style),
         ],
       ),
     );

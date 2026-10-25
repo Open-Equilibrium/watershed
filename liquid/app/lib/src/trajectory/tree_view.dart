@@ -66,7 +66,7 @@ class SessionTreeView extends StatelessWidget {
                   ),
                 ),
                 const Spacer(),
-                Hint('⌥↑↓'),
+                const Hint('⌥↑↓'),
               ],
             ),
           ),
