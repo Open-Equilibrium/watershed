@@ -195,6 +195,8 @@ impl Stopper {
 pub struct Session {
     writer: mpsc::Sender<Write>,
     events: mpsc::Sender<SessionEvent>,
+    /// Whether the supervisor sent `Exited`; resolutions sent later would follow it.
+    ended: Arc<tokio::sync::Mutex<bool>>,
     state: State,
     next_id: u64,
     stopper: Option<Stopper>,
@@ -224,8 +226,10 @@ impl Session {
             ..Shared::default()
         })));
         tokio::spawn(write(stdin, writes));
+        let ended = Arc::new(tokio::sync::Mutex::new(false));
         let supervisor = Supervisor {
             events: events.clone(),
+            ended: ended.clone(),
             writer: writer.clone(),
             state: state.clone(),
             adapter: PiAdapter::new(),
@@ -238,6 +242,7 @@ impl Session {
         let session = Self {
             writer,
             events,
+            ended,
             state,
             next_id: 0,
             stopper: Some(Stopper {
@@ -439,7 +444,8 @@ impl Session {
         self.state.lock().mode = mode;
     }
 
-    /// Answers an open approval request.
+    /// Answers an open approval request. Like every command, it runs to completion: dropped
+    /// midway, the request may stay unanswered.
     pub async fn decide(
         &mut self,
         request: &RequestId,
@@ -461,11 +467,11 @@ impl Session {
             Decision::Reject => "reject",
         };
         self.respond(request, json!({ "value": value })).await?;
-        let resolved = RuntimeEvent::RequestResolved {
+        self.resolved(RuntimeEvent::RequestResolved {
             request: request.clone(),
             decision,
-        };
-        let _ = self.events.send(SessionEvent::Runtime(resolved)).await;
+        })
+        .await;
         Ok(())
     }
 
@@ -484,11 +490,19 @@ impl Session {
             Answer::Cancelled => json!({ "cancelled": true }),
         };
         self.respond(request, reply).await?;
-        let resolved = RuntimeEvent::UserInputResolved {
+        self.resolved(RuntimeEvent::UserInputResolved {
             request: request.clone(),
-        };
-        let _ = self.events.send(SessionEvent::Runtime(resolved)).await;
+        })
+        .await;
         Ok(())
+    }
+
+    /// Reports a resolved dialog unless the agent's exit was reported, which stays last.
+    async fn resolved(&self, event: RuntimeEvent) {
+        let ended = self.ended.lock().await;
+        if !*ended {
+            let _ = self.events.send(SessionEvent::Runtime(event)).await;
+        }
     }
 
     /// Asks the agent to exit and kills it after `grace`; returns whether it exited successfully.
@@ -574,6 +588,7 @@ async fn write(mut stdin: ChildStdin, mut writes: mpsc::Receiver<Write>) {
 /// Reads the agent's output until it exits, fails or is killed, then reports the exit.
 struct Supervisor {
     events: mpsc::Sender<SessionEvent>,
+    ended: Arc<tokio::sync::Mutex<bool>>,
     writer: mpsc::Sender<Write>,
     state: State,
     adapter: PiAdapter,
@@ -646,6 +661,9 @@ impl Supervisor {
         let success = status.is_ok_and(|status| status.success());
         // Shutdown learns of the exit first; the event waits for buffer space.
         let _ = exit.send(success);
+        // No resolution can follow: one being reported finishes first.
+        let mut ended = self.ended.lock().await;
+        *ended = true;
         let _ = self.events.send(SessionEvent::Exited { success }).await;
     }
 

@@ -52,24 +52,27 @@ impl LineFramer {
                 }
                 continue;
             }
-            self.pending.extend_from_slice(part);
-            if self.pending.len() - usize::from(complete) > self.limit {
-                let mut record = std::mem::take(&mut self.pending);
-                if complete {
-                    record.pop();
-                }
+            if self.pending.len() + body.len() > self.limit {
+                // Only its start and end are kept; the rest is never held.
+                let pending = std::mem::take(&mut self.pending);
+                let start = pending
+                    .iter()
+                    .chain(body)
+                    .take(KEPT_BYTES)
+                    .copied()
+                    .collect();
                 let mut end = Vec::new();
-                keep_end(&mut end, &record);
-                record.truncate(KEPT_BYTES);
+                keep_end(&mut end, &pending);
+                keep_end(&mut end, body);
                 if complete {
-                    frames.push(Frame::Oversized { start: record, end });
+                    frames.push(Frame::Oversized { start, end });
                 } else {
-                    self.skipping = Some((record, end));
+                    self.skipping = Some((start, end));
                 }
                 continue;
             }
+            self.pending.extend_from_slice(body);
             if complete {
-                self.pending.pop();
                 frames.push(Frame::Record(std::mem::take(&mut self.pending)));
             }
         }
