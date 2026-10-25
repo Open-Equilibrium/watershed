@@ -208,6 +208,57 @@ fn snapshots_without_running_the_repositorys_hooks() {
 }
 
 #[test]
+fn reads_the_project_without_running_commands_its_git_configuration_names() {
+    run(async {
+        let repo = Repo::new("filters");
+        repo.write("a.txt", "a\n");
+        repo.write(".gitignore", "ignored.txt\n");
+        repo.git(&["add", "."]);
+        repo.git(&["commit", "-q", "-m", "base"]);
+        // An agent allowed to edit files can name commands for Git to run on them.
+        let ran = repo.path().join("ran");
+        for (name, value) in [
+            (
+                "filter.evil.clean",
+                format!("touch '{}'; cat", ran.display()),
+            ),
+            (
+                "diff.evil.textconv",
+                format!("touch '{}'; cat", ran.display()),
+            ),
+        ] {
+            repo.git(&["config", name, &value]);
+        }
+        repo.write(".gitattributes", "*.txt filter=evil diff=evil\n");
+        std::fs::write(
+            repo.path().join(".git/info/attributes"),
+            "*.txt filter=evil diff=evil\n",
+        )
+        .expect("attributes");
+        std::fs::write(repo.path().join(".git/info/exclude"), "local.txt\n").expect("exclude");
+        let tree = WorkingTree::open(repo.path())
+            .await
+            .expect("repository opens");
+        let before = tree.snapshot().await.expect("snapshot");
+        repo.write("a.txt", "changed\n");
+        repo.write("ignored.txt", "x\n");
+        repo.write("local.txt", "x\n");
+        let changes = tree.changes(&before).await.expect("changes");
+        let patch = tree.patch(&before, "a.txt").await.expect("patch");
+        assert!(!ran.exists(), "no configured command ran");
+        assert!(patch.contains("+changed"), "{patch}");
+        assert_eq!(
+            changes
+                .iter()
+                .map(|change| change.path.as_str())
+                .collect::<Vec<_>>(),
+            ["a.txt"],
+            "ignored files stay out, also those the repository ignores locally"
+        );
+    });
+}
+
+#[test]
 fn diffs_a_project_given_by_a_relative_path() {
     run(async {
         // Below the working directory, so the path stays relative wherever Git resolves it.

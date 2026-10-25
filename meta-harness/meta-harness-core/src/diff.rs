@@ -81,13 +81,18 @@ impl fmt::Display for DiffError {
 
 impl std::error::Error for DiffError {}
 
-/// A Git working tree whose states can be captured and compared. Snapshots use a private index
-/// and object store, so the repository's own index and objects stay untouched.
+/// A Git working tree whose states can be captured and compared. Snapshots use a private Git
+/// directory with its own index and objects, so the repository's index and objects stay
+/// untouched, and Git reads neither the repository's configuration nor its attributes: no
+/// filter, conversion or hook the project names runs.
 #[derive(Debug)]
 pub struct WorkingTree {
     root: PathBuf,
     index: PathBuf,
     objects: PathBuf,
+    exclude: PathBuf,
+    /// The empty tree in the repository's object format, the only attribute source.
+    attributes: String,
     store: Store,
     /// Serializes use of the private index.
     busy: Mutex<()>,
@@ -136,18 +141,37 @@ impl WorkingTree {
             &[
                 "rev-parse",
                 "--show-toplevel",
+                "--show-object-format",
                 "--git-path",
                 "index",
                 "--git-path",
                 "objects",
+                "--git-path",
+                "info/exclude",
             ],
         )
         .await
         .map_err(|_| DiffError::NotARepository)?;
         let mut lines = lines.lines();
-        let (Some(root), Some(index), Some(objects)) = (lines.next(), lines.next(), lines.next())
-        else {
+        let (Some(root), Some(format), Some(index), Some(objects), Some(exclude)) = (
+            lines.next(),
+            lines.next(),
+            lines.next(),
+            lines.next(),
+            lines.next(),
+        ) else {
             return Err(DiffError::NotARepository);
+        };
+        let (empty_tree, config) = match format {
+            "sha1" => (
+                "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
+                "[core]\n\trepositoryformatversion = 0\n",
+            ),
+            "sha256" => (
+                "6ef19b41225c5369f1c104d45d8d85efa9b057b53b14b4b9b939dd74decc5321",
+                "[core]\n\trepositoryformatversion = 1\n[extensions]\n\tobjectformat = sha256\n",
+            ),
+            other => return Err(DiffError::Git(format!("unknown object format {other}"))),
         };
         let absolute = |path: &str| {
             let path = Path::new(path);
@@ -158,11 +182,18 @@ impl WorkingTree {
             }
         };
         let store = Store(private_dir().map_err(DiffError::Io)?);
-        std::fs::create_dir(store.0.join("objects")).map_err(DiffError::Io)?;
+        for part in ["objects", "refs", "info"] {
+            std::fs::create_dir(store.0.join(part)).map_err(DiffError::Io)?;
+        }
+        std::fs::write(store.0.join("HEAD"), "ref: refs/heads/snapshot\n")
+            .map_err(DiffError::Io)?;
+        std::fs::write(store.0.join("config"), config).map_err(DiffError::Io)?;
         Ok(Self {
             root: PathBuf::from(root),
             index: absolute(index),
             objects: absolute(objects),
+            exclude: absolute(exclude),
+            attributes: format!("--attr-source={empty_tree}"),
             store,
             busy: Mutex::new(()),
         })
@@ -180,12 +211,14 @@ impl WorkingTree {
         let statuses = self.diff(&["--name-status", "-z", &from.0, &now]).await?;
         let mut statuses = statuses.split('\0');
         let mut changes = Vec::new();
+        let mut positions = std::collections::HashMap::new();
         while let (Some(status), Some(path)) = (statuses.next(), statuses.next()) {
             let status = match status {
                 "A" => ChangeStatus::Added,
                 "D" => ChangeStatus::Deleted,
                 _ => ChangeStatus::Modified,
             };
+            positions.insert(path, changes.len());
             changes.push(FileChange {
                 path: path.to_owned(),
                 status,
@@ -200,9 +233,9 @@ impl WorkingTree {
             else {
                 continue;
             };
-            if let Some(change) = changes.iter_mut().find(|change| change.path == path) {
-                change.added = added.parse().unwrap_or(0);
-                change.removed = removed.parse().unwrap_or(0);
+            if let Some(&position) = positions.get(path) {
+                changes[position].added = added.parse().unwrap_or(0);
+                changes[position].removed = removed.parse().unwrap_or(0);
             }
         }
         Ok(changes)
@@ -217,7 +250,14 @@ impl WorkingTree {
     }
 
     async fn diff(&self, args: &[&str]) -> Result<String, DiffError> {
-        let mut command = vec!["diff", "--no-renames", "--no-ext-diff", "--no-color"];
+        let mut command = vec![
+            self.attributes.as_str(),
+            "diff",
+            "--no-renames",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--no-color",
+        ];
         command.extend_from_slice(args);
         git(&self.root, &self.env(), &command).await
     }
@@ -225,17 +265,14 @@ impl WorkingTree {
     /// Writes the working tree into the private store and returns its tree id.
     async fn write_tree(&self) -> Result<String, DiffError> {
         let _busy = self.busy.lock().await;
-        let index = self.store.0.join("index");
-        match std::fs::copy(&self.index, &index) {
-            Ok(_) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                let _ = std::fs::remove_file(&index);
-            }
-            Err(error) => return Err(DiffError::Io(error)),
-        }
+        // The repository's index speeds up reading files; its local excludes keep ignored
+        // files out. Both are copied as data.
+        copy_or_remove(&self.index, &self.store.0.join("index"))?;
+        copy_or_remove(&self.exclude, &self.store.0.join("info/exclude"))?;
         let env = self.env();
-        git(&self.root, &env, &["add", "--all", "--", "."]).await?;
-        Ok(git(&self.root, &env, &["write-tree"])
+        let attributes = self.attributes.as_str();
+        git(&self.root, &env, &[attributes, "add", "--all", "--", "."]).await?;
+        Ok(git(&self.root, &env, &[attributes, "write-tree"])
             .await?
             .trim()
             .to_owned())
@@ -243,26 +280,43 @@ impl WorkingTree {
 
     fn env(&self) -> Vec<(&'static str, OsString)> {
         vec![
+            ("GIT_DIR", self.store.0.clone().into()),
+            ("GIT_WORK_TREE", self.root.clone().into()),
             ("GIT_INDEX_FILE", self.store.0.join("index").into()),
-            ("GIT_OBJECT_DIRECTORY", self.store.0.join("objects").into()),
             (
                 "GIT_ALTERNATE_OBJECT_DIRECTORIES",
                 self.objects.clone().into(),
             ),
+            ("GIT_ATTR_NOSYSTEM", "1".into()),
             ("GIT_OPTIONAL_LOCKS", "0".into()),
         ]
+    }
+}
+
+/// Replaces `to` with a copy of `from`, or removes it when `from` does not exist.
+fn copy_or_remove(from: &Path, to: &Path) -> Result<(), DiffError> {
+    match std::fs::copy(from, to) {
+        Ok(_) => Ok(()),
+        Err(error) if error.kind() == ErrorKind::NotFound => {
+            let _ = std::fs::remove_file(to);
+            Ok(())
+        }
+        Err(error) => Err(DiffError::Io(error)),
     }
 }
 
 /// Runs the host's `git` in `dir` and returns at most [`MAX_OUTPUT_BYTES`] of its output.
 async fn git(dir: &Path, env: &[(&str, OsString)], args: &[&str]) -> Result<String, DiffError> {
     let mut child = Command::new("git")
-        // Reading the project runs none of its hooks or file monitors, which could change it.
+        // Reading the project runs none of its hooks or file monitors, which could change it, and
+        // no attribute the user's own configuration names.
         .args([
             "-c",
             "core.hooksPath=/dev/null",
             "-c",
             "core.fsmonitor=false",
+            "-c",
+            "core.attributesFile=/dev/null",
         ])
         .args(args)
         .current_dir(dir)
