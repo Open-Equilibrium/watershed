@@ -123,7 +123,9 @@ class StartChips extends StatelessWidget {
         child: _Chip(icon: LucideIcons.hexagon, label: project),
       ),
       const SizedBox(width: WsMetrics.space2),
-      _Chip(icon: LucideIcons.laptop, label: localDevice),
+      Flexible(
+        child: _Chip(icon: LucideIcons.laptop, label: localDevice),
+      ),
       const SizedBox(width: WsMetrics.space2),
       Flexible(
         child: ListenableBuilder(
