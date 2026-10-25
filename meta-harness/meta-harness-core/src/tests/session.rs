@@ -757,6 +757,26 @@ IFS= read -r line || exit 0"#,
 }
 
 #[test]
+fn reports_nothing_after_the_agent_exited() {
+    run(async {
+        let (_session, mut events) = fake_agent(
+            r#"printf '%s\n' '{"type":"extension_ui_request","id":"q1","method":"confirm","title":"Sure?","message":"Really","timeout":300}'
+exit 3"#,
+        );
+        assert!(matches!(
+            next(&mut events).await,
+            SessionEvent::Runtime(RuntimeEvent::UserInputRequested { .. })
+        ));
+        assert_eq!(
+            next(&mut events).await,
+            SessionEvent::Exited { success: false }
+        );
+        let later = timeout(Duration::from_millis(800), events.recv()).await;
+        assert!(later.is_err(), "the dialog died with the agent: {later:?}");
+    });
+}
+
+#[test]
 fn asks_only_for_calls_the_approval_mode_does_not_allow() {
     run(async {
         let script = [

@@ -608,7 +608,14 @@ impl Supervisor {
                 }
             }
         };
-        self.state.lock().replies = None;
+        {
+            // Nothing is asked of a gone agent: open dialogs end with it, and their expiry
+            // reports nothing after the exit.
+            let mut shared = self.state.lock();
+            shared.replies = None;
+            shared.questions.clear();
+            shared.approvals.clear();
+        }
         let stop = failure.is_some() || self.kill_requested;
         if let Some(reason) = failure {
             // A full event buffer must not keep a kill from ending the agent.
