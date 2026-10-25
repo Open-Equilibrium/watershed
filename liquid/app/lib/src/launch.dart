@@ -26,7 +26,8 @@ List<String> piArguments(String extension, String? session) => [
   if (session != null) ...['--session', session],
 ];
 
-/// Starts a session from the environment until the app has an approved flow for new sessions.
+/// Starts pi for the project the environment names; the start page then begins or continues a
+/// session (ADR-0203).
 /// Without Watershed's pi extension there would be no approvals, so the app refuses to start pi.
 Future<Launch> launchFromEnvironment(Map<String, String> environment) async {
   final project = environment['LIQUID_PROJECT'];
