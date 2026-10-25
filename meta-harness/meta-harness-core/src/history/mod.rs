@@ -16,7 +16,7 @@ use std::sync::Arc;
 use serde_json::Value;
 
 use crate::{Frame, ItemKind, LineFramer, SessionTree, Usage};
-use entry::{Body, Entry};
+use entry::Entry;
 
 /// A snapshot of a session's stored entries. The session keeps it and reads only the entries
 /// added since, so each snapshot shares the entries read before.
@@ -84,18 +84,17 @@ impl History {
             .map(str::to_owned);
     }
 
-    /// What every stored response used, on every branch.
+    /// What every stored entry cost, on every branch: responses, summaries, cache warming and
+    /// tools' own requests.
     pub fn usage(&self) -> Usage {
         let mut total = Usage::default();
-        for entry in self.entries.iter() {
-            if let Body::Assistant { usage, .. } = &entry.body {
-                total.input += usage.input;
-                total.output += usage.output;
-                total.cache_read += usage.cache_read;
-                total.cache_write += usage.cache_write;
-                total.reasoning += usage.reasoning;
-                total.cost_micro_usd += usage.cost_micro_usd;
-            }
+        for spent in self.entries.iter().map(|entry| &entry.spent) {
+            total.input += spent.input;
+            total.output += spent.output;
+            total.cache_read += spent.cache_read;
+            total.cache_write += spent.cache_write;
+            total.reasoning += spent.reasoning;
+            total.cost_micro_usd += spent.cost_micro_usd;
         }
         total
     }

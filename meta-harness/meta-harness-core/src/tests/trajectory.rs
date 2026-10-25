@@ -251,6 +251,33 @@ fn an_entry_too_large_to_read_keeps_its_place_in_the_branch() {
 }
 
 #[test]
+fn sums_usage_pi_records_outside_responses() {
+    let usage = |input: u64| format!(r#"{{"input":{input},"output":1,"cost":{{"total":0.001}}}}"#);
+    let data: Value = serde_json::from_str(&format!(
+        r#"{{"entries":[
+          {{"type":"message","id":"u1","parentId":null,"message":{{"role":"user","content":"Go"}}}},
+          {{"type":"message","id":"a1","parentId":"u1","message":{{"role":"assistant","content":[],"usage":{}}}}},
+          {{"type":"compaction","id":"c1","parentId":"a1","firstKeptEntryId":"a1","summary":"s","usage":{}}},
+          {{"type":"branch_summary","id":"b1","parentId":"c1","summary":"s","usage":{}}},
+          {{"type":"usage","id":"w1","parentId":"b1","kind":"cache_warm","usage":{}}},
+          {{"type":"message","id":"r1","parentId":"w1","message":{{"role":"toolResult","toolCallId":"t","toolName":"task","content":[],"usage":{}}}}}
+        ],"leafId":"r1"}}"#,
+        usage(1),
+        usage(10),
+        usage(100),
+        usage(1000),
+        usage(10000)
+    ))
+    .expect("JSON");
+    let total = History::from_entries(&data).usage();
+    assert_eq!(
+        (total.input, total.output, total.cost_micro_usd),
+        (11111, 5, 5000),
+        "summaries, cache warming and tools cost too"
+    );
+}
+
+#[test]
 fn lists_system_text_outside_named_sections() {
     let data: Value = serde_json::from_str(
         r#"{"entries":[
