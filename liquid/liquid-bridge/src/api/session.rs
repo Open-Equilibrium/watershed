@@ -85,8 +85,15 @@ pub struct AgentSession {
     cwd: PathBuf,
     /// Stops the agent even while a request holds the session.
     stopper: std::sync::Mutex<Option<meta_harness_core::Stopper>>,
-    /// The project state before the latest prompt; the diff view compares against it.
-    before_run: Mutex<Option<Snapshot>>,
+    /// The project state before the latest run; the diff view compares against it.
+    before_run: Mutex<Baseline>,
+}
+
+/// The project state before the latest run, and how many runs replaced it.
+#[derive(Default)]
+struct Baseline {
+    snapshot: Option<Snapshot>,
+    runs: u64,
 }
 
 impl AgentSession {
@@ -108,7 +115,7 @@ impl AgentSession {
             receiver: std::sync::Mutex::new(Some(receiver)),
             project,
             cwd: command.cwd,
-            before_run: Mutex::new(None),
+            before_run: Mutex::new(Baseline::default()),
         })
     }
 
@@ -154,25 +161,34 @@ impl AgentSession {
     /// project, so the diff view shows what the run changes.
     pub fn send(&self, message: String, follow_up: bool) -> Result<(), String> {
         RUNTIME.block_on(async {
-            let pending = {
+            let (pending, before) = {
                 let mut session = self.session.lock().await;
                 let session = open(&mut session)?;
-                if !session.running()
-                    && let Some(project) = &self.project
-                {
-                    // Without a snapshot the run still starts; the diff view then shows nothing.
-                    *self.before_run.lock().await = project.snapshot().await.ok();
-                }
+                // Without a snapshot the run still starts; the diff view then shows nothing.
+                let before = match &self.project {
+                    Some(project) if !session.running() => Some(project.snapshot().await.ok()),
+                    _ => None,
+                };
                 let delivery = if follow_up {
                     Delivery::FollowUp
                 } else {
                     Delivery::Steer
                 };
-                session.send(&message, delivery).await.map_err(describe)?
+                (
+                    session.send(&message, delivery).await.map_err(describe)?,
+                    before,
+                )
             };
             // The session stays free meanwhile, so questions asked before acceptance can be
             // answered.
-            pending.accepted().await.map_err(describe)
+            pending.accepted().await.map_err(describe)?;
+            // Only a prompt the agent took starts a run, so only then does its state count.
+            if let Some(snapshot) = before {
+                let mut baseline = self.before_run.lock().await;
+                baseline.snapshot = snapshot;
+                baseline.runs += 1;
+            }
+            Ok(())
         })
     }
 
@@ -191,8 +207,8 @@ impl AgentSession {
     /// Files the latest run changed, compared with the project before it.
     pub fn changes(&self) -> Result<Vec<BridgeFileChange>, String> {
         RUNTIME.block_on(async {
-            let before = self.before_run.lock().await;
-            match (&self.project, before.as_ref()) {
+            let baseline = self.before_run.lock().await;
+            match (&self.project, baseline.snapshot.as_ref()) {
                 (Some(project), Some(before)) => Ok(project
                     .changes(before)
                     .await
@@ -208,8 +224,8 @@ impl AgentSession {
     /// The unified diff of one file since the latest run started.
     pub fn patch(&self, path: String) -> Result<String, String> {
         RUNTIME.block_on(async {
-            let before = self.before_run.lock().await;
-            match (&self.project, before.as_ref()) {
+            let baseline = self.before_run.lock().await;
+            match (&self.project, baseline.snapshot.as_ref()) {
                 (Some(project), Some(before)) => project
                     .patch(before, &path)
                     .await
@@ -299,31 +315,40 @@ impl AgentSession {
     /// Starts a new session in the same agent; `false` when an extension cancelled it.
     pub fn new_session(&self) -> Result<bool, String> {
         RUNTIME.block_on(async {
+            let runs = self.before_run.lock().await.runs;
             let pending = open(&mut *self.session.lock().await)?
                 .new_session()
                 .await
                 .map_err(describe)?;
-            self.switched(pending).await
+            self.switched(pending, runs).await
         })
     }
 
     /// Continues the session stored in `path`; `false` when an extension cancelled it.
     pub fn switch_session(&self, path: String) -> Result<bool, String> {
         RUNTIME.block_on(async {
+            let runs = self.before_run.lock().await.runs;
             let pending = open(&mut *self.session.lock().await)?
                 .switch_session(Path::new(&path))
                 .await
                 .map_err(describe)?;
-            self.switched(pending).await
+            self.switched(pending, runs).await
         })
     }
 
     /// Waits for a session switch without holding the session; the diff of the previous
-    /// session's run no longer applies after it.
-    async fn switched(&self, pending: meta_harness_core::Pending) -> Result<bool, String> {
+    /// session's run no longer applies after it, unless a run started since `runs`.
+    async fn switched(
+        &self,
+        pending: meta_harness_core::Pending,
+        runs: u64,
+    ) -> Result<bool, String> {
         let switched = pending.switched().await.map_err(describe)?;
         if switched {
-            *self.before_run.lock().await = None;
+            let mut baseline = self.before_run.lock().await;
+            if baseline.runs == runs {
+                baseline.snapshot = None;
+            }
         }
         Ok(switched)
     }

@@ -518,6 +518,8 @@ fn diffs_what_a_run_changed_in_its_project() {
     let script = r#"IFS= read -r line
 printf 'new\n' > a.txt
 printf '%s\n' '{"id":"1","type":"response","command":"prompt","success":true,"data":{"disposition":"started"}}'
+IFS= read -r line
+printf '%s\n' '{"id":"2","type":"response","command":"prompt","success":false,"error":"busy"}'
 IFS= read -r line || exit 0"#;
     let session = AgentSession::start(SessionConfig {
         program: "/bin/sh".to_owned(),
@@ -542,6 +544,9 @@ IFS= read -r line || exit 0"#;
         patch.contains("-old\n") && patch.contains("+new\n"),
         "{patch}"
     );
+    // A prompt the agent rejects starts no run, so the last run's changes stay in view.
+    assert!(session.send("again".to_owned(), false).is_err());
+    assert_eq!(session.changes().expect("changes"), changes);
     assert!(session.shutdown());
     let _ = std::fs::remove_dir_all(&repo);
 }
