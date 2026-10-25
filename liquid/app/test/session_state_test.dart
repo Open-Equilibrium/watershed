@@ -370,6 +370,27 @@ void main() {
     );
   });
 
+  test('drops a chat read that ends after the session changed', () async {
+    backend.transcripts[''] = BridgeTranscript(
+      items: [chatItem('o1', BridgeItemKind.userMessage, text: 'Old')],
+      more: false,
+      start: 'o1',
+    );
+    backend.gate = Completer();
+    final restoring = state.loadChat();
+    await pumpEventQueue();
+    backend.transcripts[''] = const BridgeTranscript(items: [], more: false);
+    final switching = state.newSession();
+    await pumpEventQueue();
+    backend.gate!.complete();
+    await Future.wait([restoring, switching]);
+    expect(
+      state.items.value,
+      isEmpty,
+      reason: 'the old chat stays out of the new session',
+    );
+  });
+
   test('pages past entries that show nothing in the chat', () async {
     backend.transcripts[''] = const BridgeTranscript(
       items: [],

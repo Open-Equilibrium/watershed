@@ -154,6 +154,9 @@ class SessionState {
   /// A session switch in progress; messages wait for it and other switches are ignored.
   Completer<void>? _switching;
 
+  /// Counts session switches; a chat read started before the latest one is dropped.
+  int _generation = 0;
+
   /// Switches only while the agent is idle, then shows the session it continues.
   Future<void> _switch(
     Future<bool> Function() switchTo, {
@@ -183,6 +186,7 @@ class SessionState {
       notify(BridgeLevel.error, 'Could not change the session: $error');
       return;
     }
+    _generation++;
     _byId.clear();
     items.value = const [];
     chatMore.value = false;
@@ -304,9 +308,11 @@ class SessionState {
   /// Rebuilds the chat from the session's current branch, as the model sees it, and marks
   /// where it leaves the other branches. Items that arrive meanwhile stay after it.
   Future<void> loadChat() async {
+    final generation = _generation;
     final before = items.value;
     final page = await _backend.transcript(null);
     final history = await _backend.history(const []);
+    if (generation != _generation) return;
     // What the stored responses used; live requests add to it.
     totals.value = const SessionTotals().add(history.usage);
     final marker = branchMarker(history.tree, history.leaf);
@@ -338,10 +344,12 @@ class SessionState {
   Future<void> loadEarlier() async {
     if (_readingEarlier) return;
     _readingEarlier = true;
+    final generation = _generation;
     try {
       while (chatMore.value && _chatStart != null) {
         final before = _chatStart;
         final page = await _backend.transcript(before);
+        if (generation != _generation) return;
         _chatStart = page.start;
         // A page that does not move back ends the reading, so it cannot repeat forever.
         chatMore.value = page.more && page.start != before;
