@@ -158,7 +158,7 @@ impl Entry {
                 replacement: entry
                     .get("replacement")
                     .filter(|replacement| !replacement.is_null())
-                    .map(|replacement| content_text(Some(replacement)).chars().count()),
+                    .map(|replacement| content_text(replacement.get("content")).chars().count()),
             },
             "label" => Body::Label {
                 target: text("targetId"),
