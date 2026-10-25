@@ -86,3 +86,27 @@ fn lists_the_projects_recent_sessions_newest_first() {
         ]
     );
 }
+
+#[test]
+fn passes_over_a_named_pipe_in_the_session_directory() {
+    let dir = std::env::temp_dir().join(format!("watershed-fifo-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("directory");
+    let status = std::process::Command::new("mkfifo")
+        .arg(dir.join("pipe.jsonl"))
+        .status()
+        .expect("mkfifo runs");
+    assert!(status.success());
+    let (done, finished) = std::sync::mpsc::channel();
+    let listed = dir.clone();
+    std::thread::spawn(move || {
+        let _ = done.send(
+            recent_sessions(&listed, Path::new("/tmp"), None, 5).map(|sessions| sessions.len()),
+        );
+    });
+    let listed = finished
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .expect("a pipe must not block the listing");
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(listed.expect("listed"), 0);
+}
