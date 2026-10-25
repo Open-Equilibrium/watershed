@@ -219,7 +219,11 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pump();
     expect(backend.calls, ['send Say hi']);
-    expect(find.text('Send'), findsOneWidget);
+    expect(
+      find.text('Start'),
+      findsOneWidget,
+      reason: 'a session without a conversation starts with its first message',
+    );
 
     await emit(tester, event(BridgeEventKind.turnStarted, turn: 1));
     expect(find.text('Steer'), findsOneWidget, reason: 'Enter steers a run');

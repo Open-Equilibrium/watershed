@@ -19,4 +19,7 @@ abstract final class LucideIcons {
   static const terminal = IconData(0xe181, fontFamily: _family);
   static const pencil = IconData(0xe1f9, fontFamily: _family);
   static const fileText = IconData(0xe0cc, fontFamily: _family);
+  static const hexagon = IconData(0xe0f3, fontFamily: _family);
+  static const laptop = IconData(0xe1cd, fontFamily: _family);
+  static const sparkles = IconData(0xe412, fontFamily: _family);
 }

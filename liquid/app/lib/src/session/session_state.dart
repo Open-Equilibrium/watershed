@@ -122,6 +122,74 @@ class SessionState {
   /// Counts the changes of the session's stored history; the Trajectory reloads on each.
   final stored = ValueNotifier(0);
 
+  /// What the start page offers: the project's recent sessions, the models and the selected
+  /// one as `provider/id`.
+  final recent = ValueNotifier<List<BridgeStoredSession>>(const []);
+  final models = ValueNotifier<List<BridgeModel>>(const []);
+  final model = ValueNotifier<String?>(null);
+
+  /// Reads what the start page offers.
+  Future<void> loadStart() async {
+    try {
+      recent.value = await _backend.recentSessions();
+      models.value = await _backend.models();
+      model.value = await _backend.currentModel();
+    } on Object catch (error) {
+      notify(BridgeLevel.warning, 'Could not read the recent sessions: $error');
+    }
+  }
+
+  /// Starts a new session in the same agent; the current one stays available (ADR-0203).
+  Future<void> newSession() => _switch(
+    _backend.newSession,
+    busy: 'Stop the agent before starting a new session.',
+  );
+
+  /// Continues a stored session in the same agent (ADR-0203).
+  Future<void> continueSession(String path) => _switch(
+    () => _backend.switchSession(path),
+    busy: 'Stop the agent before continuing another session.',
+  );
+
+  /// Switches only while the agent is idle, then shows the session it continues.
+  Future<void> _switch(
+    Future<bool> Function() switchTo, {
+    required String busy,
+  }) async {
+    if (status.value case RunStatus.running || RunStatus.waitingForYou) {
+      notify(BridgeLevel.info, busy);
+      return;
+    }
+    try {
+      if (!await switchTo()) {
+        notify(BridgeLevel.info, 'An extension kept the current session.');
+        return;
+      }
+    } on Object catch (error) {
+      notify(BridgeLevel.error, 'Could not change the session: $error');
+      return;
+    }
+    _byId.clear();
+    items.value = const [];
+    chatMore.value = false;
+    _chatStart = null;
+    totals.value = const SessionTotals();
+    queue.value = const BridgeQueue(steering: [], followUp: []);
+    stored.value++;
+    await loadChat();
+    await loadStart();
+  }
+
+  /// Selects the model the next requests use.
+  Future<void> setModel(BridgeModel next) async {
+    try {
+      await _backend.setModel(next);
+      model.value = '${next.provider}/${next.id}';
+    } on Object catch (error) {
+      notify(BridgeLevel.error, 'Could not select ${next.name}: $error');
+    }
+  }
+
   /// Sends a message: an idle agent starts with it, a running one takes it before its next
   /// model request or, with `followUp`, once it is done. pi decides, so no turn state races
   /// the send. A message the agent rejects goes back to the input area.

@@ -5,6 +5,9 @@ import '../rust/api/session.dart';
 /// Stored entries the chat reads at a time.
 const chatPage = 200;
 
+/// How many recent sessions the start page offers.
+const recentLimit = 8;
+
 /// What [SessionState] needs from a running agent session; tests substitute a fake.
 abstract interface class SessionBackend {
   Stream<BridgeEvent> events();
@@ -23,6 +26,19 @@ abstract interface class SessionBackend {
   Future<BridgeContextDetail?> context(String entry);
   Future<BridgeTranscript> transcript(String? before);
   Future<void> branch(String entry);
+
+  /// The project's recent stored sessions, newest first, without the current one.
+  Future<List<BridgeStoredSession>> recentSessions();
+
+  /// Starts a new session or continues a stored one; `false` when an extension cancelled it.
+  Future<bool> newSession();
+  Future<bool> switchSession(String path);
+
+  Future<List<BridgeModel>> models();
+
+  /// The selected model as `provider/id`.
+  Future<String?> currentModel();
+  Future<void> setModel(BridgeModel model);
 }
 
 /// A session in the embedded Meta-Harness core, reached through the Rust bridge.
@@ -71,4 +87,18 @@ class RustSessionBackend implements SessionBackend {
       _session.context(entry: entry);
   @override
   Future<void> branch(String entry) => _session.branch(entry: entry);
+  @override
+  Future<List<BridgeStoredSession>> recentSessions() =>
+      _session.recentSessions(limit: recentLimit);
+  @override
+  Future<bool> newSession() => _session.newSession();
+  @override
+  Future<bool> switchSession(String path) => _session.switchSession(path: path);
+  @override
+  Future<List<BridgeModel>> models() => _session.models();
+  @override
+  Future<String?> currentModel() => _session.currentModel();
+  @override
+  Future<void> setModel(BridgeModel model) =>
+      _session.setModel(provider: model.provider, id: model.id);
 }

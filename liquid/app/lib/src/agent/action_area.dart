@@ -10,6 +10,7 @@ import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'shortcut_reveal.dart';
+import 'start_page.dart';
 
 /// Height of the input area; it never changes, so nothing above it moves (guidelines, patterns).
 const double actionAreaHeight = 150;
@@ -21,12 +22,16 @@ class ActionArea extends StatelessWidget {
     super.key,
     required this.state,
     required this.composer,
+    required this.project,
     this.composerFocus,
   });
 
   final SessionState state;
   final TextEditingController composer;
   final FocusNode? composerFocus;
+
+  /// The project's name, as a new session's chips show it.
+  final String project;
 
   @override
   Widget build(BuildContext context) {
@@ -54,6 +59,7 @@ class ActionArea extends StatelessWidget {
                     state: state,
                     controller: composer,
                     focusNode: composerFocus,
+                    project: project,
                   ),
           );
         },
@@ -79,12 +85,14 @@ class Composer extends StatelessWidget {
     super.key,
     required this.state,
     required this.controller,
+    required this.project,
     this.focusNode,
   });
 
   final SessionState state;
   final TextEditingController controller;
   final FocusNode? focusNode;
+  final String project;
 
   void _send({required bool followUp}) {
     final text = controller.text.trim();
@@ -104,10 +112,12 @@ class Composer extends StatelessWidget {
         WsMetrics.space4,
         WsMetrics.space4,
       ),
-      child: ValueListenableBuilder(
-        valueListenable: state.status,
-        builder: (context, status, _) {
-          final running = status == RunStatus.running;
+      child: ListenableBuilder(
+        listenable: Listenable.merge([state.status, state.items]),
+        builder: (context, _) {
+          final running = state.status.value == RunStatus.running;
+          // Without a conversation yet, the input area starts a new session (ADR-0203).
+          final starting = !running && state.items.value.isEmpty;
           return Column(
             children: [
               _QueueChips(state: state),
@@ -133,7 +143,9 @@ class Composer extends StatelessWidget {
                     expands: true,
                     style: Theme.of(context).textTheme.bodyLarge,
                     decoration: InputDecoration.collapsed(
-                      hintText: 'Steer the agent or queue a follow-up…',
+                      hintText: starting
+                          ? 'Describe the task…'
+                          : 'Steer the agent or queue a follow-up…',
                       hintStyle: TextStyle(color: ws.textFaint),
                     ),
                   ),
@@ -141,6 +153,10 @@ class Composer extends StatelessWidget {
               ),
               Row(
                 children: [
+                  if (starting) ...[
+                    StartChips(state: state, project: project),
+                    const SizedBox(width: WsMetrics.space2),
+                  ],
                   ModeChip(state: state),
                   const Spacer(),
                   if (running) ...[
@@ -154,7 +170,11 @@ class Composer extends StatelessWidget {
                   ],
                   const SizedBox(width: WsMetrics.space3),
                   PrimaryButton(
-                    label: running ? 'Steer' : 'Send',
+                    label: running
+                        ? 'Steer'
+                        : starting
+                        ? 'Start'
+                        : 'Send',
                     shortcut: '⏎',
                     onPressed: () => _send(followUp: false),
                   ),

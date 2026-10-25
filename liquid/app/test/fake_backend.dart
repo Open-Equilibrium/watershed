@@ -84,6 +84,41 @@ class FakeBackend implements SessionBackend {
   /// Whether [branch] moves the session's leaf, as a successful branch does.
   bool branchMoves = true;
 
+  /// The project's stored sessions, the models and the selected one, as pi reports them.
+  List<BridgeStoredSession> storedSessions = const [];
+  List<BridgeModel> modelList = const [];
+  String? model;
+
+  /// Whether an extension cancels session switches.
+  bool switchCancelled = false;
+
+  @override
+  Future<List<BridgeStoredSession>> recentSessions() async => storedSessions;
+
+  @override
+  Future<bool> newSession() async {
+    calls.add('new session');
+    return !switchCancelled;
+  }
+
+  @override
+  Future<bool> switchSession(String path) async {
+    calls.add('switch $path');
+    return !switchCancelled;
+  }
+
+  @override
+  Future<List<BridgeModel>> models() async => modelList;
+
+  @override
+  Future<String?> currentModel() async => model;
+
+  @override
+  Future<void> setModel(BridgeModel next) async {
+    calls.add('model ${next.provider}/${next.id}');
+    model = '${next.provider}/${next.id}';
+  }
+
   /// Transcript pages by their `before` entry; the newest page has the key ''.
   final transcripts = <String, BridgeTranscript>{};
 

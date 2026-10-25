@@ -1,6 +1,7 @@
 //! Manual check of the core against real pi: two turns with a scripted model, one allowed and one
 //! rejected command, the branch tree and Trajectory, a branch at the second prompt, the state,
-//! then the history again after reopening the session file. Run from the repository root:
+//! then the history again after reopening the session file, a new session and the way back.
+//! Run from the repository root:
 //!
 //! ```sh
 //! PI_CODING_AGENT_DIR=$(mktemp -d) PI_OFFLINE=1 cargo run -p meta-harness-core --example pi_check
@@ -66,6 +67,26 @@ async fn reopen(file: &Path, entries: usize) {
         entries,
         "the stored history comes back whole"
     );
+    let models = session.models().await.expect("models");
+    println!(
+        "models: {:?}",
+        models.iter().map(|model| &model.id).collect::<Vec<_>>()
+    );
+    let started = session.new_session().await.expect("new session sent");
+    assert!(
+        started.switched().await.expect("new session"),
+        "not cancelled"
+    );
+    let fresh = session.history().await.expect("history").tree();
+    println!("new session: {} entries", fresh.nodes.len());
+    let back = session.switch_session(file).await.expect("switch sent");
+    assert!(
+        back.switched().await.expect("switched back"),
+        "not cancelled"
+    );
+    let again = session.history().await.expect("history").tree();
+    println!("switched back: {} entries", again.nodes.len());
+    assert_eq!(again.nodes.len(), entries, "the stored session comes back");
     session.shutdown(Duration::from_secs(5)).await;
 }
 

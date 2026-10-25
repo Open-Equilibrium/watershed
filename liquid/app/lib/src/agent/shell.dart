@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -55,6 +57,7 @@ class _AgentShellState extends State<AgentShell> {
   void initState() {
     super.initState();
     widget.state.draft.addListener(_applyDraft);
+    unawaited(widget.state.loadStart());
     // A reopened Trajectory tab starts outside the comparison.
     _tab.addListener(() => _trajectoryKeys.value = trajectoryKeys);
   }
@@ -78,6 +81,13 @@ class _AgentShellState extends State<AgentShell> {
     _tab.dispose();
     _trajectoryKeys.dispose();
     super.dispose();
+  }
+
+  /// Starts a new session in the chat, ready to describe the task (ADR-0203).
+  void _newSession() {
+    _tab.value = AgentTab.chat;
+    _composerFocus.requestFocus();
+    unawaited(widget.state.newSession());
   }
 
   /// App-wide shortcuts in the macOS menu bar, where they stay out of the GUI (ADR-0204);
@@ -112,6 +122,10 @@ class _AgentShellState extends State<AgentShell> {
             ),
             provided(PlatformProvidedMenuItemType.quit),
           ],
+        ),
+        PlatformMenu(
+          label: 'Session',
+          menus: [item('New Session', LogicalKeyboardKey.keyN, _newSession)],
         ),
         PlatformMenu(
           label: 'View',
@@ -174,6 +188,8 @@ class _AgentShellState extends State<AgentShell> {
                 _tab.value = AgentTab.diff,
             const SingleActivator(LogicalKeyboardKey.keyL, meta: true):
                 _composerFocus.requestFocus,
+            const SingleActivator(LogicalKeyboardKey.keyN, meta: true):
+                _newSession,
             const SingleActivator(LogicalKeyboardKey.escape):
                 widget.state.dismissNotice,
           },
@@ -195,7 +211,10 @@ class _AgentShellState extends State<AgentShell> {
                           child: ValueListenableBuilder(
                             valueListenable: _tab,
                             builder: (context, tab, _) => switch (tab) {
-                              AgentTab.chat => ChatView(state: widget.state),
+                              AgentTab.chat => ChatView(
+                                state: widget.state,
+                                project: widget.info.project,
+                              ),
                               AgentTab.diff => DiffView(state: widget.state),
                               AgentTab.trajectory => TrajectoryView(
                                 state: widget.state,
@@ -215,6 +234,7 @@ class _AgentShellState extends State<AgentShell> {
                               width: readingWidth,
                               child: ActionArea(
                                 state: widget.state,
+                                project: widget.info.project,
                                 composer: _composer,
                                 composerFocus: _composerFocus,
                               ),

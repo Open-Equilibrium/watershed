@@ -7,6 +7,7 @@ import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import '../trajectory/trajectory_model.dart';
 import '../trajectory/tree_view.dart';
+import 'start_page.dart';
 
 /// Width of the reading column in the chat and the input area.
 const double readingWidth = 740;
@@ -15,9 +16,12 @@ const double readingWidth = 740;
 /// alone while its text streams (client architecture rules 5 and 6), and scrolling to the top
 /// reads earlier stored entries.
 class ChatView extends StatelessWidget {
-  const ChatView({super.key, required this.state});
+  const ChatView({super.key, required this.state, required this.project});
 
   final SessionState state;
+
+  /// The project's name, as the start page shows it.
+  final String project;
 
   /// How close to the oldest item reading earlier entries starts, in pixels.
   static const _readAhead = 600.0;
@@ -34,28 +38,33 @@ class ChatView extends StatelessWidget {
       },
       child: ValueListenableBuilder(
         valueListenable: state.items,
-        builder: (context, items, _) => ListView.builder(
-          reverse: true,
-          padding: const EdgeInsets.symmetric(vertical: WsMetrics.space5),
-          itemCount: items.length,
-          itemBuilder: (context, index) {
-            final item = items[items.length - 1 - index];
-            return Center(
-              child: SizedBox(
-                width: readingWidth,
-                child: Padding(
-                  padding: const EdgeInsets.only(bottom: WsMetrics.space4),
-                  child: RepaintBoundary(
-                    child: switch (item.marker) {
-                      final marker? => BranchMark(marker: marker),
-                      null => ItemTile(item: item, state: state),
-                    },
-                  ),
-                ),
+        // A session without a conversation shows the start page (ADR-0203).
+        builder: (context, items, _) => items.isEmpty
+            ? StartPage(state: state, project: project)
+            : ListView.builder(
+                reverse: true,
+                padding: const EdgeInsets.symmetric(vertical: WsMetrics.space5),
+                itemCount: items.length,
+                itemBuilder: (context, index) {
+                  final item = items[items.length - 1 - index];
+                  return Center(
+                    child: SizedBox(
+                      width: readingWidth,
+                      child: Padding(
+                        padding: const EdgeInsets.only(
+                          bottom: WsMetrics.space4,
+                        ),
+                        child: RepaintBoundary(
+                          child: switch (item.marker) {
+                            final marker? => BranchMark(marker: marker),
+                            null => ItemTile(item: item, state: state),
+                          },
+                        ),
+                      ),
+                    ),
+                  );
+                },
               ),
-            );
-          },
-        ),
       ),
     );
   }
