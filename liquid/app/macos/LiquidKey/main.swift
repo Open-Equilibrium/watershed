@@ -5,19 +5,13 @@ import IOKit.hidsystem
 
 // The Liquid key helper (ADR-0205): a login item inside Liquid.app. It turns Caps Lock into the
 // Liquid key on every keyboard, opens or focuses Liquid when the key is tapped in another app
-// and turns capitals on or off with Shift + Caps Lock. It needs no permission. `--apply` and
-// `--remove` set or give back the remapping and exit. The remapping holds for the whole
-// computer, so the helper gives it back when it quits or the user switches away.
+// and turns capitals on or off with Shift + Caps Lock. It needs no permission. `--remove` gives
+// the remapping back and exits. The remapping holds for the whole computer, so the helper
+// gives it back when it quits or the user switches away.
 
-switch CommandLine.arguments.dropFirst().first {
-case "--apply":
-    Mapping.apply(on: true)
-    exit(0)
-case "--remove":
+if CommandLine.arguments.dropFirst().first == "--remove" {
     Mapping.apply(on: false)
     exit(0)
-default:
-    break
 }
 
 /// Liquid.app, four levels above Contents/Library/LoginItems/LiquidKey.app.
@@ -38,6 +32,22 @@ var sessionActive = true
 /// Sets the remapping while this session is in front.
 func remap() {
     if sessionActive { Mapping.apply(on: true) }
+}
+
+/// Gives the remapping back if this session set it; another user's helper may hold it now.
+func unmap() {
+    if sessionActive { Mapping.apply(on: false) }
+}
+
+/// Without its hotkeys the key would be dead, so Caps Lock comes back and the helper ends.
+func register(_ modifiers: Int, _ id: EventHotKeyID, _ key: inout EventHotKeyRef?) {
+    let status = RegisterEventHotKey(
+        UInt32(kVK_F18), UInt32(modifiers), id, GetApplicationEventTarget(), 0, &key)
+    if status != noErr {
+        FileHandle.standardError.write(Data("Liquid Key: hotkey taken (\(status))\n".utf8))
+        unmap()
+        exit(1)
+    }
 }
 
 func openLiquid() {
@@ -67,8 +77,7 @@ func follow(_ app: NSRunningApplication?) {
         plain = nil
         pressedAt = nil
     } else if !inLiquid, plain == nil {
-        RegisterEventHotKey(
-            UInt32(kVK_F18), 0, plainID, GetApplicationEventTarget(), 0, &plain)
+        register(0, plainID, &plain)
     }
 }
 
@@ -120,10 +129,9 @@ IOServiceAddMatchingNotification(
     }, nil, &attached)
 drain(attached)
 
-remap()
-RegisterEventHotKey(
-    UInt32(kVK_F18), UInt32(shiftKey), shiftedID, GetApplicationEventTarget(), 0, &shifted)
+register(shiftKey, shiftedID, &shifted)
 follow(NSWorkspace.shared.frontmostApplication)
+remap()
 let workspace = NSWorkspace.shared.notificationCenter
 workspace.addObserver(
     forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
@@ -144,12 +152,12 @@ workspace.addObserver(
 }
 NotificationCenter.default.addObserver(
     forName: NSApplication.willTerminateNotification, object: nil, queue: .main
-) { _ in Mapping.apply(on: false) }
+) { _ in unmap() }
 // The system stops a login item that the user turns off with a termination signal.
 signal(SIGTERM, SIG_IGN)
 let terminate = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
 terminate.setEventHandler {
-    Mapping.apply(on: false)
+    unmap()
     exit(0)
 }
 terminate.resume()
