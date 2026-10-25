@@ -251,6 +251,75 @@ fn an_entry_too_large_to_read_keeps_its_place_in_the_branch() {
 }
 
 #[test]
+fn a_custom_entry_too_large_to_read_keeps_its_place_in_the_branch() {
+    // pi writes a custom entry's data before its id and parent.
+    let file =
+        std::env::temp_dir().join(format!("watershed-custom-gap-{}.jsonl", std::process::id()));
+    let huge = "x".repeat(17_000_000);
+    std::fs::write(
+        &file,
+        format!(
+            r#"{{"type":"session","version":3,"id":"s1","cwd":"/tmp"}}
+{{"type":"message","id":"u1","parentId":null,"message":{{"role":"user","content":"Look"}}}}
+{{"type":"custom","customType":"big","data":{{"id":"inner","blob":"{huge}"}},"id":"c1","parentId":"u1","timestamp":"2026-10-24T10:00:00.000Z"}}
+{{"type":"message","id":"a1","parentId":"c1","message":{{"role":"assistant","content":[{{"type":"text","text":"Seen."}}]}}}}
+"#
+        ),
+    )
+    .expect("session file");
+    let history = History::from_file(&file, 16 * 1024 * 1024);
+    let _ = std::fs::remove_file(&file);
+    let records = history.expect("history").trajectory(Some("a1")).records;
+    assert_eq!(
+        records
+            .iter()
+            .map(|record| record.entry.as_str())
+            .collect::<Vec<_>>(),
+        ["u1", "a1"],
+        "the prompt before the skipped custom entry stays on the branch"
+    );
+}
+
+#[test]
+fn sums_the_usage_of_a_session_read_from_its_file() {
+    let file = std::env::temp_dir().join(format!("watershed-usage-{}.jsonl", std::process::id()));
+    std::fs::write(
+        &file,
+        r#"{"type":"session","version":3,"id":"s1","cwd":"/tmp"}
+{"type":"message","id":"u1","parentId":null,"message":{"role":"user","content":"Go"}}
+{"type":"message","id":"a1","parentId":"u1","message":{"role":"assistant","content":[],"usage":{"input":7,"output":2,"cost":{"total":0.001}}}}
+{"type":"compaction","id":"c1","parentId":"a1","firstKeptEntryId":"a1","summary":"s","usage":{"input":30,"output":1,"cost":{"total":0}}}
+"#,
+    )
+    .expect("session file");
+    let history = History::from_file(&file, 16 * 1024 * 1024);
+    let _ = std::fs::remove_file(&file);
+    let usage = history.expect("history").usage();
+    assert_eq!((usage.input, usage.output), (37, 3));
+}
+
+#[test]
+fn counts_tests_without_overflowing() {
+    let line = "test result: ok. 4294967295 passed; 0 failed; 0 ignored";
+    let data: Value = serde_json::from_str(&format!(
+        r#"{{"entries":[
+          {{"type":"message","id":"a1","parentId":null,"message":{{"role":"assistant","content":[{{"type":"toolCall","id":"c1","name":"bash","arguments":{{"command":"cargo test"}}}}]}}}},
+          {{"type":"message","id":"r1","parentId":"a1","message":{{"role":"toolResult","toolCallId":"c1","toolName":"bash","content":[{{"type":"text","text":"{line}\n{line}"}}]}}}}
+        ],"leafId":"r1"}}"#
+    ))
+    .expect("JSON");
+    let records = History::from_entries(&data).trajectory(None).records;
+    let tests = records.iter().find_map(|record| record.outcome.tests);
+    assert_eq!(
+        tests,
+        Some(TestCount {
+            passed: u32::MAX,
+            failed: 0
+        })
+    );
+}
+
+#[test]
 fn sums_usage_pi_records_outside_responses() {
     let usage = |input: u64| format!(r#"{{"input":{input},"output":1,"cost":{{"total":0.001}}}}"#);
     let data: Value = serde_json::from_str(&format!(

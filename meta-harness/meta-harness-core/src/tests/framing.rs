@@ -24,21 +24,22 @@ fn frames_records_only_at_line_feeds() {
 }
 
 #[test]
-fn skips_records_longer_than_the_limit_and_keeps_their_start() {
+fn skips_records_longer_than_the_limit_and_keeps_their_start_and_end() {
     let mut framer = LineFramer::new(8);
     assert_eq!(
         framer.push(b"{\"a\":12}\n"),
         [Frame::Record(b"{\"a\":12}".to_vec())]
     );
-    // A record past the limit is dropped up to its line feed; only its start is kept, and the
-    // records after it still arrive.
+    // A record past the limit is dropped up to its line feed; only its start and end are kept,
+    // and the records after it still arrive.
     assert_eq!(framer.push(b"{\"type\":"), []);
     assert_eq!(framer.push(b"1234567890"), []);
     assert_eq!(
         framer.push(b"}\n{\"b\":1}\n"),
         [
             Frame::Oversized {
-                start: b"{\"type\":1234567890".to_vec()
+                start: b"{\"type\":1234567890".to_vec(),
+                end: b"{\"type\":1234567890}".to_vec(),
             },
             Frame::Record(b"{\"b\":1}".to_vec()),
         ]
@@ -46,7 +47,8 @@ fn skips_records_longer_than_the_limit_and_keeps_their_start() {
     assert_eq!(
         LineFramer::new(4).push(b"{\"a\":1}\n"),
         [Frame::Oversized {
-            start: b"{\"a\":1}".to_vec()
+            start: b"{\"a\":1}".to_vec(),
+            end: b"{\"a\":1}".to_vec(),
         }]
     );
     let mut huge = LineFramer::new(4);
@@ -55,8 +57,9 @@ fn skips_records_longer_than_the_limit_and_keeps_their_start() {
     assert_eq!(
         huge.push(b"\n"),
         [Frame::Oversized {
-            start: vec![b'x'; 256]
+            start: vec![b'x'; 256],
+            end: vec![b'x'; 256],
         }],
-        "the kept start is bounded"
+        "the kept start and end are bounded"
     );
 }

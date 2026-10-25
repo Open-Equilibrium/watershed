@@ -62,7 +62,9 @@ impl History {
                             entries.push(Entry::parse(&entry));
                         }
                     }
-                    Frame::Oversized { start } => entries.extend(Entry::skipped(&start)),
+                    Frame::Oversized { start, end } => {
+                        entries.extend(Entry::skipped(&start, &end));
+                    }
                 }
             }
         }

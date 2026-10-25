@@ -599,7 +599,7 @@ impl Supervisor {
             for frame in frames {
                 let record = match frame {
                     Frame::Record(record) => record,
-                    Frame::Oversized { start } => {
+                    Frame::Oversized { start, .. } => {
                         if !self.skip(&start).await {
                             break 'read None;
                         }

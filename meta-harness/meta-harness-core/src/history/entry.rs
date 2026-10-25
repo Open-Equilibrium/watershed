@@ -128,22 +128,34 @@ pub(crate) struct SystemChange {
 }
 
 impl Entry {
-    /// An entry too large to read, kept by the id and parent pi writes at its start, so the
-    /// entries after it still reach their ancestors.
-    pub fn skipped(start: &[u8]) -> Option<Self> {
+    /// An entry too large to read, kept by its id and parent, so the entries after it still
+    /// reach their ancestors. pi writes them first, except in custom entries, which end with
+    /// them after their data.
+    pub fn skipped(start: &[u8], end: &[u8]) -> Option<Self> {
         let start = String::from_utf8_lossy(start);
-        let text = |key: &str| {
-            let (_, rest) = start.split_once(key)?;
-            rest.split_once('"').map(|(value, _)| value.to_owned())
-        };
-        let parent = if start.contains(r#""parentId":null"#) {
-            None
+        let custom = start.starts_with(r#"{"type":"custom"#);
+        let fields = if custom {
+            String::from_utf8_lossy(end)
         } else {
-            Some(text(r#""parentId":""#)?)
+            start.clone()
+        };
+        // Data may hold the same names, so the field nearest the entry's own ones counts.
+        let field = |key: &str| {
+            let key = format!(r#""{key}":"#);
+            let (_, rest) = if custom {
+                fields.rsplit_once(&key)?
+            } else {
+                fields.split_once(&key)?
+            };
+            if rest.starts_with("null") {
+                return Some(None);
+            }
+            let (value, _) = rest.strip_prefix('"')?.split_once('"')?;
+            Some(Some(value.to_owned()))
         };
         Some(Self {
-            id: text(r#""id":""#)?,
-            parent,
+            id: field("id")??,
+            parent: field("parentId")?,
             at_ms: None,
             body: Body::Other {
                 kind: "too large to read".to_owned(),

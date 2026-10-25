@@ -68,9 +68,15 @@ fn cargo(lines: &[&str]) -> Option<TestCount> {
         .iter()
         .filter(|line| line.starts_with("test result:"))
         .collect();
+    // Output is the tool's, so its numbers may be anything.
+    let sum = |word| {
+        results
+            .iter()
+            .fold(0u32, |sum, line| sum.saturating_add(before(line, word)))
+    };
     (!results.is_empty()).then(|| TestCount {
-        passed: results.iter().map(|line| before(line, " passed")).sum(),
-        failed: results.iter().map(|line| before(line, " failed")).sum(),
+        passed: sum(" passed"),
+        failed: sum(" failed"),
     })
 }
 
