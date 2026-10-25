@@ -21,8 +21,6 @@ pub(crate) struct Entry {
     pub parent: Option<String>,
     /// Unix milliseconds when it was stored.
     pub at_ms: Option<u64>,
-    /// What producing it cost: a response, a summary, cache warming or a tool's own requests.
-    pub spent: Usage,
     pub body: Body,
 }
 
@@ -147,7 +145,6 @@ impl Entry {
             id: text(r#""id":""#)?,
             parent,
             at_ms: None,
-            spent: Usage::default(),
             body: Body::Other {
                 kind: "too large to read".to_owned(),
             },
@@ -199,13 +196,18 @@ impl Entry {
                 .get("timestamp")
                 .and_then(Value::as_str)
                 .and_then(iso_millis),
-            spent: usage(
-                entry
-                    .get("usage")
-                    .or_else(|| entry.pointer("/message/usage")),
-            ),
             body,
         }
+    }
+
+    /// What producing a stored entry cost: a response, a summary, cache warming or a tool's own
+    /// requests. The history sums it as it reads, so entries stay small.
+    pub fn spent(entry: &Value) -> Usage {
+        usage(
+            entry
+                .get("usage")
+                .or_else(|| entry.pointer("/message/usage")),
+        )
     }
 }
 

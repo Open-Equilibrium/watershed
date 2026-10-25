@@ -24,6 +24,8 @@ use entry::Entry;
 pub struct History {
     entries: Arc<Vec<Entry>>,
     leaf: Option<String>,
+    /// What every entry read so far cost.
+    spent: Usage,
 }
 
 impl History {
@@ -43,6 +45,7 @@ impl History {
         let mut framer = LineFramer::new(limit);
         let mut chunk = vec![0; 64 * 1024];
         let mut entries = Vec::new();
+        let mut spent = Usage::default();
         loop {
             let read = file.read(&mut chunk)?;
             if read == 0 {
@@ -55,6 +58,7 @@ impl History {
                         if let Ok(entry @ Value::Object(_)) = serde_json::from_slice::<Value>(&line)
                             && entry.get("type").and_then(Value::as_str) != Some("session")
                         {
+                            add(&mut spent, &Entry::spent(&entry));
                             entries.push(Entry::parse(&entry));
                         }
                     }
@@ -65,6 +69,7 @@ impl History {
         Ok(Self {
             entries: Arc::new(entries),
             leaf: None,
+            spent,
         })
     }
 
@@ -76,6 +81,9 @@ impl History {
             .map(Vec::as_slice)
             .unwrap_or_default();
         if !entries.is_empty() {
+            for entry in entries {
+                add(&mut self.spent, &Entry::spent(entry));
+            }
             Arc::make_mut(&mut self.entries).extend(entries.iter().map(Entry::parse));
         }
         self.leaf = data
@@ -87,16 +95,7 @@ impl History {
     /// What every stored entry cost, on every branch: responses, summaries, cache warming and
     /// tools' own requests.
     pub fn usage(&self) -> Usage {
-        let mut total = Usage::default();
-        for spent in self.entries.iter().map(|entry| &entry.spent) {
-            total.input += spent.input;
-            total.output += spent.output;
-            total.cache_read += spent.cache_read;
-            total.cache_write += spent.cache_write;
-            total.reasoning += spent.reasoning;
-            total.cost_micro_usd += spent.cost_micro_usd;
-        }
-        total
+        self.spent
     }
 
     /// The id of the last entry read, from which the next read continues.
@@ -286,4 +285,13 @@ pub struct TranscriptItem {
     pub failed: bool,
     /// How long a tool call ran.
     pub duration_ms: Option<u64>,
+}
+
+fn add(total: &mut Usage, spent: &Usage) {
+    total.input += spent.input;
+    total.output += spent.output;
+    total.cache_read += spent.cache_read;
+    total.cache_write += spent.cache_write;
+    total.reasoning += spent.reasoning;
+    total.cost_micro_usd += spent.cost_micro_usd;
 }
