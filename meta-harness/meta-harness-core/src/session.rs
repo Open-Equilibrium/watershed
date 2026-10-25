@@ -3,7 +3,7 @@
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::future::{Future, poll_fn};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::pin::{Pin, pin};
 use std::process::Stdio;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -81,6 +81,23 @@ impl Pending {
     pub async fn accepted(self) -> Result<(), CommandError> {
         self.0.await.unwrap_or(Err(CommandError::Closed)).map(drop)
     }
+
+    /// Waits until the agent answered a session switch; `false` when an extension cancelled it.
+    pub async fn switched(self) -> Result<bool, CommandError> {
+        let data = self.0.await.unwrap_or(Err(CommandError::Closed))?;
+        Ok(data.get("cancelled").and_then(Value::as_bool) != Some(true))
+    }
+}
+
+/// A model the agent can use.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Model {
+    /// The provider, such as `anthropic`.
+    pub provider: String,
+    /// The provider's model id.
+    pub id: String,
+    /// The name to show; the id when the agent gives none.
+    pub name: String,
 }
 
 /// What the agent reports about its session.
@@ -237,6 +254,49 @@ impl Session {
             let _ = self.answer(&request, Answer::Cancelled).await;
         }
         Ok(pending)
+    }
+
+    /// Starts a new session in the same agent; the stored one stays available. Extensions may
+    /// ask the user first or cancel it.
+    pub async fn new_session(&mut self) -> Result<Pending, CommandError> {
+        self.submit(json!({ "type": "new_session" })).await
+    }
+
+    /// Continues the session stored in `file`; extensions may ask the user first or cancel it.
+    pub async fn switch_session(&mut self, file: &Path) -> Result<Pending, CommandError> {
+        self.submit(json!({
+            "type": "switch_session",
+            "sessionPath": file.to_string_lossy(),
+        }))
+        .await
+    }
+
+    /// The models the agent can use.
+    pub async fn models(&mut self) -> Result<Vec<Model>, CommandError> {
+        let data = self
+            .command(json!({ "type": "get_available_models" }))
+            .await?;
+        let models = data.get("models").and_then(Value::as_array);
+        Ok(models
+            .into_iter()
+            .flatten()
+            .filter_map(|model| {
+                let text = |field| model.get(field).and_then(Value::as_str);
+                let id = text("id")?;
+                Some(Model {
+                    provider: text("provider")?.to_owned(),
+                    id: id.to_owned(),
+                    name: text("name").unwrap_or(id).to_owned(),
+                })
+            })
+            .collect())
+    }
+
+    /// Selects the model the next requests use.
+    pub async fn set_model(&mut self, provider: &str, id: &str) -> Result<(), CommandError> {
+        self.command(json!({ "type": "set_model", "provider": provider, "modelId": id }))
+            .await
+            .map(drop)
     }
 
     /// Reads the session's file, id, model and streaming state.

@@ -6,7 +6,7 @@ use tokio::time::timeout;
 
 use crate::{
     AgentCommand, Answer, ApprovalMode, CommandError, Decision, Delivery, EntryKind, ItemDetail,
-    ItemId, ItemKind, ItemStatus, NotificationLevel, Pending, Queue, RecordKind, RequestId,
+    ItemId, ItemKind, ItemStatus, Model, NotificationLevel, Pending, Queue, RecordKind, RequestId,
     RequestKind, RuntimeEvent, Session, SessionEvent, SessionState, SessionTree, TreeNode, TurnId,
     UserInput,
 };
@@ -556,6 +556,62 @@ fn stopping_rejects_an_approval_that_arrives_late() {
             ),
             "the next turn asks again"
         );
+    });
+}
+
+#[test]
+fn switches_sessions_and_models_through_pi() {
+    run(async {
+        let script = [
+            expect_response(&[r#""type":"new_session""#, r#""id":"1""#]),
+            r#"printf '%s\n' '{"id":"1","type":"response","command":"new_session","success":true,"data":{"cancelled":false}}'
+"#
+            .to_owned(),
+            expect_response(&[
+                r#""type":"switch_session""#,
+                r#""id":"2""#,
+                r#""sessionPath":"/tmp/old.jsonl""#,
+            ]),
+            r#"printf '%s\n' '{"id":"2","type":"response","command":"switch_session","success":true,"data":{"cancelled":true}}'
+"#
+            .to_owned(),
+            expect_response(&[r#""type":"get_available_models""#, r#""id":"3""#]),
+            r#"printf '%s\n' '{"id":"3","type":"response","command":"get_available_models","success":true,"data":{"models":[{"id":"faux-1","name":"Faux One","provider":"faux"},{"id":"faux-2","provider":"faux"}]}}'
+"#
+            .to_owned(),
+            expect_response(&[
+                r#""type":"set_model""#,
+                r#""id":"4""#,
+                r#""provider":"faux""#,
+                r#""modelId":"faux-2""#,
+            ]),
+            r#"printf '%s\n' '{"id":"4","type":"response","command":"set_model","success":true,"data":{}}'
+"#
+            .to_owned(),
+        ]
+        .concat();
+        let (mut session, _events) = fake_agent(&script);
+        let started = session.new_session().await.expect("sent");
+        assert_eq!(started.switched().await, Ok(true));
+        let resumed = session
+            .switch_session(std::path::Path::new("/tmp/old.jsonl"))
+            .await
+            .expect("sent");
+        assert_eq!(
+            resumed.switched().await,
+            Ok(false),
+            "an extension cancelled it"
+        );
+        let model = |id: &str, name: &str| Model {
+            provider: "faux".to_owned(),
+            id: id.to_owned(),
+            name: name.to_owned(),
+        };
+        assert_eq!(
+            session.models().await,
+            Ok(vec![model("faux-1", "Faux One"), model("faux-2", "faux-2")])
+        );
+        assert_eq!(session.set_model("faux", "faux-2").await, Ok(()));
     });
 }
 

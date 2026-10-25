@@ -10,6 +10,7 @@ mod framing;
 mod history;
 mod pi;
 mod session;
+mod stored;
 
 pub use approval::ApprovalMode;
 pub use diff::{ChangeStatus, DiffError, FileChange, Snapshot, WorkingTree};
@@ -24,7 +25,10 @@ pub use history::{
     ToolOutcome, Trajectory, TrajectoryRecord, Transcript, TranscriptItem,
 };
 pub use pi::PiAdapter;
-pub use session::{AgentCommand, CommandError, Pending, Session, SessionEvent, SessionState};
+pub use session::{
+    AgentCommand, CommandError, Model, Pending, Session, SessionEvent, SessionState,
+};
+pub use stored::{StoredSession, recent_sessions};
 
 #[cfg(test)]
 mod tests;

@@ -4,5 +4,6 @@ mod framing;
 mod outcome;
 mod pi;
 mod session;
+mod stored;
 mod trajectory;
 mod transcript;
