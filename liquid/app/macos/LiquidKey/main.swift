@@ -40,6 +40,8 @@ func unmap() {
 }
 
 /// Without its hotkeys the key would be dead, so Caps Lock comes back and the helper ends.
+/// macOS reports only a second registration in this process; another app holding the same
+/// keys goes unnoticed.
 func register(_ modifiers: Int, _ id: EventHotKeyID, _ key: inout EventHotKeyRef?) {
     let status = RegisterEventHotKey(
         UInt32(kVK_F18), UInt32(modifiers), id, GetApplicationEventTarget(), 0, &key)

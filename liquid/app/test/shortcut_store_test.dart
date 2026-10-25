@@ -184,6 +184,12 @@ void main() {
     final reported = <String>[];
     shortcuts.report = reported.add;
     expect(reported, ['Could not turn the Liquid key on: denied']);
+    expect(
+      shortcuts.value,
+      ShortcutSettings.standard(),
+      reason: 'hints stay visible without the Liquid key',
+    );
+    expect(await store.load(), ShortcutSettings.standard());
   });
 
   test('the Liquid key needs macOS 13 for its login item', () {

@@ -94,8 +94,9 @@ class ShortcutController extends ValueNotifier<ShortcutSettings> {
   ShortcutController.memory([ShortcutSettings? settings])
     : this._(settings ?? ShortcutSettings.standard(), null, null, false);
 
-  /// The stored settings. A stored Liquid key is turned on again, so a login item the user
-  /// turned off is reported; the first frame does not wait for it.
+  /// The stored settings. A stored Liquid key is turned on again; when its login item was
+  /// turned off, Liquid reports it and continues without the Liquid key. The first frame does
+  /// not wait for it.
   static Future<ShortcutController> load(
     ShortcutStore store,
     LiquidKeyHost host,
