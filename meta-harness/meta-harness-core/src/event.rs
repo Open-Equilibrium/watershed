@@ -60,15 +60,6 @@ pub struct Usage {
     pub cost_micro_usd: u64,
 }
 
-/// One named part of the agent's system prompt.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ContextSection {
-    /// The section name.
-    pub name: String,
-    /// Its length in characters, or `None` when the section was removed.
-    pub chars: Option<usize>,
-}
-
 /// What a session entry holds.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EntryKind {
@@ -261,26 +252,6 @@ pub enum AgentEvent {
         status: ItemStatus,
         /// How long a tool ran, when the agent measured it.
         duration_ms: Option<u64>,
-    },
-    /// The agent changed what it sends to the model: prompt sections or tools.
-    ContextChanged {
-        /// The owning turn.
-        turn: TurnId,
-        /// Changed prompt sections, by name.
-        sections: Vec<ContextSection>,
-        /// Characters of instructions appended to the prompt.
-        appended_chars: usize,
-        /// Tools added, by name.
-        tools_added: Vec<String>,
-        /// Tools removed, by name.
-        tools_removed: Vec<String>,
-    },
-    /// The agent sent a request to the model.
-    ModelRequestStarted {
-        /// The owning turn.
-        turn: TurnId,
-        /// The request.
-        step: StepId,
     },
     /// The model finished its response to a request.
     ModelRequestCompleted {

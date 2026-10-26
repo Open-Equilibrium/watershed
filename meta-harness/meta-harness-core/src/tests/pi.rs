@@ -3,9 +3,8 @@ use std::time::Duration;
 use serde_json::{Map, Value};
 
 use crate::{
-    AgentEvent, ContextSection, EntryKind, History, ItemDetail, ItemId, ItemKind, ItemStatus,
-    NotificationLevel, PiAdapter, RequestId, RequestKind, SessionTree, StepId, TreeNode, TurnId,
-    Usage, UserInput,
+    AgentEvent, EntryKind, History, ItemDetail, ItemId, ItemKind, ItemStatus, NotificationLevel,
+    PiAdapter, RequestId, RequestKind, SessionTree, StepId, TreeNode, TurnId, Usage, UserInput,
 };
 
 const TURN: TurnId = TurnId(1);
@@ -76,10 +75,6 @@ fn streams_a_turn_with_reasoning_and_text() {
             AgentEvent::TurnStarted { turn: TURN },
             started(1, ItemKind::UserMessage),
             completed(1, ItemKind::UserMessage, "Say hi"),
-            AgentEvent::ModelRequestStarted {
-                turn: TURN,
-                step: StepId(1),
-            },
             started(2, ItemKind::Reasoning),
             delta(2, "The user "),
             delta(2, "wants hi."),
@@ -318,7 +313,7 @@ fn turns_watershed_approval_questions_into_requests() {
 }
 
 #[test]
-fn measures_model_requests_and_context_changes() {
+fn measures_model_requests() {
     let mut adapter = PiAdapter::new();
     let records = [
         (0, r#"{"type":"agent_start"}"#),
@@ -360,37 +355,11 @@ fn measures_model_requests_and_context_changes() {
             let record: Map<String, Value> = serde_json::from_str(record).expect("JSON object");
             adapter.translate(&record, Duration::from_millis(*at))
         })
-        .filter(|event| {
-            matches!(
-                event,
-                AgentEvent::ContextChanged { .. }
-                    | AgentEvent::ModelRequestStarted { .. }
-                    | AgentEvent::ModelRequestCompleted { .. }
-            )
-        })
+        .filter(|event| matches!(event, AgentEvent::ModelRequestCompleted { .. }))
         .collect();
-    let section = |name: &str, chars| ContextSection {
-        name: name.to_owned(),
-        chars,
-    };
     assert_eq!(
         events,
         [
-            AgentEvent::ContextChanged {
-                turn: TURN,
-                sections: vec![
-                    section("docs", None),
-                    section("preamble", Some(11)),
-                    section("rules", Some(9)),
-                ],
-                appended_chars: 13,
-                tools_added: vec!["read".to_owned(), "bash".to_owned()],
-                tools_removed: vec!["grep".to_owned()],
-            },
-            AgentEvent::ModelRequestStarted {
-                turn: TURN,
-                step: StepId(1),
-            },
             AgentEvent::ModelRequestCompleted {
                 turn: TURN,
                 step: StepId(1),
@@ -407,10 +376,6 @@ fn measures_model_requests_and_context_changes() {
                 error: None,
                 first_token_ms: Some(445),
                 duration_ms: 1095,
-            },
-            AgentEvent::ModelRequestStarted {
-                turn: TURN,
-                step: StepId(2),
             },
             AgentEvent::ModelRequestCompleted {
                 turn: TURN,

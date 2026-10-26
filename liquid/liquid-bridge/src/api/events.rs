@@ -18,10 +18,6 @@ pub enum BridgeEventKind {
     ContentDelta,
     /// `turn`, `item` with kind, status and duration, and `text` with the final text.
     ItemCompleted,
-    /// `turn` and `context`.
-    ContextChanged,
-    /// `turn` and `step` id.
-    ModelRequestStarted,
     /// `turn` and `step` with model, usage, stop reason, error and timing.
     ModelRequestCompleted,
     /// `request` with its approval.
@@ -67,8 +63,6 @@ pub struct BridgeEvent {
     pub text: Option<String>,
     /// A notification, status or widget.
     pub display: Option<BridgeDisplay>,
-    /// A context change.
-    pub context: Option<BridgeContext>,
     /// Whether the agent process exited successfully.
     pub success: Option<bool>,
     /// The messages waiting for the running agent.
@@ -248,28 +242,6 @@ pub struct BridgeDisplay {
     pub level: Option<BridgeLevel>,
     /// Widget lines, or `None` when cleared.
     pub lines: Option<Vec<String>>,
-}
-
-/// A change to what the agent sends to the model.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BridgeContext {
-    /// Changed prompt sections.
-    pub sections: Vec<BridgeSection>,
-    /// Characters of instructions appended to the prompt.
-    pub appended_chars: i64,
-    /// Tools added, by name.
-    pub tools_added: Vec<String>,
-    /// Tools removed, by name.
-    pub tools_removed: Vec<String>,
-}
-
-/// One prompt section.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BridgeSection {
-    /// The section name.
-    pub name: String,
-    /// Its length in characters, or `None` when removed.
-    pub chars: Option<i64>,
 }
 
 /// How a file changed in a run.

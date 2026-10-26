@@ -7,7 +7,7 @@ import '../frb_generated.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
 /// A tool call awaiting approval.
 class BridgeApproval {
@@ -55,45 +55,6 @@ enum BridgeChangeStatus {
 
   /// The file was removed.
   deleted,
-}
-
-/// A change to what the agent sends to the model.
-class BridgeContext {
-  /// Changed prompt sections.
-  final List<BridgeSection> sections;
-
-  /// Characters of instructions appended to the prompt.
-  final PlatformInt64 appendedChars;
-
-  /// Tools added, by name.
-  final List<String> toolsAdded;
-
-  /// Tools removed, by name.
-  final List<String> toolsRemoved;
-
-  const BridgeContext({
-    required this.sections,
-    required this.appendedChars,
-    required this.toolsAdded,
-    required this.toolsRemoved,
-  });
-
-  @override
-  int get hashCode =>
-      sections.hashCode ^
-      appendedChars.hashCode ^
-      toolsAdded.hashCode ^
-      toolsRemoved.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is BridgeContext &&
-          runtimeType == other.runtimeType &&
-          sections == other.sections &&
-          appendedChars == other.appendedChars &&
-          toolsAdded == other.toolsAdded &&
-          toolsRemoved == other.toolsRemoved;
 }
 
 /// The user's answer to an approval request.
@@ -157,9 +118,6 @@ class BridgeEvent {
   /// A notification, status or widget.
   final BridgeDisplay? display;
 
-  /// A context change.
-  final BridgeContext? context;
-
   /// Whether the agent process exited successfully.
   final bool? success;
 
@@ -174,7 +132,6 @@ class BridgeEvent {
     this.request,
     this.text,
     this.display,
-    this.context,
     this.success,
     this.queue,
   });
@@ -188,7 +145,6 @@ class BridgeEvent {
       request.hashCode ^
       text.hashCode ^
       display.hashCode ^
-      context.hashCode ^
       success.hashCode ^
       queue.hashCode;
 
@@ -204,7 +160,6 @@ class BridgeEvent {
           request == other.request &&
           text == other.text &&
           display == other.display &&
-          context == other.context &&
           success == other.success &&
           queue == other.queue;
 }
@@ -231,12 +186,6 @@ enum BridgeEventKind {
 
   /// `turn`, `item` with kind, status and duration, and `text` with the final text.
   itemCompleted,
-
-  /// `turn` and `context`.
-  contextChanged,
-
-  /// `turn` and `step` id.
-  modelRequestStarted,
 
   /// `turn` and `step` with model, usage, stop reason, error and timing.
   modelRequestCompleted,
@@ -520,28 +469,6 @@ enum BridgeRequestKind {
 
   /// Calling any other tool.
   tool,
-}
-
-/// One prompt section.
-class BridgeSection {
-  /// The section name.
-  final String name;
-
-  /// Its length in characters, or `None` when removed.
-  final PlatformInt64? chars;
-
-  const BridgeSection({required this.name, this.chars});
-
-  @override
-  int get hashCode => name.hashCode ^ chars.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is BridgeSection &&
-          runtimeType == other.runtimeType &&
-          name == other.name &&
-          chars == other.chars;
 }
 
 /// A model request and, once completed, its outcome.

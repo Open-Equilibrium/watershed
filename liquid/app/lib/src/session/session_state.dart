@@ -551,9 +551,6 @@ class SessionState {
             ? RunStatus.exited
             : RunStatus.failed;
         return;
-      case BridgeEventKind.contextChanged ||
-          BridgeEventKind.modelRequestStarted:
-        break;
     }
     approval.value = _approvals.firstOrNull;
     question.value = _questions.firstOrNull;

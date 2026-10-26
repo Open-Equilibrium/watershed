@@ -6,8 +6,8 @@ use std::time::Duration;
 use serde_json::{Map, Value};
 
 use crate::event::{
-    AgentEvent, ContextSection, ItemDetail, ItemId, ItemKind, ItemStatus, NotificationLevel, Queue,
-    RequestId, RequestKind, StepId, TurnId, Usage, UserInput,
+    AgentEvent, ItemDetail, ItemId, ItemKind, ItemStatus, NotificationLevel, Queue, RequestId,
+    RequestKind, StepId, TurnId, Usage, UserInput,
 };
 
 /// Title prefix of the select dialog Watershed's pi extension uses to ask for an approval.
@@ -104,13 +104,11 @@ impl PiAdapter {
                         started: self.turn_started.take().unwrap_or(at),
                         first_token: None,
                     });
-                    events.push(AgentEvent::ModelRequestStarted { turn, step: id });
                 }
             }
             Some("message_end") => match role(record) {
                 Some("user") => self.user_message(turn, record, &mut events),
                 Some("assistant") => self.model_response(turn, record, at, &mut events),
-                Some("system") => events.extend(context_change(turn, record)),
                 _ => {}
             },
             Some("message_update") => {
@@ -300,44 +298,6 @@ fn completed(turn: TurnId, item: ItemId, kind: ItemKind, text: String) -> AgentE
 
 fn role(record: &Map<String, Value>) -> Option<&str> {
     record.get("message")?.get("role")?.as_str()
-}
-
-/// Reads a system message that changes prompt sections or tools.
-fn context_change(turn: TurnId, record: &Map<String, Value>) -> Option<AgentEvent> {
-    let message = record.get("message")?.as_object()?;
-    let sections = message
-        .get("sections")
-        .and_then(Value::as_object)
-        .map(|sections| {
-            sections
-                .iter()
-                .map(|(name, text)| ContextSection {
-                    name: name.clone(),
-                    chars: text.as_str().map(|text| text.chars().count()),
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-    let names = |field| -> Vec<String> {
-        message
-            .get(field)
-            .and_then(Value::as_array)
-            .map(|tools| {
-                tools
-                    .iter()
-                    .filter_map(|tool| tool.get("name").and_then(Value::as_str))
-                    .map(str::to_owned)
-                    .collect()
-            })
-            .unwrap_or_default()
-    };
-    Some(AgentEvent::ContextChanged {
-        turn,
-        sections,
-        appended_chars: content_text(message.get("content")).chars().count(),
-        tools_added: names("toolsAdded"),
-        tools_removed: names("toolsRemoved"),
-    })
 }
 
 /// Classifies one of pi's tool names.

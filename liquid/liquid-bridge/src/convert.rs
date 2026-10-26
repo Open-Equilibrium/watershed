@@ -9,10 +9,9 @@ use meta_harness_core::{
 };
 
 use crate::api::events::{
-    BridgeApproval, BridgeChangeStatus, BridgeContext, BridgeDecision, BridgeDisplay, BridgeEvent,
+    BridgeApproval, BridgeChangeStatus, BridgeDecision, BridgeDisplay, BridgeEvent,
     BridgeEventKind, BridgeFileChange, BridgeItem, BridgeItemKind, BridgeLevel, BridgeQuestion,
-    BridgeQuestionKind, BridgeQueue, BridgeRequest, BridgeRequestKind, BridgeSection, BridgeStep,
-    BridgeUsage,
+    BridgeQuestionKind, BridgeQueue, BridgeRequest, BridgeRequestKind, BridgeStep, BridgeUsage,
 };
 use crate::api::history::{
     BridgeContextDetail, BridgeContextMessage, BridgeContextPart, BridgeEntryKind, BridgeRecord,
@@ -289,7 +288,6 @@ fn event(kind: BridgeEventKind) -> BridgeEvent {
         request: None,
         text: None,
         display: None,
-        context: None,
         success: None,
         queue: None,
     }
@@ -403,41 +401,6 @@ impl From<AgentEvent> for BridgeEvent {
                 }),
                 text: Some(text),
                 ..event(Kind::ItemCompleted)
-            },
-            AgentEvent::ContextChanged {
-                turn,
-                sections,
-                appended_chars,
-                tools_added,
-                tools_removed,
-            } => BridgeEvent {
-                turn: Some(int(turn.0)),
-                context: Some(BridgeContext {
-                    sections: sections
-                        .into_iter()
-                        .map(|section| BridgeSection {
-                            name: section.name,
-                            chars: section.chars.map(int),
-                        })
-                        .collect(),
-                    appended_chars: int(appended_chars),
-                    tools_added,
-                    tools_removed,
-                }),
-                ..event(Kind::ContextChanged)
-            },
-            AgentEvent::ModelRequestStarted { turn, step } => BridgeEvent {
-                turn: Some(int(turn.0)),
-                step: Some(BridgeStep {
-                    id: int(step.0),
-                    model: String::new(),
-                    usage: BridgeUsage::default(),
-                    stop_reason: String::new(),
-                    error: None,
-                    first_token_ms: None,
-                    duration_ms: 0,
-                }),
-                ..event(Kind::ModelRequestStarted)
             },
             AgentEvent::ModelRequestCompleted {
                 turn,

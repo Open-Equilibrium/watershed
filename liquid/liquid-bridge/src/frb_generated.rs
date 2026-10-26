@@ -1427,22 +1427,6 @@ impl SseDecode for crate::api::events::BridgeChangeStatus {
     }
 }
 
-impl SseDecode for crate::api::events::BridgeContext {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
-        let mut var_sections = <Vec<crate::api::events::BridgeSection>>::sse_decode(deserializer);
-        let mut var_appendedChars = <i64>::sse_decode(deserializer);
-        let mut var_toolsAdded = <Vec<String>>::sse_decode(deserializer);
-        let mut var_toolsRemoved = <Vec<String>>::sse_decode(deserializer);
-        return crate::api::events::BridgeContext {
-            sections: var_sections,
-            appended_chars: var_appendedChars,
-            tools_added: var_toolsAdded,
-            tools_removed: var_toolsRemoved,
-        };
-    }
-}
-
 impl SseDecode for crate::api::history::BridgeContextDetail {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -1543,7 +1527,6 @@ impl SseDecode for crate::api::events::BridgeEvent {
         let mut var_request = <Option<crate::api::events::BridgeRequest>>::sse_decode(deserializer);
         let mut var_text = <Option<String>>::sse_decode(deserializer);
         let mut var_display = <Option<crate::api::events::BridgeDisplay>>::sse_decode(deserializer);
-        let mut var_context = <Option<crate::api::events::BridgeContext>>::sse_decode(deserializer);
         let mut var_success = <Option<bool>>::sse_decode(deserializer);
         let mut var_queue = <Option<crate::api::events::BridgeQueue>>::sse_decode(deserializer);
         return crate::api::events::BridgeEvent {
@@ -1554,7 +1537,6 @@ impl SseDecode for crate::api::events::BridgeEvent {
             request: var_request,
             text: var_text,
             display: var_display,
-            context: var_context,
             success: var_success,
             queue: var_queue,
         };
@@ -1573,21 +1555,19 @@ impl SseDecode for crate::api::events::BridgeEventKind {
             4 => crate::api::events::BridgeEventKind::ItemUpdated,
             5 => crate::api::events::BridgeEventKind::ContentDelta,
             6 => crate::api::events::BridgeEventKind::ItemCompleted,
-            7 => crate::api::events::BridgeEventKind::ContextChanged,
-            8 => crate::api::events::BridgeEventKind::ModelRequestStarted,
-            9 => crate::api::events::BridgeEventKind::ModelRequestCompleted,
-            10 => crate::api::events::BridgeEventKind::RequestOpened,
-            11 => crate::api::events::BridgeEventKind::RequestResolved,
-            12 => crate::api::events::BridgeEventKind::UserInputRequested,
-            13 => crate::api::events::BridgeEventKind::UserInputResolved,
-            14 => crate::api::events::BridgeEventKind::Notification,
-            15 => crate::api::events::BridgeEventKind::StatusChanged,
-            16 => crate::api::events::BridgeEventKind::WidgetChanged,
-            17 => crate::api::events::BridgeEventKind::TitleChanged,
-            18 => crate::api::events::BridgeEventKind::InputTextSet,
-            19 => crate::api::events::BridgeEventKind::Failed,
-            20 => crate::api::events::BridgeEventKind::Exited,
-            21 => crate::api::events::BridgeEventKind::QueueChanged,
+            7 => crate::api::events::BridgeEventKind::ModelRequestCompleted,
+            8 => crate::api::events::BridgeEventKind::RequestOpened,
+            9 => crate::api::events::BridgeEventKind::RequestResolved,
+            10 => crate::api::events::BridgeEventKind::UserInputRequested,
+            11 => crate::api::events::BridgeEventKind::UserInputResolved,
+            12 => crate::api::events::BridgeEventKind::Notification,
+            13 => crate::api::events::BridgeEventKind::StatusChanged,
+            14 => crate::api::events::BridgeEventKind::WidgetChanged,
+            15 => crate::api::events::BridgeEventKind::TitleChanged,
+            16 => crate::api::events::BridgeEventKind::InputTextSet,
+            17 => crate::api::events::BridgeEventKind::Failed,
+            18 => crate::api::events::BridgeEventKind::Exited,
+            19 => crate::api::events::BridgeEventKind::QueueChanged,
             _ => unreachable!("Invalid variant for BridgeEventKind: {}", inner),
         };
     }
@@ -1810,18 +1790,6 @@ impl SseDecode for crate::api::events::BridgeRequestKind {
             1 => crate::api::events::BridgeRequestKind::FileChange,
             2 => crate::api::events::BridgeRequestKind::Tool,
             _ => unreachable!("Invalid variant for BridgeRequestKind: {}", inner),
-        };
-    }
-}
-
-impl SseDecode for crate::api::events::BridgeSection {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
-        let mut var_name = <String>::sse_decode(deserializer);
-        let mut var_chars = <Option<i64>>::sse_decode(deserializer);
-        return crate::api::events::BridgeSection {
-            name: var_name,
-            chars: var_chars,
         };
     }
 }
@@ -2083,20 +2051,6 @@ impl SseDecode for Vec<crate::api::history::BridgeRecord> {
     }
 }
 
-impl SseDecode for Vec<crate::api::events::BridgeSection> {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
-        let mut len_ = <i32>::sse_decode(deserializer);
-        let mut ans_ = Vec::with_capacity(len_ as usize);
-        for idx_ in 0..len_ {
-            ans_.push(<crate::api::events::BridgeSection>::sse_decode(
-                deserializer,
-            ));
-        }
-        return ans_;
-    }
-}
-
 impl SseDecode for Vec<crate::api::session::BridgeStoredSession> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -2192,19 +2146,6 @@ impl SseDecode for Option<crate::api::events::BridgeApproval> {
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         if (<bool>::sse_decode(deserializer)) {
             return Some(<crate::api::events::BridgeApproval>::sse_decode(
-                deserializer,
-            ));
-        } else {
-            return None;
-        }
-    }
-}
-
-impl SseDecode for Option<crate::api::events::BridgeContext> {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
-        if (<bool>::sse_decode(deserializer)) {
-            return Some(<crate::api::events::BridgeContext>::sse_decode(
                 deserializer,
             ));
         } else {
@@ -2641,29 +2582,6 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::events::BridgeChangeStatus>
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
-impl flutter_rust_bridge::IntoDart for crate::api::events::BridgeContext {
-    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
-        [
-            self.sections.into_into_dart().into_dart(),
-            self.appended_chars.into_into_dart().into_dart(),
-            self.tools_added.into_into_dart().into_dart(),
-            self.tools_removed.into_into_dart().into_dart(),
-        ]
-        .into_dart()
-    }
-}
-impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
-    for crate::api::events::BridgeContext
-{
-}
-impl flutter_rust_bridge::IntoIntoDart<crate::api::events::BridgeContext>
-    for crate::api::events::BridgeContext
-{
-    fn into_into_dart(self) -> crate::api::events::BridgeContext {
-        self
-    }
-}
-// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::api::history::BridgeContextDetail {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
@@ -2811,7 +2729,6 @@ impl flutter_rust_bridge::IntoDart for crate::api::events::BridgeEvent {
             self.request.into_into_dart().into_dart(),
             self.text.into_into_dart().into_dart(),
             self.display.into_into_dart().into_dart(),
-            self.context.into_into_dart().into_dart(),
             self.success.into_into_dart().into_dart(),
             self.queue.into_into_dart().into_dart(),
         ]
@@ -2840,21 +2757,19 @@ impl flutter_rust_bridge::IntoDart for crate::api::events::BridgeEventKind {
             Self::ItemUpdated => 4.into_dart(),
             Self::ContentDelta => 5.into_dart(),
             Self::ItemCompleted => 6.into_dart(),
-            Self::ContextChanged => 7.into_dart(),
-            Self::ModelRequestStarted => 8.into_dart(),
-            Self::ModelRequestCompleted => 9.into_dart(),
-            Self::RequestOpened => 10.into_dart(),
-            Self::RequestResolved => 11.into_dart(),
-            Self::UserInputRequested => 12.into_dart(),
-            Self::UserInputResolved => 13.into_dart(),
-            Self::Notification => 14.into_dart(),
-            Self::StatusChanged => 15.into_dart(),
-            Self::WidgetChanged => 16.into_dart(),
-            Self::TitleChanged => 17.into_dart(),
-            Self::InputTextSet => 18.into_dart(),
-            Self::Failed => 19.into_dart(),
-            Self::Exited => 20.into_dart(),
-            Self::QueueChanged => 21.into_dart(),
+            Self::ModelRequestCompleted => 7.into_dart(),
+            Self::RequestOpened => 8.into_dart(),
+            Self::RequestResolved => 9.into_dart(),
+            Self::UserInputRequested => 10.into_dart(),
+            Self::UserInputResolved => 11.into_dart(),
+            Self::Notification => 12.into_dart(),
+            Self::StatusChanged => 13.into_dart(),
+            Self::WidgetChanged => 14.into_dart(),
+            Self::TitleChanged => 15.into_dart(),
+            Self::InputTextSet => 16.into_dart(),
+            Self::Failed => 17.into_dart(),
+            Self::Exited => 18.into_dart(),
+            Self::QueueChanged => 19.into_dart(),
             _ => unreachable!(),
         }
     }
@@ -3175,27 +3090,6 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::events::BridgeRequestKind>
     for crate::api::events::BridgeRequestKind
 {
     fn into_into_dart(self) -> crate::api::events::BridgeRequestKind {
-        self
-    }
-}
-// Codec=Dco (DartCObject based), see doc to use other codecs
-impl flutter_rust_bridge::IntoDart for crate::api::events::BridgeSection {
-    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
-        [
-            self.name.into_into_dart().into_dart(),
-            self.chars.into_into_dart().into_dart(),
-        ]
-        .into_dart()
-    }
-}
-impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
-    for crate::api::events::BridgeSection
-{
-}
-impl flutter_rust_bridge::IntoIntoDart<crate::api::events::BridgeSection>
-    for crate::api::events::BridgeSection
-{
-    fn into_into_dart(self) -> crate::api::events::BridgeSection {
         self
     }
 }
@@ -3530,16 +3424,6 @@ impl SseEncode for crate::api::events::BridgeChangeStatus {
     }
 }
 
-impl SseEncode for crate::api::events::BridgeContext {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
-        <Vec<crate::api::events::BridgeSection>>::sse_encode(self.sections, serializer);
-        <i64>::sse_encode(self.appended_chars, serializer);
-        <Vec<String>>::sse_encode(self.tools_added, serializer);
-        <Vec<String>>::sse_encode(self.tools_removed, serializer);
-    }
-}
-
 impl SseEncode for crate::api::history::BridgeContextDetail {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -3625,7 +3509,6 @@ impl SseEncode for crate::api::events::BridgeEvent {
         <Option<crate::api::events::BridgeRequest>>::sse_encode(self.request, serializer);
         <Option<String>>::sse_encode(self.text, serializer);
         <Option<crate::api::events::BridgeDisplay>>::sse_encode(self.display, serializer);
-        <Option<crate::api::events::BridgeContext>>::sse_encode(self.context, serializer);
         <Option<bool>>::sse_encode(self.success, serializer);
         <Option<crate::api::events::BridgeQueue>>::sse_encode(self.queue, serializer);
     }
@@ -3643,21 +3526,19 @@ impl SseEncode for crate::api::events::BridgeEventKind {
                 crate::api::events::BridgeEventKind::ItemUpdated => 4,
                 crate::api::events::BridgeEventKind::ContentDelta => 5,
                 crate::api::events::BridgeEventKind::ItemCompleted => 6,
-                crate::api::events::BridgeEventKind::ContextChanged => 7,
-                crate::api::events::BridgeEventKind::ModelRequestStarted => 8,
-                crate::api::events::BridgeEventKind::ModelRequestCompleted => 9,
-                crate::api::events::BridgeEventKind::RequestOpened => 10,
-                crate::api::events::BridgeEventKind::RequestResolved => 11,
-                crate::api::events::BridgeEventKind::UserInputRequested => 12,
-                crate::api::events::BridgeEventKind::UserInputResolved => 13,
-                crate::api::events::BridgeEventKind::Notification => 14,
-                crate::api::events::BridgeEventKind::StatusChanged => 15,
-                crate::api::events::BridgeEventKind::WidgetChanged => 16,
-                crate::api::events::BridgeEventKind::TitleChanged => 17,
-                crate::api::events::BridgeEventKind::InputTextSet => 18,
-                crate::api::events::BridgeEventKind::Failed => 19,
-                crate::api::events::BridgeEventKind::Exited => 20,
-                crate::api::events::BridgeEventKind::QueueChanged => 21,
+                crate::api::events::BridgeEventKind::ModelRequestCompleted => 7,
+                crate::api::events::BridgeEventKind::RequestOpened => 8,
+                crate::api::events::BridgeEventKind::RequestResolved => 9,
+                crate::api::events::BridgeEventKind::UserInputRequested => 10,
+                crate::api::events::BridgeEventKind::UserInputResolved => 11,
+                crate::api::events::BridgeEventKind::Notification => 12,
+                crate::api::events::BridgeEventKind::StatusChanged => 13,
+                crate::api::events::BridgeEventKind::WidgetChanged => 14,
+                crate::api::events::BridgeEventKind::TitleChanged => 15,
+                crate::api::events::BridgeEventKind::InputTextSet => 16,
+                crate::api::events::BridgeEventKind::Failed => 17,
+                crate::api::events::BridgeEventKind::Exited => 18,
+                crate::api::events::BridgeEventKind::QueueChanged => 19,
                 _ => {
                     unimplemented!("");
                 }
@@ -3846,14 +3727,6 @@ impl SseEncode for crate::api::events::BridgeRequestKind {
     }
 }
 
-impl SseEncode for crate::api::events::BridgeSection {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
-        <String>::sse_encode(self.name, serializer);
-        <Option<i64>>::sse_encode(self.chars, serializer);
-    }
-}
-
 impl SseEncode for crate::api::events::BridgeStep {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -4027,16 +3900,6 @@ impl SseEncode for Vec<crate::api::history::BridgeRecord> {
     }
 }
 
-impl SseEncode for Vec<crate::api::events::BridgeSection> {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
-        <i32>::sse_encode(self.len() as _, serializer);
-        for item in self {
-            <crate::api::events::BridgeSection>::sse_encode(item, serializer);
-        }
-    }
-}
-
 impl SseEncode for Vec<crate::api::session::BridgeStoredSession> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -4113,16 +3976,6 @@ impl SseEncode for Option<crate::api::events::BridgeApproval> {
         <bool>::sse_encode(self.is_some(), serializer);
         if let Some(value) = self {
             <crate::api::events::BridgeApproval>::sse_encode(value, serializer);
-        }
-    }
-}
-
-impl SseEncode for Option<crate::api::events::BridgeContext> {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
-        <bool>::sse_encode(self.is_some(), serializer);
-        if let Some(value) = self {
-            <crate::api::events::BridgeContext>::sse_encode(value, serializer);
         }
     }
 }
