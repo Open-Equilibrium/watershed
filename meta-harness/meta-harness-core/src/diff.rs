@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use tokio::io::{AsyncRead, AsyncReadExt};
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::Mutex;
 
@@ -259,19 +259,68 @@ impl WorkingTree {
         // The first snapshot starts from the project's index, so Git rereads only the files
         // that changed since; later snapshots keep the private index.
         let index = self.store.0.join("index");
+        let env = self.env();
         if !index.exists() {
             match std::fs::copy(&self.index, &index) {
-                Ok(_) => {}
+                Ok(_) => self.unmark(&env).await?,
                 Err(error) if error.kind() == ErrorKind::NotFound => {}
                 Err(error) => return Err(DiffError::Io(error)),
             }
         }
-        let env = self.env();
         git(&self.root, &env, &["add", "--all", "--", "."]).await?;
         Ok(git(&self.root, &env, &["write-tree"])
             .await?
             .trim()
             .to_owned())
+    }
+
+    /// Clears the marks with which the project told Git to assume files unchanged in the copied
+    /// index; `git add` would skip those files and hide their changes.
+    async fn unmark(&self, env: &[(&'static str, OsString)]) -> Result<(), DiffError> {
+        let mut listing = git_command(&self.root, env, &["ls-files", "-z", "-v"])
+            .stderr(Stdio::null())
+            .spawn()
+            .map_err(DiffError::GitStart)?;
+        let mut entries = BufReader::new(listing.stdout.take().expect("stdout is piped")).split(0);
+        let mut marked = Vec::new();
+        let unreadable = |error: std::io::Error| DiffError::Git(error.to_string());
+        while let Some(entry) = entries.next_segment().await.map_err(unreadable)? {
+            // `ls-files -v` tags a file assumed unchanged with a lowercase letter.
+            if let [tag, b' ', path @ ..] = entry.as_slice()
+                && tag.is_ascii_lowercase()
+            {
+                marked.extend_from_slice(path);
+                marked.push(0);
+            }
+        }
+        if !listing.wait().await.map_err(unreadable)?.success() {
+            return Err(DiffError::Git(
+                "could not list the project's files".to_owned(),
+            ));
+        }
+        if marked.is_empty() {
+            return Ok(());
+        }
+        let mut clearing = git_command(
+            &self.root,
+            env,
+            &["update-index", "--no-assume-unchanged", "-z", "--stdin"],
+        )
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(DiffError::GitStart)?;
+        let mut input = clearing.stdin.take().expect("stdin is piped");
+        input.write_all(&marked).await.map_err(unreadable)?;
+        drop(input);
+        if clearing.wait().await.map_err(unreadable)?.success() {
+            Ok(())
+        } else {
+            Err(DiffError::Git(
+                "could not read files the project assumes unchanged".to_owned(),
+            ))
+        }
     }
 
     /// The private store, which tests watch for cleanup.
@@ -295,24 +344,7 @@ impl WorkingTree {
 
 /// Runs the host's `git` in `dir` and returns at most [`MAX_OUTPUT_BYTES`] of its output.
 async fn git(dir: &Path, env: &[(&str, OsString)], args: &[&str]) -> Result<String, DiffError> {
-    let mut child = Command::new("git")
-        // Reading the project runs none of its hooks or file monitors, which could change it.
-        .args([
-            "-c",
-            "core.hooksPath=/dev/null",
-            "-c",
-            "core.fsmonitor=false",
-            // Blank context lines keep their leading space, which Liquid reads as context.
-            "-c",
-            "diff.suppressBlankEmpty=false",
-        ])
-        .args(args)
-        .current_dir(dir)
-        .envs(env.iter().map(|(name, value)| (name, value)))
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true)
+    let mut child = git_command(dir, env, args)
         .spawn()
         .map_err(DiffError::GitStart)?;
     // Git's warnings drain meanwhile, so a full error pipe never blocks it.
@@ -341,6 +373,38 @@ async fn git(dir: &Path, env: &[(&str, OsString)], args: &[&str]) -> Result<Stri
         ));
     }
     Ok(String::from_utf8_lossy(&output).into_owned())
+}
+
+/// The host's `git` in `dir` with its output piped. Project settings that would run something
+/// or let Git skip a changed file are overridden.
+fn git_command(dir: &Path, env: &[(&str, OsString)], args: &[&str]) -> Command {
+    let mut command = Command::new("git");
+    command
+        .args([
+            // Reading the project runs none of its hooks or file monitors, which could change it.
+            "-c",
+            "core.hooksPath=/dev/null",
+            "-c",
+            "core.fsmonitor=false",
+            // Every file's state is checked in full, so no setting hides a change.
+            "-c",
+            "core.ignoreStat=false",
+            "-c",
+            "core.checkStat=default",
+            "-c",
+            "core.trustctime=true",
+            // Blank context lines keep their leading space, which Liquid reads as context.
+            "-c",
+            "diff.suppressBlankEmpty=false",
+        ])
+        .args(args)
+        .current_dir(dir)
+        .envs(env.iter().map(|(name, value)| (name, value)))
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+    command
 }
 
 /// Reads `reader` to its end and keeps at most `limit` bytes from its start.

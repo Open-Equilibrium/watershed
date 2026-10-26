@@ -124,6 +124,38 @@ fn a_session_switch_ends_the_diff_unless_a_run_started_meanwhile() {
 }
 
 #[test]
+fn project_settings_that_skip_files_hide_no_change() {
+    run(async {
+        // A file the project marks as unchanged, and a setting that trusts the index over
+        // the files; either way Git would skip the file.
+        let marked = Repo::new("assume-unchanged");
+        marked.git(&["update-index", "--assume-unchanged", "a.txt"]);
+        let trusting = Repo::new("ignore-stat");
+        trusting.git(&["config", "core.ignoreStat", "true"]);
+        for repo in [marked, trusting] {
+            let diff = RunDiff::open(repo.path()).await;
+            diff.started(diff.capture().await);
+            repo.write("a.txt", "new\n");
+            assert_eq!(
+                diff.changes().await.expect("changes"),
+                [modified("a.txt")],
+                "{}",
+                repo.path().display()
+            );
+            repo.write("a.txt", "newer\n");
+            diff.started(diff.capture().await);
+            repo.write("a.txt", "newest\n");
+            assert_eq!(
+                diff.changes().await.expect("changes"),
+                [modified("a.txt")],
+                "a later run too: {}",
+                repo.path().display()
+            );
+        }
+    });
+}
+
+#[test]
 fn a_project_outside_git_says_so_instead_of_showing_no_changes() {
     run(async {
         let dir =
