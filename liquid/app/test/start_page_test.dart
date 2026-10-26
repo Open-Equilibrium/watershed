@@ -87,7 +87,7 @@ void main() {
     expect(backend.calls, contains('new session'));
 
     backend.calls.clear();
-    backend.controller.add(event(BridgeEventKind.turnStarted, turn: 1));
+    backend.controller.add(event(BridgeEventKind.turnStarted));
     await tester.pumpAndSettle();
     await newSessionKey(tester);
     expect(backend.calls, isNot(contains('new session')));

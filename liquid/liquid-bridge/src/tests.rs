@@ -50,12 +50,10 @@ fn tool_items_keep_their_call_and_outcome() {
         kind: ItemKind::CommandExecution,
         detail: ItemDetail::Tool {
             name: "bash".to_owned(),
-            arguments: r#"{"command":"ls"}"#.to_owned(),
             target: "ls".to_owned(),
         },
     });
     assert_eq!(started.kind, BridgeEventKind::ItemStarted);
-    assert_eq!(started.turn, Some(2));
     let item = started.item.expect("item");
     assert_eq!(
         (item.id, item.kind),
@@ -96,7 +94,7 @@ fn tool_items_keep_their_call_and_outcome() {
 }
 
 #[test]
-fn model_requests_carry_usage_and_timing() {
+fn model_requests_carry_usage_and_how_they_ended() {
     let completed = bridge(AgentEvent::ModelRequestCompleted {
         turn: TurnId(1),
         step: StepId(3),
@@ -109,19 +107,21 @@ fn model_requests_carry_usage_and_timing() {
             reasoning: 214,
             cost_micro_usd: 23457,
         },
-        stop_reason: "toolUse".to_owned(),
-        error: None,
+        stop_reason: "error".to_owned(),
+        error: Some("529 overloaded".to_owned()),
         first_token_ms: Some(900),
         duration_ms: 3400,
     });
     let step = completed.step.expect("step");
-    assert_eq!((step.id, step.model.as_str()), (3, "faux/faux-1"));
+    assert_eq!(
+        (step.stop_reason.as_str(), step.error.as_deref()),
+        ("error", Some("529 overloaded"))
+    );
     assert_eq!(
         (step.usage.input, step.usage.output, step.usage.reasoning),
         (6140, 820, 214)
     );
     assert_eq!(step.usage.cost_micro_usd, 23457);
-    assert_eq!((step.first_token_ms, step.duration_ms), (Some(900), 3400));
 }
 
 #[test]
@@ -152,8 +152,11 @@ fn requests_and_questions_reach_dart_with_their_answers() {
         decision: Some(Decision::AllowSession),
     });
     assert_eq!(
-        resolved.request.expect("request").decision,
-        Some(BridgeDecision::AllowSession)
+        (
+            resolved.kind,
+            resolved.request.expect("request").id.as_str()
+        ),
+        (BridgeEventKind::RequestResolved, "a1")
     );
     assert_eq!(Decision::from(BridgeDecision::Reject), Decision::Reject);
 
@@ -325,12 +328,8 @@ IFS= read -r line || exit 0"#
     assert_eq!(stop.recv_timeout(Duration::from_secs(10)), Ok(Ok(())));
     let resolved = next();
     assert_eq!(
-        (
-            resolved.kind,
-            resolved.request.and_then(|request| request.decision)
-        ),
-        (BridgeEventKind::RequestResolved, None),
-        "no decision of the user's"
+        (resolved.kind, resolved.request.map(|request| request.id)),
+        (BridgeEventKind::RequestResolved, Some("a1".to_owned()))
     );
     assert!(call(session.shutdown()));
 }

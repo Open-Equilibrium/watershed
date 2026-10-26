@@ -96,8 +96,8 @@ void main() {
       reason: 'a continued session\'s earlier runs are not compared',
     );
 
-    backend.controller.add(event(BridgeEventKind.turnStarted, turn: 1));
-    backend.controller.add(event(BridgeEventKind.turnCompleted, turn: 1));
+    backend.controller.add(event(BridgeEventKind.turnStarted));
+    backend.controller.add(event(BridgeEventKind.turnCompleted));
     await tester.pumpAndSettle();
     expect(find.text('No changes in this run'), findsOneWidget);
   });

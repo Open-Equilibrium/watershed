@@ -100,9 +100,6 @@ class BridgeEvent {
   /// What happened.
   final BridgeEventKind kind;
 
-  /// The owning turn.
-  final PlatformInt64? turn;
-
   /// The item.
   final BridgeItem? item;
 
@@ -126,7 +123,6 @@ class BridgeEvent {
 
   const BridgeEvent({
     required this.kind,
-    this.turn,
     this.item,
     this.step,
     this.request,
@@ -139,7 +135,6 @@ class BridgeEvent {
   @override
   int get hashCode =>
       kind.hashCode ^
-      turn.hashCode ^
       item.hashCode ^
       step.hashCode ^
       request.hashCode ^
@@ -154,7 +149,6 @@ class BridgeEvent {
       other is BridgeEvent &&
           runtimeType == other.runtimeType &&
           kind == other.kind &&
-          turn == other.turn &&
           item == other.item &&
           step == other.step &&
           request == other.request &&
@@ -166,16 +160,16 @@ class BridgeEvent {
 
 /// What happened; the variant names the parts of [`BridgeEvent`] it fills.
 enum BridgeEventKind {
-  /// `turn`.
+  /// A turn started; no parts.
   turnStarted,
 
-  /// `turn`.
+  /// A turn ended; no parts.
   turnCompleted,
 
-  /// `turn`.
+  /// A turn was stopped; no parts.
   turnAborted,
 
-  /// `turn` and `item` with kind, tool and target.
+  /// `item` with kind, tool and target.
   itemStarted,
 
   /// `item` id and `text` with the latest partial output.
@@ -184,16 +178,16 @@ enum BridgeEventKind {
   /// `item` id and `text` with the appended text.
   contentDelta,
 
-  /// `turn`, `item` with kind, status and duration, and `text` with the final text.
+  /// `item` with kind, status and duration, and `text` with the final text.
   itemCompleted,
 
-  /// `turn` and `step` with model, usage, stop reason, error and timing.
+  /// `step` with usage, stop reason and error.
   modelRequestCompleted,
 
   /// `request` with its approval.
   requestOpened,
 
-  /// `request` with its decision.
+  /// `request` id.
   requestResolved,
 
   /// `request` with its question.
@@ -435,7 +429,7 @@ class BridgeQueue {
           followUp == other.followUp;
 }
 
-/// An open request and, depending on the event, what it asks or how it was answered.
+/// An open request and, depending on the event, what it asks.
 class BridgeRequest {
   /// The request id.
   final String id;
@@ -446,19 +440,10 @@ class BridgeRequest {
   /// The question awaiting an answer.
   final BridgeQuestion? question;
 
-  /// The user's decision on an ended approval; none when it was withdrawn, as Stop does.
-  final BridgeDecision? decision;
-
-  const BridgeRequest({
-    required this.id,
-    this.approval,
-    this.question,
-    this.decision,
-  });
+  const BridgeRequest({required this.id, this.approval, this.question});
 
   @override
-  int get hashCode =>
-      id.hashCode ^ approval.hashCode ^ question.hashCode ^ decision.hashCode;
+  int get hashCode => id.hashCode ^ approval.hashCode ^ question.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -467,8 +452,7 @@ class BridgeRequest {
           runtimeType == other.runtimeType &&
           id == other.id &&
           approval == other.approval &&
-          question == other.question &&
-          decision == other.decision;
+          question == other.question;
 }
 
 /// What an approval request asks to allow.
@@ -483,14 +467,8 @@ enum BridgeRequestKind {
   tool,
 }
 
-/// A model request and, once completed, its outcome.
+/// A completed model request's outcome.
 class BridgeStep {
-  /// The request id.
-  final PlatformInt64 id;
-
-  /// The model that answered.
-  final String model;
-
   /// Tokens and cost.
   final BridgeUsage usage;
 
@@ -500,44 +478,19 @@ class BridgeStep {
   /// The provider's error.
   final String? error;
 
-  /// Milliseconds until the first streamed content.
-  final PlatformInt64? firstTokenMs;
-
-  /// Milliseconds from request to completed response.
-  final PlatformInt64 durationMs;
-
-  const BridgeStep({
-    required this.id,
-    required this.model,
-    required this.usage,
-    required this.stopReason,
-    this.error,
-    this.firstTokenMs,
-    required this.durationMs,
-  });
+  const BridgeStep({required this.usage, required this.stopReason, this.error});
 
   @override
-  int get hashCode =>
-      id.hashCode ^
-      model.hashCode ^
-      usage.hashCode ^
-      stopReason.hashCode ^
-      error.hashCode ^
-      firstTokenMs.hashCode ^
-      durationMs.hashCode;
+  int get hashCode => usage.hashCode ^ stopReason.hashCode ^ error.hashCode;
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       other is BridgeStep &&
           runtimeType == other.runtimeType &&
-          id == other.id &&
-          model == other.model &&
           usage == other.usage &&
           stopReason == other.stopReason &&
-          error == other.error &&
-          firstTokenMs == other.firstTokenMs &&
-          durationMs == other.durationMs;
+          error == other.error;
 }
 
 /// Tokens and cost of one model request.

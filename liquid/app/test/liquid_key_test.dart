@@ -78,7 +78,7 @@ void main() {
     'holding the Liquid key shows its shortcuts and ⌘ no longer does',
     (tester) async {
       await show(tester, ShortcutSettings.liquidKey());
-      backend.controller.add(event(BridgeEventKind.turnStarted, turn: 1));
+      backend.controller.add(event(BridgeEventKind.turnStarted));
       backend.controller.add(
         event(
           BridgeEventKind.requestOpened,
@@ -150,7 +150,7 @@ void main() {
     tester,
   ) async {
     await show(tester, ShortcutSettings.liquidKey());
-    backend.controller.add(event(BridgeEventKind.turnStarted, turn: 1));
+    backend.controller.add(event(BridgeEventKind.turnStarted));
     backend.controller.add(
       event(
         BridgeEventKind.requestOpened,

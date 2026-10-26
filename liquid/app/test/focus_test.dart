@@ -172,7 +172,7 @@ void main() {
   ) async {
     await show(tester);
     final command = List.generate(40, (line) => 'echo $line').join('\n');
-    await emit(tester, event(BridgeEventKind.turnStarted, turn: 1));
+    await emit(tester, event(BridgeEventKind.turnStarted));
     await emit(tester, approval('a1', command: command));
     await read(tester);
     final scroll = find
@@ -202,7 +202,7 @@ void main() {
     tester,
   ) async {
     await show(tester);
-    await emit(tester, event(BridgeEventKind.turnStarted, turn: 1));
+    await emit(tester, event(BridgeEventKind.turnStarted));
     await emit(tester, approval('a1'));
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.sendKeyDownEvent(LogicalKeyboardKey.enter);
@@ -359,7 +359,7 @@ void main() {
     tester,
   ) async {
     await show(tester);
-    await emit(tester, event(BridgeEventKind.turnStarted, turn: 1));
+    await emit(tester, event(BridgeEventKind.turnStarted));
     await emit(tester, approval('a1'));
     await emit(tester, approval('a2'));
     await read(tester);

@@ -317,7 +317,6 @@ impl PiAdapter {
         let detail = ItemDetail::Tool {
             name: name.to_owned(),
             target: call_target(&arguments),
-            arguments,
         };
         events.push(started(turn, item, kind, detail));
     }

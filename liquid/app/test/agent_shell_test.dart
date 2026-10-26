@@ -76,8 +76,8 @@ void main() {
       );
 
       backend.sessionTitle = 'Rate limit for /login';
-      await emit(tester, event(BridgeEventKind.turnStarted, turn: 1));
-      await emit(tester, event(BridgeEventKind.turnCompleted, turn: 1));
+      await emit(tester, event(BridgeEventKind.turnStarted));
+      await emit(tester, event(BridgeEventKind.turnCompleted));
       expect(
         find.text('Rate limit for /login'),
         findsNWidgets(2),
@@ -108,8 +108,8 @@ void main() {
           removed: 1,
         ),
     ];
-    await emit(tester, event(BridgeEventKind.turnStarted, turn: 1));
-    await emit(tester, event(BridgeEventKind.turnCompleted, turn: 1));
+    await emit(tester, event(BridgeEventKind.turnStarted));
+    await emit(tester, event(BridgeEventKind.turnCompleted));
     expect(
       find.descendant(of: count, matching: find.text('2')),
       findsOneWidget,
@@ -326,7 +326,7 @@ void main() {
 
   testWidgets('decides approvals from the keyboard', (tester) async {
     await show(tester);
-    await emit(tester, event(BridgeEventKind.turnStarted, turn: 1));
+    await emit(tester, event(BridgeEventKind.turnStarted));
     for (final (id, keys, decision) in [
       ('a1', [LogicalKeyboardKey.enter], 'allowOnce'),
       (
@@ -374,7 +374,7 @@ void main() {
       reason: 'a session without a conversation starts with its first message',
     );
 
-    await emit(tester, event(BridgeEventKind.turnStarted, turn: 1));
+    await emit(tester, event(BridgeEventKind.turnStarted));
     expect(find.text('Steer'), findsOneWidget, reason: 'Enter steers a run');
     expect(
       find.text('⌥⏎ queue'),
@@ -417,12 +417,11 @@ void main() {
     'shows streamed text, tool rows, widgets and the waiting status',
     (tester) async {
       await show(tester);
-      await emit(tester, event(BridgeEventKind.turnStarted, turn: 1));
+      await emit(tester, event(BridgeEventKind.turnStarted));
       await emit(
         tester,
         event(
           BridgeEventKind.itemStarted,
-          turn: 1,
           item: item(1, kind: BridgeItemKind.assistantMessage),
         ),
       );
@@ -438,7 +437,6 @@ void main() {
         tester,
         event(
           BridgeEventKind.itemStarted,
-          turn: 1,
           item: BridgeItem(
             id: 2,
             kind: BridgeItemKind.commandExecution,
@@ -692,7 +690,7 @@ void main() {
     tester,
   ) async {
     await show(tester);
-    await emit(tester, event(BridgeEventKind.turnStarted, turn: 1));
+    await emit(tester, event(BridgeEventKind.turnStarted));
     for (final (id, tool, added, removed) in [
       (5, 'edit', 9, 2),
       (6, 'write', 38, 0),
@@ -701,7 +699,6 @@ void main() {
         tester,
         event(
           BridgeEventKind.itemStarted,
-          turn: 1,
           item: item(id, kind: BridgeItemKind.fileChange, tool: tool),
         ),
       );
@@ -709,7 +706,6 @@ void main() {
         tester,
         event(
           BridgeEventKind.itemCompleted,
-          turn: 1,
           item: item(
             id,
             kind: BridgeItemKind.fileChange,
@@ -728,12 +724,11 @@ void main() {
 
   testWidgets('shows thinking without promising to open it', (tester) async {
     await show(tester);
-    await emit(tester, event(BridgeEventKind.turnStarted, turn: 1));
+    await emit(tester, event(BridgeEventKind.turnStarted));
     await emit(
       tester,
       event(
         BridgeEventKind.itemStarted,
-        turn: 1,
         item: item(4, kind: BridgeItemKind.reasoning),
       ),
     );
@@ -752,14 +747,13 @@ void main() {
     tester,
   ) async {
     await show(tester);
-    await emit(tester, event(BridgeEventKind.turnStarted, turn: 1));
+    await emit(tester, event(BridgeEventKind.turnStarted));
     // pi starts both calls, the first is allowed and the second asks.
     for (final id in [5, 6]) {
       await emit(
         tester,
         event(
           BridgeEventKind.itemStarted,
-          turn: 1,
           item: item(id, kind: BridgeItemKind.commandExecution, tool: 'bash'),
         ),
       );
@@ -786,12 +780,11 @@ void main() {
     tester,
   ) async {
     await show(tester);
-    await emit(tester, event(BridgeEventKind.turnStarted, turn: 1));
+    await emit(tester, event(BridgeEventKind.turnStarted));
     await emit(
       tester,
       event(
         BridgeEventKind.itemStarted,
-        turn: 1,
         item: item(5, kind: BridgeItemKind.commandExecution, tool: 'bash'),
       ),
     );
@@ -800,7 +793,6 @@ void main() {
       tester,
       event(
         BridgeEventKind.itemCompleted,
-        turn: 1,
         item: item(
           5,
           kind: BridgeItemKind.commandExecution,
@@ -817,7 +809,7 @@ void main() {
     tester,
   ) async {
     await show(tester);
-    await emit(tester, event(BridgeEventKind.turnStarted, turn: 1));
+    await emit(tester, event(BridgeEventKind.turnStarted));
     await emit(
       tester,
       event(BridgeEventKind.requestOpened, request: approval('a1')),

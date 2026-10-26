@@ -4,25 +4,25 @@
 /// What happened; the variant names the parts of [`BridgeEvent`] it fills.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BridgeEventKind {
-    /// `turn`.
+    /// A turn started; no parts.
     TurnStarted,
-    /// `turn`.
+    /// A turn ended; no parts.
     TurnCompleted,
-    /// `turn`.
+    /// A turn was stopped; no parts.
     TurnAborted,
-    /// `turn` and `item` with kind, tool and target.
+    /// `item` with kind, tool and target.
     ItemStarted,
     /// `item` id and `text` with the latest partial output.
     ItemUpdated,
     /// `item` id and `text` with the appended text.
     ContentDelta,
-    /// `turn`, `item` with kind, status and duration, and `text` with the final text.
+    /// `item` with kind, status and duration, and `text` with the final text.
     ItemCompleted,
-    /// `turn` and `step` with model, usage, stop reason, error and timing.
+    /// `step` with usage, stop reason and error.
     ModelRequestCompleted,
     /// `request` with its approval.
     RequestOpened,
-    /// `request` with its decision.
+    /// `request` id.
     RequestResolved,
     /// `request` with its question.
     UserInputRequested,
@@ -51,8 +51,6 @@ pub enum BridgeEventKind {
 pub struct BridgeEvent {
     /// What happened.
     pub kind: BridgeEventKind,
-    /// The owning turn.
-    pub turn: Option<i64>,
     /// The item.
     pub item: Option<BridgeItem>,
     /// The model request.
@@ -116,23 +114,15 @@ pub struct BridgeItem {
     pub removed: Option<i64>,
 }
 
-/// A model request and, once completed, its outcome.
+/// A completed model request's outcome.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BridgeStep {
-    /// The request id.
-    pub id: i64,
-    /// The model that answered.
-    pub model: String,
     /// Tokens and cost.
     pub usage: BridgeUsage,
     /// Why the response ended.
     pub stop_reason: String,
     /// The provider's error.
     pub error: Option<String>,
-    /// Milliseconds until the first streamed content.
-    pub first_token_ms: Option<i64>,
-    /// Milliseconds from request to completed response.
-    pub duration_ms: i64,
 }
 
 /// Tokens and cost of one model request.
@@ -152,7 +142,7 @@ pub struct BridgeUsage {
     pub cost_micro_usd: i64,
 }
 
-/// An open request and, depending on the event, what it asks or how it was answered.
+/// An open request and, depending on the event, what it asks.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BridgeRequest {
     /// The request id.
@@ -161,8 +151,6 @@ pub struct BridgeRequest {
     pub approval: Option<BridgeApproval>,
     /// The question awaiting an answer.
     pub question: Option<BridgeQuestion>,
-    /// The user's decision on an ended approval; none when it was withdrawn, as Stop does.
-    pub decision: Option<BridgeDecision>,
 }
 
 /// What an approval request asks to allow.

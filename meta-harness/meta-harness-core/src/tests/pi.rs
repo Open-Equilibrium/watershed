@@ -154,13 +154,12 @@ fn classifies_tool_calls_and_reports_their_outcome() {
         r#"{"type":"tool_execution_start","toolCallId":"c5","toolName":"write","args":{"path":"b.txt","content":"one\ntwo\nthree\n"}}"#,
         r#"{"type":"tool_execution_end","toolCallId":"c5","toolName":"write","result":{"content":[{"type":"text","text":"Wrote"}]},"isError":false}"#,
     ]);
-    let tool = |item, kind, name: &str, arguments: &str| AgentEvent::ItemStarted {
+    let tool = |item, kind, name: &str| AgentEvent::ItemStarted {
         turn: TURN,
         item: ItemId(item),
         kind,
         detail: ItemDetail::Tool {
             name: name.to_owned(),
-            arguments: arguments.to_owned(),
             target: match item {
                 1 => "ls",
                 2 | 4 => "a.txt",
@@ -193,7 +192,7 @@ fn classifies_tool_calls_and_reports_their_outcome() {
         events,
         [
             AgentEvent::TurnStarted { turn: TURN },
-            tool(1, CommandExecution, "bash", r#"{"command":"ls"}"#),
+            tool(1, CommandExecution, "bash"),
             AgentEvent::ItemUpdated {
                 item: ItemId(1),
                 output: "a.txt".to_owned(),
@@ -205,18 +204,13 @@ fn classifies_tool_calls_and_reports_their_outcome() {
                 ItemStatus::Completed,
                 Some(12)
             ),
-            tool(2, FileChange, "edit", r#"{"path":"a.txt"}"#),
+            tool(2, FileChange, "edit"),
             finished(2, FileChange, "No match", ItemStatus::Failed, Some(3)),
-            tool(3, DynamicToolCall, "grep", r#"{"pattern":"x"}"#),
+            tool(3, DynamicToolCall, "grep"),
             finished(3, DynamicToolCall, "", ItemStatus::Completed, None),
-            tool(4, FileChange, "edit", r#"{"path":"a.txt"}"#),
+            tool(4, FileChange, "edit"),
             changed(4, "Edited", 1, 1),
-            tool(
-                5,
-                FileChange,
-                "write",
-                r#"{"content":"one\ntwo\nthree\n","path":"b.txt"}"#
-            ),
+            tool(5, FileChange, "write"),
             changed(5, "Wrote", 3, 0),
         ]
     );
@@ -499,13 +493,7 @@ fn builds_the_session_tree_from_flat_entries() {
                 ),
                 node("e3", Some("e2"), EntryKind::ToolResult, "read", None),
                 node("e4", Some("e2"), EntryKind::Approval, "bash", None),
-                node(
-                    "e5",
-                    Some("e4"),
-                    EntryKind::Other("model_change".to_owned()),
-                    "",
-                    None
-                ),
+                node("e5", Some("e4"), EntryKind::Other, "", None),
             ],
             leaf: Some("e4".to_owned()),
         }

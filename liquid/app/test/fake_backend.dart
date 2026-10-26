@@ -222,7 +222,6 @@ class FakeBackend implements SessionBackend {
 
 BridgeEvent event(
   BridgeEventKind kind, {
-  int? turn,
   BridgeItem? item,
   BridgeStep? step,
   BridgeRequest? request,
@@ -232,7 +231,6 @@ BridgeEvent event(
   BridgeQueue? queue,
 }) => BridgeEvent(
   kind: kind,
-  turn: turn,
   item: item,
   step: step,
   request: request,

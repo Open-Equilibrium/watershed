@@ -53,7 +53,6 @@ pub(super) fn transcript(
             kind,
             text: text.to_owned(),
             tool: None,
-            arguments: None,
             target: None,
             failed: false,
             duration_ms: None,
@@ -84,7 +83,6 @@ pub(super) fn transcript(
                         .map(|added| ChangedLines { added, removed: 0 });
                     items.push(TranscriptItem {
                         tool: Some(call.name.clone()),
-                        arguments: Some(call.arguments.clone()),
                         target: Some(call_target(&call.arguments)),
                         failed,
                         duration_ms,

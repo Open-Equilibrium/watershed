@@ -122,12 +122,8 @@ pub struct Model {
 pub struct SessionState {
     /// The session file, unless the session is in memory only.
     pub session_file: Option<PathBuf>,
-    /// The agent's session id.
-    pub session_id: String,
     /// The selected model as `provider/id`.
     pub model: Option<String>,
-    /// Whether a turn is streaming.
-    pub streaming: bool,
 }
 
 enum Write {
@@ -428,7 +424,7 @@ impl Session {
             .await
     }
 
-    /// Reads the session's file, id, model and streaming state.
+    /// Reads the session's file and model.
     pub async fn state(&mut self) -> Result<SessionState, CommandError> {
         let data = self.command(json!({ "type": "get_state" })).await?;
         let text = |field| data.get(field).and_then(Value::as_str);
@@ -441,9 +437,7 @@ impl Session {
         });
         Ok(SessionState {
             session_file: text("sessionFile").map(|file| self.cwd.join(file)),
-            session_id: text("sessionId").unwrap_or_default().to_owned(),
             model,
-            streaming: data.get("isStreaming").and_then(Value::as_bool) == Some(true),
         })
     }
 

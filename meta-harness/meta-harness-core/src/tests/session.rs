@@ -476,7 +476,7 @@ fn skips_an_oversized_record_and_keeps_the_session() {
 "#
             ),
             expect_response(&[r#""type":"get_state""#, r#""id":"3""#]),
-            r#"printf '%s\n' '{"id":"3","type":"response","command":"get_state","success":true,"data":{"sessionId":"abc","isStreaming":false}}'
+            r#"printf '%s\n' '{"id":"3","type":"response","command":"get_state","success":true,"data":{"sessionId":"abc","isStreaming":false,"sessionFile":"/tmp/s.jsonl"}}'
 "#
             .to_owned(),
         ]
@@ -498,8 +498,8 @@ fn skips_an_oversized_record_and_keeps_the_session() {
             Err(CommandError::TooLarge)
         );
         assert_eq!(
-            session.state().await.map(|state| state.session_id),
-            Ok("abc".to_owned())
+            session.state().await.map(|state| state.session_file),
+            Ok(Some("/tmp/s.jsonl".into()))
         );
     });
 }
@@ -1008,9 +1008,7 @@ fn reads_state_and_tree_and_branches_through_the_extension() {
             session.state().await,
             Ok(SessionState {
                 session_file: Some("/tmp/s.jsonl".into()),
-                session_id: "abc".to_owned(),
                 model: Some("faux/faux-1".to_owned()),
-                streaming: false,
             })
         );
         let history = session.history().await.expect("history");

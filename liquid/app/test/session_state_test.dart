@@ -24,12 +24,11 @@ void main() {
   test('streams a turn into items whose text grows in place', () async {
     await state.send('Say hi');
     expect(backend.calls, ['send Say hi']);
-    await emit(event(BridgeEventKind.turnStarted, turn: 1));
+    await emit(event(BridgeEventKind.turnStarted));
     expect(state.status.value, RunStatus.running);
     await emit(
       event(
         BridgeEventKind.itemStarted,
-        turn: 1,
         item: item(1, kind: BridgeItemKind.assistantMessage),
       ),
     );
@@ -42,14 +41,12 @@ void main() {
     await emit(
       event(
         BridgeEventKind.itemStarted,
-        turn: 1,
         item: item(2, kind: BridgeItemKind.commandExecution, tool: 'bash'),
       ),
     );
     await emit(
       event(
         BridgeEventKind.itemCompleted,
-        turn: 1,
         item: item(
           2,
           kind: BridgeItemKind.commandExecution,
@@ -67,14 +64,7 @@ void main() {
     await emit(
       event(
         BridgeEventKind.modelRequestCompleted,
-        turn: 1,
-        step: BridgeStep(
-          id: 1,
-          model: 'faux/faux-1',
-          usage: usage(100, 20, 5),
-          stopReason: 'stop',
-          durationMs: 900,
-        ),
+        step: BridgeStep(usage: usage(100, 20, 5), stopReason: 'stop'),
       ),
     );
     expect(
@@ -91,7 +81,7 @@ void main() {
       'send Shorter please',
       reason: 'pi decides whether a message starts or steers a run',
     );
-    await emit(event(BridgeEventKind.turnCompleted, turn: 1));
+    await emit(event(BridgeEventKind.turnCompleted));
     expect(state.status.value, RunStatus.idle);
   });
 
@@ -106,7 +96,7 @@ void main() {
           text: 'npm test',
         ),
       );
-      await emit(event(BridgeEventKind.turnStarted, turn: 1));
+      await emit(event(BridgeEventKind.turnStarted));
       await emit(event(BridgeEventKind.requestOpened, request: approval('a1')));
       await emit(event(BridgeEventKind.requestOpened, request: approval('a2')));
       expect(state.status.value, RunStatus.waitingForYou);
@@ -116,14 +106,14 @@ void main() {
       await emit(
         event(
           BridgeEventKind.requestResolved,
-          request: BridgeRequest(id: 'a1', decision: BridgeDecision.allowOnce),
+          request: BridgeRequest(id: 'a1'),
         ),
       );
       expect(state.approval.value!.id, 'a2');
       await emit(
         event(
           BridgeEventKind.requestResolved,
-          request: BridgeRequest(id: 'a2', decision: BridgeDecision.reject),
+          request: BridgeRequest(id: 'a2'),
         ),
       );
       expect(state.approval.value, isNull);
@@ -215,7 +205,7 @@ void main() {
   test('signals when the stored history changes and branches', () async {
     final changes = <int>[];
     state.stored.addListener(() => changes.add(state.stored.value));
-    await emit(event(BridgeEventKind.turnStarted, turn: 1));
+    await emit(event(BridgeEventKind.turnStarted));
     await emit(
       event(
         BridgeEventKind.contentDelta,
@@ -231,7 +221,7 @@ void main() {
         request: const BridgeRequest(id: 'a1'),
       ),
     );
-    await emit(event(BridgeEventKind.turnCompleted, turn: 1));
+    await emit(event(BridgeEventKind.turnCompleted));
     expect(changes, [1, 2, 3]);
 
     backend.stored = historyOf([]);
@@ -467,11 +457,10 @@ void main() {
   });
 
   test('an agent that exits mid-turn leaves nothing running', () async {
-    await emit(event(BridgeEventKind.turnStarted, turn: 1));
+    await emit(event(BridgeEventKind.turnStarted));
     await emit(
       event(
         BridgeEventKind.itemStarted,
-        turn: 1,
         item: item(3, kind: BridgeItemKind.commandExecution, tool: 'bash'),
       ),
     );
@@ -519,10 +508,7 @@ void main() {
     await emit(
       event(
         BridgeEventKind.modelRequestCompleted,
-        turn: 1,
         step: BridgeStep(
-          id: 1,
-          model: 'faux/faux-1',
           usage: const BridgeUsage(
             input: 100,
             output: 20,
@@ -532,7 +518,6 @@ void main() {
             costMicroUsd: 0,
           ),
           stopReason: 'stop',
-          durationMs: 900,
         ),
       ),
     );
@@ -714,14 +699,10 @@ void main() {
     await emit(
       event(
         BridgeEventKind.modelRequestCompleted,
-        turn: 1,
         step: BridgeStep(
-          id: 1,
-          model: 'faux/faux-1',
           usage: usage(0, 0, 0),
           stopReason: 'error',
           error: '401 invalid x-api-key',
-          durationMs: 120,
         ),
       ),
     );
@@ -734,28 +715,24 @@ void main() {
   test('a request that Stop ended is no failure', () async {
     BridgeEvent ended(String stopReason, String error) => event(
       BridgeEventKind.modelRequestCompleted,
-      turn: 1,
       step: BridgeStep(
-        id: 1,
-        model: 'faux/faux-1',
         usage: usage(0, 0, 0),
         stopReason: stopReason,
         error: error,
-        durationMs: 120,
       ),
     );
     // Providers report an aborted request, some as an error.
     await emit(ended('aborted', 'Request was aborted'));
-    await emit(event(BridgeEventKind.turnStarted, turn: 1));
+    await emit(event(BridgeEventKind.turnStarted));
     await state.stop();
     await emit(ended('error', 'This operation was aborted'));
-    await emit(event(BridgeEventKind.turnAborted, turn: 1));
+    await emit(event(BridgeEventKind.turnAborted));
     expect(state.notices.value, isEmpty);
   });
 
   test('a request that ended before it was shown never shows', () async {
     // Stop can withdraw a request while the core is still reporting it.
-    await emit(event(BridgeEventKind.turnStarted, turn: 1));
+    await emit(event(BridgeEventKind.turnStarted));
     await emit(
       event(BridgeEventKind.requestResolved, request: BridgeRequest(id: 'a1')),
     );
@@ -798,19 +775,15 @@ void main() {
 
   test('a Stop that failed leaves model failures reported', () async {
     backend.abortError = 'agent is gone';
-    await emit(event(BridgeEventKind.turnStarted, turn: 1));
+    await emit(event(BridgeEventKind.turnStarted));
     await state.stop();
     await emit(
       event(
         BridgeEventKind.modelRequestCompleted,
-        turn: 1,
         step: BridgeStep(
-          id: 1,
-          model: 'faux/faux-1',
           usage: usage(0, 0, 0),
           stopReason: 'error',
           error: '529 overloaded',
-          durationMs: 120,
         ),
       ),
     );
@@ -855,7 +828,7 @@ void main() {
     );
 
     backend.calls.clear();
-    await emit(event(BridgeEventKind.turnStarted, turn: 1));
+    await emit(event(BridgeEventKind.turnStarted));
     await state.stop();
     expect(backend.calls, ['clear queue', 'abort']);
     expect(

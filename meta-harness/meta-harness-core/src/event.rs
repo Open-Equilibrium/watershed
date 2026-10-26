@@ -34,8 +34,6 @@ pub enum ItemDetail {
     Tool {
         /// The agent's tool name.
         name: String,
-        /// The call's arguments as JSON text.
-        arguments: String,
         /// What the call works on, such as a command or a path, on one line.
         target: String,
     },
@@ -84,10 +82,10 @@ pub enum EntryKind {
     System,
     /// The user's decision on a tool call, recorded by Watershed's pi extension.
     Approval,
-    /// An extension's custom entry, with its type.
-    Custom(String),
-    /// Any other entry, with the agent's entry type.
-    Other(String),
+    /// An extension's custom entry.
+    Custom,
+    /// Any other entry.
+    Other,
 }
 
 /// One entry of a session's branch tree.

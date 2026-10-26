@@ -84,8 +84,8 @@ impl From<TreeNode> for BridgeTreeNode {
                 EntryKind::ToolResult => BridgeEntryKind::ToolResult,
                 EntryKind::System => BridgeEntryKind::System,
                 EntryKind::Approval => BridgeEntryKind::Approval,
-                EntryKind::Custom(_) => BridgeEntryKind::Custom,
-                EntryKind::Other(_) => BridgeEntryKind::Other,
+                EntryKind::Custom => BridgeEntryKind::Custom,
+                EntryKind::Other => BridgeEntryKind::Other,
             },
             preview: node.preview,
             label: node.label,
@@ -294,7 +294,6 @@ impl From<RequestKind> for BridgeRequestKind {
 fn event(kind: BridgeEventKind) -> BridgeEvent {
     BridgeEvent {
         kind,
-        turn: None,
         item: None,
         step: None,
         request: None,
@@ -323,7 +322,6 @@ fn request(id: String) -> BridgeRequest {
         id,
         approval: None,
         question: None,
-        decision: None,
     }
 }
 
@@ -359,30 +357,20 @@ impl From<AgentEvent> for BridgeEvent {
     fn from(agent: AgentEvent) -> Self {
         use BridgeEventKind as Kind;
         match agent {
-            AgentEvent::TurnStarted { turn } => BridgeEvent {
-                turn: Some(int(turn.0)),
-                ..event(Kind::TurnStarted)
-            },
-            AgentEvent::TurnCompleted { turn } => BridgeEvent {
-                turn: Some(int(turn.0)),
-                ..event(Kind::TurnCompleted)
-            },
-            AgentEvent::TurnAborted { turn } => BridgeEvent {
-                turn: Some(int(turn.0)),
-                ..event(Kind::TurnAborted)
-            },
+            AgentEvent::TurnStarted { .. } => event(Kind::TurnStarted),
+            AgentEvent::TurnCompleted { .. } => event(Kind::TurnCompleted),
+            AgentEvent::TurnAborted { .. } => event(Kind::TurnAborted),
             AgentEvent::ItemStarted {
-                turn,
                 item: id,
                 kind,
                 detail,
+                ..
             } => {
                 let (tool, target) = match detail {
                     ItemDetail::Tool { name, target, .. } => (Some(name), Some(target)),
                     ItemDetail::None => (None, None),
                 };
                 BridgeEvent {
-                    turn: Some(int(turn.0)),
                     item: Some(BridgeItem {
                         kind: Some(kind.into()),
                         tool,
@@ -403,15 +391,14 @@ impl From<AgentEvent> for BridgeEvent {
                 ..event(Kind::ContentDelta)
             },
             AgentEvent::ItemCompleted {
-                turn,
                 item: id,
                 kind,
                 text,
                 status,
                 duration_ms,
                 lines,
+                ..
             } => BridgeEvent {
-                turn: Some(int(turn.0)),
                 item: Some(BridgeItem {
                     kind: Some(kind.into()),
                     failed: status == ItemStatus::Failed,
@@ -424,24 +411,15 @@ impl From<AgentEvent> for BridgeEvent {
                 ..event(Kind::ItemCompleted)
             },
             AgentEvent::ModelRequestCompleted {
-                turn,
-                step,
-                model,
                 usage,
                 stop_reason,
                 error,
-                first_token_ms,
-                duration_ms,
+                ..
             } => BridgeEvent {
-                turn: Some(int(turn.0)),
                 step: Some(BridgeStep {
-                    id: int(step.0),
-                    model,
                     usage: usage.into(),
                     stop_reason,
                     error,
-                    first_token_ms: first_token_ms.map(int),
-                    duration_ms: int(duration_ms),
                 }),
                 ..event(Kind::ModelRequestCompleted)
             },
@@ -464,14 +442,8 @@ impl From<AgentEvent> for BridgeEvent {
                 }),
                 ..event(Kind::RequestOpened)
             },
-            AgentEvent::RequestResolved {
-                request: id,
-                decision,
-            } => BridgeEvent {
-                request: Some(BridgeRequest {
-                    decision: decision.map(Into::into),
-                    ..request(id.0)
-                }),
+            AgentEvent::RequestResolved { request: id, .. } => BridgeEvent {
+                request: Some(request(id.0)),
                 ..event(Kind::RequestResolved)
             },
             AgentEvent::UserInputRequested { request: id, input } => {

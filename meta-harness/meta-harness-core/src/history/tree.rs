@@ -70,21 +70,15 @@ fn summary(body: &Body) -> (EntryKind, String) {
         Body::ToolResult { tool, .. } => (EntryKind::ToolResult, line(tool)),
         Body::System(_) => (EntryKind::System, String::new()),
         Body::Approval { tool, .. } => (EntryKind::Approval, line(tool)),
-        Body::RequestTiming { .. } | Body::ToolTiming { .. } => (
-            EntryKind::Custom("watershed.timing".to_owned()),
-            String::new(),
-        ),
-        Body::Custom { kind } => (EntryKind::Custom(kind.clone()), String::new()),
-        Body::Message { .. } => (EntryKind::Other("message".to_owned()), String::new()),
-        Body::CustomMessage { .. } => {
-            (EntryKind::Other("custom_message".to_owned()), String::new())
+        Body::RequestTiming { .. } | Body::ToolTiming { .. } | Body::Custom => {
+            (EntryKind::Custom, String::new())
         }
-        Body::BranchSummary { .. } => {
-            (EntryKind::Other("branch_summary".to_owned()), String::new())
-        }
-        Body::Compaction { .. } => (EntryKind::Other("compaction".to_owned()), String::new()),
-        Body::ContextEdit { .. } => (EntryKind::Other("context_edit".to_owned()), String::new()),
-        Body::Label { .. } => (EntryKind::Other("label".to_owned()), String::new()),
-        Body::Other { kind } => (EntryKind::Other(kind.clone()), String::new()),
+        Body::Message { .. }
+        | Body::CustomMessage { .. }
+        | Body::BranchSummary { .. }
+        | Body::Compaction { .. }
+        | Body::ContextEdit { .. }
+        | Body::Label { .. }
+        | Body::Other => (EntryKind::Other, String::new()),
     }
 }

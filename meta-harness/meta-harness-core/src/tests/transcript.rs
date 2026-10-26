@@ -21,7 +21,6 @@ fn item(entry: &str, kind: ItemKind, text: &str) -> TranscriptItem {
         kind,
         text: text.to_owned(),
         tool: None,
-        arguments: None,
         target: None,
         failed: false,
         duration_ms: None,
@@ -34,7 +33,6 @@ fn rebuilds_the_chat_of_the_current_branch_page_by_page() {
     let history = History::from_entries(&serde_json::from_str::<Value>(SESSION).expect("JSON"));
     let command = TranscriptItem {
         tool: Some("bash".to_owned()),
-        arguments: Some(r#"{"command":"npm test"}"#.to_owned()),
         target: Some("npm test".to_owned()),
         failed: true,
         duration_ms: Some(900),

@@ -72,9 +72,7 @@ pub(crate) enum Body {
         waited_ms: Option<u64>,
     },
     /// Another extension's custom entry.
-    Custom {
-        kind: String,
-    },
+    Custom,
     /// A message an extension added to the model's context.
     CustomMessage {
         kind: String,
@@ -99,10 +97,8 @@ pub(crate) enum Body {
         target: Option<String>,
         label: Option<String>,
     },
-    /// Any other entry, with its type, such as a model change.
-    Other {
-        kind: String,
-    },
+    /// Any other entry, such as a model change.
+    Other,
 }
 
 /// A tool call in a model response.
@@ -157,9 +153,7 @@ impl Entry {
             id: field("id")??,
             parent: field("parentId")?,
             at_ms: None,
-            body: Body::Other {
-                kind: "too large to read".to_owned(),
-            },
+            body: Body::Other,
         })
     }
 
@@ -199,7 +193,7 @@ impl Entry {
                 target: text("targetId"),
                 label: text("label"),
             },
-            _ => Body::Other { kind },
+            _ => Body::Other,
         };
         Self {
             id: text("id").unwrap_or_default(),
@@ -225,9 +219,7 @@ impl Entry {
 
 fn message(message: Option<&Value>) -> Body {
     let Some(message) = message else {
-        return Body::Other {
-            kind: "message".to_owned(),
-        };
+        return Body::Other;
     };
     let field = |name| {
         message
@@ -342,14 +334,14 @@ fn custom(kind: String, data: Option<&Value>) -> Body {
                 call: text("toolCallId"),
                 duration_ms: millis("durationMs"),
             },
-            _ => Body::Custom { kind },
+            _ => Body::Custom,
         },
         "watershed.approval" => Body::Approval {
             tool: text("tool"),
             decision: text("decision"),
             waited_ms: millis("waitedMs"),
         },
-        _ => Body::Custom { kind },
+        _ => Body::Custom,
     }
 }
 

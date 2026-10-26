@@ -1620,7 +1620,6 @@ impl SseDecode for crate::api::events::BridgeEvent {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut var_kind = <crate::api::events::BridgeEventKind>::sse_decode(deserializer);
-        let mut var_turn = <Option<i64>>::sse_decode(deserializer);
         let mut var_item = <Option<crate::api::events::BridgeItem>>::sse_decode(deserializer);
         let mut var_step = <Option<crate::api::events::BridgeStep>>::sse_decode(deserializer);
         let mut var_request = <Option<crate::api::events::BridgeRequest>>::sse_decode(deserializer);
@@ -1630,7 +1629,6 @@ impl SseDecode for crate::api::events::BridgeEvent {
         let mut var_queue = <Option<crate::api::events::BridgeQueue>>::sse_decode(deserializer);
         return crate::api::events::BridgeEvent {
             kind: var_kind,
-            turn: var_turn,
             item: var_item,
             step: var_step,
             request: var_request,
@@ -1880,13 +1878,10 @@ impl SseDecode for crate::api::events::BridgeRequest {
             <Option<crate::api::events::BridgeApproval>>::sse_decode(deserializer);
         let mut var_question =
             <Option<crate::api::events::BridgeQuestion>>::sse_decode(deserializer);
-        let mut var_decision =
-            <Option<crate::api::events::BridgeDecision>>::sse_decode(deserializer);
         return crate::api::events::BridgeRequest {
             id: var_id,
             approval: var_approval,
             question: var_question,
-            decision: var_decision,
         };
     }
 }
@@ -1907,21 +1902,13 @@ impl SseDecode for crate::api::events::BridgeRequestKind {
 impl SseDecode for crate::api::events::BridgeStep {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
-        let mut var_id = <i64>::sse_decode(deserializer);
-        let mut var_model = <String>::sse_decode(deserializer);
         let mut var_usage = <crate::api::events::BridgeUsage>::sse_decode(deserializer);
         let mut var_stopReason = <String>::sse_decode(deserializer);
         let mut var_error = <Option<String>>::sse_decode(deserializer);
-        let mut var_firstTokenMs = <Option<i64>>::sse_decode(deserializer);
-        let mut var_durationMs = <i64>::sse_decode(deserializer);
         return crate::api::events::BridgeStep {
-            id: var_id,
-            model: var_model,
             usage: var_usage,
             stop_reason: var_stopReason,
             error: var_error,
-            first_token_ms: var_firstTokenMs,
-            duration_ms: var_durationMs,
         };
     }
 }
@@ -2851,7 +2838,6 @@ impl flutter_rust_bridge::IntoDart for crate::api::events::BridgeEvent {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
             self.kind.into_into_dart().into_dart(),
-            self.turn.into_into_dart().into_dart(),
             self.item.into_into_dart().into_dart(),
             self.step.into_into_dart().into_dart(),
             self.request.into_into_dart().into_dart(),
@@ -3188,7 +3174,6 @@ impl flutter_rust_bridge::IntoDart for crate::api::events::BridgeRequest {
             self.id.into_into_dart().into_dart(),
             self.approval.into_into_dart().into_dart(),
             self.question.into_into_dart().into_dart(),
-            self.decision.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -3230,13 +3215,9 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::events::BridgeRequestKind>
 impl flutter_rust_bridge::IntoDart for crate::api::events::BridgeStep {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
-            self.id.into_into_dart().into_dart(),
-            self.model.into_into_dart().into_dart(),
             self.usage.into_into_dart().into_dart(),
             self.stop_reason.into_into_dart().into_dart(),
             self.error.into_into_dart().into_dart(),
-            self.first_token_ms.into_into_dart().into_dart(),
-            self.duration_ms.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -3638,7 +3619,6 @@ impl SseEncode for crate::api::events::BridgeEvent {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <crate::api::events::BridgeEventKind>::sse_encode(self.kind, serializer);
-        <Option<i64>>::sse_encode(self.turn, serializer);
         <Option<crate::api::events::BridgeItem>>::sse_encode(self.item, serializer);
         <Option<crate::api::events::BridgeStep>>::sse_encode(self.step, serializer);
         <Option<crate::api::events::BridgeRequest>>::sse_encode(self.request, serializer);
@@ -3846,7 +3826,6 @@ impl SseEncode for crate::api::events::BridgeRequest {
         <String>::sse_encode(self.id, serializer);
         <Option<crate::api::events::BridgeApproval>>::sse_encode(self.approval, serializer);
         <Option<crate::api::events::BridgeQuestion>>::sse_encode(self.question, serializer);
-        <Option<crate::api::events::BridgeDecision>>::sse_encode(self.decision, serializer);
     }
 }
 
@@ -3870,13 +3849,9 @@ impl SseEncode for crate::api::events::BridgeRequestKind {
 impl SseEncode for crate::api::events::BridgeStep {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
-        <i64>::sse_encode(self.id, serializer);
-        <String>::sse_encode(self.model, serializer);
         <crate::api::events::BridgeUsage>::sse_encode(self.usage, serializer);
         <String>::sse_encode(self.stop_reason, serializer);
         <Option<String>>::sse_encode(self.error, serializer);
-        <Option<i64>>::sse_encode(self.first_token_ms, serializer);
-        <i64>::sse_encode(self.duration_ms, serializer);
     }
 }
 
