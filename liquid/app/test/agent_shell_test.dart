@@ -46,12 +46,13 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  BridgeRequest approval(String id) => BridgeRequest(
+  BridgeRequest approval(String id, {int? item}) => BridgeRequest(
     id: id,
     approval: BridgeApproval(
       kind: BridgeRequestKind.commandExecution,
       tool: 'bash',
       text: 'npm test -- login',
+      item: item,
     ),
   );
 
@@ -459,7 +460,7 @@ void main() {
       );
       await emit(
         tester,
-        event(BridgeEventKind.requestOpened, request: approval('a1')),
+        event(BridgeEventKind.requestOpened, request: approval('a1', item: 2)),
       );
       expect(find.text('Now I run the tests.'), findsOneWidget);
       expect(find.text('waiting for approval'), findsOneWidget);
@@ -745,6 +746,40 @@ void main() {
       findsNothing,
       reason: 'a chevron would suggest it opens',
     );
+  });
+
+  testWidgets('marks only the call an approval asks about as waiting', (
+    tester,
+  ) async {
+    await show(tester);
+    await emit(tester, event(BridgeEventKind.turnStarted, turn: 1));
+    // pi starts both calls, the first is allowed and the second asks.
+    for (final id in [5, 6]) {
+      await emit(
+        tester,
+        event(
+          BridgeEventKind.itemStarted,
+          turn: 1,
+          item: item(id, kind: BridgeItemKind.commandExecution, tool: 'bash'),
+        ),
+      );
+    }
+    await emit(
+      tester,
+      event(
+        BridgeEventKind.requestOpened,
+        request: BridgeRequest(
+          id: 'a2',
+          approval: BridgeApproval(
+            kind: BridgeRequestKind.commandExecution,
+            tool: 'bash',
+            text: 'pwd',
+            item: 6,
+          ),
+        ),
+      ),
+    );
+    expect(find.text('waiting for approval'), findsOneWidget);
   });
 
   testWidgets('marks a tool done when only its outcome changes', (

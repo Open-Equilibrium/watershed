@@ -450,6 +450,7 @@ impl From<AgentEvent> for BridgeEvent {
                 kind,
                 tool,
                 text,
+                item,
                 ..
             } => BridgeEvent {
                 request: Some(BridgeRequest {
@@ -457,6 +458,7 @@ impl From<AgentEvent> for BridgeEvent {
                         kind: kind.into(),
                         tool,
                         text,
+                        item: item.map(|item| int(item.0)),
                     }),
                     ..request(id.0)
                 }),

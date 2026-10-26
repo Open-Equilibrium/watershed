@@ -51,7 +51,7 @@ impl PiAdapter {
     pub fn translate(&mut self, record: &Map<String, Value>, at: Duration) -> Vec<AgentEvent> {
         let kind = record.get("type").and_then(Value::as_str);
         if kind == Some("extension_ui_request") {
-            return extension_ui(record).into_iter().collect();
+            return extension_ui(record, &self.tools).into_iter().collect();
         }
         if kind == Some("queue_update") {
             return vec![AgentEvent::QueueChanged(queue(&Value::Object(
@@ -474,12 +474,15 @@ pub(crate) fn request_kind(tool: &str) -> RequestKind {
 }
 
 /// Translates one extension UI request; unknown methods yield nothing.
-fn extension_ui(record: &Map<String, Value>) -> Option<AgentEvent> {
+fn extension_ui(
+    record: &Map<String, Value>,
+    tools: &HashMap<String, OpenTool>,
+) -> Option<AgentEvent> {
     let request = RequestId(str_field(record, "id").to_owned());
     let text = |field| str_field(record, field).to_owned();
     let input = match str_field(record, "method") {
         "select" => match str_field(record, "title").strip_prefix(APPROVAL_PREFIX) {
-            Some(payload) => return Some(approval(request, payload)),
+            Some(payload) => return Some(approval(request, payload, tools)),
             None => UserInput::Select {
                 title: text("title"),
                 options: strings(record.get("options")).unwrap_or_default(),
@@ -536,7 +539,7 @@ fn extension_ui(record: &Map<String, Value>) -> Option<AgentEvent> {
 
 /// Reads the approval payload; an unreadable payload still asks the user, so nothing runs
 /// without a decision.
-fn approval(request: RequestId, payload: &str) -> AgentEvent {
+fn approval(request: RequestId, payload: &str, tools: &HashMap<String, OpenTool>) -> AgentEvent {
     let payload: Map<String, Value> = serde_json::from_str(payload).unwrap_or_default();
     let tool = str_field(&payload, "tool");
     let arguments = payload
@@ -554,6 +557,9 @@ fn approval(request: RequestId, payload: &str) -> AgentEvent {
             .get("session")
             .and_then(Value::as_str)
             .map(str::to_owned),
+        item: tools
+            .get(str_field(&payload, "toolCallId"))
+            .map(|tool| tool.item),
     }
 }
 

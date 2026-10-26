@@ -85,6 +85,7 @@ test("asks the core before every tool call and records user decisions", async ()
       arguments: { command: "ls" },
       readOnly: false,
       session: "s1",
+      toolCallId: "c1",
     });
     assert.deepEqual(options, ["allow-once", "allow-session", "reject", "allow-auto"]);
     assert.deepEqual(

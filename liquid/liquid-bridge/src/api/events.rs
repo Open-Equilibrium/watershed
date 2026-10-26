@@ -185,6 +185,8 @@ pub struct BridgeApproval {
     pub tool: String,
     /// The whole call the user decides on, such as a shell command.
     pub text: String,
+    /// The id of the call's item in the chat, when known.
+    pub item: Option<i64>,
 }
 
 /// The user's answer to an approval request.

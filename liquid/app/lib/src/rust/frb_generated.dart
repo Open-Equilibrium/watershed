@@ -1367,12 +1367,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeApproval dco_decode_bridge_approval(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 3)
-      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+    if (arr.length != 4)
+      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
     return BridgeApproval(
       kind: dco_decode_bridge_request_kind(arr[0]),
       tool: dco_decode_String(arr[1]),
       text: dco_decode_String(arr[2]),
+      item: dco_decode_opt_box_autoadd_i_64(arr[3]),
     );
   }
 
@@ -2212,7 +2213,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_kind = sse_decode_bridge_request_kind(deserializer);
     var var_tool = sse_decode_String(deserializer);
     var var_text = sse_decode_String(deserializer);
-    return BridgeApproval(kind: var_kind, tool: var_tool, text: var_text);
+    var var_item = sse_decode_opt_box_autoadd_i_64(deserializer);
+    return BridgeApproval(
+      kind: var_kind,
+      tool: var_tool,
+      text: var_text,
+      item: var_item,
+    );
   }
 
   @protected
@@ -3329,6 +3336,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_bridge_request_kind(self.kind, serializer);
     sse_encode_String(self.tool, serializer);
     sse_encode_String(self.text, serializer);
+    sse_encode_opt_box_autoadd_i_64(self.item, serializer);
   }
 
   @protected

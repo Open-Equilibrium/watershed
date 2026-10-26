@@ -134,6 +134,7 @@ fn requests_and_questions_reach_dart_with_their_answers() {
         text: "{}".to_owned(),
         read_only: false,
         session: None,
+        item: Some(ItemId(7)),
     });
     let request = opened.request.expect("request");
     assert_eq!(request.id, "a1");
@@ -143,6 +144,7 @@ fn requests_and_questions_reach_dart_with_their_answers() {
             kind: BridgeRequestKind::FileChange,
             tool: "write".to_owned(),
             text: "{}".to_owned(),
+            item: Some(7),
         })
     );
     let resolved = bridge(AgentEvent::RequestResolved {

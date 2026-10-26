@@ -301,6 +301,8 @@ pub enum AgentEvent {
         read_only: bool,
         /// The session the call runs in, when the agent says.
         session: Option<String>,
+        /// The call's item, when the agent says which call it asks about.
+        item: Option<ItemId>,
     },
     /// An approval request ended.
     RequestResolved {

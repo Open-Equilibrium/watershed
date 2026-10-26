@@ -20,14 +20,19 @@ class BridgeApproval {
   /// The whole call the user decides on, such as a shell command.
   final String text;
 
+  /// The id of the call's item in the chat, when known.
+  final PlatformInt64? item;
+
   const BridgeApproval({
     required this.kind,
     required this.tool,
     required this.text,
+    this.item,
   });
 
   @override
-  int get hashCode => kind.hashCode ^ tool.hashCode ^ text.hashCode;
+  int get hashCode =>
+      kind.hashCode ^ tool.hashCode ^ text.hashCode ^ item.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -36,7 +41,8 @@ class BridgeApproval {
           runtimeType == other.runtimeType &&
           kind == other.kind &&
           tool == other.tool &&
-          text == other.text;
+          text == other.text &&
+          item == other.item;
 }
 
 /// How a file changed in a run.

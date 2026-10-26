@@ -326,6 +326,7 @@ fn turns_watershed_approval_questions_into_requests() {
             text: if id == "a1" { "npm test" } else { arguments }.to_owned(),
             read_only,
             session: (id == "a1").then(|| "s1".to_owned()),
+            item: None,
         };
     assert_eq!(
         events,
@@ -348,6 +349,29 @@ fn turns_watershed_approval_questions_into_requests() {
             opened("a4", RequestKind::ToolApproval, "safe<U+202E>", "{}", false),
         ]
     );
+}
+
+#[test]
+fn ties_an_approval_to_the_call_it_asks_about() {
+    // pi starts each call of a response, then asks about it before running it, so an earlier
+    // call of the same tool can still be running.
+    let events = translate(&[
+        r#"{"type":"agent_start"}"#,
+        r#"{"type":"tool_execution_start","toolCallId":"c1","toolName":"bash","args":{"command":"ls"}}"#,
+        r#"{"type":"tool_execution_start","toolCallId":"c2","toolName":"bash","args":{"command":"pwd"}}"#,
+        r#"{"type":"extension_ui_request","id":"a2","method":"select","title":"watershed.approval {\"tool\":\"bash\",\"arguments\":{\"command\":\"pwd\"},\"readOnly\":false,\"toolCallId\":\"c2\"}","options":[]}"#,
+    ]);
+    let items: Vec<_> = events
+        .iter()
+        .filter_map(|event| match event {
+            AgentEvent::ItemStarted { item, .. } => Some(*item),
+            _ => None,
+        })
+        .collect();
+    let Some(AgentEvent::RequestOpened { item, .. }) = events.last() else {
+        panic!("the approval opens a request: {events:?}");
+    };
+    assert_eq!(*item, Some(items[1]), "the second call's item");
 }
 
 #[test]

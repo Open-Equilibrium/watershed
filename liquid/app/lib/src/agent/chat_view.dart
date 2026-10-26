@@ -166,10 +166,7 @@ class ToolRow extends StatelessWidget {
       builder: (context, _) {
         final approval = state.approval.value;
         final outcome = item.outcome.value;
-        final waiting =
-            outcome == null &&
-            approval != null &&
-            approval.approval?.tool == item.tool;
+        final waiting = outcome == null && approval?.approval?.item == item.id;
         final (mark, markColor) = switch (outcome) {
           (failed: true, durationMs: _, lines: _) => (LucideIcons.x, ws.danger),
           (failed: false, durationMs: _, lines: _) => (

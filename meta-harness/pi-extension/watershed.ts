@@ -39,6 +39,8 @@ function watershed(pi: ExtensionAPI, clock: Clock): void {
       readOnly: tool?.sourceInfo?.source === "builtin" && READING_BUILTINS.has(tool.name),
       // Allowances for a session end with it, also when an extension command switches it.
       session: ctx.sessionManager.getSessionId(),
+      // The call the user decides on, among a response's calls that pi started.
+      toolCallId: event.toolCallId,
     };
     const asked = clock();
     const decision = await ctx.ui.select(APPROVAL_PREFIX + JSON.stringify(payload), DECISIONS);

@@ -1490,10 +1490,12 @@ impl SseDecode for crate::api::events::BridgeApproval {
         let mut var_kind = <crate::api::events::BridgeRequestKind>::sse_decode(deserializer);
         let mut var_tool = <String>::sse_decode(deserializer);
         let mut var_text = <String>::sse_decode(deserializer);
+        let mut var_item = <Option<i64>>::sse_decode(deserializer);
         return crate::api::events::BridgeApproval {
             kind: var_kind,
             tool: var_tool,
             text: var_text,
+            item: var_item,
         };
     }
 }
@@ -2647,6 +2649,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::events::BridgeApproval {
             self.kind.into_into_dart().into_dart(),
             self.tool.into_into_dart().into_dart(),
             self.text.into_into_dart().into_dart(),
+            self.item.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -3518,6 +3521,7 @@ impl SseEncode for crate::api::events::BridgeApproval {
         <crate::api::events::BridgeRequestKind>::sse_encode(self.kind, serializer);
         <String>::sse_encode(self.tool, serializer);
         <String>::sse_encode(self.text, serializer);
+        <Option<i64>>::sse_encode(self.item, serializer);
     }
 }
 
