@@ -69,8 +69,9 @@ class _TrajectoryViewState extends State<TrajectoryView> {
   bool _inspecting = false;
   InspectorTab _tab = InspectorTab.summary;
 
-  /// What the model saw for each response, loaded when its inspector opens.
+  /// What the model saw for the latest responses opened, loaded when their inspector opens.
   final _details = <String, BridgeContextDetail?>{};
+  static const _keptDetails = 4;
 
   /// Why the latest history read failed, so a lasting failure is reported once.
   String? _unreadHistory;
@@ -399,12 +400,18 @@ class _TrajectoryViewState extends State<TrajectoryView> {
     if (record.kind != BridgeRecordKind.message) return null;
     final entry = record.entry;
     if (!_details.containsKey(entry)) {
+      // Each context lists the branch before it, so only the latest few stay.
+      if (_details.length == _keptDetails) {
+        final oldest = _details.keys.first;
+        _details.remove(oldest);
+        _unread.remove(oldest);
+      }
       _details[entry] = null;
       widget.state
           .context(entry)
           .then(
             (detail) {
-              if (!mounted) return;
+              if (!mounted || !_details.containsKey(entry)) return;
               setState(() {
                 if (detail == null) {
                   _unread[entry] = 'the session has no such response';
@@ -414,7 +421,9 @@ class _TrajectoryViewState extends State<TrajectoryView> {
               });
             },
             onError: (Object error) {
-              if (mounted) setState(() => _unread[entry] = '$error');
+              if (mounted && _details.containsKey(entry)) {
+                setState(() => _unread[entry] = '$error');
+              }
             },
           );
     }

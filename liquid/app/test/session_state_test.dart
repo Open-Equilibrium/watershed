@@ -773,7 +773,10 @@ void main() {
       ),
     );
     await emit(
-      event(BridgeEventKind.userInputResolved, request: BridgeRequest(id: 'q1')),
+      event(
+        BridgeEventKind.userInputResolved,
+        request: BridgeRequest(id: 'q1'),
+      ),
     );
     await emit(
       event(
@@ -811,7 +814,10 @@ void main() {
         ),
       ),
     );
-    expect(state.notice.value?.text, 'The model request failed: 529 overloaded');
+    expect(
+      state.notice.value?.text,
+      'The model request failed: 529 overloaded',
+    );
   });
 
   test('keeps the waiting messages and edits them', () async {

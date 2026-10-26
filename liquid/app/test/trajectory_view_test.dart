@@ -516,6 +516,41 @@ void main() {
     expect(find.text('new'), findsOneWidget);
   });
 
+  testWidgets('keeps what the model saw only for the latest steps opened', (
+    tester,
+  ) async {
+    // Each response's context lists the whole branch before it, so keeping every one opened
+    // would grow with the square of the session.
+    await show(
+      tester,
+      historyOf([
+        record('u1', 1, BridgeRecordKind.user, 'Go', 0),
+        for (var step = 1; step <= 8; step++)
+          record(
+            'm$step',
+            1,
+            BridgeRecordKind.message,
+            'Step $step',
+            step * 100,
+          ),
+      ]),
+    );
+    await press(tester, LogicalKeyboardKey.arrowDown);
+    await press(tester, LogicalKeyboardKey.arrowDown);
+    await press(tester, LogicalKeyboardKey.enter);
+    for (var step = 0; step < 7; step++) {
+      await press(tester, LogicalKeyboardKey.arrowDown);
+    }
+    for (var step = 0; step < 7; step++) {
+      await press(tester, LogicalKeyboardKey.arrowUp);
+    }
+    expect(
+      backend.calls.where((call) => call == 'context m1'),
+      hasLength(2),
+      reason: 'read again after later steps took its place',
+    );
+  });
+
   testWidgets('follows the run live as steps are stored', (tester) async {
     await show(tester, historyOf(branchA.take(1).toList()));
     expect(find.text("I'll look first."), findsNothing);
