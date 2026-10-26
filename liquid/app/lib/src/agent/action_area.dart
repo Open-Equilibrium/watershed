@@ -277,6 +277,20 @@ class ModeChip extends StatelessWidget {
     BridgeApprovalMode.fullAccess: 'Full access',
   };
 
+  /// What each mode lets the agent do, and what Allow edits risks (approved mockup, ADR-0206).
+  static const _explained = {
+    BridgeApprovalMode.ask: (
+      'Asks before every call that is not read-only.',
+      null,
+    ),
+    BridgeApprovalMode.allowEdits: (
+      'Changes files without asking.',
+      'Any file you can change, including settings that run commands, such as Git settings '
+          'Liquid uses for the diff.',
+    ),
+    BridgeApprovalMode.fullAccess: ('Runs every call without asking.', null),
+  };
+
   @override
   Widget build(BuildContext context) {
     return ValueListenableBuilder(
@@ -287,7 +301,13 @@ class ModeChip extends StatelessWidget {
         onSelected: state.setMode,
         itemBuilder: (context) => [
           for (final entry in labels.entries)
-            PopupMenuItem(value: entry.key, child: Text(entry.value)),
+            PopupMenuItem(
+              value: entry.key,
+              child: _ModeItem(
+                name: entry.value,
+                explained: _explained[entry.key]!,
+              ),
+            ),
         ],
         child: Container(
           height: 28,
@@ -315,6 +335,46 @@ class ModeChip extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// One mode in the mode menu: its name, what it does and, for Allow edits, its risk.
+class _ModeItem extends StatelessWidget {
+  const _ModeItem({required this.name, required this.explained});
+
+  final String name;
+  final (String, String?) explained;
+
+  @override
+  Widget build(BuildContext context) {
+    final ws = context.ws;
+    final (description, risk) = explained;
+    final small = TextStyle(fontSize: WsMetrics.fsSmall, color: ws.textMuted);
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 280),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(name, style: const TextStyle(fontWeight: WsMetrics.fwMedium)),
+          Text(description, style: small),
+          if (risk != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(LucideIcons.triangleAlert, size: 12, color: ws.warning),
+                  const SizedBox(width: WsMetrics.space1),
+                  Expanded(
+                    child: Text(risk, style: small.copyWith(color: ws.warning)),
+                  ),
+                ],
+              ),
+            ),
+        ],
       ),
     );
   }

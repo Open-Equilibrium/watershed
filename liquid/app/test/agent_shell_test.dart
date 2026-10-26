@@ -57,6 +57,27 @@ void main() {
     ),
   );
 
+  testWidgets('the mode menu explains each mode and what Allow edits risks', (
+    tester,
+  ) async {
+    await show(tester);
+    await tester.tap(find.byTooltip('Approval mode'));
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Asks before every call that is not read-only.'),
+      findsOneWidget,
+    );
+    expect(find.text('Changes files without asking.'), findsOneWidget);
+    expect(
+      find.text(
+        'Any file you can change, including settings that run commands, such '
+        'as Git settings Liquid uses for the diff.',
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('Runs every call without asking.'), findsOneWidget);
+  });
+
   testWidgets('focuses the input area with ⌘L from any tab', (tester) async {
     await show(tester);
     await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
