@@ -437,6 +437,16 @@ fn iso_millis(text: &str) -> Option<u64> {
         clock.next()?.ok()?,
     );
     let millis: i64 = format!("{fraction:0<3}").get(..3)?.parse().ok()?;
+    // Fields in range keep the arithmetic below far from overflowing.
+    let in_range = (0..=9999).contains(&year)
+        && (1..=12).contains(&month)
+        && (1..=31).contains(&day)
+        && (0..=23).contains(&hour)
+        && (0..=59).contains(&minute)
+        && (0..=60).contains(&second);
+    if !in_range {
+        return None;
+    }
     // Days from the civil calendar (Howard Hinnant's algorithm).
     let year = if month <= 2 { year - 1 } else { year };
     let era = year.div_euclid(400);

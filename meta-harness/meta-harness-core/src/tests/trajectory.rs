@@ -597,3 +597,26 @@ fn a_parent_cycle_ends_the_branch_instead_of_hanging() {
         .expect("a stored cycle must not hang the reader");
     assert_eq!(read.3, 3, "every entry but the labels is a node");
 }
+
+#[test]
+fn reads_numbers_out_of_range_without_overflowing() {
+    let max = u64::MAX;
+    let response = |id: &str, parent: &str, timestamp: &str| {
+        format!(
+            r#"{{"type":"message","id":"{id}","parentId":{parent},"timestamp":"{timestamp}","message":{{"role":"assistant","model":"m","stopReason":"stop","usage":{{"input":{max},"output":{max},"cacheRead":{max},"cacheWrite":{max},"reasoning":{max},"totalTokens":0,"cost":{{"total":1e300}}}},"content":[{{"type":"text","text":"x"}}]}}}}"#
+        )
+    };
+    let session = format!(
+        r#"{{"entries":[{},{}],"leafId":"a2"}}"#,
+        response("a1", "null", "99999999999999-13-99T99:99:99Z"),
+        response("a2", r#""a1""#, "2026-10-24T10:00:00Z"),
+    );
+    let history = History::from_entries(&serde_json::from_str::<Value>(&session).expect("JSON"));
+    assert_eq!(
+        history.usage().input,
+        u64::MAX,
+        "the sum stops at the largest number"
+    );
+    assert_eq!(history.usage().cost_micro_usd, u64::MAX);
+    assert_eq!(history.trajectory(None).records.len(), 2);
+}

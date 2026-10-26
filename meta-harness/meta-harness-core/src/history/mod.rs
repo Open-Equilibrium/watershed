@@ -292,11 +292,12 @@ pub struct TranscriptItem {
     pub lines: Option<ChangedLines>,
 }
 
+/// Adds what an agent reports, which can be any number, so the sum stops at the largest one.
 fn add(total: &mut Usage, spent: &Usage) {
-    total.input += spent.input;
-    total.output += spent.output;
-    total.cache_read += spent.cache_read;
-    total.cache_write += spent.cache_write;
-    total.reasoning += spent.reasoning;
-    total.cost_micro_usd += spent.cost_micro_usd;
+    total.input = total.input.saturating_add(spent.input);
+    total.output = total.output.saturating_add(spent.output);
+    total.cache_read = total.cache_read.saturating_add(spent.cache_read);
+    total.cache_write = total.cache_write.saturating_add(spent.cache_write);
+    total.reasoning = total.reasoning.saturating_add(spent.reasoning);
+    total.cost_micro_usd = total.cost_micro_usd.saturating_add(spent.cost_micro_usd);
 }
