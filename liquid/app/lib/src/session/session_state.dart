@@ -250,6 +250,7 @@ class SessionState {
     _generation++;
     sessionTitle.value = null;
     // The previous session's run no longer applies.
+    ran.value = false;
     changed.value = const [];
     changesProblem.value = null;
     _byId.clear();
@@ -409,6 +410,10 @@ class SessionState {
 
   /// Why the latest read of the changes failed; null after one that worked.
   final changesProblem = ValueNotifier<String?>(null);
+
+  /// Whether a run started in this session since Liquid opened it; the Diff tab compares only
+  /// such a run with the project before it.
+  final ran = ValueNotifier(false);
 
   /// Reads what the latest run changed. A failed read is reported once, and the Diff tab says
   /// so instead of showing an earlier run's changes.
@@ -641,6 +646,7 @@ class SessionState {
     switch (event.kind) {
       case BridgeEventKind.turnStarted:
         _turnActive = true;
+        ran.value = true;
         _stopping = false;
       case BridgeEventKind.turnCompleted || BridgeEventKind.turnAborted:
         _turnActive = false;

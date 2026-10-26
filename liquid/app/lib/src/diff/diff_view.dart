@@ -44,6 +44,7 @@ class _DiffViewState extends State<DiffView> {
   void initState() {
     super.initState();
     widget.state.changed.addListener(_show);
+    widget.state.ran.addListener(_show);
     // Opening the tab reads the changes again, so it shows the project as it is now.
     unawaited(widget.state.readChanges());
     // It also shows the last list at once and moves the keyboard to it.
@@ -57,6 +58,7 @@ class _DiffViewState extends State<DiffView> {
   @override
   void dispose() {
     widget.state.changed.removeListener(_show);
+    widget.state.ran.removeListener(_show);
     _focus.dispose();
     super.dispose();
   }
@@ -201,7 +203,9 @@ class _DiffViewState extends State<DiffView> {
     if (_changes.isEmpty) {
       return Center(
         child: Text(
-          'No changes in this run',
+          widget.state.ran.value
+              ? 'No changes in this run'
+              : 'No run in this session yet',
           style: Theme.of(context).textTheme.bodySmall,
         ),
       );

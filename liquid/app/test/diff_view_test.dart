@@ -78,14 +78,26 @@ void main() {
     },
   );
 
-  testWidgets('says when a run changed nothing', (tester) async {
-    final state = SessionState(FakeBackend());
+  testWidgets('says when no run started yet and when a run changed nothing', (
+    tester,
+  ) async {
+    final backend = FakeBackend();
+    final state = SessionState(backend);
     await tester.pumpWidget(
       MaterialApp(
         theme: liquidTheme(Brightness.light),
         home: Material(child: DiffView(state: state)),
       ),
     );
+    await tester.pumpAndSettle();
+    expect(
+      find.text('No run in this session yet'),
+      findsOneWidget,
+      reason: 'a continued session\'s earlier runs are not compared',
+    );
+
+    backend.controller.add(event(BridgeEventKind.turnStarted, turn: 1));
+    backend.controller.add(event(BridgeEventKind.turnCompleted, turn: 1));
     await tester.pumpAndSettle();
     expect(find.text('No changes in this run'), findsOneWidget);
   });
