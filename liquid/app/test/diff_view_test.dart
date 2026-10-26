@@ -11,10 +11,32 @@ import 'package:liquid/src/theme/theme.dart';
 import 'fake_backend.dart';
 
 void main() {
+  /// Shows the Diff tab of a session on [backend].
+  Future<SessionState> show(
+    WidgetTester tester,
+    FakeBackend backend, {
+    Size size = const Size(1600, 900),
+  }) async {
+    await tester.binding.setSurfaceSize(size);
+    final state = SessionState(backend);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: liquidTheme(Brightness.light),
+        home: Material(child: DiffView(state: state)),
+      ),
+    );
+    await tester.pumpAndSettle();
+    return state;
+  }
+
+  Future<void> press(WidgetTester tester, LogicalKeyboardKey key) async {
+    await tester.sendKeyEvent(key);
+    await tester.pumpAndSettle();
+  }
+
   testWidgets(
     'lists changed files as folders and shows the selected file\'s diff',
     (tester) async {
-      await tester.binding.setSurfaceSize(const Size(1600, 900));
       final backend = FakeBackend()
         ..changed = [
           BridgeFileChange(
@@ -36,14 +58,7 @@ void main() {
           'src/routes/login.ts':
               '@@ -1,2 +1,2 @@\n-const old = 1;\n+const fresh = 2;\n same();\n',
         };
-      final state = SessionState(backend);
-      await tester.pumpWidget(
-        MaterialApp(
-          theme: liquidTheme(Brightness.light),
-          home: Material(child: DiffView(state: state)),
-        ),
-      );
-      await tester.pumpAndSettle();
+      await show(tester, backend);
       expect(find.text('2 files · +3 −1'), findsOneWidget);
       for (final name in [
         'src',
@@ -82,14 +97,7 @@ void main() {
     tester,
   ) async {
     final backend = FakeBackend();
-    final state = SessionState(backend);
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: liquidTheme(Brightness.light),
-        home: Material(child: DiffView(state: state)),
-      ),
-    );
-    await tester.pumpAndSettle();
+    await show(tester, backend);
     expect(
       find.text('No run in this session yet'),
       findsOneWidget,
@@ -103,7 +111,6 @@ void main() {
   });
 
   testWidgets('says why a diff cannot be shown', (tester) async {
-    await tester.binding.setSurfaceSize(const Size(1600, 900));
     final backend = FakeBackend()
       ..changed = [
         BridgeFileChange(
@@ -114,14 +121,7 @@ void main() {
         ),
       ]
       ..patchError = 'the diff is larger than 4 MiB';
-    final state = SessionState(backend);
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: liquidTheme(Brightness.light),
-        home: Material(child: DiffView(state: state)),
-      ),
-    );
-    await tester.pumpAndSettle();
+    final state = await show(tester, backend);
     expect(
       (state.notice.value?.level, state.notice.value?.text),
       (
@@ -132,7 +132,6 @@ void main() {
   });
 
   testWidgets('scrolls a long line sideways to its end', (tester) async {
-    await tester.binding.setSurfaceSize(const Size(1200, 900));
     final long = '${'x' * 400} changed at the end';
     final backend = FakeBackend()
       ..changed = [
@@ -144,13 +143,7 @@ void main() {
         ),
       ]
       ..patches = {'wide.ts': '@@ -1 +1 @@\n+$long\n'};
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: liquidTheme(Brightness.light),
-        home: Material(child: DiffView(state: SessionState(backend))),
-      ),
-    );
-    await tester.pumpAndSettle();
+    await show(tester, backend, size: const Size(1200, 900));
     final line = find.textContaining('changed at the end', findRichText: true);
     final before = tester.getTopLeft(line).dx;
     await tester.dragFrom(
@@ -163,7 +156,6 @@ void main() {
 
   testWidgets('keeps every arrow press while a patch loads and reads only '
       'the last', (tester) async {
-    await tester.binding.setSurfaceSize(const Size(1600, 900));
     BridgeFileChange file(String path) => BridgeFileChange(
       path: path,
       status: BridgeChangeStatus.modified,
@@ -176,13 +168,7 @@ void main() {
         for (final name in ['a', 'b', 'c', 'd'])
           '$name.ts': '@@ -1 +1 @@\n+$name changed\n',
       };
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: liquidTheme(Brightness.light),
-        home: Material(child: DiffView(state: SessionState(backend))),
-      ),
-    );
-    await tester.pumpAndSettle();
+    await show(tester, backend);
     expect(
       find.textContaining('a changed', findRichText: true),
       findsOneWidget,
@@ -205,7 +191,6 @@ void main() {
   });
 
   testWidgets('folds folders by click and with ← and →', (tester) async {
-    await tester.binding.setSurfaceSize(const Size(1600, 900));
     BridgeFileChange file(String path) => BridgeFileChange(
       path: path,
       status: BridgeChangeStatus.modified,
@@ -214,17 +199,7 @@ void main() {
     );
     final backend = FakeBackend()
       ..changed = [file('src/a.ts'), file('src/b.ts'), file('top.ts')];
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: liquidTheme(Brightness.light),
-        home: Material(child: DiffView(state: SessionState(backend))),
-      ),
-    );
-    await tester.pumpAndSettle();
-    Future<void> press(LogicalKeyboardKey key) async {
-      await tester.sendKeyEvent(key);
-      await tester.pumpAndSettle();
-    }
+    await show(tester, backend);
 
     await tester.tap(find.text('src'));
     await tester.pumpAndSettle();
@@ -235,12 +210,12 @@ void main() {
     expect(find.text('b.ts'), findsOneWidget);
 
     expect(find.text('src/a.ts'), findsOneWidget, reason: 'a.ts is open');
-    await press(LogicalKeyboardKey.arrowLeft);
+    await press(tester, LogicalKeyboardKey.arrowLeft);
     expect(find.text('a.ts'), findsNothing, reason: '← folds its folder');
-    await press(LogicalKeyboardKey.arrowRight);
+    await press(tester, LogicalKeyboardKey.arrowRight);
     expect(find.text('a.ts'), findsOneWidget, reason: '→ unfolds it');
-    await press(LogicalKeyboardKey.arrowLeft);
-    await press(LogicalKeyboardKey.arrowDown);
+    await press(tester, LogicalKeyboardKey.arrowLeft);
+    await press(tester, LogicalKeyboardKey.arrowDown);
     expect(
       find.text('top.ts'),
       findsNWidgets(2),
@@ -251,7 +226,6 @@ void main() {
   testWidgets('says when the changes cannot be read instead of old ones', (
     tester,
   ) async {
-    await tester.binding.setSurfaceSize(const Size(1600, 900));
     final backend = FakeBackend()
       ..changed = [
         BridgeFileChange(
@@ -261,14 +235,7 @@ void main() {
           removed: 0,
         ),
       ];
-    final state = SessionState(backend);
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: liquidTheme(Brightness.light),
-        home: Material(child: DiffView(state: state)),
-      ),
-    );
-    await tester.pumpAndSettle();
+    final state = await show(tester, backend);
     expect(find.text('old.ts'), findsWidgets);
 
     backend.changesError = 'the project could not be captured';
@@ -284,16 +251,8 @@ void main() {
   });
 
   testWidgets('says when the project is not in Git', (tester) async {
-    await tester.binding.setSurfaceSize(const Size(1600, 900));
     final backend = FakeBackend()..changed = null;
-    final state = SessionState(backend);
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: liquidTheme(Brightness.light),
-        home: Material(child: DiffView(state: state)),
-      ),
-    );
-    await tester.pumpAndSettle();
+    final state = await show(tester, backend);
     expect(
       find.text(
         'This project is not in Git, so Liquid cannot show what a run changed.',
@@ -314,7 +273,6 @@ void main() {
   });
 
   testWidgets('moves past a folded folder in both directions', (tester) async {
-    await tester.binding.setSurfaceSize(const Size(1600, 900));
     BridgeFileChange file(String path) => BridgeFileChange(
       path: path,
       status: BridgeChangeStatus.modified,
@@ -328,32 +286,21 @@ void main() {
         file('src/b.ts'),
         file('top.ts'),
       ];
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: liquidTheme(Brightness.light),
-        home: Material(child: DiffView(state: SessionState(backend))),
-      ),
-    );
-    await tester.pumpAndSettle();
-    Future<void> press(LogicalKeyboardKey key) async {
-      await tester.sendKeyEvent(key);
-      await tester.pumpAndSettle();
-    }
+    await show(tester, backend);
 
-    await press(LogicalKeyboardKey.arrowDown);
+    await press(tester, LogicalKeyboardKey.arrowDown);
     expect(find.text('src/a.ts'), findsOneWidget);
-    await press(LogicalKeyboardKey.arrowLeft);
-    await press(LogicalKeyboardKey.arrowDown);
+    await press(tester, LogicalKeyboardKey.arrowLeft);
+    await press(tester, LogicalKeyboardKey.arrowDown);
     expect(find.text('top.ts'), findsNWidgets(2), reason: 'the next file');
-    await press(LogicalKeyboardKey.arrowLeft);
-    await press(LogicalKeyboardKey.arrowUp);
+    await press(tester, LogicalKeyboardKey.arrowLeft);
+    await press(tester, LogicalKeyboardKey.arrowUp);
     expect(find.text('lib/x.ts'), findsOneWidget, reason: 'past the folder');
   });
 
   testWidgets('counts one file and explains a file without a text diff', (
     tester,
   ) async {
-    await tester.binding.setSurfaceSize(const Size(1600, 900));
     final backend = FakeBackend()
       ..changed = [
         BridgeFileChange(
@@ -366,13 +313,7 @@ void main() {
       ..patches = {
         'logo.png': 'Binary files a/logo.png and b/logo.png differ\n',
       };
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: liquidTheme(Brightness.light),
-        home: Material(child: DiffView(state: SessionState(backend))),
-      ),
-    );
-    await tester.pumpAndSettle();
+    await show(tester, backend);
     expect(find.text('1 file · +0 −0'), findsOneWidget);
     expect(
       find.text('No text changes to show, as for a binary file.'),
