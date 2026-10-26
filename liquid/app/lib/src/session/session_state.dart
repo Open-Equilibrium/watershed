@@ -380,8 +380,14 @@ class SessionState {
   Future<BridgeContextDetail?> context(String entry) => _backend.context(entry);
 
   /// Continues the session from `entry`; the next prompt starts a new branch there. The chat
-  /// then shows the branch the session continues.
-  Future<void> branch(String entry) async {
+  /// then shows the branch the session continues. A branch asked for while one runs waits for
+  /// that one instead of branching again.
+  Future<void> branch(String entry) =>
+      _branching ??= _branch(entry).whenComplete(() => _branching = null);
+
+  Future<void>? _branching;
+
+  Future<void> _branch(String entry) async {
     await _backend.branch(entry);
     stored.value++;
     await loadChat();
@@ -403,33 +409,57 @@ class SessionState {
   Future<void> _loadChat() async {
     final generation = _generation;
     final before = items.value;
-    final page = await _backend.transcript(null);
-    final history = await _backend.history(const []);
+    final BridgeTranscript page;
+    final BridgeHistory history;
+    try {
+      page = await _backend.transcript(null);
+      history = await _backend.history(const []);
+    } on Object catch (error) {
+      notify(BridgeLevel.error, 'Could not restore the chat: $error');
+      return;
+    }
     if (generation != _generation) return;
     // What the stored responses used; live requests add to it.
     totals.value = const SessionTotals().add(history.usage);
-    final marker = branchMarker(history.tree, history.leaf);
     final rebuilt = _stored(page.items);
-    if (marker != null) {
+    _pendingMark = null;
+    if (branchMarker(history.tree, history.leaf) case final marker?) {
       final path = _pathIndex(history.tree, history.leaf);
-      final forkIndex = path[marker.fork] ?? -1;
-      final after = rebuilt.indexWhere(
-        (view) => (path[view.entry] ?? -1) > forkIndex,
-      );
-      rebuilt.insert(
-        after < 0 ? rebuilt.length : after,
-        ItemView(
-          id: _nextStoredId--,
-          kind: BridgeItemKind.dynamicToolCall,
-          marker: marker,
-        ),
-      );
+      final mark = (marker: marker, path: path, fork: path[marker.fork] ?? -1);
+      if (!_placeMark(rebuilt, mark, complete: !page.more)) _pendingMark = mark;
     }
-    final arrived = items.value.where((view) => !before.contains(view));
+    // Only live items arrived meanwhile; items another restore rebuilt are replaced.
+    final arrived = items.value.where(
+      (view) =>
+          !before.contains(view) && view.entry == null && view.marker == null,
+    );
     items.value = [...rebuilt, ...arrived];
     _chatStart = page.start;
     chatMore.value = page.more;
     if (page.items.isEmpty) await loadEarlier();
+  }
+
+  /// The branch mark until the chat shows where the branch leaves the others.
+  _Mark? _pendingMark;
+
+  /// Puts the mark before the first of `views` past the fork, once they show the fork itself
+  /// or nothing earlier remains; whether it did.
+  bool _placeMark(List<ItemView> views, _Mark mark, {required bool complete}) {
+    int position(ItemView view) => mark.path[view.entry] ?? -1;
+    final reachesFork = views.any(
+      (view) => view.entry != null && position(view) <= mark.fork,
+    );
+    if (!reachesFork && !complete) return false;
+    final after = views.indexWhere((view) => position(view) > mark.fork);
+    views.insert(
+      after < 0 ? views.length : after,
+      ItemView(
+        id: _nextStoredId--,
+        kind: BridgeItemKind.dynamicToolCall,
+        marker: mark.marker,
+      ),
+    );
+    return true;
   }
 
   /// Reads the stored entries before the earliest one the chat covers, passing over pages the
@@ -447,7 +477,12 @@ class SessionState {
         // A page that does not move back ends the reading, so it cannot repeat forever.
         chatMore.value = page.more && page.start != before;
         if (page.items.isNotEmpty) {
-          items.value = [..._stored(page.items), ...items.value];
+          final shown = [..._stored(page.items), ...items.value];
+          if (_pendingMark case final mark?
+              when _placeMark(shown, mark, complete: !chatMore.value)) {
+            _pendingMark = null;
+          }
+          items.value = shown;
           return;
         }
       }
@@ -489,6 +524,11 @@ class SessionState {
   void notify(BridgeLevel level, String text) {
     final shown = Notice(level, text, DateTime.now());
     notices.value = [shown, ...notices.value].take(_keptNotices).toList();
+    // An error stays in the bar until it is dismissed; anything less only joins the list.
+    if (notice.value?.level == BridgeLevel.error &&
+        level != BridgeLevel.error) {
+      return;
+    }
     notice.value = shown;
     _fade?.cancel();
     if (level != BridgeLevel.error) {
@@ -626,3 +666,7 @@ String _firstLine(String message) {
   final line = message.trim().split('\n').first.trim();
   return String.fromCharCodes(line.runes.take(120));
 }
+
+/// Where a branch leaves the others: its mark, each entry's position on the path to the leaf,
+/// and the fork's position.
+typedef _Mark = ({BranchMarker marker, Map<String, int> path, int fork});

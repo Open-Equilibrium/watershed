@@ -310,6 +310,117 @@ void main() {
     },
   );
 
+  group('the rebuilt chat', () {
+    const tree = [
+      BridgeTreeNode(id: 'u1', kind: BridgeEntryKind.user, preview: 'Go'),
+      BridgeTreeNode(
+        id: 'a1',
+        parent: 'u1',
+        kind: BridgeEntryKind.assistant,
+        preview: 'Looked',
+      ),
+      BridgeTreeNode(
+        id: 'a2',
+        parent: 'a1',
+        kind: BridgeEntryKind.assistant,
+        preview: 'Done',
+      ),
+      BridgeTreeNode(
+        id: 'b1',
+        parent: 'a1',
+        kind: BridgeEntryKind.user,
+        preview: 'Instead',
+      ),
+      BridgeTreeNode(
+        id: 'b2',
+        parent: 'b1',
+        kind: BridgeEntryKind.assistant,
+        preview: 'B2',
+      ),
+    ];
+    String describe(ItemView view) =>
+        view.marker == null ? view.text.value : 'marker ${view.marker!.ref}';
+
+    test('holds one branch at a time and never doubles', () async {
+      backend.stored = historyOf([], tree: tree, leaf: 'b2');
+      backend.transcripts[''] = BridgeTranscript(
+        items: [
+          chatItem('u1', BridgeItemKind.userMessage, text: 'Go'),
+          chatItem('a1', BridgeItemKind.assistantMessage, text: 'Looked'),
+        ],
+        more: false,
+        start: 'u1',
+      );
+      backend.gate = Completer();
+      final first = state.branch('a1');
+      final second = state.branch('a1');
+      final reload = state.loadChat();
+      await pumpEventQueue();
+      backend.gate!.complete();
+      await Future.wait([first, second, reload]);
+      expect(backend.calls.where((call) => call.startsWith('branch')), [
+        'branch a1',
+      ], reason: 'a double press branches once');
+      expect(
+        state.items.value
+            .where((view) => view.marker == null)
+            .map((view) => view.text.value),
+        ['Go', 'Looked'],
+        reason: 'overlapping restores keep one copy',
+      );
+      expect(state.items.value.where((view) => view.marker != null).length, 1);
+    });
+
+    test('says when it cannot be read', () async {
+      backend.transcriptError = 'session file is gone';
+      await state.loadChat();
+      expect(
+        state.notice.value?.text,
+        'Could not restore the chat: session file is gone',
+      );
+    });
+
+    test('marks the branch where it leaves, also on an earlier page', () async {
+      backend.stored = historyOf([], tree: tree, leaf: 'b2');
+      // The newest page starts after the first entry past the fork.
+      backend.transcripts[''] = BridgeTranscript(
+        items: [chatItem('b2', BridgeItemKind.assistantMessage, text: 'B2')],
+        more: true,
+        start: 'b2',
+      );
+      backend.transcripts['b2'] = BridgeTranscript(
+        items: [
+          chatItem('u1', BridgeItemKind.userMessage, text: 'Go'),
+          chatItem('a1', BridgeItemKind.assistantMessage, text: 'Looked'),
+          chatItem('b1', BridgeItemKind.userMessage, text: 'Instead'),
+        ],
+        more: false,
+        start: 'u1',
+      );
+      await state.loadChat();
+      await state.loadEarlier();
+      expect(state.items.value.map(describe), [
+        'Go',
+        'Looked',
+        'marker B',
+        'Instead',
+        'B2',
+      ]);
+    });
+  });
+
+  test('keeps an error in the status bar until it is dismissed', () async {
+    state.notify(BridgeLevel.error, 'The model request failed');
+    state.notify(BridgeLevel.info, 'Session saved');
+    expect(state.notice.value?.text, 'The model request failed');
+    expect(state.notices.value.map((notice) => notice.text), [
+      'Session saved',
+      'The model request failed',
+    ], reason: 'the list keeps both');
+    state.dismissNotice();
+    expect(state.notice.value, isNull);
+  });
+
   test('counts cached input in the session totals', () async {
     await emit(
       event(

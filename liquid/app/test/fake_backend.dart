@@ -144,9 +144,13 @@ class FakeBackend implements SessionBackend {
   /// Transcript pages by their `before` entry; the newest page has the key ''.
   final transcripts = <String, BridgeTranscript>{};
 
+  /// What reading the chat fails with.
+  Object? transcriptError;
+
   @override
   Future<BridgeTranscript> transcript(String? before) async {
     calls.add('transcript ${before ?? ''}'.trim());
+    if (transcriptError case final error?) throw error;
     return transcripts[before ?? ''] ??
         const BridgeTranscript(items: [], more: false);
   }
