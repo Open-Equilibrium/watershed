@@ -69,8 +69,8 @@ class _StatusBarState extends State<StatusBar> {
                       link: _anchor,
                       onClose: _list.hide,
                     ),
-                    child: GestureDetector(
-                      behavior: HitTestBehavior.opaque,
+                    // Focusable, so the list opens from the keyboard too.
+                    child: InkWell(
                       onTap: _list.toggle,
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
@@ -202,7 +202,7 @@ class _NoticeList extends StatelessWidget {
                         const SizedBox(width: WsMetrics.space2),
                         Text('Notifications', style: small),
                         const Spacer(),
-                        GestureDetector(
+                        InkWell(
                           onTap: () {
                             state.clearNotices();
                             onClose();

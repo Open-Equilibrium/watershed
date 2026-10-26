@@ -299,6 +299,30 @@ void main() {
     expect(shown(), contains('idle'), reason: 'Esc dismisses');
   });
 
+  testWidgets('opens and clears the notifications from the keyboard', (
+    tester,
+  ) async {
+    await show(tester);
+    await emit(
+      tester,
+      event(
+        BridgeEventKind.notification,
+        display: BridgeDisplay(key: '', level: BridgeLevel.warning),
+        text: 'lint: 2 warnings',
+      ),
+    );
+    Focus.of(tester.element(find.byKey(const Key('status')))).requestFocus();
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(find.text('Notifications'), findsOneWidget);
+    Focus.of(tester.element(find.text('Clear all'))).requestFocus();
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.space);
+    await tester.pumpAndSettle();
+    expect(find.text('Notifications'), findsNothing);
+  });
+
   testWidgets('decides approvals from the keyboard', (tester) async {
     await show(tester);
     await emit(tester, event(BridgeEventKind.turnStarted, turn: 1));
