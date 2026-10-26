@@ -566,18 +566,22 @@ class _ProfileRow extends StatelessWidget {
                   border: Border.all(color: ws.borderStrong),
                   borderRadius: BorderRadius.circular(WsMetrics.radiusMd + 1),
                 ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    for (final profile in Profile.values)
-                      if (available || profile != Profile.liquidKey)
-                        _Segment(
-                          label: _profileNames[profile]!,
-                          selected: settings.profile == profile,
-                          onTap: () =>
-                              shortcuts.update(settings.choose(profile)),
-                        ),
-                  ],
+                // Focus shows above the group's background.
+                child: Material(
+                  type: MaterialType.transparency,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      for (final profile in Profile.values)
+                        if (available || profile != Profile.liquidKey)
+                          _Segment(
+                            label: _profileNames[profile]!,
+                            selected: settings.profile == profile,
+                            onTap: () =>
+                                shortcuts.update(settings.choose(profile)),
+                          ),
+                    ],
+                  ),
                 ),
               ),
               if (settings.profile == Profile.custom)
@@ -630,10 +634,10 @@ class _Segment extends StatelessWidget {
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
-      child: Container(
+      // Ink, so the focus highlight shows above the selected segment.
+      child: Ink(
         height: 24,
         padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space4),
-        alignment: Alignment.center,
         decoration: selected
             ? BoxDecoration(
                 color: ws.canvas,
@@ -641,12 +645,15 @@ class _Segment extends StatelessWidget {
                 border: Border.all(color: ws.borderStrong),
               )
             : null,
-        child: Text(
-          label,
-          style: TextStyle(
-            fontSize: 13,
-            color: selected ? ws.text : ws.textMuted,
-            fontWeight: selected ? WsMetrics.fwMedium : WsMetrics.fwRegular,
+        child: Center(
+          widthFactor: 1,
+          child: Text(
+            label,
+            style: TextStyle(
+              fontSize: 13,
+              color: selected ? ws.text : ws.textMuted,
+              fontWeight: selected ? WsMetrics.fwMedium : WsMetrics.fwRegular,
+            ),
           ),
         ),
       ),
@@ -771,7 +778,11 @@ class _Notice extends StatelessWidget {
       color: context.ws.warningSubtle,
       borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
     ),
-    child: Wrap(spacing: WsMetrics.space3, children: children),
+    // Focus on a link shows above the notice's background.
+    child: Material(
+      type: MaterialType.transparency,
+      child: Wrap(spacing: WsMetrics.space3, children: children),
+    ),
   );
 }
 

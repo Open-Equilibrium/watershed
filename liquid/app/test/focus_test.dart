@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:liquid/src/agent/action_area.dart';
 import 'package:liquid/src/agent/shell.dart';
 import 'package:liquid/src/rust/api/events.dart';
 import 'package:liquid/src/session/session_state.dart';
+import 'package:liquid/src/shortcuts/shortcuts_page.dart';
 import 'package:liquid/src/theme/theme.dart';
 
 import 'fake_backend.dart';
@@ -253,5 +255,82 @@ void main() {
         event(resolved, request: BridgeRequest(id: request.request!.id)),
       );
     }
+  });
+
+  /// Paints [top] after a box filled with [bottom], so [top] shows on it.
+  PaintPattern paintsAbove(Color bottom, Color top) {
+    bool fills(Object? paint, Color color) =>
+        paint is Paint && paint.color.toARGB32() == color.toARGB32();
+    return paints
+      ..something(
+        (method, arguments) =>
+            method == #drawRRect && fills(arguments[1], bottom),
+      )
+      ..something(
+        (method, arguments) =>
+            (method == #drawRect || method == #drawRRect) &&
+            fills(arguments[1], top),
+      );
+  }
+
+  /// Presses Tab until the keyboard is on something inside [target].
+  Future<void> tabTo(WidgetTester tester, Finder target) async {
+    final inside = find.descendant(of: target, matching: find.byType(Focus));
+    for (var press = 0; press < 30; press++) {
+      final focus = FocusManager.instance.primaryFocus?.context;
+      if (focus != null && inside.evaluate().contains(focus)) return;
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.pumpAndSettle();
+    }
+    fail('Tab never reached $target');
+  }
+
+  testWidgets('focus shows on controls inside the input area', (tester) async {
+    await show(tester);
+    final context = tester.element(find.byType(Composer));
+    await tabTo(tester, find.byType(ModeChip));
+    expect(
+      find.byType(Composer),
+      paintsAbove(context.ws.surface, Theme.of(context).focusColor),
+      reason: 'the highlight is painted above the input area',
+    );
+  });
+
+  testWidgets('focus shows on the profile choice and on notice links', (
+    tester,
+  ) async {
+    await show(tester);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.comma);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pumpAndSettle();
+    final context = tester.element(find.text('Standard'));
+    final focus = Theme.of(context).focusColor;
+    final standard = find.ancestor(
+      of: find.text('Standard'),
+      matching: find.byType(InkWell),
+    );
+    await tabTo(tester, standard);
+    expect(
+      find.byType(ShortcutsPage),
+      paintsAbove(context.ws.canvas, focus),
+      reason: 'the highlight is painted above the selected profile',
+    );
+
+    await tester.tap(find.text('⌘L'));
+    await tester.pumpAndSettle();
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyN);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pumpAndSettle();
+    final link = find.text('Use anyway, clear New Session');
+    Focus.of(tester.element(link)).requestFocus();
+    await tester.pumpAndSettle();
+    expect(link, findsOneWidget);
+    expect(
+      find.byType(ShortcutsPage),
+      paintsAbove(context.ws.warningSubtle, focus),
+      reason: 'the highlight is painted above the notice',
+    );
   });
 }

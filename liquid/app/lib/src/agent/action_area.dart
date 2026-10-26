@@ -108,7 +108,7 @@ class _ActionAreaState extends State<ActionArea> {
   }
 }
 
-/// The input area's card.
+/// The input area's card; controls in it show focus and hover above its background.
 class _Box extends StatelessWidget {
   const _Box({this.ring, required this.padding, required this.child});
 
@@ -127,7 +127,7 @@ class _Box extends StatelessWidget {
       ],
     ),
     padding: padding,
-    child: child,
+    child: Material(type: MaterialType.transparency, child: child),
   );
 }
 
