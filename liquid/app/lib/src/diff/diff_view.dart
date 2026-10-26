@@ -30,7 +30,10 @@ class _DiffViewState extends State<DiffView> {
   List<DiffLine> _lines = const [];
 
   /// Whether the selected file's patch was read.
-  bool _patchRead = false;
+  String? _note;
+
+  static const _textless =
+      'No text changes to show, as for a binary file or a new file mode.';
   bool _loaded = false;
   final _focus = FocusNode(debugLabel: 'diff');
 
@@ -63,19 +66,6 @@ class _DiffViewState extends State<DiffView> {
     super.dispose();
   }
 
-  /// Reports why changes cannot be read, such as a diff over Git's output limit.
-  Future<T?> _read<T>(Future<T> Function() read) async {
-    try {
-      return await read();
-    } on Object catch (error) {
-      widget.state.notify(
-        BridgeLevel.error,
-        'Could not show the changes: $error',
-      );
-      return null;
-    }
-  }
-
   void _show() {
     final changes = widget.state.changed.value;
     if (changes == null) return;
@@ -96,7 +86,7 @@ class _DiffViewState extends State<DiffView> {
     setState(() {
       _selected = change;
       _lines = const [];
-      _patchRead = false;
+      _note = null;
     });
     if (_loading) return;
     _loading = true;
@@ -104,16 +94,25 @@ class _DiffViewState extends State<DiffView> {
       // Selections passed while a patch loaded are never read.
       while (mounted) {
         final wanted = _selected;
-        final patch = wanted == null
-            ? ''
-            : await _read(() => widget.state.patch(wanted.path));
-        if (!mounted || _selected != wanted) continue;
-        if (patch != null) {
-          setState(() {
-            _lines = parsePatch(patch);
-            _patchRead = true;
-          });
+        if (wanted == null) return;
+        // Why the file shows no lines: a diff that could not be read, such as one over Git's
+        // output limit, or a change without text.
+        String? note;
+        var lines = const <DiffLine>[];
+        final what = 'the changes of ${wanted.path}';
+        try {
+          lines = parsePatch(await widget.state.patch(wanted.path));
+          widget.state.reportRead(what, null);
+          if (lines.isEmpty) note = _textless;
+        } on Object catch (error) {
+          note = 'Could not show the changes: $error';
+          widget.state.reportRead(what, note);
         }
+        if (!mounted || _selected != wanted) continue;
+        setState(() {
+          _lines = lines;
+          _note = note;
+        });
         return;
       }
     } finally {
@@ -252,11 +251,7 @@ class _DiffViewState extends State<DiffView> {
           ),
         ),
         Expanded(
-          child: _Patch(
-            change: _selected,
-            lines: _lines,
-            textless: _patchRead && _lines.isEmpty,
-          ),
+          child: _Patch(change: _selected, lines: _lines, note: _note),
         ),
       ],
     );
@@ -360,22 +355,19 @@ class _FileTile extends StatelessWidget {
 }
 
 class _Patch extends StatelessWidget {
-  const _Patch({
-    required this.change,
-    required this.lines,
-    required this.textless,
-  });
+  const _Patch({required this.change, required this.lines, required this.note});
 
   final BridgeFileChange? change;
   final List<DiffLine> lines;
 
-  /// Whether the file changed without lines to show, such as a binary file.
-  final bool textless;
+  /// Why the file shows no lines.
+  final String? note;
 
   @override
   Widget build(BuildContext context) {
     final ws = context.ws;
     final change = this.change;
+    final note = this.note;
     if (change == null) return const SizedBox.shrink();
     return Padding(
       padding: const EdgeInsets.fromLTRB(
@@ -423,10 +415,10 @@ class _Patch extends StatelessWidget {
                 ),
               ),
               // Long lines scroll sideways together, so no change is out of reach.
-              child: textless
+              child: note != null
                   ? Center(
                       child: Text(
-                        'No text changes to show, as for a binary file or a new file mode.',
+                        note,
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
                     )

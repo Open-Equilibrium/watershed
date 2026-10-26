@@ -7,8 +7,9 @@ int promptTokens(BridgeUsage usage) =>
 /// A duration as milliseconds, seconds or minutes and seconds.
 String formatDuration(int ms) {
   if (ms < 1000) return '$ms ms';
-  if (ms < 60000) return '${(ms / 1000).toStringAsFixed(1)} s';
-  final seconds = ms ~/ 1000;
+  // Seconds keep one decimal until they would round to a whole minute.
+  if (ms < 59950) return '${(ms / 1000).toStringAsFixed(1)} s';
+  final seconds = ms < 60000 ? 60 : ms ~/ 1000;
   return '${seconds ~/ 60}m ${(seconds % 60).toString().padLeft(2, '0')}s';
 }
 

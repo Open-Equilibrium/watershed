@@ -122,13 +122,16 @@ void main() {
       ]
       ..patchError = 'the diff is larger than 4 MiB';
     final state = await show(tester, backend);
-    expect(
-      (state.notice.value?.level, state.notice.value?.text),
-      (
-        BridgeLevel.error,
-        'Could not show the changes: the diff is larger than 4 MiB',
-      ),
-    );
+    const reason = 'Could not show the changes: the diff is larger than 4 MiB';
+    expect(find.text(reason), findsOneWidget, reason: 'the file says why');
+    // Each run reads the changes again; the lasting failure is reported once.
+    for (var turn = 0; turn < 2; turn++) {
+      backend.controller
+        ..add(event(BridgeEventKind.turnStarted))
+        ..add(event(BridgeEventKind.turnCompleted));
+      await tester.pumpAndSettle();
+    }
+    expect(state.notices.value.map((notice) => notice.text), [reason]);
   });
 
   testWidgets('scrolls a long line sideways to its end', (tester) async {
