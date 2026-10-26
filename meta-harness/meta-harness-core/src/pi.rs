@@ -349,12 +349,12 @@ pub(crate) fn call_argument(arguments: &str) -> Option<String> {
     ["command", "path", "file_path", "pattern"]
         .iter()
         .find_map(|name| arguments.get(*name)?.as_str())
-        .map(|text| first_line(text, TARGET_CHARS))
+        .map(|text| first_line(&visible(text), TARGET_CHARS))
 }
 
 /// What a call works on, for one-line summaries: its main argument, else its arguments.
 pub(crate) fn call_target(arguments: &str) -> String {
-    call_argument(arguments).unwrap_or_else(|| first_line(arguments, TARGET_CHARS))
+    call_argument(arguments).unwrap_or_else(|| first_line(&visible(arguments), TARGET_CHARS))
 }
 
 /// The whole call an approval shows: a shell command itself, other tools their arguments.
@@ -362,13 +362,12 @@ pub(crate) fn call_text(tool: &str, arguments: &str) -> String {
     let command = (tool == "bash")
         .then(|| serde_json::from_str::<Value>(arguments).ok())
         .flatten();
-    match command
-        .as_ref()
-        .and_then(|call| call.get("command")?.as_str())
-    {
-        Some(command) => command.to_owned(),
-        None => arguments.to_owned(),
-    }
+    visible(
+        command
+            .as_ref()
+            .and_then(|call| call.get("command")?.as_str())
+            .unwrap_or(arguments),
+    )
 }
 
 /// The file a call of one of pi's file tools changes.
@@ -380,7 +379,51 @@ pub(crate) fn changed_path(tool: &str, arguments: &str) -> Option<String> {
     ["path", "file_path"]
         .iter()
         .find_map(|name| arguments.get(*name)?.as_str())
-        .map(str::to_owned)
+        .map(visible)
+}
+/// `text` with the characters that hide or reorder what it shows written out, such as
+/// `<U+202E>`: controls other than line breaks and tabs, Unicode's format characters,
+/// including its bidirectional controls, and its line and paragraph separators. Look-alike
+/// letters stay as they are.
+pub(crate) fn visible(text: &str) -> String {
+    let mut shown = String::with_capacity(text.len());
+    for character in text.chars() {
+        if hides(character) {
+            shown.push_str(&format!("<U+{:04X}>", u32::from(character)));
+        } else {
+            shown.push(character);
+        }
+    }
+    shown
+}
+
+/// Whether `character` hides or reorders text: Unicode 15.1's control (Cc) characters other
+/// than line breaks and tabs, its format (Cf) characters and its separators U+2028 and U+2029.
+fn hides(character: char) -> bool {
+    (character.is_control() && character != '\n' && character != '\t')
+        || matches!(
+            u32::from(character),
+            0xAD | 0x600..=0x605
+                | 0x61C
+                | 0x6DD
+                | 0x70F
+                | 0x890..=0x891
+                | 0x8E2
+                | 0x180E
+                | 0x200B..=0x200F
+                | 0x2028..=0x202E
+                | 0x2060..=0x2064
+                | 0x2066..=0x206F
+                | 0xFEFF
+                | 0xFFF9..=0xFFFB
+                | 0x110BD
+                | 0x110CD
+                | 0x13430..=0x1343F
+                | 0x1BCA0..=0x1BCA3
+                | 0x1D173..=0x1D17A
+                | 0xE0001
+                | 0xE0020..=0xE007F
+        )
 }
 
 /// A decision as Watershed's extension records it.

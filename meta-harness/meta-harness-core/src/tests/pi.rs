@@ -497,3 +497,31 @@ fn reports_extension_errors_as_notifications() {
         }]
     );
 }
+
+#[test]
+fn shows_invisible_and_reordering_characters_in_what_a_call_shows() {
+    use crate::pi::{call_target, call_text, changed_path};
+    // Right-to-left override, zero-width space, carriage return and NUL; line breaks and tabs
+    // stay.
+    let command = r#"{"command":"rm -rf /\u202egnp.txt\u200b\r\n\techo\u0000"}"#;
+    assert_eq!(
+        call_text("bash", command),
+        "rm -rf /<U+202E>gnp.txt<U+200B><U+000D>\n\techo<U+0000>"
+    );
+    assert_eq!(
+        call_target(command),
+        "rm -rf /<U+202E>gnp.txt<U+200B><U+000D>"
+    );
+    // As the adapter receives them: parsed, with the characters themselves.
+    let edit = serde_json::json!({"path": "a\u{2066}b.rs", "oldText": "x\u{2028}y"}).to_string();
+    assert_eq!(
+        changed_path("edit", &edit).as_deref(),
+        Some("a<U+2066>b.rs")
+    );
+    assert_eq!(
+        call_text("edit", &edit),
+        r#"{"oldText":"x<U+2028>y","path":"a<U+2066>b.rs"}"#,
+        "other tools show their arguments"
+    );
+    assert_eq!(call_text("bash", r#"{"command":"ls -la"}"#), "ls -la");
+}
