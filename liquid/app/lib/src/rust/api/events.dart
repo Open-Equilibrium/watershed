@@ -223,7 +223,7 @@ enum BridgeEventKind {
 
 /// One file a run changed.
 class BridgeFileChange {
-  /// The path relative to the project root.
+  /// The path relative to the root of the Git repository the project is in.
   final String path;
 
   /// How it changed.

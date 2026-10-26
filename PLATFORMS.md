@@ -11,7 +11,7 @@ Linux and macOS share the same [public installation guarantee and maintenance li
 | Flow Agent authoring, Fixture execution and provider-only Flows | Linux x86_64; macOS ARM64 | Implemented; productive provider execution is restricted to Ubuntu 24.04 and macOS 27. |
 | Flow Agent Tool execution with mandatory self-protection | Linux x86_64; macOS ARM64 | Linux Bubblewrap/seccomp and Mac Seatbelt replacements integrated; native evidence is linked above. Failed admission/readiness prevents launch without fallback. |
 | Meta-Harness CLI, service and host-local agent control | Linux x86_64; macOS ARM64 | Not implemented. |
-| Liquid desktop client | Linux x86_64; macOS ARM64; Windows 11 x86_64 | Not implemented. |
+| Liquid desktop client | Linux x86_64; macOS ARM64; Windows 11 x86_64 | In development on macOS ARM64: the agent surface for one pi session, not released. Linux and Windows are not implemented. |
 | Liquid mobile client | Android ARM64 | Not implemented. |
 
 Linux ARM64 and Windows 11 ARM64 are deferred beyond Release 1. Earlier Windows versions are unsupported. Flow Agent and Meta-Harness have no native Windows support or future Windows-backend commitment. Liquid's mobile and headless capabilities retain their separate contracts in its [V-Spec](docs/concept/V-Spec_Liquid.html); desktop support does not certify them.

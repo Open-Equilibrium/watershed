@@ -93,8 +93,8 @@ summary{cursor:pointer}summary h3{display:inline;margin:0}summary:focus-visible{
         <p><strong>Recommendation:</strong> A behind a backend-neutral Meta-Harness agent-executor contract, subject to a bounded integration spike; keep direct semantic adapters where they provide richer events.</p>
         <p><strong>Acceptance criterion:</strong> The spike starts, steers, observes and restores Codex plus one other CLI agent without an attached HerdR UI; preserves stable Meta-Harness session identity across detach and service restarts; routes every mutation through the Meta-Harness policy/audit gate; normalizes HerdR events without treating terminal inference as semantic truth; rejects cross-host process claims; and documents fail-closed behavior for unsupported capabilities on the native targets in <a href="../../PLATFORMS.md">PLATFORMS.md</a>.</p>
       </details>
-      <details id="d-068" class="decision" style="grid-column:1/-1">
-        <summary><h3>D-068 - Reach Of Tool Approvals</h3></summary>
+      <details id="d-073" class="decision" style="grid-column:1/-1">
+        <summary><h3>D-073 - Reach Of Tool Approvals</h3></summary>
         <p><strong>Status:</strong> Open; found by the agent-surface review. Nothing here blocks the slice: each question is about how far an existing approval reaches (ADR-0188, ADR-0207).</p>
         <p><strong>Background:</strong> Watershed's pi extension is what makes pi ask before a tool call. pi loads its extensions anew for every session, so the core checks that the extension is loaded when a session starts and before the first message after a session switch Liquid makes. An extension command can also switch sessions itself; the core does not see that.</p>
         <p><strong>Question 1 - switches an extension makes:</strong> If Watershed's extension file disappeared (for example, a checkout of an older branch of this repository) and another extension then switches sessions, the next messages run tools without asking.</p>

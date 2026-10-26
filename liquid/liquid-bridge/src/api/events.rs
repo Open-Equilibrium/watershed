@@ -260,7 +260,7 @@ pub enum BridgeChangeStatus {
 /// One file a run changed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BridgeFileChange {
-    /// The path relative to the project root.
+    /// The path relative to the root of the Git repository the project is in.
     pub path: String,
     /// How it changed.
     pub status: BridgeChangeStatus,
