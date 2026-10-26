@@ -314,6 +314,8 @@ fn turns_watershed_approval_questions_into_requests() {
         r#"{"type":"extension_ui_request","id":"a1","method":"select","title":"watershed.approval {\"tool\":\"bash\",\"arguments\":{\"command\":\"npm test\"},\"readOnly\":false,\"session\":\"s1\"}","options":["allow-once","allow-session","reject","allow-auto"]}"#,
         r#"{"type":"extension_ui_request","id":"a2","method":"select","title":"watershed.approval {\"tool\":\"write\",\"arguments\":{},\"readOnly\":false}","options":[]}"#,
         r#"{"type":"extension_ui_request","id":"a3","method":"select","title":"watershed.approval {\"tool\":\"read\",\"arguments\":{\"path\":\"a\"},\"readOnly\":true}","options":[]}"#,
+        // An extension's tool name cannot hide characters either.
+        r#"{"type":"extension_ui_request","id":"a4","method":"select","title":"watershed.approval {\"tool\":\"safe\\u202e\",\"arguments\":{},\"readOnly\":false}","options":[]}"#,
     ]);
     let opened =
         |id: &str, kind, tool: &str, arguments: &str, read_only| AgentEvent::RequestOpened {
@@ -343,6 +345,7 @@ fn turns_watershed_approval_questions_into_requests() {
                 r#"{"path":"a"}"#,
                 true
             ),
+            opened("a4", RequestKind::ToolApproval, "safe<U+202E>", "{}", false),
         ]
     );
 }
@@ -522,6 +525,12 @@ fn shows_invisible_and_reordering_characters_in_what_a_call_shows() {
         call_text("edit", &edit),
         r#"{"oldText":"x<U+2028>y","path":"a<U+2066>b.rs"}"#,
         "other tools show their arguments"
+    );
+    // Characters Unicode lets renderers ignore: variation selectors, fillers, joiners and tags.
+    let ignorable = r#"{"command":"rm\ufe0f \u3164-\u115f\u034f\u17b4\u180b\udb40\udd00"}"#;
+    assert_eq!(
+        call_text("bash", ignorable),
+        "rm<U+FE0F> <U+3164>-<U+115F><U+034F><U+17B4><U+180B><U+E0100>"
     );
     assert_eq!(call_text("bash", r#"{"command":"ls -la"}"#), "ls -la");
 }

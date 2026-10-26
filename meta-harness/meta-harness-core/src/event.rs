@@ -291,13 +291,13 @@ pub enum AgentEvent {
         request: RequestId,
         /// What the call would do.
         kind: RequestKind,
-        /// The agent's tool name.
+        /// The agent's tool name, with hiding characters written out as in `text`.
         tool: String,
         /// The call's arguments as JSON text.
         arguments: String,
         /// The whole call the user decides on, such as a shell command.
         text: String,
-        /// Whether the tool declares that it only reads.
+        /// Whether the tool is one of the agent's own reading tools (ADR-0208).
         read_only: bool,
         /// The session the call runs in, when the agent says.
         session: Option<String>,

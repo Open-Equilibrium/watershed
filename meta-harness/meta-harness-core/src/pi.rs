@@ -404,10 +404,9 @@ pub(crate) fn changed_path(tool: &str, arguments: &str) -> Option<String> {
         .find_map(|name| arguments.get(*name)?.as_str())
         .map(visible)
 }
+
 /// `text` with the characters that hide or reorder what it shows written out, such as
-/// `<U+202E>`: controls other than line breaks and tabs, Unicode's format characters,
-/// including its bidirectional controls, and its line and paragraph separators. Look-alike
-/// letters stay as they are.
+/// `<U+202E>`; [`hides`] lists them. Look-alike letters stay as they are.
 pub(crate) fn visible(text: &str) -> String {
     let mut shown = String::with_capacity(text.len());
     for character in text.chars() {
@@ -420,32 +419,38 @@ pub(crate) fn visible(text: &str) -> String {
     shown
 }
 
-/// Whether `character` hides or reorders text: Unicode 15.1's control (Cc) characters other
-/// than line breaks and tabs, its format (Cf) characters and its separators U+2028 and U+2029.
+/// Whether `character` hides or reorders text, as of Unicode 16.0: control (Cc) characters
+/// other than line breaks and tabs, format (Cf) characters, the separators U+2028 and U+2029,
+/// and characters renderers may ignore (Default_Ignorable_Code_Point), such as variation
+/// selectors and fillers.
 fn hides(character: char) -> bool {
     (character.is_control() && character != '\n' && character != '\t')
         || matches!(
             u32::from(character),
-            0xAD | 0x600..=0x605
+            0xAD | 0x34F
+                | 0x600..=0x605
                 | 0x61C
                 | 0x6DD
                 | 0x70F
                 | 0x890..=0x891
                 | 0x8E2
-                | 0x180E
+                | 0x115F..=0x1160
+                | 0x17B4..=0x17B5
+                | 0x180B..=0x180F
                 | 0x200B..=0x200F
                 | 0x2028..=0x202E
-                | 0x2060..=0x2064
-                | 0x2066..=0x206F
+                | 0x2060..=0x206F
+                | 0x3164
+                | 0xFE00..=0xFE0F
                 | 0xFEFF
-                | 0xFFF9..=0xFFFB
+                | 0xFFA0
+                | 0xFFF0..=0xFFFB
                 | 0x110BD
                 | 0x110CD
                 | 0x13430..=0x1343F
                 | 0x1BCA0..=0x1BCA3
                 | 0x1D173..=0x1D17A
-                | 0xE0001
-                | 0xE0020..=0xE007F
+                | 0xE0000..=0xE0FFF
         )
 }
 
@@ -541,7 +546,7 @@ fn approval(request: RequestId, payload: &str) -> AgentEvent {
     AgentEvent::RequestOpened {
         request,
         kind: request_kind(tool),
-        tool: tool.to_owned(),
+        tool: visible(tool),
         text: call_text(tool, &arguments),
         arguments,
         read_only: payload.get("readOnly").and_then(Value::as_bool) == Some(true),
