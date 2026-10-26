@@ -131,6 +131,25 @@ void main() {
   });
 
   test(
+    'choosing the Liquid key profile keeps the previous profile when it fails',
+    () async {
+      final custom = ShortcutSettings.standard().change(
+        Command.diff,
+        const Keys(LogicalKeyboardKey.keyD, meta: true),
+      );
+      final store = ShortcutStore(file);
+      await store.save(custom);
+      final host = FakeHost()
+        ..failure = PlatformException(code: 'approval', message: 'denied');
+      final shortcuts = await ShortcutController.load(store, host);
+
+      await shortcuts.update(custom.choose(Profile.liquidKey));
+      expect(shortcuts.value, custom, reason: 'Custom stays, not Standard');
+      expect(await store.load(), custom);
+    },
+  );
+
+  test(
     'a change queued behind a failing Liquid key leaves the key off',
     () async {
       final host = FakeHost()

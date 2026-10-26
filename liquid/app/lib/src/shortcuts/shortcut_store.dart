@@ -88,7 +88,8 @@ class ChannelLiquidKeyHost implements LiquidKeyHost {
 
 /// The shortcut settings in use; changes are applied and saved in order.
 class ShortcutController extends ValueNotifier<ShortcutSettings> {
-  ShortcutController._(super.value, this._store, this._host, this.firstStart);
+  ShortcutController._(super.value, this._store, this._host, this.firstStart)
+    : _settled = value;
 
   /// Settings that are neither stored nor applied, for a Liquid without its app data.
   ShortcutController.memory([ShortcutSettings? settings])
@@ -146,6 +147,9 @@ class ShortcutController extends ValueNotifier<ShortcutSettings> {
 
   /// Whether this computer has the Liquid key on, as far as Liquid turned it.
   bool _applied = false;
+
+  /// The settings in effect before the latest change, which a failed one returns to.
+  ShortcutSettings _settled;
   Future<void> _pending = Future.value();
 
   Future<void> update(ShortcutSettings next) {
@@ -165,10 +169,11 @@ class ShortcutController extends ValueNotifier<ShortcutSettings> {
           if (await _apply(want)) {
             _applied = want;
           } else if (want) {
-            value = value.withoutLiquidKey();
+            value = _withoutLiquidKey(value);
             changed = true;
           }
         }
+        _settled = value;
         if (!save && !changed) return;
         try {
           await _store?.save(value);
@@ -176,6 +181,17 @@ class ShortcutController extends ValueNotifier<ShortcutSettings> {
           _problem('Could not save the shortcuts: ${error.message}');
         }
       });
+
+  /// `settings` without the Liquid key: a chosen Liquid key profile gives way to the profile
+  /// before it (approved mockup), other settings only turn the key off.
+  ShortcutSettings _withoutLiquidKey(ShortcutSettings settings) {
+    final before = _settled.profile;
+    final back =
+        settings.profile == Profile.liquidKey && before != Profile.liquidKey
+        ? settings.choose(before)
+        : settings;
+    return back.withoutLiquidKey();
+  }
 
   /// Whether the Liquid key is now on or off as asked.
   Future<bool> _apply(bool on) async {
