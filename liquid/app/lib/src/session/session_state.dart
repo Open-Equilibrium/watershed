@@ -18,7 +18,6 @@ class ItemView {
     required this.id,
     required this.kind,
     this.tool,
-    this.arguments,
     this.target,
     this.entry,
     this.marker,
@@ -27,7 +26,6 @@ class ItemView {
   final int id;
   final BridgeItemKind kind;
   final String? tool;
-  final String? arguments;
 
   /// What a tool call works on, such as a command or a path, on one line.
   final String? target;
@@ -553,7 +551,6 @@ class SessionState {
           id: _nextStoredId--,
           kind: item.kind,
           tool: item.tool,
-          arguments: item.arguments,
           target: item.target,
           entry: item.entry,
         )
@@ -627,7 +624,6 @@ class SessionState {
           id: started.id,
           kind: started.kind ?? BridgeItemKind.dynamicToolCall,
           tool: started.tool,
-          arguments: started.arguments,
           target: started.target,
         );
         _byId[view.id] = view;

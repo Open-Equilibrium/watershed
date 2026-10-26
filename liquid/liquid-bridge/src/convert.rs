@@ -158,7 +158,6 @@ impl From<TranscriptItem> for BridgeTranscriptItem {
             kind: item.kind.into(),
             text: item.text,
             tool: item.tool,
-            arguments: item.arguments,
             target: item.target,
             failed: item.failed,
             duration_ms: item.duration_ms.map(int),
@@ -311,7 +310,6 @@ fn item(id: u64) -> BridgeItem {
         id: int(id),
         kind: None,
         tool: None,
-        arguments: None,
         target: None,
         failed: false,
         duration_ms: None,
@@ -379,20 +377,15 @@ impl From<AgentEvent> for BridgeEvent {
                 kind,
                 detail,
             } => {
-                let (tool, arguments, target) = match detail {
-                    ItemDetail::Tool {
-                        name,
-                        arguments,
-                        target,
-                    } => (Some(name), Some(arguments), Some(target)),
-                    ItemDetail::None => (None, None, None),
+                let (tool, target) = match detail {
+                    ItemDetail::Tool { name, target, .. } => (Some(name), Some(target)),
+                    ItemDetail::None => (None, None),
                 };
                 BridgeEvent {
                     turn: Some(int(turn.0)),
                     item: Some(BridgeItem {
                         kind: Some(kind.into()),
                         tool,
-                        arguments,
                         target,
                         ..item(id.0)
                     }),
@@ -456,18 +449,14 @@ impl From<AgentEvent> for BridgeEvent {
                 request: id,
                 kind,
                 tool,
-                arguments,
                 text,
-                read_only,
                 ..
             } => BridgeEvent {
                 request: Some(BridgeRequest {
                     approval: Some(BridgeApproval {
                         kind: kind.into(),
                         tool,
-                        arguments,
                         text,
-                        read_only,
                     }),
                     ..request(id.0)
                 }),

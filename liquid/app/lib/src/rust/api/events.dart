@@ -17,30 +17,17 @@ class BridgeApproval {
   /// The tool name.
   final String tool;
 
-  /// The arguments as JSON text.
-  final String arguments;
-
   /// The whole call the user decides on, such as a shell command.
   final String text;
-
-  /// Whether the tool declares that it only reads.
-  final bool readOnly;
 
   const BridgeApproval({
     required this.kind,
     required this.tool,
-    required this.arguments,
     required this.text,
-    required this.readOnly,
   });
 
   @override
-  int get hashCode =>
-      kind.hashCode ^
-      tool.hashCode ^
-      arguments.hashCode ^
-      text.hashCode ^
-      readOnly.hashCode;
+  int get hashCode => kind.hashCode ^ tool.hashCode ^ text.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -49,9 +36,7 @@ class BridgeApproval {
           runtimeType == other.runtimeType &&
           kind == other.kind &&
           tool == other.tool &&
-          arguments == other.arguments &&
-          text == other.text &&
-          readOnly == other.readOnly;
+          text == other.text;
 }
 
 /// How a file changed in a run.
@@ -184,7 +169,7 @@ enum BridgeEventKind {
   /// `turn`.
   turnAborted,
 
-  /// `turn` and `item` with kind, tool and arguments.
+  /// `turn` and `item` with kind, tool and target.
   itemStarted,
 
   /// `item` id and `text` with the latest partial output.
@@ -283,9 +268,6 @@ class BridgeItem {
   /// The tool name of a tool call.
   final String? tool;
 
-  /// The tool call's arguments as JSON text.
-  final String? arguments;
-
   /// What a tool call works on, such as a command or a path, on one line.
   final String? target;
 
@@ -305,7 +287,6 @@ class BridgeItem {
     required this.id,
     this.kind,
     this.tool,
-    this.arguments,
     this.target,
     required this.failed,
     this.durationMs,
@@ -318,7 +299,6 @@ class BridgeItem {
       id.hashCode ^
       kind.hashCode ^
       tool.hashCode ^
-      arguments.hashCode ^
       target.hashCode ^
       failed.hashCode ^
       durationMs.hashCode ^
@@ -333,7 +313,6 @@ class BridgeItem {
           id == other.id &&
           kind == other.kind &&
           tool == other.tool &&
-          arguments == other.arguments &&
           target == other.target &&
           failed == other.failed &&
           durationMs == other.durationMs &&

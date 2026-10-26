@@ -11,13 +11,11 @@ class SessionInfo {
     required this.project,
     required this.harness,
     required this.device,
-    this.branch,
   });
 
   final String project;
   final String harness;
   final String device;
-  final String? branch;
 }
 
 /// The open session's title, or "New session" before it has one.
@@ -39,7 +37,7 @@ class SessionTitle extends StatelessWidget {
   );
 }
 
-/// Session navigation with project, harness, branch and device per session.
+/// Session navigation with project, harness and device per session.
 class Sidebar extends StatelessWidget {
   const Sidebar({super.key, required this.state, required this.info});
 
@@ -129,11 +127,7 @@ class Sidebar extends StatelessWidget {
                     Padding(
                       padding: const EdgeInsets.only(left: 15),
                       child: Text(
-                        [
-                          info.harness,
-                          if (info.branch != null) info.branch!,
-                          info.device,
-                        ].join(' · '),
+                        [info.harness, info.device].join(' · '),
                         style: small,
                         overflow: TextOverflow.ellipsis,
                       ),

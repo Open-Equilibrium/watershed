@@ -62,7 +62,6 @@ fn tool_items_keep_their_call_and_outcome() {
         (7, Some(BridgeItemKind::CommandExecution))
     );
     assert_eq!(item.tool.as_deref(), Some("bash"));
-    assert_eq!(item.arguments.as_deref(), Some(r#"{"command":"ls"}"#));
     assert_eq!(item.target.as_deref(), Some("ls"));
 
     let completed = bridge(AgentEvent::ItemCompleted {
@@ -143,9 +142,7 @@ fn requests_and_questions_reach_dart_with_their_answers() {
         Some(BridgeApproval {
             kind: BridgeRequestKind::FileChange,
             tool: "write".to_owned(),
-            arguments: "{}".to_owned(),
             text: "{}".to_owned(),
-            read_only: false,
         })
     );
     let resolved = bridge(AgentEvent::RequestResolved {

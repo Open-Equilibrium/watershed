@@ -461,9 +461,6 @@ class BridgeTranscriptItem {
   /// A tool call's tool.
   final String? tool;
 
-  /// A tool call's arguments as JSON text.
-  final String? arguments;
-
   /// What a tool call works on, such as a command or a path, on one line.
   final String? target;
 
@@ -484,7 +481,6 @@ class BridgeTranscriptItem {
     required this.kind,
     required this.text,
     this.tool,
-    this.arguments,
     this.target,
     required this.failed,
     this.durationMs,
@@ -498,7 +494,6 @@ class BridgeTranscriptItem {
       kind.hashCode ^
       text.hashCode ^
       tool.hashCode ^
-      arguments.hashCode ^
       target.hashCode ^
       failed.hashCode ^
       durationMs.hashCode ^
@@ -514,7 +509,6 @@ class BridgeTranscriptItem {
           kind == other.kind &&
           text == other.text &&
           tool == other.tool &&
-          arguments == other.arguments &&
           target == other.target &&
           failed == other.failed &&
           durationMs == other.durationMs &&

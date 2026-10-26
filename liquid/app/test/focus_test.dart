@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -76,9 +74,7 @@ void main() {
       approval: BridgeApproval(
         kind: BridgeRequestKind.commandExecution,
         tool: 'bash',
-        arguments: jsonEncode({'command': command}),
         text: command,
-        readOnly: false,
       ),
     ),
   );

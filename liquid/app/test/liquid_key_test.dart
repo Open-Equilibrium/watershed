@@ -87,9 +87,7 @@ void main() {
             approval: BridgeApproval(
               kind: BridgeRequestKind.commandExecution,
               tool: 'bash',
-              arguments: '{"command":"git push"}',
               text: 'git push',
-              readOnly: false,
             ),
           ),
         ),
@@ -161,9 +159,7 @@ void main() {
           approval: BridgeApproval(
             kind: BridgeRequestKind.commandExecution,
             tool: 'bash',
-            arguments: '{"command":"git push"}',
             text: 'git push',
-            readOnly: false,
           ),
         ),
       ),

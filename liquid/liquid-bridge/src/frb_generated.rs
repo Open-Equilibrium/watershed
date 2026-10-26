@@ -1489,15 +1489,11 @@ impl SseDecode for crate::api::events::BridgeApproval {
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut var_kind = <crate::api::events::BridgeRequestKind>::sse_decode(deserializer);
         let mut var_tool = <String>::sse_decode(deserializer);
-        let mut var_arguments = <String>::sse_decode(deserializer);
         let mut var_text = <String>::sse_decode(deserializer);
-        let mut var_readOnly = <bool>::sse_decode(deserializer);
         return crate::api::events::BridgeApproval {
             kind: var_kind,
             tool: var_tool,
-            arguments: var_arguments,
             text: var_text,
-            read_only: var_readOnly,
         };
     }
 }
@@ -1713,7 +1709,6 @@ impl SseDecode for crate::api::events::BridgeItem {
         let mut var_id = <i64>::sse_decode(deserializer);
         let mut var_kind = <Option<crate::api::events::BridgeItemKind>>::sse_decode(deserializer);
         let mut var_tool = <Option<String>>::sse_decode(deserializer);
-        let mut var_arguments = <Option<String>>::sse_decode(deserializer);
         let mut var_target = <Option<String>>::sse_decode(deserializer);
         let mut var_failed = <bool>::sse_decode(deserializer);
         let mut var_durationMs = <Option<i64>>::sse_decode(deserializer);
@@ -1723,7 +1718,6 @@ impl SseDecode for crate::api::events::BridgeItem {
             id: var_id,
             kind: var_kind,
             tool: var_tool,
-            arguments: var_arguments,
             target: var_target,
             failed: var_failed,
             duration_ms: var_durationMs,
@@ -2016,7 +2010,6 @@ impl SseDecode for crate::api::history::BridgeTranscriptItem {
         let mut var_kind = <crate::api::events::BridgeItemKind>::sse_decode(deserializer);
         let mut var_text = <String>::sse_decode(deserializer);
         let mut var_tool = <Option<String>>::sse_decode(deserializer);
-        let mut var_arguments = <Option<String>>::sse_decode(deserializer);
         let mut var_target = <Option<String>>::sse_decode(deserializer);
         let mut var_failed = <bool>::sse_decode(deserializer);
         let mut var_durationMs = <Option<i64>>::sse_decode(deserializer);
@@ -2027,7 +2020,6 @@ impl SseDecode for crate::api::history::BridgeTranscriptItem {
             kind: var_kind,
             text: var_text,
             tool: var_tool,
-            arguments: var_arguments,
             target: var_target,
             failed: var_failed,
             duration_ms: var_durationMs,
@@ -2654,9 +2646,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::events::BridgeApproval {
         [
             self.kind.into_into_dart().into_dart(),
             self.tool.into_into_dart().into_dart(),
-            self.arguments.into_into_dart().into_dart(),
             self.text.into_into_dart().into_dart(),
-            self.read_only.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -2973,7 +2963,6 @@ impl flutter_rust_bridge::IntoDart for crate::api::events::BridgeItem {
             self.id.into_into_dart().into_dart(),
             self.kind.into_into_dart().into_dart(),
             self.tool.into_into_dart().into_dart(),
-            self.arguments.into_into_dart().into_dart(),
             self.target.into_into_dart().into_dart(),
             self.failed.into_into_dart().into_dart(),
             self.duration_ms.into_into_dart().into_dart(),
@@ -3382,7 +3371,6 @@ impl flutter_rust_bridge::IntoDart for crate::api::history::BridgeTranscriptItem
             self.kind.into_into_dart().into_dart(),
             self.text.into_into_dart().into_dart(),
             self.tool.into_into_dart().into_dart(),
-            self.arguments.into_into_dart().into_dart(),
             self.target.into_into_dart().into_dart(),
             self.failed.into_into_dart().into_dart(),
             self.duration_ms.into_into_dart().into_dart(),
@@ -3529,9 +3517,7 @@ impl SseEncode for crate::api::events::BridgeApproval {
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <crate::api::events::BridgeRequestKind>::sse_encode(self.kind, serializer);
         <String>::sse_encode(self.tool, serializer);
-        <String>::sse_encode(self.arguments, serializer);
         <String>::sse_encode(self.text, serializer);
-        <bool>::sse_encode(self.read_only, serializer);
     }
 }
 
@@ -3719,7 +3705,6 @@ impl SseEncode for crate::api::events::BridgeItem {
         <i64>::sse_encode(self.id, serializer);
         <Option<crate::api::events::BridgeItemKind>>::sse_encode(self.kind, serializer);
         <Option<String>>::sse_encode(self.tool, serializer);
-        <Option<String>>::sse_encode(self.arguments, serializer);
         <Option<String>>::sse_encode(self.target, serializer);
         <bool>::sse_encode(self.failed, serializer);
         <Option<i64>>::sse_encode(self.duration_ms, serializer);
@@ -3947,7 +3932,6 @@ impl SseEncode for crate::api::history::BridgeTranscriptItem {
         <crate::api::events::BridgeItemKind>::sse_encode(self.kind, serializer);
         <String>::sse_encode(self.text, serializer);
         <Option<String>>::sse_encode(self.tool, serializer);
-        <Option<String>>::sse_encode(self.arguments, serializer);
         <Option<String>>::sse_encode(self.target, serializer);
         <bool>::sse_encode(self.failed, serializer);
         <Option<i64>>::sse_encode(self.duration_ms, serializer);

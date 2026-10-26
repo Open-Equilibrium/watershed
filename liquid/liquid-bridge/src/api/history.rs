@@ -202,8 +202,6 @@ pub struct BridgeTranscriptItem {
     pub text: String,
     /// A tool call's tool.
     pub tool: Option<String>,
-    /// A tool call's arguments as JSON text.
-    pub arguments: Option<String>,
     /// What a tool call works on, such as a command or a path, on one line.
     pub target: Option<String>,
     /// Whether a tool call failed.

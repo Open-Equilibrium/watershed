@@ -2,7 +2,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
-use crate::{ChangeStatus, DiffError, FileChange, WorkingTree};
+use crate::diff::WorkingTree;
+use crate::{ChangeStatus, DiffError, FileChange};
 
 /// A throwaway Git repository that ignores the user's Git configuration.
 struct Repo(PathBuf);

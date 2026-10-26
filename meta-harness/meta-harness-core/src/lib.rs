@@ -14,7 +14,7 @@ mod session;
 mod stored;
 
 pub use approval::ApprovalMode;
-pub use diff::{ChangeStatus, DiffError, FileChange, Snapshot, WorkingTree};
+pub use diff::{ChangeStatus, DiffError, FileChange};
 pub use event::{
     AgentEvent, Answer, ChangedLines, Decision, Delivery, EntryKind, ItemDetail, ItemId, ItemKind,
     ItemStatus, NotificationLevel, Queue, RequestId, RequestKind, SessionTree, StepId, TreeNode,

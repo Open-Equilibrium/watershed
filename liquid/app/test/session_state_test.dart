@@ -103,9 +103,7 @@ void main() {
         approval: BridgeApproval(
           kind: BridgeRequestKind.commandExecution,
           tool: 'bash',
-          arguments: '{"command":"npm test"}',
           text: 'npm test',
-          readOnly: false,
         ),
       );
       await emit(event(BridgeEventKind.turnStarted, turn: 1));
@@ -618,9 +616,7 @@ void main() {
           approval: BridgeApproval(
             kind: BridgeRequestKind.commandExecution,
             tool: 'bash',
-            arguments: '{}',
             text: '{}',
-            readOnly: false,
           ),
         ),
       ),

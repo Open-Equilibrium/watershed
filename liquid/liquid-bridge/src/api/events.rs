@@ -10,7 +10,7 @@ pub enum BridgeEventKind {
     TurnCompleted,
     /// `turn`.
     TurnAborted,
-    /// `turn` and `item` with kind, tool and arguments.
+    /// `turn` and `item` with kind, tool and target.
     ItemStarted,
     /// `item` id and `text` with the latest partial output.
     ItemUpdated,
@@ -104,8 +104,6 @@ pub struct BridgeItem {
     pub kind: Option<BridgeItemKind>,
     /// The tool name of a tool call.
     pub tool: Option<String>,
-    /// The tool call's arguments as JSON text.
-    pub arguments: Option<String>,
     /// What a tool call works on, such as a command or a path, on one line.
     pub target: Option<String>,
     /// Whether the item failed.
@@ -185,12 +183,8 @@ pub struct BridgeApproval {
     pub kind: BridgeRequestKind,
     /// The tool name.
     pub tool: String,
-    /// The arguments as JSON text.
-    pub arguments: String,
     /// The whole call the user decides on, such as a shell command.
     pub text: String,
-    /// Whether the tool declares that it only reads.
-    pub read_only: bool,
 }
 
 /// The user's answer to an approval request.

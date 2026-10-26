@@ -51,9 +51,7 @@ void main() {
     approval: BridgeApproval(
       kind: BridgeRequestKind.commandExecution,
       tool: 'bash',
-      arguments: '{"command":"npm test -- login"}',
       text: 'npm test -- login',
-      readOnly: false,
     ),
   );
 
@@ -420,7 +418,6 @@ void main() {
             id: 2,
             kind: BridgeItemKind.commandExecution,
             tool: 'bash',
-            arguments: '{"command":"npm test -- login"}',
             target: 'npm test -- login',
             failed: false,
           ),
@@ -544,9 +541,7 @@ void main() {
           approval: BridgeApproval(
             kind: BridgeRequestKind.tool,
             tool: tool,
-            arguments: '{}',
             text: '{}',
-            readOnly: false,
           ),
         ),
       ),
@@ -568,9 +563,7 @@ void main() {
           approval: BridgeApproval(
             kind: BridgeRequestKind.commandExecution,
             tool: 'bash',
-            arguments: '{"command":"$command"}',
             text: command,
-            readOnly: false,
           ),
         ),
       ),
