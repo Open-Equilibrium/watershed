@@ -1,4 +1,4 @@
-//! A running agent process behind the runtime event model.
+//! A running agent process behind the agent event model.
 
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
@@ -51,8 +51,8 @@ pub struct AgentCommand {
 /// Something that happened in a session.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SessionEvent {
-    /// A runtime event from the agent.
-    Runtime(AgentEvent),
+    /// An event from the agent.
+    Agent(AgentEvent),
     /// The agent broke its protocol, so the session stopped it.
     Failed(String),
     /// The agent process exited; this is always the last event.
@@ -605,7 +605,7 @@ impl Session {
     async fn resolved(&self, event: AgentEvent) {
         let ended = self.ended.lock().await;
         if !*ended {
-            let _ = self.events.send(SessionEvent::Runtime(event)).await;
+            let _ = self.events.send(SessionEvent::Agent(event)).await;
         }
     }
 
@@ -872,7 +872,7 @@ impl Supervisor {
             if forward {
                 let events = self.events.clone();
                 if self
-                    .unless_killed(events.send(SessionEvent::Runtime(event)))
+                    .unless_killed(events.send(SessionEvent::Agent(event)))
                     .await
                     .is_none()
                 {
@@ -912,7 +912,7 @@ impl Supervisor {
             };
             if !*ended && open {
                 let resolved = AgentEvent::UserInputResolved { request: expired };
-                let _ = events.send(SessionEvent::Runtime(resolved)).await;
+                let _ = events.send(SessionEvent::Agent(resolved)).await;
             }
         });
         self.state
@@ -960,7 +960,7 @@ impl Supervisor {
             ),
         };
         let events = self.events.clone();
-        self.unless_killed(events.send(SessionEvent::Runtime(skipped)))
+        self.unless_killed(events.send(SessionEvent::Agent(skipped)))
             .await
             .is_some()
     }

@@ -112,8 +112,8 @@ async fn check() {
         .expect("event in time")
     {
         match &event {
-            SessionEvent::Runtime(AgentEvent::ContentDelta { .. }) => {}
-            SessionEvent::Runtime(AgentEvent::RequestOpened {
+            SessionEvent::Agent(AgentEvent::ContentDelta { .. }) => {}
+            SessionEvent::Agent(AgentEvent::RequestOpened {
                 request,
                 tool,
                 arguments,
@@ -126,7 +126,7 @@ async fn check() {
                     .await
                     .expect("decision sent");
             }
-            SessionEvent::Runtime(AgentEvent::TurnCompleted { .. }) => {
+            SessionEvent::Agent(AgentEvent::TurnCompleted { .. }) => {
                 println!("{event:?}");
                 turns += 1;
                 if turns == 1 {
@@ -162,7 +162,7 @@ async fn check() {
                     .await
                     .expect("event in time")
                 {
-                    if let SessionEvent::Runtime(AgentEvent::InputTextSet { .. }) = &event {
+                    if let SessionEvent::Agent(AgentEvent::InputTextSet { .. }) = &event {
                         println!("branch handed back: {event:?}");
                         break;
                     }

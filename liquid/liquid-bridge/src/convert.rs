@@ -340,7 +340,7 @@ fn display(key: String) -> BridgeDisplay {
 impl From<SessionEvent> for BridgeEvent {
     fn from(session_event: SessionEvent) -> Self {
         match session_event {
-            SessionEvent::Runtime(runtime) => runtime.into(),
+            SessionEvent::Agent(event) => event.into(),
             SessionEvent::Failed(reason) => BridgeEvent {
                 text: Some(reason),
                 ..event(BridgeEventKind::Failed)
@@ -358,9 +358,9 @@ impl From<SessionEvent> for BridgeEvent {
 }
 
 impl From<AgentEvent> for BridgeEvent {
-    fn from(runtime: AgentEvent) -> Self {
+    fn from(agent: AgentEvent) -> Self {
         use BridgeEventKind as Kind;
-        match runtime {
+        match agent {
             AgentEvent::TurnStarted { turn } => BridgeEvent {
                 turn: Some(int(turn.0)),
                 ..event(Kind::TurnStarted)

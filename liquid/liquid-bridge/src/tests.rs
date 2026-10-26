@@ -39,7 +39,7 @@ fn call<F: std::future::Future>(call: F) -> F::Output {
 }
 
 fn bridge(event: AgentEvent) -> BridgeEvent {
-    SessionEvent::Runtime(event).into()
+    SessionEvent::Agent(event).into()
 }
 
 #[test]

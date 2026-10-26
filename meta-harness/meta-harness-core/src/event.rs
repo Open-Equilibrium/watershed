@@ -206,7 +206,7 @@ pub enum ItemStatus {
     Failed,
 }
 
-/// An agent-neutral runtime event.
+/// An agent-neutral agent event.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AgentEvent {
     /// A turn started.

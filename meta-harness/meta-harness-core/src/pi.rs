@@ -1,4 +1,4 @@
-//! Adapter from pi's RPC session events to agent-neutral runtime events.
+//! Adapter from pi's RPC session events to agent-neutral agent events.
 
 use std::collections::HashMap;
 use std::time::Duration;
@@ -14,7 +14,7 @@ use crate::history::{first_line, patch_lines};
 /// Title prefix of the select dialog Watershed's pi extension uses to ask for an approval.
 pub(crate) const APPROVAL_PREFIX: &str = "watershed.approval ";
 
-/// Translates pi RPC records into runtime events, one session at a time.
+/// Translates pi RPC records into agent events, one session at a time.
 #[derive(Debug, Default)]
 pub struct PiAdapter {
     turns: u64,
@@ -47,7 +47,7 @@ impl PiAdapter {
     }
 
     /// Translates one pi session event received `at` a time on the session's monotonic clock;
-    /// events without a runtime meaning yield nothing.
+    /// events without an agent-neutral meaning yield nothing.
     pub fn translate(&mut self, record: &Map<String, Value>, at: Duration) -> Vec<AgentEvent> {
         let kind = record.get("type").and_then(Value::as_str);
         if kind == Some("extension_ui_request") {

@@ -92,7 +92,7 @@ IFS= read -r line || exit 0"#,
             },
             AgentEvent::TurnCompleted { turn },
         ] {
-            assert_eq!(next(&mut events).await, SessionEvent::Runtime(expected));
+            assert_eq!(next(&mut events).await, SessionEvent::Agent(expected));
         }
         assert!(
             timeout(WAIT, session.shutdown(WAIT))
@@ -440,7 +440,7 @@ IFS= read -r line || exit 0
         assert!(
             matches!(
                 &skipped,
-                SessionEvent::Runtime(AgentEvent::Notification {
+                SessionEvent::Agent(AgentEvent::Notification {
                     level: NotificationLevel::Warning,
                     ..
                 })
@@ -450,7 +450,7 @@ IFS= read -r line || exit 0
         assert!(
             matches!(
                 next(&mut events).await,
-                SessionEvent::Runtime(AgentEvent::QueueChanged(_))
+                SessionEvent::Agent(AgentEvent::QueueChanged(_))
             ),
             "the agent got its answer instead of waiting"
         );
@@ -486,7 +486,7 @@ fn skips_an_oversized_record_and_keeps_the_session() {
         assert!(
             matches!(
                 &skipped,
-                SessionEvent::Runtime(AgentEvent::Notification {
+                SessionEvent::Agent(AgentEvent::Notification {
                     level: NotificationLevel::Warning,
                     message,
                 }) if message.starts_with("Skipped an agent record")
@@ -545,12 +545,12 @@ IFS= read -r line || exit 0
         );
         assert!(matches!(
             next(&mut events).await,
-            SessionEvent::Runtime(AgentEvent::TurnStarted { .. })
+            SessionEvent::Agent(AgentEvent::TurnStarted { .. })
         ));
         assert!(session.running(), "a started turn makes the session run");
         assert_eq!(
             next(&mut events).await,
-            SessionEvent::Runtime(AgentEvent::QueueChanged(queue.clone()))
+            SessionEvent::Agent(AgentEvent::QueueChanged(queue.clone()))
         );
         assert_eq!(session.clear_queue().await, Ok(queue));
     });
@@ -615,7 +615,7 @@ fn answers_extension_questions() {
         ];
         for (id, answer) in questions {
             let request = RequestId(id.to_owned());
-            let SessionEvent::Runtime(AgentEvent::UserInputRequested {
+            let SessionEvent::Agent(AgentEvent::UserInputRequested {
                 request: asked,
                 input,
             }) = next(&mut events).await
@@ -635,7 +635,7 @@ fn answers_extension_questions() {
             assert_eq!(session.answer(&request, answer).await, Ok(()));
             assert_eq!(
                 next(&mut events).await,
-                SessionEvent::Runtime(AgentEvent::UserInputResolved { request })
+                SessionEvent::Agent(AgentEvent::UserInputResolved { request })
             );
         }
         assert_eq!(next(&mut events).await, exited(true));
@@ -663,12 +663,12 @@ fn stopping_withdraws_an_approval_that_arrives_late() {
         assert_eq!(timeout(WAIT, stopping.accepted()).await, Ok(Ok(())));
         assert!(matches!(
             next(&mut events).await,
-            SessionEvent::Runtime(AgentEvent::TurnStarted { .. })
+            SessionEvent::Agent(AgentEvent::TurnStarted { .. })
         ));
         assert!(
             matches!(
                 next(&mut events).await,
-                SessionEvent::Runtime(AgentEvent::RequestOpened { request, .. })
+                SessionEvent::Agent(AgentEvent::RequestOpened { request, .. })
                     if request == RequestId("a2".to_owned())
             ),
             "the next turn asks again"
@@ -694,7 +694,7 @@ fn asks_the_user_again_once_an_abort_found_the_agent_idle() {
         assert!(
             matches!(
                 next(&mut events).await,
-                SessionEvent::Runtime(AgentEvent::UserInputRequested { .. })
+                SessionEvent::Agent(AgentEvent::UserInputRequested { .. })
             ),
             "the question reaches the user"
         );
@@ -789,7 +789,7 @@ fn allowances_for_a_session_end_with_it() {
         let opened = |event: SessionEvent, id: &str| {
             matches!(
                 event,
-                SessionEvent::Runtime(AgentEvent::RequestOpened { request, .. })
+                SessionEvent::Agent(AgentEvent::RequestOpened { request, .. })
                     if request == RequestId(id.to_owned())
             )
         };
@@ -808,7 +808,7 @@ fn allowances_for_a_session_end_with_it() {
         assert_eq!(kept.switched().await, Ok(false));
         assert!(matches!(
             next(&mut events).await,
-            SessionEvent::Runtime(AgentEvent::QueueChanged(_))
+            SessionEvent::Agent(AgentEvent::QueueChanged(_))
         ));
         let started = session.new_session().await.expect("sent");
         assert_eq!(started.switched().await, Ok(true));
@@ -835,7 +835,7 @@ fn allowances_end_when_the_agent_asks_for_another_session() {
         let (mut session, mut events) = fake_agent(&script);
         assert!(matches!(
             next(&mut events).await,
-            SessionEvent::Runtime(AgentEvent::RequestOpened { .. })
+            SessionEvent::Agent(AgentEvent::RequestOpened { .. })
         ));
         assert_eq!(
             session
@@ -847,7 +847,7 @@ fn allowances_end_when_the_agent_asks_for_another_session() {
         assert!(
             matches!(
                 next(&mut events).await,
-                SessionEvent::Runtime(AgentEvent::RequestOpened { request, .. })
+                SessionEvent::Agent(AgentEvent::RequestOpened { request, .. })
                     if request == RequestId("a3".to_owned())
             ),
             "the same session runs bash at once, another one asks again"
@@ -866,11 +866,11 @@ IFS= read -r line || exit 0"#,
         let request = RequestId("q1".to_owned());
         assert!(matches!(
             next(&mut events).await,
-            SessionEvent::Runtime(AgentEvent::UserInputRequested { .. })
+            SessionEvent::Agent(AgentEvent::UserInputRequested { .. })
         ));
         assert_eq!(
             next(&mut events).await,
-            SessionEvent::Runtime(AgentEvent::UserInputResolved {
+            SessionEvent::Agent(AgentEvent::UserInputResolved {
                 request: request.clone()
             })
         );
@@ -896,7 +896,7 @@ fn keeps_a_dialog_without_a_time_limit_open() {
         let (mut session, mut events) = fake_agent(&script);
         assert!(matches!(
             next(&mut events).await,
-            SessionEvent::Runtime(AgentEvent::UserInputRequested { .. })
+            SessionEvent::Agent(AgentEvent::UserInputRequested { .. })
         ));
         let early = timeout(Duration::from_millis(300), events.recv()).await;
         assert!(early.is_err(), "nothing expires: {early:?}");
@@ -917,7 +917,7 @@ exit 3"#,
         );
         assert!(matches!(
             next(&mut events).await,
-            SessionEvent::Runtime(AgentEvent::UserInputRequested { .. })
+            SessionEvent::Agent(AgentEvent::UserInputRequested { .. })
         ));
         assert_eq!(next(&mut events).await, exited(false));
         let later = timeout(Duration::from_millis(800), events.recv()).await;
@@ -955,7 +955,7 @@ fn asks_only_for_calls_the_approval_mode_does_not_allow() {
             let request = RequestId(id.to_owned());
             assert_eq!(
                 next(&mut events).await,
-                SessionEvent::Runtime(AgentEvent::RequestOpened {
+                SessionEvent::Agent(AgentEvent::RequestOpened {
                     request: request.clone(),
                     kind,
                     tool: tool.to_owned(),
@@ -968,7 +968,7 @@ fn asks_only_for_calls_the_approval_mode_does_not_allow() {
             assert_eq!(session.decide(&request, decision).await, Ok(()));
             assert_eq!(
                 next(&mut events).await,
-                SessionEvent::Runtime(AgentEvent::RequestResolved {
+                SessionEvent::Agent(AgentEvent::RequestResolved {
                     request,
                     decision: Some(decision)
                 })
@@ -1184,24 +1184,24 @@ fn stopping_withdraws_the_dialogs_the_agent_waits_for() {
         let (mut session, mut events) = fake_agent(&script);
         assert!(matches!(
             next(&mut events).await,
-            SessionEvent::Runtime(AgentEvent::RequestOpened { .. })
+            SessionEvent::Agent(AgentEvent::RequestOpened { .. })
         ));
         assert!(matches!(
             next(&mut events).await,
-            SessionEvent::Runtime(AgentEvent::UserInputRequested { .. })
+            SessionEvent::Agent(AgentEvent::UserInputRequested { .. })
         ));
         let stopping = session.abort().await.expect("abort sent");
         assert_eq!(timeout(WAIT, stopping.accepted()).await, Ok(Ok(())));
         assert_eq!(
             next(&mut events).await,
-            SessionEvent::Runtime(AgentEvent::RequestResolved {
+            SessionEvent::Agent(AgentEvent::RequestResolved {
                 request: RequestId("a1".to_owned()),
                 decision: None,
             })
         );
         assert_eq!(
             next(&mut events).await,
-            SessionEvent::Runtime(AgentEvent::UserInputResolved {
+            SessionEvent::Agent(AgentEvent::UserInputResolved {
                 request: RequestId("q1".to_owned())
             })
         );
@@ -1236,7 +1236,7 @@ exit 0"#,
         );
         assert!(matches!(
             next(&mut events).await,
-            SessionEvent::Runtime(AgentEvent::UserInputRequested { .. })
+            SessionEvent::Agent(AgentEvent::UserInputRequested { .. })
         ));
         assert_eq!(next(&mut events).await, exited(true));
         drop(session);
