@@ -1090,3 +1090,18 @@ exit 1"#,
         }
     });
 }
+
+#[test]
+fn finds_a_relative_session_file_in_the_agents_directory() {
+    run(async {
+        // A project's pi settings can name a relative session directory.
+        let (mut session, _events) = fake_agent(&format!(
+            "{}printf '%s\\n' '{{\"id\":\"1\",\"type\":\"response\",\"command\":\"get_state\",\"success\":true,\"data\":{{\"sessionId\":\"s\",\"isStreaming\":false,\"sessionFile\":\".sessions/s.jsonl\"}}}}'\nIFS= read -r line || exit 0\n",
+            expect_response(&[r#""type":"get_state""#])
+        ));
+        assert_eq!(
+            session.state().await.expect("state").session_file,
+            Some(std::env::temp_dir().join(".sessions/s.jsonl"))
+        );
+    });
+}

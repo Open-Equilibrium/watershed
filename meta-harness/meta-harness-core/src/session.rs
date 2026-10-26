@@ -225,6 +225,8 @@ pub struct Session {
     stopper: Option<Stopper>,
     /// The stored entries read so far; later reads continue after the last one.
     history: History,
+    /// The directory the agent works in; a relative path it reports starts there.
+    cwd: PathBuf,
 }
 
 impl Session {
@@ -282,6 +284,7 @@ impl Session {
                 exited,
             }),
             history: History::default(),
+            cwd: command.cwd.clone(),
         };
         Ok((session, receiver))
     }
@@ -413,7 +416,7 @@ impl Session {
             ))
         });
         Ok(SessionState {
-            session_file: text("sessionFile").map(PathBuf::from),
+            session_file: text("sessionFile").map(|file| self.cwd.join(file)),
             session_id: text("sessionId").unwrap_or_default().to_owned(),
             model,
             streaming: data.get("isStreaming").and_then(Value::as_bool) == Some(true),
