@@ -151,6 +151,8 @@ struct Shared {
     approvals: HashMap<RequestId, (String, Option<String>)>,
     /// Open questions from agent extensions.
     questions: HashSet<RequestId>,
+    /// The timers of questions with a time limit.
+    expiries: HashMap<RequestId, tokio::task::AbortHandle>,
     /// Whether a turn is running, from the agent's events.
     running: bool,
     /// Commands that switch the session, awaiting their response.
@@ -166,6 +168,14 @@ struct Shared {
 impl Shared {
     /// Keeps allowances only for `session`: an extension command can switch sessions without
     /// the core seeing it, and a call from another session asks again.
+    /// Ends an open question and its timer; `false` when it was not open.
+    fn end_question(&mut self, request: &RequestId) -> bool {
+        if let Some(expiry) = self.expiries.remove(request) {
+            expiry.abort();
+        }
+        self.questions.remove(request)
+    }
+
     fn allow_in(&mut self, session: Option<String>) {
         if self.allowed_in != session {
             self.allowed.clear();
@@ -536,7 +546,7 @@ impl Session {
         request: &RequestId,
         answer: Answer,
     ) -> Result<(), CommandError> {
-        if !self.state.lock().questions.remove(request) {
+        if !self.state.lock().end_question(request) {
             return Err(CommandError::UnknownRequest);
         }
         let reply = match answer {
@@ -693,6 +703,9 @@ impl Supervisor {
             let mut shared = self.state.lock();
             shared.replies = None;
             shared.questions.clear();
+            for (_, expiry) in shared.expiries.drain() {
+                expiry.abort();
+            }
             shared.approvals.clear();
         }
         let stop = failure.is_some() || self.kill_requested;
@@ -844,17 +857,29 @@ impl Supervisor {
     }
 
     /// Forgets a question once its time is up: pi then answers it itself without telling.
+    /// An answered question or the agent's exit ends the timer, so it keeps nothing alive.
     fn expire(&self, request: RequestId, timeout: Duration) {
         let (state, events, ended) = (self.state.clone(), self.events.clone(), self.ended.clone());
-        tokio::spawn(async move {
+        let expired = request.clone();
+        let timer = tokio::spawn(async move {
             tokio::time::sleep(timeout).await;
             // Like a user's answer, it never follows the exit.
             let ended = ended.lock().await;
-            if !*ended && state.lock().questions.remove(&request) {
-                let resolved = AgentEvent::UserInputResolved { request };
+            let open = {
+                let mut shared = state.lock();
+                // Its own timer ends here; aborting it would drop the report below.
+                shared.expiries.remove(&expired);
+                shared.questions.remove(&expired)
+            };
+            if !*ended && open {
+                let resolved = AgentEvent::UserInputResolved { request: expired };
                 let _ = events.send(SessionEvent::Runtime(resolved)).await;
             }
         });
+        self.state
+            .lock()
+            .expiries
+            .insert(request, timer.abort_handle());
     }
 
     /// Fails the command an oversized response answers, or reports a skipped event; returns

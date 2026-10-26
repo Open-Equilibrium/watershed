@@ -1161,3 +1161,24 @@ fn reads_the_history_before_pi_wrote_the_session_file() {
         assert_eq!(history.tree().leaf.as_deref(), Some("u1"));
     });
 }
+
+#[test]
+fn a_question_s_time_limit_keeps_nothing_alive_after_the_exit() {
+    run(async {
+        let (session, mut events) = fake_agent(
+            r#"printf '%s\n' '{"type":"extension_ui_request","id":"q1","method":"confirm","title":"Sure?","message":"","timeout":600000}'
+exit 0"#,
+        );
+        assert!(matches!(
+            next(&mut events).await,
+            SessionEvent::Runtime(AgentEvent::UserInputRequested { .. })
+        ));
+        assert_eq!(next(&mut events).await, exited(true));
+        drop(session);
+        assert_eq!(
+            timeout(WAIT, events.recv()).await,
+            Ok(None),
+            "the event stream ends instead of waiting ten minutes"
+        );
+    });
+}
