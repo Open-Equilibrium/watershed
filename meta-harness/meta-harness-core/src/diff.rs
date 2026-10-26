@@ -161,7 +161,9 @@ impl WorkingTree {
         )
         .await
         .map_err(|error| match error {
-            DiffError::Git(_) => DiffError::NotARepository,
+            DiffError::Git(reason) if reason.contains("not a git repository") => {
+                DiffError::NotARepository
+            }
             error => error,
         })?;
         let mut lines = lines.lines();
@@ -399,6 +401,8 @@ fn git_command(dir: &Path, env: &[(&str, OsString)], args: &[&str]) -> Command {
         ])
         .args(args)
         .current_dir(dir)
+        // Git's messages in English, as Liquid shows them and reads one.
+        .env("LC_ALL", "C")
         .envs(env.iter().map(|(name, value)| (name, value)))
         .stdin(Stdio::null())
         .stdout(Stdio::piped())

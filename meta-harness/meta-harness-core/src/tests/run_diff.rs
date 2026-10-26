@@ -178,6 +178,26 @@ fn a_project_outside_git_says_so_instead_of_showing_no_changes() {
 }
 
 #[test]
+fn a_git_that_cannot_read_the_project_is_reported_instead_of_outside_git() {
+    run(async {
+        let repo = Repo::new("broken-config");
+        let config = repo.path().join(".git/config");
+        let mut text = std::fs::read_to_string(&config).expect("config");
+        text.push_str("[broken\n");
+        std::fs::write(&config, text).expect("config");
+        let diff = RunDiff::open(repo.path()).await;
+        let error = diff
+            .changes()
+            .await
+            .expect_err("Git cannot read the project");
+        assert!(
+            error.to_string().contains("bad config"),
+            "Git's own reason: {error}"
+        );
+    });
+}
+
+#[test]
 fn a_project_that_could_not_be_captured_is_reported_instead_of_unchanged() {
     use std::os::unix::fs::PermissionsExt;
     run(async {
