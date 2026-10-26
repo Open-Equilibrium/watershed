@@ -1105,3 +1105,59 @@ fn finds_a_relative_session_file_in_the_agents_directory() {
         );
     });
 }
+
+#[test]
+fn stopping_cancels_the_questions_the_agent_waits_for() {
+    run(async {
+        // pi answers an abort only once its open dialogs are answered: one asked before the
+        // abort, one that arrives after it.
+        let script = [
+            r#"printf '%s\n' '{"type":"extension_ui_request","id":"q1","method":"input","title":"Name","placeholder":""}'
+"#
+            .to_owned(),
+            expect_response(&[r#""type":"abort""#]),
+            expect_response(&[r#""id":"q1""#, r#""cancelled":true"#]),
+            r#"printf '%s\n' '{"type":"extension_ui_request","id":"q2","method":"confirm","title":"Sure?","message":""}'
+"#
+            .to_owned(),
+            expect_response(&[r#""id":"q2""#, r#""cancelled":true"#]),
+            r#"printf '%s\n' '{"id":"1","type":"response","command":"abort","success":true}'
+"#
+            .to_owned(),
+            "IFS= read -r line || exit 0\n".to_owned(),
+        ]
+        .concat();
+        let (mut session, mut events) = fake_agent(&script);
+        assert!(matches!(
+            next(&mut events).await,
+            SessionEvent::Runtime(AgentEvent::UserInputRequested { .. })
+        ));
+        let stopping = session.abort().await.expect("abort sent");
+        assert_eq!(timeout(WAIT, stopping.accepted()).await, Ok(Ok(())));
+        assert_eq!(
+            next(&mut events).await,
+            SessionEvent::Runtime(AgentEvent::UserInputResolved {
+                request: RequestId("q1".to_owned())
+            })
+        );
+    });
+}
+
+#[test]
+fn reads_the_history_before_pi_wrote_the_session_file() {
+    run(async {
+        // pi writes the session file only after the first response, so a fresh session has a
+        // path that does not exist yet.
+        let missing =
+            std::env::temp_dir().join(format!("watershed-unwritten-{}.jsonl", std::process::id()));
+        let script = format!(
+            "{}printf '%s\\n' '{{\"id\":\"1\",\"type\":\"response\",\"command\":\"get_state\",\"success\":true,\"data\":{{\"sessionId\":\"s\",\"isStreaming\":false,\"sessionFile\":\"{}\"}}}}'\n{}printf '%s\\n' '{{\"id\":\"2\",\"type\":\"response\",\"command\":\"get_entries\",\"success\":true,\"data\":{{\"entries\":[{{\"type\":\"message\",\"id\":\"u1\",\"parentId\":null,\"message\":{{\"role\":\"user\",\"content\":\"Hi\"}}}}],\"leafId\":\"u1\"}}}}'\nIFS= read -r line || exit 0\n",
+            expect_response(&[r#""type":"get_state""#]),
+            missing.display(),
+            expect_response(&[r#""type":"get_entries""#]),
+        );
+        let (mut session, _events) = fake_agent(&script);
+        let history = session.history().await.expect("history");
+        assert_eq!(history.tree().leaf.as_deref(), Some("u1"));
+    });
+}
