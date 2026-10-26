@@ -2,9 +2,9 @@
 //! session file of 1,000 turns of eight entries each and eight forks of ten turns. Each sample
 //! starts a session that reads the stored history from that file, asks the agent for newer
 //! entries, builds its tree and two Trajectories, then reads again, which only asks for entries
-//! after the last one. It prints one
-//! JSON line per sample and a summary and never compares with a threshold. Run from the
-//! repository root:
+//! after the last one. The session file is written by a second run of this example, so building
+//! it adds nothing to the measured process. It prints one JSON line per sample and a summary and
+//! never compares with a threshold. Run from the repository root:
 //!
 //! ```sh
 //! cargo build --release -p meta-harness-core --example trajectory_observe
@@ -12,6 +12,7 @@
 //! ```
 
 use std::fmt::Write as _;
+use std::path::Path;
 use std::time::Instant;
 
 use meta_harness_core::{AgentCommand, Session};
@@ -23,6 +24,14 @@ const FORK_TURNS: usize = 10;
 const SAMPLES: usize = 20;
 
 fn main() {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if let [flag, file] = args.as_slice()
+        && flag == "--write"
+    {
+        let (leaf, fork_leaf) = write_session(Path::new(file));
+        println!("{leaf} {fork_leaf}");
+        return;
+    }
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -30,22 +39,34 @@ fn main() {
     runtime.block_on(observe());
 }
 
-async fn observe() {
+/// Writes pi's session file: a header line, then one line per entry; returns the main and the
+/// last fork's leaf.
+fn write_session(file: &Path) -> (String, String) {
     let (entries, fork_leaf) = session();
-    let leaf = entries["leafId"].as_str().expect("leaf").to_owned();
-    // pi's session file: a header line, then one line per entry.
     let mut data = String::from(r#"{"type":"session","version":3,"id":"observe","cwd":"/tmp"}"#);
     data.push('\n');
     for entry in entries["entries"].as_array().expect("entries") {
         data.push_str(&entry.to_string());
         data.push('\n');
     }
-    // Only the file and the core's own allocations remain in the measured process.
-    drop(entries);
+    std::fs::write(file, data).expect("session file");
+    let leaf = entries["leafId"].as_str().expect("leaf").to_owned();
+    (leaf, fork_leaf)
+}
+
+async fn observe() {
     let dir = std::env::temp_dir().join(format!("trajectory-observe-{}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("temporary directory");
     let file = dir.join("session.jsonl");
-    std::fs::write(&file, &data).expect("session file");
+    let written = std::process::Command::new(std::env::current_exe().expect("this example"))
+        .arg("--write")
+        .arg(&file)
+        .output()
+        .expect("the writer runs");
+    assert!(written.status.success(), "the session file is written");
+    let leaves = String::from_utf8(written.stdout).expect("leaf ids");
+    let (leaf, fork_leaf) = leaves.trim().split_once(' ').expect("two leaves");
+    let file_bytes = std::fs::metadata(&file).expect("session file").len();
     // Reports the session file, then answers each read with nothing newer than it.
     let script = format!(
         "IFS= read -r line\nprintf '%s\\n' '{{\"id\":\"1\",\"type\":\"response\",\"command\":\"get_state\",\"success\":true,\"data\":{{\"sessionId\":\"observe\",\"isStreaming\":false,\"sessionFile\":\"{}\"}}}}'\ni=2\nwhile IFS= read -r line; do\nprintf '%s\\n' '{{\"id\":\"'$i'\",\"type\":\"response\",\"command\":\"get_entries\",\"success\":true,\"data\":{{\"entries\":[],\"leafId\":\"{leaf}\"}}}}'\ni=$((i+1))\ndone",
@@ -66,7 +87,7 @@ async fn observe() {
         let built = started.elapsed();
         let current = history.trajectory(None);
         let projected = started.elapsed();
-        let fork = history.trajectory(Some(&fork_leaf));
+        let fork = history.trajectory(Some(fork_leaf));
         let done = started.elapsed();
         drop(history);
         let again = Instant::now();
@@ -93,7 +114,7 @@ async fn observe() {
     totals.sort_by(f64::total_cmp);
     println!(
         r#"{{"summary":"trajectory","file_bytes":{},"samples":{SAMPLES},"p50_ms":{:.3},"p95_ms":{:.3},"max_ms":{:.3}}}"#,
-        data.len(),
+        file_bytes,
         rank(&totals, 0.50),
         rank(&totals, 0.95),
         totals[totals.len() - 1],
