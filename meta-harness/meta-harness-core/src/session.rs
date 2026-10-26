@@ -18,8 +18,8 @@ use tokio::sync::{mpsc, oneshot};
 use crate::approval::{ApprovalMode, needs_user};
 use crate::pi::queue;
 use crate::{
-    Answer, Decision, Delivery, Frame, History, LineFramer, NotificationLevel, PiAdapter, Queue,
-    RequestId, RuntimeEvent,
+    AgentEvent, Answer, Decision, Delivery, Frame, History, LineFramer, NotificationLevel,
+    PiAdapter, Queue, RequestId,
 };
 
 /// Largest record accepted from an agent; a larger one is skipped and fails its command.
@@ -45,7 +45,7 @@ pub struct AgentCommand {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SessionEvent {
     /// A runtime event from the agent.
-    Runtime(RuntimeEvent),
+    Runtime(AgentEvent),
     /// The agent broke its protocol, so the session stopped it.
     Failed(String),
     /// The agent process exited; this is always the last event.
@@ -467,7 +467,7 @@ impl Session {
             Decision::Reject => "reject",
         };
         self.respond(request, json!({ "value": value })).await?;
-        self.resolved(RuntimeEvent::RequestResolved {
+        self.resolved(AgentEvent::RequestResolved {
             request: request.clone(),
             decision,
         })
@@ -490,7 +490,7 @@ impl Session {
             Answer::Cancelled => json!({ "cancelled": true }),
         };
         self.respond(request, reply).await?;
-        self.resolved(RuntimeEvent::UserInputResolved {
+        self.resolved(AgentEvent::UserInputResolved {
             request: request.clone(),
         })
         .await;
@@ -498,7 +498,7 @@ impl Session {
     }
 
     /// Reports a resolved dialog unless the agent's exit was reported, which stays last.
-    async fn resolved(&self, event: RuntimeEvent) {
+    async fn resolved(&self, event: AgentEvent) {
         let ended = self.ended.lock().await;
         if !*ended {
             let _ = self.events.send(SessionEvent::Runtime(event)).await;
@@ -676,7 +676,7 @@ impl Supervisor {
         for event in self.adapter.translate(&record, self.started.elapsed()) {
             let mut expiry = None;
             let forward = match &event {
-                RuntimeEvent::RequestOpened {
+                AgentEvent::RequestOpened {
                     request,
                     kind,
                     tool,
@@ -705,7 +705,7 @@ impl Supervisor {
                         None => true,
                     }
                 }
-                RuntimeEvent::UserInputRequested { request, .. } => {
+                AgentEvent::UserInputRequested { request, .. } => {
                     let stopping = {
                         let mut shared = self.state.lock();
                         if !shared.stopping {
@@ -727,13 +727,13 @@ impl Supervisor {
                         .map(|timeout| (request.clone(), Duration::from_millis(timeout)));
                     true
                 }
-                RuntimeEvent::TurnStarted { .. } => {
+                AgentEvent::TurnStarted { .. } => {
                     let mut shared = self.state.lock();
                     shared.running = true;
                     shared.stopping = false;
                     true
                 }
-                RuntimeEvent::TurnCompleted { .. } | RuntimeEvent::TurnAborted { .. } => {
+                AgentEvent::TurnCompleted { .. } | AgentEvent::TurnAborted { .. } => {
                     let mut shared = self.state.lock();
                     shared.running = false;
                     shared.stopping = false;
@@ -775,7 +775,7 @@ impl Supervisor {
             // Like a user's answer, it never follows the exit.
             let ended = ended.lock().await;
             if !*ended && state.lock().questions.remove(&request) {
-                let resolved = RuntimeEvent::UserInputResolved { request };
+                let resolved = AgentEvent::UserInputResolved { request };
                 let _ = events.send(SessionEvent::Runtime(resolved)).await;
             }
         });
@@ -812,7 +812,7 @@ impl Supervisor {
         {
             return false;
         }
-        let skipped = RuntimeEvent::Notification {
+        let skipped = AgentEvent::Notification {
             level: NotificationLevel::Warning,
             message: format!(
                 "Skipped an agent record larger than {} MiB",

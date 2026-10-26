@@ -3,14 +3,14 @@ use std::time::Duration;
 use serde_json::{Map, Value};
 
 use crate::{
-    ContextSection, EntryKind, History, ItemDetail, ItemId, ItemKind, ItemStatus,
-    NotificationLevel, PiAdapter, RequestId, RequestKind, RuntimeEvent, SessionTree, StepId,
-    TreeNode, TurnId, Usage, UserInput,
+    AgentEvent, ContextSection, EntryKind, History, ItemDetail, ItemId, ItemKind, ItemStatus,
+    NotificationLevel, PiAdapter, RequestId, RequestKind, SessionTree, StepId, TreeNode, TurnId,
+    Usage, UserInput,
 };
 
 const TURN: TurnId = TurnId(1);
 
-fn translate(records: &[&str]) -> Vec<RuntimeEvent> {
+fn translate(records: &[&str]) -> Vec<AgentEvent> {
     let mut adapter = PiAdapter::new();
     records
         .iter()
@@ -22,8 +22,8 @@ fn translate(records: &[&str]) -> Vec<RuntimeEvent> {
         .collect()
 }
 
-fn started(item: u64, kind: ItemKind) -> RuntimeEvent {
-    RuntimeEvent::ItemStarted {
+fn started(item: u64, kind: ItemKind) -> AgentEvent {
+    AgentEvent::ItemStarted {
         turn: TURN,
         item: ItemId(item),
         kind,
@@ -31,8 +31,8 @@ fn started(item: u64, kind: ItemKind) -> RuntimeEvent {
     }
 }
 
-fn completed(item: u64, kind: ItemKind, text: &str) -> RuntimeEvent {
-    RuntimeEvent::ItemCompleted {
+fn completed(item: u64, kind: ItemKind, text: &str) -> AgentEvent {
+    AgentEvent::ItemCompleted {
         turn: TURN,
         item: ItemId(item),
         kind,
@@ -42,8 +42,8 @@ fn completed(item: u64, kind: ItemKind, text: &str) -> RuntimeEvent {
     }
 }
 
-fn delta(item: u64, text: &str) -> RuntimeEvent {
-    RuntimeEvent::ContentDelta {
+fn delta(item: u64, text: &str) -> AgentEvent {
+    AgentEvent::ContentDelta {
         item: ItemId(item),
         delta: text.to_owned(),
     }
@@ -73,10 +73,10 @@ fn streams_a_turn_with_reasoning_and_text() {
     assert_eq!(
         events,
         [
-            RuntimeEvent::TurnStarted { turn: TURN },
+            AgentEvent::TurnStarted { turn: TURN },
             started(1, ItemKind::UserMessage),
             completed(1, ItemKind::UserMessage, "Say hi"),
-            RuntimeEvent::ModelRequestStarted {
+            AgentEvent::ModelRequestStarted {
                 turn: TURN,
                 step: StepId(1),
             },
@@ -88,7 +88,7 @@ fn streams_a_turn_with_reasoning_and_text() {
             delta(3, "Hi"),
             delta(3, " there"),
             completed(3, ItemKind::AssistantMessage, "Hi there"),
-            RuntimeEvent::ModelRequestCompleted {
+            AgentEvent::ModelRequestCompleted {
                 turn: TURN,
                 step: StepId(1),
                 model: String::new(),
@@ -98,7 +98,7 @@ fn streams_a_turn_with_reasoning_and_text() {
                 first_token_ms: Some(0),
                 duration_ms: 0,
             },
-            RuntimeEvent::TurnCompleted { turn: TURN },
+            AgentEvent::TurnCompleted { turn: TURN },
         ]
     );
 }
@@ -119,16 +119,16 @@ fn keeps_retries_in_one_turn_and_reports_aborts() {
     assert_eq!(
         events,
         [
-            RuntimeEvent::TurnStarted { turn: TURN },
-            RuntimeEvent::TurnAborted { turn: TURN },
-            RuntimeEvent::TurnStarted { turn: second },
-            RuntimeEvent::ItemStarted {
+            AgentEvent::TurnStarted { turn: TURN },
+            AgentEvent::TurnAborted { turn: TURN },
+            AgentEvent::TurnStarted { turn: second },
+            AgentEvent::ItemStarted {
                 turn: second,
                 item: ItemId(1),
                 kind: ItemKind::UserMessage,
                 detail: ItemDetail::None,
             },
-            RuntimeEvent::ItemCompleted {
+            AgentEvent::ItemCompleted {
                 turn: second,
                 item: ItemId(1),
                 kind: ItemKind::UserMessage,
@@ -152,7 +152,7 @@ fn classifies_tool_calls_and_reports_their_outcome() {
         r#"{"type":"tool_execution_start","toolCallId":"c3","toolName":"grep","args":{"pattern":"x"}}"#,
         r#"{"type":"tool_execution_end","toolCallId":"c3","toolName":"grep","result":{"content":[]},"isError":false}"#,
     ]);
-    let tool = |item, kind, name: &str, arguments: &str| RuntimeEvent::ItemStarted {
+    let tool = |item, kind, name: &str, arguments: &str| AgentEvent::ItemStarted {
         turn: TURN,
         item: ItemId(item),
         kind,
@@ -161,7 +161,7 @@ fn classifies_tool_calls_and_reports_their_outcome() {
             arguments: arguments.to_owned(),
         },
     };
-    let finished = |item, kind, text: &str, status, duration_ms| RuntimeEvent::ItemCompleted {
+    let finished = |item, kind, text: &str, status, duration_ms| AgentEvent::ItemCompleted {
         turn: TURN,
         item: ItemId(item),
         kind,
@@ -173,9 +173,9 @@ fn classifies_tool_calls_and_reports_their_outcome() {
     assert_eq!(
         events,
         [
-            RuntimeEvent::TurnStarted { turn: TURN },
+            AgentEvent::TurnStarted { turn: TURN },
             tool(1, CommandExecution, "bash", r#"{"command":"ls"}"#),
-            RuntimeEvent::ItemUpdated {
+            AgentEvent::ItemUpdated {
                 item: ItemId(1),
                 output: "a.txt".to_owned(),
             },
@@ -211,7 +211,7 @@ fn translates_extension_questions_and_display_updates() {
         r#"{"type":"extension_ui_request","id":"e1","method":"set_editor_text","text":"draft"}"#,
     ]);
     let request = |id: &str| RequestId(id.to_owned());
-    let input = |id, input| RuntimeEvent::UserInputRequested {
+    let input = |id, input| AgentEvent::UserInputRequested {
         request: request(id),
         input,
     };
@@ -246,34 +246,34 @@ fn translates_extension_questions_and_display_updates() {
                     prefill: "a\nb".to_owned(),
                 }
             ),
-            RuntimeEvent::Notification {
+            AgentEvent::Notification {
                 level: NotificationLevel::Warning,
                 message: "Blocked".to_owned(),
             },
-            RuntimeEvent::Notification {
+            AgentEvent::Notification {
                 level: NotificationLevel::Info,
                 message: "Saved".to_owned(),
             },
-            RuntimeEvent::StatusChanged {
+            AgentEvent::StatusChanged {
                 key: "todo".to_owned(),
                 text: Some("2/3".to_owned()),
             },
-            RuntimeEvent::StatusChanged {
+            AgentEvent::StatusChanged {
                 key: "todo".to_owned(),
                 text: None,
             },
-            RuntimeEvent::WidgetChanged {
+            AgentEvent::WidgetChanged {
                 key: "todo".to_owned(),
                 lines: Some(vec!["one".to_owned(), "two".to_owned()]),
             },
-            RuntimeEvent::WidgetChanged {
+            AgentEvent::WidgetChanged {
                 key: "todo".to_owned(),
                 lines: None,
             },
-            RuntimeEvent::TitleChanged {
+            AgentEvent::TitleChanged {
                 title: "pi - acme".to_owned(),
             },
-            RuntimeEvent::InputTextSet {
+            AgentEvent::InputTextSet {
                 text: "draft".to_owned(),
             },
         ]
@@ -288,7 +288,7 @@ fn turns_watershed_approval_questions_into_requests() {
         r#"{"type":"extension_ui_request","id":"a3","method":"select","title":"watershed.approval {\"tool\":\"read\",\"arguments\":{\"path\":\"a\"},\"readOnly\":true}","options":[]}"#,
     ]);
     let opened =
-        |id: &str, kind, tool: &str, arguments: &str, read_only| RuntimeEvent::RequestOpened {
+        |id: &str, kind, tool: &str, arguments: &str, read_only| AgentEvent::RequestOpened {
             request: RequestId(id.to_owned()),
             kind,
             tool: tool.to_owned(),
@@ -354,7 +354,7 @@ fn measures_model_requests_and_context_changes() {
             r#"{"type":"message_end","message":{"role":"assistant","content":[],"model":"faux-1","stopReason":"error","errorMessage":"529 overloaded","usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0,"cost":{"total":0}}}}"#,
         ),
     ];
-    let events: Vec<RuntimeEvent> = records
+    let events: Vec<AgentEvent> = records
         .iter()
         .flat_map(|(at, record)| {
             let record: Map<String, Value> = serde_json::from_str(record).expect("JSON object");
@@ -363,9 +363,9 @@ fn measures_model_requests_and_context_changes() {
         .filter(|event| {
             matches!(
                 event,
-                RuntimeEvent::ContextChanged { .. }
-                    | RuntimeEvent::ModelRequestStarted { .. }
-                    | RuntimeEvent::ModelRequestCompleted { .. }
+                AgentEvent::ContextChanged { .. }
+                    | AgentEvent::ModelRequestStarted { .. }
+                    | AgentEvent::ModelRequestCompleted { .. }
             )
         })
         .collect();
@@ -376,7 +376,7 @@ fn measures_model_requests_and_context_changes() {
     assert_eq!(
         events,
         [
-            RuntimeEvent::ContextChanged {
+            AgentEvent::ContextChanged {
                 turn: TURN,
                 sections: vec![
                     section("docs", None),
@@ -387,11 +387,11 @@ fn measures_model_requests_and_context_changes() {
                 tools_added: vec!["read".to_owned(), "bash".to_owned()],
                 tools_removed: vec!["grep".to_owned()],
             },
-            RuntimeEvent::ModelRequestStarted {
+            AgentEvent::ModelRequestStarted {
                 turn: TURN,
                 step: StepId(1),
             },
-            RuntimeEvent::ModelRequestCompleted {
+            AgentEvent::ModelRequestCompleted {
                 turn: TURN,
                 step: StepId(1),
                 model: "faux-1".to_owned(),
@@ -408,11 +408,11 @@ fn measures_model_requests_and_context_changes() {
                 first_token_ms: Some(445),
                 duration_ms: 1095,
             },
-            RuntimeEvent::ModelRequestStarted {
+            AgentEvent::ModelRequestStarted {
                 turn: TURN,
                 step: StepId(2),
             },
-            RuntimeEvent::ModelRequestCompleted {
+            AgentEvent::ModelRequestCompleted {
                 turn: TURN,
                 step: StepId(2),
                 model: "faux-1".to_owned(),
@@ -491,7 +491,7 @@ fn reports_extension_errors_as_notifications() {
         translate(&[
             r#"{"type":"extension_error","extensionPath":"/home/me/.pi/extensions/lint.ts","event":"tool_call","error":"boom"}"#
         ]),
-        [RuntimeEvent::Notification {
+        [AgentEvent::Notification {
             level: NotificationLevel::Error,
             message: "lint.ts failed in tool_call: boom".to_owned(),
         }]

@@ -11,7 +11,7 @@ use std::ffi::OsString;
 use std::path::Path;
 use std::time::Duration;
 
-use meta_harness_core::{AgentCommand, Decision, RecordKind, RuntimeEvent, Session, SessionEvent};
+use meta_harness_core::{AgentCommand, AgentEvent, Decision, RecordKind, Session, SessionEvent};
 
 const WAIT: Duration = Duration::from_secs(30);
 
@@ -108,8 +108,8 @@ async fn check() {
         .expect("event in time")
     {
         match &event {
-            SessionEvent::Runtime(RuntimeEvent::ContentDelta { .. }) => {}
-            SessionEvent::Runtime(RuntimeEvent::RequestOpened {
+            SessionEvent::Runtime(AgentEvent::ContentDelta { .. }) => {}
+            SessionEvent::Runtime(AgentEvent::RequestOpened {
                 request,
                 tool,
                 arguments,
@@ -122,7 +122,7 @@ async fn check() {
                     .await
                     .expect("decision sent");
             }
-            SessionEvent::Runtime(RuntimeEvent::TurnCompleted { .. }) => {
+            SessionEvent::Runtime(AgentEvent::TurnCompleted { .. }) => {
                 println!("{event:?}");
                 turns += 1;
                 if turns == 1 {
@@ -158,7 +158,7 @@ async fn check() {
                     .await
                     .expect("event in time")
                 {
-                    if let SessionEvent::Runtime(RuntimeEvent::InputTextSet { .. }) = &event {
+                    if let SessionEvent::Runtime(AgentEvent::InputTextSet { .. }) = &event {
                         println!("branch handed back: {event:?}");
                         break;
                     }

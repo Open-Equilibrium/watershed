@@ -1,6 +1,6 @@
 use meta_harness_core::{
-    CommandError, Decision, ItemDetail, ItemId, ItemKind, ItemStatus, RequestId, RequestKind,
-    RuntimeEvent, SessionEvent, StepId, TurnId, Usage, UserInput,
+    AgentEvent, CommandError, Decision, ItemDetail, ItemId, ItemKind, ItemStatus, RequestId,
+    RequestKind, SessionEvent, StepId, TurnId, Usage, UserInput,
 };
 
 use crate::api::events::{
@@ -23,13 +23,13 @@ fn no_session_file(id: u32) -> String {
     )
 }
 
-fn bridge(event: RuntimeEvent) -> BridgeEvent {
+fn bridge(event: AgentEvent) -> BridgeEvent {
     SessionEvent::Runtime(event).into()
 }
 
 #[test]
 fn tool_items_keep_their_call_and_outcome() {
-    let started = bridge(RuntimeEvent::ItemStarted {
+    let started = bridge(AgentEvent::ItemStarted {
         turn: TurnId(2),
         item: ItemId(7),
         kind: ItemKind::CommandExecution,
@@ -48,7 +48,7 @@ fn tool_items_keep_their_call_and_outcome() {
     assert_eq!(item.tool.as_deref(), Some("bash"));
     assert_eq!(item.arguments.as_deref(), Some(r#"{"command":"ls"}"#));
 
-    let completed = bridge(RuntimeEvent::ItemCompleted {
+    let completed = bridge(AgentEvent::ItemCompleted {
         turn: TurnId(2),
         item: ItemId(7),
         kind: ItemKind::CommandExecution,
@@ -64,7 +64,7 @@ fn tool_items_keep_their_call_and_outcome() {
 
 #[test]
 fn model_requests_carry_usage_and_timing() {
-    let completed = bridge(RuntimeEvent::ModelRequestCompleted {
+    let completed = bridge(AgentEvent::ModelRequestCompleted {
         turn: TurnId(1),
         step: StepId(3),
         model: "faux/faux-1".to_owned(),
@@ -93,7 +93,7 @@ fn model_requests_carry_usage_and_timing() {
 
 #[test]
 fn requests_and_questions_reach_dart_with_their_answers() {
-    let opened = bridge(RuntimeEvent::RequestOpened {
+    let opened = bridge(AgentEvent::RequestOpened {
         request: RequestId("a1".to_owned()),
         kind: RequestKind::FileChangeApproval,
         tool: "write".to_owned(),
@@ -111,7 +111,7 @@ fn requests_and_questions_reach_dart_with_their_answers() {
             read_only: false,
         })
     );
-    let resolved = bridge(RuntimeEvent::RequestResolved {
+    let resolved = bridge(AgentEvent::RequestResolved {
         request: RequestId("a1".to_owned()),
         decision: Decision::AllowSession,
     });
@@ -121,7 +121,7 @@ fn requests_and_questions_reach_dart_with_their_answers() {
     );
     assert_eq!(Decision::from(BridgeDecision::Reject), Decision::Reject);
 
-    let asked = bridge(RuntimeEvent::UserInputRequested {
+    let asked = bridge(AgentEvent::UserInputRequested {
         request: RequestId("q1".to_owned()),
         input: UserInput::Editor {
             title: "Edit".to_owned(),
@@ -446,7 +446,7 @@ fn shuts_down_while_a_query_waits_for_a_hung_agent() {
 #[test]
 fn coalesces_consecutive_deltas_of_one_item() {
     let delta = |item: u64, text: &str| {
-        bridge(RuntimeEvent::ContentDelta {
+        bridge(AgentEvent::ContentDelta {
             item: ItemId(item),
             delta: text.to_owned(),
         })
@@ -455,7 +455,7 @@ fn coalesces_consecutive_deltas_of_one_item() {
         delta(1, "He"),
         delta(1, "llo"),
         delta(2, "Hi"),
-        bridge(RuntimeEvent::TurnCompleted { turn: TurnId(1) }),
+        bridge(AgentEvent::TurnCompleted { turn: TurnId(1) }),
         delta(2, "!"),
     ]);
     let summary: Vec<_> = merged
@@ -757,7 +757,7 @@ fn rebuilds_the_chat_of_the_current_branch() {
 
 #[test]
 fn passes_the_waiting_messages_to_dart() {
-    let changed = bridge(RuntimeEvent::QueueChanged(meta_harness_core::Queue {
+    let changed = bridge(AgentEvent::QueueChanged(meta_harness_core::Queue {
         steering: vec!["Use Redis".to_owned()],
         follow_up: vec!["Also docs".to_owned()],
     }));

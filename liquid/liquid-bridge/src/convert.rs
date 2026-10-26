@@ -1,10 +1,11 @@
 //! Conversions between the core's model and the types Dart receives.
 
 use meta_harness_core::{
-    ApprovalMode, ChangeStatus, CommandError, ContextDetail, ContextMessage, ContextPart, Decision,
-    EntryKind, FileChange, ItemDetail, ItemKind, ItemStatus, Model, NotificationLevel, Queue,
-    RecordKind, RequestKind, RuntimeEvent, SessionEvent, StepContext, StoredSession, ToolOutcome,
-    Trajectory, TrajectoryRecord, Transcript, TranscriptItem, TreeNode, Usage, UserInput,
+    AgentEvent, ApprovalMode, ChangeStatus, CommandError, ContextDetail, ContextMessage,
+    ContextPart, Decision, EntryKind, FileChange, ItemDetail, ItemKind, ItemStatus, Model,
+    NotificationLevel, Queue, RecordKind, RequestKind, SessionEvent, StepContext, StoredSession,
+    ToolOutcome, Trajectory, TrajectoryRecord, Transcript, TranscriptItem, TreeNode, Usage,
+    UserInput,
 };
 
 use crate::api::events::{
@@ -338,23 +339,23 @@ impl From<SessionEvent> for BridgeEvent {
     }
 }
 
-impl From<RuntimeEvent> for BridgeEvent {
-    fn from(runtime: RuntimeEvent) -> Self {
+impl From<AgentEvent> for BridgeEvent {
+    fn from(runtime: AgentEvent) -> Self {
         use BridgeEventKind as Kind;
         match runtime {
-            RuntimeEvent::TurnStarted { turn } => BridgeEvent {
+            AgentEvent::TurnStarted { turn } => BridgeEvent {
                 turn: Some(int(turn.0)),
                 ..event(Kind::TurnStarted)
             },
-            RuntimeEvent::TurnCompleted { turn } => BridgeEvent {
+            AgentEvent::TurnCompleted { turn } => BridgeEvent {
                 turn: Some(int(turn.0)),
                 ..event(Kind::TurnCompleted)
             },
-            RuntimeEvent::TurnAborted { turn } => BridgeEvent {
+            AgentEvent::TurnAborted { turn } => BridgeEvent {
                 turn: Some(int(turn.0)),
                 ..event(Kind::TurnAborted)
             },
-            RuntimeEvent::ItemStarted {
+            AgentEvent::ItemStarted {
                 turn,
                 item: id,
                 kind,
@@ -375,17 +376,17 @@ impl From<RuntimeEvent> for BridgeEvent {
                     ..event(Kind::ItemStarted)
                 }
             }
-            RuntimeEvent::ItemUpdated { item: id, output } => BridgeEvent {
+            AgentEvent::ItemUpdated { item: id, output } => BridgeEvent {
                 item: Some(item(id.0)),
                 text: Some(output),
                 ..event(Kind::ItemUpdated)
             },
-            RuntimeEvent::ContentDelta { item: id, delta } => BridgeEvent {
+            AgentEvent::ContentDelta { item: id, delta } => BridgeEvent {
                 item: Some(item(id.0)),
                 text: Some(delta),
                 ..event(Kind::ContentDelta)
             },
-            RuntimeEvent::ItemCompleted {
+            AgentEvent::ItemCompleted {
                 turn,
                 item: id,
                 kind,
@@ -403,7 +404,7 @@ impl From<RuntimeEvent> for BridgeEvent {
                 text: Some(text),
                 ..event(Kind::ItemCompleted)
             },
-            RuntimeEvent::ContextChanged {
+            AgentEvent::ContextChanged {
                 turn,
                 sections,
                 appended_chars,
@@ -425,7 +426,7 @@ impl From<RuntimeEvent> for BridgeEvent {
                 }),
                 ..event(Kind::ContextChanged)
             },
-            RuntimeEvent::ModelRequestStarted { turn, step } => BridgeEvent {
+            AgentEvent::ModelRequestStarted { turn, step } => BridgeEvent {
                 turn: Some(int(turn.0)),
                 step: Some(BridgeStep {
                     id: int(step.0),
@@ -438,7 +439,7 @@ impl From<RuntimeEvent> for BridgeEvent {
                 }),
                 ..event(Kind::ModelRequestStarted)
             },
-            RuntimeEvent::ModelRequestCompleted {
+            AgentEvent::ModelRequestCompleted {
                 turn,
                 step,
                 model,
@@ -460,7 +461,7 @@ impl From<RuntimeEvent> for BridgeEvent {
                 }),
                 ..event(Kind::ModelRequestCompleted)
             },
-            RuntimeEvent::RequestOpened {
+            AgentEvent::RequestOpened {
                 request: id,
                 kind,
                 tool,
@@ -478,7 +479,7 @@ impl From<RuntimeEvent> for BridgeEvent {
                 }),
                 ..event(Kind::RequestOpened)
             },
-            RuntimeEvent::RequestResolved {
+            AgentEvent::RequestResolved {
                 request: id,
                 decision,
             } => BridgeEvent {
@@ -488,7 +489,7 @@ impl From<RuntimeEvent> for BridgeEvent {
                 }),
                 ..event(Kind::RequestResolved)
             },
-            RuntimeEvent::UserInputRequested { request: id, input } => {
+            AgentEvent::UserInputRequested { request: id, input } => {
                 let (kind, title, detail, options) = match input {
                     UserInput::Select { title, options } => {
                         (BridgeQuestionKind::Select, title, String::new(), options)
@@ -516,11 +517,11 @@ impl From<RuntimeEvent> for BridgeEvent {
                     ..event(Kind::UserInputRequested)
                 }
             }
-            RuntimeEvent::UserInputResolved { request: id } => BridgeEvent {
+            AgentEvent::UserInputResolved { request: id } => BridgeEvent {
                 request: Some(request(id.0)),
                 ..event(Kind::UserInputResolved)
             },
-            RuntimeEvent::Notification { level, message } => BridgeEvent {
+            AgentEvent::Notification { level, message } => BridgeEvent {
                 display: Some(BridgeDisplay {
                     level: Some(match level {
                         NotificationLevel::Info => BridgeLevel::Info,
@@ -532,27 +533,27 @@ impl From<RuntimeEvent> for BridgeEvent {
                 text: Some(message),
                 ..event(Kind::Notification)
             },
-            RuntimeEvent::StatusChanged { key, text } => BridgeEvent {
+            AgentEvent::StatusChanged { key, text } => BridgeEvent {
                 display: Some(display(key)),
                 text,
                 ..event(Kind::StatusChanged)
             },
-            RuntimeEvent::WidgetChanged { key, lines } => BridgeEvent {
+            AgentEvent::WidgetChanged { key, lines } => BridgeEvent {
                 display: Some(BridgeDisplay {
                     lines,
                     ..display(key)
                 }),
                 ..event(Kind::WidgetChanged)
             },
-            RuntimeEvent::TitleChanged { title } => BridgeEvent {
+            AgentEvent::TitleChanged { title } => BridgeEvent {
                 text: Some(title),
                 ..event(Kind::TitleChanged)
             },
-            RuntimeEvent::InputTextSet { text } => BridgeEvent {
+            AgentEvent::InputTextSet { text } => BridgeEvent {
                 text: Some(text),
                 ..event(Kind::InputTextSet)
             },
-            RuntimeEvent::QueueChanged(queue) => BridgeEvent {
+            AgentEvent::QueueChanged(queue) => BridgeEvent {
                 queue: Some(queue.into()),
                 ..event(Kind::QueueChanged)
             },

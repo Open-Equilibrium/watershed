@@ -5,9 +5,9 @@ use tokio::sync::mpsc::Receiver;
 use tokio::time::timeout;
 
 use crate::{
-    AgentCommand, Answer, ApprovalMode, CommandError, Decision, Delivery, EntryKind, ItemDetail,
-    ItemId, ItemKind, ItemStatus, Model, NotificationLevel, Pending, Queue, RecordKind, RequestId,
-    RequestKind, RuntimeEvent, Session, SessionEvent, SessionState, SessionTree, TreeNode, TurnId,
+    AgentCommand, AgentEvent, Answer, ApprovalMode, CommandError, Decision, Delivery, EntryKind,
+    ItemDetail, ItemId, ItemKind, ItemStatus, Model, NotificationLevel, Pending, Queue, RecordKind,
+    RequestId, RequestKind, Session, SessionEvent, SessionState, SessionTree, TreeNode, TurnId,
     UserInput,
 };
 
@@ -74,14 +74,14 @@ IFS= read -r line || exit 0"#,
         let turn = TurnId(1);
         let (item, kind) = (ItemId(1), ItemKind::UserMessage);
         for expected in [
-            RuntimeEvent::TurnStarted { turn },
-            RuntimeEvent::ItemStarted {
+            AgentEvent::TurnStarted { turn },
+            AgentEvent::ItemStarted {
                 turn,
                 item,
                 kind,
                 detail: ItemDetail::None,
             },
-            RuntimeEvent::ItemCompleted {
+            AgentEvent::ItemCompleted {
                 turn,
                 item,
                 kind,
@@ -89,7 +89,7 @@ IFS= read -r line || exit 0"#,
                 status: ItemStatus::Completed,
                 duration_ms: None,
             },
-            RuntimeEvent::TurnCompleted { turn },
+            AgentEvent::TurnCompleted { turn },
         ] {
             assert_eq!(next(&mut events).await, SessionEvent::Runtime(expected));
         }
@@ -448,7 +448,7 @@ IFS= read -r line || exit 0
         assert!(
             matches!(
                 &skipped,
-                SessionEvent::Runtime(RuntimeEvent::Notification {
+                SessionEvent::Runtime(AgentEvent::Notification {
                     level: NotificationLevel::Warning,
                     ..
                 })
@@ -458,7 +458,7 @@ IFS= read -r line || exit 0
         assert!(
             matches!(
                 next(&mut events).await,
-                SessionEvent::Runtime(RuntimeEvent::QueueChanged(_))
+                SessionEvent::Runtime(AgentEvent::QueueChanged(_))
             ),
             "the agent got its answer instead of waiting"
         );
@@ -494,7 +494,7 @@ fn skips_an_oversized_record_and_keeps_the_session() {
         assert!(
             matches!(
                 &skipped,
-                SessionEvent::Runtime(RuntimeEvent::Notification {
+                SessionEvent::Runtime(AgentEvent::Notification {
                     level: NotificationLevel::Warning,
                     message,
                 }) if message.starts_with("Skipped an agent record")
@@ -553,12 +553,12 @@ IFS= read -r line || exit 0
         );
         assert!(matches!(
             next(&mut events).await,
-            SessionEvent::Runtime(RuntimeEvent::TurnStarted { .. })
+            SessionEvent::Runtime(AgentEvent::TurnStarted { .. })
         ));
         assert!(session.running(), "a started turn makes the session run");
         assert_eq!(
             next(&mut events).await,
-            SessionEvent::Runtime(RuntimeEvent::QueueChanged(queue.clone()))
+            SessionEvent::Runtime(AgentEvent::QueueChanged(queue.clone()))
         );
         assert_eq!(session.clear_queue().await, Ok(queue));
     });
@@ -616,7 +616,7 @@ fn answers_extension_questions() {
         ];
         for (id, answer) in questions {
             let request = RequestId(id.to_owned());
-            let SessionEvent::Runtime(RuntimeEvent::UserInputRequested {
+            let SessionEvent::Runtime(AgentEvent::UserInputRequested {
                 request: asked,
                 input,
             }) = next(&mut events).await
@@ -636,7 +636,7 @@ fn answers_extension_questions() {
             assert_eq!(session.answer(&request, answer).await, Ok(()));
             assert_eq!(
                 next(&mut events).await,
-                SessionEvent::Runtime(RuntimeEvent::UserInputResolved { request })
+                SessionEvent::Runtime(AgentEvent::UserInputResolved { request })
             );
         }
         assert_eq!(
@@ -666,12 +666,12 @@ fn stopping_rejects_an_approval_that_arrives_late() {
         assert_eq!(timeout(WAIT, stopping.accepted()).await, Ok(Ok(())));
         assert!(matches!(
             next(&mut events).await,
-            SessionEvent::Runtime(RuntimeEvent::TurnStarted { .. })
+            SessionEvent::Runtime(AgentEvent::TurnStarted { .. })
         ));
         assert!(
             matches!(
                 next(&mut events).await,
-                SessionEvent::Runtime(RuntimeEvent::RequestOpened { request, .. })
+                SessionEvent::Runtime(AgentEvent::RequestOpened { request, .. })
                     if request == RequestId("a2".to_owned())
             ),
             "the next turn asks again"
@@ -697,7 +697,7 @@ fn asks_the_user_again_once_an_abort_found_the_agent_idle() {
         assert!(
             matches!(
                 next(&mut events).await,
-                SessionEvent::Runtime(RuntimeEvent::UserInputRequested { .. })
+                SessionEvent::Runtime(AgentEvent::UserInputRequested { .. })
             ),
             "the question reaches the user"
         );
@@ -792,7 +792,7 @@ fn allowances_for_a_session_end_with_it() {
         let opened = |event: SessionEvent, id: &str| {
             matches!(
                 event,
-                SessionEvent::Runtime(RuntimeEvent::RequestOpened { request, .. })
+                SessionEvent::Runtime(AgentEvent::RequestOpened { request, .. })
                     if request == RequestId(id.to_owned())
             )
         };
@@ -811,7 +811,7 @@ fn allowances_for_a_session_end_with_it() {
         assert_eq!(kept.switched().await, Ok(false));
         assert!(matches!(
             next(&mut events).await,
-            SessionEvent::Runtime(RuntimeEvent::QueueChanged(_))
+            SessionEvent::Runtime(AgentEvent::QueueChanged(_))
         ));
         let started = session.new_session().await.expect("sent");
         assert_eq!(started.switched().await, Ok(true));
@@ -833,11 +833,11 @@ IFS= read -r line || exit 0"#,
         let request = RequestId("q1".to_owned());
         assert!(matches!(
             next(&mut events).await,
-            SessionEvent::Runtime(RuntimeEvent::UserInputRequested { .. })
+            SessionEvent::Runtime(AgentEvent::UserInputRequested { .. })
         ));
         assert_eq!(
             next(&mut events).await,
-            SessionEvent::Runtime(RuntimeEvent::UserInputResolved {
+            SessionEvent::Runtime(AgentEvent::UserInputResolved {
                 request: request.clone()
             })
         );
@@ -863,7 +863,7 @@ fn keeps_a_dialog_without_a_time_limit_open() {
         let (mut session, mut events) = fake_agent(&script);
         assert!(matches!(
             next(&mut events).await,
-            SessionEvent::Runtime(RuntimeEvent::UserInputRequested { .. })
+            SessionEvent::Runtime(AgentEvent::UserInputRequested { .. })
         ));
         let early = timeout(Duration::from_millis(300), events.recv()).await;
         assert!(early.is_err(), "nothing expires: {early:?}");
@@ -884,7 +884,7 @@ exit 3"#,
         );
         assert!(matches!(
             next(&mut events).await,
-            SessionEvent::Runtime(RuntimeEvent::UserInputRequested { .. })
+            SessionEvent::Runtime(AgentEvent::UserInputRequested { .. })
         ));
         assert_eq!(
             next(&mut events).await,
@@ -925,7 +925,7 @@ fn asks_only_for_calls_the_approval_mode_does_not_allow() {
             let request = RequestId(id.to_owned());
             assert_eq!(
                 next(&mut events).await,
-                SessionEvent::Runtime(RuntimeEvent::RequestOpened {
+                SessionEvent::Runtime(AgentEvent::RequestOpened {
                     request: request.clone(),
                     kind,
                     tool: tool.to_owned(),
@@ -936,7 +936,7 @@ fn asks_only_for_calls_the_approval_mode_does_not_allow() {
             assert_eq!(session.decide(&request, decision).await, Ok(()));
             assert_eq!(
                 next(&mut events).await,
-                SessionEvent::Runtime(RuntimeEvent::RequestResolved { request, decision })
+                SessionEvent::Runtime(AgentEvent::RequestResolved { request, decision })
             );
         }
         assert_eq!(

@@ -6,8 +6,8 @@ use std::time::Duration;
 use serde_json::{Map, Value};
 
 use crate::event::{
-    ContextSection, ItemDetail, ItemId, ItemKind, ItemStatus, NotificationLevel, Queue, RequestId,
-    RequestKind, RuntimeEvent, StepId, TurnId, Usage, UserInput,
+    AgentEvent, ContextSection, ItemDetail, ItemId, ItemKind, ItemStatus, NotificationLevel, Queue,
+    RequestId, RequestKind, StepId, TurnId, Usage, UserInput,
 };
 
 /// Title prefix of the select dialog Watershed's pi extension uses to ask for an approval.
@@ -46,20 +46,20 @@ impl PiAdapter {
 
     /// Translates one pi session event received `at` a time on the session's monotonic clock;
     /// events without a runtime meaning yield nothing.
-    pub fn translate(&mut self, record: &Map<String, Value>, at: Duration) -> Vec<RuntimeEvent> {
+    pub fn translate(&mut self, record: &Map<String, Value>, at: Duration) -> Vec<AgentEvent> {
         let kind = record.get("type").and_then(Value::as_str);
         if kind == Some("extension_ui_request") {
             return extension_ui(record).into_iter().collect();
         }
         if kind == Some("queue_update") {
-            return vec![RuntimeEvent::QueueChanged(queue(&Value::Object(
+            return vec![AgentEvent::QueueChanged(queue(&Value::Object(
                 record.clone(),
             )))];
         }
         if kind == Some("extension_error") {
             let path = str_field(record, "extensionPath");
             let extension = path.rsplit(['/', '\\']).next().unwrap_or(path);
-            return vec![RuntimeEvent::Notification {
+            return vec![AgentEvent::Notification {
                 level: NotificationLevel::Error,
                 message: format!(
                     "{extension} failed in {}: {}",
@@ -74,7 +74,7 @@ impl PiAdapter {
             self.turns += 1;
             let turn = TurnId(self.turns);
             self.turn = Some(turn);
-            events.push(RuntimeEvent::TurnStarted { turn });
+            events.push(AgentEvent::TurnStarted { turn });
         }
         let Some(turn) = self.turn else {
             return events;
@@ -88,9 +88,9 @@ impl PiAdapter {
                 self.turn_started = None;
                 events.push(
                     if record.get("aborted").and_then(Value::as_bool) == Some(true) {
-                        RuntimeEvent::TurnAborted { turn }
+                        AgentEvent::TurnAborted { turn }
                     } else {
-                        RuntimeEvent::TurnCompleted { turn }
+                        AgentEvent::TurnCompleted { turn }
                     },
                 );
             }
@@ -104,7 +104,7 @@ impl PiAdapter {
                         started: self.turn_started.take().unwrap_or(at),
                         first_token: None,
                     });
-                    events.push(RuntimeEvent::ModelRequestStarted { turn, step: id });
+                    events.push(AgentEvent::ModelRequestStarted { turn, step: id });
                 }
             }
             Some("message_end") => match role(record) {
@@ -134,13 +134,13 @@ impl PiAdapter {
                 if let Some(&(item, _)) = self.tools.get(str_field(record, "toolCallId")) {
                     let output =
                         content_text(record.get("partialResult").and_then(|r| r.get("content")));
-                    events.push(RuntimeEvent::ItemUpdated { item, output });
+                    events.push(AgentEvent::ItemUpdated { item, output });
                 }
             }
             Some("tool_execution_end") => {
                 if let Some((item, kind)) = self.tools.remove(str_field(record, "toolCallId")) {
                     let failed = record.get("isError").and_then(Value::as_bool) == Some(true);
-                    events.push(RuntimeEvent::ItemCompleted {
+                    events.push(AgentEvent::ItemCompleted {
                         turn,
                         item,
                         kind,
@@ -163,7 +163,7 @@ impl PiAdapter {
         &mut self,
         turn: TurnId,
         record: &Map<String, Value>,
-        events: &mut Vec<RuntimeEvent>,
+        events: &mut Vec<AgentEvent>,
     ) {
         let Some(message) = record.get("message") else {
             return;
@@ -184,7 +184,7 @@ impl PiAdapter {
         turn: TurnId,
         record: &Map<String, Value>,
         at: Duration,
-        events: &mut Vec<RuntimeEvent>,
+        events: &mut Vec<AgentEvent>,
     ) {
         let (Some(step), Some(message)) = (
             self.step.take(),
@@ -193,7 +193,7 @@ impl PiAdapter {
             return;
         };
         let millis = |duration: Duration| u64::try_from(duration.as_millis()).unwrap_or(u64::MAX);
-        events.push(RuntimeEvent::ModelRequestCompleted {
+        events.push(AgentEvent::ModelRequestCompleted {
             turn,
             step: step.id,
             model: str_field(message, "model").to_owned(),
@@ -214,7 +214,7 @@ impl PiAdapter {
         &mut self,
         turn: TurnId,
         update: &Map<String, Value>,
-        events: &mut Vec<RuntimeEvent>,
+        events: &mut Vec<AgentEvent>,
     ) {
         let Some(index) = update.get("contentIndex").and_then(Value::as_u64) else {
             return;
@@ -233,7 +233,7 @@ impl PiAdapter {
             Some("text_delta" | "thinking_delta") => {
                 if let Some(&(item, _)) = self.blocks.get(&index) {
                     let delta = str_field(update, "delta").to_owned();
-                    events.push(RuntimeEvent::ContentDelta { item, delta });
+                    events.push(AgentEvent::ContentDelta { item, delta });
                 }
             }
             Some("text_end" | "thinking_end") => {
@@ -254,7 +254,7 @@ impl PiAdapter {
         &mut self,
         turn: TurnId,
         record: &Map<String, Value>,
-        events: &mut Vec<RuntimeEvent>,
+        events: &mut Vec<AgentEvent>,
     ) {
         let name = str_field(record, "toolName");
         let kind = match request_kind(name) {
@@ -278,8 +278,8 @@ impl PiAdapter {
     }
 }
 
-fn started(turn: TurnId, item: ItemId, kind: ItemKind, detail: ItemDetail) -> RuntimeEvent {
-    RuntimeEvent::ItemStarted {
+fn started(turn: TurnId, item: ItemId, kind: ItemKind, detail: ItemDetail) -> AgentEvent {
+    AgentEvent::ItemStarted {
         turn,
         item,
         kind,
@@ -287,8 +287,8 @@ fn started(turn: TurnId, item: ItemId, kind: ItemKind, detail: ItemDetail) -> Ru
     }
 }
 
-fn completed(turn: TurnId, item: ItemId, kind: ItemKind, text: String) -> RuntimeEvent {
-    RuntimeEvent::ItemCompleted {
+fn completed(turn: TurnId, item: ItemId, kind: ItemKind, text: String) -> AgentEvent {
+    AgentEvent::ItemCompleted {
         turn,
         item,
         kind,
@@ -303,7 +303,7 @@ fn role(record: &Map<String, Value>) -> Option<&str> {
 }
 
 /// Reads a system message that changes prompt sections or tools.
-fn context_change(turn: TurnId, record: &Map<String, Value>) -> Option<RuntimeEvent> {
+fn context_change(turn: TurnId, record: &Map<String, Value>) -> Option<AgentEvent> {
     let message = record.get("message")?.as_object()?;
     let sections = message
         .get("sections")
@@ -331,7 +331,7 @@ fn context_change(turn: TurnId, record: &Map<String, Value>) -> Option<RuntimeEv
             })
             .unwrap_or_default()
     };
-    Some(RuntimeEvent::ContextChanged {
+    Some(AgentEvent::ContextChanged {
         turn,
         sections,
         appended_chars: content_text(message.get("content")).chars().count(),
@@ -350,7 +350,7 @@ pub(crate) fn request_kind(tool: &str) -> RequestKind {
 }
 
 /// Translates one extension UI request; unknown methods yield nothing.
-fn extension_ui(record: &Map<String, Value>) -> Option<RuntimeEvent> {
+fn extension_ui(record: &Map<String, Value>) -> Option<AgentEvent> {
     let request = RequestId(str_field(record, "id").to_owned());
     let text = |field| str_field(record, field).to_owned();
     let input = match str_field(record, "method") {
@@ -379,13 +379,13 @@ fn extension_ui(record: &Map<String, Value>) -> Option<RuntimeEvent> {
                 "error" => NotificationLevel::Error,
                 _ => NotificationLevel::Info,
             };
-            return Some(RuntimeEvent::Notification {
+            return Some(AgentEvent::Notification {
                 level,
                 message: text("message"),
             });
         }
         "setStatus" => {
-            return Some(RuntimeEvent::StatusChanged {
+            return Some(AgentEvent::StatusChanged {
                 key: text("statusKey"),
                 text: record
                     .get("statusText")
@@ -394,28 +394,28 @@ fn extension_ui(record: &Map<String, Value>) -> Option<RuntimeEvent> {
             });
         }
         "setWidget" => {
-            return Some(RuntimeEvent::WidgetChanged {
+            return Some(AgentEvent::WidgetChanged {
                 key: text("widgetKey"),
                 lines: strings(record.get("widgetLines")),
             });
         }
         "setTitle" => {
-            return Some(RuntimeEvent::TitleChanged {
+            return Some(AgentEvent::TitleChanged {
                 title: text("title"),
             });
         }
-        "set_editor_text" => return Some(RuntimeEvent::InputTextSet { text: text("text") }),
+        "set_editor_text" => return Some(AgentEvent::InputTextSet { text: text("text") }),
         _ => return None,
     };
-    Some(RuntimeEvent::UserInputRequested { request, input })
+    Some(AgentEvent::UserInputRequested { request, input })
 }
 
 /// Reads the approval payload; an unreadable payload still asks the user, so nothing runs
 /// without a decision.
-fn approval(request: RequestId, payload: &str) -> RuntimeEvent {
+fn approval(request: RequestId, payload: &str) -> AgentEvent {
     let payload: Map<String, Value> = serde_json::from_str(payload).unwrap_or_default();
     let tool = str_field(&payload, "tool");
-    RuntimeEvent::RequestOpened {
+    AgentEvent::RequestOpened {
         request,
         kind: request_kind(tool),
         tool: tool.to_owned(),

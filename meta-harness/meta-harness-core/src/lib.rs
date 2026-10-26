@@ -15,9 +15,9 @@ mod stored;
 pub use approval::ApprovalMode;
 pub use diff::{ChangeStatus, DiffError, FileChange, Snapshot, WorkingTree};
 pub use event::{
-    Answer, ContextSection, Decision, Delivery, EntryKind, ItemDetail, ItemId, ItemKind,
-    ItemStatus, NotificationLevel, Queue, RequestId, RequestKind, RuntimeEvent, SessionTree,
-    StepId, TreeNode, TurnId, Usage, UserInput,
+    AgentEvent, Answer, ContextSection, Decision, Delivery, EntryKind, ItemDetail, ItemId,
+    ItemKind, ItemStatus, NotificationLevel, Queue, RequestId, RequestKind, SessionTree, StepId,
+    TreeNode, TurnId, Usage, UserInput,
 };
 pub use framing::{Frame, LineFramer};
 pub use history::{

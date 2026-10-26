@@ -1,4 +1,4 @@
-//! Agent-neutral runtime events, using T3 Code's provider runtime vocabulary (ADR-0195).
+//! Agent-neutral agent events, using T3 Code's provider runtime vocabulary (ADR-0195).
 
 /// One turn: a user prompt until the agent settles, including its retries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -206,7 +206,7 @@ pub enum ItemStatus {
 
 /// An agent-neutral runtime event.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RuntimeEvent {
+pub enum AgentEvent {
     /// A turn started.
     TurnStarted {
         /// The turn.
