@@ -39,10 +39,6 @@ pub enum ItemDetail {
     },
 }
 
-/// One model request within a turn: the agent sends its context and receives one response.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct StepId(pub u64);
-
 /// Tokens and cost of one model request, as the provider reported them.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Usage {
@@ -268,20 +264,12 @@ pub enum AgentEvent {
     ModelRequestCompleted {
         /// The owning turn.
         turn: TurnId,
-        /// The request.
-        step: StepId,
-        /// The model that answered.
-        model: String,
         /// Tokens and cost.
         usage: Usage,
         /// Why the response ended, such as `stop`, `toolUse`, `error` or `aborted`.
         stop_reason: String,
         /// The provider's error, if the request failed.
         error: Option<String>,
-        /// Milliseconds until the first streamed content, if any arrived.
-        first_token_ms: Option<u64>,
-        /// Milliseconds from request to completed response.
-        duration_ms: u64,
     },
     /// A tool call waits for the user's approval.
     RequestOpened {
@@ -302,12 +290,10 @@ pub enum AgentEvent {
         /// The call's item, when the agent says which call it asks about.
         item: Option<ItemId>,
     },
-    /// An approval request ended.
+    /// An approval request ended, answered or withdrawn.
     RequestResolved {
         /// The request.
         request: RequestId,
-        /// The user's answer; none when the request was withdrawn, as Stop does.
-        decision: Option<Decision>,
     },
     /// An agent extension asks the user a question.
     UserInputRequested {

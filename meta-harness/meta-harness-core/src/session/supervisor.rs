@@ -5,7 +5,7 @@ use std::future::{Future, poll_fn};
 use std::pin::{Pin, pin};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::task::Poll;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use serde_json::{Map, Value, json};
 use tokio::io::AsyncReadExt;
@@ -32,8 +32,6 @@ pub(super) struct Supervisor {
     pub(super) writer: mpsc::Sender<Write>,
     pub(super) state: State,
     pub(super) adapter: PiAdapter,
-    /// The session's monotonic clock for request timing.
-    pub(super) started: Instant,
     pub(super) killed: oneshot::Receiver<()>,
     /// Set once `killed` completed; it must not be polled again.
     pub(super) kill_requested: bool,
@@ -138,7 +136,7 @@ impl Supervisor {
             self.answer_command(record);
             return true;
         }
-        for event in self.adapter.translate(&record, self.started.elapsed()) {
+        for event in self.adapter.translate(&record) {
             let mut expiry = None;
             let forward = match &event {
                 AgentEvent::RequestOpened {

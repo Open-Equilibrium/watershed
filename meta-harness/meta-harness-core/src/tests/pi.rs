@@ -1,11 +1,9 @@
-use std::time::Duration;
-
 use serde_json::{Map, Value};
 
 use crate::{
     AgentEvent, ChangedLines, EntryKind, History, ItemDetail, ItemId, ItemKind, ItemStatus,
-    NotificationLevel, PiAdapter, RequestId, RequestKind, SessionTree, StepId, TreeNode, TurnId,
-    Usage, UserInput,
+    NotificationLevel, PiAdapter, RequestId, RequestKind, SessionTree, TreeNode, TurnId, Usage,
+    UserInput,
 };
 
 const TURN: TurnId = TurnId(1);
@@ -17,7 +15,7 @@ fn translate(records: &[&str]) -> Vec<AgentEvent> {
         .flat_map(|record| {
             let record: Map<String, Value> =
                 serde_json::from_str(record).expect("fixture records are JSON objects");
-            adapter.translate(&record, Duration::ZERO)
+            adapter.translate(&record)
         })
         .collect()
 }
@@ -87,13 +85,9 @@ fn streams_a_turn_with_reasoning_and_text() {
             completed(3, ItemKind::AssistantMessage, "Hi there"),
             AgentEvent::ModelRequestCompleted {
                 turn: TURN,
-                step: StepId(1),
-                model: String::new(),
                 usage: Usage::default(),
                 stop_reason: String::new(),
                 error: None,
-                first_token_ms: Some(0),
-                duration_ms: 0,
             },
             AgentEvent::TurnCompleted { turn: TURN },
         ]
@@ -369,57 +363,21 @@ fn ties_an_approval_to_the_call_it_asks_about() {
 }
 
 #[test]
-fn measures_model_requests() {
-    let mut adapter = PiAdapter::new();
-    let records = [
-        (0, r#"{"type":"agent_start"}"#),
-        // The request starts with pi's turn, before the provider answers with headers.
-        (5, r#"{"type":"turn_start"}"#),
-        (
-            10,
-            r#"{"type":"message_end","message":{"role":"system","content":"Also be kind.","sections":{"preamble":"You are pi.","rules":"Be brief.","docs":null},"toolsAdded":[{"name":"read"},{"name":"bash"}],"toolsRemoved":[{"name":"grep"}]}}"#,
-        ),
-        (
-            100,
-            r#"{"type":"message_start","message":{"role":"assistant","content":[],"model":"faux-1","stopReason":"pending"}}"#,
-        ),
-        (
-            400,
-            r#"{"type":"message_update","assistantMessageEvent":{"type":"text_start","contentIndex":0}}"#,
-        ),
-        (
-            450,
-            r#"{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"Hi"}}"#,
-        ),
-        (
-            1100,
-            r#"{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"Hi"}],"model":"faux-1","stopReason":"stop","usage":{"input":6140,"output":820,"cacheRead":100,"cacheWrite":5,"reasoning":214,"totalTokens":6960,"cost":{"input":0.01,"output":0.008,"cacheRead":0,"cacheWrite":0,"total":0.0234567}}}}"#,
-        ),
-        (1150, r#"{"type":"turn_start"}"#),
-        (
-            1200,
-            r#"{"type":"message_start","message":{"role":"assistant","content":[],"model":"faux-1"}}"#,
-        ),
-        (
-            1300,
-            r#"{"type":"message_end","message":{"role":"assistant","content":[],"model":"faux-1","stopReason":"error","errorMessage":"529 overloaded","usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0,"cost":{"total":0}}}}"#,
-        ),
-    ];
-    let events: Vec<AgentEvent> = records
-        .iter()
-        .flat_map(|(at, record)| {
-            let record: Map<String, Value> = serde_json::from_str(record).expect("JSON object");
-            adapter.translate(&record, Duration::from_millis(*at))
-        })
+fn reports_what_each_model_request_used_and_how_it_ended() {
+    let events = translate(&[
+        r#"{"type":"agent_start"}"#,
+        r#"{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"Hi"}],"model":"faux-1","stopReason":"stop","usage":{"input":6140,"output":820,"cacheRead":100,"cacheWrite":5,"reasoning":214,"totalTokens":6960,"cost":{"input":0.01,"output":0.008,"cacheRead":0,"cacheWrite":0,"total":0.0234567}}}}"#,
+        r#"{"type":"message_end","message":{"role":"assistant","content":[],"model":"faux-1","stopReason":"error","errorMessage":"529 overloaded","usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0,"cost":{"total":0}}}}"#,
+    ]);
+    let requests: Vec<_> = events
+        .into_iter()
         .filter(|event| matches!(event, AgentEvent::ModelRequestCompleted { .. }))
         .collect();
     assert_eq!(
-        events,
+        requests,
         [
             AgentEvent::ModelRequestCompleted {
                 turn: TURN,
-                step: StepId(1),
-                model: "faux-1".to_owned(),
                 usage: Usage {
                     input: 6140,
                     output: 820,
@@ -430,18 +388,12 @@ fn measures_model_requests() {
                 },
                 stop_reason: "stop".to_owned(),
                 error: None,
-                first_token_ms: Some(445),
-                duration_ms: 1095,
             },
             AgentEvent::ModelRequestCompleted {
                 turn: TURN,
-                step: StepId(2),
-                model: "faux-1".to_owned(),
                 usage: Usage::default(),
                 stop_reason: "error".to_owned(),
                 error: Some("529 overloaded".to_owned()),
-                first_token_ms: None,
-                duration_ms: 150,
             },
         ]
     );

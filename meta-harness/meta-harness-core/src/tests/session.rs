@@ -969,10 +969,7 @@ fn asks_only_for_calls_the_approval_mode_does_not_allow() {
             assert_eq!(session.decide(&request, decision).await, Ok(()));
             assert_eq!(
                 next(&mut events).await,
-                SessionEvent::Agent(AgentEvent::RequestResolved {
-                    request,
-                    decision: Some(decision)
-                })
+                SessionEvent::Agent(AgentEvent::RequestResolved { request })
             );
         }
         assert_eq!(next(&mut events).await, exited(true));
@@ -1195,7 +1192,6 @@ fn stopping_withdraws_the_dialogs_the_agent_waits_for() {
             next(&mut events).await,
             SessionEvent::Agent(AgentEvent::RequestResolved {
                 request: RequestId("a1".to_owned()),
-                decision: None,
             })
         );
         assert_eq!(

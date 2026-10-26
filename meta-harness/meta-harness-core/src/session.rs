@@ -5,7 +5,7 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use serde_json::{Value, json};
 use tokio::io::AsyncWriteExt;
@@ -270,7 +270,6 @@ impl Session {
             writer: writer.clone(),
             state: state.clone(),
             adapter: PiAdapter::new(),
-            started: Instant::now(),
             killed,
             kill_requested: false,
             error_output,
@@ -542,7 +541,6 @@ impl Session {
         self.respond(request, json!({ "value": value })).await?;
         self.resolved(AgentEvent::RequestResolved {
             request: request.clone(),
-            decision: Some(decision),
         })
         .await;
         Ok(())
@@ -556,7 +554,6 @@ impl Session {
         self.respond(request, json!({ "cancelled": true })).await?;
         self.resolved(AgentEvent::RequestResolved {
             request: request.clone(),
-            decision: None,
         })
         .await;
         Ok(())

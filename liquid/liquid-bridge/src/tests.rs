@@ -1,6 +1,6 @@
 use meta_harness_core::{
     AgentEvent, ChangedLines, CommandError, Decision, ItemDetail, ItemId, ItemKind, ItemStatus,
-    RequestId, RequestKind, SessionEvent, StepId, TurnId, Usage, UserInput,
+    RequestId, RequestKind, SessionEvent, TurnId, Usage, UserInput,
 };
 
 use crate::api::events::{
@@ -97,8 +97,6 @@ fn tool_items_keep_their_call_and_outcome() {
 fn model_requests_carry_usage_and_how_they_ended() {
     let completed = bridge(AgentEvent::ModelRequestCompleted {
         turn: TurnId(1),
-        step: StepId(3),
-        model: "faux/faux-1".to_owned(),
         usage: Usage {
             input: 6140,
             output: 820,
@@ -109,8 +107,6 @@ fn model_requests_carry_usage_and_how_they_ended() {
         },
         stop_reason: "error".to_owned(),
         error: Some("529 overloaded".to_owned()),
-        first_token_ms: Some(900),
-        duration_ms: 3400,
     });
     let step = completed.step.expect("step");
     assert_eq!(
@@ -149,7 +145,6 @@ fn requests_and_questions_reach_dart_with_their_answers() {
     );
     let resolved = bridge(AgentEvent::RequestResolved {
         request: RequestId("a1".to_owned()),
-        decision: Some(Decision::AllowSession),
     });
     assert_eq!(
         (
