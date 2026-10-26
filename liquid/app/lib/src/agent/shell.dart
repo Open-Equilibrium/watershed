@@ -112,12 +112,15 @@ class _AgentShellState extends State<AgentShell> {
     if (widget.state.question.value != null) _settings.value = false;
   }
 
+  /// Text handed back to the input area goes before what the user typed meanwhile, which stays.
   void _applyDraft() {
     final draft = widget.state.draft.value;
     if (draft == null) return;
+    final typed = _composer.text.trim();
+    final text = typed.isEmpty || typed == draft ? draft : '$draft\n\n$typed';
     _composer.value = TextEditingValue(
-      text: draft,
-      selection: TextSelection.collapsed(offset: draft.length),
+      text: text,
+      selection: TextSelection.collapsed(offset: text.length),
     );
     // Taken, so the same text handed back again arrives again.
     widget.state.draft.value = null;

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
@@ -128,10 +129,7 @@ void main() {
         text: 'Error: No models available',
       ),
     );
-    expect(
-      find.textContaining('Error: No models available'),
-      findsOneWidget,
-    );
+    expect(find.textContaining('Error: No models available'), findsOneWidget);
   });
 
   testWidgets('the mode menu explains each mode and what Allow edits risks', (
@@ -168,6 +166,27 @@ void main() {
       find.byKey(const Key('composer')),
     );
     expect(composer.focusNode?.hasFocus, isTrue);
+  });
+
+  testWidgets('keeps what the user typed when a message comes back', (
+    tester,
+  ) async {
+    await show(tester);
+    backend
+      ..sendGate = Completer()
+      ..sendError = 'busy';
+    final composer = find.byKey(const Key('composer'));
+    await tester.enterText(composer, 'first');
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    await tester.enterText(composer, 'second');
+    backend.sendGate!.complete();
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<TextField>(composer).controller?.text,
+      'first\n\nsecond',
+      reason: 'the failed message comes back before the typed text',
+    );
   });
 
   testWidgets('takes the same handed-back text again after it was sent', (
