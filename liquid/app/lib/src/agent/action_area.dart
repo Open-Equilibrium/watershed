@@ -376,7 +376,10 @@ class ModeChip extends StatelessWidget {
               const SizedBox(width: WsMetrics.space1),
               Text(
                 labels[mode]!,
-                style: TextStyle(color: context.ws.textMuted, fontSize: 13),
+                style: TextStyle(
+                  color: context.ws.textMuted,
+                  fontSize: WsMetrics.fsCompact,
+                ),
               ),
               const SizedBox(width: WsMetrics.space1),
               Icon(
@@ -1064,7 +1067,7 @@ class KeyBadge extends StatelessWidget {
       child: Text(
         text,
         style: TextStyle(
-          fontSize: 10,
+          fontSize: WsMetrics.fsCaption,
           height: 14 / 10,
           fontWeight: WsMetrics.fwSemibold,
           color: ws.surface,
@@ -1149,7 +1152,7 @@ class _Button extends StatelessWidget {
                 style: TextStyle(
                   color: foreground,
                   fontWeight: WsMetrics.fwMedium,
-                  fontSize: 13,
+                  fontSize: WsMetrics.fsCompact,
                 ),
               ),
             ],

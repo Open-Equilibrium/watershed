@@ -145,7 +145,7 @@ class _RowContent extends StatelessWidget {
     final ws = context.ws;
     final muted = TextStyle(
       color: highlighted ? ws.text : ws.textMuted,
-      fontSize: 13,
+      fontSize: WsMetrics.fsCompact,
     );
     final faint = TextStyle(
       color: ws.textFaint,
@@ -161,7 +161,10 @@ class _RowContent extends StatelessWidget {
         if (row.isStep && !isPrompt) ...[
           ConstrainedBox(
             constraints: const BoxConstraints(minWidth: 16),
-            child: Text('${row.step}', style: faint.copyWith(fontSize: 13)),
+            child: Text(
+              '${row.step}',
+              style: faint.copyWith(fontSize: WsMetrics.fsCompact),
+            ),
           ),
           const SizedBox(width: WsMetrics.space2),
         ],
@@ -172,7 +175,7 @@ class _RowContent extends StatelessWidget {
             child: Text(
               branch.name,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(color: ws.text, fontSize: 13),
+              style: TextStyle(color: ws.text, fontSize: WsMetrics.fsCompact),
             ),
           ),
         ] else if (isPrompt) ...[
@@ -180,7 +183,7 @@ class _RowContent extends StatelessWidget {
             'Turn ${row.turn}',
             style: TextStyle(
               color: ws.text,
-              fontSize: 13,
+              fontSize: WsMetrics.fsCompact,
               fontWeight: WsMetrics.fwSemibold,
             ),
           ),

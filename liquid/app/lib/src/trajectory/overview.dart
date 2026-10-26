@@ -285,7 +285,10 @@ class _OverviewState extends State<Overview> {
                       ),
                     ),
                     const SizedBox(width: WsMetrics.space2),
-                    Text(label, style: small.copyWith(fontSize: 11)),
+                    Text(
+                      label,
+                      style: small.copyWith(fontSize: WsMetrics.fsCaption),
+                    ),
                     const SizedBox(width: WsMetrics.space5),
                   ],
                 ],
@@ -327,7 +330,11 @@ class _AxisPainter extends CustomPainter {
       final text = TextPainter(
         text: TextSpan(
           text: label,
-          style: TextStyle(color: palette.textFaint, fontSize: 11, height: 1),
+          style: TextStyle(
+            color: palette.textFaint,
+            fontSize: WsMetrics.fsCaption,
+            height: 1,
+          ),
         ),
         textDirection: TextDirection.ltr,
       )..layout();

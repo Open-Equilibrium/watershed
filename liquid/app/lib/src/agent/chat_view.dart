@@ -212,7 +212,7 @@ class ToolRow extends StatelessWidget {
                 item.tool ?? '',
                 style: TextStyle(
                   color: waiting ? ws.warning : ws.textMuted,
-                  fontSize: 13,
+                  fontSize: WsMetrics.fsCompact,
                 ),
               ),
               const SizedBox(width: WsMetrics.space3),
@@ -228,7 +228,7 @@ class ToolRow extends StatelessWidget {
                 trailing,
                 style: TextStyle(
                   color: waiting ? ws.warning : ws.textMuted,
-                  fontSize: 12,
+                  fontSize: WsMetrics.fsSmall,
                 ),
               ),
             ],

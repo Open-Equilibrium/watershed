@@ -808,7 +808,9 @@ class _NoticeList extends StatelessWidget {
                                     notice.text,
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(fontSize: 13),
+                                    style: const TextStyle(
+                                      fontSize: WsMetrics.fsCompact,
+                                    ),
                                   ),
                                 ),
                                 Text(

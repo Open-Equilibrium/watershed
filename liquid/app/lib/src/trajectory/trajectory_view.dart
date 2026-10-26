@@ -736,7 +736,7 @@ class _Toolbar extends StatelessWidget {
                       child: Text(
                         label,
                         style: TextStyle(
-                          fontSize: 13,
+                          fontSize: WsMetrics.fsCompact,
                           color: value == equalWidth ? ws.text : ws.textMuted,
                         ),
                       ),
@@ -750,7 +750,7 @@ class _Toolbar extends StatelessWidget {
             onPressed: onFold,
             style: TextButton.styleFrom(
               foregroundColor: ws.textMuted,
-              textStyle: const TextStyle(fontSize: 13),
+              textStyle: const TextStyle(fontSize: WsMetrics.fsCompact),
             ),
             child: Row(
               children: [
@@ -773,7 +773,10 @@ class _Toolbar extends StatelessWidget {
                 children: [
                   Text(
                     'Comparing',
-                    style: TextStyle(color: ws.accent, fontSize: 13),
+                    style: TextStyle(
+                      color: ws.accent,
+                      fontSize: WsMetrics.fsCompact,
+                    ),
                   ),
                   const SizedBox(width: WsMetrics.space3),
                   Hint(Keymap.of(context).label(Command.compare)),
@@ -924,7 +927,7 @@ class _StepRow extends StatelessWidget {
     final ws = context.ws;
     final figures = TextStyle(
       color: ws.textMuted,
-      fontSize: 13,
+      fontSize: WsMetrics.fsCompact,
       fontFeatures: const [FontFeature.tabularFigures()],
     );
     final usage = record.usage;
@@ -1032,7 +1035,7 @@ class _Inspector extends StatelessWidget {
                       child: Text(
                         label,
                         style: TextStyle(
-                          fontSize: 13,
+                          fontSize: WsMetrics.fsCompact,
                           color: value == shown ? ws.text : ws.textMuted,
                           fontWeight: value == shown
                               ? WsMetrics.fwMedium
@@ -1094,7 +1097,10 @@ class _Pairs extends StatelessWidget {
                 Text(
                   label,
                   maxLines: 1,
-                  style: TextStyle(color: ws.textMuted, fontSize: 13),
+                  style: TextStyle(
+                    color: ws.textMuted,
+                    fontSize: WsMetrics.fsCompact,
+                  ),
                 ),
                 const SizedBox(width: WsMetrics.space4),
                 Expanded(
@@ -1104,7 +1110,7 @@ class _Pairs extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     textAlign: TextAlign.right,
                     style: const TextStyle(
-                      fontSize: 13,
+                      fontSize: WsMetrics.fsCompact,
                       fontFeatures: [FontFeature.tabularFigures()],
                     ),
                   ),
@@ -1218,14 +1224,17 @@ class _ShareRow extends StatelessWidget {
               label,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(color: ws.textMuted, fontSize: 13),
+              style: TextStyle(
+                color: ws.textMuted,
+                fontSize: WsMetrics.fsCompact,
+              ),
             ),
           ),
           const SizedBox(width: WsMetrics.space4),
           Text(
             '≈ ${formatCount(tokens)}',
             style: const TextStyle(
-              fontSize: 13,
+              fontSize: WsMetrics.fsCompact,
               fontFeatures: [FontFeature.tabularFigures()],
             ),
           ),
@@ -1458,7 +1467,10 @@ class _ContextTab extends StatelessWidget {
                     ),
                     child: Text(
                       'new',
-                      style: TextStyle(color: ws.accent, fontSize: 10),
+                      style: TextStyle(
+                        color: ws.accent,
+                        fontSize: WsMetrics.fsCaption,
+                      ),
                     ),
                   ),
                 ],

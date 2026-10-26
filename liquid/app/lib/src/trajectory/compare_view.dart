@@ -195,7 +195,10 @@ class _Cell extends StatelessWidget {
                     width: 22,
                     child: Text(
                       '${step.$1}',
-                      style: TextStyle(color: ws.textFaint, fontSize: 13),
+                      style: TextStyle(
+                        color: ws.textFaint,
+                        fontSize: WsMetrics.fsCompact,
+                      ),
                     ),
                   ),
                   KindTag(step.$2.kind),
@@ -228,7 +231,7 @@ class _Cell extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         color: ws.textMuted,
-                        fontSize: 13,
+                        fontSize: WsMetrics.fsCompact,
                         fontFeatures: const [FontFeature.tabularFigures()],
                       ),
                     ),

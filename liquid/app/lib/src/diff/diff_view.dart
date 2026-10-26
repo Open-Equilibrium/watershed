@@ -292,7 +292,7 @@ class _FileTile extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                   color: selected ? ws.text : ws.textMuted,
-                  fontSize: 13,
+                  fontSize: WsMetrics.fsCompact,
                 ),
               ),
             ),
@@ -431,8 +431,9 @@ class _LineRow extends StatelessWidget {
       DiffKind.hunk => (ws.subtle, ws.subtle, ''),
       DiffKind.context => (null, null, ''),
     };
+    // Muted, as faint lacks contrast on the strong diff colors.
     final number = TextStyle(
-      color: ws.textFaint,
+      color: ws.textMuted,
       fontSize: WsMetrics.fsSmall,
       fontFeatures: const [FontFeature.tabularFigures()],
     );

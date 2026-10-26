@@ -194,7 +194,10 @@ class _Chip extends StatelessWidget {
               label,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(color: ws.textMuted, fontSize: 13),
+              style: TextStyle(
+                color: ws.textMuted,
+                fontSize: WsMetrics.fsCompact,
+              ),
             ),
           ),
           if (menu) ...[

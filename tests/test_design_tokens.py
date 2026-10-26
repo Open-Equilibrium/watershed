@@ -1,6 +1,7 @@
 """Liquid's Dart design tokens must follow the canonical CSS tokens (ADR-0194)."""
 
 import importlib.util
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -73,6 +74,40 @@ class DesignTokens(unittest.TestCase):
 
     def test_the_committed_dart_tokens_match_the_canonical_css(self):
         self.assertEqual(TOKENS.main(["--check"]), 0)
+
+    def test_text_tones_meet_wcag_aa_wherever_they_carry_content(self):
+        css = TOKENS.CSS.read_text()
+        blocks = {selector: dict(TOKENS.DECLARATION.findall(body))
+                  for selector, body in TOKENS.BLOCK.findall(css)}
+
+        def luminance(hex_color):
+            channels = [int(hex_color[i:i + 2], 16) / 255 for i in (1, 3, 5)]
+            linear = [c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4 for c in channels]
+            return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+
+        def contrast(first, second):
+            light, dark = sorted([luminance(first), luminance(second)], reverse=True)
+            return (light + 0.05) / (dark + 0.05)
+
+        backgrounds = ["canvas", "subtle", "surface", "hover", "selected", "titlebar", "code",
+                       "warning-subtle"]
+        pairs = [(tone, background) for tone in ["text", "text-muted", "text-faint"]
+                 for background in backgrounds]
+        # Diff line numbers sit on the strong diff colors in muted.
+        pairs += [("text-muted", "diff-add-strong"), ("text-muted", "diff-del-strong")]
+        for theme in [".theme-light", ".theme-dark"]:
+            tokens = blocks[theme]
+            for tone, background in pairs:
+                with self.subTest(theme=theme, tone=tone, background=background):
+                    self.assertGreaterEqual(
+                        contrast(tokens[tone], tokens[background]), 4.5)
+
+    def test_liquid_sets_font_sizes_only_through_tokens(self):
+        raw = re.compile(r"fontSize:\s*[\d.]+")
+        found = [f"{path.relative_to(ROOT)}: {match.group(0)}"
+                 for path in (ROOT / "liquid" / "app" / "lib").rglob("*.dart")
+                 for match in raw.finditer(path.read_text())]
+        self.assertEqual(found, [])
 
 
 if __name__ == "__main__":

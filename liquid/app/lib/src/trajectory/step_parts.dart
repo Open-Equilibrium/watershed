@@ -153,7 +153,7 @@ class OutcomeText extends StatelessWidget {
       ),
       maxLines: 1,
       style: const TextStyle(
-        fontSize: 13,
+        fontSize: WsMetrics.fsCompact,
         fontFeatures: [FontFeature.tabularFigures()],
       ),
     );

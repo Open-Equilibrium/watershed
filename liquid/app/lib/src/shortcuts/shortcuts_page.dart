@@ -349,7 +349,7 @@ class _ShortcutsPageState extends State<ShortcutsPage> {
                   ),
                   child: TextField(
                     controller: _search,
-                    style: const TextStyle(fontSize: 13),
+                    style: const TextStyle(fontSize: WsMetrics.fsCompact),
                     decoration: InputDecoration.collapsed(
                       hintText: 'Search actions or keys',
                       hintStyle: TextStyle(color: ws.textFaint),
@@ -657,7 +657,7 @@ class _Segment extends StatelessWidget {
           child: Text(
             label,
             style: TextStyle(
-              fontSize: 13,
+              fontSize: WsMetrics.fsCompact,
               color: selected ? ws.text : ws.textMuted,
               fontWeight: selected ? WsMetrics.fwMedium : WsMetrics.fwRegular,
             ),
@@ -704,7 +704,7 @@ class _Row extends StatelessWidget {
                   label,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 13),
+                  style: const TextStyle(fontSize: WsMetrics.fsCompact),
                 ),
               ),
               for (final key in keys) ...[
@@ -751,8 +751,8 @@ class _Kbd extends StatelessWidget {
       child: Text(
         text,
         style: TextStyle(
-          fontSize: 11.5,
-          height: 20 / 11.5,
+          fontSize: WsMetrics.fsSmall,
+          height: 20 / WsMetrics.fsSmall,
           fontWeight: WsMetrics.fwMedium,
           color: switch (tone) {
             _Tone.plain || _Tone.changed => ws.text,

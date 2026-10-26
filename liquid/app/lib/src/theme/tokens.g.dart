@@ -35,8 +35,12 @@ abstract final class WsMetrics {
   static const double lhProse = 24;
   static const double fsUi = 14;
   static const double lhUi = 20;
+  static const double fsCompact = 13;
+  static const double lhCompact = 20;
   static const double fsSmall = 12;
   static const double lhSmall = 18;
+  static const double fsCaption = 11;
+  static const double lhCaption = 14;
   static const double fsMono = 13;
   static const double lhMono = 20;
   static const FontWeight fwRegular = FontWeight.w400;
@@ -146,8 +150,8 @@ final class WsPalette {
     border: Color(0xFFE9E9E7),
     borderStrong: Color(0xFFDCDBD8),
     text: Color(0xFF37352F),
-    textMuted: Color(0xFF787774),
-    textFaint: Color(0xFF9B9A97),
+    textMuted: Color(0xFF504F4C),
+    textFaint: Color(0xFF6B6A67),
     accent: Color(0xFF2075D8),
     onAccent: Color(0xFFFFFFFF),
     accentSubtle: Color(0xFFE7F0FB),
@@ -202,8 +206,8 @@ final class WsPalette {
     border: Color(0xFF2F2F2F),
     borderStrong: Color(0xFF3A3A3A),
     text: Color(0xFFD4D4D4),
-    textMuted: Color(0xFF9B9B9B),
-    textFaint: Color(0xFF6F6F6F),
+    textMuted: Color(0xFFB7B7B7),
+    textFaint: Color(0xFF9D9D9D),
     accent: Color(0xFF4C9BEA),
     onAccent: Color(0xFF0B1626),
     accentSubtle: Color(0xFF1D2C3D),
