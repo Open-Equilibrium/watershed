@@ -104,6 +104,7 @@ void main() {
           kind: BridgeRequestKind.commandExecution,
           tool: 'bash',
           arguments: '{"command":"npm test"}',
+          text: 'npm test',
           readOnly: false,
         ),
       );
@@ -412,6 +413,7 @@ void main() {
             kind: BridgeRequestKind.commandExecution,
             tool: 'bash',
             arguments: '{}',
+            text: '{}',
             readOnly: false,
           ),
         ),

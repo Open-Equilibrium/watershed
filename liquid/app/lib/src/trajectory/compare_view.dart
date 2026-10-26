@@ -252,7 +252,7 @@ class _Cell extends StatelessWidget {
         '${formatCompact(promptTokens(usage))} → ${formatCompact(usage.output)}',
       ].join(' · '),
       BridgeRecordKind.approval => [
-        decisionLabel(record.detail),
+        decisionLabel(record.decision),
         ?time,
       ].join(' · '),
       BridgeRecordKind.tool => outcomeText(record.outcome) ?? time ?? '',

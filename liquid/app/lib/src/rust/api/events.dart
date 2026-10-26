@@ -20,6 +20,9 @@ class BridgeApproval {
   /// The arguments as JSON text.
   final String arguments;
 
+  /// The whole call the user decides on, such as a shell command.
+  final String text;
+
   /// Whether the tool declares that it only reads.
   final bool readOnly;
 
@@ -27,12 +30,17 @@ class BridgeApproval {
     required this.kind,
     required this.tool,
     required this.arguments,
+    required this.text,
     required this.readOnly,
   });
 
   @override
   int get hashCode =>
-      kind.hashCode ^ tool.hashCode ^ arguments.hashCode ^ readOnly.hashCode;
+      kind.hashCode ^
+      tool.hashCode ^
+      arguments.hashCode ^
+      text.hashCode ^
+      readOnly.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -42,6 +50,7 @@ class BridgeApproval {
           kind == other.kind &&
           tool == other.tool &&
           arguments == other.arguments &&
+          text == other.text &&
           readOnly == other.readOnly;
 }
 
@@ -277,6 +286,9 @@ class BridgeItem {
   /// The tool call's arguments as JSON text.
   final String? arguments;
 
+  /// What a tool call works on, such as a command or a path, on one line.
+  final String? target;
+
   /// Whether the item failed.
   final bool failed;
 
@@ -294,6 +306,7 @@ class BridgeItem {
     this.kind,
     this.tool,
     this.arguments,
+    this.target,
     required this.failed,
     this.durationMs,
     this.added,
@@ -306,6 +319,7 @@ class BridgeItem {
       kind.hashCode ^
       tool.hashCode ^
       arguments.hashCode ^
+      target.hashCode ^
       failed.hashCode ^
       durationMs.hashCode ^
       added.hashCode ^
@@ -320,6 +334,7 @@ class BridgeItem {
           kind == other.kind &&
           tool == other.tool &&
           arguments == other.arguments &&
+          target == other.target &&
           failed == other.failed &&
           durationMs == other.durationMs &&
           added == other.added &&

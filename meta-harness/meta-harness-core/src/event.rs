@@ -36,6 +36,8 @@ pub enum ItemDetail {
         name: String,
         /// The call's arguments as JSON text.
         arguments: String,
+        /// What the call works on, such as a command or a path, on one line.
+        target: String,
     },
 }
 
@@ -293,6 +295,8 @@ pub enum AgentEvent {
         tool: String,
         /// The call's arguments as JSON text.
         arguments: String,
+        /// The whole call the user decides on, such as a shell command.
+        text: String,
         /// Whether the tool declares that it only reads.
         read_only: bool,
         /// The session the call runs in, when the agent says.

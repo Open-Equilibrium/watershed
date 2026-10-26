@@ -45,19 +45,19 @@ class KindTag extends StatelessWidget {
 }
 
 /// An approval decision in words.
-String decisionLabel(String decision) => switch (decision) {
-  'allow-once' => 'allowed once',
-  'allow-session' => 'allowed for session',
-  'reject' => 'rejected',
-  _ => decision,
+String decisionLabel(BridgeDecision? decision) => switch (decision) {
+  BridgeDecision.allowOnce => 'allowed once',
+  BridgeDecision.allowSession => 'allowed for session',
+  BridgeDecision.reject => 'rejected',
+  null => 'decided',
 };
 
 /// What a step did, as the ledger's Step column shows it.
 String stepText(BridgeRecord record) => switch (record.kind) {
   BridgeRecordKind.user || BridgeRecordKind.message => record.label,
-  BridgeRecordKind.tool => toolSummary(record.label, record.detail),
+  BridgeRecordKind.tool => toolSummary(record),
   BridgeRecordKind.approval =>
-    '${record.label} · ${decisionLabel(record.detail)}',
+    '${record.label} · ${decisionLabel(record.decision)}',
 };
 
 /// The Step column's text; tool calls and approvals are code.

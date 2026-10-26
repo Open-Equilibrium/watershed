@@ -6,6 +6,7 @@ mod trajectory;
 mod transcript;
 mod tree;
 
+pub(crate) use entry::first_line;
 pub(crate) use outcome::patch_lines;
 #[cfg(test)]
 pub(crate) use outcome::test_counts;
@@ -16,7 +17,7 @@ use std::sync::Arc;
 
 use serde_json::Value;
 
-use crate::{ChangedLines, Frame, ItemKind, LineFramer, SessionTree, Usage};
+use crate::{ChangedLines, Decision, Frame, ItemKind, LineFramer, SessionTree, Usage};
 use entry::Entry;
 
 /// A snapshot of a session's stored entries. The session keeps it and reads only the entries
@@ -170,8 +171,14 @@ pub struct TrajectoryRecord {
     pub kind: RecordKind,
     /// The prompt, the response's first line or the tool name.
     pub label: String,
-    /// Tool arguments as JSON text, or an approval's decision.
+    /// A tool call's arguments as JSON text.
     pub detail: String,
+    /// What a tool call works on, such as a command or a path, on one line.
+    pub target: String,
+    /// The file a successful file change changed.
+    pub changed_file: Option<String>,
+    /// An approval's decision.
+    pub decision: Option<Decision>,
     /// Milliseconds from the branch's first entry to the start.
     pub start_ms: u64,
     /// How long it took, when measured.
@@ -284,6 +291,8 @@ pub struct TranscriptItem {
     pub tool: Option<String>,
     /// A tool call's arguments as JSON text.
     pub arguments: Option<String>,
+    /// What a tool call works on, such as a command or a path, on one line.
+    pub target: Option<String>,
     /// Whether a tool call failed.
     pub failed: bool,
     /// How long a tool call ran.

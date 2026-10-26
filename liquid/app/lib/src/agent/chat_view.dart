@@ -167,13 +167,6 @@ class ToolRow extends StatelessWidget {
   final ItemView item;
   final SessionState state;
 
-  String get _target {
-    final arguments = item.arguments ?? '';
-    final match = RegExp(r'"(?:command|path|pattern)"\s*:\s*"([^"]*)"')
-        .firstMatch(arguments);
-    return match?.group(1) ?? arguments;
-  }
-
   @override
   Widget build(BuildContext context) {
     final ws = context.ws;
@@ -235,7 +228,7 @@ class ToolRow extends StatelessWidget {
               const SizedBox(width: WsMetrics.space3),
               Expanded(
                 child: Text(
-                  _target,
+                  item.target ?? '',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: monoStyle(context),

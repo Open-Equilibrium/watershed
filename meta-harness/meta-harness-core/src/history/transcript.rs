@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use super::entry::{Body, Entry};
 use super::trajectory::path;
 use super::{Transcript, TranscriptItem};
+use crate::pi::call_target;
 use crate::{ChangedLines, ItemKind};
 
 /// The items of up to `limit` entries on the branch ending at `leaf`, before `before`.
@@ -53,6 +54,7 @@ pub(super) fn transcript(
             text: text.to_owned(),
             tool: None,
             arguments: None,
+            target: None,
             failed: false,
             duration_ms: None,
             lines: None,
@@ -83,6 +85,7 @@ pub(super) fn transcript(
                     items.push(TranscriptItem {
                         tool: Some(call.name.clone()),
                         arguments: Some(call.arguments.clone()),
+                        target: Some(call_target(&call.arguments)),
                         failed,
                         duration_ms,
                         lines: lines.or(written),

@@ -1,6 +1,6 @@
 //! A session's stored history for the Trajectory tab: its branch tree and Trajectories.
 
-use crate::api::events::{BridgeItemKind, BridgeUsage};
+use crate::api::events::{BridgeDecision, BridgeItemKind, BridgeUsage};
 
 /// The session's branch tree and the requested Trajectories.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -73,6 +73,12 @@ pub struct BridgeRecord {
     pub label: String,
     /// Tool arguments as JSON text, or an approval's decision.
     pub detail: String,
+    /// What a tool call works on, such as a command or a path, on one line.
+    pub target: String,
+    /// The file a successful file change changed.
+    pub changed_file: Option<String>,
+    /// An approval's decision.
+    pub decision: Option<BridgeDecision>,
     /// Milliseconds from the branch's first entry to the start.
     pub start_ms: i64,
     /// How long it took, when measured.
@@ -198,6 +204,8 @@ pub struct BridgeTranscriptItem {
     pub tool: Option<String>,
     /// A tool call's arguments as JSON text.
     pub arguments: Option<String>,
+    /// What a tool call works on, such as a command or a path, on one line.
+    pub target: Option<String>,
     /// Whether a tool call failed.
     pub failed: bool,
     /// How long a tool call ran.

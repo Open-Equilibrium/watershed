@@ -6,10 +6,10 @@ use std::time::Duration;
 use serde_json::{Map, Value};
 
 use crate::event::{
-    AgentEvent, ChangedLines, ItemDetail, ItemId, ItemKind, ItemStatus, NotificationLevel, Queue,
-    RequestId, RequestKind, StepId, TurnId, Usage, UserInput,
+    AgentEvent, ChangedLines, Decision, ItemDetail, ItemId, ItemKind, ItemStatus,
+    NotificationLevel, Queue, RequestId, RequestKind, StepId, TurnId, Usage, UserInput,
 };
-use crate::history::patch_lines;
+use crate::history::{first_line, patch_lines};
 
 /// Title prefix of the select dialog Watershed's pi extension uses to ask for an approval.
 pub(crate) const APPROVAL_PREFIX: &str = "watershed.approval ";
@@ -290,9 +290,11 @@ impl PiAdapter {
                 written,
             },
         );
+        let arguments = record.get("args").map(Value::to_string).unwrap_or_default();
         let detail = ItemDetail::Tool {
             name: name.to_owned(),
-            arguments: record.get("args").map(Value::to_string).unwrap_or_default(),
+            target: call_target(&arguments),
+            arguments,
         };
         events.push(started(turn, item, kind, detail));
     }
@@ -335,6 +337,60 @@ struct OpenTool {
 
 fn role(record: &Map<String, Value>) -> Option<&str> {
     record.get("message")?.get("role")?.as_str()
+}
+
+/// Characters of a call's target kept for one-line summaries.
+const TARGET_CHARS: usize = 120;
+
+/// The argument that names what a call of one of pi's tools works on: its command, path or
+/// pattern, as its first line.
+pub(crate) fn call_argument(arguments: &str) -> Option<String> {
+    let arguments: Value = serde_json::from_str(arguments).ok()?;
+    ["command", "path", "file_path", "pattern"]
+        .iter()
+        .find_map(|name| arguments.get(*name)?.as_str())
+        .map(|text| first_line(text, TARGET_CHARS))
+}
+
+/// What a call works on, for one-line summaries: its main argument, else its arguments.
+pub(crate) fn call_target(arguments: &str) -> String {
+    call_argument(arguments).unwrap_or_else(|| first_line(arguments, TARGET_CHARS))
+}
+
+/// The whole call an approval shows: a shell command itself, other tools their arguments.
+pub(crate) fn call_text(tool: &str, arguments: &str) -> String {
+    let command = (tool == "bash")
+        .then(|| serde_json::from_str::<Value>(arguments).ok())
+        .flatten();
+    match command
+        .as_ref()
+        .and_then(|call| call.get("command")?.as_str())
+    {
+        Some(command) => command.to_owned(),
+        None => arguments.to_owned(),
+    }
+}
+
+/// The file a call of one of pi's file tools changes.
+pub(crate) fn changed_path(tool: &str, arguments: &str) -> Option<String> {
+    if !matches!(tool, "edit" | "write") {
+        return None;
+    }
+    let arguments: Value = serde_json::from_str(arguments).ok()?;
+    ["path", "file_path"]
+        .iter()
+        .find_map(|name| arguments.get(*name)?.as_str())
+        .map(str::to_owned)
+}
+
+/// A decision as Watershed's extension records it.
+pub(crate) fn decision(text: &str) -> Option<Decision> {
+    match text {
+        "allow-once" => Some(Decision::AllowOnce),
+        "allow-session" => Some(Decision::AllowSession),
+        "reject" => Some(Decision::Reject),
+        _ => None,
+    }
 }
 
 /// Classifies one of pi's tool names.
@@ -412,14 +468,16 @@ fn extension_ui(record: &Map<String, Value>) -> Option<AgentEvent> {
 fn approval(request: RequestId, payload: &str) -> AgentEvent {
     let payload: Map<String, Value> = serde_json::from_str(payload).unwrap_or_default();
     let tool = str_field(&payload, "tool");
+    let arguments = payload
+        .get("arguments")
+        .map(Value::to_string)
+        .unwrap_or_default();
     AgentEvent::RequestOpened {
         request,
         kind: request_kind(tool),
         tool: tool.to_owned(),
-        arguments: payload
-            .get("arguments")
-            .map(Value::to_string)
-            .unwrap_or_default(),
+        text: call_text(tool, &arguments),
+        arguments,
         read_only: payload.get("readOnly").and_then(Value::as_bool) == Some(true),
         session: payload
             .get("session")

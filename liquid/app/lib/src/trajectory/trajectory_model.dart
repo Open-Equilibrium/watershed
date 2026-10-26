@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
@@ -452,25 +451,9 @@ String formatCost(int microUsd) =>
 String formatCompact(int count) =>
     count >= 1000 ? '${(count / 1000).toStringAsFixed(1)}k' : '$count';
 
-/// Tool arguments every reader understands at a glance.
-const _primaryArguments = ['command', 'path', 'file_path'];
-
-/// A tool call as `tool · main argument`, such as `bash · npm test`.
-String toolSummary(String tool, String arguments) {
-  Object? parsed;
-  try {
-    parsed = jsonDecode(arguments);
-  } on FormatException {
-    return tool;
-  }
-  if (parsed is! Map<String, Object?> || parsed.isEmpty) return tool;
-  final primary = _primaryArguments
-      .map((name) => parsed is Map ? parsed[name] : null)
-      .whereType<String>()
-      .firstOrNull;
-  final text = primary ?? arguments;
-  return '$tool · ${text.length > 120 ? '${text.substring(0, 119)}…' : text}';
-}
+/// A tool call as `tool · target`, such as `bash · npm test`.
+String toolSummary(BridgeRecord record) =>
+    record.target.isEmpty ? record.label : '${record.label} · ${record.target}';
 
 /// A tool call's outcome as text, such as `+9 −2` or `exit 0 · 14 ✓`; `null` when the stored
 /// result shows none.
@@ -498,28 +481,10 @@ List<int> shares(int total, List<int> parts) {
   ];
 }
 
-/// Tools whose successful calls change files.
-const _fileTools = {'edit', 'write'};
-
-/// Paths that successful edits and writes changed on a branch.
+/// Paths that successful file changes changed on a branch.
 Set<String> changedFiles(List<BridgeRecord> records) => {
-  for (final record in records)
-    if (record.kind == BridgeRecordKind.tool &&
-        _fileTools.contains(record.label) &&
-        !record.failed)
-      ?_path(record.detail),
+  for (final record in records) ?record.changedFile,
 };
-
-String? _path(String arguments) {
-  try {
-    final parsed = jsonDecode(arguments);
-    if (parsed is! Map<String, Object?>) return null;
-    final path = parsed['path'] ?? parsed['file_path'];
-    return path is String ? path : null;
-  } on FormatException {
-    return null;
-  }
-}
 
 /// Whether `path` looks like a test file.
 bool isTestPath(String path) {

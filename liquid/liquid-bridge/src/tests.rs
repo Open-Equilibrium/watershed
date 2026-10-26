@@ -36,6 +36,7 @@ fn tool_items_keep_their_call_and_outcome() {
         detail: ItemDetail::Tool {
             name: "bash".to_owned(),
             arguments: r#"{"command":"ls"}"#.to_owned(),
+            target: "ls".to_owned(),
         },
     });
     assert_eq!(started.kind, BridgeEventKind::ItemStarted);
@@ -47,6 +48,7 @@ fn tool_items_keep_their_call_and_outcome() {
     );
     assert_eq!(item.tool.as_deref(), Some("bash"));
     assert_eq!(item.arguments.as_deref(), Some(r#"{"command":"ls"}"#));
+    assert_eq!(item.target.as_deref(), Some("ls"));
 
     let completed = bridge(AgentEvent::ItemCompleted {
         turn: TurnId(2),
@@ -115,6 +117,7 @@ fn requests_and_questions_reach_dart_with_their_answers() {
         kind: RequestKind::FileChangeApproval,
         tool: "write".to_owned(),
         arguments: "{}".to_owned(),
+        text: "{}".to_owned(),
         read_only: false,
         session: None,
     });
@@ -126,6 +129,7 @@ fn requests_and_questions_reach_dart_with_their_answers() {
             kind: BridgeRequestKind::FileChange,
             tool: "write".to_owned(),
             arguments: "{}".to_owned(),
+            text: "{}".to_owned(),
             read_only: false,
         })
     );

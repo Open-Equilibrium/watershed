@@ -19,6 +19,7 @@ class ItemView {
     required this.kind,
     this.tool,
     this.arguments,
+    this.target,
     this.entry,
     this.marker,
   });
@@ -27,6 +28,9 @@ class ItemView {
   final BridgeItemKind kind;
   final String? tool;
   final String? arguments;
+
+  /// What a tool call works on, such as a command or a path, on one line.
+  final String? target;
 
   /// The stored entry a rebuilt item comes from.
   final String? entry;
@@ -459,6 +463,7 @@ class SessionState {
           kind: item.kind,
           tool: item.tool,
           arguments: item.arguments,
+          target: item.target,
           entry: item.entry,
         )
         ..text.value = item.text
@@ -527,6 +532,7 @@ class SessionState {
           kind: started.kind ?? BridgeItemKind.dynamicToolCall,
           tool: started.tool,
           arguments: started.arguments,
+          target: started.target,
         );
         _byId[view.id] = view;
         items.value = [...items.value, view];

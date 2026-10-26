@@ -61,6 +61,7 @@ final branchA = [
     2200,
     duration: 18,
     detail: '{"path":"src/routes/login.ts"}',
+    target: 'src/routes/login.ts',
   ),
   record(
     'e4',
@@ -80,7 +81,7 @@ final branchA = [
     'bash',
     5800,
     duration: 9400,
-    detail: 'allow-once',
+    decision: BridgeDecision.allowOnce,
   ),
   record(
     'e5',
@@ -90,6 +91,7 @@ final branchA = [
     15200,
     duration: 6800,
     detail: '{"command":"npm test"}',
+    target: 'npm test',
     failed: true,
   ),
   record('e6', 1, BridgeRecordKind.message, 'Done.', 22000, duration: 2500),
@@ -406,6 +408,8 @@ void main() {
           100,
           duration: 9,
           detail: '{"path":"src/login.ts"}',
+          target: 'src/login.ts',
+          changedFile: 'src/login.ts',
           outcome: const BridgeToolOutcome(added: 9, removed: 2),
         ),
         record(
@@ -416,6 +420,7 @@ void main() {
           200,
           duration: 900,
           detail: '{"command":"npm test"}',
+          target: 'npm test',
           outcome: const BridgeToolOutcome(
             exitCode: 0,
             testsPassed: 14,

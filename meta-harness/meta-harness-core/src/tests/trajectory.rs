@@ -1,8 +1,8 @@
 use serde_json::Value;
 
 use crate::{
-    ContextDetail, ContextMessage, ContextPart, History, RecordKind, StepContext, TestCount,
-    ToolOutcome, Trajectory, TrajectoryRecord, Usage,
+    ContextDetail, ContextMessage, ContextPart, Decision, History, RecordKind, StepContext,
+    TestCount, ToolOutcome, Trajectory, TrajectoryRecord, Usage,
 };
 
 /// A session with a branch after the first model response: `e7` continues the original run,
@@ -100,6 +100,9 @@ fn projects_the_selected_branch_with_timing_and_what_the_model_saw() {
         kind,
         label: label.to_owned(),
         detail: String::new(),
+        target: String::new(),
+        changed_file: None,
+        decision: None,
         start_ms,
         duration_ms,
         first_token_ms: None,
@@ -141,11 +144,12 @@ fn projects_the_selected_branch_with_timing_and_what_the_model_saw() {
         )
     };
     let approval = TrajectoryRecord {
-        detail: "allow-once".to_owned(),
+        decision: Some(Decision::AllowOnce),
         ..record("a1", 1, RecordKind::Approval, "bash", 3500, Some(9400))
     };
     let tool = TrajectoryRecord {
         detail: r#"{"command":"npm test"}"#.to_owned(),
+        target: "npm test".to_owned(),
         failed: true,
         ..record("e4", 1, RecordKind::Tool, "bash", 12900, Some(6800))
     };
@@ -566,6 +570,16 @@ fn reads_outcomes_from_what_tools_did_not_from_what_they_were_asked_or_printed()
         ],
         "a failed write wrote nothing, signs in content are changes, and a successful \
          command's output only quotes an exit code"
+    );
+    let changed: Vec<_> = records
+        .iter()
+        .filter(|record| record.kind == RecordKind::Tool)
+        .map(|record| (record.target.as_str(), record.changed_file.as_deref()))
+        .collect();
+    assert_eq!(
+        changed,
+        [("a.ts", None), ("f.c", Some("f.c")), ("cat log", None)],
+        "what each call works on, and the file a successful change changed"
     );
 }
 

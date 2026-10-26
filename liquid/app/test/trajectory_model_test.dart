@@ -256,7 +256,8 @@ void main() {
         BridgeRecordKind.tool,
         'edit',
         0,
-        detail: '{"path":"src/login.ts"}',
+        target: 'src/login.ts',
+        changedFile: 'src/login.ts',
       ),
       record(
         'e2',
@@ -264,7 +265,8 @@ void main() {
         BridgeRecordKind.tool,
         'write',
         0,
-        detail: '{"path":"test/login.test.ts"}',
+        target: 'test/login.test.ts',
+        changedFile: 'test/login.test.ts',
       ),
       record(
         'e3',
@@ -272,7 +274,8 @@ void main() {
         BridgeRecordKind.tool,
         'edit',
         0,
-        detail: '{"path":"src/login.ts"}',
+        target: 'src/login.ts',
+        changedFile: 'src/login.ts',
       ),
       record(
         'e4',
@@ -280,7 +283,7 @@ void main() {
         BridgeRecordKind.tool,
         'edit',
         0,
-        detail: '{"path":"README.md"}',
+        target: 'README.md',
         failed: true,
       ),
       record(
@@ -320,17 +323,19 @@ void main() {
     );
     expect(
       [
-        toolSummary('bash', '{"command":"npm test -- login"}'),
-        toolSummary('read', '{"path":"src/routes/login.ts"}'),
-        toolSummary('grep', '{"pattern":"x"}'),
-        toolSummary('bash', 'not json'),
+        toolSummary(
+          record(
+            'e1',
+            1,
+            BridgeRecordKind.tool,
+            'bash',
+            0,
+            target: 'npm test -- login',
+          ),
+        ),
+        toolSummary(record('e2', 1, BridgeRecordKind.tool, 'read', 0)),
       ],
-      [
-        'bash · npm test -- login',
-        'read · src/routes/login.ts',
-        'grep · {"pattern":"x"}',
-        'bash',
-      ],
+      ['bash · npm test -- login', 'read'],
     );
   });
 }

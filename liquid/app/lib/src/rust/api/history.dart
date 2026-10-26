@@ -184,6 +184,15 @@ class BridgeRecord {
   /// Tool arguments as JSON text, or an approval's decision.
   final String detail;
 
+  /// What a tool call works on, such as a command or a path, on one line.
+  final String target;
+
+  /// The file a successful file change changed.
+  final String? changedFile;
+
+  /// An approval's decision.
+  final BridgeDecision? decision;
+
   /// Milliseconds from the branch's first entry to the start.
   final PlatformInt64 startMs;
 
@@ -217,6 +226,9 @@ class BridgeRecord {
     required this.kind,
     required this.label,
     required this.detail,
+    required this.target,
+    this.changedFile,
+    this.decision,
     required this.startMs,
     this.durationMs,
     this.firstTokenMs,
@@ -235,6 +247,9 @@ class BridgeRecord {
       kind.hashCode ^
       label.hashCode ^
       detail.hashCode ^
+      target.hashCode ^
+      changedFile.hashCode ^
+      decision.hashCode ^
       startMs.hashCode ^
       durationMs.hashCode ^
       firstTokenMs.hashCode ^
@@ -255,6 +270,9 @@ class BridgeRecord {
           kind == other.kind &&
           label == other.label &&
           detail == other.detail &&
+          target == other.target &&
+          changedFile == other.changedFile &&
+          decision == other.decision &&
           startMs == other.startMs &&
           durationMs == other.durationMs &&
           firstTokenMs == other.firstTokenMs &&
@@ -446,6 +464,9 @@ class BridgeTranscriptItem {
   /// A tool call's arguments as JSON text.
   final String? arguments;
 
+  /// What a tool call works on, such as a command or a path, on one line.
+  final String? target;
+
   /// Whether a tool call failed.
   final bool failed;
 
@@ -464,6 +485,7 @@ class BridgeTranscriptItem {
     required this.text,
     this.tool,
     this.arguments,
+    this.target,
     required this.failed,
     this.durationMs,
     this.added,
@@ -477,6 +499,7 @@ class BridgeTranscriptItem {
       text.hashCode ^
       tool.hashCode ^
       arguments.hashCode ^
+      target.hashCode ^
       failed.hashCode ^
       durationMs.hashCode ^
       added.hashCode ^
@@ -492,6 +515,7 @@ class BridgeTranscriptItem {
           text == other.text &&
           tool == other.tool &&
           arguments == other.arguments &&
+          target == other.target &&
           failed == other.failed &&
           durationMs == other.durationMs &&
           added == other.added &&

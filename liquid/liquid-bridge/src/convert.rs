@@ -109,6 +109,9 @@ impl From<TrajectoryRecord> for BridgeRecord {
             },
             label: record.label,
             detail: record.detail,
+            target: record.target,
+            changed_file: record.changed_file,
+            decision: record.decision.map(Into::into),
             start_ms: int(record.start_ms),
             duration_ms: record.duration_ms.map(int),
             first_token_ms: record.first_token_ms.map(int),
@@ -149,6 +152,7 @@ impl From<TranscriptItem> for BridgeTranscriptItem {
             text: item.text,
             tool: item.tool,
             arguments: item.arguments,
+            target: item.target,
             failed: item.failed,
             duration_ms: item.duration_ms.map(int),
             added: item.lines.map(|lines| int(lines.added)),
@@ -301,6 +305,7 @@ fn item(id: u64) -> BridgeItem {
         kind: None,
         tool: None,
         arguments: None,
+        target: None,
         failed: false,
         duration_ms: None,
         added: None,
@@ -363,9 +368,13 @@ impl From<AgentEvent> for BridgeEvent {
                 kind,
                 detail,
             } => {
-                let (tool, arguments) = match detail {
-                    ItemDetail::Tool { name, arguments } => (Some(name), Some(arguments)),
-                    ItemDetail::None => (None, None),
+                let (tool, arguments, target) = match detail {
+                    ItemDetail::Tool {
+                        name,
+                        arguments,
+                        target,
+                    } => (Some(name), Some(arguments), Some(target)),
+                    ItemDetail::None => (None, None, None),
                 };
                 BridgeEvent {
                     turn: Some(int(turn.0)),
@@ -373,6 +382,7 @@ impl From<AgentEvent> for BridgeEvent {
                         kind: Some(kind.into()),
                         tool,
                         arguments,
+                        target,
                         ..item(id.0)
                     }),
                     ..event(Kind::ItemStarted)
@@ -436,6 +446,7 @@ impl From<AgentEvent> for BridgeEvent {
                 kind,
                 tool,
                 arguments,
+                text,
                 read_only,
                 ..
             } => BridgeEvent {
@@ -444,6 +455,7 @@ impl From<AgentEvent> for BridgeEvent {
                         kind: kind.into(),
                         tool,
                         arguments,
+                        text,
                         read_only,
                     }),
                     ..request(id.0)

@@ -974,6 +974,7 @@ fn asks_only_for_calls_the_approval_mode_does_not_allow() {
                     kind,
                     tool: tool.to_owned(),
                     arguments: "{}".to_owned(),
+                    text: "{}".to_owned(),
                     read_only: false,
                     session: Some("s1".to_owned()),
                 })

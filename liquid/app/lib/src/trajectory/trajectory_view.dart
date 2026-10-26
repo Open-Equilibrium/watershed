@@ -1572,7 +1572,7 @@ class _StepSummary extends StatelessWidget {
             const _Heading('Approval'),
             _Pairs([
               ('Tool', record.label),
-              ('Decision', decisionLabel(record.detail)),
+              ('Decision', decisionLabel(record.decision)),
               if (duration != null)
                 ('Waited for you', formatDuration(duration)),
             ]),

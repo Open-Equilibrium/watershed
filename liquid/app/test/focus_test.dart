@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -73,7 +75,8 @@ void main() {
       approval: BridgeApproval(
         kind: BridgeRequestKind.commandExecution,
         tool: 'bash',
-        arguments: '{"command":"$command"}',
+        arguments: jsonEncode({'command': command}),
+        text: command,
         readOnly: false,
       ),
     ),
@@ -171,7 +174,7 @@ void main() {
     tester,
   ) async {
     await show(tester);
-    final command = List.generate(40, (line) => 'echo $line').join(r'\n');
+    final command = List.generate(40, (line) => 'echo $line').join('\n');
     await emit(tester, event(BridgeEventKind.turnStarted, turn: 1));
     await emit(tester, approval('a1', command: command));
     await read(tester);

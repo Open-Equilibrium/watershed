@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -551,9 +550,7 @@ class _ApprovalCardState extends State<ApprovalCard> {
                 ],
               ),
               const SizedBox(height: WsMetrics.space3),
-              Expanded(
-                child: _ScrollingCode(_call(approval), controller: _code),
-              ),
+              Expanded(child: _ScrollingCode(approval.text, controller: _code)),
               const SizedBox(height: WsMetrics.space3),
               Row(
                 children: [
@@ -595,22 +592,6 @@ class _ApprovalCardState extends State<ApprovalCard> {
       ),
     );
   }
-}
-
-/// What an approval shows: a shell command itself, other tools their arguments.
-String _call(BridgeApproval approval) {
-  if (approval.tool == 'bash') {
-    try {
-      if (jsonDecode(approval.arguments) case {
-        'command': final String command,
-      }) {
-        return command;
-      }
-    } on FormatException {
-      // Shown as the agent sent it.
-    }
-  }
-  return approval.arguments;
 }
 
 /// Code that scrolls inside a fixed height and says how many lines are below, so nothing is

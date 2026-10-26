@@ -106,6 +106,8 @@ pub struct BridgeItem {
     pub tool: Option<String>,
     /// The tool call's arguments as JSON text.
     pub arguments: Option<String>,
+    /// What a tool call works on, such as a command or a path, on one line.
+    pub target: Option<String>,
     /// Whether the item failed.
     pub failed: bool,
     /// How long a tool ran.
@@ -185,6 +187,8 @@ pub struct BridgeApproval {
     pub tool: String,
     /// The arguments as JSON text.
     pub arguments: String,
+    /// The whole call the user decides on, such as a shell command.
+    pub text: String,
     /// Whether the tool declares that it only reads.
     pub read_only: bool,
 }

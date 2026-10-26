@@ -3,13 +3,12 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use serde_json::Value;
-
 use super::entry::{Body, Entry, SystemChange, first_line};
 use super::{
     ContextDetail, ContextMessage, ContextPart, RecordKind, StepContext, ToolOutcome, Trajectory,
     TrajectoryRecord,
 };
+use crate::pi;
 
 /// Longest row label, in characters.
 const LABEL_CHARS: usize = 80;
@@ -295,7 +294,7 @@ impl Projection {
                 decision,
                 waited_ms,
             } => self.records.push(TrajectoryRecord {
-                detail: decision.clone(),
+                decision: pi::decision(decision),
                 ..row(
                     id,
                     self.turn,
@@ -380,11 +379,15 @@ impl Projection {
             } => {
                 let (ended, duration_ms) = self.tool_timing.remove(call).unwrap_or((at, None));
                 let (arguments, written) = self.tool_calls.remove(call).unwrap_or_default();
-                let label = match primary_argument(&arguments) {
+                let label = match pi::call_argument(&arguments) {
                     Some(argument) => format!("result of {tool} · {argument}"),
                     None => format!("result of {tool}"),
                 };
                 self.records.push(TrajectoryRecord {
+                    target: pi::call_target(&arguments),
+                    changed_file: (!*failed)
+                        .then(|| pi::changed_path(tool, &arguments))
+                        .flatten(),
                     detail: arguments,
                     failed: *failed,
                     outcome: ToolOutcome {
@@ -444,6 +447,9 @@ fn row(
         kind,
         label,
         detail: String::new(),
+        target: String::new(),
+        changed_file: None,
+        decision: None,
         start_ms,
         duration_ms,
         first_token_ms: None,
@@ -454,13 +460,4 @@ fn row(
         context: None,
         outcome: ToolOutcome::default(),
     }
-}
-
-/// The argument that tells a tool call apart at a glance: a command or a path.
-fn primary_argument(arguments: &str) -> Option<String> {
-    let arguments: Value = serde_json::from_str(arguments).ok()?;
-    ["command", "path", "file_path"]
-        .iter()
-        .find_map(|name| arguments.get(*name)?.as_str())
-        .map(|text| first_line(text, LABEL_CHARS))
 }

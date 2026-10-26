@@ -161,6 +161,13 @@ fn classifies_tool_calls_and_reports_their_outcome() {
         detail: ItemDetail::Tool {
             name: name.to_owned(),
             arguments: arguments.to_owned(),
+            target: match item {
+                1 => "ls",
+                2 | 4 => "a.txt",
+                3 => "x",
+                _ => "b.txt",
+            }
+            .to_owned(),
         },
     };
     let finished = |item, kind, text: &str, status, duration_ms| AgentEvent::ItemCompleted {
@@ -314,6 +321,7 @@ fn turns_watershed_approval_questions_into_requests() {
             kind,
             tool: tool.to_owned(),
             arguments: arguments.to_owned(),
+            text: if id == "a1" { "npm test" } else { arguments }.to_owned(),
             read_only,
             session: (id == "a1").then(|| "s1".to_owned()),
         };
