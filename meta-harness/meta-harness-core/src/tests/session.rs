@@ -1058,6 +1058,53 @@ fn requires_the_extension_that_asks_before_tool_calls() {
     });
 }
 
+#[test]
+fn checks_the_extension_again_before_the_first_message_after_a_session_switch() {
+    run(async {
+        let commands = |id: u32, names: &str| {
+            format!(
+                "{}printf '%s\\n' '{{\"id\":\"{id}\",\"type\":\"response\",\"command\":\"get_commands\",\"success\":true,\"data\":{{\"commands\":[{names}]}}}}'\n",
+                expect_response(&[r#""type":"get_commands""#, &format!(r#""id":"{id}""#)])
+            )
+        };
+        let prompt = |id: u32| {
+            format!(
+                "{}printf '%s\\n' '{{\"id\":\"{id}\",\"type\":\"response\",\"command\":\"prompt\",\"success\":true,\"data\":{{\"disposition\":\"started\"}}}}'\n",
+                expect_response(&[r#""type":"prompt""#, &format!(r#""id":"{id}""#)])
+            )
+        };
+        let script = [
+            expect_response(&[r#""type":"new_session""#, r#""id":"1""#]),
+            r#"printf '%s\n' '{"id":"1","type":"response","command":"new_session","success":true,"data":{"cancelled":false}}'
+"#
+            .to_owned(),
+            // pi reloaded its extensions for the new session, and Watershed's is gone.
+            commands(2, ""),
+            commands(3, r#"{"name":"watershed-branch","source":"extension"}"#),
+            prompt(4),
+            prompt(5),
+            "IFS= read -r line || exit 0\n".to_owned(),
+        ]
+        .concat();
+        let (mut session, _events) = fake_agent(&script);
+        assert_eq!(
+            session.new_session().await.expect("sent").switched().await,
+            Ok(true)
+        );
+        assert_eq!(
+            session.prompt("Hi").await.map(drop),
+            Err(CommandError::Ungated),
+            "the message never reaches an agent that would run tools without asking"
+        );
+        assert_eq!(accepted(session.prompt("Hi").await).await, Ok(()));
+        assert_eq!(
+            accepted(session.send("Again", Delivery::Steer).await).await,
+            Ok(()),
+            "checked once per switch"
+        );
+    });
+}
+
 /// The last event of an agent that wrote nothing to its error output.
 fn exited(success: bool) -> SessionEvent {
     SessionEvent::Exited {

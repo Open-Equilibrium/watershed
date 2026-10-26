@@ -168,14 +168,15 @@ struct Shared {
     /// Whether the agent switched sessions since the history was read; the next read starts
     /// over, since sessions can share entry ids.
     switched: bool,
+    /// Whether the agent switched sessions since its extensions were checked: pi loads them
+    /// anew for each session, so the next message checks again.
+    unchecked: bool,
     /// Whether an abort waits for the turn to settle; dialogs arriving meanwhile are rejected
     /// or dismissed, since the agent stops only once they are answered.
     stopping: bool,
 }
 
 impl Shared {
-    /// Keeps allowances only for `session`: an extension command can switch sessions without
-    /// the core seeing it, and a call from another session asks again.
     /// Ends an open question and its timer; `false` when it was not open.
     fn end_question(&mut self, request: &RequestId) -> bool {
         if let Some(expiry) = self.expiries.remove(request) {
@@ -184,6 +185,8 @@ impl Shared {
         self.questions.remove(request)
     }
 
+    /// Keeps allowances only for `session`: an extension command can switch sessions without
+    /// the core seeing it, and a call from another session asks again.
     fn allow_in(&mut self, session: Option<String>) {
         if self.allowed_in != session {
             self.allowed.clear();
@@ -309,6 +312,7 @@ impl Session {
 
     /// Sends a prompt that starts a turn.
     pub async fn prompt(&mut self, message: &str) -> Result<Pending, CommandError> {
+        self.checked().await?;
         self.submit(json!({ "type": "prompt", "message": message }))
             .await
     }
@@ -320,6 +324,7 @@ impl Session {
         message: &str,
         delivery: Delivery,
     ) -> Result<Pending, CommandError> {
+        self.checked().await?;
         let behavior = match delivery {
             Delivery::Steer => "steer",
             Delivery::FollowUp => "followUp",
@@ -375,8 +380,10 @@ impl Session {
         self.submit_as(command, true).await
     }
 
-    /// Fails unless Watershed's pi extension is loaded: without it the agent would run tools
-    /// without asking, so a session must not start (ADR-0188).
+    /// Fails unless Watershed's pi extension is loaded, which pi shows by listing its
+    /// `watershed-branch` command: without it the agent would run tools without asking, so a
+    /// session must not start, and the first message after a session switch checks again
+    /// (ADR-0188).
     pub async fn require_gate(&mut self) -> Result<(), CommandError> {
         let data = self.command(json!({ "type": "get_commands" })).await?;
         let gated = data
@@ -393,6 +400,15 @@ impl Session {
         } else {
             Err(CommandError::Ungated)
         }
+    }
+
+    /// Checks the extension again after a session switch, before a message could run tools.
+    async fn checked(&mut self) -> Result<(), CommandError> {
+        if self.state.lock().unchecked {
+            self.require_gate().await?;
+            self.state.lock().unchecked = false;
+        }
+        Ok(())
     }
 
     /// The models the agent can use.
@@ -974,6 +990,7 @@ impl Supervisor {
             let mut shared = self.state.lock();
             shared.allowed.clear();
             shared.switched = true;
+            shared.unchecked = true;
         }
         let _ = reply.send(result);
     }
