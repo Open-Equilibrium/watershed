@@ -228,6 +228,27 @@ void main() {
     expect(focused(tester, const Key('composer')), isTrue);
   });
 
+  testWidgets('an approval waits again once Liquid is back in front', (
+    tester,
+  ) async {
+    await show(tester);
+    await emit(tester, approval('a1'));
+    // It arrived while the user worked in another app.
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    await read(tester);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    expect(
+      backend.calls.where((call) => call.startsWith('decide')),
+      isEmpty,
+      reason: 'the key that brought Liquid back decides nothing',
+    );
+
+    await read(tester);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    expect(backend.calls.last, 'decide a1 allowOnce');
+  });
+
   testWidgets('an approval or a question closes Settings', (tester) async {
     await show(tester);
     for (final (request, shown, resolved) in [

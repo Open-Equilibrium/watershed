@@ -453,7 +453,11 @@ class _ApprovalCardState extends State<ApprovalCard> {
 
   /// Whether the card was shown long enough to be read; until then no key decides (ADR-0207).
   bool _armed = false;
-  late final Timer _arming;
+  Timer? _arming;
+
+  /// Starts the wait again whenever Liquid comes back in front, since the card may have
+  /// appeared while the user worked elsewhere.
+  late final AppLifecycleListener _front;
 
   @override
   void initState() {
@@ -462,12 +466,24 @@ class _ApprovalCardState extends State<ApprovalCard> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _focus.requestFocus();
     });
-    _arming = Timer(const Duration(milliseconds: 500), () => _armed = true);
+    _front = AppLifecycleListener(onStateChange: (_) => _arm());
+    _arm();
+  }
+
+  /// Takes keys 0.5 s after Liquid is in front with the card.
+  void _arm() {
+    _armed = false;
+    _arming?.cancel();
+    if (WidgetsBinding.instance.lifecycleState case null ||
+        AppLifecycleState.resumed) {
+      _arming = Timer(const Duration(milliseconds: 500), () => _armed = true);
+    }
   }
 
   @override
   void dispose() {
-    _arming.cancel();
+    _arming?.cancel();
+    _front.dispose();
     _focus.dispose();
     _code.dispose();
     super.dispose();
