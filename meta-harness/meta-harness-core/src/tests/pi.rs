@@ -525,3 +525,48 @@ fn shows_invisible_and_reordering_characters_in_what_a_call_shows() {
     );
     assert_eq!(call_text("bash", r#"{"command":"ls -la"}"#), "ls -la");
 }
+
+#[test]
+fn ends_the_items_an_abort_leaves_open() {
+    let events = translate(&[
+        r#"{"type":"agent_start"}"#,
+        r#"{"type":"message_start","message":{"role":"assistant","content":[]}}"#,
+        r#"{"type":"message_update","assistantMessageEvent":{"type":"text_start","contentIndex":0}}"#,
+        r#"{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"Run"}}"#,
+        r#"{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"ning"}}"#,
+        r#"{"type":"tool_execution_start","toolCallId":"c1","toolName":"bash","args":{"command":"sleep 9"}}"#,
+        r#"{"type":"agent_settled","aborted":true}"#,
+    ]);
+    let ended: Vec<_> = events
+        .iter()
+        .skip_while(|event| {
+            !matches!(
+                event,
+                AgentEvent::ItemStarted {
+                    item: ItemId(2),
+                    ..
+                }
+            )
+        })
+        .skip(1)
+        .cloned()
+        .collect();
+    let interrupted = |item, kind, text: &str| AgentEvent::ItemCompleted {
+        turn: TURN,
+        item: ItemId(item),
+        kind,
+        text: text.to_owned(),
+        status: ItemStatus::Failed,
+        duration_ms: None,
+        lines: None,
+    };
+    assert_eq!(
+        ended,
+        [
+            interrupted(1, ItemKind::AssistantMessage, "Running"),
+            interrupted(2, ItemKind::CommandExecution, ""),
+            AgentEvent::TurnAborted { turn: TURN },
+        ],
+        "nothing stays running after the abort"
+    );
+}

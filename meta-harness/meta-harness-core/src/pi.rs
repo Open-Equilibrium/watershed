@@ -20,8 +20,9 @@ pub struct PiAdapter {
     turns: u64,
     items: u64,
     turn: Option<TurnId>,
-    /// Open content blocks of the streaming assistant message, keyed by content index.
-    blocks: HashMap<u64, (ItemId, ItemKind)>,
+    /// Open content blocks of the streaming assistant message, keyed by content index, with
+    /// their text so far.
+    blocks: HashMap<u64, (ItemId, ItemKind, String)>,
     /// Running tool calls, keyed by pi's tool call id.
     tools: HashMap<String, OpenTool>,
     steps: u64,
@@ -83,8 +84,29 @@ impl PiAdapter {
         match kind {
             Some("agent_settled") => {
                 self.turn = None;
-                self.blocks.clear();
-                self.tools.clear();
+                // Items still open, such as after an abort, end as failed, so none stays running.
+                let mut open: Vec<_> = self
+                    .blocks
+                    .drain()
+                    .map(|(_, block)| block)
+                    .chain(
+                        self.tools
+                            .drain()
+                            .map(|(_, tool)| (tool.item, tool.kind, String::new())),
+                    )
+                    .collect();
+                open.sort_by_key(|(item, ..)| item.0);
+                for (item, kind, text) in open {
+                    events.push(AgentEvent::ItemCompleted {
+                        turn,
+                        item,
+                        kind,
+                        text,
+                        status: ItemStatus::Failed,
+                        duration_ms: None,
+                        lines: None,
+                    });
+                }
                 self.step = None;
                 self.turn_started = None;
                 events.push(
@@ -242,17 +264,18 @@ impl PiAdapter {
                     ItemKind::Reasoning
                 };
                 let item = self.next_item();
-                self.blocks.insert(index, (item, kind));
+                self.blocks.insert(index, (item, kind, String::new()));
                 events.push(started(turn, item, kind, ItemDetail::None));
             }
             Some("text_delta" | "thinking_delta") => {
-                if let Some(&(item, _)) = self.blocks.get(&index) {
+                if let Some((item, _, text)) = self.blocks.get_mut(&index) {
                     let delta = str_field(update, "delta").to_owned();
-                    events.push(AgentEvent::ContentDelta { item, delta });
+                    text.push_str(&delta);
+                    events.push(AgentEvent::ContentDelta { item: *item, delta });
                 }
             }
             Some("text_end" | "thinking_end") => {
-                if let Some((item, kind)) = self.blocks.remove(&index) {
+                if let Some((item, kind, _)) = self.blocks.remove(&index) {
                     events.push(completed(
                         turn,
                         item,
