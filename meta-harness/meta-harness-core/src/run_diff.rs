@@ -1,0 +1,145 @@
+//! What a session's latest run changed in its Git project (ADR-0190): the project state before
+//! the run, when a new run replaces it and when it no longer applies.
+
+use std::future::Future;
+use std::path::Path;
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::time::Duration;
+
+use crate::diff::{DiffError, FileChange, Snapshot, WorkingTree};
+
+/// Longest one Git read of the project may take; a hung Git or a slow filter then ends.
+const GIT_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// The changes of a session's latest run in its project.
+#[derive(Debug)]
+pub struct RunDiff {
+    /// The project; none outside Git or once closed.
+    tree: Mutex<Option<Arc<WorkingTree>>>,
+    before: Mutex<Before>,
+    timeout: Duration,
+}
+
+#[derive(Debug, Default)]
+struct Before {
+    /// The project before the latest run, or why it could not be captured.
+    state: Option<Result<Snapshot, String>>,
+    /// Runs started so far.
+    runs: u64,
+}
+
+/// The project as captured before a message that may start a run.
+#[derive(Debug)]
+pub struct Capture(Option<Result<Snapshot, String>>);
+
+impl RunDiff {
+    /// Follows the project that contains `dir`; outside Git no run changes anything.
+    pub async fn open(dir: &Path) -> Self {
+        Self::with_timeout(dir, GIT_TIMEOUT).await
+    }
+
+    pub(crate) async fn with_timeout(dir: &Path, timeout: Duration) -> Self {
+        Self {
+            tree: Mutex::new(WorkingTree::open(dir).await.ok().map(Arc::new)),
+            before: Mutex::default(),
+            timeout,
+        }
+    }
+
+    /// Captures the project before a message that may start a run. It can take a while in a
+    /// large project, so callers hold nothing the agent needs meanwhile.
+    pub async fn capture(&self) -> Capture {
+        let Some(tree) = self.tree() else {
+            return Capture(None);
+        };
+        Capture(Some(
+            self.bounded(tree.snapshot())
+                .await
+                .map_err(|error| error.to_string()),
+        ))
+    }
+
+    /// The agent took the message `capture` was made for, so a run started that later diffs
+    /// compare against it.
+    pub fn started(&self, capture: Capture) {
+        let mut before = self.before();
+        before.state = capture.0;
+        before.runs += 1;
+    }
+
+    /// Runs started so far, for [`RunDiff::switched`].
+    pub fn runs(&self) -> u64 {
+        self.before().runs
+    }
+
+    /// The agent switched sessions, so the previous session's run no longer applies, unless a
+    /// run started since `runs`.
+    pub fn switched(&self, runs: u64) {
+        let mut before = self.before();
+        if before.runs == runs {
+            before.state = None;
+        }
+    }
+
+    /// The files the latest run changed.
+    pub async fn changes(&self) -> Result<Vec<FileChange>, DiffError> {
+        match self.compared()? {
+            Some((tree, before)) => self.bounded(tree.changes(&before)).await,
+            None => Ok(Vec::new()),
+        }
+    }
+
+    /// The unified diff of one file since the latest run started.
+    pub async fn patch(&self, path: &str) -> Result<String, DiffError> {
+        match self.compared()? {
+            Some((tree, before)) => self.bounded(tree.patch(&before, path)).await,
+            None => Ok(String::new()),
+        }
+    }
+
+    /// Removes the private snapshots once reads in progress end.
+    pub fn close(&self) {
+        self.tree
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
+    }
+
+    /// The private store, which tests watch for cleanup.
+    #[cfg(test)]
+    pub(crate) fn store(&self) -> Option<std::path::PathBuf> {
+        self.tree().map(|tree| tree.store().to_owned())
+    }
+
+    fn compared(&self) -> Result<Option<(Arc<WorkingTree>, Snapshot)>, DiffError> {
+        let Some(tree) = self.tree() else {
+            return Ok(None);
+        };
+        match &self.before().state {
+            None => Ok(None),
+            Some(Ok(before)) => Ok(Some((tree, before.clone()))),
+            Some(Err(reason)) => Err(DiffError::NotCaptured(reason.clone())),
+        }
+    }
+
+    async fn bounded<T>(
+        &self,
+        read: impl Future<Output = Result<T, DiffError>>,
+    ) -> Result<T, DiffError> {
+        // Dropping the read stops its Git.
+        tokio::time::timeout(self.timeout, read)
+            .await
+            .unwrap_or(Err(DiffError::TimedOut(self.timeout)))
+    }
+
+    fn tree(&self) -> Option<Arc<WorkingTree>> {
+        self.tree
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
+    fn before(&self) -> MutexGuard<'_, Before> {
+        self.before.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+}

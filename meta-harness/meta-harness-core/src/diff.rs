@@ -62,6 +62,10 @@ pub enum DiffError {
     Io(std::io::Error),
     /// Git's output exceeded the limit, so only part of it could be read.
     TooLarge,
+    /// Git did not finish within the time limit.
+    TimedOut(std::time::Duration),
+    /// The project could not be captured before the run, so its changes are unknown.
+    NotCaptured(String),
 }
 
 impl fmt::Display for DiffError {
@@ -74,6 +78,13 @@ impl fmt::Display for DiffError {
                 f,
                 "the diff is larger than {} MiB",
                 MAX_OUTPUT_BYTES / (1024 * 1024)
+            ),
+            Self::TimedOut(limit) => {
+                write!(f, "git did not finish within {} s", limit.as_secs())
+            }
+            Self::NotCaptured(reason) => write!(
+                f,
+                "the project could not be captured before the run: {reason}"
             ),
         }
     }
@@ -234,13 +245,17 @@ impl WorkingTree {
     /// Writes the working tree into the private store and returns its tree id.
     async fn write_tree(&self) -> Result<String, DiffError> {
         let _busy = self.busy.lock().await;
+        // A Git stopped at its time limit leaves its lock; no other Git uses this index now.
+        let _ = std::fs::remove_file(self.store.0.join("index.lock"));
+        // The first snapshot starts from the project's index, so Git rereads only the files
+        // that changed since; later snapshots keep the private index.
         let index = self.store.0.join("index");
-        match std::fs::copy(&self.index, &index) {
-            Ok(_) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                let _ = std::fs::remove_file(&index);
+        if !index.exists() {
+            match std::fs::copy(&self.index, &index) {
+                Ok(_) => {}
+                Err(error) if error.kind() == ErrorKind::NotFound => {}
+                Err(error) => return Err(DiffError::Io(error)),
             }
-            Err(error) => return Err(DiffError::Io(error)),
         }
         let env = self.env();
         git(&self.root, &env, &["add", "--all", "--", "."]).await?;
@@ -248,6 +263,12 @@ impl WorkingTree {
             .await?
             .trim()
             .to_owned())
+    }
+
+    /// The private store, which tests watch for cleanup.
+    #[cfg(test)]
+    pub(crate) fn store(&self) -> &Path {
+        &self.store.0
     }
 
     fn env(&self) -> Vec<(&'static str, OsString)> {

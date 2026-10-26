@@ -3,6 +3,7 @@ mod diff;
 mod framing;
 mod outcome;
 mod pi;
+mod run_diff;
 mod session;
 mod stored;
 mod trajectory;

@@ -9,6 +9,7 @@ mod event;
 mod framing;
 mod history;
 mod pi;
+mod run_diff;
 mod session;
 mod stored;
 
@@ -25,6 +26,7 @@ pub use history::{
     ToolOutcome, Trajectory, TrajectoryRecord, Transcript, TranscriptItem,
 };
 pub use pi::PiAdapter;
+pub use run_diff::{Capture, RunDiff};
 pub use session::{
     AgentCommand, CommandError, Model, Pending, Session, SessionEvent, SessionState, Stopper,
 };

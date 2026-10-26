@@ -487,33 +487,44 @@ fn coalesces_consecutive_deltas_of_one_item() {
     );
 }
 
-#[test]
-fn diffs_what_a_run_changed_in_its_project() {
-    let repo = std::env::temp_dir().join(format!("liquid-bridge-diff-{}", std::process::id()));
+/// A new Git repository with `a.txt` committed as `old`.
+fn repository(name: &str) -> std::path::PathBuf {
+    let repo = std::env::temp_dir().join(format!("liquid-bridge-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&repo);
     std::fs::create_dir_all(&repo).expect("repository");
-    let git = |args: &[&str]| {
-        let status = std::process::Command::new("git")
-            .args([
-                "-c",
-                "user.name=Test",
-                "-c",
-                "user.email=test@example.com",
-                "-c",
-                "commit.gpgsign=false",
-            ])
-            .args(args)
-            .current_dir(&repo)
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .env("GIT_CONFIG_NOSYSTEM", "1")
-            .status()
-            .expect("git runs");
-        assert!(status.success(), "git {args:?}");
-    };
-    git(&["init", "-q"]);
     std::fs::write(repo.join("a.txt"), "old\n").expect("file");
-    git(&["add", "."]);
-    git(&["commit", "-q", "-m", "base"]);
+    for args in [
+        &["init", "-q"][..],
+        &["add", "."],
+        &["commit", "-q", "-m", "base"],
+    ] {
+        git(&repo, args);
+    }
+    repo
+}
+
+fn git(repo: &std::path::Path, args: &[&str]) {
+    let status = std::process::Command::new("git")
+        .args([
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.com",
+            "-c",
+            "commit.gpgsign=false",
+        ])
+        .args(args)
+        .current_dir(repo)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .status()
+        .expect("git runs");
+    assert!(status.success(), "git {args:?}");
+}
+
+#[test]
+fn diffs_what_a_run_changed_in_its_project() {
+    let repo = repository("diff");
     // The stand-in agent edits the project only after the prompt arrives.
     let script = r#"IFS= read -r line
 printf 'new\n' > a.txt
@@ -548,6 +559,43 @@ IFS= read -r line || exit 0"#;
     assert!(session.send("again".to_owned(), false).is_err());
     assert_eq!(session.changes().expect("changes"), changes);
     assert!(session.shutdown());
+    assert_eq!(
+        session.changes(),
+        Ok(Vec::new()),
+        "shutting down removes the snapshots"
+    );
+    let _ = std::fs::remove_dir_all(&repo);
+}
+
+#[test]
+fn shuts_down_while_a_slow_project_is_captured() {
+    let repo = repository("slow");
+    // A clean filter runs while the project is captured; this one holds the capture up.
+    git(&repo, &["config", "filter.slow.clean", "sleep 10; cat"]);
+    std::fs::write(repo.join(".gitattributes"), "*.txt filter=slow\n").expect("attributes");
+    std::fs::write(repo.join("a.txt"), "new\n").expect("file");
+    let session = Arc::new(
+        AgentSession::start(SessionConfig {
+            program: "/bin/sh".to_owned(),
+            args: vec!["-c".to_owned(), "IFS= read -r line || exit 0".to_owned()],
+            cwd: repo.display().to_string(),
+        })
+        .expect("agent starts"),
+    );
+    {
+        let session = Arc::clone(&session);
+        std::thread::spawn(move || session.send("edit".to_owned(), false));
+    }
+    std::thread::sleep(Duration::from_millis(300));
+    let (stopped, stop) = mpsc::channel();
+    {
+        let session = Arc::clone(&session);
+        std::thread::spawn(move || stopped.send(session.shutdown()));
+    }
+    assert!(
+        stop.recv_timeout(Duration::from_secs(5)).is_ok(),
+        "the capture does not hold up shutdown"
+    );
     let _ = std::fs::remove_dir_all(&repo);
 }
 
