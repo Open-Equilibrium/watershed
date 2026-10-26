@@ -37,9 +37,16 @@ private func liquidKey(_ call: FlutterMethodCall, result: @escaping FlutterResul
   }
 }
 
+private let helperIdentifier = Bundle.main.bundleIdentifier! + ".key"
+
 @available(macOS 13, *)
 private var loginItem: SMAppService {
-  SMAppService.loginItem(identifier: Bundle.main.bundleIdentifier! + ".key")
+  SMAppService.loginItem(identifier: helperIdentifier)
+}
+
+/// Whether the helper runs; it quits, for example, when another app took its key.
+private var helperRunning: Bool {
+  !NSRunningApplication.runningApplications(withBundleIdentifier: helperIdentifier).isEmpty
 }
 
 @available(macOS 13, *)
@@ -50,6 +57,8 @@ private func enableLiquidKey() -> FlutterError? {
     details: nil)
   do {
     if item.status == .requiresApproval { return approval }
+    // A registered helper that quit starts again.
+    if item.status == .enabled && !helperRunning { try item.unregister() }
     if item.status != .enabled { try item.register() }
     return item.status == .requiresApproval ? approval : nil
   } catch {
