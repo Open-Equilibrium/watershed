@@ -113,14 +113,23 @@ fn diffs_a_run_against_its_snapshot_without_touching_the_repository() {
             removed,
         };
         assert_eq!(
-            tree.changes(&snapshot).await.expect("changes"),
+            tree.changes(&snapshot, &tree.snapshot().await.expect("snapshot"))
+                .await
+                .expect("changes"),
             [
                 change("a.txt", ChangeStatus::Modified, 1, 1),
                 change("b.txt", ChangeStatus::Added, 1, 0),
                 change("c.txt", ChangeStatus::Deleted, 0, 1),
             ]
         );
-        let patch = tree.patch(&snapshot, "a.txt").await.expect("patch");
+        let patch = tree
+            .patch(
+                &snapshot,
+                &tree.snapshot().await.expect("snapshot"),
+                "a.txt",
+            )
+            .await
+            .expect("patch");
         assert!(
             patch.contains("-old\n") && patch.contains("+new\n"),
             "{patch}"
@@ -227,7 +236,10 @@ fn shows_a_patch_without_running_the_projects_textconv() {
             .expect("repository opens");
         let before = tree.snapshot().await.expect("snapshot");
         repo.write("a.txt", "changed\n");
-        let patch = tree.patch(&before, "a.txt").await.expect("patch");
+        let patch = tree
+            .patch(&before, &tree.snapshot().await.expect("snapshot"), "a.txt")
+            .await
+            .expect("patch");
         assert!(patch.contains("+changed"), "{patch}");
         assert!(!ran.exists(), "the project's textconv did not run");
     });
@@ -263,7 +275,9 @@ fn diffs_a_project_given_by_a_relative_path() {
         let snapshot = tree.snapshot().await.expect("snapshot");
         repo.write("a.txt", "new\n");
         assert_eq!(
-            tree.changes(&snapshot).await.expect("changes"),
+            tree.changes(&snapshot, &tree.snapshot().await.expect("snapshot"))
+                .await
+                .expect("changes"),
             [FileChange {
                 path: "a.txt".to_owned(),
                 status: ChangeStatus::Modified,
@@ -288,7 +302,14 @@ fn reads_the_patch_of_a_file_whose_name_looks_like_a_pattern() {
         let snapshot = tree.snapshot().await.expect("snapshot");
         repo.write("a.txt", "plain\n");
         repo.write("a*.txt", "starred\n");
-        let patch = tree.patch(&snapshot, "a*.txt").await.expect("patch");
+        let patch = tree
+            .patch(
+                &snapshot,
+                &tree.snapshot().await.expect("snapshot"),
+                "a*.txt",
+            )
+            .await
+            .expect("patch");
         assert!(patch.contains("+starred"), "{patch}");
         assert!(!patch.contains("+plain"), "only the named file: {patch}");
     });
@@ -308,7 +329,12 @@ fn reports_a_diff_too_large_to_read_instead_of_cutting_it() {
         // More than the 4 MiB Git output limit.
         repo.write("big.txt", &"a line of changed text\n".repeat(200_000));
         assert!(matches!(
-            tree.patch(&snapshot, "big.txt").await,
+            tree.patch(
+                &snapshot,
+                &tree.snapshot().await.expect("snapshot"),
+                "big.txt"
+            )
+            .await,
             Err(DiffError::TooLarge)
         ));
     });
@@ -330,7 +356,12 @@ fn snapshots_a_project_whose_git_warns_a_lot() {
             .await
             .expect("snapshot finishes")
             .expect("snapshot");
-        assert_eq!(tree.changes(&snapshot).await.expect("changes"), []);
+        assert_eq!(
+            tree.changes(&snapshot, &tree.snapshot().await.expect("snapshot"))
+                .await
+                .expect("changes"),
+            []
+        );
     });
 }
 
@@ -347,7 +378,14 @@ fn keeps_blank_context_lines_whatever_the_projects_diff_settings() {
             .expect("repository opens");
         let snapshot = tree.snapshot().await.expect("snapshot");
         repo.write("a.txt", "one\n\nTHREE\n");
-        let patch = tree.patch(&snapshot, "a.txt").await.expect("patch");
+        let patch = tree
+            .patch(
+                &snapshot,
+                &tree.snapshot().await.expect("snapshot"),
+                "a.txt",
+            )
+            .await
+            .expect("patch");
         // A blank context line keeps its leading space, so Liquid reads it as context.
         assert!(patch.contains(" one\n \n-three\n"), "{patch:?}");
     });

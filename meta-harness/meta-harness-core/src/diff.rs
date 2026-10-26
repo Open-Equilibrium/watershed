@@ -195,11 +195,14 @@ impl WorkingTree {
         Ok(Snapshot(self.write_tree().await?))
     }
 
-    /// Lists the files that changed since `from`.
-    pub async fn changes(&self, from: &Snapshot) -> Result<Vec<FileChange>, DiffError> {
-        let now = self.write_tree().await?;
-        let numstat = self.diff(&["--numstat", "-z", &from.0, &now]).await?;
-        let statuses = self.diff(&["--name-status", "-z", &from.0, &now]).await?;
+    /// Lists the files that changed from `from` to `to`.
+    pub async fn changes(
+        &self,
+        from: &Snapshot,
+        to: &Snapshot,
+    ) -> Result<Vec<FileChange>, DiffError> {
+        let numstat = self.diff(&["--numstat", "-z", &from.0, &to.0]).await?;
+        let statuses = self.diff(&["--name-status", "-z", &from.0, &to.0]).await?;
         let mut statuses = statuses.split('\0');
         let mut changes = Vec::new();
         let mut positions = std::collections::HashMap::new();
@@ -232,12 +235,16 @@ impl WorkingTree {
         Ok(changes)
     }
 
-    /// Returns the unified diff of one file since `from`.
-    pub async fn patch(&self, from: &Snapshot, path: &str) -> Result<String, DiffError> {
-        let now = self.write_tree().await?;
+    /// Returns the unified diff of one file from `from` to `to`.
+    pub async fn patch(
+        &self,
+        from: &Snapshot,
+        to: &Snapshot,
+        path: &str,
+    ) -> Result<String, DiffError> {
         // A literal pathspec, so a name such as `a*.txt` selects only that file.
         let path = format!(":(literal){path}");
-        self.diff(&[&from.0, &now, "--", &path]).await
+        self.diff(&[&from.0, &to.0, "--", &path]).await
     }
 
     async fn diff(&self, args: &[&str]) -> Result<String, DiffError> {

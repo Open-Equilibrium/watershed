@@ -36,6 +36,8 @@ pub struct RunDiff {
 struct Before {
     /// The project before the latest run, or why it could not be captured.
     state: Option<Result<Snapshot, String>>,
+    /// The project as the latest list of changes saw it, which patches then show too.
+    listed: Option<Snapshot>,
     /// Runs started so far.
     runs: u64,
 }
@@ -59,7 +61,10 @@ impl RunDiff {
     }
 
     pub(crate) async fn with_timeout(dir: &Path, timeout: Duration) -> Self {
-        let (tree, unopened) = match WorkingTree::open(dir).await {
+        let opened = tokio::time::timeout(timeout, WorkingTree::open(dir))
+            .await
+            .unwrap_or(Err(DiffError::TimedOut(timeout)));
+        let (tree, unopened) = match opened {
             Ok(tree) => (Some(Arc::new(tree)), None),
             Err(DiffError::NotARepository) => (None, Some(Unopened::OutsideGit)),
             Err(error) => (None, Some(Unopened::Failed(error.to_string()))),
@@ -91,6 +96,7 @@ impl RunDiff {
     pub fn started(&self, capture: Capture) {
         let mut before = self.before();
         before.state = capture.0;
+        before.listed = None;
         before.runs += 1;
     }
 
@@ -105,22 +111,43 @@ impl RunDiff {
         let mut before = self.before();
         if before.runs == runs {
             before.state = None;
+            before.listed = None;
         }
     }
 
-    /// The files the latest run changed.
+    /// The files the latest run changed, as the project is now.
     pub async fn changes(&self) -> Result<Vec<FileChange>, DiffError> {
-        match self.compared()? {
-            Some((tree, before)) => self.bounded(tree.changes(&before)).await,
-            None => Ok(Vec::new()),
-        }
+        let Some((tree, before, runs)) = self.compared()? else {
+            return Ok(Vec::new());
+        };
+        let now = self.bounded(tree.snapshot()).await?;
+        self.list(runs, &now);
+        self.bounded(tree.changes(&before, &now)).await
     }
 
-    /// The unified diff of one file since the latest run started.
+    /// The unified diff of one file since the latest run started, as the latest list of changes
+    /// saw the project, so it needs no new pass over the project.
     pub async fn patch(&self, path: &str) -> Result<String, DiffError> {
-        match self.compared()? {
-            Some((tree, before)) => self.bounded(tree.patch(&before, path)).await,
-            None => Ok(String::new()),
+        let Some((tree, before, runs)) = self.compared()? else {
+            return Ok(String::new());
+        };
+        let listed = self.before().listed.clone();
+        let now = match listed {
+            Some(now) => now,
+            None => {
+                let now = self.bounded(tree.snapshot()).await?;
+                self.list(runs, &now);
+                now
+            }
+        };
+        self.bounded(tree.patch(&before, &now, path)).await
+    }
+
+    /// Keeps `now` as what later patches show, unless another run started meanwhile.
+    fn list(&self, runs: u64, now: &Snapshot) {
+        let mut before = self.before();
+        if before.runs == runs {
+            before.listed = Some(now.clone());
         }
     }
 
@@ -154,7 +181,8 @@ impl RunDiff {
         self.tree().map(|tree| tree.store().to_owned())
     }
 
-    fn compared(&self) -> Result<Option<(Arc<WorkingTree>, Snapshot)>, DiffError> {
+    /// The project, the state before the latest run and the runs started so far.
+    fn compared(&self) -> Result<Option<(Arc<WorkingTree>, Snapshot, u64)>, DiffError> {
         let Some(tree) = self.tree() else {
             return match &self.unopened {
                 Some(Unopened::OutsideGit) => Err(DiffError::NotARepository),
@@ -162,9 +190,10 @@ impl RunDiff {
                 None => Ok(None),
             };
         };
-        match &self.before().state {
+        let before = self.before();
+        match &before.state {
             None => Ok(None),
-            Some(Ok(before)) => Ok(Some((tree, before.clone()))),
+            Some(Ok(state)) => Ok(Some((tree, state.clone(), before.runs))),
             Some(Err(reason)) => Err(DiffError::NotCaptured(reason.clone())),
         }
     }

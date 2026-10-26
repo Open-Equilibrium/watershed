@@ -101,6 +101,42 @@ fn a_run_compares_against_the_project_before_it_until_the_next_run_starts() {
 }
 
 #[test]
+fn a_patch_shows_a_file_as_the_list_of_changes_saw_it() {
+    run(async {
+        let repo = Repo::new("patch-agrees");
+        let diff = RunDiff::open(repo.path()).await;
+        diff.started(diff.capture().await);
+        repo.write("a.txt", "new\n");
+        assert_eq!(diff.changes().await.expect("changes"), [modified("a.txt")]);
+        // Reading one file compares the same states, without a new pass over the project.
+        repo.write("a.txt", "newer\n");
+        let patch = diff.patch("a.txt").await.expect("patch");
+        assert!(
+            patch.contains("+new\n") && !patch.contains("newer"),
+            "{patch}"
+        );
+
+        diff.started(diff.capture().await);
+        repo.write("a.txt", "newest\n");
+        let patch = diff.patch("a.txt").await.expect("patch");
+        assert!(patch.contains("+newest\n"), "a new run reads anew: {patch}");
+    });
+}
+
+#[test]
+fn a_git_that_does_not_answer_at_open_is_reported() {
+    run(async {
+        let repo = Repo::new("open-limit");
+        // Too short for Git to answer, as a hung Git would not.
+        let diff = RunDiff::with_timeout(repo.path(), Duration::from_millis(1)).await;
+        assert!(matches!(
+            diff.changes().await,
+            Err(DiffError::NotCaptured(_))
+        ));
+    });
+}
+
+#[test]
 fn a_session_switch_ends_the_diff_unless_a_run_started_meanwhile() {
     run(async {
         let repo = Repo::new("switch");
@@ -187,7 +223,8 @@ fn a_first_snapshot_that_failed_still_clears_the_projects_marks() {
         let repo = Repo::new("unmark-retry");
         repo.git(&["update-index", "--assume-unchanged", "a.txt"]);
         // The first snapshot runs out of time while it clears the copied index's marks.
-        let mut diff = RunDiff::with_timeout(repo.path(), Duration::from_millis(1)).await;
+        let mut diff = RunDiff::open(repo.path()).await;
+        diff.set_timeout(Duration::from_millis(1));
         diff.started(diff.capture().await);
         assert!(matches!(
             diff.changes().await,
