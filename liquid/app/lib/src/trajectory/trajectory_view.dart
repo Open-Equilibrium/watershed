@@ -4,7 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../agent/action_area.dart';
+import '../controls.dart';
 import '../rust/api/events.dart';
 import '../rust/api/history.dart';
 import '../session/session_state.dart';

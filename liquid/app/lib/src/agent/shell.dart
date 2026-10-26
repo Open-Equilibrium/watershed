@@ -4,6 +4,8 @@ import 'dart:ui';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '../controls.dart';
+import '../diff/diff_view.dart';
 import '../rust/api/events.dart';
 import '../session/session_state.dart';
 import '../shortcuts/first_start.dart';
@@ -13,11 +15,10 @@ import '../shortcuts/shortcuts_page.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
+import '../trajectory/trajectory_view.dart';
 import 'action_area.dart';
 import 'chat_view.dart';
 import 'shortcut_reveal.dart';
-import '../diff/diff_view.dart';
-import '../trajectory/trajectory_view.dart';
 
 /// What the sidebar shows about a session.
 @immutable

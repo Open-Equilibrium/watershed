@@ -2,7 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
-import '../agent/action_area.dart';
+import '../controls.dart';
 import '../rust/api/history.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../agent/action_area.dart';
+import '../controls.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'keymap.dart';
