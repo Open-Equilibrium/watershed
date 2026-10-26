@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'agent/shell.dart';
+import 'agent/sidebar.dart';
 import 'rust/api/session.dart';
 import 'session/backend.dart';
 import 'session/session_state.dart';
