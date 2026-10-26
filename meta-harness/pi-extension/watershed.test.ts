@@ -107,14 +107,15 @@ test("reports read-only tools and stays out of other modes", async () => {
     return JSON.parse(rpc.questions[0].title.slice(APPROVAL_PREFIX.length)).readOnly;
   };
   assert.deepEqual(
-    [await readOnly("read"), await readOnly("grep"), await readOnly("tool_search"), await readOnly("lookup")],
-    [true, true, true, true],
-    "pi's reading built-ins and annotated tools",
+    [await readOnly("read"), await readOnly("grep"), await readOnly("tool_search")],
+    [true, true, true],
+    "pi's reading built-ins",
   );
   assert.deepEqual(
-    [await readOnly("bash"), await readOnly("find")],
-    [false, false],
-    "a built-in that changes things, and an extension tool named like a reading built-in",
+    [await readOnly("bash"), await readOnly("find"), await readOnly("lookup")],
+    [false, false, false],
+    "a built-in that changes things, an extension tool named like a reading built-in, and a tool " +
+      "that only calls itself read-only",
   );
   const read = { type: "tool_call", toolCallId: "c2", toolName: "read", input: { path: "a" } };
   const tui = context("reject", "tui");

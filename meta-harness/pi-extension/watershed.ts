@@ -7,7 +7,10 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 /** Title prefix of the select dialog the core answers instead of the user. */
 export const APPROVAL_PREFIX = "watershed.approval ";
 
-/** pi's built-in tools that only read; pi gives its built-ins no annotations. */
+/**
+ * pi's built-in tools that only read; pi gives its built-ins no annotations. Only these count as
+ * read-only: another tool's own `readOnlyHint` is a claim nobody checks (ADR-0208).
+ */
 const READING_BUILTINS = new Set(["read", "grep", "find", "ls", "tool_search"]);
 
 /** Answers the core may give; only the first three are user decisions. */
@@ -33,9 +36,7 @@ function watershed(pi: ExtensionAPI, clock: Clock): void {
     const payload = {
       tool: event.toolName,
       arguments: event.input,
-      readOnly:
-        tool?.annotations?.readOnlyHint === true ||
-        (tool?.sourceInfo?.source === "builtin" && READING_BUILTINS.has(tool.name)),
+      readOnly: tool?.sourceInfo?.source === "builtin" && READING_BUILTINS.has(tool.name),
     };
     const asked = clock();
     const decision = await ctx.ui.select(APPROVAL_PREFIX + JSON.stringify(payload), DECISIONS);
