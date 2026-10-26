@@ -513,7 +513,7 @@ class _ApprovalCardState extends State<ApprovalCard> {
     final ws = context.ws;
     final title = switch (approval.kind) {
       BridgeRequestKind.commandExecution => 'Run a shell command?',
-      BridgeRequestKind.fileChange => 'Change project files?',
+      BridgeRequestKind.fileChange => 'Change files?',
       BridgeRequestKind.tool => 'Call ${approval.tool}?',
     };
     final keys = Keymap.of(context);
