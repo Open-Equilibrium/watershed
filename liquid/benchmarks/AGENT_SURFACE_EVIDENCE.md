@@ -6,7 +6,7 @@ Observational evidence for the [agent-surface slice](../../PLAN.md) under the [e
 
 - Apple M6, 24 GB, macOS 27.0 (26A428).
 - Rust 1.99.0, release builds; Flutter 3.47.7 `flutter test` (debug JIT).
-- All three workloads observed on 2026-10-26 at commit `8f2ff48` plus the example change committed with this record; one run each.
+- All three workloads observed on 2026-10-26 at commit `733887b`; one run each.
 
 ## Workloads
 
@@ -18,9 +18,9 @@ Observational evidence for the [agent-surface slice](../../PLAN.md) under the [e
 
 ## Observations
 
-Token streaming: the 20,000 deltas arrive as 169 to 181 events, the largest carrying 3,056 bytes of merged text. Maximum resident set size 8.3 MB, peak memory footprint 7.0 MB.
+Token streaming: the 20,000 deltas arrive as 173 to 184 events, the largest carrying 3,120 bytes of merged text. Maximum resident set size 9.3 MB, peak memory footprint 7.9 MB.
 
-Long Trajectory, core: the first read from the session file takes most of each sample (10.5 ms p50); the tree and both Trajectories over the compact index take about 3.3 ms together, and the follow-up read of new entries about 0.06 ms. The process peaks at 50.9 MB resident (17.2 MB footprint). Earlier records built the session file in the measured process and are not comparable, nor are runs that read the stored entries from one agent response.
+Long Trajectory, core: the first read from the session file takes most of each sample (10.7 ms p50); the tree and both Trajectories over the compact index take about 3.4 ms together, and the follow-up read of new entries about 0.06 ms. The process's peak memory footprint is 17.2 MB. `/usr/bin/time` reports 50.9 MB maximum resident set size, but that counts the waited-for writer run too, so only the footprint describes the measured process. Earlier records built the session file in the measured process and are not comparable, nor are runs that read the stored entries from one agent response.
 
 Long Trajectory, Dart: every operation is linear in the steps except `compareBranches`, whose alignment is capped at 250,000 step pairs; `compareBranches.early` aligns 4,445 against 50 steps.
 
@@ -29,63 +29,63 @@ Long Trajectory, Dart: every operation is linear in the steps except `compareBra
 Token streaming:
 
 ```json
-{"sample":0,"elapsed_ms":20.293,"events":178,"delta_events":173,"largest_delta_bytes":2448}
-{"sample":1,"elapsed_ms":13.784,"events":181,"delta_events":176,"largest_delta_bytes":2704}
-{"sample":2,"elapsed_ms":11.398,"events":176,"delta_events":171,"largest_delta_bytes":2496}
-{"sample":3,"elapsed_ms":11.367,"events":173,"delta_events":168,"largest_delta_bytes":2608}
-{"sample":4,"elapsed_ms":11.311,"events":175,"delta_events":170,"largest_delta_bytes":2592}
-{"sample":5,"elapsed_ms":11.268,"events":172,"delta_events":167,"largest_delta_bytes":2624}
-{"sample":6,"elapsed_ms":11.381,"events":175,"delta_events":170,"largest_delta_bytes":2592}
-{"sample":7,"elapsed_ms":11.285,"events":175,"delta_events":170,"largest_delta_bytes":2576}
-{"sample":8,"elapsed_ms":11.205,"events":176,"delta_events":171,"largest_delta_bytes":2624}
-{"sample":9,"elapsed_ms":11.250,"events":177,"delta_events":172,"largest_delta_bytes":2560}
-{"sample":10,"elapsed_ms":11.162,"events":172,"delta_events":167,"largest_delta_bytes":2592}
-{"sample":11,"elapsed_ms":11.223,"events":176,"delta_events":171,"largest_delta_bytes":2576}
-{"sample":12,"elapsed_ms":11.267,"events":173,"delta_events":168,"largest_delta_bytes":2496}
-{"sample":13,"elapsed_ms":10.990,"events":172,"delta_events":167,"largest_delta_bytes":2624}
-{"sample":14,"elapsed_ms":11.204,"events":175,"delta_events":170,"largest_delta_bytes":2624}
-{"sample":15,"elapsed_ms":11.315,"events":175,"delta_events":170,"largest_delta_bytes":2592}
-{"sample":16,"elapsed_ms":11.129,"events":176,"delta_events":171,"largest_delta_bytes":2624}
-{"sample":17,"elapsed_ms":11.026,"events":169,"delta_events":164,"largest_delta_bytes":2496}
-{"sample":18,"elapsed_ms":11.306,"events":175,"delta_events":170,"largest_delta_bytes":2480}
-{"sample":19,"elapsed_ms":11.329,"events":174,"delta_events":169,"largest_delta_bytes":3056}
-{"summary":"stream","deltas_in":20000,"delta_bytes":16,"samples":20,"p50_ms":11.268,"p95_ms":13.784,"max_ms":20.293}
+{"sample":0,"elapsed_ms":19.985,"events":180,"delta_events":175,"largest_delta_bytes":2448}
+{"sample":1,"elapsed_ms":13.484,"events":178,"delta_events":173,"largest_delta_bytes":2608}
+{"sample":2,"elapsed_ms":11.284,"events":175,"delta_events":170,"largest_delta_bytes":2480}
+{"sample":3,"elapsed_ms":11.238,"events":176,"delta_events":171,"largest_delta_bytes":2576}
+{"sample":4,"elapsed_ms":11.190,"events":175,"delta_events":170,"largest_delta_bytes":2464}
+{"sample":5,"elapsed_ms":11.433,"events":184,"delta_events":179,"largest_delta_bytes":2544}
+{"sample":6,"elapsed_ms":11.531,"events":175,"delta_events":170,"largest_delta_bytes":2896}
+{"sample":7,"elapsed_ms":11.416,"events":174,"delta_events":169,"largest_delta_bytes":2480}
+{"sample":8,"elapsed_ms":11.330,"events":175,"delta_events":170,"largest_delta_bytes":2480}
+{"sample":9,"elapsed_ms":11.320,"events":180,"delta_events":175,"largest_delta_bytes":2576}
+{"sample":10,"elapsed_ms":11.460,"events":174,"delta_events":169,"largest_delta_bytes":2576}
+{"sample":11,"elapsed_ms":11.360,"events":176,"delta_events":171,"largest_delta_bytes":2608}
+{"sample":12,"elapsed_ms":11.426,"events":177,"delta_events":172,"largest_delta_bytes":2480}
+{"sample":13,"elapsed_ms":11.308,"events":178,"delta_events":173,"largest_delta_bytes":2992}
+{"sample":14,"elapsed_ms":11.429,"events":174,"delta_events":169,"largest_delta_bytes":3120}
+{"sample":15,"elapsed_ms":11.233,"events":176,"delta_events":171,"largest_delta_bytes":2560}
+{"sample":16,"elapsed_ms":11.401,"events":180,"delta_events":175,"largest_delta_bytes":2464}
+{"sample":17,"elapsed_ms":11.218,"events":174,"delta_events":169,"largest_delta_bytes":2512}
+{"sample":18,"elapsed_ms":11.394,"events":175,"delta_events":170,"largest_delta_bytes":2592}
+{"sample":19,"elapsed_ms":11.498,"events":173,"delta_events":168,"largest_delta_bytes":2464}
+{"summary":"stream","deltas_in":20000,"delta_bytes":16,"samples":20,"p50_ms":11.394,"p95_ms":13.484,"max_ms":19.985}
 ```
 
 Long Trajectory, core:
 
 ```json
-{"sample":0,"read_ms":16.407,"tree_ms":0.676,"trajectory_ms":2.275,"fork_trajectory_ms":1.919,"total_ms":21.278,"update_ms":0.068,"nodes":8640,"records":5000,"fork_records":4490}
-{"sample":1,"read_ms":12.415,"tree_ms":0.471,"trajectory_ms":1.708,"fork_trajectory_ms":1.547,"total_ms":16.140,"update_ms":0.061,"nodes":8640,"records":5000,"fork_records":4490}
-{"sample":2,"read_ms":10.558,"tree_ms":0.415,"trajectory_ms":1.520,"fork_trajectory_ms":1.379,"total_ms":13.872,"update_ms":0.059,"nodes":8640,"records":5000,"fork_records":4490}
-{"sample":3,"read_ms":10.433,"tree_ms":0.415,"trajectory_ms":1.513,"fork_trajectory_ms":1.383,"total_ms":13.745,"update_ms":0.061,"nodes":8640,"records":5000,"fork_records":4490}
-{"sample":4,"read_ms":10.396,"tree_ms":0.408,"trajectory_ms":1.499,"fork_trajectory_ms":1.367,"total_ms":13.670,"update_ms":0.055,"nodes":8640,"records":5000,"fork_records":4490}
-{"sample":5,"read_ms":10.438,"tree_ms":0.416,"trajectory_ms":1.490,"fork_trajectory_ms":1.372,"total_ms":13.715,"update_ms":0.056,"nodes":8640,"records":5000,"fork_records":4490}
-{"sample":6,"read_ms":10.462,"tree_ms":0.414,"trajectory_ms":1.515,"fork_trajectory_ms":1.399,"total_ms":13.789,"update_ms":0.058,"nodes":8640,"records":5000,"fork_records":4490}
-{"sample":7,"read_ms":10.472,"tree_ms":0.428,"trajectory_ms":1.520,"fork_trajectory_ms":1.377,"total_ms":13.798,"update_ms":0.058,"nodes":8640,"records":5000,"fork_records":4490}
-{"sample":8,"read_ms":10.357,"tree_ms":0.404,"trajectory_ms":1.491,"fork_trajectory_ms":1.380,"total_ms":13.632,"update_ms":0.058,"nodes":8640,"records":5000,"fork_records":4490}
-{"sample":9,"read_ms":10.416,"tree_ms":0.425,"trajectory_ms":1.497,"fork_trajectory_ms":1.381,"total_ms":13.719,"update_ms":0.051,"nodes":8640,"records":5000,"fork_records":4490}
-{"sample":10,"read_ms":10.449,"tree_ms":0.417,"trajectory_ms":1.509,"fork_trajectory_ms":1.380,"total_ms":13.756,"update_ms":0.059,"nodes":8640,"records":5000,"fork_records":4490}
-{"sample":11,"read_ms":10.944,"tree_ms":0.461,"trajectory_ms":1.618,"fork_trajectory_ms":1.487,"total_ms":14.510,"update_ms":0.080,"nodes":8640,"records":5000,"fork_records":4490}
-{"sample":12,"read_ms":11.021,"tree_ms":0.415,"trajectory_ms":1.492,"fork_trajectory_ms":1.372,"total_ms":14.300,"update_ms":0.063,"nodes":8640,"records":5000,"fork_records":4490}
-{"sample":13,"read_ms":10.491,"tree_ms":0.419,"trajectory_ms":1.510,"fork_trajectory_ms":1.420,"total_ms":13.840,"update_ms":0.054,"nodes":8640,"records":5000,"fork_records":4490}
-{"sample":14,"read_ms":10.351,"tree_ms":0.406,"trajectory_ms":1.492,"fork_trajectory_ms":1.387,"total_ms":13.637,"update_ms":0.057,"nodes":8640,"records":5000,"fork_records":4490}
-{"sample":15,"read_ms":10.534,"tree_ms":0.415,"trajectory_ms":1.501,"fork_trajectory_ms":1.379,"total_ms":13.829,"update_ms":0.058,"nodes":8640,"records":5000,"fork_records":4490}
-{"sample":16,"read_ms":10.330,"tree_ms":0.415,"trajectory_ms":1.496,"fork_trajectory_ms":1.389,"total_ms":13.631,"update_ms":0.056,"nodes":8640,"records":5000,"fork_records":4490}
-{"sample":17,"read_ms":10.481,"tree_ms":0.406,"trajectory_ms":1.508,"fork_trajectory_ms":1.376,"total_ms":13.772,"update_ms":0.058,"nodes":8640,"records":5000,"fork_records":4490}
-{"sample":18,"read_ms":10.351,"tree_ms":0.434,"trajectory_ms":1.549,"fork_trajectory_ms":1.409,"total_ms":13.742,"update_ms":0.061,"nodes":8640,"records":5000,"fork_records":4490}
-{"sample":19,"read_ms":10.438,"tree_ms":0.412,"trajectory_ms":1.497,"fork_trajectory_ms":1.396,"total_ms":13.743,"update_ms":0.058,"nodes":8640,"records":5000,"fork_records":4490}
-{"summary":"trajectory","file_bytes":2050826,"samples":20,"p50_ms":13.756,"p95_ms":16.140,"max_ms":21.278}
+{"sample":0,"read_ms":16.439,"tree_ms":0.678,"trajectory_ms":2.201,"fork_trajectory_ms":1.890,"total_ms":21.209,"update_ms":0.070,"nodes":8640,"records":5000,"fork_records":4490}
+{"sample":1,"read_ms":12.573,"tree_ms":0.467,"trajectory_ms":1.671,"fork_trajectory_ms":1.476,"total_ms":16.188,"update_ms":0.059,"nodes":8640,"records":5000,"fork_records":4490}
+{"sample":2,"read_ms":10.854,"tree_ms":0.421,"trajectory_ms":1.528,"fork_trajectory_ms":1.399,"total_ms":14.202,"update_ms":0.060,"nodes":8640,"records":5000,"fork_records":4490}
+{"sample":3,"read_ms":10.688,"tree_ms":0.421,"trajectory_ms":1.535,"fork_trajectory_ms":1.411,"total_ms":14.055,"update_ms":0.060,"nodes":8640,"records":5000,"fork_records":4490}
+{"sample":4,"read_ms":10.658,"tree_ms":0.418,"trajectory_ms":1.550,"fork_trajectory_ms":1.417,"total_ms":14.044,"update_ms":0.056,"nodes":8640,"records":5000,"fork_records":4490}
+{"sample":5,"read_ms":10.828,"tree_ms":0.432,"trajectory_ms":1.525,"fork_trajectory_ms":1.405,"total_ms":14.191,"update_ms":0.057,"nodes":8640,"records":5000,"fork_records":4490}
+{"sample":6,"read_ms":10.690,"tree_ms":0.422,"trajectory_ms":1.552,"fork_trajectory_ms":1.414,"total_ms":14.078,"update_ms":0.060,"nodes":8640,"records":5000,"fork_records":4490}
+{"sample":7,"read_ms":10.636,"tree_ms":0.420,"trajectory_ms":1.558,"fork_trajectory_ms":1.419,"total_ms":14.032,"update_ms":0.057,"nodes":8640,"records":5000,"fork_records":4490}
+{"sample":8,"read_ms":10.721,"tree_ms":0.426,"trajectory_ms":1.567,"fork_trajectory_ms":1.432,"total_ms":14.146,"update_ms":0.055,"nodes":8640,"records":5000,"fork_records":4490}
+{"sample":9,"read_ms":10.584,"tree_ms":0.419,"trajectory_ms":1.519,"fork_trajectory_ms":1.391,"total_ms":13.912,"update_ms":0.056,"nodes":8640,"records":5000,"fork_records":4490}
+{"sample":10,"read_ms":10.607,"tree_ms":0.423,"trajectory_ms":1.550,"fork_trajectory_ms":1.415,"total_ms":13.996,"update_ms":0.055,"nodes":8640,"records":5000,"fork_records":4490}
+{"sample":11,"read_ms":10.715,"tree_ms":0.424,"trajectory_ms":1.576,"fork_trajectory_ms":1.432,"total_ms":14.147,"update_ms":0.057,"nodes":8640,"records":5000,"fork_records":4490}
+{"sample":12,"read_ms":10.564,"tree_ms":0.418,"trajectory_ms":1.525,"fork_trajectory_ms":1.398,"total_ms":13.905,"update_ms":0.056,"nodes":8640,"records":5000,"fork_records":4490}
+{"sample":13,"read_ms":10.612,"tree_ms":0.421,"trajectory_ms":1.534,"fork_trajectory_ms":1.392,"total_ms":13.959,"update_ms":0.054,"nodes":8640,"records":5000,"fork_records":4490}
+{"sample":14,"read_ms":10.634,"tree_ms":0.425,"trajectory_ms":1.551,"fork_trajectory_ms":1.410,"total_ms":14.020,"update_ms":0.053,"nodes":8640,"records":5000,"fork_records":4490}
+{"sample":15,"read_ms":10.643,"tree_ms":0.426,"trajectory_ms":1.560,"fork_trajectory_ms":1.411,"total_ms":14.040,"update_ms":0.054,"nodes":8640,"records":5000,"fork_records":4490}
+{"sample":16,"read_ms":10.739,"tree_ms":0.427,"trajectory_ms":1.534,"fork_trajectory_ms":1.404,"total_ms":14.103,"update_ms":0.056,"nodes":8640,"records":5000,"fork_records":4490}
+{"sample":17,"read_ms":10.667,"tree_ms":0.437,"trajectory_ms":1.549,"fork_trajectory_ms":1.441,"total_ms":14.094,"update_ms":0.057,"nodes":8640,"records":5000,"fork_records":4490}
+{"sample":18,"read_ms":10.761,"tree_ms":0.415,"trajectory_ms":1.541,"fork_trajectory_ms":1.430,"total_ms":14.147,"update_ms":0.056,"nodes":8640,"records":5000,"fork_records":4490}
+{"sample":19,"read_ms":10.777,"tree_ms":0.429,"trajectory_ms":1.582,"fork_trajectory_ms":1.422,"total_ms":14.210,"update_ms":0.055,"nodes":8640,"records":5000,"fork_records":4490}
+{"summary":"trajectory","file_bytes":2050826,"samples":20,"p50_ms":14.078,"p95_ms":16.188,"max_ms":21.209}
 ```
 
 Long Trajectory, Dart:
 
 ```json
 {"nodes":8720,"records":5000,"fork_records":4490}
-{"operation":"sessionGraph","samples":20,"p50_ms":1.31,"p95_ms":2.806,"max_ms":3.198}
-{"operation":"turnGroups","samples":20,"p50_ms":0.203,"p95_ms":0.825,"max_ms":1.134}
-{"operation":"segments","samples":20,"p50_ms":0.051,"p95_ms":0.094,"max_ms":0.28}
-{"operation":"inRange","samples":20,"p50_ms":0.039,"p95_ms":0.083,"max_ms":0.105}
-{"operation":"compareBranches.late","samples":20,"p50_ms":0.117,"p95_ms":0.243,"max_ms":0.276}
-{"operation":"compareBranches.early","samples":20,"p50_ms":0.78,"p95_ms":0.926,"max_ms":1.014}
+{"operation":"sessionGraph","samples":20,"p50_ms":1.322,"p95_ms":3.253,"max_ms":4.542}
+{"operation":"turnGroups","samples":20,"p50_ms":0.199,"p95_ms":0.786,"max_ms":1.135}
+{"operation":"segments","samples":20,"p50_ms":0.051,"p95_ms":0.267,"max_ms":0.312}
+{"operation":"inRange","samples":20,"p50_ms":0.039,"p95_ms":0.097,"max_ms":0.111}
+{"operation":"compareBranches.late","samples":20,"p50_ms":0.118,"p95_ms":0.291,"max_ms":0.366}
+{"operation":"compareBranches.early","samples":20,"p50_ms":0.791,"p95_ms":0.964,"max_ms":1.014}
 ```
