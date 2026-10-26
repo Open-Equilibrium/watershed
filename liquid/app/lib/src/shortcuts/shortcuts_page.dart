@@ -10,13 +10,21 @@ import 'shortcut_store.dart';
 
 /// One line of the list: a command whose keys can change, or keys that stay as they are.
 class _Entry {
-  const _Entry(Command this.command) : fixedLabel = null, fixedKeys = null;
-  const _Entry.fixed(String this.fixedLabel, String this.fixedKeys)
-    : command = null;
+  const _Entry(Command this.command) : fixed = null, system = null;
+  const _Entry.fixed(Fixed this.fixed) : command = null, system = null;
+
+  /// Keys macOS handles for the Liquid key, which Liquid cannot change.
+  const _Entry.system(String label, String keys)
+    : system = (label, keys),
+      command = null,
+      fixed = null;
 
   final Command? command;
-  final String? fixedLabel;
-  final String? fixedKeys;
+  final Fixed? fixed;
+  final (String, String)? system;
+
+  String? get fixedLabel => fixed?.label ?? system?.$1;
+  String? get fixedKeys => fixed?.display ?? system?.$2;
 }
 
 typedef _Group = (String title, String? note, List<_Entry> entries);
@@ -25,9 +33,9 @@ const _liquidKeyGroup = (
   'Liquid key',
   'every app',
   [
-    _Entry.fixed('Open Liquid', 'tap ⇪'),
-    _Entry.fixed('Caps Lock on or off', '⇧⇪'),
-    _Entry.fixed('Show shortcuts in Liquid', 'hold ⇪'),
+    _Entry.system('Open Liquid', 'tap ⇪'),
+    _Entry.system('Caps Lock on or off', '⇧⇪'),
+    _Entry.system('Show shortcuts in Liquid', 'hold ⇪'),
   ],
 );
 
@@ -50,7 +58,7 @@ const List<_Group> _left = [
     [
       _Entry(Command.send),
       _Entry(Command.queue),
-      _Entry.fixed('New line', '⇧⏎'),
+      _Entry.fixed(Fixed.newLine),
       _Entry(Command.stop),
       _Entry(Command.dismissNotice),
     ],
@@ -65,7 +73,7 @@ const List<_Group> _right = [
       _Entry(Command.allowOnce),
       _Entry(Command.allowSession),
       _Entry(Command.reject),
-      _Entry.fixed('Scroll the call', '↑↓ ⇞⇟'),
+      _Entry.fixed(Fixed.scrollCall),
     ],
   ),
   (
@@ -74,7 +82,7 @@ const List<_Group> _right = [
     [
       _Entry(Command.answer),
       _Entry(Command.answerEditor),
-      _Entry.fixed('Move through options', '↑↓'),
+      _Entry.fixed(Fixed.moveThroughOptions),
       _Entry(Command.dismissQuestion),
     ],
   ),
@@ -82,24 +90,21 @@ const List<_Group> _right = [
     'Trajectory',
     null,
     [
-      _Entry.fixed('Previous or next step', '↑↓'),
-      _Entry.fixed('Fold or unfold the turn', '←→'),
+      _Entry.fixed(Fixed.previousOrNextStep),
+      _Entry.fixed(Fixed.foldTurn),
       _Entry(Command.foldAll),
       _Entry(Command.openStep),
       _Entry(Command.closeStep),
       _Entry(Command.branch),
       _Entry(Command.compare),
-      _Entry.fixed('Move in the branch tree', '⌥↑↓'),
+      _Entry.fixed(Fixed.moveInTree),
       _Entry(Command.selectBranch),
     ],
   ),
   (
     'Diff',
     null,
-    [
-      _Entry.fixed('Previous or next file', '↑↓'),
-      _Entry.fixed('Fold or unfold the folder', '←→'),
-    ],
+    [_Entry.fixed(Fixed.previousOrNextFile), _Entry.fixed(Fixed.foldFolder)],
   ),
 ];
 

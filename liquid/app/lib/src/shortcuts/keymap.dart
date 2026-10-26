@@ -167,7 +167,54 @@ class _KeysActivator extends ShortcutActivator {
 }
 
 /// Where a command's keys work; keys conflict only within one area.
-enum Area { app, input, approval, question, trajectory }
+enum Area { app, input, approval, question, trajectory, diff }
+
+/// Keys that never change, as Settings → Shortcuts lists them per area; no command may take
+/// them there.
+enum Fixed {
+  newLine('New line', Area.input, '⇧⏎', [
+    Keys(LogicalKeyboardKey.enter, shift: true),
+  ]),
+  scrollCall('Scroll the call', Area.approval, '↑↓ ⇞⇟', [
+    Keys(LogicalKeyboardKey.arrowUp),
+    Keys(LogicalKeyboardKey.arrowDown),
+    Keys(LogicalKeyboardKey.pageUp),
+    Keys(LogicalKeyboardKey.pageDown),
+  ]),
+  moveThroughOptions('Move through options', Area.question, '↑↓', [
+    Keys(LogicalKeyboardKey.arrowUp),
+    Keys(LogicalKeyboardKey.arrowDown),
+  ]),
+  previousOrNextStep('Previous or next step', Area.trajectory, '↑↓', [
+    Keys(LogicalKeyboardKey.arrowUp),
+    Keys(LogicalKeyboardKey.arrowDown),
+  ]),
+  foldTurn('Fold or unfold the turn', Area.trajectory, '←→', [
+    Keys(LogicalKeyboardKey.arrowLeft),
+    Keys(LogicalKeyboardKey.arrowRight),
+  ]),
+  moveInTree('Move in the branch tree', Area.trajectory, '⌥↑↓', [
+    Keys(LogicalKeyboardKey.arrowUp, alt: true),
+    Keys(LogicalKeyboardKey.arrowDown, alt: true),
+  ]),
+  previousOrNextFile('Previous or next file', Area.diff, '↑↓', [
+    Keys(LogicalKeyboardKey.arrowUp),
+    Keys(LogicalKeyboardKey.arrowDown),
+  ]),
+  foldFolder('Fold or unfold the folder', Area.diff, '←→', [
+    Keys(LogicalKeyboardKey.arrowLeft),
+    Keys(LogicalKeyboardKey.arrowRight),
+  ]);
+
+  const Fixed(this.label, this.area, this.display, this.keys);
+
+  final String label;
+  final Area area;
+
+  /// The keys as Settings show them.
+  final String display;
+  final List<Keys> keys;
+}
 
 /// Every action with keys the user can change in Settings → Shortcuts.
 enum Command {
@@ -290,7 +337,7 @@ String? reserved(Command command, Keys keys) {
   return typing && keys.types ? 'typing' : null;
 }
 
-/// Keys of the fixed rows in Settings → Shortcuts, per area, and macOS standards everywhere.
+/// macOS standards everywhere, and the fixed keys per area.
 final _reserved = <(Area?, Keys, String)>[
   (null, const Keys(LogicalKeyboardKey.keyQ, meta: true), 'Quit'),
   (null, const Keys(LogicalKeyboardKey.keyW, meta: true), 'Close'),
@@ -312,33 +359,8 @@ final _reserved = <(Area?, Keys, String)>[
   (null, const Keys(LogicalKeyboardKey.keyA, meta: true), 'Select All'),
   (null, const Keys(LogicalKeyboardKey.keyZ, meta: true), 'Undo'),
   (null, const Keys(LogicalKeyboardKey.keyZ, meta: true, shift: true), 'Redo'),
-  (Area.input, const Keys(LogicalKeyboardKey.enter, shift: true), 'New line'),
-  for (final key in [
-    LogicalKeyboardKey.arrowUp,
-    LogicalKeyboardKey.arrowDown,
-    LogicalKeyboardKey.pageUp,
-    LogicalKeyboardKey.pageDown,
-  ])
-    (Area.approval, Keys(key), 'Scroll the call'),
-  (
-    Area.question,
-    const Keys(LogicalKeyboardKey.arrowUp),
-    'Move through options',
-  ),
-  (
-    Area.question,
-    const Keys(LogicalKeyboardKey.arrowDown),
-    'Move through options',
-  ),
-  for (final key in [LogicalKeyboardKey.arrowUp, LogicalKeyboardKey.arrowDown])
-    (Area.trajectory, Keys(key), 'Previous or next step'),
-  for (final key in [
-    LogicalKeyboardKey.arrowLeft,
-    LogicalKeyboardKey.arrowRight,
-  ])
-    (Area.trajectory, Keys(key), 'Fold or unfold the turn'),
-  for (final key in [LogicalKeyboardKey.arrowUp, LogicalKeyboardKey.arrowDown])
-    (Area.trajectory, Keys(key, alt: true), 'Move in the branch tree'),
+  for (final fixed in Fixed.values)
+    for (final keys in fixed.keys) (fixed.area, keys, fixed.label),
 ];
 
 /// The Custom profile: the profile it started from, whether Caps Lock is the Liquid key and
