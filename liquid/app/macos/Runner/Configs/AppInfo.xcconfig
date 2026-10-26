@@ -5,10 +5,10 @@
 // 'flutter create' template.
 
 // The application's name. By default this is also the title of the Flutter window.
-PRODUCT_NAME = liquid
+PRODUCT_NAME = Liquid
 
 // The application's bundle identifier
 PRODUCT_BUNDLE_IDENTIFIER = org.openequilibrium.liquid
 
 // The copyright displayed in application information
-PRODUCT_COPYRIGHT = Copyright © 2026 org.openequilibrium. All rights reserved.
+PRODUCT_COPYRIGHT = © 2026 Watershed contributors, AGPL-3.0-only
