@@ -179,8 +179,35 @@ fn closing_removes_the_private_snapshots() {
         let store = diff.store().expect("a Git project has a store");
         assert!(store.exists());
 
-        diff.close();
+        diff.close().await;
         assert!(!store.exists(), "{}", store.display());
         assert_eq!(diff.changes().await.expect("changes"), []);
+    });
+}
+
+#[test]
+fn closing_stops_a_read_in_progress_and_removes_its_snapshots() {
+    run(async {
+        let repo = Repo::new("close-slow");
+        repo.git(&["config", "filter.slow.clean", "sleep 5; cat"]);
+        repo.write(".gitattributes", "*.txt filter=slow\n");
+        let diff = std::sync::Arc::new(RunDiff::open(repo.path()).await);
+        let store = diff.store().expect("a Git project has a store");
+        repo.write("a.txt", "new\n");
+        let reading = tokio::spawn({
+            let diff = diff.clone();
+            async move { diff.capture().await }
+        });
+        tokio::time::sleep(Duration::from_millis(300)).await;
+
+        tokio::time::timeout(Duration::from_secs(2), diff.close())
+            .await
+            .expect("closing does not wait for the slow read");
+        assert!(!store.exists(), "{}", store.display());
+        diff.started(reading.await.expect("the read ends"));
+        assert!(
+            diff.changes().await.expect("closed").is_empty(),
+            "a closed diff shows nothing"
+        );
     });
 }

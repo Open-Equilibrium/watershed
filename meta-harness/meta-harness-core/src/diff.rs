@@ -66,6 +66,8 @@ pub enum DiffError {
     TimedOut(std::time::Duration),
     /// The project could not be captured before the run, so its changes are unknown.
     NotCaptured(String),
+    /// The session ended while Git read the project.
+    Closed,
 }
 
 impl fmt::Display for DiffError {
@@ -86,6 +88,7 @@ impl fmt::Display for DiffError {
                 f,
                 "the project could not be captured before the run: {reason}"
             ),
+            Self::Closed => f.write_str("the session ended"),
         }
     }
 }

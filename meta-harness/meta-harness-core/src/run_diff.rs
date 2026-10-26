@@ -1,15 +1,23 @@
 //! What a session's latest run changed in its Git project (ADR-0190): the project state before
 //! the run, when a new run replaces it and when it no longer applies.
 
-use std::future::Future;
+use std::future::{Future, poll_fn};
 use std::path::Path;
+use std::pin::pin;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
-use std::time::Duration;
+use std::task::Poll;
+use std::time::{Duration, Instant};
+
+use tokio::sync::watch;
 
 use crate::diff::{DiffError, FileChange, Snapshot, WorkingTree};
 
-/// Longest one Git read of the project may take; a hung Git or a slow filter then ends.
+/// Longest one Git read of the project may take; Git is then stopped, though a filter it
+/// started runs until it ends.
 const GIT_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Longest closing waits for reads in progress to stop their Git.
+const CLOSE_WAIT: Duration = Duration::from_secs(1);
 
 /// The changes of a session's latest run in its project.
 #[derive(Debug)]
@@ -18,6 +26,8 @@ pub struct RunDiff {
     tree: Mutex<Option<Arc<WorkingTree>>>,
     before: Mutex<Before>,
     timeout: Duration,
+    /// Tells reads in progress that the diff closed.
+    closed: watch::Sender<bool>,
 }
 
 #[derive(Debug, Default)]
@@ -43,6 +53,7 @@ impl RunDiff {
             tree: Mutex::new(WorkingTree::open(dir).await.ok().map(Arc::new)),
             before: Mutex::default(),
             timeout,
+            closed: watch::Sender::new(false),
         }
     }
 
@@ -97,12 +108,23 @@ impl RunDiff {
         }
     }
 
-    /// Removes the private snapshots once reads in progress end.
-    pub fn close(&self) {
-        self.tree
+    /// Stops reads in progress and removes the private snapshots.
+    pub async fn close(&self) {
+        let tree = self
+            .tree
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .take();
+        self.closed.send_replace(true);
+        let Some(tree) = tree else {
+            return;
+        };
+        // Each read in progress holds the project until it stopped its Git; the last holder
+        // removes the snapshots.
+        let waited = Instant::now();
+        while Arc::strong_count(&tree) > 1 && waited.elapsed() < CLOSE_WAIT {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
     }
 
     /// The private store, which tests watch for cleanup.
@@ -122,14 +144,21 @@ impl RunDiff {
         }
     }
 
+    /// Runs `read` until its time limit or until the diff closes; dropping it stops its Git.
     async fn bounded<T>(
         &self,
         read: impl Future<Output = Result<T, DiffError>>,
     ) -> Result<T, DiffError> {
-        // Dropping the read stops its Git.
-        tokio::time::timeout(self.timeout, read)
-            .await
-            .unwrap_or(Err(DiffError::TimedOut(self.timeout)))
+        let mut read = pin!(tokio::time::timeout(self.timeout, read));
+        let mut closed = self.closed.subscribe();
+        let mut closing = pin!(closed.wait_for(|closed| *closed));
+        poll_fn(|context| {
+            if let Poll::Ready(result) = read.as_mut().poll(context) {
+                return Poll::Ready(result.unwrap_or(Err(DiffError::TimedOut(self.timeout))));
+            }
+            closing.as_mut().poll(context).map(|_| Err(DiffError::Closed))
+        })
+        .await
     }
 
     fn tree(&self) -> Option<Arc<WorkingTree>> {

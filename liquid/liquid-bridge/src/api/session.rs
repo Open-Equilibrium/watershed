@@ -481,7 +481,7 @@ impl AgentSession {
             };
             // Requests still waiting end with the agent, so the session is free to drop.
             self.session.lock().await.take();
-            self.diff.close();
+            self.diff.close().await;
             stopped
         })
     }
