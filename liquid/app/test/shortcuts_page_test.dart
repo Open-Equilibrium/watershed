@@ -136,6 +136,23 @@ void main() {
     expect(shortcuts.value, ShortcutSettings.standard());
   });
 
+  testWidgets('recording the keys a command already has changes nothing', (
+    tester,
+  ) async {
+    await show(tester, ShortcutSettings.standard());
+    await openSettings(tester);
+
+    await tester.tap(find.text('⌘3'));
+    await tester.pumpAndSettle();
+    await press(
+      tester,
+      LogicalKeyboardKey.digit3,
+      holding: LogicalKeyboardKey.metaLeft,
+    );
+    expect(find.text('Press keys…'), findsNothing, reason: 'recording ends');
+    expect(shortcuts.value, ShortcutSettings.standard(), reason: 'no Custom');
+  });
+
   testWidgets('keys that macOS or typing need are refused', (tester) async {
     await show(tester, ShortcutSettings.standard());
     await openSettings(tester);

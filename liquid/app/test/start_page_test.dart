@@ -110,6 +110,29 @@ void main() {
     expect(find.text('Faux Two'), findsOneWidget);
   });
 
+  testWidgets('sizes each chip to its label', (tester) async {
+    await show(tester);
+    // The chips in the input area, not the project's name in the sidebar.
+    double width(String label) => tester
+        .getSize(
+          find
+              .ancestor(
+                of: find.descendant(
+                  of: find.byType(StartChips),
+                  matching: find.text(label),
+                ),
+                matching: find.byType(Container),
+              )
+              .first,
+        )
+        .width;
+    expect(
+      width('acme-api'),
+      lessThan(width('Faux One')),
+      reason: 'compact chips, as the approved mockup shows',
+    );
+  });
+
   testWidgets('keeps Start reachable with long names in a narrow window', (
     tester,
   ) async {

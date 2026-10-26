@@ -254,6 +254,11 @@ class _ShortcutsPageState extends State<ShortcutsPage> {
       _stop();
       return KeyEventResult.handled;
     }
+    // The keys it already starts with change nothing, so no Custom profile starts.
+    if (_shortcuts.value.bindings(command).firstOrNull == keys) {
+      _done();
+      return KeyEventResult.handled;
+    }
     final use = reserved(command, keys);
     final conflict = _shortcuts.value.conflict(command, keys);
     if (use == null && conflict == null) {

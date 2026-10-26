@@ -367,7 +367,6 @@ class ModeChip extends StatelessWidget {
             border: Border.all(color: context.ws.borderStrong),
             borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
           ),
-          alignment: Alignment.center,
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -625,40 +624,43 @@ class _ScrollingCodeState extends State<_ScrollingCode> {
         color: ws.code,
         borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
       ),
-      child: Stack(
+      // The hint sits below the code, so it never covers a line of the call.
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          NotificationListener<ScrollMetricsNotification>(
-            onNotification: (notification) =>
-                _measure(notification.metrics, lineHeight),
-            child: NotificationListener<ScrollUpdateNotification>(
+          Expanded(
+            child: NotificationListener<ScrollMetricsNotification>(
               onNotification: (notification) =>
                   _measure(notification.metrics, lineHeight),
-              child: SingleChildScrollView(
-                controller: widget.controller,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: WsMetrics.space4,
-                  vertical: WsMetrics.space2,
-                ),
-                child: SizedBox(
-                  width: double.infinity,
-                  child: Text(widget.text, style: style),
+              child: NotificationListener<ScrollUpdateNotification>(
+                onNotification: (notification) =>
+                    _measure(notification.metrics, lineHeight),
+                child: SingleChildScrollView(
+                  controller: widget.controller,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: WsMetrics.space4,
+                    vertical: WsMetrics.space2,
+                  ),
+                  child: SizedBox(
+                    width: double.infinity,
+                    child: Text(widget.text, style: style),
+                  ),
                 ),
               ),
             ),
           ),
           if (_below > 0)
-            Positioned(
-              right: WsMetrics.space3,
-              bottom: WsMetrics.space1,
-              child: Container(
-                color: ws.code,
-                padding: const EdgeInsets.only(left: WsMetrics.space2),
-                child: Text(
-                  '↓ $_below more line${_below == 1 ? '' : 's'}',
-                  style: TextStyle(
-                    color: ws.textFaint,
-                    fontSize: WsMetrics.fsSmall,
-                  ),
+            Padding(
+              padding: const EdgeInsets.only(
+                right: WsMetrics.space3,
+                bottom: WsMetrics.space1,
+              ),
+              child: Text(
+                '↓ $_below more line${_below == 1 ? '' : 's'}',
+                textAlign: TextAlign.end,
+                style: TextStyle(
+                  color: ws.textFaint,
+                  fontSize: WsMetrics.fsSmall,
                 ),
               ),
             ),

@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:liquid/src/agent/chat_view.dart';
 import 'package:liquid/src/agent/shell.dart';
 import 'package:liquid/src/agent/sidebar.dart';
 import 'package:liquid/src/rust/api/events.dart';
@@ -496,6 +497,16 @@ void main() {
     );
     expect(find.text(command), findsOneWidget, reason: 'the command itself');
     expect(find.textContaining('more lines'), findsOneWidget);
+    final view = tester.getRect(
+      find
+          .ancestor(of: find.text(command), matching: find.byType(Scrollable))
+          .first,
+    );
+    expect(
+      tester.getRect(find.textContaining('more lines')).overlaps(view),
+      isFalse,
+      reason: 'the hint covers none of the call',
+    );
     await tester.drag(
       find.ancestor(
         of: find.text(command),
@@ -615,6 +626,28 @@ void main() {
     expect(find.text('+9 −2', findRichText: true), findsOneWidget);
     expect(find.text('+38', findRichText: true), findsOneWidget);
     expect(find.text('9 ms'), findsNothing, reason: 'the lines say more');
+  });
+
+  testWidgets('shows thinking without promising to open it', (tester) async {
+    await show(tester);
+    await emit(tester, event(BridgeEventKind.turnStarted, turn: 1));
+    await emit(
+      tester,
+      event(
+        BridgeEventKind.itemStarted,
+        turn: 1,
+        item: item(4, kind: BridgeItemKind.reasoning),
+      ),
+    );
+    final thinking = find.ancestor(
+      of: find.text('Thinking'),
+      matching: find.byType(ItemTile),
+    );
+    expect(
+      find.descendant(of: thinking, matching: find.byType(Icon)),
+      findsNothing,
+      reason: 'a chevron would suggest it opens',
+    );
   });
 
   testWidgets('marks a tool done when only its outcome changes', (

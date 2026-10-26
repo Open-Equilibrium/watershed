@@ -183,7 +183,6 @@ class _Chip extends StatelessWidget {
         border: Border.all(color: ws.borderStrong),
         borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
       ),
-      alignment: Alignment.center,
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [

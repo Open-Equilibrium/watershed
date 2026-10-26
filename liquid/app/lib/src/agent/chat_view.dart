@@ -111,7 +111,7 @@ class BranchMark extends StatelessWidget {
   }
 }
 
-/// One timeline entry: a user bubble, model prose, collapsed reasoning or a tool row.
+/// One timeline entry: a user bubble, model prose, a line for reasoning or a tool row.
 class ItemTile extends StatelessWidget {
   const ItemTile({super.key, required this.item, required this.state});
 
@@ -141,18 +141,9 @@ class ItemTile extends StatelessWidget {
           ),
         ),
         BridgeItemKind.assistantMessage => SelectableText(text, style: prose),
-        BridgeItemKind.reasoning => Row(
-          children: [
-            Icon(LucideIcons.chevronRight, size: 14, color: ws.textFaint),
-            const SizedBox(width: WsMetrics.space1),
-            Text(
-              'Thinking',
-              style: TextStyle(
-                color: ws.textFaint,
-                fontSize: WsMetrics.fsSmall,
-              ),
-            ),
-          ],
+        BridgeItemKind.reasoning => Text(
+          'Thinking',
+          style: TextStyle(color: ws.textFaint, fontSize: WsMetrics.fsSmall),
         ),
         _ => ToolRow(item: item, state: state),
       },
