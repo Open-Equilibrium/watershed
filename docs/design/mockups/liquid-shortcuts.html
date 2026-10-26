@@ -62,7 +62,16 @@ kbd.alt{background:none;color:var(--tf)}
 .badge{position:absolute;top:-9px;right:-6px;font:600 10.5px/16px ui-sans-serif,-apple-system,sans-serif;padding:0 5px;border-radius:4px;background:#37352f;color:#fff;white-space:nowrap}
 ul.notes{margin:0;padding-left:16px;font-size:13px;color:var(--muted-foreground)}
 .notes b{color:var(--foreground)}
-@media (max-width:640px){.cols,.choices,.hold{grid-template-columns:1fr}.set{grid-template-columns:1fr}.nav{display:none}}
+.ask{margin:2px 0 4px;padding:10px 12px;border-radius:8px;background:var(--was);box-shadow:inset 0 0 0 1px #f2c9a0;display:flex;flex-direction:column;gap:4px}
+.ask .ah{display:flex;align-items:center;gap:8px;color:var(--wa)}
+.ask .ah b{color:var(--t)}
+.ask .acts{margin-top:6px}
+.btn.pri{background:var(--ac);color:var(--oa);box-shadow:none}
+.btn.dng{color:#c4403b;background:var(--c)}
+.btn.focus{box-shadow:0 0 0 2px var(--was),0 0 0 4px var(--ac)}
+.after{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.after .cap{font-size:12px;font-weight:600;margin-bottom:4px}
+@media (max-width:640px){.cols,.choices,.hold,.after{grid-template-columns:1fr}.set{grid-template-columns:1fr}.nav{display:none}}
 </style></head><body>
 <div class="wrap">
 <div class="top">Approved mockups for Liquid's shortcuts and the Liquid key (ADR-0204, ADR-0205); the Rules below specify them, <a href="../guidelines.md">guidelines.md</a> states the general rule.</div>
@@ -199,6 +208,54 @@ ul.notes{margin:0;padding-left:16px;font-size:13px;color:var(--muted-foreground)
 <li><b>Effect:</b> the menu bar, the badges and the key bindings follow the settings at once. Tabs show a badge only for keys the menu bar cannot show, such as ⇪1.</li>
 <li><b>First start:</b> nothing is preselected, and both buttons carry the same weight; esc chooses Standard. Turning on the Liquid key may make macOS show a notice that a background item was added.</li>
 <li><b>Saving:</b> a JSON file in the app data folder holds the profile and the changed shortcuts.</li>
+</ul>
+
+<h2>Replacing Custom<span>Standard is active, and the kept Custom profile has 4 changed shortcuts</span></h2>
+<div class="w set">
+ <div class="nav"><div class="h">Settings</div><div class="it on">Shortcuts</div></div>
+ <div class="main">
+  <div class="head"><h3>Shortcuts</h3><div class="search">Search actions or keys</div></div>
+  <div class="prof"><span class="m">Profile</span><span class="seg"><span>Liquid key</span><span class="on">Standard</span><span>Custom</span></span></div>
+  <div class="grp">App <span>menu bar shows ⌘</span></div>
+  <div class="row"><span class="l">New Session</span><kbd>⌘N</kbd></div>
+  <div class="row"><span class="l">Settings…</span><kbd>⌘,</kbd></div>
+  <div class="row"><span class="l">Chat</span><kbd>⌘1</kbd></div>
+  <div class="row"><span class="l">Trajectory</span><kbd>⌘2</kbd></div>
+  <div class="row rec"><span class="l">Diff</span><kbd>⌘D</kbd></div>
+  <div class="ask">
+   <div class="ah"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg><b>Replace the Custom profile?</b></div>
+   <div>Changing Diff to ⌘D starts a new Custom profile from Standard. This replaces your current Custom profile, which has 4 changed shortcuts.</div>
+   <div class="m s">To change that profile instead, cancel and choose Custom.</div>
+   <div class="acts"><span class="btn dng">Replace Custom</span><span class="btn pri focus">Cancel</span></div>
+  </div>
+  <div class="row"><span class="l">Focus Input</span><kbd>⌘L</kbd></div>
+  <div class="foot"><span>Standard profile</span><span class="lnk">Reset all to defaults</span></div>
+ </div>
+</div>
+
+<div class="after">
+ <div><div class="cap">After Replace Custom</div>
+  <div class="w strip">
+   <div class="prof"><span class="m">Profile</span><span class="seg"><span>Liquid key</span><span>Standard</span><span class="on">Custom</span></span><span class="f s">based on Standard</span></div>
+   <div class="row chg"><span class="l">Diff</span><kbd>⌘D</kbd><span class="reset">Reset to ⌘3</span></div>
+   <div class="foot"><span>1 shortcut changed</span><span class="lnk">Reset all to defaults</span></div>
+  </div></div>
+ <div><div class="cap">After Cancel, ⏎ or esc</div>
+  <div class="w strip">
+   <div class="prof"><span class="m">Profile</span><span class="seg"><span>Liquid key</span><span class="on">Standard</span><span>Custom</span></span></div>
+   <div class="row"><span class="l">Diff</span><kbd>⌘3</kbd></div>
+   <div class="foot"><span>Standard profile</span><span class="lnk">Reset all to defaults</span></div>
+  </div></div>
+</div>
+
+<ul class="notes">
+<li><b>When:</b> after the new keys are recorded, and after "Use anyway" when they conflict, before anything changes. Only while Liquid key or Standard is active and the kept Custom profile differs from the profile it is based on: at least one changed shortcut, or its Liquid key switch differs. Otherwise nothing would be lost, and the new Custom profile replaces it without asking.</li>
+<li><b>Place:</b> below the recording row, where conflict notices appear; the row shows the pressed keys and is not changed yet. Recording stops while Liquid asks.</li>
+<li><b>Text:</b> the action, its keys and the active profile, then what is lost: "4 changed shortcuts", "1 changed shortcut", or "the Liquid key turned off" when only the switch differs.</li>
+<li><b>Keys:</b> Cancel is the default and has the focus; ⏎ and esc choose it, and so does leaving the row. esc here never closes Settings. Replace Custom needs a click, or Tab and then ⏎. Holding the reveal key shows ⏎ on Cancel.</li>
+<li><b>Replace Custom:</b> the change applies in a new Custom profile based on the active profile, which becomes active; the old Custom profile is gone.</li>
+<li><b>Cancel:</b> nothing changes. The active profile, its keys and the kept Custom profile stay as they were.</li>
+<li><b>Not proposed:</b> a third button, "Edit Custom instead", would apply the change to the kept Custom profile and lose nothing, but it also switches the profile, which can turn the Liquid key on or off as a side effect; the hint line points to that path instead.</li>
 </ul>
 </div>
 </body></html>
