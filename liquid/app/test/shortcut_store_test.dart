@@ -208,7 +208,17 @@ void main() {
       ShortcutSettings.standard(),
       reason: 'hints stay visible without the Liquid key',
     );
-    expect(await store.load(), ShortcutSettings.standard());
+    // The file is written in the background, outside the event queue.
+    var saved = await store.load();
+    for (
+      var tries = 0;
+      saved != ShortcutSettings.standard() && tries < 200;
+      tries++
+    ) {
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+      saved = await store.load();
+    }
+    expect(saved, ShortcutSettings.standard());
   });
 
   test('the Liquid key needs macOS 13 for its login item', () {
