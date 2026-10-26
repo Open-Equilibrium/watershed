@@ -561,12 +561,21 @@ class _ApprovalCardState extends State<ApprovalCard> {
                     background: ws.warningSubtle,
                   ),
                   const SizedBox(width: WsMetrics.space4),
-                  Text(title, style: Theme.of(context).textTheme.labelMedium),
-                  const Spacer(),
-                  Text(
-                    approval.tool,
-                    style: Theme.of(context).textTheme.bodySmall,
+                  // A long tool name wraps rather than lose a part.
+                  Expanded(
+                    child: Text(
+                      title,
+                      style: Theme.of(context).textTheme.labelMedium,
+                    ),
                   ),
+                  // Any other tool is named in the title already.
+                  if (approval.kind != BridgeRequestKind.tool) ...[
+                    const SizedBox(width: WsMetrics.space4),
+                    Text(
+                      approval.tool,
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ],
                 ],
               ),
               const SizedBox(height: WsMetrics.space3),
@@ -979,6 +988,35 @@ class _QuestionCardState extends State<QuestionCard> {
         ],
       ),
     };
+    final header = Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  question.title,
+                  style: Theme.of(context).textTheme.labelMedium,
+                ),
+                if (question.kind == BridgeQuestionKind.confirm &&
+                    question.detail.isNotEmpty)
+                  Text(
+                    question.detail,
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+              ],
+            ),
+          ),
+        ),
+        SecondaryButton(
+          label: 'Dismiss',
+          shortcut: keys.label(Command.dismissQuestion),
+          onPressed: () => state.dismiss(id),
+        ),
+      ],
+    );
     return CallbackShortcuts(
       bindings: keys.bind({
         Command.dismissQuestion: () => state.dismiss(id),
@@ -990,39 +1028,25 @@ class _QuestionCardState extends State<QuestionCard> {
         child: _Box(
           ring: context.ws.borderStrong,
           padding: const EdgeInsets.all(WsMetrics.space4),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      question.title,
-                      style: Theme.of(context).textTheme.labelMedium,
-                    ),
+          // A long question scrolls, so its answers stay in the card.
+          child: LayoutBuilder(
+            builder: (context, card) => Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (question.kind == BridgeQuestionKind.select ||
+                    question.kind == BridgeQuestionKind.editor) ...[
+                  ConstrainedBox(
+                    constraints: BoxConstraints(maxHeight: card.maxHeight / 3),
+                    child: header,
                   ),
-                  SecondaryButton(
-                    label: 'Dismiss',
-                    shortcut: keys.label(Command.dismissQuestion),
-                    onPressed: () => state.dismiss(id),
-                  ),
+                  const SizedBox(height: WsMetrics.space2),
+                  Expanded(child: answer),
+                ] else ...[
+                  Expanded(child: header),
+                  answer,
                 ],
-              ),
-              if (question.kind == BridgeQuestionKind.confirm &&
-                  question.detail.isNotEmpty)
-                Text(
-                  question.detail,
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-              if (question.kind == BridgeQuestionKind.select ||
-                  question.kind == BridgeQuestionKind.editor) ...[
-                const SizedBox(height: WsMetrics.space2),
-                Expanded(child: answer),
-              ] else ...[
-                const Spacer(),
-                answer,
               ],
-            ],
+            ),
           ),
         ),
       ),

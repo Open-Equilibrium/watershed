@@ -118,9 +118,19 @@ class _StatusBarState extends State<StatusBar> {
                 '≈ \$${(totals.costMicroUsd / 1e6).toStringAsFixed(2)}',
                 style: text,
               ),
-              for (final entry in state.statuses.value.entries) ...[
+              if (state.statuses.value.isNotEmpty) ...[
                 const SizedBox(width: WsMetrics.space6),
-                Text('${entry.key} ${entry.value}', style: text),
+                Flexible(
+                  child: Text(
+                    [
+                      for (final entry in state.statuses.value.entries)
+                        '${entry.key} ${entry.value}',
+                    ].join(' · '),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: text,
+                  ),
+                ),
               ],
               const Spacer(),
               // The view's keys show only while the reveal key is held (ADR-0204).

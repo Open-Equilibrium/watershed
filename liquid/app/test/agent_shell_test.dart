@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:liquid/src/agent/action_area.dart';
 import 'package:liquid/src/agent/chat_view.dart';
 import 'package:liquid/src/agent/shell.dart';
 import 'package:liquid/src/agent/sidebar.dart';
@@ -472,6 +473,85 @@ void main() {
     await tester.tap(find.text('Fixed'));
     await tester.pump();
     expect(backend.calls.last, 'answer q1 Fixed');
+  });
+
+  testWidgets('keeps a long question and its answers in the input area', (
+    tester,
+  ) async {
+    await show(tester);
+    final long = [for (var part = 0; part < 40; part++) 'line $part'].join(' ');
+    BridgeEvent ask(String id, BridgeQuestionKind kind, String detail) => event(
+      BridgeEventKind.userInputRequested,
+      request: BridgeRequest(
+        id: id,
+        question: BridgeQuestion(
+          kind: kind,
+          title: 'Question: $long',
+          detail: detail,
+          options: const ['Sliding', 'Fixed'],
+        ),
+      ),
+    );
+    final area = find.byType(ActionArea);
+    void inArea(Finder finder) => expect(
+      tester.getRect(area).intersect(tester.getRect(finder)),
+      tester.getRect(finder),
+      reason: '$finder',
+    );
+
+    await emit(tester, ask('q1', BridgeQuestionKind.confirm, 'Detail: $long'));
+    inArea(find.text('Yes'));
+    inArea(find.text('No'));
+    await tester.tap(find.text('No'));
+    expect(backend.calls.last, 'confirm q1 false');
+    await emit(
+      tester,
+      event(
+        BridgeEventKind.userInputResolved,
+        request: BridgeRequest(id: 'q1'),
+      ),
+    );
+
+    await emit(tester, ask('q2', BridgeQuestionKind.select, ''));
+    inArea(find.text('Fixed'));
+    await tester.tap(find.text('Fixed'));
+    expect(backend.calls.last, 'answer q2 Fixed');
+  });
+
+  testWidgets('fits many extension statuses and a long tool name', (
+    tester,
+  ) async {
+    await show(tester);
+    for (var key = 0; key < 8; key++) {
+      await emit(
+        tester,
+        event(
+          BridgeEventKind.statusChanged,
+          display: BridgeDisplay(key: 'extension-$key', lines: const []),
+          text: 'indexing workspace files ($key)',
+        ),
+      );
+    }
+    // Model APIs allow tool names of up to 64 characters.
+    final tool = 'mcp__${'long_server_name_' * 3}__run_ta';
+    expect(tool.length, 64);
+    await emit(
+      tester,
+      event(
+        BridgeEventKind.requestOpened,
+        request: BridgeRequest(
+          id: 'a1',
+          approval: BridgeApproval(
+            kind: BridgeRequestKind.tool,
+            tool: tool,
+            arguments: '{}',
+            text: '{}',
+            readOnly: false,
+          ),
+        ),
+      ),
+    );
+    expect(find.text('Call $tool?'), findsOneWidget);
   });
 
   testWidgets('shows the whole call before it is allowed', (tester) async {
