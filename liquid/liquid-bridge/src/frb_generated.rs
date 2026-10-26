@@ -1664,6 +1664,8 @@ impl SseDecode for crate::api::events::BridgeItem {
         let mut var_arguments = <Option<String>>::sse_decode(deserializer);
         let mut var_failed = <bool>::sse_decode(deserializer);
         let mut var_durationMs = <Option<i64>>::sse_decode(deserializer);
+        let mut var_added = <Option<i64>>::sse_decode(deserializer);
+        let mut var_removed = <Option<i64>>::sse_decode(deserializer);
         return crate::api::events::BridgeItem {
             id: var_id,
             kind: var_kind,
@@ -1671,6 +1673,8 @@ impl SseDecode for crate::api::events::BridgeItem {
             arguments: var_arguments,
             failed: var_failed,
             duration_ms: var_durationMs,
+            added: var_added,
+            removed: var_removed,
         };
     }
 }
@@ -1954,6 +1958,8 @@ impl SseDecode for crate::api::history::BridgeTranscriptItem {
         let mut var_arguments = <Option<String>>::sse_decode(deserializer);
         let mut var_failed = <bool>::sse_decode(deserializer);
         let mut var_durationMs = <Option<i64>>::sse_decode(deserializer);
+        let mut var_added = <Option<i64>>::sse_decode(deserializer);
+        let mut var_removed = <Option<i64>>::sse_decode(deserializer);
         return crate::api::history::BridgeTranscriptItem {
             entry: var_entry,
             kind: var_kind,
@@ -1962,6 +1968,8 @@ impl SseDecode for crate::api::history::BridgeTranscriptItem {
             arguments: var_arguments,
             failed: var_failed,
             duration_ms: var_durationMs,
+            added: var_added,
+            removed: var_removed,
         };
     }
 }
@@ -2891,6 +2899,8 @@ impl flutter_rust_bridge::IntoDart for crate::api::events::BridgeItem {
             self.arguments.into_into_dart().into_dart(),
             self.failed.into_into_dart().into_dart(),
             self.duration_ms.into_into_dart().into_dart(),
+            self.added.into_into_dart().into_dart(),
+            self.removed.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -3294,6 +3304,8 @@ impl flutter_rust_bridge::IntoDart for crate::api::history::BridgeTranscriptItem
             self.arguments.into_into_dart().into_dart(),
             self.failed.into_into_dart().into_dart(),
             self.duration_ms.into_into_dart().into_dart(),
+            self.added.into_into_dart().into_dart(),
+            self.removed.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -3627,6 +3639,8 @@ impl SseEncode for crate::api::events::BridgeItem {
         <Option<String>>::sse_encode(self.arguments, serializer);
         <bool>::sse_encode(self.failed, serializer);
         <Option<i64>>::sse_encode(self.duration_ms, serializer);
+        <Option<i64>>::sse_encode(self.added, serializer);
+        <Option<i64>>::sse_encode(self.removed, serializer);
     }
 }
 
@@ -3849,6 +3863,8 @@ impl SseEncode for crate::api::history::BridgeTranscriptItem {
         <Option<String>>::sse_encode(self.arguments, serializer);
         <bool>::sse_encode(self.failed, serializer);
         <Option<i64>>::sse_encode(self.duration_ms, serializer);
+        <Option<i64>>::sse_encode(self.added, serializer);
+        <Option<i64>>::sse_encode(self.removed, serializer);
     }
 }
 

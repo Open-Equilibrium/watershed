@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use super::entry::{Body, Entry};
 use super::trajectory::path;
 use super::{Transcript, TranscriptItem};
-use crate::ItemKind;
+use crate::{ChangedLines, ItemKind};
 
 /// The items of up to `limit` entries on the branch ending at `leaf`, before `before`.
 pub(super) fn transcript(
@@ -16,17 +16,26 @@ pub(super) fn transcript(
 ) -> Transcript {
     let path = path(entries, leaf);
     // How each tool call ended, from anywhere on the branch, so every page shows it.
-    let mut ended: HashMap<&str, (bool, Option<u64>)> = HashMap::new();
+    let mut ended: HashMap<&str, (bool, Option<u64>, Option<ChangedLines>)> = HashMap::new();
     let mut timing: HashMap<&str, Option<u64>> = HashMap::new();
     for entry in &path {
         match &entry.body {
             Body::ToolTiming { call, duration_ms } => {
                 timing.insert(call, *duration_ms);
             }
-            Body::ToolResult { call, failed, .. } => {
+            Body::ToolResult {
+                call,
+                failed,
+                outcome,
+                ..
+            } => {
+                let lines = outcome
+                    .added
+                    .zip(outcome.removed)
+                    .map(|(added, removed)| ChangedLines { added, removed });
                 ended.insert(
                     call,
-                    (*failed, timing.get(call.as_str()).copied().flatten()),
+                    (*failed, timing.get(call.as_str()).copied().flatten(), lines),
                 );
             }
             _ => {}
@@ -46,6 +55,7 @@ pub(super) fn transcript(
             arguments: None,
             failed: false,
             duration_ms: None,
+            lines: None,
         };
         match &entry.body {
             Body::User { text, .. } => items.push(item(ItemKind::UserMessage, text)),
@@ -62,14 +72,20 @@ pub(super) fn transcript(
                     items.push(item(ItemKind::AssistantMessage, text));
                 }
                 for call in calls {
-                    let (failed, duration_ms) =
+                    let (failed, duration_ms, lines) =
                         // A call without a result never finished, such as after a crash.
-                        ended.get(call.id.as_str()).copied().unwrap_or((true, None));
+                        ended.get(call.id.as_str()).copied().unwrap_or((true, None, None));
+                    // A written file counts the lines it wrote.
+                    let written = call
+                        .written_lines
+                        .filter(|_| !failed)
+                        .map(|added| ChangedLines { added, removed: 0 });
                     items.push(TranscriptItem {
                         tool: Some(call.name.clone()),
                         arguments: Some(call.arguments.clone()),
                         failed,
                         duration_ms,
+                        lines: lines.or(written),
                         ..item(tool_kind(&call.name), "")
                     });
                 }

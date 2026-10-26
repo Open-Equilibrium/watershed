@@ -151,6 +151,8 @@ impl From<TranscriptItem> for BridgeTranscriptItem {
             arguments: item.arguments,
             failed: item.failed,
             duration_ms: item.duration_ms.map(int),
+            added: item.lines.map(|lines| int(lines.added)),
+            removed: item.lines.map(|lines| int(lines.removed)),
         }
     }
 }
@@ -301,6 +303,8 @@ fn item(id: u64) -> BridgeItem {
         arguments: None,
         failed: false,
         duration_ms: None,
+        added: None,
+        removed: None,
     }
 }
 
@@ -391,12 +395,15 @@ impl From<AgentEvent> for BridgeEvent {
                 text,
                 status,
                 duration_ms,
+                lines,
             } => BridgeEvent {
                 turn: Some(int(turn.0)),
                 item: Some(BridgeItem {
                     kind: Some(kind.into()),
                     failed: status == ItemStatus::Failed,
                     duration_ms: duration_ms.map(int),
+                    added: lines.map(|lines| int(lines.added)),
+                    removed: lines.map(|lines| int(lines.removed)),
                     ..item(id.0)
                 }),
                 text: Some(text),

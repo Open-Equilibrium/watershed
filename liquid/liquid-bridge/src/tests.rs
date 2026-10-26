@@ -1,6 +1,6 @@
 use meta_harness_core::{
-    AgentEvent, CommandError, Decision, ItemDetail, ItemId, ItemKind, ItemStatus, RequestId,
-    RequestKind, SessionEvent, StepId, TurnId, Usage, UserInput,
+    AgentEvent, ChangedLines, CommandError, Decision, ItemDetail, ItemId, ItemKind, ItemStatus,
+    RequestId, RequestKind, SessionEvent, StepId, TurnId, Usage, UserInput,
 };
 
 use crate::api::events::{
@@ -55,11 +55,28 @@ fn tool_items_keep_their_call_and_outcome() {
         text: "a.txt".to_owned(),
         status: ItemStatus::Failed,
         duration_ms: Some(12),
+        lines: None,
     });
     let item = completed.item.expect("item");
     assert!(item.failed);
     assert_eq!(item.duration_ms, Some(12));
     assert_eq!(completed.text.as_deref(), Some("a.txt"));
+
+    let edited = bridge(AgentEvent::ItemCompleted {
+        turn: TurnId(2),
+        item: ItemId(8),
+        kind: ItemKind::FileChange,
+        text: String::new(),
+        status: ItemStatus::Completed,
+        duration_ms: None,
+        lines: Some(ChangedLines {
+            added: 9,
+            removed: 2,
+        }),
+    })
+    .item
+    .expect("item");
+    assert_eq!((edited.added, edited.removed), (Some(9), Some(2)));
 }
 
 #[test]

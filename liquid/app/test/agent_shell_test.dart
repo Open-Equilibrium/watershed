@@ -540,6 +540,44 @@ void main() {
     expect(backend.calls.last, 'answer q1 fix: limit /login\n\nAdd a limiter.');
   });
 
+  testWidgets('shows the lines a file change added and removed', (
+    tester,
+  ) async {
+    await show(tester);
+    await emit(tester, event(BridgeEventKind.turnStarted, turn: 1));
+    for (final (id, tool, added, removed) in [
+      (5, 'edit', 9, 2),
+      (6, 'write', 38, 0),
+    ]) {
+      await emit(
+        tester,
+        event(
+          BridgeEventKind.itemStarted,
+          turn: 1,
+          item: item(id, kind: BridgeItemKind.fileChange, tool: tool),
+        ),
+      );
+      await emit(
+        tester,
+        event(
+          BridgeEventKind.itemCompleted,
+          turn: 1,
+          item: item(
+            id,
+            kind: BridgeItemKind.fileChange,
+            tool: tool,
+            durationMs: 9,
+            added: added,
+            removed: removed,
+          ),
+        ),
+      );
+    }
+    expect(find.text('+9 −2', findRichText: true), findsOneWidget);
+    expect(find.text('+38', findRichText: true), findsOneWidget);
+    expect(find.text('9 ms'), findsNothing, reason: 'the lines say more');
+  });
+
   testWidgets('marks a tool done when only its outcome changes', (
     tester,
   ) async {

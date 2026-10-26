@@ -210,12 +210,16 @@ BridgeItem item(
   String? tool,
   bool failed = false,
   int? durationMs,
+  int? added,
+  int? removed,
 }) => BridgeItem(
   id: id,
   kind: kind,
   tool: tool,
   failed: failed,
   durationMs: durationMs,
+  added: added,
+  removed: removed,
 );
 
 BridgeUsage usage(int input, int output, int cost) => BridgeUsage(

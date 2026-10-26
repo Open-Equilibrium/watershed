@@ -39,8 +39,15 @@ class ItemView {
   final ValueNotifier<ItemOutcome?> outcome = ValueNotifier(null);
 }
 
-/// How a finished item ended.
-typedef ItemOutcome = ({bool failed, int? durationMs});
+/// How a finished item ended, and the lines a file change added and removed.
+typedef ItemOutcome = ({
+  bool failed,
+  int? durationMs,
+  ({int added, int removed})? lines,
+});
+
+({int added, int removed})? _lines(int? added, int? removed) =>
+    added == null || removed == null ? null : (added: added, removed: removed);
 
 /// A notification from the agent or Liquid, as the status bar shows it.
 @immutable
@@ -455,7 +462,11 @@ class SessionState {
           entry: item.entry,
         )
         ..text.value = item.text
-        ..outcome.value = (failed: item.failed, durationMs: item.durationMs),
+        ..outcome.value = (
+          failed: item.failed,
+          durationMs: item.durationMs,
+          lines: _lines(item.added, item.removed),
+        ),
   ];
 
   /// Each entry's position on the path from the root to `leaf`.
@@ -534,6 +545,7 @@ class SessionState {
             ..outcome.value = (
               failed: event.item!.failed,
               durationMs: event.item!.durationMs,
+              lines: _lines(event.item!.added, event.item!.removed),
             )
             ..text.value = event.text ?? view.text.value;
         }

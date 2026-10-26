@@ -283,6 +283,12 @@ class BridgeItem {
   /// How long a tool ran.
   final PlatformInt64? durationMs;
 
+  /// The lines a file change added.
+  final PlatformInt64? added;
+
+  /// The lines a file change removed.
+  final PlatformInt64? removed;
+
   const BridgeItem({
     required this.id,
     this.kind,
@@ -290,6 +296,8 @@ class BridgeItem {
     this.arguments,
     required this.failed,
     this.durationMs,
+    this.added,
+    this.removed,
   });
 
   @override
@@ -299,7 +307,9 @@ class BridgeItem {
       tool.hashCode ^
       arguments.hashCode ^
       failed.hashCode ^
-      durationMs.hashCode;
+      durationMs.hashCode ^
+      added.hashCode ^
+      removed.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -311,7 +321,9 @@ class BridgeItem {
           tool == other.tool &&
           arguments == other.arguments &&
           failed == other.failed &&
-          durationMs == other.durationMs;
+          durationMs == other.durationMs &&
+          added == other.added &&
+          removed == other.removed;
 }
 
 /// What an item represents.

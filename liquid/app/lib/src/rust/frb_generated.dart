@@ -1511,8 +1511,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeItem dco_decode_bridge_item(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 6)
-      throw Exception('unexpected arr length: expect 6 but see ${arr.length}');
+    if (arr.length != 8)
+      throw Exception('unexpected arr length: expect 8 but see ${arr.length}');
     return BridgeItem(
       id: dco_decode_i_64(arr[0]),
       kind: dco_decode_opt_box_autoadd_bridge_item_kind(arr[1]),
@@ -1520,6 +1520,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       arguments: dco_decode_opt_String(arr[3]),
       failed: dco_decode_bool(arr[4]),
       durationMs: dco_decode_opt_box_autoadd_i_64(arr[5]),
+      added: dco_decode_opt_box_autoadd_i_64(arr[6]),
+      removed: dco_decode_opt_box_autoadd_i_64(arr[7]),
     );
   }
 
@@ -1720,8 +1722,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeTranscriptItem dco_decode_bridge_transcript_item(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 7)
-      throw Exception('unexpected arr length: expect 7 but see ${arr.length}');
+    if (arr.length != 9)
+      throw Exception('unexpected arr length: expect 9 but see ${arr.length}');
     return BridgeTranscriptItem(
       entry: dco_decode_String(arr[0]),
       kind: dco_decode_bridge_item_kind(arr[1]),
@@ -1730,6 +1732,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       arguments: dco_decode_opt_String(arr[4]),
       failed: dco_decode_bool(arr[5]),
       durationMs: dco_decode_opt_box_autoadd_i_64(arr[6]),
+      added: dco_decode_opt_box_autoadd_i_64(arr[7]),
+      removed: dco_decode_opt_box_autoadd_i_64(arr[8]),
     );
   }
 
@@ -2365,6 +2369,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_arguments = sse_decode_opt_String(deserializer);
     var var_failed = sse_decode_bool(deserializer);
     var var_durationMs = sse_decode_opt_box_autoadd_i_64(deserializer);
+    var var_added = sse_decode_opt_box_autoadd_i_64(deserializer);
+    var var_removed = sse_decode_opt_box_autoadd_i_64(deserializer);
     return BridgeItem(
       id: var_id,
       kind: var_kind,
@@ -2372,6 +2378,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       arguments: var_arguments,
       failed: var_failed,
       durationMs: var_durationMs,
+      added: var_added,
+      removed: var_removed,
     );
   }
 
@@ -2603,6 +2611,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_arguments = sse_decode_opt_String(deserializer);
     var var_failed = sse_decode_bool(deserializer);
     var var_durationMs = sse_decode_opt_box_autoadd_i_64(deserializer);
+    var var_added = sse_decode_opt_box_autoadd_i_64(deserializer);
+    var var_removed = sse_decode_opt_box_autoadd_i_64(deserializer);
     return BridgeTranscriptItem(
       entry: var_entry,
       kind: var_kind,
@@ -2611,6 +2621,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       arguments: var_arguments,
       failed: var_failed,
       durationMs: var_durationMs,
+      added: var_added,
+      removed: var_removed,
     );
   }
 
@@ -3430,6 +3442,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_opt_String(self.arguments, serializer);
     sse_encode_bool(self.failed, serializer);
     sse_encode_opt_box_autoadd_i_64(self.durationMs, serializer);
+    sse_encode_opt_box_autoadd_i_64(self.added, serializer);
+    sse_encode_opt_box_autoadd_i_64(self.removed, serializer);
   }
 
   @protected
@@ -3613,6 +3627,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_opt_String(self.arguments, serializer);
     sse_encode_bool(self.failed, serializer);
     sse_encode_opt_box_autoadd_i_64(self.durationMs, serializer);
+    sse_encode_opt_box_autoadd_i_64(self.added, serializer);
+    sse_encode_opt_box_autoadd_i_64(self.removed, serializer);
   }
 
   @protected

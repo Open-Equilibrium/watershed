@@ -6,6 +6,7 @@ mod trajectory;
 mod transcript;
 mod tree;
 
+pub(crate) use outcome::patch_lines;
 #[cfg(test)]
 pub(crate) use outcome::test_counts;
 
@@ -15,7 +16,7 @@ use std::sync::Arc;
 
 use serde_json::Value;
 
-use crate::{Frame, ItemKind, LineFramer, SessionTree, Usage};
+use crate::{ChangedLines, Frame, ItemKind, LineFramer, SessionTree, Usage};
 use entry::Entry;
 
 /// A snapshot of a session's stored entries. The session keeps it and reads only the entries
@@ -287,6 +288,8 @@ pub struct TranscriptItem {
     pub failed: bool,
     /// How long a tool call ran.
     pub duration_ms: Option<u64>,
+    /// The lines a file change added and removed.
+    pub lines: Option<ChangedLines>,
 }
 
 fn add(total: &mut Usage, spent: &Usage) {

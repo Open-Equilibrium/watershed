@@ -4,7 +4,7 @@ use crate::TestCount;
 
 /// Lines a unified patch adds and removes. Each hunk header says how many old and new lines
 /// follow, so changed content that starts with `---` or `+++` is not taken for a file name.
-pub(super) fn patch_lines(patch: &str) -> (u32, u32) {
+pub(crate) fn patch_lines(patch: &str) -> (u32, u32) {
     let (mut added, mut removed) = (0, 0);
     let (mut old, mut new) = (0u32, 0u32);
     for line in patch.lines() {

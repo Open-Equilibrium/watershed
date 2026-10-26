@@ -88,6 +88,7 @@ IFS= read -r line || exit 0"#,
                 text: "Say hi".to_owned(),
                 status: ItemStatus::Completed,
                 duration_ms: None,
+                lines: None,
             },
             AgentEvent::TurnCompleted { turn },
         ] {

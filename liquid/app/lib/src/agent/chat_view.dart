@@ -187,16 +187,33 @@ class ToolRow extends StatelessWidget {
             approval != null &&
             approval.approval?.tool == item.tool;
         final (mark, markColor) = switch (outcome) {
-          (failed: true, durationMs: _) => (LucideIcons.x, ws.danger),
-          (failed: false, durationMs: _) => (LucideIcons.check, ws.success),
+          (failed: true, durationMs: _, lines: _) => (LucideIcons.x, ws.danger),
+          (failed: false, durationMs: _, lines: _) => (
+            LucideIcons.check,
+            ws.success,
+          ),
           null when waiting => (LucideIcons.clock, ws.warning),
           null => (LucideIcons.loader, ws.textFaint),
         };
-        final trailing = waiting
-            ? 'waiting for approval'
-            : outcome?.durationMs != null
-            ? '${outcome!.durationMs} ms'
-            : '';
+        // A file change shows its lines (approved mockup), other tools how long they ran.
+        final lines = outcome?.lines;
+        final trailing = [
+          if (waiting) TextSpan(text: 'waiting for approval'),
+          if (!waiting && lines != null) ...[
+            if (lines.added > 0)
+              TextSpan(
+                text: '+${lines.added}',
+                style: TextStyle(color: ws.success),
+              ),
+            if (lines.added > 0 && lines.removed > 0) const TextSpan(text: ' '),
+            if (lines.removed > 0)
+              TextSpan(
+                text: '−${lines.removed}',
+                style: TextStyle(color: ws.danger),
+              ),
+          ] else if (!waiting && outcome?.durationMs != null)
+            TextSpan(text: '${outcome!.durationMs} ms'),
+        ];
         return Container(
           height: 32,
           padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space4),
@@ -224,8 +241,8 @@ class ToolRow extends StatelessWidget {
                   style: monoStyle(context),
                 ),
               ),
-              Text(
-                trailing,
+              Text.rich(
+                TextSpan(children: trailing),
                 style: TextStyle(
                   color: waiting ? ws.warning : ws.textMuted,
                   fontSize: WsMetrics.fsSmall,

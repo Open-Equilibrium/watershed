@@ -60,6 +60,15 @@ pub struct Usage {
     pub cost_micro_usd: u64,
 }
 
+/// The lines a file change added and removed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ChangedLines {
+    /// Added lines.
+    pub added: u32,
+    /// Removed lines.
+    pub removed: u32,
+}
+
 /// What a session entry holds.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EntryKind {
@@ -252,6 +261,8 @@ pub enum AgentEvent {
         status: ItemStatus,
         /// How long a tool ran, when the agent measured it.
         duration_ms: Option<u64>,
+        /// The lines a file change added and removed.
+        lines: Option<ChangedLines>,
     },
     /// The model finished its response to a request.
     ModelRequestCompleted {

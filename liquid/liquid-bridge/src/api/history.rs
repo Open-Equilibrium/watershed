@@ -202,4 +202,8 @@ pub struct BridgeTranscriptItem {
     pub failed: bool,
     /// How long a tool call ran.
     pub duration_ms: Option<i64>,
+    /// The lines a file change added.
+    pub added: Option<i64>,
+    /// The lines a file change removed.
+    pub removed: Option<i64>,
 }

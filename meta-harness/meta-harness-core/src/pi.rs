@@ -6,9 +6,10 @@ use std::time::Duration;
 use serde_json::{Map, Value};
 
 use crate::event::{
-    AgentEvent, ItemDetail, ItemId, ItemKind, ItemStatus, NotificationLevel, Queue, RequestId,
-    RequestKind, StepId, TurnId, Usage, UserInput,
+    AgentEvent, ChangedLines, ItemDetail, ItemId, ItemKind, ItemStatus, NotificationLevel, Queue,
+    RequestId, RequestKind, StepId, TurnId, Usage, UserInput,
 };
+use crate::history::patch_lines;
 
 /// Title prefix of the select dialog Watershed's pi extension uses to ask for an approval.
 pub(crate) const APPROVAL_PREFIX: &str = "watershed.approval ";
@@ -22,7 +23,7 @@ pub struct PiAdapter {
     /// Open content blocks of the streaming assistant message, keyed by content index.
     blocks: HashMap<u64, (ItemId, ItemKind)>,
     /// Running tool calls, keyed by pi's tool call id.
-    tools: HashMap<String, (ItemId, ItemKind)>,
+    tools: HashMap<String, OpenTool>,
     steps: u64,
     /// When pi's latest turn started; its model request starts then, before the provider
     /// answers with headers.
@@ -129,19 +130,34 @@ impl PiAdapter {
             }
             Some("tool_execution_start") => self.tool_start(turn, record, &mut events),
             Some("tool_execution_update") => {
-                if let Some(&(item, _)) = self.tools.get(str_field(record, "toolCallId")) {
+                if let Some(&OpenTool { item, .. }) =
+                    self.tools.get(str_field(record, "toolCallId"))
+                {
                     let output =
                         content_text(record.get("partialResult").and_then(|r| r.get("content")));
                     events.push(AgentEvent::ItemUpdated { item, output });
                 }
             }
             Some("tool_execution_end") => {
-                if let Some((item, kind)) = self.tools.remove(str_field(record, "toolCallId")) {
+                if let Some(tool) = self.tools.remove(str_field(record, "toolCallId")) {
                     let failed = record.get("isError").and_then(Value::as_bool) == Some(true);
+                    // An edit's patch counts its lines, a written file its own.
+                    let patch = record
+                        .get("result")
+                        .and_then(|result| result.pointer("/details/patch"))
+                        .and_then(Value::as_str);
+                    let lines = match (patch, tool.written) {
+                        _ if failed => None,
+                        (Some(patch), _) => {
+                            let (added, removed) = patch_lines(patch);
+                            Some(ChangedLines { added, removed })
+                        }
+                        (None, written) => written.map(|added| ChangedLines { added, removed: 0 }),
+                    };
                     events.push(AgentEvent::ItemCompleted {
                         turn,
-                        item,
-                        kind,
+                        item: tool.item,
+                        kind: tool.kind,
                         text: content_text(record.get("result").and_then(|r| r.get("content"))),
                         status: if failed {
                             ItemStatus::Failed
@@ -149,6 +165,7 @@ impl PiAdapter {
                             ItemStatus::Completed
                         },
                         duration_ms: record.get("durationMs").and_then(Value::as_u64),
+                        lines,
                     });
                 }
             }
@@ -261,8 +278,18 @@ impl PiAdapter {
             RequestKind::ToolApproval => ItemKind::DynamicToolCall,
         };
         let item = self.next_item();
-        self.tools
-            .insert(str_field(record, "toolCallId").to_owned(), (item, kind));
+        let written = (name == "write")
+            .then(|| record.get("args")?.get("content")?.as_str())
+            .flatten()
+            .map(|content| u32::try_from(content.lines().count()).unwrap_or(u32::MAX));
+        self.tools.insert(
+            str_field(record, "toolCallId").to_owned(),
+            OpenTool {
+                item,
+                kind,
+                written,
+            },
+        );
         let detail = ItemDetail::Tool {
             name: name.to_owned(),
             arguments: record.get("args").map(Value::to_string).unwrap_or_default(),
@@ -293,7 +320,17 @@ fn completed(turn: TurnId, item: ItemId, kind: ItemKind, text: String) -> AgentE
         text,
         status: ItemStatus::Completed,
         duration_ms: None,
+        lines: None,
     }
+}
+
+/// A tool call that is running.
+#[derive(Debug)]
+struct OpenTool {
+    item: ItemId,
+    kind: ItemKind,
+    /// The lines a `write` call writes.
+    written: Option<u32>,
 }
 
 fn role(record: &Map<String, Value>) -> Option<&str> {

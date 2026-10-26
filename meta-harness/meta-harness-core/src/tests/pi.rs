@@ -3,8 +3,9 @@ use std::time::Duration;
 use serde_json::{Map, Value};
 
 use crate::{
-    AgentEvent, EntryKind, History, ItemDetail, ItemId, ItemKind, ItemStatus, NotificationLevel,
-    PiAdapter, RequestId, RequestKind, SessionTree, StepId, TreeNode, TurnId, Usage, UserInput,
+    AgentEvent, ChangedLines, EntryKind, History, ItemDetail, ItemId, ItemKind, ItemStatus,
+    NotificationLevel, PiAdapter, RequestId, RequestKind, SessionTree, StepId, TreeNode, TurnId,
+    Usage, UserInput,
 };
 
 const TURN: TurnId = TurnId(1);
@@ -38,6 +39,7 @@ fn completed(item: u64, kind: ItemKind, text: &str) -> AgentEvent {
         text: text.to_owned(),
         status: ItemStatus::Completed,
         duration_ms: None,
+        lines: None,
     }
 }
 
@@ -130,6 +132,7 @@ fn keeps_retries_in_one_turn_and_reports_aborts() {
                 text: "Plain string prompt".to_owned(),
                 status: ItemStatus::Completed,
                 duration_ms: None,
+                lines: None,
             },
         ]
     );
@@ -146,6 +149,10 @@ fn classifies_tool_calls_and_reports_their_outcome() {
         r#"{"type":"tool_execution_end","toolCallId":"c2","toolName":"edit","result":{"content":[{"type":"text","text":"No match"}]},"isError":true,"durationMs":3}"#,
         r#"{"type":"tool_execution_start","toolCallId":"c3","toolName":"grep","args":{"pattern":"x"}}"#,
         r#"{"type":"tool_execution_end","toolCallId":"c3","toolName":"grep","result":{"content":[]},"isError":false}"#,
+        r#"{"type":"tool_execution_start","toolCallId":"c4","toolName":"edit","args":{"path":"a.txt"}}"#,
+        r#"{"type":"tool_execution_end","toolCallId":"c4","toolName":"edit","result":{"content":[{"type":"text","text":"Edited"}],"details":{"patch":"@@ -1,2 +1,2 @@\n-old\n+new\n same\n"}},"isError":false}"#,
+        r#"{"type":"tool_execution_start","toolCallId":"c5","toolName":"write","args":{"path":"b.txt","content":"one\ntwo\nthree\n"}}"#,
+        r#"{"type":"tool_execution_end","toolCallId":"c5","toolName":"write","result":{"content":[{"type":"text","text":"Wrote"}]},"isError":false}"#,
     ]);
     let tool = |item, kind, name: &str, arguments: &str| AgentEvent::ItemStarted {
         turn: TURN,
@@ -163,6 +170,16 @@ fn classifies_tool_calls_and_reports_their_outcome() {
         text: text.to_owned(),
         status,
         duration_ms,
+        lines: None,
+    };
+    let changed = |item, text: &str, added, removed| AgentEvent::ItemCompleted {
+        turn: TURN,
+        item: ItemId(item),
+        kind: ItemKind::FileChange,
+        text: text.to_owned(),
+        status: ItemStatus::Completed,
+        duration_ms: None,
+        lines: Some(ChangedLines { added, removed }),
     };
     use ItemKind::{CommandExecution, DynamicToolCall, FileChange};
     assert_eq!(
@@ -185,6 +202,15 @@ fn classifies_tool_calls_and_reports_their_outcome() {
             finished(2, FileChange, "No match", ItemStatus::Failed, Some(3)),
             tool(3, DynamicToolCall, "grep", r#"{"pattern":"x"}"#),
             finished(3, DynamicToolCall, "", ItemStatus::Completed, None),
+            tool(4, FileChange, "edit", r#"{"path":"a.txt"}"#),
+            changed(4, "Edited", 1, 1),
+            tool(
+                5,
+                FileChange,
+                "write",
+                r#"{"content":"one\ntwo\nthree\n","path":"b.txt"}"#
+            ),
+            changed(5, "Wrote", 3, 0),
         ]
     );
 }

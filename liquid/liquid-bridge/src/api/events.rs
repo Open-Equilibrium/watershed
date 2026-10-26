@@ -110,6 +110,10 @@ pub struct BridgeItem {
     pub failed: bool,
     /// How long a tool ran.
     pub duration_ms: Option<i64>,
+    /// The lines a file change added.
+    pub added: Option<i64>,
+    /// The lines a file change removed.
+    pub removed: Option<i64>,
 }
 
 /// A model request and, once completed, its outcome.
