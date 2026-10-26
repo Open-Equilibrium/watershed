@@ -376,7 +376,7 @@ pub(crate) fn call_target(arguments: &str) -> String {
 
 /// The whole call an approval shows: a shell command itself, other tools their arguments.
 pub(crate) fn call_text(tool: &str, arguments: &str) -> String {
-    let command = (tool == "bash")
+    let command = (item_kind(tool) == ItemKind::CommandExecution)
         .then(|| serde_json::from_str::<Value>(arguments).ok())
         .flatten();
     visible(
@@ -389,7 +389,7 @@ pub(crate) fn call_text(tool: &str, arguments: &str) -> String {
 
 /// The file a call of one of pi's file tools changes.
 pub(crate) fn changed_path(tool: &str, arguments: &str) -> Option<String> {
-    if !matches!(tool, "edit" | "write") {
+    if item_kind(tool) != ItemKind::FileChange {
         return None;
     }
     let arguments: Value = serde_json::from_str(arguments).ok()?;

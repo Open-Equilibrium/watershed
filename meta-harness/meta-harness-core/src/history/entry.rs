@@ -4,8 +4,8 @@
 use serde_json::Value;
 
 use super::outcome::{exit_code, patch_lines, test_counts};
-use crate::pi::{content_text, usage, written_lines};
-use crate::{ToolOutcome, Usage};
+use crate::pi::{content_text, item_kind, usage, written_lines};
+use crate::{ItemKind, ToolOutcome, Usage};
 
 /// Longest text kept per prompt or response, in characters.
 const TEXT_CHARS: usize = 64 * 1024;
@@ -290,7 +290,7 @@ fn message(message: Option<&Value>) -> Body {
                 .and_then(|details| details.get("patch"))
                 .and_then(Value::as_str);
             let (added, removed) = patch.map(patch_lines).unzip();
-            let shell = tool == "bash";
+            let shell = item_kind(&tool) == ItemKind::CommandExecution;
             Body::ToolResult {
                 call: field("toolCallId"),
                 outcome: ToolOutcome {
@@ -449,7 +449,8 @@ fn iso_millis(text: &str) -> Option<u64> {
 pub(crate) fn first_line(text: &str, chars: usize) -> String {
     let line = text
         .lines()
-        .find(|line| !line.trim().is_empty())
+        .map(str::trim)
+        .find(|line| !line.is_empty())
         .unwrap_or_default();
     line.chars().take(chars).collect()
 }

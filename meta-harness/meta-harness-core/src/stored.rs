@@ -6,6 +6,7 @@ use std::time::UNIX_EPOCH;
 
 use serde_json::Value;
 
+use crate::history::first_line;
 use crate::pi::content_text;
 use crate::{Frame, LineFramer};
 
@@ -74,12 +75,7 @@ pub fn recent_sessions(
 /// The title of the session stored in `file`, as [`recent_sessions`] gives it; none before the
 /// session has a name or a prompt, or for a session of another project.
 pub fn session_title(file: &Path, project: &Path) -> Option<String> {
-    title(file, &canonical(project))
-}
-
-/// The title of a session file started in `project`: its latest name, else its first prompt.
-fn title(path: &Path, project: &Path) -> Option<String> {
-    head(path, project)?
+    head(file, &canonical(project))?
 }
 
 /// The title the start of a session file gives, if any; `None` when the file is not a session
@@ -117,10 +113,9 @@ fn head(path: &Path, project: &Path) -> Option<Option<String>> {
                 if prompt.is_none()
                     && entry.pointer("/message/role").and_then(Value::as_str) == Some("user") =>
             {
-                let text = content_text(entry.pointer("/message/content"));
                 // The first line with words, as Liquid names an unsaved session.
-                let line = text.trim().lines().next().unwrap_or_default().trim();
-                prompt = Some(line.chars().take(TITLE_CHARS).collect());
+                let text = content_text(entry.pointer("/message/content"));
+                prompt = Some(first_line(&text, TITLE_CHARS));
             }
             _ => {}
         }
