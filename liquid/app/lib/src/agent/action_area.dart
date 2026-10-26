@@ -43,7 +43,9 @@ class _ActionAreaState extends State<ActionArea> {
     widget.state.approval,
     widget.state.question,
   ]);
-  late bool _asking = _shown;
+
+  /// Whether a card was shown when the requests last changed.
+  bool _asking = false;
 
   bool get _shown =>
       widget.state.approval.value != null ||
@@ -52,6 +54,7 @@ class _ActionAreaState extends State<ActionArea> {
   @override
   void initState() {
     super.initState();
+    _asking = _shown;
     _waiting.addListener(_changed);
   }
 

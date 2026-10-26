@@ -253,6 +253,11 @@ void main() {
         tester,
         event(resolved, request: BridgeRequest(id: request.request!.id)),
       );
+      expect(
+        focused(tester, const Key('composer')),
+        isTrue,
+        reason: 'the keys go back to the input area',
+      );
     }
   });
 
