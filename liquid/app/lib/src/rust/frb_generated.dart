@@ -4095,7 +4095,7 @@ class AgentSessionImpl extends RustOpaque implements AgentSession {
         RustLib.instance.api.rust_arc_decrement_strong_count_AgentSessionPtr,
   );
 
-  /// Aborts the running turn; open approvals are rejected and questions dismissed, so the
+  /// Aborts the running turn; open approvals are withdrawn and questions dismissed, so the
   /// agent can stop.
   Future<void> abort() =>
       RustLib.instance.api.crateApiSessionAgentSessionAbort(that: this);

@@ -418,82 +418,73 @@ impl AgentSession {
         })
     }
 
-    /// Aborts the running turn; open approvals are rejected and questions dismissed, so the
+    // The calls below wait for nothing but pi and run on flutter_rust_bridge's async runtime,
+    // so calls waiting on a slow project or a hung agent in its thread pool never hold up a
+    // decision, Stop or quitting.
+
+    /// Aborts the running turn; open approvals are withdrawn and questions dismissed, so the
     /// agent can stop.
-    pub fn abort(&self) -> Result<(), String> {
-        RUNTIME.block_on(async {
-            let pending = open(&mut *self.session.lock().await)?
-                .abort()
-                .await
-                .map_err(describe)?;
-            // pi answers once the agent is idle; the session stays free meanwhile.
-            pending.accepted().await.map_err(describe)
-        })
+    pub async fn abort(&self) -> Result<(), String> {
+        let pending = open(&mut *self.session.lock().await)?
+            .abort()
+            .await
+            .map_err(describe)?;
+        // pi answers once the agent is idle; the session stays free meanwhile.
+        pending.accepted().await.map_err(describe)
     }
 
     /// Changes which tool calls need the user's approval.
-    pub fn set_approval_mode(&self, mode: BridgeApprovalMode) -> Result<(), String> {
-        RUNTIME.block_on(async {
-            let mut session = self.session.lock().await;
-            open(&mut session)?.set_approval_mode(mode.into());
-            Ok(())
-        })
+    pub async fn set_approval_mode(&self, mode: BridgeApprovalMode) -> Result<(), String> {
+        open(&mut *self.session.lock().await)?.set_approval_mode(mode.into());
+        Ok(())
     }
 
     /// Answers an approval request.
-    pub fn decide(&self, request: String, decision: BridgeDecision) -> Result<(), String> {
-        RUNTIME.block_on(async {
-            let mut session = self.session.lock().await;
-            open(&mut session)?
-                .decide(&RequestId(request), decision.into())
-                .await
-                .map_err(describe)
-        })
+    pub async fn decide(&self, request: String, decision: BridgeDecision) -> Result<(), String> {
+        open(&mut *self.session.lock().await)?
+            .decide(&RequestId(request), decision.into())
+            .await
+            .map_err(describe)
     }
 
     /// Answers a selection, input or editor question with text.
-    pub fn answer_text(&self, request: String, text: String) -> Result<(), String> {
-        self.answer(request, Answer::Value(text))
+    pub async fn answer_text(&self, request: String, text: String) -> Result<(), String> {
+        self.answer(request, Answer::Value(text)).await
     }
 
     /// Answers a confirmation question.
-    pub fn answer_confirm(&self, request: String, confirmed: bool) -> Result<(), String> {
-        self.answer(request, Answer::Confirmed(confirmed))
+    pub async fn answer_confirm(&self, request: String, confirmed: bool) -> Result<(), String> {
+        self.answer(request, Answer::Confirmed(confirmed)).await
     }
 
     /// Dismisses a question.
-    pub fn dismiss(&self, request: String) -> Result<(), String> {
-        self.answer(request, Answer::Cancelled)
+    pub async fn dismiss(&self, request: String) -> Result<(), String> {
+        self.answer(request, Answer::Cancelled).await
     }
 
     /// Asks the agent to exit and kills it after a grace period; returns whether it exited
     /// successfully.
-    pub fn shutdown(&self) -> bool {
+    pub async fn shutdown(&self) -> bool {
         let stopper = self
             .stopper
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .take();
-        RUNTIME.block_on(async {
-            let stopped = match stopper {
-                Some(stopper) => stopper.stop(SHUTDOWN_GRACE).await,
-                None => false,
-            };
-            // Requests still waiting end with the agent, so the session is free to drop.
-            self.session.lock().await.take();
-            self.diff.close().await;
-            stopped
-        })
+        let stopped = match stopper {
+            Some(stopper) => stopper.stop(SHUTDOWN_GRACE).await,
+            None => false,
+        };
+        // Requests still waiting end with the agent, so the session is free to drop.
+        self.session.lock().await.take();
+        self.diff.close().await;
+        stopped
     }
 
-    fn answer(&self, request: String, answer: Answer) -> Result<(), String> {
-        RUNTIME.block_on(async {
-            let mut session = self.session.lock().await;
-            open(&mut session)?
-                .answer(&RequestId(request), answer)
-                .await
-                .map_err(describe)
-        })
+    async fn answer(&self, request: String, answer: Answer) -> Result<(), String> {
+        open(&mut *self.session.lock().await)?
+            .answer(&RequestId(request), answer)
+            .await
+            .map_err(describe)
     }
 }
 

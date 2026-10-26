@@ -15,7 +15,7 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<AgentSession>>
 abstract class AgentSession implements RustOpaqueInterface {
-  /// Aborts the running turn; open approvals are rejected and questions dismissed, so the
+  /// Aborts the running turn; open approvals are withdrawn and questions dismissed, so the
   /// agent can stop.
   Future<void> abort();
 

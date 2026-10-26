@@ -156,7 +156,10 @@ impl RunDiff {
             if let Poll::Ready(result) = read.as_mut().poll(context) {
                 return Poll::Ready(result.unwrap_or(Err(DiffError::TimedOut(self.timeout))));
             }
-            closing.as_mut().poll(context).map(|_| Err(DiffError::Closed))
+            closing
+                .as_mut()
+                .poll(context)
+                .map(|_| Err(DiffError::Closed))
         })
         .await
     }

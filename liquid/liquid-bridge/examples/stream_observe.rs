@@ -62,7 +62,9 @@ fn main() {
             }
         }
         let millis = started.elapsed().as_secs_f64() * 1000.0;
-        session.shutdown();
+        // Run as flutter_rust_bridge runs it: on a runtime of its own.
+        let stopper = tokio::runtime::Runtime::new().expect("runtime starts");
+        stopper.block_on(session.shutdown());
         assert_eq!(text, DELTAS * DELTA.len(), "the whole stream arrived");
         println!(
             r#"{{"sample":{sample},"elapsed_ms":{millis:.3},"events":{events},"delta_events":{deltas},"largest_delta_bytes":{largest}}}"#

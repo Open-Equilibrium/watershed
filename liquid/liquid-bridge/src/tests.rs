@@ -30,6 +30,14 @@ fn no_session_file(id: u32) -> String {
     )
 }
 
+/// Runs an async call as flutter_rust_bridge does: on a runtime of its own, apart from the
+/// bridge's.
+fn call<F: std::future::Future>(call: F) -> F::Output {
+    tokio::runtime::Runtime::new()
+        .expect("runtime starts")
+        .block_on(call)
+}
+
 fn bridge(event: AgentEvent) -> BridgeEvent {
     SessionEvent::Runtime(event).into()
 }
@@ -217,7 +225,7 @@ IFS= read -r line || exit 0"#;
         Err("the session's events already have a subscriber".to_owned())
     );
     assert_eq!(
-        session.set_approval_mode(BridgeApprovalMode::FullAccess),
+        call(session.set_approval_mode(BridgeApprovalMode::FullAccess)),
         Ok(())
     );
     assert_eq!(session.send("Say hi".to_owned(), false), Ok(()));
@@ -229,7 +237,7 @@ IFS= read -r line || exit 0"#;
     };
     assert_eq!(next(), BridgeEventKind::TurnStarted);
     assert_eq!(next(), BridgeEventKind::TurnCompleted);
-    assert!(session.shutdown());
+    assert!(call(session.shutdown()));
     assert_eq!(next(), BridgeEventKind::Exited);
     assert_eq!(
         session.send("again".to_owned(), false),
@@ -270,12 +278,12 @@ IFS= read -r line || exit 0"#;
     {
         let session = Arc::clone(&session);
         std::thread::spawn(move || {
-            answered.send(session.answer_text("q1".to_owned(), "Ada".to_owned()))
+            answered.send(call(session.answer_text("q1".to_owned(), "Ada".to_owned())))
         });
     }
     assert_eq!(answer.recv_timeout(Duration::from_secs(10)), Ok(Ok(())));
     assert_eq!(sending.join().expect("send returns"), Ok(()));
-    assert!(session.shutdown());
+    assert!(call(session.shutdown()));
 }
 
 #[test]
@@ -313,7 +321,7 @@ IFS= read -r line || exit 0"#
     let (stopped, stop) = mpsc::channel();
     {
         let session = Arc::clone(&session);
-        std::thread::spawn(move || stopped.send(session.abort()));
+        std::thread::spawn(move || stopped.send(call(session.abort())));
     }
     assert_eq!(stop.recv_timeout(Duration::from_secs(10)), Ok(Ok(())));
     let resolved = next();
@@ -325,7 +333,7 @@ IFS= read -r line || exit 0"#
         (BridgeEventKind::RequestResolved, None),
         "no decision of the user's"
     );
-    assert!(session.shutdown());
+    assert!(call(session.shutdown()));
 }
 
 #[test]
@@ -405,7 +413,7 @@ fn starts_and_resumes_sessions_and_picks_models() {
         session.set_model("faux".to_owned(), "faux-1".to_owned()),
         Ok(())
     );
-    assert!(session.shutdown());
+    assert!(call(session.shutdown()));
 }
 
 #[test]
@@ -441,11 +449,11 @@ IFS= read -r line || exit 0"#;
     let (answered, answer) = mpsc::channel();
     {
         let session = Arc::clone(&session);
-        std::thread::spawn(move || answered.send(session.answer_confirm("q1".to_owned(), true)));
+        std::thread::spawn(move || answered.send(call(session.answer_confirm("q1".to_owned(), true))));
     }
     assert_eq!(answer.recv_timeout(Duration::from_secs(10)), Ok(Ok(())));
     assert_eq!(selecting.join().expect("selection returns"), Ok(()));
-    assert!(session.shutdown());
+    assert!(call(session.shutdown()));
 }
 
 #[test]
@@ -468,7 +476,7 @@ fn shuts_down_while_a_query_waits_for_a_hung_agent() {
     let (stopped, stop) = mpsc::channel();
     {
         let session = Arc::clone(&session);
-        std::thread::spawn(move || stopped.send(session.shutdown()));
+        std::thread::spawn(move || stopped.send(call(session.shutdown())));
     }
     assert_eq!(
         stop.recv_timeout(Duration::from_secs(20)),
@@ -598,7 +606,7 @@ IFS= read -r line || exit 0"#;
     // Nor does one that pi handles itself, such as a command.
     assert_eq!(session.send("/name tidy".to_owned(), false), Ok(()));
     assert_eq!(session.changes().expect("changes"), changes);
-    assert!(session.shutdown());
+    assert!(call(session.shutdown()));
     assert_eq!(
         session.changes(),
         Ok(Vec::new()),
@@ -630,7 +638,7 @@ fn shuts_down_while_a_slow_project_is_captured() {
     let (stopped, stop) = mpsc::channel();
     {
         let session = Arc::clone(&session);
-        std::thread::spawn(move || stopped.send(session.shutdown()));
+        std::thread::spawn(move || stopped.send(call(session.shutdown())));
     }
     assert!(
         stop.recv_timeout(Duration::from_secs(5)).is_ok(),
@@ -753,7 +761,7 @@ IFS= read -r line || exit 0"#
     assert_eq!(steps(&both)[1], steps(&current)[0]);
 
     assert_eq!(session.branch("e1".to_owned()), Ok(()));
-    assert!(session.shutdown());
+    assert!(call(session.shutdown()));
 }
 
 #[test]
@@ -799,7 +807,7 @@ fn reads_tool_outcomes_and_what_the_model_saw() {
         ]
     );
     assert_eq!(detail.tools[0].name, "write");
-    assert!(session.shutdown());
+    assert!(call(session.shutdown()));
 }
 
 #[test]
@@ -840,7 +848,7 @@ fn rebuilds_the_chat_of_the_current_branch() {
         (transcript.more, transcript.start.as_deref()),
         (false, Some("u1"))
     );
-    assert!(session.shutdown());
+    assert!(call(session.shutdown()));
 }
 
 #[test]
@@ -916,7 +924,7 @@ IFS= read -r line || exit 0"#;
     let last = std::iter::from_fn(|| receiver.recv_timeout(Duration::from_secs(5)).ok())
         .find(|event| event.text.as_deref() == Some("299"));
     assert!(last.is_some(), "every early event reaches Dart");
-    assert!(session.shutdown());
+    assert!(call(session.shutdown()));
 }
 
 #[test]
