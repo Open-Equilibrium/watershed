@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -17,8 +18,8 @@ import 'start_page.dart';
 const double actionAreaHeight = 150;
 
 /// The input area at the bottom of every tab: the composer, or in its place an approval or a
-/// question waiting for the user.
-class ActionArea extends StatelessWidget {
+/// question waiting for the user. Once it is answered, the keys go back to the composer.
+class ActionArea extends StatefulWidget {
   const ActionArea({
     super.key,
     required this.state,
@@ -35,7 +36,45 @@ class ActionArea extends StatelessWidget {
   final String project;
 
   @override
+  State<ActionArea> createState() => _ActionAreaState();
+}
+
+class _ActionAreaState extends State<ActionArea> {
+  late final _waiting = Listenable.merge([
+    widget.state.approval,
+    widget.state.question,
+  ]);
+  late bool _asking = _shown;
+
+  bool get _shown =>
+      widget.state.approval.value != null ||
+      widget.state.question.value != null;
+
+  @override
+  void initState() {
+    super.initState();
+    _waiting.addListener(_changed);
+  }
+
+  @override
+  void dispose() {
+    _waiting.removeListener(_changed);
+    super.dispose();
+  }
+
+  void _changed() {
+    final asking = _shown;
+    if (_asking && !asking) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) widget.composerFocus?.requestFocus();
+      });
+    }
+    _asking = asking;
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final state = widget.state;
     return SizedBox(
       height: actionAreaHeight,
       child: ValueListenableBuilder(
@@ -58,9 +97,9 @@ class ActionArea extends StatelessWidget {
                   )
                 : Composer(
                     state: state,
-                    controller: composer,
-                    focusNode: composerFocus,
-                    project: project,
+                    controller: widget.composer,
+                    focusNode: widget.composerFocus,
+                    project: widget.project,
                   ),
           );
         },
@@ -69,14 +108,28 @@ class ActionArea extends StatelessWidget {
   }
 }
 
-BoxDecoration _box(BuildContext context, {Color? ring}) => BoxDecoration(
-  color: context.ws.surface,
-  borderRadius: BorderRadius.circular(WsMetrics.radiusXl),
-  boxShadow: [
-    if (ring != null) BoxShadow(color: ring, spreadRadius: 1),
-    ...context.ws.shadow,
-  ],
-);
+/// The input area's card.
+class _Box extends StatelessWidget {
+  const _Box({this.ring, required this.padding, required this.child});
+
+  final Color? ring;
+  final EdgeInsetsGeometry padding;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    decoration: BoxDecoration(
+      color: context.ws.surface,
+      borderRadius: BorderRadius.circular(WsMetrics.radiusXl),
+      boxShadow: [
+        if (ring case final ring?) BoxShadow(color: ring, spreadRadius: 1),
+        ...context.ws.shadow,
+      ],
+    ),
+    padding: padding,
+    child: child,
+  );
+}
 
 /// Text entry for prompts and steering (approved session-flow mockup): Enter sends or steers a
 /// running agent, ⌥Enter queues a follow-up, Esc stops the run, Shift+Enter adds a line.
@@ -105,8 +158,7 @@ class Composer extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ws = context.ws;
-    return Container(
-      decoration: _box(context),
+    return _Box(
       padding: const EdgeInsets.fromLTRB(
         WsMetrics.space5,
         WsMetrics.space4,
@@ -393,18 +445,43 @@ class ApprovalCard extends StatefulWidget {
 
 class _ApprovalCardState extends State<ApprovalCard> {
   final _focus = FocusNode(debugLabel: 'approval');
+  final _code = ScrollController();
+
+  /// Whether the card was shown long enough to be read; until then no key decides (ADR-0207).
+  bool _armed = false;
+  late final Timer _arming;
 
   @override
   void initState() {
     super.initState();
     // The card takes the keyboard as soon as it appears, so the decision needs no mouse.
-    WidgetsBinding.instance.addPostFrameCallback((_) => _focus.requestFocus());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _focus.requestFocus();
+    });
+    _arming = Timer(const Duration(milliseconds: 500), () => _armed = true);
   }
 
   @override
   void dispose() {
+    _arming.cancel();
     _focus.dispose();
+    _code.dispose();
     super.dispose();
+  }
+
+  /// Moves the call by a line, or by a page of its view.
+  void _scroll(int direction, {bool page = false}) {
+    if (!_code.hasClients) return;
+    final position = _code.position;
+    final step = page
+        ? position.viewportDimension
+        : _lineHeight(monoStyle(context));
+    _code.jumpTo(
+      (position.pixels + direction * step).clamp(
+        position.minScrollExtent,
+        position.maxScrollExtent,
+      ),
+    );
   }
 
   @override
@@ -418,16 +495,38 @@ class _ApprovalCardState extends State<ApprovalCard> {
       BridgeRequestKind.tool => 'Call ${approval.tool}?',
     };
     final keys = Keymap.of(context);
+    final decisions = {
+      Command.allowOnce: () => state.decide(BridgeDecision.allowOnce),
+      Command.allowSession: () => state.decide(BridgeDecision.allowSession),
+      Command.reject: () => state.decide(BridgeDecision.reject),
+    };
     return CallbackShortcuts(
-      bindings: keys.bind({
-        Command.allowOnce: () => state.decide(BridgeDecision.allowOnce),
-        Command.allowSession: () => state.decide(BridgeDecision.allowSession),
-        Command.reject: () => state.decide(BridgeDecision.reject),
-      }),
+      bindings: {
+        ...keys.bind(decisions),
+        const SingleActivator(LogicalKeyboardKey.arrowUp): () => _scroll(-1),
+        const SingleActivator(LogicalKeyboardKey.arrowDown): () => _scroll(1),
+        const SingleActivator(LogicalKeyboardKey.pageUp): () =>
+            _scroll(-1, page: true),
+        const SingleActivator(LogicalKeyboardKey.pageDown): () =>
+            _scroll(1, page: true),
+      },
       child: Focus(
         focusNode: _focus,
-        child: Container(
-          decoration: _box(context, ring: ws.warningBorder),
+        // A key pressed before the card was read, or held from before, decides nothing.
+        onKeyEvent: (node, event) =>
+            (!_armed || event is KeyRepeatEvent) &&
+                decisions.keys
+                    .expand(keys.bindings)
+                    .any(
+                      (decision) => decision.activator.accepts(
+                        event,
+                        HardwareKeyboard.instance,
+                      ),
+                    )
+            ? KeyEventResult.handled
+            : KeyEventResult.ignored,
+        child: _Box(
+          ring: ws.warningBorder,
           padding: const EdgeInsets.all(WsMetrics.space4),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -449,7 +548,9 @@ class _ApprovalCardState extends State<ApprovalCard> {
                 ],
               ),
               const SizedBox(height: WsMetrics.space3),
-              Expanded(child: _ScrollingCode(_call(approval))),
+              Expanded(
+                child: _ScrollingCode(_call(approval), controller: _code),
+              ),
               const SizedBox(height: WsMetrics.space3),
               Row(
                 children: [
@@ -512,9 +613,10 @@ String _call(BridgeApproval approval) {
 /// Code that scrolls inside a fixed height and says how many lines are below, so nothing is
 /// hidden without a hint (approved approval mockup).
 class _ScrollingCode extends StatefulWidget {
-  const _ScrollingCode(this.text);
+  const _ScrollingCode(this.text, {required this.controller});
 
   final String text;
+  final ScrollController controller;
 
   @override
   State<_ScrollingCode> createState() => _ScrollingCodeState();
@@ -533,10 +635,7 @@ class _ScrollingCodeState extends State<_ScrollingCode> {
   Widget build(BuildContext context) {
     final ws = context.ws;
     final style = monoStyle(context);
-    final lineHeight = (TextPainter(
-      text: TextSpan(text: ' ', style: style),
-      textDirection: TextDirection.ltr,
-    )..layout()).height;
+    final lineHeight = _lineHeight(style);
     return Container(
       decoration: BoxDecoration(
         color: ws.code,
@@ -551,6 +650,7 @@ class _ScrollingCodeState extends State<_ScrollingCode> {
               onNotification: (notification) =>
                   _measure(notification.metrics, lineHeight),
               child: SingleChildScrollView(
+                controller: widget.controller,
                 padding: const EdgeInsets.symmetric(
                   horizontal: WsMetrics.space4,
                   vertical: WsMetrics.space2,
@@ -584,12 +684,22 @@ class _ScrollingCodeState extends State<_ScrollingCode> {
   }
 }
 
+double _lineHeight(TextStyle style) => (TextPainter(
+  text: TextSpan(text: ' ', style: style),
+  textDirection: TextDirection.ltr,
+)..layout()).height;
+
 /// A selection that narrows as the user types; arrows move and Enter picks (approved mockup).
 class _OptionList extends StatefulWidget {
-  const _OptionList({required this.options, required this.onPick});
+  const _OptionList({
+    required this.options,
+    required this.onPick,
+    required this.focusNode,
+  });
 
   final List<String> options;
   final ValueChanged<String> onPick;
+  final FocusNode focusNode;
 
   @override
   State<_OptionList> createState() => _OptionListState();
@@ -670,7 +780,7 @@ class _OptionListState extends State<_OptionList> {
                   child: TextField(
                     key: const Key('filter'),
                     controller: _filter,
-                    autofocus: true,
+                    focusNode: widget.focusNode,
                     style: const TextStyle(fontSize: WsMetrics.fsSmall),
                     decoration: const InputDecoration.collapsed(
                       hintText: 'Type to filter',
@@ -740,10 +850,26 @@ class _QuestionCardState extends State<QuestionCard> {
         ? widget.request.question!.detail
         : '',
   );
+  final _card = FocusNode(debugLabel: 'question');
+  final _field = FocusNode(debugLabel: 'answer');
+
+  @override
+  void initState() {
+    super.initState();
+    // A confirmation takes the keys itself, other questions in their field.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      widget.request.question!.kind == BridgeQuestionKind.confirm
+          ? _card.requestFocus()
+          : _field.requestFocus();
+    });
+  }
 
   @override
   void dispose() {
     _text.dispose();
+    _card.dispose();
+    _field.dispose();
     super.dispose();
   }
 
@@ -756,6 +882,7 @@ class _QuestionCardState extends State<QuestionCard> {
       BridgeQuestionKind.select => _OptionList(
         options: question.options,
         onPick: state.answerText,
+        focusNode: _field,
       ),
       BridgeQuestionKind.confirm => Row(
         children: [
@@ -792,7 +919,7 @@ class _QuestionCardState extends State<QuestionCard> {
                 child: TextField(
                   key: const Key('answer'),
                   controller: _text,
-                  autofocus: true,
+                  focusNode: _field,
                   maxLines: null,
                   expands: true,
                   keyboardType: TextInputType.multiline,
@@ -827,7 +954,7 @@ class _QuestionCardState extends State<QuestionCard> {
               child: TextField(
                 key: const Key('answer'),
                 controller: _text,
-                autofocus: true,
+                focusNode: _field,
                 decoration: InputDecoration.collapsed(
                   hintText: question.detail,
                 ),
@@ -851,10 +978,9 @@ class _QuestionCardState extends State<QuestionCard> {
           Command.answer: () => state.answerConfirm(true),
       }),
       child: Focus(
-        // Text questions focus their field; a confirmation takes the keys itself.
-        autofocus: question.kind == BridgeQuestionKind.confirm,
-        child: Container(
-          decoration: _box(context, ring: context.ws.borderStrong),
+        focusNode: _card,
+        child: _Box(
+          ring: context.ws.borderStrong,
           padding: const EdgeInsets.all(WsMetrics.space4),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,

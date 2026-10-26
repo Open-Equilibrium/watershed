@@ -81,6 +81,8 @@ class _AgentShellState extends State<AgentShell> {
     super.initState();
     _lifecycle;
     widget.state.draft.addListener(_applyDraft);
+    widget.state.approval.addListener(_approvalArrived);
+    widget.state.question.addListener(_questionArrived);
     unawaited(widget.state.loadStart());
     // A reopened Trajectory tab starts outside the comparison.
     _tab.addListener(() => _comparing.value = false);
@@ -102,6 +104,15 @@ class _AgentShellState extends State<AgentShell> {
     if (!_settings.value) _focus.requestFocus();
   }
 
+  /// An approval or a question closes Settings, which cover the input area it appears in.
+  void _approvalArrived() {
+    if (widget.state.approval.value != null) _settings.value = false;
+  }
+
+  void _questionArrived() {
+    if (widget.state.question.value != null) _settings.value = false;
+  }
+
   void _applyDraft() {
     final draft = widget.state.draft.value;
     if (draft == null) return;
@@ -117,6 +128,8 @@ class _AgentShellState extends State<AgentShell> {
   void dispose() {
     _lifecycle.dispose();
     widget.state.draft.removeListener(_applyDraft);
+    widget.state.approval.removeListener(_approvalArrived);
+    widget.state.question.removeListener(_questionArrived);
     _composer.dispose();
     _composerFocus.dispose();
     _tab.dispose();

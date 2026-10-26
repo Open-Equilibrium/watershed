@@ -63,6 +63,7 @@ const List<_Group> _right = [
       _Entry(Command.allowOnce),
       _Entry(Command.allowSession),
       _Entry(Command.reject),
+      _Entry.fixed('Scroll the call', '↑↓ ⇞⇟'),
     ],
   ),
   (

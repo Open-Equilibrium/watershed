@@ -141,6 +141,10 @@ void main() {
       'typing',
     );
     expect(
+      reserved(Command.reject, const Keys(LogicalKeyboardKey.pageDown)),
+      'Scroll the call',
+    );
+    expect(
       reserved(Command.branch, const Keys(LogicalKeyboardKey.keyX)),
       isNull,
       reason: 'the Trajectory has no text field',

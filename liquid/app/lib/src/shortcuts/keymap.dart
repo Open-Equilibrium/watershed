@@ -313,6 +313,13 @@ final _reserved = <(Area?, Keys, String)>[
   (null, const Keys(LogicalKeyboardKey.keyZ, meta: true), 'Undo'),
   (null, const Keys(LogicalKeyboardKey.keyZ, meta: true, shift: true), 'Redo'),
   (Area.input, const Keys(LogicalKeyboardKey.enter, shift: true), 'New line'),
+  for (final key in [
+    LogicalKeyboardKey.arrowUp,
+    LogicalKeyboardKey.arrowDown,
+    LogicalKeyboardKey.pageUp,
+    LogicalKeyboardKey.pageDown,
+  ])
+    (Area.approval, Keys(key), 'Scroll the call'),
   (
     Area.question,
     const Keys(LogicalKeyboardKey.arrowUp),

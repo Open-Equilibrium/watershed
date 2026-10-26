@@ -82,6 +82,8 @@ void main() {
     await show(tester);
     await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
     await tester.sendKeyEvent(LogicalKeyboardKey.digit3);
+    // The tab opens and takes the keys before the next key arrives.
+    await tester.pumpAndSettle();
     await tester.sendKeyEvent(LogicalKeyboardKey.keyL);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
     await tester.pumpAndSettle();
@@ -218,6 +220,8 @@ void main() {
       );
       expect(find.text('Run a shell command?'), findsOneWidget);
       expect(find.textContaining('npm test -- login'), findsWidgets);
+      // An approval takes keys once it could be read (ADR-0207).
+      await tester.pump(const Duration(milliseconds: 500));
       for (final key in keys) {
         await tester.sendKeyDownEvent(key);
       }
@@ -406,6 +410,7 @@ void main() {
       findsNothing,
       reason: 'nothing hidden at the end',
     );
+    await tester.pump(const Duration(milliseconds: 500));
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     expect(backend.calls.last, 'decide a1 allowOnce');
   });

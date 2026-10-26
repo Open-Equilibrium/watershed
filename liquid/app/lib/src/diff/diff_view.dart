@@ -27,17 +27,23 @@ class _DiffViewState extends State<DiffView> {
   BridgeFileChange? _selected;
   List<DiffLine> _lines = const [];
   bool _loaded = false;
+  final _focus = FocusNode(debugLabel: 'diff');
 
   @override
   void initState() {
     super.initState();
     widget.state.status.addListener(_reloadWhenIdle);
     _reload();
+    // Opening the tab moves the keyboard to it.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _focus.requestFocus();
+    });
   }
 
   @override
   void dispose() {
     widget.state.status.removeListener(_reloadWhenIdle);
+    _focus.dispose();
     super.dispose();
   }
 
@@ -95,7 +101,15 @@ class _DiffViewState extends State<DiffView> {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => CallbackShortcuts(
+    bindings: {
+      const SingleActivator(LogicalKeyboardKey.arrowDown): () => _move(1),
+      const SingleActivator(LogicalKeyboardKey.arrowUp): () => _move(-1),
+    },
+    child: Focus(focusNode: _focus, child: _content(context)),
+  );
+
+  Widget _content(BuildContext context) {
     final ws = context.ws;
     if (!_loaded) return const SizedBox.shrink();
     if (_changes.isEmpty) {
@@ -108,54 +122,45 @@ class _DiffViewState extends State<DiffView> {
     }
     final added = _changes.fold(0, (sum, change) => sum + change.added);
     final removed = _changes.fold(0, (sum, change) => sum + change.removed);
-    return CallbackShortcuts(
-      bindings: {
-        const SingleActivator(LogicalKeyboardKey.arrowDown): () => _move(1),
-        const SingleActivator(LogicalKeyboardKey.arrowUp): () => _move(-1),
-      },
-      child: Focus(
-        autofocus: true,
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Container(
-              width: 264,
-              decoration: BoxDecoration(
-                border: Border(right: BorderSide(color: ws.border)),
-              ),
-              child: ListView(
-                padding: const EdgeInsets.all(WsMetrics.space3),
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(
-                      WsMetrics.space3,
-                      WsMetrics.space1,
-                      0,
-                      WsMetrics.space2,
-                    ),
-                    child: Text(
-                      '${_changes.length} files · +$added −$removed',
-                      style: TextStyle(
-                        color: ws.textFaint,
-                        fontSize: WsMetrics.fsSmall,
-                      ),
-                    ),
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Container(
+          width: 264,
+          decoration: BoxDecoration(
+            border: Border(right: BorderSide(color: ws.border)),
+          ),
+          child: ListView(
+            padding: const EdgeInsets.all(WsMetrics.space3),
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  WsMetrics.space3,
+                  WsMetrics.space1,
+                  0,
+                  WsMetrics.space2,
+                ),
+                child: Text(
+                  '${_changes.length} files · +$added −$removed',
+                  style: TextStyle(
+                    color: ws.textFaint,
+                    fontSize: WsMetrics.fsSmall,
                   ),
-                  for (final row in _rows)
-                    _FileTile(
-                      row: row,
-                      selected: row.change?.path == _selected?.path,
-                      onTap: _select,
-                    ),
-                ],
+                ),
               ),
-            ),
-            Expanded(
-              child: _Patch(change: _selected, lines: _lines),
-            ),
-          ],
+              for (final row in _rows)
+                _FileTile(
+                  row: row,
+                  selected: row.change?.path == _selected?.path,
+                  onTap: _select,
+                ),
+            ],
+          ),
         ),
-      ),
+        Expanded(
+          child: _Patch(change: _selected, lines: _lines),
+        ),
+      ],
     );
   }
 }
