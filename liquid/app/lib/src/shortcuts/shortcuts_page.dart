@@ -154,12 +154,14 @@ class _ShortcutsPageState extends State<ShortcutsPage> {
     super.initState();
     _search.addListener(() => setState(() {}));
     _keys.addListener(_focusChanged);
+    _shortcuts.addListener(_settingsChanged);
     // The shell keeps the focus otherwise, and esc would not reach the page.
     WidgetsBinding.instance.addPostFrameCallback((_) => _keys.requestFocus());
   }
 
   @override
   void dispose() {
+    _shortcuts.removeListener(_settingsChanged);
     _keys.dispose();
     _keep.dispose();
     _replace.dispose();
@@ -196,12 +198,18 @@ class _ShortcutsPageState extends State<ShortcutsPage> {
     }
   }
 
+  /// A profile chosen meanwhile settles the question whether to replace Custom.
+  void _settingsChanged() {
+    if (_replacing != null && _shortcuts.value.replaced == null) _done();
+  }
+
   /// Changes `command`'s keys, after asking when that replaces the kept Custom profile.
   void _change(Command command, Keys keys, {Command? clear}) {
     if (_shortcuts.value.replaced == null) return _apply(command, keys, clear);
     setState(() {
       _pressed = keys;
       _conflict = null;
+      _refused = null;
       _replacing = (command: command, keys: keys, clear: clear);
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -533,7 +541,7 @@ class _ShortcutsPageState extends State<ShortcutsPage> {
         ),
         if (refused != null)
           _Notice(children: [Text(refused, style: _Notice.text(context))]),
-        if (_replacing case final replacing?)
+        if (_replacing case final replacing? when settings.replaced != null)
           _ReplaceCustom(
             settings: settings,
             change: replacing,

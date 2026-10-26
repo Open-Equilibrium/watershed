@@ -321,6 +321,43 @@ void main() {
       );
     }
 
+    testWidgets('a profile chosen while it asks ends the question', (
+      tester,
+    ) async {
+      await show(tester, kept.choose(Profile.standard));
+      await recordDiff(tester);
+      expect(find.text('Replace the Custom profile?'), findsOneWidget);
+      await tester.tap(find.text('Custom'));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expect(find.byType(ErrorWidget), findsNothing);
+      expect(find.text('Replace the Custom profile?'), findsNothing);
+      expect(find.text('Press keys…'), findsNothing, reason: 'recording ends');
+      expect(shortcuts.value, kept, reason: 'the kept Custom profile is back');
+    });
+
+    testWidgets('only the question shows, not an earlier refusal', (
+      tester,
+    ) async {
+      await show(tester, kept.choose(Profile.standard));
+      await openSettings(tester);
+      await tester.tap(find.text('⌘3'));
+      await tester.pumpAndSettle();
+      await press(
+        tester,
+        LogicalKeyboardKey.keyQ,
+        holding: LogicalKeyboardKey.metaLeft,
+      );
+      expect(find.text('⌘Q is kept for Quit.'), findsOneWidget);
+      await press(
+        tester,
+        LogicalKeyboardKey.keyD,
+        holding: LogicalKeyboardKey.metaLeft,
+      );
+      expect(find.text('Replace the Custom profile?'), findsOneWidget);
+      expect(find.text('⌘Q is kept for Quit.'), findsNothing);
+    });
+
     testWidgets('does not ask when nothing would be lost', (tester) async {
       await show(
         tester,
