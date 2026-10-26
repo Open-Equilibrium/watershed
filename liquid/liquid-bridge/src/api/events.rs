@@ -40,7 +40,7 @@ pub enum BridgeEventKind {
     InputTextSet,
     /// `text` with the reason the session stopped the agent.
     Failed,
-    /// `success`; always the last event.
+    /// `success`, and `text` with the end of the agent's error output; always the last event.
     Exited,
     /// The messages waiting for the running agent changed.
     QueueChanged,

@@ -167,10 +167,18 @@ fn requests_and_questions_reach_dart_with_their_answers() {
 
 #[test]
 fn the_exit_ends_the_stream_and_failures_explain_themselves() {
-    let exited: BridgeEvent = SessionEvent::Exited { success: false }.into();
+    let exited: BridgeEvent = SessionEvent::Exited {
+        success: false,
+        error_output: "Error: no models".to_owned(),
+    }
+    .into();
     assert_eq!(
-        (exited.kind, exited.success),
-        (BridgeEventKind::Exited, Some(false))
+        (exited.kind, exited.success, exited.text.as_deref()),
+        (
+            BridgeEventKind::Exited,
+            Some(false),
+            Some("Error: no models")
+        )
     );
     let failed: BridgeEvent = SessionEvent::Failed("broken".to_owned()).into();
     assert_eq!(
@@ -861,4 +869,20 @@ IFS= read -r line || exit 0"#;
     });
     let error = started.err().expect("no session starts");
     assert!(error.contains("Watershed"), "{error}");
+}
+
+#[test]
+fn says_why_the_agent_did_not_start() {
+    let script = r#"printf 'Error: Failed to load extension\nHint: Start without extensions.\n' >&2
+exit 1"#;
+    let started = AgentSession::start(SessionConfig {
+        program: "/bin/sh".to_owned(),
+        args: vec!["-c".to_owned(), script.to_owned()],
+        cwd: std::env::temp_dir().display().to_string(),
+    });
+    let error = started.err().expect("no session starts");
+    assert!(
+        error.starts_with("Error: Failed to load extension"),
+        "{error}"
+    );
 }

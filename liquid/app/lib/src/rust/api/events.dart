@@ -229,7 +229,7 @@ enum BridgeEventKind {
   /// `text` with the reason the session stopped the agent.
   failed,
 
-  /// `success`; always the last event.
+  /// `success`, and `text` with the end of the agent's error output; always the last event.
   exited,
 
   /// The messages waiting for the running agent changed.

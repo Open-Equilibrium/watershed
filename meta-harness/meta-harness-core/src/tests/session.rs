@@ -99,10 +99,7 @@ IFS= read -r line || exit 0"#,
                 .await
                 .expect("agent exits")
         );
-        assert_eq!(
-            next(&mut events).await,
-            SessionEvent::Exited { success: true }
-        );
+        assert_eq!(next(&mut events).await, exited(true));
     });
 }
 
@@ -118,10 +115,7 @@ exit 3"#,
             accepted(session.prompt("Say hi").await).await,
             Err(CommandError::Rejected("Agent is busy".to_owned()))
         );
-        assert_eq!(
-            next(&mut events).await,
-            SessionEvent::Exited { success: false }
-        );
+        assert_eq!(next(&mut events).await, exited(false));
         assert_eq!(
             accepted(session.abort().await).await,
             Err(CommandError::Closed)
@@ -140,10 +134,7 @@ while :; do sleep 1; done"#,
             next(&mut events).await,
             SessionEvent::Failed("agent wrote a record that is not a JSON object".to_owned())
         );
-        assert_eq!(
-            next(&mut events).await,
-            SessionEvent::Exited { success: false }
-        );
+        assert_eq!(next(&mut events).await, exited(false));
     });
 }
 
@@ -647,10 +638,7 @@ fn answers_extension_questions() {
                 SessionEvent::Runtime(AgentEvent::UserInputResolved { request })
             );
         }
-        assert_eq!(
-            next(&mut events).await,
-            SessionEvent::Exited { success: true }
-        );
+        assert_eq!(next(&mut events).await, exited(true));
     });
 }
 
@@ -930,10 +918,7 @@ exit 3"#,
             next(&mut events).await,
             SessionEvent::Runtime(AgentEvent::UserInputRequested { .. })
         ));
-        assert_eq!(
-            next(&mut events).await,
-            SessionEvent::Exited { success: false }
-        );
+        assert_eq!(next(&mut events).await, exited(false));
         let later = timeout(Duration::from_millis(800), events.recv()).await;
         assert!(later.is_err(), "the dialog died with the agent: {later:?}");
     });
@@ -985,10 +970,7 @@ fn asks_only_for_calls_the_approval_mode_does_not_allow() {
                 SessionEvent::Runtime(AgentEvent::RequestResolved { request, decision })
             );
         }
-        assert_eq!(
-            next(&mut events).await,
-            SessionEvent::Exited { success: true }
-        );
+        assert_eq!(next(&mut events).await, exited(true));
         let unknown = RequestId("a1".to_owned());
         assert_eq!(
             session.decide(&unknown, Decision::AllowOnce).await,
@@ -1073,5 +1055,38 @@ fn requires_the_extension_that_asks_before_tool_calls() {
         let other = r#"{"name":"fix-tests","source":"prompt"},{"name":"watershed-branch","source":"prompt"}"#;
         let (mut ungated, _events) = fake_agent(&answer(other));
         assert_eq!(ungated.require_gate().await, Err(CommandError::Ungated));
+    });
+}
+
+/// The last event of an agent that wrote nothing to its error output.
+fn exited(success: bool) -> SessionEvent {
+    SessionEvent::Exited {
+        success,
+        error_output: String::new(),
+    }
+}
+
+#[test]
+fn reports_the_end_of_what_a_failed_agent_wrote_to_its_error_output() {
+    run(async {
+        // More than a pipe holds and than is kept, with the reason at the end.
+        let (_session, mut events) = fake_agent(
+            r#"i=0; while [ $i -lt 2000 ]; do printf 'warning %s: something to ignore here\n' $i >&2; i=$((i+1)); done
+printf 'Error: Failed to load extension\n' >&2
+exit 1"#,
+        );
+        match next(&mut events).await {
+            SessionEvent::Exited {
+                success: false,
+                error_output,
+            } => {
+                assert!(
+                    error_output.ends_with("Error: Failed to load extension"),
+                    "{error_output}"
+                );
+                assert!(error_output.len() <= 16 * 1024, "{}", error_output.len());
+            }
+            other => panic!("{other:?}"),
+        }
     });
 }

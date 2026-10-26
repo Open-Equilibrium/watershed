@@ -342,8 +342,12 @@ impl From<SessionEvent> for BridgeEvent {
                 text: Some(reason),
                 ..event(BridgeEventKind::Failed)
             },
-            SessionEvent::Exited { success } => BridgeEvent {
+            SessionEvent::Exited {
+                success,
+                error_output,
+            } => BridgeEvent {
                 success: Some(success),
+                text: (!error_output.is_empty()).then_some(error_output),
                 ..event(BridgeEventKind::Exited)
             },
         }

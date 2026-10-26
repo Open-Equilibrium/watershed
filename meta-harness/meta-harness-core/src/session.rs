@@ -30,6 +30,13 @@ const EVENT_BUFFER: usize = 256;
 const WRITE_BUFFER: usize = 64;
 const READ_BUFFER: usize = 64 * 1024;
 
+/// The end of the agent's error output kept to explain why it failed.
+const MAX_ERROR_OUTPUT: usize = 16 * 1024;
+
+/// How long an exited agent's error output may take to end; a process the agent started can
+/// keep it open.
+const ERROR_OUTPUT_WAIT: Duration = Duration::from_millis(500);
+
 /// How to start an agent process that speaks pi's RPC protocol.
 #[derive(Debug, Clone)]
 pub struct AgentCommand {
@@ -52,6 +59,8 @@ pub enum SessionEvent {
     Exited {
         /// Whether the process exited successfully.
         success: bool,
+        /// The end of what the agent wrote to its error output, such as why it did not start.
+        error_output: String,
     },
 }
 
@@ -226,10 +235,16 @@ impl Session {
             .current_dir(&command.cwd)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
+            .stderr(Stdio::piped())
             .kill_on_drop(true)
             .spawn()?;
         let stdout = child.stdout.take().expect("stdout is piped");
+        // Drained all along, so a talkative agent never blocks on a full pipe.
+        let error_output = Arc::new(Mutex::new(Vec::new()));
+        let error_reader = tokio::spawn(keep_end(
+            child.stderr.take().expect("stderr is piped"),
+            error_output.clone(),
+        ));
         let stdin = child.stdin.take().expect("stdin is piped");
         let (writer, writes) = mpsc::channel(WRITE_BUFFER);
         let (events, receiver) = mpsc::channel(EVENT_BUFFER);
@@ -250,6 +265,8 @@ impl Session {
             started: Instant::now(),
             killed,
             kill_requested: false,
+            error_output,
+            error_reader,
         };
         tokio::spawn(supervisor.run(child, stdout, exit));
         let writer_for_stop = writer.clone();
@@ -632,6 +649,9 @@ struct Supervisor {
     killed: oneshot::Receiver<()>,
     /// Set once `killed` completed; it must not be polled again.
     kill_requested: bool,
+    /// The end of the agent's error output so far, and the task that reads it.
+    error_output: Arc<Mutex<Vec<u8>>>,
+    error_reader: tokio::task::JoinHandle<()>,
 }
 
 impl Supervisor {
@@ -696,10 +716,24 @@ impl Supervisor {
         let success = status.is_ok_and(|status| status.success());
         // Shutdown learns of the exit first; the event waits for buffer space.
         let _ = exit.send(success);
+        let _ = tokio::time::timeout(ERROR_OUTPUT_WAIT, &mut self.error_reader).await;
+        let error_output = {
+            let kept = self
+                .error_output
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            String::from_utf8_lossy(&kept).trim().to_owned()
+        };
         // No resolution can follow: one being reported finishes first.
         let mut ended = self.ended.lock().await;
         *ended = true;
-        let _ = self.events.send(SessionEvent::Exited { success }).await;
+        let _ = self
+            .events
+            .send(SessionEvent::Exited {
+                success,
+                error_output,
+            })
+            .await;
     }
 
     /// Routes one record; returns `false` once the session was killed.
@@ -924,5 +958,16 @@ impl Supervisor {
         .await;
         self.kill_requested = outcome.is_none();
         outcome
+    }
+}
+
+/// Reads `reader` to its end and keeps the last [`MAX_ERROR_OUTPUT`] bytes in `kept`.
+async fn keep_end(mut reader: impl tokio::io::AsyncRead + Unpin, kept: Arc<Mutex<Vec<u8>>>) {
+    let mut chunk = [0; 8192];
+    while let Ok(read @ 1..) = reader.read(&mut chunk).await {
+        let mut kept = kept.lock().unwrap_or_else(PoisonError::into_inner);
+        kept.extend_from_slice(&chunk[..read]);
+        let excess = kept.len().saturating_sub(MAX_ERROR_OUTPUT);
+        kept.drain(..excess);
     }
 }

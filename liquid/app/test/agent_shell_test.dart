@@ -118,6 +118,22 @@ void main() {
     expect(count, findsNothing, reason: 'a new session has no run yet');
   });
 
+  testWidgets('says why the agent stopped', (tester) async {
+    await show(tester);
+    await emit(
+      tester,
+      event(
+        BridgeEventKind.exited,
+        success: false,
+        text: 'Error: No models available',
+      ),
+    );
+    expect(
+      find.textContaining('Error: No models available'),
+      findsOneWidget,
+    );
+  });
+
   testWidgets('the mode menu explains each mode and what Allow edits risks', (
     tester,
   ) async {

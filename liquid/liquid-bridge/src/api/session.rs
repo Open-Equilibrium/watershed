@@ -7,8 +7,8 @@ use std::time::Duration;
 use std::path::{Path, PathBuf};
 
 use meta_harness_core::{
-    AgentCommand, Answer, Delivery, RequestId, RunDiff, Session, SessionEvent, recent_sessions,
-    session_title,
+    AgentCommand, Answer, CommandError, Delivery, RequestId, RunDiff, Session, SessionEvent,
+    recent_sessions, session_title,
 };
 use tokio::runtime::Runtime;
 use tokio::sync::{Mutex, mpsc};
@@ -97,10 +97,19 @@ impl AgentSession {
         };
         let _runtime = RUNTIME.enter();
         let diff = RUNTIME.block_on(RunDiff::open(&command.cwd));
-        let (mut session, receiver) =
+        let (mut session, mut receiver) =
             Session::start(&command).map_err(|error| error.to_string())?;
         // Without the extension pi runs tool calls without asking; dropping the session ends it.
-        RUNTIME.block_on(session.require_gate()).map_err(describe)?;
+        if let Err(error) = RUNTIME.block_on(session.require_gate()) {
+            // An agent that ended at once says why on its error output.
+            let output = match error {
+                CommandError::Closed => RUNTIME.block_on(error_output(&mut receiver)),
+                _ => None,
+            };
+            return Err(output
+                .filter(|output| !output.is_empty())
+                .unwrap_or_else(|| describe(error)));
+        }
         let stopper = session.stopper();
         Ok(Self {
             stopper: std::sync::Mutex::new(stopper),
@@ -464,4 +473,20 @@ fn open(session: &mut Option<Session>) -> Result<&mut Session, String> {
     session
         .as_mut()
         .ok_or_else(|| "the session was shut down".to_owned())
+}
+
+/// What an agent that ended wrote to its error output, once it reports its exit.
+async fn error_output(receiver: &mut mpsc::Receiver<SessionEvent>) -> Option<String> {
+    let exit = async {
+        while let Some(event) = receiver.recv().await {
+            if let SessionEvent::Exited { error_output, .. } = event {
+                return Some(error_output);
+            }
+        }
+        None
+    };
+    tokio::time::timeout(SHUTDOWN_GRACE, exit)
+        .await
+        .ok()
+        .flatten()
 }

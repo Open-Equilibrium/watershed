@@ -597,6 +597,10 @@ class SessionState {
       case BridgeEventKind.failed:
         failure.value = event.text;
       case BridgeEventKind.exited:
+        // A failed agent's error output says why, such as an extension that did not load.
+        if (event.success != true && failure.value == null) {
+          failure.value = event.text;
+        }
         // A gone agent asks nothing more; its open cards cannot be answered.
         _approvals.clear();
         _questions.clear();
