@@ -28,6 +28,9 @@ class _DiffViewState extends State<DiffView> {
   List<FileRow> _rows = const [];
   BridgeFileChange? _selected;
   List<DiffLine> _lines = const [];
+
+  /// Whether the selected file's patch was read.
+  bool _patchRead = false;
   bool _loaded = false;
   final _focus = FocusNode(debugLabel: 'diff');
 
@@ -91,6 +94,7 @@ class _DiffViewState extends State<DiffView> {
     setState(() {
       _selected = change;
       _lines = const [];
+      _patchRead = false;
     });
     if (_loading) return;
     _loading = true;
@@ -102,7 +106,12 @@ class _DiffViewState extends State<DiffView> {
             ? ''
             : await _read(() => widget.state.patch(wanted.path));
         if (!mounted || _selected != wanted) continue;
-        if (patch != null) setState(() => _lines = parsePatch(patch));
+        if (patch != null) {
+          setState(() {
+            _lines = parsePatch(patch);
+            _patchRead = true;
+          });
+        }
         return;
       }
     } finally {
@@ -117,14 +126,23 @@ class _DiffViewState extends State<DiffView> {
         (row.change != null && row.folder == folder),
   );
 
+  /// Selects the next file in `step`'s direction from the selected one, passing files a
+  /// folded folder hides.
   void _move(int step) {
     final files = [
       for (final row in _rows)
-        if (!_hidden(row)) ?row.change,
+        if (row.change != null) row,
     ];
-    final index = files.indexWhere((change) => change.path == _selected?.path);
-    final next = index + step;
-    if (next >= 0 && next < files.length) _select(files[next]);
+    final index = files.indexWhere(
+      (row) => row.change!.path == _selected?.path,
+    );
+    for (
+      var next = index + step;
+      next >= 0 && next < files.length;
+      next += step
+    ) {
+      if (!_hidden(files[next])) return unawaited(_select(files[next].change));
+    }
   }
 
   void _toggle(String folder) => setState(() {
@@ -163,7 +181,20 @@ class _DiffViewState extends State<DiffView> {
       const SingleActivator(LogicalKeyboardKey.arrowLeft): _fold,
       const SingleActivator(LogicalKeyboardKey.arrowRight): _unfold,
     },
-    child: Focus(focusNode: _focus, child: _content(context)),
+    child: Focus(
+      focusNode: _focus,
+      child: ValueListenableBuilder(
+        valueListenable: widget.state.changesProblem,
+        builder: (context, problem, _) => problem == null
+            ? _content(context)
+            : Center(
+                child: Text(
+                  problem,
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ),
+      ),
+    ),
   );
 
   Widget _content(BuildContext context) {
@@ -198,7 +229,8 @@ class _DiffViewState extends State<DiffView> {
                   WsMetrics.space2,
                 ),
                 child: Text(
-                  '${_changes.length} files · +$added −$removed',
+                  '${_changes.length} file${_changes.length == 1 ? '' : 's'} · '
+                  '+$added −$removed',
                   style: TextStyle(
                     color: ws.textFaint,
                     fontSize: WsMetrics.fsSmall,
@@ -218,7 +250,11 @@ class _DiffViewState extends State<DiffView> {
           ),
         ),
         Expanded(
-          child: _Patch(change: _selected, lines: _lines),
+          child: _Patch(
+            change: _selected,
+            lines: _lines,
+            textless: _patchRead && _lines.isEmpty,
+          ),
         ),
       ],
     );
@@ -322,10 +358,17 @@ class _FileTile extends StatelessWidget {
 }
 
 class _Patch extends StatelessWidget {
-  const _Patch({required this.change, required this.lines});
+  const _Patch({
+    required this.change,
+    required this.lines,
+    required this.textless,
+  });
 
   final BridgeFileChange? change;
   final List<DiffLine> lines;
+
+  /// Whether the file changed without lines to show, such as a binary file.
+  final bool textless;
 
   @override
   Widget build(BuildContext context) {
@@ -378,33 +421,42 @@ class _Patch extends StatelessWidget {
                 ),
               ),
               // Long lines scroll sideways together, so no change is out of reach.
-              child: LayoutBuilder(
-                builder: (context, constraints) {
-                  final char = (TextPainter(
-                    text: TextSpan(text: 'M', style: monoStyle(context)),
-                    textDirection: TextDirection.ltr,
-                  )..layout()).width;
-                  final widest = lines.fold(
-                    0,
-                    (widest, line) => math.max(widest, line.text.length),
-                  );
-                  return SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: SizedBox(
-                      width: math.max(
-                        constraints.maxWidth,
-                        _LineRow.gutter + widest * char + WsMetrics.space6,
+              child: textless
+                  ? Center(
+                      child: Text(
+                        'No text changes to show, as for a binary file.',
+                        style: Theme.of(context).textTheme.bodySmall,
                       ),
-                      height: constraints.maxHeight,
-                      child: ListView.builder(
-                        itemCount: lines.length,
-                        itemBuilder: (context, index) =>
-                            _LineRow(line: lines[index]),
-                      ),
+                    )
+                  : LayoutBuilder(
+                      builder: (context, constraints) {
+                        final char = (TextPainter(
+                          text: TextSpan(text: 'M', style: monoStyle(context)),
+                          textDirection: TextDirection.ltr,
+                        )..layout()).width;
+                        final widest = lines.fold(
+                          0,
+                          (widest, line) => math.max(widest, line.text.length),
+                        );
+                        return SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: SizedBox(
+                            width: math.max(
+                              constraints.maxWidth,
+                              _LineRow.gutter +
+                                  widest * char +
+                                  WsMetrics.space6,
+                            ),
+                            height: constraints.maxHeight,
+                            child: ListView.builder(
+                              itemCount: lines.length,
+                              itemBuilder: (context, index) =>
+                                  _LineRow(line: lines[index]),
+                            ),
+                          ),
+                        );
+                      },
                     ),
-                  );
-                },
-              ),
             ),
           ),
           const SizedBox(height: WsMetrics.space4),

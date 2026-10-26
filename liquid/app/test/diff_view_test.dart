@@ -235,4 +235,106 @@ void main() {
       reason: '↓ passes the folded files: the list and the header show top.ts',
     );
   });
+
+  testWidgets('says when the changes cannot be read instead of old ones', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1600, 900));
+    final backend = FakeBackend()
+      ..changed = [
+        BridgeFileChange(
+          path: 'old.ts',
+          status: BridgeChangeStatus.modified,
+          added: 1,
+          removed: 0,
+        ),
+      ];
+    final state = SessionState(backend);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: liquidTheme(Brightness.light),
+        home: Material(child: DiffView(state: state)),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('old.ts'), findsWidgets);
+
+    backend.changesError = 'the project could not be captured';
+    await state.readChanges();
+    await tester.pumpAndSettle();
+    expect(find.text('old.ts'), findsNothing);
+    expect(
+      find.text(
+        'Could not show the changes: the project could not be captured',
+      ),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('moves past a folded folder in both directions', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1600, 900));
+    BridgeFileChange file(String path) => BridgeFileChange(
+      path: path,
+      status: BridgeChangeStatus.modified,
+      added: 1,
+      removed: 0,
+    );
+    final backend = FakeBackend()
+      ..changed = [
+        file('lib/x.ts'),
+        file('src/a.ts'),
+        file('src/b.ts'),
+        file('top.ts'),
+      ];
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: liquidTheme(Brightness.light),
+        home: Material(child: DiffView(state: SessionState(backend))),
+      ),
+    );
+    await tester.pumpAndSettle();
+    Future<void> press(LogicalKeyboardKey key) async {
+      await tester.sendKeyEvent(key);
+      await tester.pumpAndSettle();
+    }
+
+    await press(LogicalKeyboardKey.arrowDown);
+    expect(find.text('src/a.ts'), findsOneWidget);
+    await press(LogicalKeyboardKey.arrowLeft);
+    await press(LogicalKeyboardKey.arrowDown);
+    expect(find.text('top.ts'), findsNWidgets(2), reason: 'the next file');
+    await press(LogicalKeyboardKey.arrowLeft);
+    await press(LogicalKeyboardKey.arrowUp);
+    expect(find.text('lib/x.ts'), findsOneWidget, reason: 'past the folder');
+  });
+
+  testWidgets('counts one file and explains a file without a text diff', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1600, 900));
+    final backend = FakeBackend()
+      ..changed = [
+        BridgeFileChange(
+          path: 'logo.png',
+          status: BridgeChangeStatus.modified,
+          added: 0,
+          removed: 0,
+        ),
+      ]
+      ..patches = {
+        'logo.png': 'Binary files a/logo.png and b/logo.png differ\n',
+      };
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: liquidTheme(Brightness.light),
+        home: Material(child: DiffView(state: SessionState(backend))),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('1 file · +0 −0'), findsOneWidget);
+    expect(
+      find.text('No text changes to show, as for a binary file.'),
+      findsOneWidget,
+    );
+  });
 }

@@ -234,6 +234,7 @@ class SessionState {
     sessionTitle.value = null;
     // The previous session's run no longer applies.
     changed.value = const [];
+    changesProblem.value = null;
     _byId.clear();
     items.value = const [];
     chatMore.value = false;
@@ -387,14 +388,24 @@ class SessionState {
   /// and its count show them.
   final changed = ValueNotifier<List<BridgeFileChange>?>(null);
 
-  /// Reads what the latest run changed; a failure is reported and keeps the last list.
+  /// Why the latest read of the changes failed; null after one that worked.
+  final changesProblem = ValueNotifier<String?>(null);
+
+  /// Reads what the latest run changed. A failed read is reported, and the Diff tab says so
+  /// instead of showing an earlier run's changes.
   Future<void> readChanges() async {
     final generation = _generation;
     try {
       final read = await _backend.changes();
-      if (generation == _generation) changed.value = read;
+      if (generation != _generation) return;
+      changesProblem.value = null;
+      changed.value = read;
     } on Object catch (error) {
-      notify(BridgeLevel.error, 'Could not show the changes: $error');
+      if (generation != _generation) return;
+      final problem = 'Could not show the changes: $error';
+      changesProblem.value = problem;
+      changed.value = null;
+      notify(BridgeLevel.error, problem);
     }
   }
 
