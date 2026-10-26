@@ -293,6 +293,9 @@ async fn git(dir: &Path, env: &[(&str, OsString)], args: &[&str]) -> Result<Stri
             "core.hooksPath=/dev/null",
             "-c",
             "core.fsmonitor=false",
+            // Blank context lines keep their leading space, which Liquid reads as context.
+            "-c",
+            "diff.suppressBlankEmpty=false",
         ])
         .args(args)
         .current_dir(dir)

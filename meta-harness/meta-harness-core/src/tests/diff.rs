@@ -332,3 +332,22 @@ fn snapshots_a_project_whose_git_warns_a_lot() {
         assert_eq!(tree.changes(&snapshot).await.expect("changes"), []);
     });
 }
+
+#[test]
+fn keeps_blank_context_lines_whatever_the_projects_diff_settings() {
+    run(async {
+        let repo = Repo::new("blank");
+        repo.git(&["config", "diff.suppressBlankEmpty", "true"]);
+        repo.write("a.txt", "one\n\nthree\n");
+        repo.git(&["add", "."]);
+        repo.git(&["commit", "-q", "-m", "base"]);
+        let tree = WorkingTree::open(repo.path())
+            .await
+            .expect("repository opens");
+        let snapshot = tree.snapshot().await.expect("snapshot");
+        repo.write("a.txt", "one\n\nTHREE\n");
+        let patch = tree.patch(&snapshot, "a.txt").await.expect("patch");
+        // A blank context line keeps its leading space, so Liquid reads it as context.
+        assert!(patch.contains(" one\n \n-three\n"), "{patch:?}");
+    });
+}
