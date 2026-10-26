@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import '../format.dart';
 import '../rust/api/events.dart';
 import '../rust/api/history.dart';
 import '../rust/api/session.dart';
@@ -66,10 +67,6 @@ const _keptNotices = 20;
 
 /// How long information and warnings stay in the status bar; errors stay until dismissed.
 const _noticeFades = Duration(seconds: 6);
-
-/// Tokens a model request read: fresh input plus cache reads and writes.
-int promptTokens(BridgeUsage usage) =>
-    usage.input + usage.cacheRead + usage.cacheWrite;
 
 /// Tokens and cost the session spent so far.
 @immutable

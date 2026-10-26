@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../controls.dart';
+import '../format.dart';
 import '../rust/api/history.dart';
 import '../shortcuts/keymap.dart';
 import '../theme/icons.dart';

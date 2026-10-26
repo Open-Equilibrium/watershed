@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 
 import '../controls.dart';
+import '../format.dart';
 import '../rust/api/history.dart';
 import '../shortcuts/keymap.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
-import '../session/session_state.dart';
 import 'step_parts.dart';
 import 'trajectory_model.dart';
 

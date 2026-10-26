@@ -803,6 +803,27 @@ void main() {
     );
     expect(find.byIcon(LucideIcons.check), findsOneWidget);
     expect(find.text('40 ms'), findsOneWidget);
+
+    await emit(
+      tester,
+      event(
+        BridgeEventKind.itemStarted,
+        item: item(6, kind: BridgeItemKind.commandExecution, tool: 'bash'),
+      ),
+    );
+    await emit(
+      tester,
+      event(
+        BridgeEventKind.itemCompleted,
+        item: item(
+          6,
+          kind: BridgeItemKind.commandExecution,
+          tool: 'bash',
+          durationMs: 84213,
+        ),
+      ),
+    );
+    expect(find.text('1m 24s'), findsOneWidget, reason: 'as the Trajectory');
   });
 
   testWidgets('shows contextual shortcuts only while Cmd alone is held', (

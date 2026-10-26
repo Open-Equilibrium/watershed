@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:liquid/src/format.dart';
 import 'package:liquid/src/rust/api/history.dart';
 import 'package:liquid/src/trajectory/trajectory_model.dart';
 

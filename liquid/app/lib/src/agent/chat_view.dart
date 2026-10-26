@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../format.dart';
 import '../rust/api/events.dart';
 import '../session/session_state.dart';
 import '../theme/icons.dart';
@@ -193,7 +194,7 @@ class ToolRow extends StatelessWidget {
                 style: TextStyle(color: ws.danger),
               ),
           ] else if (!waiting && outcome?.durationMs != null)
-            TextSpan(text: '${outcome!.durationMs} ms'),
+            TextSpan(text: formatDuration(outcome!.durationMs!)),
         ];
         return Container(
           height: 32,

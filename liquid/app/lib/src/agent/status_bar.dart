@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 
+import '../format.dart';
 import '../rust/api/events.dart';
 import '../session/session_state.dart';
 import '../shortcuts/shortcut_reveal.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
-import '../trajectory/trajectory_model.dart';
 import 'sidebar.dart';
 
 /// Run status, tokens, cost and extension status entries. A notification takes the status
