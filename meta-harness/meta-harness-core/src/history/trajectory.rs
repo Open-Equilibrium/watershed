@@ -339,10 +339,12 @@ impl Projection {
                         (call.arguments.clone(), call.written_lines),
                     );
                 }
-                let label = if text.trim().is_empty() {
-                    "(tool calls)".to_owned()
-                } else {
+                let label = if !text.trim().is_empty() {
                     first_line(text, LABEL_CHARS)
+                } else if calls.is_empty() {
+                    "(no response)".to_owned()
+                } else {
+                    "(tool calls)".to_owned()
                 };
                 let context = StepContext {
                     prompt_chars: self.sections.values().sum::<usize>() + self.appended_chars,

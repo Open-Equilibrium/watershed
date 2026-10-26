@@ -584,6 +584,26 @@ fn reads_outcomes_from_what_tools_did_not_from_what_they_were_asked_or_printed()
 }
 
 #[test]
+fn names_a_response_that_ended_empty_apart_from_one_that_called_tools() {
+    let data: Value = serde_json::from_str(
+        r#"{"entries":[
+      {"type":"message","id":"u1","parentId":null,"message":{"role":"user","content":"Go"}},
+      {"type":"message","id":"a1","parentId":"u1","message":{"role":"assistant","stopReason":"aborted","content":[]}},
+      {"type":"message","id":"a2","parentId":"a1","message":{"role":"assistant","stopReason":"toolUse","content":[{"type":"toolCall","id":"c1","name":"ls","arguments":{}}]}}
+    ],"leafId":"a2"}"#,
+    )
+    .expect("JSON");
+    let labels: Vec<String> = History::from_entries(&data)
+        .trajectory(None)
+        .records
+        .into_iter()
+        .filter(|record| record.kind == RecordKind::Message)
+        .map(|record| record.label)
+        .collect();
+    assert_eq!(labels, ["(no response)", "(tool calls)"]);
+}
+
+#[test]
 fn a_parent_cycle_ends_the_branch_instead_of_hanging() {
     let (done, finished) = std::sync::mpsc::channel();
     std::thread::spawn(move || {

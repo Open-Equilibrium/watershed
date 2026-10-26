@@ -449,7 +449,7 @@ void main() {
       );
     });
 
-    test('an earlier chat page that cannot be read is reported', () async {
+    test('an earlier chat page that cannot be read is reported once', () async {
       backend.transcripts[''] = BridgeTranscript(
         items: [chatItem('u2', BridgeItemKind.userMessage, text: 'Later')],
         more: true,
@@ -457,11 +457,12 @@ void main() {
       );
       await state.loadChat();
       backend.transcriptError = 'session file is gone';
+      // Each scroll near the top tries again.
       await state.loadEarlier();
-      expect(
-        state.notice.value?.text,
+      await state.loadEarlier();
+      expect(state.notices.value.map((notice) => notice.text), [
         'Could not read earlier messages: session file is gone',
-      );
+      ]);
     });
   });
 
@@ -728,6 +729,28 @@ void main() {
       (state.notice.value?.level, state.notice.value?.text),
       (BridgeLevel.error, 'The model request failed: 401 invalid x-api-key'),
     );
+  });
+
+  test('a request that Stop ended is no failure', () async {
+    BridgeEvent ended(String stopReason, String error) => event(
+      BridgeEventKind.modelRequestCompleted,
+      turn: 1,
+      step: BridgeStep(
+        id: 1,
+        model: 'faux/faux-1',
+        usage: usage(0, 0, 0),
+        stopReason: stopReason,
+        error: error,
+        durationMs: 120,
+      ),
+    );
+    // Providers report an aborted request, some as an error.
+    await emit(ended('aborted', 'Request was aborted'));
+    await emit(event(BridgeEventKind.turnStarted, turn: 1));
+    await state.stop();
+    await emit(ended('error', 'This operation was aborted'));
+    await emit(event(BridgeEventKind.turnAborted, turn: 1));
+    expect(state.notices.value, isEmpty);
   });
 
   test('keeps the waiting messages and edits them', () async {

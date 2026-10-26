@@ -101,6 +101,9 @@ class SessionState {
   final List<BridgeRequest> _questions = [];
   bool _turnActive = false;
 
+  /// Whether the user stopped the running turn; requests it ends are no failures.
+  bool _stopping = false;
+
   final status = ValueNotifier(RunStatus.idle);
   final items = ValueNotifier<List<ItemView>>(const []);
   final approval = ValueNotifier<BridgeRequest?>(null);
@@ -131,6 +134,9 @@ class SessionState {
   /// The earliest stored entry the chat covers; the next page ends before it.
   String? _chatStart;
   bool _readingEarlier = false;
+
+  /// Why earlier messages could not be read, so a lasting failure is reported once.
+  String? _unreadEarlier;
 
   /// Rebuilt items count down from -1, so they never meet live item ids.
   int _nextStoredId = -1;
@@ -339,6 +345,7 @@ class SessionState {
   Future<void> stop() => _changeQueue(_stop);
 
   Future<void> _stop() async {
+    _stopping = true;
     try {
       final waiting = await _backend.clearQueue();
       final texts = [...waiting.steering, ...waiting.followUp];
@@ -520,6 +527,7 @@ class SessionState {
       while (chatMore.value && _chatStart != null) {
         final before = _chatStart;
         final page = await _backend.transcript(before);
+        _unreadEarlier = null;
         if (generation != _generation || version != _chatVersion) return;
         _chatStart = page.start;
         // A page that does not move back ends the reading, so it cannot repeat forever.
@@ -542,7 +550,10 @@ class SessionState {
         items.value = shown;
       }
     } on Object catch (error) {
-      notify(BridgeLevel.error, 'Could not read earlier messages: $error');
+      if ('$error' != _unreadEarlier) {
+        notify(BridgeLevel.error, 'Could not read earlier messages: $error');
+      }
+      _unreadEarlier = '$error';
     } finally {
       _readingEarlier = false;
     }
@@ -616,8 +627,10 @@ class SessionState {
     switch (event.kind) {
       case BridgeEventKind.turnStarted:
         _turnActive = true;
+        _stopping = false;
       case BridgeEventKind.turnCompleted || BridgeEventKind.turnAborted:
         _turnActive = false;
+        _stopping = false;
         stored.value++;
         unawaited(loadTitle());
         unawaited(readChanges());
@@ -652,7 +665,9 @@ class SessionState {
         }
       case BridgeEventKind.modelRequestCompleted:
         totals.value = totals.value.add(event.step!.usage);
-        if (event.step!.error case final error?) {
+        // A request Stop ended reports an abort, some providers as an error.
+        if (event.step!.error case final error?
+            when event.step!.stopReason != 'aborted' && !_stopping) {
           notify(BridgeLevel.error, 'The model request failed: $error');
         }
       case BridgeEventKind.requestOpened:
