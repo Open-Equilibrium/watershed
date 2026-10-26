@@ -437,6 +437,7 @@ impl From<AgentEvent> for BridgeEvent {
                 tool,
                 arguments,
                 read_only,
+                ..
             } => BridgeEvent {
                 request: Some(BridgeRequest {
                     approval: Some(BridgeApproval {

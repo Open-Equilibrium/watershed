@@ -116,6 +116,7 @@ fn requests_and_questions_reach_dart_with_their_answers() {
         tool: "write".to_owned(),
         arguments: "{}".to_owned(),
         read_only: false,
+        session: None,
     });
     let request = opened.request.expect("request");
     assert_eq!(request.id, "a1");

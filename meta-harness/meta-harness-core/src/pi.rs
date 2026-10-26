@@ -421,6 +421,10 @@ fn approval(request: RequestId, payload: &str) -> AgentEvent {
             .map(Value::to_string)
             .unwrap_or_default(),
         read_only: payload.get("readOnly").and_then(Value::as_bool) == Some(true),
+        session: payload
+            .get("session")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
     }
 }
 

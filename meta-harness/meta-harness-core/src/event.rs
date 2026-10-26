@@ -295,6 +295,8 @@ pub enum AgentEvent {
         arguments: String,
         /// Whether the tool declares that it only reads.
         read_only: bool,
+        /// The session the call runs in, when the agent says.
+        session: Option<String>,
     },
     /// The user answered an approval request.
     RequestResolved {

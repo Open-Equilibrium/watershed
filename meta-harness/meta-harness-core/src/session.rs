@@ -133,10 +133,11 @@ struct Shared {
     /// Commands awaiting their response; `None` once the agent is gone.
     replies: Option<HashMap<u64, Reply>>,
     mode: ApprovalMode,
-    /// Tools the user allowed for the rest of the session.
+    /// Tools the user allowed for the rest of the session, and the session they belong to.
     allowed: HashSet<String>,
-    /// Open approval requests and the tool each one would call.
-    approvals: HashMap<RequestId, String>,
+    allowed_in: Option<String>,
+    /// Open approval requests, the tool each one would call and its session.
+    approvals: HashMap<RequestId, (String, Option<String>)>,
     /// Open questions from agent extensions.
     questions: HashSet<RequestId>,
     /// Whether a turn is running, from the agent's events.
@@ -149,6 +150,17 @@ struct Shared {
     /// Whether an abort waits for the turn to settle; dialogs arriving meanwhile are rejected
     /// or dismissed, since the agent stops only once they are answered.
     stopping: bool,
+}
+
+impl Shared {
+    /// Keeps allowances only for `session`: an extension command can switch sessions without
+    /// the core seeing it, and a call from another session asks again.
+    fn allow_in(&mut self, session: Option<String>) {
+        if self.allowed_in != session {
+            self.allowed.clear();
+            self.allowed_in = session;
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -453,11 +465,12 @@ impl Session {
     ) -> Result<(), CommandError> {
         {
             let mut shared = self.state.lock();
-            let tool = shared
+            let (tool, session) = shared
                 .approvals
                 .remove(request)
                 .ok_or(CommandError::UnknownRequest)?;
             if decision == Decision::AllowSession {
+                shared.allow_in(session);
                 shared.allowed.insert(tool);
             }
         }
@@ -681,15 +694,19 @@ impl Supervisor {
                     kind,
                     tool,
                     read_only,
+                    session,
                     ..
                 } => {
                     let answer = {
                         let mut shared = self.state.lock();
+                        shared.allow_in(session.clone());
                         let allowed = shared.allowed.contains(tool);
                         if shared.stopping {
                             Some(json!({ "value": "reject" }))
                         } else if needs_user(shared.mode, *kind, *read_only, allowed) {
-                            shared.approvals.insert(request.clone(), tool.clone());
+                            shared
+                                .approvals
+                                .insert(request.clone(), (tool.clone(), session.clone()));
                             None
                         } else {
                             Some(json!({ "value": "allow-auto" }))

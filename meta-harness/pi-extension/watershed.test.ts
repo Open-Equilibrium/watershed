@@ -52,6 +52,7 @@ function context(
       setEditorText: (text: string) => drafts.push(text),
     },
     sessionManager: {
+      getSessionId: () => "s1",
       getEntry: (id: string) =>
         session.entries ? session.entries[id] : { type: "message", message: { role: "assistant", content: [] } },
     },
@@ -83,6 +84,7 @@ test("asks the core before every tool call and records user decisions", async ()
       tool: "bash",
       arguments: { command: "ls" },
       readOnly: false,
+      session: "s1",
     });
     assert.deepEqual(options, ["allow-once", "allow-session", "reject", "allow-auto"]);
     assert.deepEqual(
@@ -215,6 +217,7 @@ test("records how long an approval waited for the user", async () => {
         return "allow-once";
       },
     },
+    sessionManager: { getSessionId: () => "s1" },
   };
   await handlers.get("tool_call")!({ toolCallId: "c9", toolName: "bash", input: {} }, ctx);
   assert.deepEqual(entries, [

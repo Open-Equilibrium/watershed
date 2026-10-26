@@ -304,7 +304,7 @@ fn translates_extension_questions_and_display_updates() {
 #[test]
 fn turns_watershed_approval_questions_into_requests() {
     let events = translate(&[
-        r#"{"type":"extension_ui_request","id":"a1","method":"select","title":"watershed.approval {\"tool\":\"bash\",\"arguments\":{\"command\":\"npm test\"},\"readOnly\":false}","options":["allow-once","allow-session","reject","allow-auto"]}"#,
+        r#"{"type":"extension_ui_request","id":"a1","method":"select","title":"watershed.approval {\"tool\":\"bash\",\"arguments\":{\"command\":\"npm test\"},\"readOnly\":false,\"session\":\"s1\"}","options":["allow-once","allow-session","reject","allow-auto"]}"#,
         r#"{"type":"extension_ui_request","id":"a2","method":"select","title":"watershed.approval {\"tool\":\"write\",\"arguments\":{},\"readOnly\":false}","options":[]}"#,
         r#"{"type":"extension_ui_request","id":"a3","method":"select","title":"watershed.approval {\"tool\":\"read\",\"arguments\":{\"path\":\"a\"},\"readOnly\":true}","options":[]}"#,
     ]);
@@ -315,6 +315,7 @@ fn turns_watershed_approval_questions_into_requests() {
             tool: tool.to_owned(),
             arguments: arguments.to_owned(),
             read_only,
+            session: (id == "a1").then(|| "s1".to_owned()),
         };
     assert_eq!(
         events,

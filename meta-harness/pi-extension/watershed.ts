@@ -37,6 +37,8 @@ function watershed(pi: ExtensionAPI, clock: Clock): void {
       tool: event.toolName,
       arguments: event.input,
       readOnly: tool?.sourceInfo?.source === "builtin" && READING_BUILTINS.has(tool.name),
+      // Allowances for a session end with it, also when an extension command switches it.
+      session: ctx.sessionManager.getSessionId(),
     };
     const asked = clock();
     const decision = await ctx.ui.select(APPROVAL_PREFIX + JSON.stringify(payload), DECISIONS);

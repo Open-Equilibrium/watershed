@@ -585,7 +585,14 @@ fn no_session_file(id: u32) -> String {
 }
 
 fn approval_request(id: &str, tool: &str, read_only: bool) -> String {
-    let payload = format!(r#"{{\"tool\":\"{tool}\",\"arguments\":{{}},\"readOnly\":{read_only}}}"#);
+    approval_in("s1", id, tool, read_only)
+}
+
+/// An approval request from the session `session`, as the extension asks it.
+fn approval_in(session: &str, id: &str, tool: &str, read_only: bool) -> String {
+    let payload = format!(
+        r#"{{\"tool\":\"{tool}\",\"arguments\":{{}},\"readOnly\":{read_only},\"session\":\"{session}\"}}"#
+    );
     format!(
         "printf '%s\\n' '{{\"type\":\"extension_ui_request\",\"id\":\"{id}\",\"method\":\"select\",\"title\":\"watershed.approval {payload}\",\"options\":[]}}'\n"
     )
@@ -824,6 +831,42 @@ fn allowances_for_a_session_end_with_it() {
 }
 
 #[test]
+fn allowances_end_when_the_agent_asks_for_another_session() {
+    run(async {
+        // An extension command can switch sessions without the core seeing the switch.
+        let script = [
+            approval_in("s1", "a1", "bash", false),
+            expect_response(&[r#""id":"a1""#, r#""value":"allow-session""#]),
+            approval_in("s1", "a2", "bash", false),
+            expect_response(&[r#""id":"a2""#, r#""value":"allow-auto""#]),
+            approval_in("s2", "a3", "bash", false),
+            "IFS= read -r line || exit 0\n".to_owned(),
+        ]
+        .concat();
+        let (mut session, mut events) = fake_agent(&script);
+        assert!(matches!(
+            next(&mut events).await,
+            SessionEvent::Runtime(AgentEvent::RequestOpened { .. })
+        ));
+        assert_eq!(
+            session
+                .decide(&RequestId("a1".to_owned()), Decision::AllowSession)
+                .await,
+            Ok(())
+        );
+        let _resolved = next(&mut events).await;
+        assert!(
+            matches!(
+                next(&mut events).await,
+                SessionEvent::Runtime(AgentEvent::RequestOpened { request, .. })
+                    if request == RequestId("a3".to_owned())
+            ),
+            "the same session runs bash at once, another one asks again"
+        );
+    });
+}
+
+#[test]
 fn forgets_a_question_once_its_time_is_up() {
     run(async {
         // pi answers a dialog with a timeout itself once the time is up, without telling.
@@ -932,6 +975,7 @@ fn asks_only_for_calls_the_approval_mode_does_not_allow() {
                     tool: tool.to_owned(),
                     arguments: "{}".to_owned(),
                     read_only: false,
+                    session: Some("s1".to_owned()),
                 })
             );
             assert_eq!(session.decide(&request, decision).await, Ok(()));
