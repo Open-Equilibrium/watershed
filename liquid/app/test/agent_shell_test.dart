@@ -87,6 +87,36 @@ void main() {
     },
   );
 
+  testWidgets('the Diff tab counts the files the latest run changed', (
+    tester,
+  ) async {
+    await show(tester);
+    await tester.pumpAndSettle();
+    final count = find.byKey(const Key('changed-files'));
+    expect(count, findsNothing, reason: 'no run yet');
+
+    backend.changed = [
+      for (final path in ['a.txt', 'b.txt'])
+        BridgeFileChange(
+          path: path,
+          status: BridgeChangeStatus.modified,
+          added: 1,
+          removed: 1,
+        ),
+    ];
+    await emit(tester, event(BridgeEventKind.turnStarted, turn: 1));
+    await emit(tester, event(BridgeEventKind.turnCompleted, turn: 1));
+    expect(
+      find.descendant(of: count, matching: find.text('2')),
+      findsOneWidget,
+    );
+
+    backend.changed = const [];
+    await state.newSession();
+    await tester.pumpAndSettle();
+    expect(count, findsNothing, reason: 'a new session has no run yet');
+  });
+
   testWidgets('the mode menu explains each mode and what Allow edits risks', (
     tester,
   ) async {

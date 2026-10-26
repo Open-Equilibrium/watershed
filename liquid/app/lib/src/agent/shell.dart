@@ -262,7 +262,7 @@ class _AgentShellState extends State<AgentShell> {
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
                           _Header(state: widget.state),
-                          _Tabs(tab: _tab),
+                          _Tabs(tab: _tab, state: widget.state),
                           Expanded(
                             child: ValueListenableBuilder(
                               valueListenable: _tab,
@@ -359,10 +359,43 @@ class _SessionTitle extends StatelessWidget {
   );
 }
 
+/// How many files the latest run changed, beside the Diff tab's name (approved mockup).
+class _ChangedFiles extends StatelessWidget {
+  const _ChangedFiles({required this.state});
+
+  final SessionState state;
+
+  @override
+  Widget build(BuildContext context) => ValueListenableBuilder(
+    valueListenable: state.changed,
+    builder: (context, changed, _) {
+      final count = changed?.length ?? 0;
+      if (count == 0) return const SizedBox.shrink();
+      return Container(
+        key: const Key('changed-files'),
+        margin: const EdgeInsets.only(left: WsMetrics.space2),
+        padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space2),
+        decoration: BoxDecoration(
+          color: context.ws.hover,
+          borderRadius: BorderRadius.circular(WsMetrics.radiusSm),
+        ),
+        child: Text(
+          '$count',
+          style: TextStyle(
+            color: context.ws.textMuted,
+            fontSize: WsMetrics.fsSmall,
+          ),
+        ),
+      );
+    },
+  );
+}
+
 class _Tabs extends StatelessWidget {
-  const _Tabs({required this.tab});
+  const _Tabs({required this.tab, required this.state});
 
   final ValueNotifier<AgentTab> tab;
+  final SessionState state;
 
   static const _commands = {
     AgentTab.chat: Command.chat,
@@ -409,14 +442,23 @@ class _Tabs extends StatelessWidget {
                   child: Stack(
                     clipBehavior: Clip.none,
                     children: [
-                      Text(
-                        entry.value.label,
-                        style: TextStyle(
-                          color: entry.key == active ? ws.text : ws.textMuted,
-                          fontWeight: entry.key == active
-                              ? WsMetrics.fwMedium
-                              : WsMetrics.fwRegular,
-                        ),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            entry.value.label,
+                            style: TextStyle(
+                              color: entry.key == active
+                                  ? ws.text
+                                  : ws.textMuted,
+                              fontWeight: entry.key == active
+                                  ? WsMetrics.fwMedium
+                                  : WsMetrics.fwRegular,
+                            ),
+                          ),
+                          if (entry.key == AgentTab.diff)
+                            _ChangedFiles(state: state),
+                        ],
                       ),
                       // Keys the menu bar shows stay out of the GUI (ADR-0204); the Liquid
                       // key, which it cannot show, gets a hint (ADR-0205).

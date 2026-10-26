@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -39,23 +40,22 @@ class _DiffViewState extends State<DiffView> {
   @override
   void initState() {
     super.initState();
-    widget.state.status.addListener(_reloadWhenIdle);
-    _reload();
-    // Opening the tab moves the keyboard to it.
+    widget.state.changed.addListener(_show);
+    // Opening the tab reads the changes again, so it shows the project as it is now.
+    unawaited(widget.state.readChanges());
+    // It also shows the last list at once and moves the keyboard to it.
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _focus.requestFocus();
+      if (!mounted) return;
+      _focus.requestFocus();
+      _show();
     });
   }
 
   @override
   void dispose() {
-    widget.state.status.removeListener(_reloadWhenIdle);
+    widget.state.changed.removeListener(_show);
     _focus.dispose();
     super.dispose();
-  }
-
-  void _reloadWhenIdle() {
-    if (widget.state.status.value == RunStatus.idle) _reload();
   }
 
   /// Reports why changes cannot be read, such as a diff over Git's output limit.
@@ -71,9 +71,9 @@ class _DiffViewState extends State<DiffView> {
     }
   }
 
-  Future<void> _reload() async {
-    final changes = await _read(widget.state.changes);
-    if (!mounted || changes == null) return;
+  void _show() {
+    final changes = widget.state.changed.value;
+    if (changes == null) return;
     setState(() {
       _changes = changes;
       _rows = fileTree(changes);
@@ -83,7 +83,7 @@ class _DiffViewState extends State<DiffView> {
     final keep = files
         .where((change) => change.path == _selected?.path)
         .firstOrNull;
-    await _select(keep ?? files.firstOrNull);
+    unawaited(_select(keep ?? files.firstOrNull));
   }
 
   Future<void> _select(BridgeFileChange? change) async {

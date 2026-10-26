@@ -221,6 +221,8 @@ class SessionState {
     }
     _generation++;
     sessionTitle.value = null;
+    // The previous session's run no longer applies.
+    changed.value = const [];
     _byId.clear();
     items.value = const [];
     chatMore.value = false;
@@ -340,8 +342,20 @@ class SessionState {
     }
   }
 
-  /// Files the latest run changed.
-  Future<List<BridgeFileChange>> changes() => _backend.changes();
+  /// The files the latest run changed, as last read; null before the first read. The Diff tab
+  /// and its count show them.
+  final changed = ValueNotifier<List<BridgeFileChange>?>(null);
+
+  /// Reads what the latest run changed; a failure is reported and keeps the last list.
+  Future<void> readChanges() async {
+    final generation = _generation;
+    try {
+      final read = await _backend.changes();
+      if (generation == _generation) changed.value = read;
+    } on Object catch (error) {
+      notify(BridgeLevel.error, 'Could not show the changes: $error');
+    }
+  }
 
   /// One file's unified diff since the latest run started.
   Future<String> patch(String path) => _backend.patch(path);
@@ -494,6 +508,7 @@ class SessionState {
         _turnActive = false;
         stored.value++;
         unawaited(loadTitle());
+        unawaited(readChanges());
       case BridgeEventKind.itemStarted:
         final started = event.item!;
         final view = ItemView(
