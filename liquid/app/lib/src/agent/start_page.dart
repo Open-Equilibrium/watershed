@@ -2,12 +2,12 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import '../controls.dart';
 import '../rust/api/session.dart';
 import '../session/session_state.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
-import 'chat_view.dart';
 
 /// The device a local session runs on, as the start page's device chip names it.
 final localDevice = Platform.isMacOS ? 'This Mac' : 'This computer';

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../controls.dart';
 import '../format.dart';
 import '../rust/api/events.dart';
 import '../session/session_state.dart';
@@ -9,9 +10,6 @@ import '../theme/tokens.g.dart';
 import '../trajectory/trajectory_model.dart';
 import '../trajectory/tree_view.dart';
 import 'start_page.dart';
-
-/// Width of the reading column in the chat and the input area.
-const double readingWidth = 740;
 
 /// The chat timeline of the current branch. It builds only visible items, each item rebuilds
 /// alone while its text streams (client architecture rules 5 and 6), and scrolling to the top
