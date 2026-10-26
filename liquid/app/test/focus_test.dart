@@ -245,6 +245,49 @@ void main() {
     expect(backend.calls.last, 'decide a1 allowOnce');
   });
 
+  testWidgets('an approval closes a menu above it before taking keys', (
+    tester,
+  ) async {
+    await show(tester);
+    await emit(tester, event(BridgeEventKind.turnStarted));
+    await tester.tap(find.byTooltip('Approval mode'));
+    await tester.pumpAndSettle();
+    expect(find.text('Runs every call without asking.'), findsOneWidget);
+
+    await emit(tester, approval('a1'));
+    expect(
+      find.text('Runs every call without asking.'),
+      findsNothing,
+      reason: 'the menu would hide the call it decides',
+    );
+    await read(tester);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    expect(backend.calls.last, 'decide a1 allowOnce');
+  });
+
+  testWidgets('a key held past a decision does nothing more', (tester) async {
+    await show(tester);
+    await tester.enterText(find.byKey(const Key('composer')), 'half-written');
+    await emit(tester, event(BridgeEventKind.turnStarted));
+    for (final (id, key) in [
+      ('a1', LogicalKeyboardKey.enter),
+      ('a2', LogicalKeyboardKey.escape),
+    ]) {
+      await emit(tester, approval(id));
+      await read(tester);
+      await tester.sendKeyDownEvent(key);
+      await emit(
+        tester,
+        event(BridgeEventKind.requestResolved, request: BridgeRequest(id: id)),
+      );
+      // The key repeats in the input area, which has the keys again.
+      await tester.sendKeyRepeatEvent(key);
+      await tester.sendKeyUpEvent(key);
+      await tester.pumpAndSettle();
+    }
+    expect(backend.calls, ['decide a1 allowOnce', 'decide a2 reject']);
+  });
+
   testWidgets('an approval or a question closes Settings', (tester) async {
     await show(tester);
     for (final (request, shown, resolved) in [

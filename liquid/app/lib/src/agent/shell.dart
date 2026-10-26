@@ -88,11 +88,13 @@ class _AgentShellState extends State<AgentShell> {
     if (!_settings.value) _focus.requestFocus();
   }
 
-  /// An approval or a question closes Settings, which cover the input area it appears in.
+  /// An approval or a question closes Settings and any menu or dialog, which would cover it
+  /// or take the keys meant for it.
   void _asked() {
     if (widget.state.approval.value != null ||
         widget.state.question.value != null) {
       _settings.value = false;
+      Navigator.of(context).popUntil((route) => route.isFirst);
     }
   }
 

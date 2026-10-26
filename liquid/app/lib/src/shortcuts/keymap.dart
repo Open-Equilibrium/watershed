@@ -25,9 +25,13 @@ class Keys {
   final bool shift;
   final bool control;
 
-  /// Accepts exactly these keys: a binding without the Liquid key ignores its key while the
-  /// Liquid key is held, so ⇪⏎ never also runs ⏎.
+  /// Accepts exactly these keys when pressed: a binding without the Liquid key ignores its
+  /// key while the Liquid key is held, so ⇪⏎ never also runs ⏎. A key held from before, such
+  /// as one that just decided an approval, runs nothing.
   ShortcutActivator get activator => _KeysActivator(this);
+
+  /// Like [activator], and also while the key is held, as for moving through a list.
+  ShortcutActivator get repeating => _KeysActivator(this, repeats: true);
 
   /// These keys as the macOS menu bar shows them; none with the Liquid key.
   SingleActivator? get menuShortcut => liquid
@@ -145,16 +149,17 @@ class Keys {
 
 /// Accepts its key with exactly its modifiers, the Liquid key among them.
 class _KeysActivator extends ShortcutActivator {
-  const _KeysActivator(this.keys);
+  const _KeysActivator(this.keys, {this.repeats = false});
 
   final Keys keys;
+  final bool repeats;
 
   @override
   Iterable<LogicalKeyboardKey> get triggers => [keys.key];
 
   @override
   bool accepts(KeyEvent event, HardwareKeyboard state) =>
-      event is! KeyUpEvent &&
+      (event is KeyDownEvent || (repeats && event is KeyRepeatEvent)) &&
       event.logicalKey == keys.key &&
       state.logicalKeysPressed.contains(liquidKey) == keys.liquid &&
       state.isMetaPressed == keys.meta &&
@@ -220,7 +225,7 @@ enum Fixed {
     assert(actions.length == keys.length, '$name binds ${keys.length} keys');
     return {
       for (final (index, keys) in this.keys.indexed)
-        keys.activator: actions[index],
+        keys.repeating: actions[index],
     };
   }
 }

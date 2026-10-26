@@ -108,9 +108,9 @@ class _ApprovalCardState extends State<ApprovalCard> {
       },
       child: Focus(
         focusNode: _focus,
-        // A key pressed before the card was read, or held from before, decides nothing.
+        // A key pressed before the card was read decides nothing; a held key never does.
         onKeyEvent: (node, event) =>
-            (!_armed || event is KeyRepeatEvent) &&
+            !_armed &&
                 decisions.keys
                     .expand(keys.bindings)
                     .any(
