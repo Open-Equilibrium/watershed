@@ -891,3 +891,50 @@ exit 1"#;
         "{error}"
     );
 }
+
+#[test]
+fn starts_after_an_agent_says_much_before_it_is_ready() {
+    // More events than the session's channel holds, before the answer to the start check.
+    let script = r#"i=0; while [ $i -lt 300 ]; do printf '%s\n' "{\"type\":\"extension_ui_request\",\"id\":\"s$i\",\"method\":\"setStatus\",\"statusKey\":\"k\",\"statusText\":\"$i\"}"; i=$((i+1)); done
+IFS= read -r line
+printf '%s\n' '{"id":"1","type":"response","command":"get_commands","success":true,"data":{"commands":[{"name":"watershed-branch","source":"extension"}]}}'
+IFS= read -r line || exit 0"#;
+    let (done, started) = mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = done.send(AgentSession::start(SessionConfig {
+            program: "/bin/sh".to_owned(),
+            args: vec!["-c".to_owned(), script.to_owned()],
+            cwd: std::env::temp_dir().display().to_string(),
+        }));
+    });
+    let session = started
+        .recv_timeout(Duration::from_secs(10))
+        .expect("the start ends")
+        .expect("agent starts");
+    let (sender, receiver) = mpsc::channel();
+    session
+        .forward(move |event| sender.send(event).is_ok())
+        .expect("first subscriber");
+    let last = std::iter::from_fn(|| receiver.recv_timeout(Duration::from_secs(5)).ok())
+        .find(|event| event.text.as_deref() == Some("299"));
+    assert!(last.is_some(), "every early event reaches Dart");
+    assert!(session.shutdown());
+}
+
+#[test]
+fn gives_up_on_an_agent_that_never_says_it_is_ready() {
+    let (done, started) = mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = done.send(AgentSession::start(SessionConfig {
+            program: "/bin/sh".to_owned(),
+            args: vec!["-c".to_owned(), "while :; do sleep 1; done".to_owned()],
+            cwd: std::env::temp_dir().display().to_string(),
+        }));
+    });
+    let error = started
+        .recv_timeout(Duration::from_secs(10))
+        .expect("the start ends")
+        .err()
+        .expect("no session starts");
+    assert!(error.contains("did not answer"), "{error}");
+}

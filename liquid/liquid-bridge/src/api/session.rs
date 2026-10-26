@@ -17,9 +17,10 @@ use crate::api::events::{BridgeDecision, BridgeEvent, BridgeFileChange, BridgeQu
 use crate::api::history::{BridgeContextDetail, BridgeHistory, BridgeTranscript};
 use crate::convert::{coalesce, describe};
 use crate::frb_generated::StreamSink;
+use crate::ready::{START_TIMEOUT, error_output, ready};
 
 /// Time an agent gets to exit after its input closes before it is killed.
-const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
+pub(crate) const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
 
 static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
     tokio::runtime::Builder::new_multi_thread()
@@ -79,6 +80,8 @@ pub struct AgentSession {
     /// The session's events until Dart subscribes; the core buffers a bounded number and then
     /// pauses the agent.
     receiver: std::sync::Mutex<Option<mpsc::Receiver<SessionEvent>>>,
+    /// Events that arrived while the agent started.
+    early: std::sync::Mutex<Vec<SessionEvent>>,
     /// What the latest run changed in the project.
     diff: RunDiff,
     /// The directory the agent works in.
@@ -99,22 +102,39 @@ impl AgentSession {
         let diff = RUNTIME.block_on(RunDiff::open(&command.cwd));
         let (mut session, mut receiver) =
             Session::start(&command).map_err(|error| error.to_string())?;
-        // Without the extension pi runs tool calls without asking; dropping the session ends it.
-        if let Err(error) = RUNTIME.block_on(session.require_gate()) {
+        // Without the extension pi runs tool calls without asking, so the agent must confirm
+        // it within a time limit; dropping the session ends the agent.
+        let (gate, mut early) = RUNTIME.block_on(ready(&mut session, &mut receiver));
+        match gate {
+            Some(Ok(())) => {}
             // An agent that ended at once says why on its error output.
-            let output = match error {
-                CommandError::Closed => RUNTIME.block_on(error_output(&mut receiver)),
-                _ => None,
-            };
-            return Err(output
-                .filter(|output| !output.is_empty())
-                .unwrap_or_else(|| describe(error)));
+            Some(Err(CommandError::Closed)) => {
+                let output = early
+                    .iter()
+                    .find_map(|event| match event {
+                        SessionEvent::Exited { error_output, .. } => Some(error_output.clone()),
+                        _ => None,
+                    })
+                    .or_else(|| RUNTIME.block_on(error_output(&mut receiver)));
+                return Err(output
+                    .filter(|output| !output.is_empty())
+                    .unwrap_or_else(|| describe(CommandError::Closed)));
+            }
+            Some(Err(error)) => return Err(describe(error)),
+            None => {
+                return Err(format!(
+                    "pi did not answer within {} s of starting",
+                    START_TIMEOUT.as_secs()
+                ));
+            }
         }
+        early.shrink_to_fit();
         let stopper = session.stopper();
         Ok(Self {
             stopper: std::sync::Mutex::new(stopper),
             session: Mutex::new(Some(session)),
             receiver: std::sync::Mutex::new(Some(receiver)),
+            early: std::sync::Mutex::new(early),
             diff,
             cwd: command.cwd,
         })
@@ -138,8 +158,16 @@ impl AgentSession {
             .unwrap_or_else(PoisonError::into_inner)
             .take()
             .ok_or_else(|| "the session's events already have a subscriber".to_owned())?;
+        let early = std::mem::take(&mut *self.early.lock().unwrap_or_else(PoisonError::into_inner));
         RUNTIME.spawn(async move {
-            let mut batch = Vec::new();
+            // Events from before the start finished come first.
+            let mut batch: Vec<_> = early.into_iter().map(BridgeEvent::from).collect();
+            if !coalesce(std::mem::take(&mut batch))
+                .into_iter()
+                .all(&mut deliver)
+            {
+                return;
+            }
             while let Some(event) = receiver.recv().await {
                 batch.push(BridgeEvent::from(event));
                 while let Ok(event) = receiver.try_recv() {
@@ -473,20 +501,4 @@ fn open(session: &mut Option<Session>) -> Result<&mut Session, String> {
     session
         .as_mut()
         .ok_or_else(|| "the session was shut down".to_owned())
-}
-
-/// What an agent that ended wrote to its error output, once it reports its exit.
-async fn error_output(receiver: &mut mpsc::Receiver<SessionEvent>) -> Option<String> {
-    let exit = async {
-        while let Some(event) = receiver.recv().await {
-            if let SessionEvent::Exited { error_output, .. } = event {
-                return Some(error_output);
-            }
-        }
-        None
-    };
-    tokio::time::timeout(SHUTDOWN_GRACE, exit)
-        .await
-        .ok()
-        .flatten()
 }
