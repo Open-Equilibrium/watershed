@@ -100,8 +100,8 @@ impl AgentSession {
         };
         let _runtime = RUNTIME.enter();
         let diff = RUNTIME.block_on(RunDiff::open(&command.cwd));
-        let (mut session, mut receiver) =
-            Session::start(&command).map_err(|error| error.to_string())?;
+        let (mut session, mut receiver) = Session::start(&command)
+            .map_err(|error| format!("could not run {}: {error}", command.program.display()))?;
         // Without the extension pi runs tool calls without asking, so the agent must confirm
         // it within a time limit; dropping the session ends the agent.
         let (gate, mut early) = RUNTIME.block_on(ready(&mut session, &mut receiver));

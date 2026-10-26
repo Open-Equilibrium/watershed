@@ -895,6 +895,17 @@ exit 1"#;
         error.starts_with("Error: Failed to load extension"),
         "{error}"
     );
+
+    let missing = AgentSession::start(SessionConfig {
+        program: "/nonexistent/pi".to_owned(),
+        args: Vec::new(),
+        cwd: std::env::temp_dir().display().to_string(),
+    });
+    let error = missing.err().expect("no session starts");
+    assert!(
+        error.starts_with("could not run /nonexistent/pi: "),
+        "{error}"
+    );
 }
 
 #[test]

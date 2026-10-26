@@ -21,6 +21,17 @@ void main() {
     expect(launch.problem, contains('absolute path'));
   });
 
+  test('says when the project directory does not exist', () async {
+    final launch = await launchFromEnvironment({
+      'LIQUID_PROJECT': '/nonexistent/acme-api',
+      'LIQUID_PI_EXTENSION': '/w/watershed.ts',
+    });
+    expect(
+      launch.problem,
+      'LIQUID_PROJECT names no directory: /nonexistent/acme-api',
+    );
+  });
+
   test('reopens a stored pi session when one is named', () {
     expect(piArguments('/w/watershed.ts', null), [
       '--mode',

@@ -39,6 +39,10 @@ Future<Launch> launchFromEnvironment(Map<String, String> environment) async {
       'to the absolute path of meta-harness/pi-extension/watershed.ts.',
     );
   }
+  // Starting pi in a missing directory fails like a missing pi.
+  if (!Directory(project).existsSync()) {
+    return Launch.problem('LIQUID_PROJECT names no directory: $project');
+  }
   try {
     final session = await AgentSession.start(
       config: SessionConfig(
