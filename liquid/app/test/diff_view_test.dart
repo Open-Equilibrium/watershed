@@ -271,6 +271,36 @@ void main() {
     );
   });
 
+  testWidgets('says when the project is not in Git', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1600, 900));
+    final backend = FakeBackend()..changed = null;
+    final state = SessionState(backend);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: liquidTheme(Brightness.light),
+        home: Material(child: DiffView(state: state)),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      find.text(
+        'This project is not in Git, so Liquid cannot show what a run changed.',
+      ),
+      findsOneWidget,
+    );
+    expect(state.notices.value, isEmpty, reason: 'nothing failed');
+  });
+
+  testWidgets('reports a lasting failure to read the changes once', (
+    tester,
+  ) async {
+    final backend = FakeBackend()..changesError = 'git could not start';
+    final state = SessionState(backend);
+    await state.readChanges();
+    await state.readChanges();
+    expect(state.notices.value, hasLength(1));
+  });
+
   testWidgets('moves past a folded folder in both directions', (tester) async {
     await tester.binding.setSurfaceSize(const Size(1600, 900));
     BridgeFileChange file(String path) => BridgeFileChange(

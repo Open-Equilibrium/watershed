@@ -124,6 +124,28 @@ fn a_session_switch_ends_the_diff_unless_a_run_started_meanwhile() {
 }
 
 #[test]
+fn a_project_outside_git_says_so_instead_of_showing_no_changes() {
+    run(async {
+        let dir =
+            std::env::temp_dir().join(format!("watershed-run-diff-no-git-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("directory");
+        let diff = RunDiff::open(&dir).await;
+        diff.started(diff.capture().await);
+        std::fs::write(dir.join("a.txt"), "new\n").expect("file");
+
+        assert!(matches!(
+            diff.changes().await,
+            Err(DiffError::NotARepository)
+        ));
+        assert!(matches!(
+            diff.patch("a.txt").await,
+            Err(DiffError::NotARepository)
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+    });
+}
+
+#[test]
 fn a_project_that_could_not_be_captured_is_reported_instead_of_unchanged() {
     use std::os::unix::fs::PermissionsExt;
     run(async {

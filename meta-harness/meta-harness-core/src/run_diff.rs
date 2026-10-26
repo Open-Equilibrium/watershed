@@ -22,8 +22,10 @@ const CLOSE_WAIT: Duration = Duration::from_secs(1);
 /// The changes of a session's latest run in its project.
 #[derive(Debug)]
 pub struct RunDiff {
-    /// The project; none outside Git or once closed.
+    /// The project; none when it could not be opened or once closed.
     tree: Mutex<Option<Arc<WorkingTree>>>,
+    /// Why the project could not be opened.
+    unopened: Option<Unopened>,
     before: Mutex<Before>,
     timeout: Duration,
     /// Tells reads in progress that the diff closed.
@@ -38,19 +40,33 @@ struct Before {
     runs: u64,
 }
 
+#[derive(Debug)]
+enum Unopened {
+    /// The project is not in a Git working tree.
+    OutsideGit,
+    /// Git or the private store failed.
+    Failed(String),
+}
+
 /// The project as captured before a message that may start a run.
 #[derive(Debug)]
 pub struct Capture(Option<Result<Snapshot, String>>);
 
 impl RunDiff {
-    /// Follows the project that contains `dir`; outside Git no run changes anything.
+    /// Follows the project that contains `dir`; outside Git, reads say so.
     pub async fn open(dir: &Path) -> Self {
         Self::with_timeout(dir, GIT_TIMEOUT).await
     }
 
     pub(crate) async fn with_timeout(dir: &Path, timeout: Duration) -> Self {
+        let (tree, unopened) = match WorkingTree::open(dir).await {
+            Ok(tree) => (Some(Arc::new(tree)), None),
+            Err(DiffError::NotARepository) => (None, Some(Unopened::OutsideGit)),
+            Err(error) => (None, Some(Unopened::Failed(error.to_string()))),
+        };
         Self {
-            tree: Mutex::new(WorkingTree::open(dir).await.ok().map(Arc::new)),
+            tree: Mutex::new(tree),
+            unopened,
             before: Mutex::default(),
             timeout,
             closed: watch::Sender::new(false),
@@ -135,7 +151,11 @@ impl RunDiff {
 
     fn compared(&self) -> Result<Option<(Arc<WorkingTree>, Snapshot)>, DiffError> {
         let Some(tree) = self.tree() else {
-            return Ok(None);
+            return match &self.unopened {
+                Some(Unopened::OutsideGit) => Err(DiffError::NotARepository),
+                Some(Unopened::Failed(reason)) => Err(DiffError::NotCaptured(reason.clone())),
+                None => Ok(None),
+            };
         };
         match &self.before().state {
             None => Ok(None),

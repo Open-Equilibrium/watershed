@@ -20,7 +20,7 @@ abstract interface class SessionBackend {
   Future<void> answerConfirm(String request, bool confirmed);
   Future<void> dismiss(String request);
   Future<bool> shutdown();
-  Future<List<BridgeFileChange>> changes();
+  Future<List<BridgeFileChange>?> changes();
   Future<String> patch(String path);
   Future<BridgeHistory> history(List<String> leaves);
   Future<BridgeContextDetail?> context(String entry);
@@ -76,7 +76,7 @@ class RustSessionBackend implements SessionBackend {
   @override
   Future<bool> shutdown() => _session.shutdown();
   @override
-  Future<List<BridgeFileChange>> changes() => _session.changes();
+  Future<List<BridgeFileChange>?> changes() => _session.changes();
   @override
   Future<String> patch(String path) => _session.patch(path: path);
   @override

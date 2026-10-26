@@ -391,21 +391,23 @@ class SessionState {
   /// Why the latest read of the changes failed; null after one that worked.
   final changesProblem = ValueNotifier<String?>(null);
 
-  /// Reads what the latest run changed. A failed read is reported, and the Diff tab says so
-  /// instead of showing an earlier run's changes.
+  /// Reads what the latest run changed. A failed read is reported once, and the Diff tab says
+  /// so instead of showing an earlier run's changes.
   Future<void> readChanges() async {
     final generation = _generation;
     try {
       final read = await _backend.changes();
       if (generation != _generation) return;
-      changesProblem.value = null;
+      changesProblem.value = read == null
+          ? 'This project is not in Git, so Liquid cannot show what a run changed.'
+          : null;
       changed.value = read;
     } on Object catch (error) {
       if (generation != _generation) return;
       final problem = 'Could not show the changes: $error';
+      if (problem != changesProblem.value) notify(BridgeLevel.error, problem);
       changesProblem.value = problem;
       changed.value = null;
-      notify(BridgeLevel.error, problem);
     }
   }
 

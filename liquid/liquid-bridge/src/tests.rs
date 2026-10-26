@@ -449,7 +449,9 @@ IFS= read -r line || exit 0"#;
     let (answered, answer) = mpsc::channel();
     {
         let session = Arc::clone(&session);
-        std::thread::spawn(move || answered.send(call(session.answer_confirm("q1".to_owned(), true))));
+        std::thread::spawn(move || {
+            answered.send(call(session.answer_confirm("q1".to_owned(), true)))
+        });
     }
     assert_eq!(answer.recv_timeout(Duration::from_secs(10)), Ok(Ok(())));
     assert_eq!(selecting.join().expect("selection returns"), Ok(()));
@@ -583,17 +585,17 @@ IFS= read -r line || exit 0"#;
         cwd: repo.display().to_string(),
     })
     .expect("agent starts");
-    assert_eq!(session.changes(), Ok(Vec::new()), "no run yet");
+    assert_eq!(session.changes(), Ok(Some(Vec::new())), "no run yet");
     assert_eq!(session.send("edit".to_owned(), false), Ok(()));
     let changes = session.changes().expect("changes");
     assert_eq!(
         changes,
-        [BridgeFileChange {
+        Some(vec![BridgeFileChange {
             path: "a.txt".to_owned(),
             status: BridgeChangeStatus::Modified,
             added: 1,
             removed: 1,
-        }]
+        }])
     );
     let patch = session.patch("a.txt".to_owned()).expect("patch");
     assert!(
@@ -609,7 +611,7 @@ IFS= read -r line || exit 0"#;
     assert!(call(session.shutdown()));
     assert_eq!(
         session.changes(),
-        Ok(Vec::new()),
+        Ok(Some(Vec::new())),
         "shutting down removes the snapshots"
     );
     let _ = std::fs::remove_dir_all(&repo);

@@ -100,7 +100,7 @@ abstract class RustLibApi extends BaseApi {
     required String entry,
   });
 
-  Future<List<BridgeFileChange>> crateApiSessionAgentSessionChanges({
+  Future<List<BridgeFileChange>?> crateApiSessionAgentSessionChanges({
     required AgentSession that,
   });
 
@@ -368,7 +368,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<List<BridgeFileChange>> crateApiSessionAgentSessionChanges({
+  Future<List<BridgeFileChange>?> crateApiSessionAgentSessionChanges({
     required AgentSession that,
   }) {
     return handler.executeNormal(
@@ -387,7 +387,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           );
         },
         codec: SseCodec(
-          decodeSuccessData: sse_decode_list_bridge_file_change,
+          decodeSuccessData: sse_decode_opt_list_bridge_file_change,
           decodeErrorData: sse_decode_String,
         ),
         constMeta: kCrateApiSessionAgentSessionChangesConstMeta,
@@ -1978,6 +1978,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  List<BridgeFileChange>? dco_decode_opt_list_bridge_file_change(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_list_bridge_file_change(raw);
+  }
+
+  @protected
   SessionConfig dco_decode_session_config(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
@@ -3062,6 +3068,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  List<BridgeFileChange>? sse_decode_opt_list_bridge_file_change(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_list_bridge_file_change(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
   SessionConfig sse_decode_session_config(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_program = sse_decode_String(deserializer);
@@ -4045,6 +4064,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_opt_list_bridge_file_change(
+    List<BridgeFileChange>? self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_list_bridge_file_change(self, serializer);
+    }
+  }
+
+  @protected
   void sse_encode_session_config(SessionConfig self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_String(self.program, serializer);
@@ -4122,8 +4154,8 @@ class AgentSessionImpl extends RustOpaque implements AgentSession {
   Future<void> branch({required String entry}) => RustLib.instance.api
       .crateApiSessionAgentSessionBranch(that: this, entry: entry);
 
-  /// Files the latest run changed, compared with the project before it.
-  Future<List<BridgeFileChange>> changes() =>
+  /// Files the latest run changed, compared with the project before it; none outside Git.
+  Future<List<BridgeFileChange>?> changes() =>
       RustLib.instance.api.crateApiSessionAgentSessionChanges(that: this);
 
   /// Removes the messages waiting for the running agent and returns them.

@@ -10,7 +10,8 @@ import 'package:liquid/src/session/backend.dart';
 class FakeBackend implements SessionBackend {
   final controller = StreamController<BridgeEvent>();
   final calls = <String>[];
-  List<BridgeFileChange> changed = const [];
+  /// The files the latest run changed; none outside Git.
+  List<BridgeFileChange>? changed = const [];
   Map<String, String> patches = const {};
   BridgeHistory stored = historyOf([]);
 
@@ -74,7 +75,7 @@ class FakeBackend implements SessionBackend {
   Object? changesError;
 
   @override
-  Future<List<BridgeFileChange>> changes() async {
+  Future<List<BridgeFileChange>?> changes() async {
     if (changesError case final error?) throw error;
     return changed;
   }

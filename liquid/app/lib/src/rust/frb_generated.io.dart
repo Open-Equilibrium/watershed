@@ -311,6 +311,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<String>? dco_decode_opt_list_String(dynamic raw);
 
   @protected
+  List<BridgeFileChange>? dco_decode_opt_list_bridge_file_change(dynamic raw);
+
+  @protected
   SessionConfig dco_decode_session_config(dynamic raw);
 
   @protected
@@ -681,6 +684,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<String>? sse_decode_opt_list_String(SseDeserializer deserializer);
+
+  @protected
+  List<BridgeFileChange>? sse_decode_opt_list_bridge_file_change(
+    SseDeserializer deserializer,
+  );
 
   @protected
   SessionConfig sse_decode_session_config(SseDeserializer deserializer);
@@ -1161,6 +1169,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_opt_list_String(List<String>? self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_opt_list_bridge_file_change(
+    List<BridgeFileChange>? self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_session_config(SessionConfig self, SseSerializer serializer);

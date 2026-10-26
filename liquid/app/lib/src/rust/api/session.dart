@@ -31,8 +31,8 @@ abstract class AgentSession implements RustOpaqueInterface {
   /// Continues the session from `entry`; the next prompt starts a new branch there.
   Future<void> branch({required String entry});
 
-  /// Files the latest run changed, compared with the project before it.
-  Future<List<BridgeFileChange>> changes();
+  /// Files the latest run changed, compared with the project before it; none outside Git.
+  Future<List<BridgeFileChange>?> changes();
 
   /// Removes the messages waiting for the running agent and returns them.
   Future<BridgeQueue> clearQueue();

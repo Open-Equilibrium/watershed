@@ -7,8 +7,8 @@ use std::time::Duration;
 use std::path::{Path, PathBuf};
 
 use meta_harness_core::{
-    AgentCommand, Answer, CommandError, Delivery, RequestId, RunDiff, Session, SessionEvent,
-    recent_sessions, session_title,
+    AgentCommand, Answer, CommandError, Delivery, DiffError, RequestId, RunDiff, Session,
+    SessionEvent, recent_sessions, session_title,
 };
 use tokio::runtime::Runtime;
 use tokio::sync::{Mutex, mpsc};
@@ -236,18 +236,13 @@ impl AgentSession {
         })
     }
 
-    /// Files the latest run changed, compared with the project before it.
-    pub fn changes(&self) -> Result<Vec<BridgeFileChange>, String> {
-        RUNTIME.block_on(async {
-            Ok(self
-                .diff
-                .changes()
-                .await
-                .map_err(|error| error.to_string())?
-                .into_iter()
-                .map(Into::into)
-                .collect())
-        })
+    /// Files the latest run changed, compared with the project before it; none outside Git.
+    pub fn changes(&self) -> Result<Option<Vec<BridgeFileChange>>, String> {
+        match RUNTIME.block_on(self.diff.changes()) {
+            Ok(changes) => Ok(Some(changes.into_iter().map(Into::into).collect())),
+            Err(DiffError::NotARepository) => Ok(None),
+            Err(error) => Err(error.to_string()),
+        }
     }
 
     /// The unified diff of one file since the latest run started.

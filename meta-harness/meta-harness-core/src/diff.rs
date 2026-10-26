@@ -58,6 +58,8 @@ pub enum DiffError {
     NotARepository,
     /// Git failed.
     Git(String),
+    /// Git could not be started, for example because it is not installed.
+    GitStart(std::io::Error),
     /// The private object store could not be prepared.
     Io(std::io::Error),
     /// Git's output exceeded the limit, so only part of it could be read.
@@ -75,6 +77,7 @@ impl fmt::Display for DiffError {
         match self {
             Self::NotARepository => f.write_str("not inside a Git working tree"),
             Self::Git(error) => write!(f, "git failed: {error}"),
+            Self::GitStart(error) => write!(f, "git could not start: {error}"),
             Self::Io(error) => write!(f, "snapshot store failed: {error}"),
             Self::TooLarge => write!(
                 f,
@@ -157,7 +160,10 @@ impl WorkingTree {
             ],
         )
         .await
-        .map_err(|_| DiffError::NotARepository)?;
+        .map_err(|error| match error {
+            DiffError::Git(_) => DiffError::NotARepository,
+            error => error,
+        })?;
         let mut lines = lines.lines();
         let (Some(root), Some(index), Some(objects)) = (lines.next(), lines.next(), lines.next())
         else {
@@ -308,7 +314,7 @@ async fn git(dir: &Path, env: &[(&str, OsString)], args: &[&str]) -> Result<Stri
         .stderr(Stdio::piped())
         .kill_on_drop(true)
         .spawn()
-        .map_err(|error| DiffError::Git(error.to_string()))?;
+        .map_err(DiffError::GitStart)?;
     // Git's warnings drain meanwhile, so a full error pipe never blocks it.
     let stderr = child.stderr.take().expect("stderr is piped");
     let errors = tokio::spawn(keep_start(stderr, MAX_ERROR_BYTES));
