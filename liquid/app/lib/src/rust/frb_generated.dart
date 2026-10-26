@@ -69,7 +69,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.13.0';
 
   @override
-  int get rustContentHash => -172557710;
+  int get rustContentHash => -1053598613;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -183,6 +183,10 @@ abstract class RustLibApi extends BaseApi {
   Future<bool> crateApiSessionAgentSessionSwitchSession({
     required AgentSession that,
     required String path,
+  });
+
+  Future<String?> crateApiSessionAgentSessionTitle({
+    required AgentSession that,
   });
 
   Future<BridgeTranscript> crateApiSessionAgentSessionTranscript({
@@ -1038,6 +1042,39 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<String?> crateApiSessionAgentSessionTitle({
+    required AgentSession that,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerAgentSession(
+            that,
+            serializer,
+          );
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 23,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_opt_String,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiSessionAgentSessionTitleConstMeta,
+        argValues: [that],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiSessionAgentSessionTitleConstMeta =>
+      const TaskConstMeta(debugName: "AgentSession_title", argNames: ["that"]);
+
+  @override
   Future<BridgeTranscript> crateApiSessionAgentSessionTranscript({
     required AgentSession that,
     String? before,
@@ -1056,7 +1093,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 23,
+            funcId: 24,
             port: port_,
           );
         },
@@ -1086,7 +1123,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 24,
+            funcId: 25,
             port: port_,
           );
         },
@@ -1113,7 +1150,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 25,
+            funcId: 26,
             port: port_,
           );
         },
@@ -1143,7 +1180,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 26,
+            funcId: 27,
             port: port_,
           );
         },
@@ -4140,6 +4177,11 @@ class AgentSessionImpl extends RustOpaque implements AgentSession {
   /// Continues the session stored in `path`; `false` when an extension cancelled it.
   Future<bool> switchSession({required String path}) => RustLib.instance.api
       .crateApiSessionAgentSessionSwitchSession(that: this, path: path);
+
+  /// The open session's title, as the start page names stored sessions; none before pi
+  /// stored a name or a prompt.
+  Future<String?> title() =>
+      RustLib.instance.api.crateApiSessionAgentSessionTitle(that: this);
 
   /// The chat of the current branch: the items of up to `limit` stored entries before
   /// `before`, or of the newest ones.

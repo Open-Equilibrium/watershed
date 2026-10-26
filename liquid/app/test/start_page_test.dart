@@ -10,12 +10,7 @@ import 'package:liquid/src/theme/theme.dart';
 
 import 'fake_backend.dart';
 
-const info = SessionInfo(
-  title: 'Agent session',
-  project: 'acme-api',
-  harness: 'pi',
-  device: 'MacBook',
-);
+const info = SessionInfo(project: 'acme-api', harness: 'pi', device: 'MacBook');
 
 void main() {
   late FakeBackend backend;
@@ -134,7 +129,6 @@ void main() {
         home: AgentShell(
           state: state,
           info: const SessionInfo(
-            title: 'Agent session',
             project: 'a-project-with-a-rather-long-directory-name',
             harness: 'pi',
             device: 'MacBook',

@@ -52,7 +52,6 @@ Future<Launch> launchFromEnvironment(Map<String, String> environment) async {
     return Launch.session(
       state,
       SessionInfo(
-        title: 'Agent session',
         project: Directory(project).uri.pathSegments
             .where((part) => part.isNotEmpty)
             .last,

@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 
 use meta_harness_core::{
     AgentCommand, Answer, Delivery, RequestId, RunDiff, Session, SessionEvent, recent_sessions,
+    session_title,
 };
 use tokio::runtime::Runtime;
 use tokio::sync::{Mutex, mpsc};
@@ -292,6 +293,18 @@ impl AgentSession {
         let stored = recent_sessions(dir, &self.cwd, Some(&file), limit)
             .map_err(|error| error.to_string())?;
         Ok(stored.into_iter().map(Into::into).collect())
+    }
+
+    /// The open session's title, as the start page names stored sessions; none before pi
+    /// stored a name or a prompt.
+    pub fn title(&self) -> Result<Option<String>, String> {
+        let current = RUNTIME.block_on(async {
+            let mut session = self.session.lock().await;
+            open(&mut session)?.state().await.map_err(describe)
+        })?;
+        Ok(current
+            .session_file
+            .and_then(|file| session_title(&file, &self.cwd)))
     }
 
     /// Starts a new session in the same agent; `false` when an extension cancelled it.

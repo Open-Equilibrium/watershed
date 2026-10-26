@@ -24,14 +24,12 @@ import 'shortcut_reveal.dart';
 @immutable
 class SessionInfo {
   const SessionInfo({
-    required this.title,
     required this.project,
     required this.harness,
     required this.device,
     this.branch,
   });
 
-  final String title;
   final String project;
   final String harness;
   final String device;
@@ -263,7 +261,7 @@ class _AgentShellState extends State<AgentShell> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          _Header(title: widget.info.title),
+                          _Header(state: widget.state),
                           _Tabs(tab: _tab),
                           Expanded(
                             child: ValueListenableBuilder(
@@ -325,19 +323,38 @@ class _AgentShellState extends State<AgentShell> {
 }
 
 class _Header extends StatelessWidget {
-  const _Header({required this.title});
+  const _Header({required this.state});
 
-  final String title;
+  final SessionState state;
 
   @override
   Widget build(BuildContext context) => Container(
     height: 44,
     padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space7),
     alignment: Alignment.centerLeft,
-    child: Text(
-      title,
+    child: _SessionTitle(
+      state: state,
       style: Theme.of(context).textTheme.labelMedium
           ?.copyWith(fontWeight: WsMetrics.fwSemibold),
+    ),
+  );
+}
+
+/// The open session's title, or "New session" before it has one.
+class _SessionTitle extends StatelessWidget {
+  const _SessionTitle({required this.state, this.style});
+
+  final SessionState state;
+  final TextStyle? style;
+
+  @override
+  Widget build(BuildContext context) => ValueListenableBuilder(
+    valueListenable: state.sessionTitle,
+    builder: (context, title, _) => Text(
+      title ?? 'New session',
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: style,
     ),
   );
 }
@@ -500,12 +517,7 @@ class Sidebar extends StatelessWidget {
                           ),
                         ),
                         const SizedBox(width: WsMetrics.space3),
-                        Expanded(
-                          child: Text(
-                            info.title,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
+                        Expanded(child: _SessionTitle(state: state)),
                         Text(
                           label,
                           style: TextStyle(

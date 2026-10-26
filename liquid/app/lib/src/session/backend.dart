@@ -30,6 +30,9 @@ abstract interface class SessionBackend {
   /// The project's recent stored sessions, newest first, without the current one.
   Future<List<BridgeStoredSession>> recentSessions();
 
+  /// The open session's title, as the recent sessions are named; null until pi stored one.
+  Future<String?> title();
+
   /// Starts a new session or continues a stored one; `false` when an extension cancelled it.
   Future<bool> newSession();
   Future<bool> switchSession(String path);
@@ -90,6 +93,8 @@ class RustSessionBackend implements SessionBackend {
   @override
   Future<List<BridgeStoredSession>> recentSessions() =>
       _session.recentSessions(limit: recentLimit);
+  @override
+  Future<String?> title() => _session.title();
   @override
   Future<bool> newSession() => _session.newSession();
   @override

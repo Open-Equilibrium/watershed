@@ -96,6 +96,10 @@ class SessionState {
   final widgets = ValueNotifier<Map<String, List<String>>>(const {});
   final statuses = ValueNotifier<Map<String, String>>(const {});
   final title = ValueNotifier<String?>(null);
+
+  /// The open session's title, as the start page names stored sessions; until pi stored one,
+  /// the first line of the first message sent.
+  final sessionTitle = ValueNotifier<String?>(null);
   final draft = ValueNotifier<String?>(null);
 
   /// The notification the status bar shows, and the latest ones, newest first.
@@ -128,14 +132,28 @@ class SessionState {
   final models = ValueNotifier<List<BridgeModel>>(const []);
   final model = ValueNotifier<String?>(null);
 
-  /// Reads what the start page offers.
+  /// Reads what the start page offers, and the open session's title.
   Future<void> loadStart() async {
+    unawaited(loadTitle());
     try {
       recent.value = await _backend.recentSessions();
       models.value = await _backend.models();
       model.value = await _backend.currentModel();
     } on Object catch (error) {
       notify(BridgeLevel.warning, 'Could not read the recent sessions: $error');
+    }
+  }
+
+  /// Reads the title pi stored for the open session; a session switch meanwhile drops it.
+  Future<void> loadTitle() async {
+    final generation = _generation;
+    try {
+      final stored = await _backend.title();
+      if (stored != null && generation == _generation) {
+        sessionTitle.value = stored;
+      }
+    } on Object {
+      // The title is read again after the next turn.
     }
   }
 
@@ -202,6 +220,7 @@ class SessionState {
       return false;
     }
     _generation++;
+    sessionTitle.value = null;
     _byId.clear();
     items.value = const [];
     chatMore.value = false;
@@ -238,6 +257,8 @@ class SessionState {
     }
     try {
       await _backend.send(message, followUp: followUp);
+      // Named like a stored session until pi stores this one.
+      sessionTitle.value ??= _firstLine(message);
     } on Object catch (error) {
       draft.value = message;
       notify(BridgeLevel.error, 'The message was not sent: $error');
@@ -472,6 +493,7 @@ class SessionState {
       case BridgeEventKind.turnCompleted || BridgeEventKind.turnAborted:
         _turnActive = false;
         stored.value++;
+        unawaited(loadTitle());
       case BridgeEventKind.itemStarted:
         final started = event.item!;
         final view = ItemView(
@@ -560,4 +582,10 @@ class SessionState {
         ? RunStatus.running
         : RunStatus.idle;
   }
+}
+
+/// A message's first line, as long as a stored session's title can be.
+String _firstLine(String message) {
+  final line = message.trim().split('\n').first.trim();
+  return String.fromCharCodes(line.runes.take(120));
 }

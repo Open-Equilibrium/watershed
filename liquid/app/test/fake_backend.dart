@@ -107,6 +107,12 @@ class FakeBackend implements SessionBackend {
   @override
   Future<List<BridgeStoredSession>> recentSessions() async => storedSessions;
 
+  /// The open session's title, as pi stored it.
+  String? sessionTitle;
+
+  @override
+  Future<String?> title() async => sessionTitle;
+
   /// Holds session switches until it completes.
   Completer<void>? switchGate;
 

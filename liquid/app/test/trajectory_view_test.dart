@@ -13,12 +13,7 @@ import 'package:liquid/src/trajectory/overview.dart';
 
 import 'fake_backend.dart';
 
-const info = SessionInfo(
-  title: 'Rate limit for /login',
-  project: 'acme-api',
-  harness: 'pi',
-  device: 'MacBook',
-);
+const info = SessionInfo(project: 'acme-api', harness: 'pi', device: 'MacBook');
 
 BridgeUsage tokens(
   int input,

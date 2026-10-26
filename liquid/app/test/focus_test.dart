@@ -10,12 +10,7 @@ import 'package:liquid/src/theme/theme.dart';
 
 import 'fake_backend.dart';
 
-const info = SessionInfo(
-  title: 'Rate limit for /login',
-  project: 'acme-api',
-  harness: 'pi',
-  device: 'MacBook',
-);
+const info = SessionInfo(project: 'acme-api', harness: 'pi', device: 'MacBook');
 
 /// Keys in the whole shell, where the shell's own focus is taken first: dialogs, the Diff tab
 /// and the input area take the keys without a click, and only keys meant for them.

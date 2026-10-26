@@ -30,7 +30,7 @@ pub use run_diff::{Capture, RunDiff};
 pub use session::{
     AgentCommand, CommandError, Model, Pending, Session, SessionEvent, SessionState, Stopper,
 };
-pub use stored::{StoredSession, recent_sessions};
+pub use stored::{StoredSession, recent_sessions, session_title};
 
 #[cfg(test)]
 mod tests;

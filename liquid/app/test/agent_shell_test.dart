@@ -13,12 +13,7 @@ import 'package:liquid/src/theme/theme.dart';
 
 import 'fake_backend.dart';
 
-const info = SessionInfo(
-  title: 'Rate limit for /login',
-  project: 'acme-api',
-  harness: 'pi',
-  device: 'MacBook',
-);
+const info = SessionInfo(project: 'acme-api', harness: 'pi', device: 'MacBook');
 
 void main() {
   late FakeBackend backend;
@@ -55,6 +50,41 @@ void main() {
       arguments: '{"command":"npm test -- login"}',
       readOnly: false,
     ),
+  );
+
+  testWidgets(
+    'names the session in the header and sidebar as the start page does',
+    (tester) async {
+      await show(tester);
+      await tester.pumpAndSettle();
+      expect(find.text('New session'), findsNWidgets(2));
+
+      await tester.enterText(
+        find.byKey(const Key('composer')),
+        'Add a limiter\nto /login',
+      );
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Add a limiter'),
+        findsNWidgets(2),
+        reason: 'the first line of the first prompt, at once',
+      );
+
+      backend.sessionTitle = 'Rate limit for /login';
+      await emit(tester, event(BridgeEventKind.turnStarted, turn: 1));
+      await emit(tester, event(BridgeEventKind.turnCompleted, turn: 1));
+      expect(
+        find.text('Rate limit for /login'),
+        findsNWidgets(2),
+        reason: 'the name pi stored',
+      );
+
+      backend.sessionTitle = null;
+      await state.newSession();
+      await tester.pumpAndSettle();
+      expect(find.text('New session'), findsNWidgets(2));
+    },
   );
 
   testWidgets('the mode menu explains each mode and what Allow edits risks', (

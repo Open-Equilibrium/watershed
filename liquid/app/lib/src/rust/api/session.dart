@@ -94,6 +94,10 @@ abstract class AgentSession implements RustOpaqueInterface {
   /// Continues the session stored in `path`; `false` when an extension cancelled it.
   Future<bool> switchSession({required String path});
 
+  /// The open session's title, as the start page names stored sessions; none before pi
+  /// stored a name or a prompt.
+  Future<String?> title();
+
   /// The chat of the current branch: the items of up to `limit` stored entries before
   /// `before`, or of the newest ones.
   Future<BridgeTranscript> transcript({String? before, required int limit});

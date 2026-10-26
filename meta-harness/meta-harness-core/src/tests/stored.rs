@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::time::{Duration, SystemTime};
 
-use crate::{StoredSession, recent_sessions};
+use crate::{StoredSession, recent_sessions, session_title};
 
 /// Writes a pi session file started in `cwd` with `lines` after its header, modified at `at`.
 fn session(dir: &Path, name: &str, cwd: &str, lines: &[&str], at: u64) {
@@ -141,4 +141,36 @@ fn lists_a_linked_session_file_but_not_a_linked_pipe() {
         .map(|session| session.title)
         .collect();
     assert_eq!(titles, ["Linked"]);
+}
+
+#[test]
+fn names_the_open_session_as_the_start_page_does() {
+    let dir = std::env::temp_dir().join(format!("watershed-title-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("directory");
+    let user = r#"{"type":"message","id":"u1","parentId":null,"message":{"role":"user","content":"Add a limiter\nto /login"}}"#;
+    session(&dir, "prompt", "/work/acme-api", &[user], 1);
+    session(
+        &dir,
+        "named",
+        "/work/acme-api",
+        &[
+            user,
+            r#"{"type":"session_info","id":"i1","parentId":"u1","name":"Rate limit for /login"}"#,
+        ],
+        1,
+    );
+    session(&dir, "empty", "/work/acme-api", &[], 1);
+    let project = Path::new("/work/acme-api");
+    let title = |name: &str| session_title(&dir.join(format!("{name}.jsonl")), project);
+
+    assert_eq!(title("prompt").as_deref(), Some("Add a limiter"));
+    assert_eq!(title("named").as_deref(), Some("Rate limit for /login"));
+    assert_eq!(title("empty"), None, "nothing to name it by yet");
+    assert_eq!(
+        session_title(&dir.join("prompt.jsonl"), Path::new("/work/web-shop")),
+        None,
+        "a session of another project"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
 }

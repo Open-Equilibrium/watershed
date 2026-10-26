@@ -10,12 +10,7 @@ import 'package:liquid/src/theme/theme.dart';
 import 'fake_backend.dart';
 import 'fake_host.dart';
 
-const info = SessionInfo(
-  title: 'Rate limit for /login',
-  project: 'acme-api',
-  harness: 'pi',
-  device: 'MacBook',
-);
+const info = SessionInfo(project: 'acme-api', harness: 'pi', device: 'MacBook');
 
 void main() {
   late FakeHost host;

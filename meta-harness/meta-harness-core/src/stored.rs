@@ -67,6 +67,12 @@ pub fn recent_sessions(
         .collect())
 }
 
+/// The title of the session stored in `file`, as [`recent_sessions`] gives it; none before the
+/// session has a name or a prompt, or for a session of another project.
+pub fn session_title(file: &Path, project: &Path) -> Option<String> {
+    title(file, &canonical(project))
+}
+
 /// The title of a session file started in `project`: its latest name, else its first prompt.
 fn title(path: &Path, project: &Path) -> Option<String> {
     let mut start = Vec::new();
