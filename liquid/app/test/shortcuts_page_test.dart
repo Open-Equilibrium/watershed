@@ -72,6 +72,7 @@ void main() {
     expect(find.text('⌘N'), findsOneWidget);
     expect(find.text('tap ⇪'), findsOneWidget);
     expect(find.text('Trajectory'), findsWidgets);
+    expect(find.text('Fold or unfold the folder'), findsOneWidget);
 
     await press(tester, LogicalKeyboardKey.escape);
     expect(find.text('tap ⇪'), findsNothing);

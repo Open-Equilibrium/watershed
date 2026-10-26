@@ -91,7 +91,14 @@ const List<_Group> _right = [
       _Entry(Command.selectBranch),
     ],
   ),
-  ('Diff', null, [_Entry.fixed('Previous or next file', '↑↓')]),
+  (
+    'Diff',
+    null,
+    [
+      _Entry.fixed('Previous or next file', '↑↓'),
+      _Entry.fixed('Fold or unfold the folder', '←→'),
+    ],
+  ),
 ];
 
 const _profileNames = {

@@ -11,7 +11,8 @@ import '../theme/tokens.g.dart';
 import 'diff_model.dart';
 
 /// The changes of the latest run against the project before it: a folder tree of changed files
-/// and the selected file's unified diff. Up and Down select files.
+/// and the selected file's unified diff. Up and Down select files, Left and Right fold and
+/// unfold the selected file's folders.
 class DiffView extends StatefulWidget {
   const DiffView({super.key, required this.state});
 
@@ -28,6 +29,9 @@ class _DiffViewState extends State<DiffView> {
   List<DiffLine> _lines = const [];
   bool _loaded = false;
   final _focus = FocusNode(debugLabel: 'diff');
+
+  /// The folded folders, by path.
+  final _folded = <String>{};
 
   /// Whether a patch is loading; a selection made meanwhile loads after it.
   bool _loading = false;
@@ -106,11 +110,49 @@ class _DiffViewState extends State<DiffView> {
     }
   }
 
+  /// Whether a folded folder hides `row`.
+  bool _hidden(FileRow row) => _folded.any(
+    (folder) =>
+        row.folder.startsWith('$folder/') ||
+        (row.change != null && row.folder == folder),
+  );
+
   void _move(int step) {
-    final files = [for (final row in _rows) ?row.change];
+    final files = [
+      for (final row in _rows)
+        if (!_hidden(row)) ?row.change,
+    ];
     final index = files.indexWhere((change) => change.path == _selected?.path);
     final next = index + step;
     if (next >= 0 && next < files.length) _select(files[next]);
+  }
+
+  void _toggle(String folder) => setState(() {
+    if (!_folded.remove(folder)) _folded.add(folder);
+  });
+
+  /// The folder that holds the selected file; empty at the top.
+  String get _selectedFolder =>
+      _rows
+          .where((row) => row.change?.path == _selected?.path)
+          .firstOrNull
+          ?.folder ??
+      '';
+
+  void _fold() {
+    if (_selectedFolder.isNotEmpty) {
+      setState(() => _folded.add(_selectedFolder));
+    }
+  }
+
+  /// Unfolds every folder around the selected file, so it shows again.
+  void _unfold() {
+    final folder = _selectedFolder;
+    setState(
+      () => _folded.removeWhere(
+        (folded) => folder == folded || folder.startsWith('$folded/'),
+      ),
+    );
   }
 
   @override
@@ -118,6 +160,8 @@ class _DiffViewState extends State<DiffView> {
     bindings: {
       const SingleActivator(LogicalKeyboardKey.arrowDown): () => _move(1),
       const SingleActivator(LogicalKeyboardKey.arrowUp): () => _move(-1),
+      const SingleActivator(LogicalKeyboardKey.arrowLeft): _fold,
+      const SingleActivator(LogicalKeyboardKey.arrowRight): _unfold,
     },
     child: Focus(focusNode: _focus, child: _content(context)),
   );
@@ -162,11 +206,14 @@ class _DiffViewState extends State<DiffView> {
                 ),
               ),
               for (final row in _rows)
-                _FileTile(
-                  row: row,
-                  selected: row.change?.path == _selected?.path,
-                  onTap: _select,
-                ),
+                if (!_hidden(row))
+                  _FileTile(
+                    row: row,
+                    selected: row.change?.path == _selected?.path,
+                    folded: _folded.contains(row.folder),
+                    onTap: _select,
+                    onFold: _toggle,
+                  ),
             ],
           ),
         ),
@@ -182,12 +229,18 @@ class _FileTile extends StatelessWidget {
   const _FileTile({
     required this.row,
     required this.selected,
+    required this.folded,
     required this.onTap,
+    required this.onFold,
   });
 
   final FileRow row;
   final bool selected;
+
+  /// Whether this folder row is folded.
+  final bool folded;
   final ValueChanged<BridgeFileChange> onTap;
+  final ValueChanged<String> onFold;
 
   @override
   Widget build(BuildContext context) {
@@ -205,11 +258,15 @@ class _FileTile extends StatelessWidget {
       BridgeChangeStatus.added => letter('A', ws.success),
       BridgeChangeStatus.deleted => letter('D', ws.danger),
       BridgeChangeStatus.modified => letter('M', ws.warning),
-      null => Icon(LucideIcons.chevronDown, size: 14, color: ws.textFaint),
+      null => Icon(
+        folded ? LucideIcons.chevronRight : LucideIcons.chevronDown,
+        size: 14,
+        color: ws.textFaint,
+      ),
     };
     return InkWell(
       canRequestFocus: false,
-      onTap: change == null ? null : () => onTap(change),
+      onTap: change == null ? () => onFold(row.folder) : () => onTap(change),
       borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
       child: Container(
         height: WsMetrics.rowNav,

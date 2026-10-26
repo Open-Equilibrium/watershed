@@ -191,4 +191,48 @@ void main() {
       'd.ts',
     ], reason: 'c.ts was passed while b.ts loaded');
   });
+
+  testWidgets('folds folders by click and with ← and →', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1600, 900));
+    BridgeFileChange file(String path) => BridgeFileChange(
+      path: path,
+      status: BridgeChangeStatus.modified,
+      added: 1,
+      removed: 0,
+    );
+    final backend = FakeBackend()
+      ..changed = [file('src/a.ts'), file('src/b.ts'), file('top.ts')];
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: liquidTheme(Brightness.light),
+        home: Material(child: DiffView(state: SessionState(backend))),
+      ),
+    );
+    await tester.pumpAndSettle();
+    Future<void> press(LogicalKeyboardKey key) async {
+      await tester.sendKeyEvent(key);
+      await tester.pumpAndSettle();
+    }
+
+    await tester.tap(find.text('src'));
+    await tester.pumpAndSettle();
+    expect(find.text('b.ts'), findsNothing);
+    expect(find.text('top.ts'), findsWidgets);
+    await tester.tap(find.text('src'));
+    await tester.pumpAndSettle();
+    expect(find.text('b.ts'), findsOneWidget);
+
+    expect(find.text('src/a.ts'), findsOneWidget, reason: 'a.ts is open');
+    await press(LogicalKeyboardKey.arrowLeft);
+    expect(find.text('a.ts'), findsNothing, reason: '← folds its folder');
+    await press(LogicalKeyboardKey.arrowRight);
+    expect(find.text('a.ts'), findsOneWidget, reason: '→ unfolds it');
+    await press(LogicalKeyboardKey.arrowLeft);
+    await press(LogicalKeyboardKey.arrowDown);
+    expect(
+      find.text('top.ts'),
+      findsNWidgets(2),
+      reason: '↓ passes the folded files: the list and the header show top.ts',
+    );
+  });
 }
