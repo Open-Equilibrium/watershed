@@ -95,6 +95,16 @@ impl Pending {
         self.0.await.unwrap_or(Err(CommandError::Closed)).map(drop)
     }
 
+    /// Waits until the agent accepted a prompt; `true` when the prompt started a run, `false`
+    /// when the agent queued it for a run in progress or handled it itself, such as a command.
+    pub async fn started(self) -> Result<bool, CommandError> {
+        let data = self.0.await.unwrap_or(Err(CommandError::Closed))?;
+        Ok(matches!(
+            data.get("disposition").and_then(Value::as_str),
+            Some("started") | None
+        ))
+    }
+
     /// Waits until the agent answered a session switch; `false` when an extension cancelled it.
     pub async fn switched(self) -> Result<bool, CommandError> {
         let data = self.0.await.unwrap_or(Err(CommandError::Closed))?;

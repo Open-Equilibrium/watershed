@@ -187,9 +187,9 @@ impl AgentSession {
             };
             // The session stays free meanwhile, so questions asked before acceptance can be
             // answered.
-            pending.accepted().await.map_err(describe)?;
-            // Only a prompt the agent took starts a run, so only then does its capture count.
-            if let Some(capture) = capture {
+            let started = pending.started().await.map_err(describe)?;
+            // Only a prompt that started a run makes its capture count.
+            if let Some(capture) = capture.filter(|_| started) {
                 self.diff.started(capture);
             }
             Ok(())

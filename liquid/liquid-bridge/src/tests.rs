@@ -568,6 +568,8 @@ printf 'new\n' > a.txt
 printf '%s\n' '{"id":"2","type":"response","command":"prompt","success":true,"data":{"disposition":"started"}}'
 IFS= read -r line
 printf '%s\n' '{"id":"3","type":"response","command":"prompt","success":false,"error":"busy"}'
+IFS= read -r line
+printf '%s\n' '{"id":"4","type":"response","command":"prompt","success":true,"data":{"disposition":"handled"}}'
 IFS= read -r line || exit 0"#;
     let session = AgentSession::start(SessionConfig {
         program: "/bin/sh".to_owned(),
@@ -594,6 +596,9 @@ IFS= read -r line || exit 0"#;
     );
     // A prompt the agent rejects starts no run, so the last run's changes stay in view.
     assert!(session.send("again".to_owned(), false).is_err());
+    assert_eq!(session.changes().expect("changes"), changes);
+    // Nor does one that pi handles itself, such as a command.
+    assert_eq!(session.send("/name tidy".to_owned(), false), Ok(()));
     assert_eq!(session.changes().expect("changes"), changes);
     assert!(session.shutdown());
     assert_eq!(
