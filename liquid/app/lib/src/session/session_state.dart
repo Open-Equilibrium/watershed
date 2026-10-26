@@ -294,7 +294,16 @@ class SessionState {
       _changeQueue(() => _unqueue(message, followUp: followUp));
 
   Future<void> _unqueue(String message, {required bool followUp}) async {
-    final waiting = await _backend.clearQueue();
+    final BridgeQueue waiting;
+    try {
+      waiting = await _backend.clearQueue();
+    } on Object catch (error) {
+      notify(
+        BridgeLevel.error,
+        'Could not change the waiting messages: $error',
+      );
+      return;
+    }
     var removed = false;
     // Only the queue the chip belongs to loses the message; the same text may wait in both.
     List<String> kept(List<String> texts, {required bool inFollowUp}) {
@@ -303,11 +312,24 @@ class SessionState {
       return rest;
     }
 
-    for (final text in kept(waiting.steering, inFollowUp: false)) {
-      await _backend.send(text, followUp: false);
-    }
-    for (final text in kept(waiting.followUp, inFollowUp: true)) {
-      await _backend.send(text, followUp: true);
+    final again = [
+      for (final text in kept(waiting.steering, inFollowUp: false))
+        (text, false),
+      for (final text in kept(waiting.followUp, inFollowUp: true)) (text, true),
+    ];
+    for (final (index, (text, followUp)) in again.indexed) {
+      try {
+        await _backend.send(text, followUp: followUp);
+      } on Object catch (error) {
+        // What did not reach the agent comes back to the input area.
+        draft.value = [for (final (text, _) in again.skip(index)) text]
+            .join('\n\n');
+        notify(
+          BridgeLevel.error,
+          'Waiting messages did not reach the agent: $error',
+        );
+        return;
+      }
     }
   }
 
@@ -315,13 +337,15 @@ class SessionState {
   Future<void> stop() => _changeQueue(_stop);
 
   Future<void> _stop() async {
-    final waiting = await _backend.clearQueue();
-    await _backend.abort();
-    final texts = [...waiting.steering, ...waiting.followUp];
-    if (texts.isNotEmpty) draft.value = texts.join('\n\n');
+    try {
+      final waiting = await _backend.clearQueue();
+      final texts = [...waiting.steering, ...waiting.followUp];
+      if (texts.isNotEmpty) draft.value = texts.join('\n\n');
+      await _backend.abort();
+    } on Object catch (error) {
+      notify(BridgeLevel.error, 'Could not stop the agent: $error');
+    }
   }
-
-  Future<void> abort() => _backend.abort();
 
   /// Changes which tool calls wait for the user.
   Future<void> setMode(BridgeApprovalMode next) async {
@@ -414,6 +438,7 @@ class SessionState {
 
   Future<void> _loadChat() async {
     final generation = _generation;
+    final version = ++_chatVersion;
     final before = items.value;
     final BridgeTranscript page;
     final BridgeHistory history;
@@ -424,7 +449,7 @@ class SessionState {
       notify(BridgeLevel.error, 'Could not restore the chat: $error');
       return;
     }
-    if (generation != _generation) return;
+    if (generation != _generation || version != _chatVersion) return;
     // What the stored responses used; live requests add to it.
     totals.value = const SessionTotals().add(history.usage);
     final rebuilt = _stored(page.items);
@@ -447,6 +472,9 @@ class SessionState {
 
   /// The branch mark until the chat shows where the branch leaves the others.
   _Mark? _pendingMark;
+
+  /// Counts chat restores; an earlier page read for a replaced chat is dropped.
+  int _chatVersion = 0;
 
   /// Puts the mark before the first of `views` past the fork, once they show the fork itself
   /// or nothing earlier remains; whether it did.
@@ -473,12 +501,12 @@ class SessionState {
   Future<void> loadEarlier() async {
     if (_readingEarlier) return;
     _readingEarlier = true;
-    final generation = _generation;
+    final (generation, version) = (_generation, _chatVersion);
     try {
       while (chatMore.value && _chatStart != null) {
         final before = _chatStart;
         final page = await _backend.transcript(before);
-        if (generation != _generation) return;
+        if (generation != _generation || version != _chatVersion) return;
         _chatStart = page.start;
         // A page that does not move back ends the reading, so it cannot repeat forever.
         chatMore.value = page.more && page.start != before;
@@ -492,6 +520,15 @@ class SessionState {
           return;
         }
       }
+      // The oldest pages showed nothing, so the branch leaves before everything shown.
+      if (_pendingMark case final mark? when !chatMore.value) {
+        final shown = [...items.value];
+        _placeMark(shown, mark, complete: true);
+        _pendingMark = null;
+        items.value = shown;
+      }
+    } on Object catch (error) {
+      notify(BridgeLevel.error, 'Could not read earlier messages: $error');
     } finally {
       _readingEarlier = false;
     }
@@ -645,6 +682,13 @@ class SessionState {
       case BridgeEventKind.failed:
         failure.value = event.text;
       case BridgeEventKind.exited:
+        // Nothing an exited agent started is still running.
+        for (final view in _byId.values) {
+          if (view.outcome.value == null &&
+              view.kind != BridgeItemKind.userMessage) {
+            view.outcome.value = (failed: true, durationMs: null, lines: null);
+          }
+        }
         // A failed agent's error output says why, such as an extension that did not load.
         if (event.success != true && failure.value == null) {
           failure.value = event.text;

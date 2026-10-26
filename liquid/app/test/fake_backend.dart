@@ -46,8 +46,15 @@ class FakeBackend implements SessionBackend {
     return queued;
   }
 
+  /// What aborting fails with.
+  Object? abortError;
+
   @override
-  Future<void> abort() async => calls.add('abort');
+  Future<void> abort() async {
+    calls.add('abort');
+    if (abortError case final error?) throw error;
+  }
+
   @override
   Future<void> setApprovalMode(BridgeApprovalMode mode) async =>
       calls.add('mode ${mode.name}');
@@ -147,9 +154,13 @@ class FakeBackend implements SessionBackend {
   /// What reading the chat fails with.
   Object? transcriptError;
 
+  /// Holds reads of earlier chat pages until it completes.
+  Completer<void>? earlierGate;
+
   @override
   Future<BridgeTranscript> transcript(String? before) async {
     calls.add('transcript ${before ?? ''}'.trim());
+    if (before != null) await earlierGate?.future;
     if (transcriptError case final error?) throw error;
     return transcripts[before ?? ''] ??
         const BridgeTranscript(items: [], more: false);

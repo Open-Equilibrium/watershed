@@ -380,6 +380,26 @@ void main() {
       );
     });
 
+    test(
+      'marks the branch at the start when earlier pages show nothing',
+      () async {
+        backend.stored = historyOf([], tree: tree, leaf: 'b2');
+        backend.transcripts[''] = BridgeTranscript(
+          items: [chatItem('b2', BridgeItemKind.assistantMessage, text: 'B2')],
+          more: true,
+          start: 'b2',
+        );
+        backend.transcripts['b2'] = const BridgeTranscript(
+          items: [],
+          more: false,
+          start: 'u1',
+        );
+        await state.loadChat();
+        await state.loadEarlier();
+        expect(state.items.value.map(describe), ['marker B', 'B2']);
+      },
+    );
+
     test('marks the branch where it leaves, also on an earlier page', () async {
       backend.stored = historyOf([], tree: tree, leaf: 'b2');
       // The newest page starts after the first entry past the fork.
@@ -407,6 +427,81 @@ void main() {
         'B2',
       ]);
     });
+  });
+
+  group('what goes wrong does not lose messages', () {
+    test('a waiting message that cannot be sent again comes back', () async {
+      backend
+        ..queued = const BridgeQueue(steering: ['a', 'b', 'c'], followUp: [])
+        ..sendError = 'busy';
+      await state.unqueue('b', followUp: false);
+      expect(state.draft.value, 'a\n\nc');
+      expect(state.notice.value?.level, BridgeLevel.error);
+    });
+
+    test('a stop that fails still hands the waiting messages back', () async {
+      backend
+        ..queued = const BridgeQueue(steering: ['x'], followUp: [])
+        ..abortError = 'agent is gone';
+      await state.stop();
+      expect(state.draft.value, 'x');
+      expect(
+        state.notice.value?.text,
+        'Could not stop the agent: agent is gone',
+      );
+    });
+
+    test('an earlier chat page that cannot be read is reported', () async {
+      backend.transcripts[''] = BridgeTranscript(
+        items: [chatItem('u2', BridgeItemKind.userMessage, text: 'Later')],
+        more: true,
+        start: 'u2',
+      );
+      await state.loadChat();
+      backend.transcriptError = 'session file is gone';
+      await state.loadEarlier();
+      expect(
+        state.notice.value?.text,
+        'Could not read earlier messages: session file is gone',
+      );
+    });
+  });
+
+  test('an agent that exits mid-turn leaves nothing running', () async {
+    await emit(event(BridgeEventKind.turnStarted, turn: 1));
+    await emit(
+      event(
+        BridgeEventKind.itemStarted,
+        turn: 1,
+        item: item(3, kind: BridgeItemKind.commandExecution, tool: 'bash'),
+      ),
+    );
+    await emit(event(BridgeEventKind.exited, success: false));
+    expect(state.items.value.single.outcome.value?.failed, isTrue);
+  });
+
+  test('an earlier page read before a branch never doubles the chat', () async {
+    backend.transcripts[''] = BridgeTranscript(
+      items: [chatItem('u2', BridgeItemKind.userMessage, text: 'Later')],
+      more: true,
+      start: 'u2',
+    );
+    backend.transcripts['u2'] = BridgeTranscript(
+      items: [chatItem('u1', BridgeItemKind.userMessage, text: 'First')],
+      more: false,
+      start: 'u1',
+    );
+    await state.loadChat();
+    backend.earlierGate = Completer();
+    final earlier = state.loadEarlier();
+    await state.branch('u2');
+    backend.earlierGate!.complete();
+    await earlier;
+    expect(
+      state.items.value.where((view) => view.text.value == 'First'),
+      isEmpty,
+      reason: 'the page belongs to the chat before the branch',
+    );
   });
 
   test('keeps an error in the status bar until it is dismissed', () async {
