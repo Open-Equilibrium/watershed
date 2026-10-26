@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import 'agent/shortcut_reveal.dart';
+import 'shortcuts/shortcut_reveal.dart';
 import 'theme/theme.dart';
 import 'theme/tokens.g.dart';
 
@@ -47,7 +47,7 @@ class KeyBadge extends StatelessWidget {
         text,
         style: TextStyle(
           fontSize: WsMetrics.fsCaption,
-          height: 14 / 10,
+          height: WsMetrics.lhCaption / WsMetrics.fsCaption,
           fontWeight: WsMetrics.fwSemibold,
           color: ws.surface,
         ),

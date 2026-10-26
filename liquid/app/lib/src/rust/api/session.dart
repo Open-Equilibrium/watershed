@@ -150,7 +150,7 @@ class BridgeStoredSession {
   /// The session file.
   final String path;
 
-  /// Its name, or else the first line of its first prompt.
+  /// Its name, or else the first line of its first prompt, or else "Untitled session".
   final String title;
 
   /// When pi last wrote it, in Unix milliseconds.

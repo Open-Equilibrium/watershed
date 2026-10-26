@@ -67,6 +67,10 @@ const _keptNotices = 20;
 /// How long information and warnings stay in the status bar; errors stay until dismissed.
 const _noticeFades = Duration(seconds: 6);
 
+/// Tokens a model request read: fresh input plus cache reads and writes.
+int promptTokens(BridgeUsage usage) =>
+    usage.input + usage.cacheRead + usage.cacheWrite;
+
 /// Tokens and cost the session spent so far.
 @immutable
 class SessionTotals {
@@ -77,8 +81,7 @@ class SessionTotals {
   final int costMicroUsd;
 
   SessionTotals add(BridgeUsage usage) => SessionTotals(
-    // Cached input is part of what the model read, as the Trajectory counts it.
-    input: input + usage.input + usage.cacheRead + usage.cacheWrite,
+    input: input + promptTokens(usage),
     output: output + usage.output,
     costMicroUsd: costMicroUsd + usage.costMicroUsd,
   );
@@ -572,7 +575,6 @@ class SessionState {
     return {for (final (index, id) in path.reversed.indexed) id: index};
   }
 
-  /// Releases the event stream and stops the agent.
   /// Shows a notification in the status bar and keeps it in the list.
   void notify(BridgeLevel level, String text) {
     final shown = Notice(level, text, DateTime.now());
@@ -603,6 +605,7 @@ class SessionState {
     notices.value = const [];
   }
 
+  /// Releases the event stream and stops the agent.
   Future<void> dispose() async {
     _fade?.cancel();
     await _subscription.cancel();

@@ -2,10 +2,11 @@ import 'package:flutter/material.dart';
 
 import '../rust/api/events.dart';
 import '../session/session_state.dart';
+import '../shortcuts/shortcut_reveal.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
-import 'shortcut_reveal.dart';
+import '../trajectory/trajectory_model.dart';
 import 'sidebar.dart';
 
 /// Run status, tokens, cost and extension status entries. A notification takes the status
@@ -110,14 +111,11 @@ class _StatusBarState extends State<StatusBar> {
               ),
               const SizedBox(width: WsMetrics.space6),
               Text(
-                '${_tokens(totals.input)} in · ${_tokens(totals.output)} out',
+                '${formatCompact(totals.input)} in · ${formatCompact(totals.output)} out',
                 style: text,
               ),
               const SizedBox(width: WsMetrics.space6),
-              Text(
-                '≈ \$${(totals.costMicroUsd / 1e6).toStringAsFixed(2)}',
-                style: text,
-              ),
+              Text('≈ ${formatCost(totals.costMicroUsd)}', style: text),
               if (state.statuses.value.isNotEmpty) ...[
                 const SizedBox(width: WsMetrics.space6),
                 Flexible(
@@ -142,9 +140,6 @@ class _StatusBarState extends State<StatusBar> {
       ),
     );
   }
-
-  static String _tokens(int count) =>
-      count >= 1000 ? '${(count / 1000).toStringAsFixed(1)}k' : '$count';
 }
 
 /// The symbol that tells a notification's level apart without color.

@@ -23,7 +23,7 @@ const TITLE_CHARS: usize = 120;
 pub struct StoredSession {
     /// The session file.
     pub path: PathBuf,
-    /// Its name, or else the first line of its first prompt.
+    /// Its name, or else the first line of its first prompt, or else "Untitled session".
     pub title: String,
     /// When pi last wrote it, in Unix milliseconds.
     pub modified_ms: u64,

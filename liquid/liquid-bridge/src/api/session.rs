@@ -45,7 +45,7 @@ pub struct SessionConfig {
 pub struct BridgeStoredSession {
     /// The session file.
     pub path: String,
-    /// Its name, or else the first line of its first prompt.
+    /// Its name, or else the first line of its first prompt, or else "Untitled session".
     pub title: String,
     /// When pi last wrote it, in Unix milliseconds.
     pub modified_ms: i64,

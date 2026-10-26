@@ -10,6 +10,7 @@ import '../rust/api/events.dart';
 import '../session/session_state.dart';
 import '../shortcuts/first_start.dart';
 import '../shortcuts/keymap.dart';
+import '../shortcuts/shortcut_reveal.dart';
 import '../shortcuts/shortcut_store.dart';
 import '../shortcuts/shortcuts_page.dart';
 import '../theme/theme.dart';
@@ -19,7 +20,6 @@ import 'action_area.dart';
 import 'chat_view.dart';
 import 'sidebar.dart';
 import 'status_bar.dart';
-import 'shortcut_reveal.dart';
 
 enum AgentTab { chat, trajectory, diff }
 
@@ -65,8 +65,8 @@ class _AgentShellState extends State<AgentShell> {
     super.initState();
     _lifecycle;
     widget.state.draft.addListener(_applyDraft);
-    widget.state.approval.addListener(_approvalArrived);
-    widget.state.question.addListener(_questionArrived);
+    widget.state.approval.addListener(_asked);
+    widget.state.question.addListener(_asked);
     unawaited(widget.state.loadStart());
     // A reopened Trajectory tab starts outside the comparison.
     _tab.addListener(() => _comparing.value = false);
@@ -89,12 +89,11 @@ class _AgentShellState extends State<AgentShell> {
   }
 
   /// An approval or a question closes Settings, which cover the input area it appears in.
-  void _approvalArrived() {
-    if (widget.state.approval.value != null) _settings.value = false;
-  }
-
-  void _questionArrived() {
-    if (widget.state.question.value != null) _settings.value = false;
+  void _asked() {
+    if (widget.state.approval.value != null ||
+        widget.state.question.value != null) {
+      _settings.value = false;
+    }
   }
 
   /// Text handed back to the input area goes before what the user typed meanwhile, which stays.
@@ -115,8 +114,8 @@ class _AgentShellState extends State<AgentShell> {
   void dispose() {
     _lifecycle.dispose();
     widget.state.draft.removeListener(_applyDraft);
-    widget.state.approval.removeListener(_approvalArrived);
-    widget.state.question.removeListener(_questionArrived);
+    widget.state.approval.removeListener(_asked);
+    widget.state.question.removeListener(_asked);
     _composer.dispose();
     _composerFocus.dispose();
     _tab.dispose();
@@ -135,16 +134,26 @@ class _AgentShellState extends State<AgentShell> {
     unawaited(widget.state.newSession());
   }
 
+  /// What each app-wide command does, in the menu bar and from its keys alike.
+  late final Map<Command, VoidCallback> _actions = {
+    Command.chat: () => _tab.value = AgentTab.chat,
+    Command.trajectory: () => _tab.value = AgentTab.trajectory,
+    Command.diff: () => _tab.value = AgentTab.diff,
+    Command.focusInput: _composerFocus.requestFocus,
+    Command.newSession: _newSession,
+    Command.dismissNotice: widget.state.dismissNotice,
+    Command.settings: _toggleSettings,
+  };
+
   /// App-wide shortcuts in the macOS menu bar, where they stay out of the GUI (ADR-0204);
   /// the menu shows ⌘ keys, the bindings below handle every key on every platform.
   Widget _menus(ShortcutSettings keys, Widget child) {
     if (defaultTargetPlatform != TargetPlatform.macOS) return child;
-    PlatformMenuItem item(Command command, VoidCallback action) =>
-        PlatformMenuItem(
-          label: command.label,
-          shortcut: keys.menu(command)?.menuShortcut,
-          onSelected: action,
-        );
+    PlatformMenuItem item(Command command) => PlatformMenuItem(
+      label: command.label,
+      shortcut: keys.menu(command)?.menuShortcut,
+      onSelected: _actions[command],
+    );
     PlatformMenuItem provided(PlatformProvidedMenuItemType type) =>
         PlatformProvidedMenuItem(type: type);
     return PlatformMenuBar(
@@ -155,9 +164,7 @@ class _AgentShellState extends State<AgentShell> {
             PlatformMenuItemGroup(
               members: [provided(PlatformProvidedMenuItemType.about)],
             ),
-            PlatformMenuItemGroup(
-              members: [item(Command.settings, _toggleSettings)],
-            ),
+            PlatformMenuItemGroup(members: [item(Command.settings)]),
             PlatformMenuItemGroup(
               members: [
                 provided(PlatformProvidedMenuItemType.hide),
@@ -168,26 +175,18 @@ class _AgentShellState extends State<AgentShell> {
             provided(PlatformProvidedMenuItemType.quit),
           ],
         ),
-        PlatformMenu(
-          label: 'Session',
-          menus: [item(Command.newSession, _newSession)],
-        ),
+        PlatformMenu(label: 'Session', menus: [item(Command.newSession)]),
         PlatformMenu(
           label: 'View',
           menus: [
             PlatformMenuItemGroup(
               members: [
-                item(Command.chat, () => _tab.value = AgentTab.chat),
-                item(
-                  Command.trajectory,
-                  () => _tab.value = AgentTab.trajectory,
-                ),
-                item(Command.diff, () => _tab.value = AgentTab.diff),
+                item(Command.chat),
+                item(Command.trajectory),
+                item(Command.diff),
               ],
             ),
-            PlatformMenuItemGroup(
-              members: [item(Command.focusInput, _composerFocus.requestFocus)],
-            ),
+            PlatformMenuItemGroup(members: [item(Command.focusInput)]),
             provided(PlatformProvidedMenuItemType.toggleFullScreen),
           ],
         ),
@@ -219,15 +218,7 @@ class _AgentShellState extends State<AgentShell> {
       ShortcutReveal(
         liquid: keys.liquidKey,
         child: CallbackShortcuts(
-          bindings: keys.bind({
-            Command.chat: () => _tab.value = AgentTab.chat,
-            Command.trajectory: () => _tab.value = AgentTab.trajectory,
-            Command.diff: () => _tab.value = AgentTab.diff,
-            Command.focusInput: _composerFocus.requestFocus,
-            Command.newSession: _newSession,
-            Command.dismissNotice: widget.state.dismissNotice,
-            Command.settings: _toggleSettings,
-          }),
+          bindings: keys.bind(_actions),
           child: Focus(
             focusNode: _focus,
             autofocus: true,

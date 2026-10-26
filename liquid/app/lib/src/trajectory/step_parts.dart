@@ -159,7 +159,3 @@ class OutcomeText extends StatelessWidget {
     );
   }
 }
-
-/// Tokens a model request read: fresh input plus cache reads and writes.
-int promptTokens(BridgeUsage usage) =>
-    usage.input + usage.cacheRead + usage.cacheWrite;

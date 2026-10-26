@@ -292,18 +292,22 @@ class _QueueChips extends StatelessWidget {
                             ),
                           ),
                         ),
-                        InkWell(
-                          key: Key('unqueue $index'),
-                          canRequestFocus: false,
-                          onTap: () => state.unqueue(text, followUp: followUp),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: WsMetrics.space2,
-                            ),
-                            child: Icon(
-                              LucideIcons.x,
-                              size: 12,
-                              color: ws.textFaint,
+                        Tooltip(
+                          message: 'Remove from the queue',
+                          child: InkWell(
+                            key: Key('unqueue $index'),
+                            canRequestFocus: false,
+                            onTap: () =>
+                                state.unqueue(text, followUp: followUp),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: WsMetrics.space2,
+                              ),
+                              child: Icon(
+                                LucideIcons.x,
+                                size: 12,
+                                color: ws.textFaint,
+                              ),
                             ),
                           ),
                         ),

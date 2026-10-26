@@ -35,7 +35,7 @@ Future<Launch> launchFromEnvironment(Map<String, String> environment) async {
   if (project == null || extension == null) {
     return const Launch.problem(
       'Start Liquid with LIQUID_PROJECT set to a project directory and LIQUID_PI_EXTENSION set '
-      'to meta-harness/pi-extension/watershed.ts.',
+      'to the absolute path of meta-harness/pi-extension/watershed.ts.',
     );
   }
   try {

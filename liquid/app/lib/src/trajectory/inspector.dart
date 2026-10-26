@@ -5,6 +5,7 @@ import '../rust/api/history.dart';
 import '../shortcuts/keymap.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
+import '../session/session_state.dart';
 import 'step_parts.dart';
 import 'trajectory_model.dart';
 
