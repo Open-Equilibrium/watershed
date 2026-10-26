@@ -461,7 +461,7 @@ class BridgeRequest {
   /// The question awaiting an answer.
   final BridgeQuestion? question;
 
-  /// The user's decision on an approval.
+  /// The user's decision on an ended approval; none when it was withdrawn, as Stop does.
   final BridgeDecision? decision;
 
   const BridgeRequest({

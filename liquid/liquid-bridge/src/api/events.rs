@@ -163,7 +163,7 @@ pub struct BridgeRequest {
     pub approval: Option<BridgeApproval>,
     /// The question awaiting an answer.
     pub question: Option<BridgeQuestion>,
-    /// The user's decision on an approval.
+    /// The user's decision on an ended approval; none when it was withdrawn, as Stop does.
     pub decision: Option<BridgeDecision>,
 }
 

@@ -478,7 +478,7 @@ impl From<AgentEvent> for BridgeEvent {
                 decision,
             } => BridgeEvent {
                 request: Some(BridgeRequest {
-                    decision: Some(decision.into()),
+                    decision: decision.map(Into::into),
                     ..request(id.0)
                 }),
                 ..event(Kind::RequestResolved)

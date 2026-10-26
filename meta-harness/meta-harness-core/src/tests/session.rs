@@ -643,13 +643,14 @@ fn answers_extension_questions() {
 }
 
 #[test]
-fn stopping_rejects_an_approval_that_arrives_late() {
+fn stopping_withdraws_an_approval_that_arrives_late() {
     run(async {
         // The agent asked before the abort reached it; the request only arrives afterwards.
+        // Withdrawn rather than rejected, it is no decision of the user's.
         let script = [
             expect_response(&[r#""type":"abort""#]),
             approval_request("a1", "bash", false),
-            expect_response(&[r#""id":"a1""#, r#""value":"reject""#]),
+            expect_response(&[r#""id":"a1""#, r#""cancelled":true"#]),
             r#"printf '%s\n' '{"id":"1","type":"response","command":"abort","success":true}' '{"type":"agent_start"}'
 "#
             .to_owned(),
@@ -967,7 +968,10 @@ fn asks_only_for_calls_the_approval_mode_does_not_allow() {
             assert_eq!(session.decide(&request, decision).await, Ok(()));
             assert_eq!(
                 next(&mut events).await,
-                SessionEvent::Runtime(AgentEvent::RequestResolved { request, decision })
+                SessionEvent::Runtime(AgentEvent::RequestResolved {
+                    request,
+                    decision: Some(decision)
+                })
             );
         }
         assert_eq!(next(&mut events).await, exited(true));
@@ -1154,15 +1158,18 @@ fn finds_a_relative_session_file_in_the_agents_directory() {
 }
 
 #[test]
-fn stopping_cancels_the_questions_the_agent_waits_for() {
+fn stopping_withdraws_the_dialogs_the_agent_waits_for() {
     run(async {
-        // pi answers an abort only once its open dialogs are answered: one asked before the
-        // abort, one that arrives after it.
+        // pi answers an abort only once its open dialogs are answered: an approval and a
+        // question asked before the abort, and a question that arrives after it. The approval
+        // is withdrawn, not rejected, since the user decided nothing.
         let script = [
+            approval_request("a1", "bash", false),
             r#"printf '%s\n' '{"type":"extension_ui_request","id":"q1","method":"input","title":"Name","placeholder":""}'
 "#
             .to_owned(),
             expect_response(&[r#""type":"abort""#]),
+            expect_response(&[r#""id":"a1""#, r#""cancelled":true"#]),
             expect_response(&[r#""id":"q1""#, r#""cancelled":true"#]),
             r#"printf '%s\n' '{"type":"extension_ui_request","id":"q2","method":"confirm","title":"Sure?","message":""}'
 "#
@@ -1177,10 +1184,21 @@ fn stopping_cancels_the_questions_the_agent_waits_for() {
         let (mut session, mut events) = fake_agent(&script);
         assert!(matches!(
             next(&mut events).await,
+            SessionEvent::Runtime(AgentEvent::RequestOpened { .. })
+        ));
+        assert!(matches!(
+            next(&mut events).await,
             SessionEvent::Runtime(AgentEvent::UserInputRequested { .. })
         ));
         let stopping = session.abort().await.expect("abort sent");
         assert_eq!(timeout(WAIT, stopping.accepted()).await, Ok(Ok(())));
+        assert_eq!(
+            next(&mut events).await,
+            SessionEvent::Runtime(AgentEvent::RequestResolved {
+                request: RequestId("a1".to_owned()),
+                decision: None,
+            })
+        );
         assert_eq!(
             next(&mut events).await,
             SessionEvent::Runtime(AgentEvent::UserInputResolved {

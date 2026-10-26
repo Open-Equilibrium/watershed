@@ -302,12 +302,12 @@ pub enum AgentEvent {
         /// The session the call runs in, when the agent says.
         session: Option<String>,
     },
-    /// The user answered an approval request.
+    /// An approval request ended.
     RequestResolved {
         /// The request.
         request: RequestId,
-        /// The answer.
-        decision: Decision,
+        /// The user's answer; none when the request was withdrawn, as Stop does.
+        decision: Option<Decision>,
     },
     /// An agent extension asks the user a question.
     UserInputRequested {

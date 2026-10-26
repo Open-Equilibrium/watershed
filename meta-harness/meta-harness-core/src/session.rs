@@ -171,7 +171,7 @@ struct Shared {
     /// Whether the agent switched sessions since its extensions were checked: pi loads them
     /// anew for each session, so the next message checks again.
     unchecked: bool,
-    /// Whether an abort waits for the turn to settle; dialogs arriving meanwhile are rejected
+    /// Whether an abort waits for the turn to settle; dialogs arriving meanwhile are withdrawn
     /// or dismissed, since the agent stops only once they are answered.
     stopping: bool,
 }
@@ -344,7 +344,8 @@ impl Session {
     }
 
     /// Aborts the running turn. pi answers once the agent is idle, which needs its open dialogs
-    /// answered, so open approvals are rejected and open questions dismissed.
+    /// answered, so open approvals are withdrawn, which blocks their calls, and open questions
+    /// dismissed.
     pub async fn abort(&mut self) -> Result<Pending, CommandError> {
         self.state.lock().stopping = true;
         let pending = self.submit(json!({ "type": "abort" })).await?;
@@ -357,7 +358,7 @@ impl Session {
         };
         // One the user answered meanwhile is already resolved.
         for request in approvals {
-            let _ = self.decide(&request, Decision::Reject).await;
+            let _ = self.withdraw(&request).await;
         }
         for request in questions {
             let _ = self.answer(&request, Answer::Cancelled).await;
@@ -558,7 +559,21 @@ impl Session {
         self.respond(request, json!({ "value": value })).await?;
         self.resolved(AgentEvent::RequestResolved {
             request: request.clone(),
-            decision,
+            decision: Some(decision),
+        })
+        .await;
+        Ok(())
+    }
+
+    /// Ends an open approval request without a decision of the user's; its call is blocked.
+    async fn withdraw(&mut self, request: &RequestId) -> Result<(), CommandError> {
+        if self.state.lock().approvals.remove(request).is_none() {
+            return Err(CommandError::UnknownRequest);
+        }
+        self.respond(request, json!({ "cancelled": true })).await?;
+        self.resolved(AgentEvent::RequestResolved {
+            request: request.clone(),
+            decision: None,
         })
         .await;
         Ok(())
@@ -798,7 +813,7 @@ impl Supervisor {
                         shared.allow_in(session.clone());
                         let allowed = shared.allowed.contains(tool);
                         if shared.stopping {
-                            Some(json!({ "value": "reject" }))
+                            Some(json!({ "cancelled": true }))
                         } else if needs_user(shared.mode, *kind, *read_only, allowed) {
                             shared
                                 .approvals

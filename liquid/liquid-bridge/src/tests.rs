@@ -142,7 +142,7 @@ fn requests_and_questions_reach_dart_with_their_answers() {
     );
     let resolved = bridge(AgentEvent::RequestResolved {
         request: RequestId("a1".to_owned()),
-        decision: Decision::AllowSession,
+        decision: Some(Decision::AllowSession),
     });
     assert_eq!(
         resolved.request.expect("request").decision,
@@ -279,7 +279,7 @@ IFS= read -r line || exit 0"#;
 }
 
 #[test]
-fn stopping_rejects_the_open_approval_the_agent_waits_for() {
+fn stopping_withdraws_the_open_approval_the_agent_waits_for() {
     // pi acknowledges an abort once the agent is idle, which needs its open dialogs answered.
     let payload = r#"{\"tool\":\"bash\",\"arguments\":{},\"readOnly\":false}"#;
     let script = format!(
@@ -288,7 +288,7 @@ IFS= read -r line
 case "$line" in *'"type":"abort"'*) ;; *) exit 9 ;; esac
 IFS= read -r line
 case "$line" in *'"id":"a1"'*) ;; *) exit 9 ;; esac
-case "$line" in *'"value":"reject"'*) ;; *) exit 9 ;; esac
+case "$line" in *'"cancelled":true'*) ;; *) exit 9 ;; esac
 printf '%s\n' '{{"id":"2","type":"response","command":"abort","success":true}}'
 IFS= read -r line || exit 0"#
     );
@@ -322,10 +322,8 @@ IFS= read -r line || exit 0"#
             resolved.kind,
             resolved.request.and_then(|request| request.decision)
         ),
-        (
-            BridgeEventKind::RequestResolved,
-            Some(BridgeDecision::Reject)
-        )
+        (BridgeEventKind::RequestResolved, None),
+        "no decision of the user's"
     );
     assert!(session.shutdown());
 }
