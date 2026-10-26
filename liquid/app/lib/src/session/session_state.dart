@@ -329,27 +329,33 @@ class SessionState {
     mode.value = next;
   }
 
-  /// Answers the approval request in front.
-  Future<void> decide(BridgeDecision decision) async {
-    final request = approval.value;
-    if (request != null) {
-      await _backend.decide(request.id, decision);
-    }
-  }
+  /// Answers the approval `request`.
+  Future<void> decide(String request, BridgeDecision decision) =>
+      _reply(request, () => _backend.decide(request, decision));
 
-  /// Answers the question in front with text or a selected option.
-  Future<void> answerText(String text) =>
-      _answer((id) => _backend.answerText(id, text));
+  /// Answers the question `request` with text or a selected option.
+  Future<void> answerText(String request, String text) =>
+      _reply(request, () => _backend.answerText(request, text));
 
-  Future<void> answerConfirm(bool confirmed) =>
-      _answer((id) => _backend.answerConfirm(id, confirmed));
+  Future<void> answerConfirm(String request, bool confirmed) =>
+      _reply(request, () => _backend.answerConfirm(request, confirmed));
 
-  Future<void> dismiss() => _answer(_backend.dismiss);
+  Future<void> dismiss(String request) =>
+      _reply(request, () => _backend.dismiss(request));
 
-  Future<void> _answer(Future<void> Function(String id) reply) async {
-    final request = question.value;
-    if (request != null) {
-      await reply(request.id);
+  /// Requests answered but not resolved yet.
+  final _answered = <String>{};
+
+  /// Sends one answer to `request` while it is open, so a key on a card that is closing never
+  /// answers the request behind it, nor the same one twice.
+  Future<void> _reply(String request, Future<void> Function() send) async {
+    final open = [..._approvals, ..._questions].any((it) => it.id == request);
+    if (!open || !_answered.add(request)) return;
+    try {
+      await send();
+    } on Object catch (error) {
+      _answered.remove(request);
+      notify(BridgeLevel.error, 'The answer did not reach the agent: $error');
     }
   }
 
@@ -603,11 +609,13 @@ class SessionState {
       case BridgeEventKind.requestOpened:
         _approvals.add(event.request!);
       case BridgeEventKind.requestResolved:
+        _answered.remove(event.request!.id);
         _approvals.removeWhere((request) => request.id == event.request!.id);
         stored.value++;
       case BridgeEventKind.userInputRequested:
         _questions.add(event.request!);
       case BridgeEventKind.userInputResolved:
+        _answered.remove(event.request!.id);
         _questions.removeWhere((request) => request.id == event.request!.id);
       case BridgeEventKind.widgetChanged:
         final lines = event.display!.lines;

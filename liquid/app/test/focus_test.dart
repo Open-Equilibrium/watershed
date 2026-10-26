@@ -332,4 +332,26 @@ void main() {
       reason: 'the highlight is painted above the notice',
     );
   });
+
+  testWidgets('a key on a closing card never answers the next request', (
+    tester,
+  ) async {
+    await show(tester);
+    await emit(tester, event(BridgeEventKind.turnStarted, turn: 1));
+    await emit(tester, approval('a1'));
+    await emit(tester, approval('a2'));
+    await read(tester);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    // a1 closes; its card stays until the next frame.
+    backend.controller.add(
+      event(BridgeEventKind.requestResolved, request: BridgeRequest(id: 'a1')),
+    );
+    await tester.idle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(backend.calls.where((call) => call.startsWith('decide')), [
+      'decide a1 allowOnce',
+    ], reason: 'a2 was never shown long enough to be read');
+  });
 }

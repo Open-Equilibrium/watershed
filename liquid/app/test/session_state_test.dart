@@ -113,7 +113,7 @@ void main() {
       await emit(event(BridgeEventKind.requestOpened, request: approval('a2')));
       expect(state.status.value, RunStatus.waitingForYou);
       expect(state.approval.value!.id, 'a1');
-      await state.decide(BridgeDecision.allowOnce);
+      await state.decide('a1', BridgeDecision.allowOnce);
       expect(backend.calls.last, 'decide a1 allowOnce');
       await emit(
         event(
@@ -146,7 +146,7 @@ void main() {
         ),
       );
       expect(state.status.value, RunStatus.waitingForYou);
-      await state.answerText('B');
+      await state.answerText('q1', 'B');
       expect(backend.calls.last, 'answer q1 B');
       await emit(
         event(

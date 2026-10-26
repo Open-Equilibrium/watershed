@@ -488,6 +488,8 @@ class _ApprovalCardState extends State<ApprovalCard> {
   @override
   Widget build(BuildContext context) {
     final state = widget.state;
+    final id = widget.request.id;
+    void decide(BridgeDecision decision) => state.decide(id, decision);
     final approval = widget.request.approval!;
     final ws = context.ws;
     final title = switch (approval.kind) {
@@ -497,9 +499,9 @@ class _ApprovalCardState extends State<ApprovalCard> {
     };
     final keys = Keymap.of(context);
     final decisions = {
-      Command.allowOnce: () => state.decide(BridgeDecision.allowOnce),
-      Command.allowSession: () => state.decide(BridgeDecision.allowSession),
-      Command.reject: () => state.decide(BridgeDecision.reject),
+      Command.allowOnce: () => decide(BridgeDecision.allowOnce),
+      Command.allowSession: () => decide(BridgeDecision.allowSession),
+      Command.reject: () => decide(BridgeDecision.reject),
     };
     return CallbackShortcuts(
       bindings: {
@@ -556,13 +558,13 @@ class _ApprovalCardState extends State<ApprovalCard> {
                   PrimaryButton(
                     label: 'Allow once',
                     shortcut: keys.label(Command.allowOnce),
-                    onPressed: () => state.decide(BridgeDecision.allowOnce),
+                    onPressed: () => decide(BridgeDecision.allowOnce),
                   ),
                   const SizedBox(width: WsMetrics.space3),
                   SecondaryButton(
                     label: 'Allow for this session',
                     shortcut: keys.label(Command.allowSession),
-                    onPressed: () => state.decide(BridgeDecision.allowSession),
+                    onPressed: () => decide(BridgeDecision.allowSession),
                   ),
                   Expanded(
                     child: Text(
@@ -581,7 +583,7 @@ class _ApprovalCardState extends State<ApprovalCard> {
                     label: 'Reject',
                     shortcut: keys.label(Command.reject),
                     color: ws.danger,
-                    onPressed: () => state.decide(BridgeDecision.reject),
+                    onPressed: () => decide(BridgeDecision.reject),
                   ),
                 ],
               ),
@@ -863,11 +865,12 @@ class _QuestionCardState extends State<QuestionCard> {
   Widget build(BuildContext context) {
     final question = widget.request.question!;
     final state = widget.state;
+    final id = widget.request.id;
     final keys = Keymap.of(context);
     final answer = switch (question.kind) {
       BridgeQuestionKind.select => _OptionList(
         options: question.options,
-        onPick: state.answerText,
+        onPick: (option) => state.answerText(id, option),
         focusNode: _field,
       ),
       BridgeQuestionKind.confirm => Row(
@@ -875,12 +878,12 @@ class _QuestionCardState extends State<QuestionCard> {
           PrimaryButton(
             label: 'Yes',
             shortcut: keys.label(Command.answer),
-            onPressed: () => state.answerConfirm(true),
+            onPressed: () => state.answerConfirm(id, true),
           ),
           const SizedBox(width: WsMetrics.space3),
           SecondaryButton(
             label: 'No',
-            onPressed: () => state.answerConfirm(false),
+            onPressed: () => state.answerConfirm(id, false),
           ),
         ],
       ),
@@ -891,7 +894,7 @@ class _QuestionCardState extends State<QuestionCard> {
           Expanded(
             child: CallbackShortcuts(
               bindings: keys.bind({
-                Command.answerEditor: () => state.answerText(_text.text),
+                Command.answerEditor: () => state.answerText(id, _text.text),
               }),
               child: Container(
                 padding: const EdgeInsets.symmetric(
@@ -924,7 +927,7 @@ class _QuestionCardState extends State<QuestionCard> {
               PrimaryButton(
                 label: 'Answer',
                 shortcut: keys.label(Command.answerEditor),
-                onPressed: () => state.answerText(_text.text),
+                onPressed: () => state.answerText(id, _text.text),
               ),
             ],
           ),
@@ -935,7 +938,7 @@ class _QuestionCardState extends State<QuestionCard> {
           Expanded(
             child: CallbackShortcuts(
               bindings: keys.bind({
-                Command.answer: () => state.answerText(_text.text),
+                Command.answer: () => state.answerText(id, _text.text),
               }),
               child: TextField(
                 key: const Key('answer'),
@@ -952,16 +955,16 @@ class _QuestionCardState extends State<QuestionCard> {
           PrimaryButton(
             label: 'Answer',
             shortcut: keys.label(Command.answer),
-            onPressed: () => state.answerText(_text.text),
+            onPressed: () => state.answerText(id, _text.text),
           ),
         ],
       ),
     };
     return CallbackShortcuts(
       bindings: keys.bind({
-        Command.dismissQuestion: state.dismiss,
+        Command.dismissQuestion: () => state.dismiss(id),
         if (question.kind == BridgeQuestionKind.confirm)
-          Command.answer: () => state.answerConfirm(true),
+          Command.answer: () => state.answerConfirm(id, true),
       }),
       child: Focus(
         focusNode: _card,
@@ -982,7 +985,7 @@ class _QuestionCardState extends State<QuestionCard> {
                   SecondaryButton(
                     label: 'Dismiss',
                     shortcut: keys.label(Command.dismissQuestion),
-                    onPressed: state.dismiss,
+                    onPressed: () => state.dismiss(id),
                   ),
                 ],
               ),
