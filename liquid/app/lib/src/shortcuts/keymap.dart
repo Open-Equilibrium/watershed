@@ -214,6 +214,15 @@ enum Fixed {
   /// The keys as Settings show them.
   final String display;
   final List<Keys> keys;
+
+  /// Binds each key to the action at its position, such as ↑ to back and ↓ to on.
+  Map<ShortcutActivator, VoidCallback> bind(List<VoidCallback> actions) {
+    assert(actions.length == keys.length, '$name binds ${keys.length} keys');
+    return {
+      for (final (index, keys) in this.keys.indexed)
+        keys.activator: actions[index],
+    };
+  }
 }
 
 /// Every action with keys the user can change in Settings → Shortcuts.

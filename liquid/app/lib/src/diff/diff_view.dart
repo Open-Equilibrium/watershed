@@ -2,10 +2,10 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../rust/api/events.dart';
 import '../session/session_state.dart';
+import '../shortcuts/keymap.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
@@ -176,10 +176,8 @@ class _DiffViewState extends State<DiffView> {
   @override
   Widget build(BuildContext context) => CallbackShortcuts(
     bindings: {
-      const SingleActivator(LogicalKeyboardKey.arrowDown): () => _move(1),
-      const SingleActivator(LogicalKeyboardKey.arrowUp): () => _move(-1),
-      const SingleActivator(LogicalKeyboardKey.arrowLeft): _fold,
-      const SingleActivator(LogicalKeyboardKey.arrowRight): _unfold,
+      ...Fixed.previousOrNextFile.bind([() => _move(-1), () => _move(1)]),
+      ...Fixed.foldFolder.bind([_fold, _unfold]),
     },
     child: Focus(
       focusNode: _focus,

@@ -2,7 +2,6 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../controls.dart';
 import '../rust/api/events.dart';
@@ -21,8 +20,8 @@ import 'tree_view.dart';
 
 /// Keys of the Trajectory tab, for the status bar.
 String trajectoryKeys(ShortcutSettings keys) => [
-  '↑↓ step',
-  '←→ fold',
+  '${Fixed.previousOrNextStep.display} step',
+  '${Fixed.foldTurn.display} fold',
   keys.hint(Command.openStep, 'open'),
   keys.hint(Command.branch, 'branch'),
   keys.hint(Command.compare, 'compare'),
@@ -30,7 +29,7 @@ String trajectoryKeys(ShortcutSettings keys) => [
 
 /// Keys while comparing two branches.
 String compareKeys(ShortcutSettings keys) => [
-  '⌥↑↓ tree',
+  '${Fixed.moveInTree.display} tree',
   keys.hint(Command.selectBranch, 'select branch'),
   keys.hint(Command.compare, 'leave compare'),
 ].where((part) => part.isNotEmpty).join(' · ');
@@ -470,15 +469,9 @@ class _TrajectoryViewState extends State<TrajectoryView> {
           },
           Command.closeStep: _escape,
         }),
-        const SingleActivator(LogicalKeyboardKey.arrowDown): () => _move(1),
-        const SingleActivator(LogicalKeyboardKey.arrowUp): () => _move(-1),
-        const SingleActivator(LogicalKeyboardKey.arrowLeft): () => _fold(true),
-        const SingleActivator(LogicalKeyboardKey.arrowRight): () =>
-            _fold(false),
-        const SingleActivator(LogicalKeyboardKey.arrowUp, alt: true): () =>
-            _stepTree(-1),
-        const SingleActivator(LogicalKeyboardKey.arrowDown, alt: true): () =>
-            _stepTree(1),
+        ...Fixed.previousOrNextStep.bind([() => _move(-1), () => _move(1)]),
+        ...Fixed.foldTurn.bind([() => _fold(true), () => _fold(false)]),
+        ...Fixed.moveInTree.bind([() => _stepTree(-1), () => _stepTree(1)]),
       },
       child: Focus(
         focusNode: _focus,

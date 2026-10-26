@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../controls.dart';
 import '../rust/api/history.dart';
+import '../shortcuts/keymap.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
@@ -66,7 +67,7 @@ class SessionTreeView extends StatelessWidget {
                   ),
                 ),
                 const Spacer(),
-                const Hint('⌥↑↓'),
+                Hint(Fixed.moveInTree.display),
               ],
             ),
           ),

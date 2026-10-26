@@ -529,12 +529,12 @@ class _ApprovalCardState extends State<ApprovalCard> {
     return CallbackShortcuts(
       bindings: {
         ...keys.bind(decisions),
-        const SingleActivator(LogicalKeyboardKey.arrowUp): () => _scroll(-1),
-        const SingleActivator(LogicalKeyboardKey.arrowDown): () => _scroll(1),
-        const SingleActivator(LogicalKeyboardKey.pageUp): () =>
-            _scroll(-1, page: true),
-        const SingleActivator(LogicalKeyboardKey.pageDown): () =>
-            _scroll(1, page: true),
+        ...Fixed.scrollCall.bind([
+          () => _scroll(-1),
+          () => _scroll(1),
+          () => _scroll(-1, page: true),
+          () => _scroll(1, page: true),
+        ]),
       },
       child: Focus(
         focusNode: _focus,
@@ -788,10 +788,10 @@ class _OptionListState extends State<_OptionList> {
                 ),
                 child: CallbackShortcuts(
                   bindings: {
-                    const SingleActivator(LogicalKeyboardKey.arrowDown): () =>
-                        _move(1),
-                    const SingleActivator(LogicalKeyboardKey.arrowUp): () =>
-                        _move(-1),
+                    ...Fixed.moveThroughOptions.bind([
+                      () => _move(-1),
+                      () => _move(1),
+                    ]),
                     for (final keys in Keymap.of(
                       context,
                     ).bindings(Command.answer))
