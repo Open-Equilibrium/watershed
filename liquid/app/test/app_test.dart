@@ -11,6 +11,16 @@ void main() {
     expect(find.byType(TextField), findsNothing);
   });
 
+  test('refuses an extension path the project could supply', () async {
+    // pi reads a relative path inside the project it works in.
+    final launch = await launchFromEnvironment({
+      'LIQUID_PROJECT': '/tmp',
+      'LIQUID_PI_EXTENSION': 'meta-harness/pi-extension/watershed.ts',
+      'LIQUID_PI': '/nonexistent/pi',
+    });
+    expect(launch.problem, contains('absolute path'));
+  });
+
   test('reopens a stored pi session when one is named', () {
     expect(piArguments('/w/watershed.ts', null), [
       '--mode',

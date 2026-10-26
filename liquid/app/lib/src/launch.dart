@@ -32,7 +32,8 @@ List<String> piArguments(String extension, String? session) => [
 Future<Launch> launchFromEnvironment(Map<String, String> environment) async {
   final project = environment['LIQUID_PROJECT'];
   final extension = environment['LIQUID_PI_EXTENSION'];
-  if (project == null || extension == null) {
+  // pi reads a relative extension path inside the project, which could supply its own.
+  if (project == null || extension == null || !File(extension).isAbsolute) {
     return const Launch.problem(
       'Start Liquid with LIQUID_PROJECT set to a project directory and LIQUID_PI_EXTENSION set '
       'to the absolute path of meta-harness/pi-extension/watershed.ts.',
