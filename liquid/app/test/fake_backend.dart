@@ -19,10 +19,16 @@ class FakeBackend implements SessionBackend {
   /// Histories by the requested leaves, joined by spaces; others get [stored].
   final histories = <String, BridgeHistory>{};
   bool cancelled = false;
+  final _stopped = Completer<void>();
 
+  /// Like the bridge's stream, cancelling it finishes only with the next event, which an idle
+  /// agent sends only once it is shut down.
   @override
   Stream<BridgeEvent> events() {
-    controller.onCancel = () => cancelled = true;
+    controller.onCancel = () {
+      cancelled = true;
+      return _stopped.future;
+    };
     return controller.stream;
   }
 
@@ -209,6 +215,7 @@ class FakeBackend implements SessionBackend {
   @override
   Future<bool> shutdown() async {
     calls.add('shutdown');
+    if (!_stopped.isCompleted) _stopped.complete();
     return true;
   }
 }

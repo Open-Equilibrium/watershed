@@ -798,8 +798,8 @@ void main() {
     );
   });
 
-  test('dispose releases the stream and stops the agent', () async {
-    await state.dispose();
+  test('dispose releases the stream and stops an idle agent', () async {
+    await state.dispose().timeout(const Duration(seconds: 2));
     expect(backend.cancelled, isTrue);
     expect(backend.calls, ['shutdown']);
   });

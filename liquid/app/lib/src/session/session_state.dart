@@ -619,8 +619,11 @@ class SessionState {
   /// Releases the event stream and stops the agent.
   Future<void> dispose() async {
     _fade?.cancel();
-    await _subscription.cancel();
+    // The bridge's stream finishes cancelling only with its next event, which an idle agent
+    // sends once it is shut down, so the agent stops first.
+    final cancelled = _subscription.cancel();
     await _backend.shutdown();
+    await cancelled;
   }
 
   void _apply(BridgeEvent event) {

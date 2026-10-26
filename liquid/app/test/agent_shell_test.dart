@@ -815,8 +815,16 @@ void main() {
 
   testWidgets('stops the agent before the app exits', (tester) async {
     await show(tester);
-    final response = await tester.runAsync(tester.binding.handleRequestAppExit);
-    expect(response, AppExitResponse.exit);
+    AppExitResponse? response;
+    unawaited(
+      tester.binding.handleRequestAppExit().then((answer) => response = answer),
+    );
+    await tester.pump();
+    expect(
+      response,
+      AppExitResponse.exit,
+      reason: 'an idle agent lets Liquid quit',
+    );
     expect(backend.calls, contains('shutdown'));
   });
 }
