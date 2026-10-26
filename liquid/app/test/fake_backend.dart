@@ -101,14 +101,18 @@ class FakeBackend implements SessionBackend {
     final key = leaves.join(' ');
     calls.add('history $key'.trim());
     await gate?.future;
+    if (historyError case final error?) throw error;
     return histories[key] ?? stored;
   }
+
+  Object? historyError;
 
   /// Holds history reads until it completes.
   Completer<void>? gate;
 
   /// Whether [branch] moves the session's leaf, as a successful branch does.
   bool branchMoves = true;
+  Object? branchError;
 
   /// The project's stored sessions, the models and the selected one, as pi reports them.
   List<BridgeStoredSession> storedSessions = const [];
@@ -175,10 +179,12 @@ class FakeBackend implements SessionBackend {
 
   /// Context details by response entry.
   final contexts = <String, BridgeContextDetail>{};
+  Object? contextError;
 
   @override
   Future<BridgeContextDetail?> context(String entry) async {
     calls.add('context $entry');
+    if (contextError case final error?) throw error;
     return contexts[entry];
   }
 
@@ -186,6 +192,7 @@ class FakeBackend implements SessionBackend {
   @override
   Future<void> branch(String entry) async {
     calls.add('branch $entry');
+    if (branchError case final error?) throw error;
     if (branchMoves) {
       final node = stored.tree.where((node) => node.id == entry).firstOrNull;
       stored = BridgeHistory(

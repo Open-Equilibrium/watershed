@@ -218,6 +218,49 @@ void main() {
     expect(state.notice.value?.level, BridgeLevel.error);
   });
 
+  testWidgets('a history that cannot be read says so once', (tester) async {
+    await show(tester, historyOf(branchA));
+    backend.historyError = 'the session file is gone';
+    for (var stored = 0; stored < 2; stored++) {
+      state.stored.value++;
+      await tester.pumpAndSettle();
+    }
+    expect(state.notices.value.map((notice) => notice.text), [
+      'Could not read the session history: the session file is gone',
+    ]);
+    expect(
+      find.text('branch A · 7 steps · 24.5 s'),
+      findsOneWidget,
+      reason: 'the last history stays',
+    );
+  });
+
+  testWidgets('a branch the agent refuses says why', (tester) async {
+    await show(tester, historyOf(branchA));
+    backend.branchError = 'the agent has stopped';
+    await press(tester, LogicalKeyboardKey.arrowDown);
+    await press(tester, LogicalKeyboardKey.keyB);
+    expect(
+      state.notice.value?.text,
+      'The session could not branch at step 1: the agent has stopped',
+    );
+  });
+
+  testWidgets('what the model saw says when it cannot be read', (tester) async {
+    await show(tester, historyOf(branchA));
+    backend.contextError = 'the session file is gone';
+    for (var step = 0; step < 4; step++) {
+      await press(tester, LogicalKeyboardKey.arrowDown);
+    }
+    await press(tester, LogicalKeyboardKey.enter);
+    await tester.tap(find.text('Context'));
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Could not read what the model saw: the session file is gone'),
+      findsOneWidget,
+    );
+  });
+
   testWidgets('a prompt branches before itself, also when already there', (
     tester,
   ) async {

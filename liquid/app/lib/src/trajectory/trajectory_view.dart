@@ -72,6 +72,12 @@ class _TrajectoryViewState extends State<TrajectoryView> {
 
   /// What the model saw for each response, loaded when its inspector opens.
   final _details = <String, BridgeContextDetail?>{};
+
+  /// Why the latest history read failed, so a lasting failure is reported once.
+  String? _unreadHistory;
+
+  /// Why what the model saw for a response could not be read, by entry.
+  final _unread = <String, String>{};
   final _folded = <int>{};
   bool _equalWidth = false;
   (double, double)? _range;
@@ -132,10 +138,24 @@ class _TrajectoryViewState extends State<TrajectoryView> {
         final BridgeHistory history;
         try {
           history = await widget.state.history(leaves);
-        } on Object {
-          // The agent exited: keep showing the last history.
+        } on Object catch (error) {
+          // The last history stays. An exited agent already said so; anything else is said
+          // once until a read works again.
+          final reason = '$error';
+          final state = widget.state;
+          if (mounted &&
+              reason != _unreadHistory &&
+              state.status.value != RunStatus.exited &&
+              state.status.value != RunStatus.failed) {
+            state.notify(
+              BridgeLevel.error,
+              'Could not read the session history: $reason',
+            );
+          }
+          _unreadHistory = reason;
           return;
         }
+        _unreadHistory = null;
         if (!mounted) return;
         final graph = sessionGraph(history.tree, history.leaf);
         String grown(String tip) => graph.branchOf(tip)?.tip ?? tip;
@@ -266,7 +286,15 @@ class _TrajectoryViewState extends State<TrajectoryView> {
               .firstOrNull
               ?.parent
         : from.entry;
-    await widget.state.branch(from.entry);
+    try {
+      await widget.state.branch(from.entry);
+    } on Object catch (error) {
+      widget.state.notify(
+        BridgeLevel.error,
+        'The session could not branch at step ${index + 1}: $error',
+      );
+      return;
+    }
     bool moved;
     try {
       moved = (await widget.state.history()).leaf == expected;
@@ -373,9 +401,23 @@ class _TrajectoryViewState extends State<TrajectoryView> {
     final entry = record.entry;
     if (!_details.containsKey(entry)) {
       _details[entry] = null;
-      widget.state.context(entry).then((detail) {
-        if (mounted && detail != null) setState(() => _details[entry] = detail);
-      }, onError: (_) {});
+      widget.state
+          .context(entry)
+          .then(
+            (detail) {
+              if (!mounted) return;
+              setState(() {
+                if (detail == null) {
+                  _unread[entry] = 'the session has no such response';
+                } else {
+                  _details[entry] = detail;
+                }
+              });
+            },
+            onError: (Object error) {
+              if (mounted) setState(() => _unread[entry] = '$error');
+            },
+          );
     }
     return _details[entry];
   }
@@ -642,6 +684,7 @@ class _TrajectoryViewState extends State<TrajectoryView> {
               ),
               _InspectorLine(index: final step) => Inspector(
                 detail: _detailFor(records[step]),
+                unread: _unread[records[step].entry],
                 records: records,
                 index: step,
                 tab: _tab,

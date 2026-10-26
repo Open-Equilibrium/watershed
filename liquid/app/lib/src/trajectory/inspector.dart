@@ -22,6 +22,7 @@ class Inspector extends StatelessWidget {
     required this.records,
     required this.index,
     required this.detail,
+    this.unread,
     required this.tab,
     required this.canBranch,
     required this.onTab,
@@ -31,6 +32,9 @@ class Inspector extends StatelessWidget {
   final List<BridgeRecord> records;
   final int index;
   final BridgeContextDetail? detail;
+
+  /// Why [detail] could not be read.
+  final String? unread;
   final InspectorTab tab;
   final bool canBranch;
   final ValueChanged<InspectorTab> onTab;
@@ -101,6 +105,7 @@ class Inspector extends StatelessWidget {
                 InspectorTab.context => _ContextTab(
                   record: record,
                   detail: detail,
+                  unread: unread,
                 ),
                 InspectorTab.summary when message => _MessageSummary(
                   records: records,
@@ -426,10 +431,11 @@ class _MessageSummary extends StatelessWidget {
 
 /// Every part of what the model saw for one request (approved session-flow mockup).
 class _ContextTab extends StatelessWidget {
-  const _ContextTab({required this.record, required this.detail});
+  const _ContextTab({required this.record, required this.detail, this.unread});
 
   final BridgeRecord record;
   final BridgeContextDetail? detail;
+  final String? unread;
 
   @override
   Widget build(BuildContext context) {
@@ -438,10 +444,10 @@ class _ContextTab extends StatelessWidget {
     final saw = record.context;
     if (detail == null || saw == null) {
       return Center(
-        child: Text(
-          'Reading what the model saw…',
-          style: TextStyle(color: ws.textFaint, fontSize: WsMetrics.fsSmall),
-        ),
+        child: Text(switch (unread) {
+          final reason? => 'Could not read what the model saw: $reason',
+          null => 'Reading what the model saw…',
+        }, style: TextStyle(color: ws.textFaint, fontSize: WsMetrics.fsSmall)),
       );
     }
     final split = _tokenSplit(record);

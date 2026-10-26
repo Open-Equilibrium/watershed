@@ -474,8 +474,8 @@ class _ApprovalCardState extends State<ApprovalCard> {
   void _arm() {
     _armed = false;
     _arming?.cancel();
-    if (WidgetsBinding.instance.lifecycleState case null ||
-        AppLifecycleState.resumed) {
+    if (WidgetsBinding.instance.lifecycleState
+        case null || AppLifecycleState.resumed) {
       _arming = Timer(const Duration(milliseconds: 500), () => _armed = true);
     }
   }
