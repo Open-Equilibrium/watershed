@@ -316,7 +316,9 @@ void main() {
     await show(tester, backend);
     expect(find.text('1 file · +0 −0'), findsOneWidget);
     expect(
-      find.text('No text changes to show, as for a binary file.'),
+      find.text(
+        'No text changes to show, as for a binary file or a new file mode.',
+      ),
       findsOneWidget,
     );
   });

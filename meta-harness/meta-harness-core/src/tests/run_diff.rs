@@ -126,13 +126,18 @@ fn a_session_switch_ends_the_diff_unless_a_run_started_meanwhile() {
 #[test]
 fn project_settings_that_skip_files_hide_no_change() {
     run(async {
-        // A file the project marks as unchanged, and a setting that trusts the index over
-        // the files; either way Git would skip the file.
+        // Files the project marks as unchanged or as outside its work, and a setting that
+        // trusts the index over the files; either way Git would skip the file.
         let marked = Repo::new("assume-unchanged");
         marked.git(&["update-index", "--assume-unchanged", "a.txt"]);
+        let skipped = Repo::new("skip-worktree");
+        skipped.write("b.txt", "other\n");
+        skipped.git(&["add", "b.txt"]);
+        skipped.git(&["commit", "-q", "-m", "b"]);
+        skipped.git(&["update-index", "--skip-worktree", "a.txt"]);
         let trusting = Repo::new("ignore-stat");
         trusting.git(&["config", "core.ignoreStat", "true"]);
-        for repo in [marked, trusting] {
+        for repo in [marked, skipped, trusting] {
             let diff = RunDiff::open(repo.path()).await;
             diff.started(diff.capture().await);
             repo.write("a.txt", "new\n");
@@ -152,6 +157,51 @@ fn project_settings_that_skip_files_hide_no_change() {
                 repo.path().display()
             );
         }
+    });
+}
+
+#[test]
+fn a_file_made_executable_shows_although_the_project_ignores_modes() {
+    use std::os::unix::fs::PermissionsExt;
+    run(async {
+        let repo = Repo::new("file-mode");
+        repo.git(&["config", "core.fileMode", "false"]);
+        let diff = RunDiff::open(repo.path()).await;
+        diff.started(diff.capture().await);
+        let file = repo.path().join("a.txt");
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o755)).expect("mode");
+        assert_eq!(
+            diff.changes().await.expect("changes"),
+            [FileChange {
+                added: 0,
+                removed: 0,
+                ..modified("a.txt")
+            }]
+        );
+    });
+}
+
+#[test]
+fn a_first_snapshot_that_failed_still_clears_the_projects_marks() {
+    run(async {
+        let repo = Repo::new("unmark-retry");
+        repo.git(&["update-index", "--assume-unchanged", "a.txt"]);
+        // The first snapshot runs out of time while it clears the copied index's marks.
+        let mut diff = RunDiff::with_timeout(repo.path(), Duration::from_millis(1)).await;
+        diff.started(diff.capture().await);
+        assert!(matches!(
+            diff.changes().await,
+            Err(DiffError::NotCaptured(_))
+        ));
+
+        diff.set_timeout(Duration::from_secs(60));
+        diff.started(diff.capture().await);
+        repo.write("a.txt", "new\n");
+        assert_eq!(
+            diff.changes().await.expect("changes"),
+            [modified("a.txt")],
+            "the marks are cleared on the next snapshot"
+        );
     });
 }
 

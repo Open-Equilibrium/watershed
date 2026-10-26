@@ -426,7 +426,7 @@ class _Patch extends StatelessWidget {
               child: textless
                   ? Center(
                       child: Text(
-                        'No text changes to show, as for a binary file.',
+                        'No text changes to show, as for a binary file or a new file mode.',
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
                     )

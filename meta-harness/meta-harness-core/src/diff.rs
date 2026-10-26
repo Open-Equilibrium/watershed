@@ -250,7 +250,7 @@ impl WorkingTree {
             "--no-color",
         ];
         command.extend_from_slice(args);
-        git(&self.root, &self.env(), &command).await
+        git(&self.root, &self.env(&self.store.0.join("index")), &command).await
     }
 
     /// Writes the working tree into the private store and returns its tree id.
@@ -258,17 +258,28 @@ impl WorkingTree {
         let _busy = self.busy.lock().await;
         // A Git stopped at its time limit leaves its lock; no other Git uses this index now.
         let _ = std::fs::remove_file(self.store.0.join("index.lock"));
+        let _ = std::fs::remove_file(self.store.0.join("index.new.lock"));
         // The first snapshot starts from the project's index, so Git rereads only the files
         // that changed since; later snapshots keep the private index.
         let index = self.store.0.join("index");
-        let env = self.env();
         if !index.exists() {
-            match std::fs::copy(&self.index, &index) {
-                Ok(_) => self.unmark(&env).await?,
+            // Kept only once its marks are cleared, so a failed first snapshot leaves none.
+            let copy = self.store.0.join("index.new");
+            match std::fs::copy(&self.index, &copy) {
+                Ok(_) => {
+                    let cleared = self.unmark(&self.env(&copy)).await;
+                    if let Err(error) =
+                        cleared.and_then(|()| std::fs::rename(&copy, &index).map_err(DiffError::Io))
+                    {
+                        let _ = std::fs::remove_file(&copy);
+                        return Err(error);
+                    }
+                }
                 Err(error) if error.kind() == ErrorKind::NotFound => {}
                 Err(error) => return Err(DiffError::Io(error)),
             }
         }
+        let env = self.env(&index);
         git(&self.root, &env, &["add", "--all", "--", "."]).await?;
         Ok(git(&self.root, &env, &["write-tree"])
             .await?
@@ -276,8 +287,8 @@ impl WorkingTree {
             .to_owned())
     }
 
-    /// Clears the marks with which the project told Git to assume files unchanged in the copied
-    /// index; `git add` would skip those files and hide their changes.
+    /// Clears the marks with which the project told Git to assume files unchanged or outside its
+    /// work in the copied index; `git add` would skip those files and hide their changes.
     async fn unmark(&self, env: &[(&'static str, OsString)]) -> Result<(), DiffError> {
         let mut listing = git_command(&self.root, env, &["ls-files", "-z", "-v"])
             .stderr(Stdio::null())
@@ -287,9 +298,10 @@ impl WorkingTree {
         let mut marked = Vec::new();
         let unreadable = |error: std::io::Error| DiffError::Git(error.to_string());
         while let Some(entry) = entries.next_segment().await.map_err(unreadable)? {
-            // `ls-files -v` tags a file assumed unchanged with a lowercase letter.
+            // `ls-files -v` tags a file assumed unchanged with a lowercase letter and one
+            // outside the work with `S`.
             if let [tag, b' ', path @ ..] = entry.as_slice()
-                && tag.is_ascii_lowercase()
+                && (tag.is_ascii_lowercase() || *tag == b'S')
             {
                 marked.extend_from_slice(path);
                 marked.push(0);
@@ -303,26 +315,24 @@ impl WorkingTree {
         if marked.is_empty() {
             return Ok(());
         }
-        let mut clearing = git_command(
-            &self.root,
-            env,
-            &["update-index", "--no-assume-unchanged", "-z", "--stdin"],
-        )
-        .stdin(Stdio::piped())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(DiffError::GitStart)?;
-        let mut input = clearing.stdin.take().expect("stdin is piped");
-        input.write_all(&marked).await.map_err(unreadable)?;
-        drop(input);
-        if clearing.wait().await.map_err(unreadable)?.success() {
-            Ok(())
-        } else {
-            Err(DiffError::Git(
-                "could not read files the project assumes unchanged".to_owned(),
-            ))
+        for mark in ["--no-assume-unchanged", "--no-skip-worktree"] {
+            let mut clearing =
+                git_command(&self.root, env, &["update-index", mark, "-z", "--stdin"])
+                    .stdin(Stdio::piped())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .spawn()
+                    .map_err(DiffError::GitStart)?;
+            let mut input = clearing.stdin.take().expect("stdin is piped");
+            input.write_all(&marked).await.map_err(unreadable)?;
+            drop(input);
+            if !clearing.wait().await.map_err(unreadable)?.success() {
+                return Err(DiffError::Git(
+                    "could not read the files the project marks as skipped".to_owned(),
+                ));
+            }
         }
+        Ok(())
     }
 
     /// The private store, which tests watch for cleanup.
@@ -331,9 +341,10 @@ impl WorkingTree {
         &self.store.0
     }
 
-    fn env(&self) -> Vec<(&'static str, OsString)> {
+    /// Git's environment for snapshots with the private `index`.
+    fn env(&self, index: &Path) -> Vec<(&'static str, OsString)> {
         vec![
-            ("GIT_INDEX_FILE", self.store.0.join("index").into()),
+            ("GIT_INDEX_FILE", index.into()),
             ("GIT_OBJECT_DIRECTORY", self.store.0.join("objects").into()),
             (
                 "GIT_ALTERNATE_OBJECT_DIRECTORIES",
@@ -395,6 +406,10 @@ fn git_command(dir: &Path, env: &[(&str, OsString)], args: &[&str]) -> Command {
             "core.checkStat=default",
             "-c",
             "core.trustctime=true",
+            "-c",
+            "core.fileMode=true",
+            "-c",
+            "core.sparseCheckout=false",
             // Blank context lines keep their leading space, which Liquid reads as context.
             "-c",
             "diff.suppressBlankEmpty=false",

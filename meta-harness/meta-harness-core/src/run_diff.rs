@@ -143,6 +143,11 @@ impl RunDiff {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn set_timeout(&mut self, timeout: Duration) {
+        self.timeout = timeout;
+    }
+
     /// The private store, which tests watch for cleanup.
     #[cfg(test)]
     pub(crate) fn store(&self) -> Option<std::path::PathBuf> {
