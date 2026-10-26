@@ -439,6 +439,19 @@ void main() {
       );
     });
 
+    test('an exited agent\'s unreadable pages add no notice', () async {
+      backend.transcripts[''] = BridgeTranscript(
+        items: [chatItem('u2', BridgeItemKind.userMessage, text: 'Later')],
+        more: true,
+        start: 'u2',
+      );
+      await state.loadChat();
+      await emit(event(BridgeEventKind.exited, success: true));
+      backend.transcriptError = 'the agent has exited';
+      await state.loadEarlier();
+      expect(state.notices.value, isEmpty, reason: 'the exit says it all');
+    });
+
     test('an earlier chat page that cannot be read is reported once', () async {
       backend.transcripts[''] = BridgeTranscript(
         items: [chatItem('u2', BridgeItemKind.userMessage, text: 'Later')],

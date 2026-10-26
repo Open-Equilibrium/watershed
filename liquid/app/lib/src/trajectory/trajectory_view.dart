@@ -74,9 +74,6 @@ class _TrajectoryViewState extends State<TrajectoryView> {
   final _details = <String, BridgeContextDetail?>{};
   static const _keptDetails = 4;
 
-  /// Why the latest history read failed, so a lasting failure is reported once.
-  String? _unreadHistory;
-
   /// Why what the model saw for a response could not be read, by entry.
   final _unread = <String, String>{};
   final _folded = <int>{};
@@ -140,23 +137,16 @@ class _TrajectoryViewState extends State<TrajectoryView> {
         try {
           history = await widget.state.history(leaves);
         } on Object catch (error) {
-          // The last history stays. An exited agent already said so; anything else is said
-          // once until a read works again.
-          final reason = '$error';
-          final state = widget.state;
-          if (mounted &&
-              reason != _unreadHistory &&
-              state.status.value != RunStatus.exited &&
-              state.status.value != RunStatus.failed) {
-            state.notify(
-              BridgeLevel.error,
-              'Could not read the session history: $reason',
+          // The last history stays.
+          if (mounted) {
+            widget.state.reportRead(
+              'history',
+              'Could not read the session history: $error',
             );
           }
-          _unreadHistory = reason;
           return;
         }
-        _unreadHistory = null;
+        widget.state.reportRead('history', null);
         if (!mounted) return;
         final graph = sessionGraph(history.tree, history.leaf);
         String grown(String tip) => graph.branchOf(tip)?.tip ?? tip;

@@ -142,9 +142,6 @@ class SessionState {
   String? _chatStart;
   bool _readingEarlier = false;
 
-  /// Why earlier messages could not be read, so a lasting failure is reported once.
-  String? _unreadEarlier;
-
   /// Rebuilt items count down from -1, so they never meet live item ids.
   int _nextStoredId = -1;
 
@@ -245,6 +242,7 @@ class SessionState {
       return false;
     }
     _generation++;
+    _failing.clear();
     sessionTitle.value = null;
     // The previous session's run no longer applies.
     ran.value = false;
@@ -419,6 +417,7 @@ class SessionState {
     try {
       final read = await _backend.changes();
       if (generation != _generation) return;
+      reportRead('changes', null);
       changesProblem.value = read == null
           ? 'This project is not in Git, so Liquid cannot show what a run changed.'
           : null;
@@ -426,7 +425,7 @@ class SessionState {
     } on Object catch (error) {
       if (generation != _generation) return;
       final problem = 'Could not show the changes: $error';
-      if (problem != changesProblem.value) notify(BridgeLevel.error, problem);
+      reportRead('changes', problem);
       changesProblem.value = problem;
       changed.value = null;
     }
@@ -540,7 +539,7 @@ class SessionState {
       while (chatMore.value && _chatStart != null) {
         final before = _chatStart;
         final page = await _backend.transcript(before);
-        _unreadEarlier = null;
+        reportRead('earlier messages', null);
         if (generation != _generation || version != _chatVersion) return;
         _chatStart = page.start;
         // A page that does not move back ends the reading, so it cannot repeat forever.
@@ -563,10 +562,7 @@ class SessionState {
         items.value = shown;
       }
     } on Object catch (error) {
-      if ('$error' != _unreadEarlier) {
-        notify(BridgeLevel.error, 'Could not read earlier messages: $error');
-      }
-      _unreadEarlier = '$error';
+      reportRead('earlier messages', 'Could not read earlier messages: $error');
     } finally {
       _readingEarlier = false;
     }
@@ -615,6 +611,23 @@ class SessionState {
         if (notice.value == shown) notice.value = null;
       });
     }
+  }
+
+  /// The lasting read failures already reported, by what could not be read.
+  final Map<String, String> _failing = {};
+
+  /// Reports that reading [what] failed with [problem], or works again when it is null. A
+  /// failure is reported once until it changes or the read works, and an exited agent's
+  /// failures add nothing to what its exit said.
+  void reportRead(String what, String? problem) {
+    if (problem == null) {
+      _failing.remove(what);
+      return;
+    }
+    if (_failing[what] == problem) return;
+    _failing[what] = problem;
+    if (status.value case RunStatus.exited || RunStatus.failed) return;
+    notify(BridgeLevel.error, problem);
   }
 
   /// Takes the notification out of the status bar; the list keeps it.
