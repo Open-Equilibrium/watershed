@@ -8,6 +8,7 @@ import '../rust/api/history.dart';
 import '../rust/api/session.dart';
 import '../trajectory/trajectory_model.dart';
 import 'backend.dart';
+import 'chat_history.dart';
 
 /// What the session is doing, as the status bar and sidebar show it.
 enum RunStatus { idle, running, waitingForYou, exited, failed }
@@ -49,7 +50,8 @@ typedef ItemOutcome = ({
   ({int added, int removed})? lines,
 });
 
-({int added, int removed})? _lines(int? added, int? removed) =>
+/// The lines a file change added and removed, when the agent counted both.
+({int added, int removed})? changedLines(int? added, int? removed) =>
     added == null || removed == null ? null : (added: added, removed: removed);
 
 /// A notification from the agent or Liquid, as the status bar shows it.
@@ -135,15 +137,17 @@ class SessionState {
   /// Messages waiting for the running agent.
   final queue = ValueNotifier(const BridgeQueue(steering: [], followUp: []));
 
+  /// The chat as the session stores it, read back page by page.
+  late final _chat = ChatHistory(
+    _backend,
+    items: items,
+    totals: totals,
+    notify: notify,
+    reportRead: reportRead,
+  );
+
   /// Whether earlier stored entries of the chat remain to be read.
-  final chatMore = ValueNotifier(false);
-
-  /// The earliest stored entry the chat covers; the next page ends before it.
-  String? _chatStart;
-  bool _readingEarlier = false;
-
-  /// Rebuilt items count down from -1, so they never meet live item ids.
-  int _nextStoredId = -1;
+  ValueNotifier<bool> get chatMore => _chat.more;
 
   /// Counts the changes of the session's stored history; the Trajectory reloads on each.
   final stored = ValueNotifier(0);
@@ -250,8 +254,7 @@ class SessionState {
     changesProblem.value = null;
     _byId.clear();
     items.value = const [];
-    chatMore.value = false;
-    _chatStart = null;
+    _chat.reset();
     totals.value = const SessionTotals();
     queue.value = const BridgeQueue(steering: [], followUp: []);
     stored.value++;
@@ -278,7 +281,7 @@ class SessionState {
     // chat is restored follows it, so the restored chat does not hold its items twice.
     await _switching?.future;
     try {
-      await _chatLoad;
+      await _chat.loading;
     } on Object {
       // The chat reports its own failure; the message still goes out.
     }
@@ -458,142 +461,10 @@ class SessionState {
 
   /// Rebuilds the chat from the session's current branch, as the model sees it, and marks
   /// where it leaves the other branches. Items that arrive meanwhile stay after it.
-  Future<void> loadChat() {
-    final load = _loadChat();
-    _chatLoad = load;
-    return load.whenComplete(() {
-      if (identical(_chatLoad, load)) _chatLoad = null;
-    });
-  }
+  Future<void> loadChat() => _chat.load();
 
-  /// A chat restore in progress; messages wait for it.
-  Future<void>? _chatLoad;
-
-  Future<void> _loadChat() async {
-    final generation = _generation;
-    final version = ++_chatVersion;
-    final before = items.value;
-    final BridgeTranscript page;
-    final BridgeHistory history;
-    try {
-      page = await _backend.transcript(null);
-      history = await _backend.history(const []);
-    } on Object catch (error) {
-      notify(BridgeLevel.error, 'Could not restore the chat: $error');
-      return;
-    }
-    if (generation != _generation || version != _chatVersion) return;
-    // What the stored responses used; live requests add to it.
-    totals.value = const SessionTotals().add(history.usage);
-    final rebuilt = _stored(page.items);
-    _pendingMark = null;
-    if (branchMarker(history.tree, history.leaf) case final marker?) {
-      final path = _pathIndex(history.tree, history.leaf);
-      final mark = (marker: marker, path: path, fork: path[marker.fork] ?? -1);
-      if (!_placeMark(rebuilt, mark, complete: !page.more)) _pendingMark = mark;
-    }
-    // Only live items arrived meanwhile; items another restore rebuilt are replaced.
-    final arrived = items.value.where(
-      (view) =>
-          !before.contains(view) && view.entry == null && view.marker == null,
-    );
-    items.value = [...rebuilt, ...arrived];
-    _chatStart = page.start;
-    chatMore.value = page.more;
-    if (page.items.isEmpty) await loadEarlier();
-  }
-
-  /// The branch mark until the chat shows where the branch leaves the others.
-  _Mark? _pendingMark;
-
-  /// Counts chat restores; an earlier page read for a replaced chat is dropped.
-  int _chatVersion = 0;
-
-  /// Puts the mark before the first of `views` past the fork, once they show the fork itself
-  /// or nothing earlier remains; whether it did.
-  bool _placeMark(List<ItemView> views, _Mark mark, {required bool complete}) {
-    int position(ItemView view) => mark.path[view.entry] ?? -1;
-    final reachesFork = views.any(
-      (view) => view.entry != null && position(view) <= mark.fork,
-    );
-    if (!reachesFork && !complete) return false;
-    final after = views.indexWhere((view) => position(view) > mark.fork);
-    views.insert(
-      after < 0 ? views.length : after,
-      ItemView(
-        id: _nextStoredId--,
-        kind: BridgeItemKind.dynamicToolCall,
-        marker: mark.marker,
-      ),
-    );
-    return true;
-  }
-
-  /// Reads the stored entries before the earliest one the chat covers, passing over pages the
-  /// chat shows nothing of, such as tool results only.
-  Future<void> loadEarlier() async {
-    if (_readingEarlier) return;
-    _readingEarlier = true;
-    final (generation, version) = (_generation, _chatVersion);
-    try {
-      while (chatMore.value && _chatStart != null) {
-        final before = _chatStart;
-        final page = await _backend.transcript(before);
-        reportRead('earlier messages', null);
-        if (generation != _generation || version != _chatVersion) return;
-        _chatStart = page.start;
-        // A page that does not move back ends the reading, so it cannot repeat forever.
-        chatMore.value = page.more && page.start != before;
-        if (page.items.isNotEmpty) {
-          final shown = [..._stored(page.items), ...items.value];
-          if (_pendingMark case final mark?
-              when _placeMark(shown, mark, complete: !chatMore.value)) {
-            _pendingMark = null;
-          }
-          items.value = shown;
-          return;
-        }
-      }
-      // The oldest pages showed nothing, so the branch leaves before everything shown.
-      if (_pendingMark case final mark? when !chatMore.value) {
-        final shown = [...items.value];
-        _placeMark(shown, mark, complete: true);
-        _pendingMark = null;
-        items.value = shown;
-      }
-    } on Object catch (error) {
-      reportRead('earlier messages', 'Could not read earlier messages: $error');
-    } finally {
-      _readingEarlier = false;
-    }
-  }
-
-  List<ItemView> _stored(List<BridgeTranscriptItem> items) => [
-    for (final item in items)
-      ItemView(
-          id: _nextStoredId--,
-          kind: item.kind,
-          tool: item.tool,
-          target: item.target,
-          entry: item.entry,
-        )
-        ..text.value = item.text
-        ..outcome.value = (
-          failed: item.failed,
-          durationMs: item.durationMs,
-          lines: _lines(item.added, item.removed),
-        ),
-  ];
-
-  /// Each entry's position on the path from the root to `leaf`.
-  static Map<String, int> _pathIndex(List<BridgeTreeNode> tree, String? leaf) {
-    final parents = {for (final node in tree) node.id: node.parent};
-    final path = <String>[];
-    for (String? id = leaf; id != null; id = parents[id]) {
-      path.add(id);
-    }
-    return {for (final (index, id) in path.reversed.indexed) id: index};
-  }
+  /// Reads the stored entries before the earliest one the chat covers.
+  Future<void> loadEarlier() => _chat.loadEarlier();
 
   /// Shows a notification in the status bar and keeps it in the list.
   void notify(BridgeLevel level, String text) {
@@ -689,7 +560,7 @@ class SessionState {
             ..outcome.value = (
               failed: event.item!.failed,
               durationMs: event.item!.durationMs,
-              lines: _lines(event.item!.added, event.item!.removed),
+              lines: changedLines(event.item!.added, event.item!.removed),
             )
             ..text.value = event.text ?? view.text.value;
         }
@@ -777,7 +648,3 @@ String _firstLine(String message) {
   final line = message.trim().split('\n').first.trim();
   return String.fromCharCodes(line.runes.take(120));
 }
-
-/// Where a branch leaves the others: its mark, each entry's position on the path to the leaf,
-/// and the fork's position.
-typedef _Mark = ({BranchMarker marker, Map<String, int> path, int fork});
