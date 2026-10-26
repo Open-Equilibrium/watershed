@@ -71,8 +71,12 @@ class FakeBackend implements SessionBackend {
   /// Holds patch reads until it completes.
   Completer<void>? patchGate;
 
+  /// The files whose patch was read, in order.
+  final patchReads = <String>[];
+
   @override
   Future<String> patch(String path) async {
+    patchReads.add(path);
     await patchGate?.future;
     if (patchError case final error?) throw error;
     return patches[path] ?? '';

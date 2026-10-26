@@ -29,6 +29,9 @@ class _DiffViewState extends State<DiffView> {
   bool _loaded = false;
   final _focus = FocusNode(debugLabel: 'diff');
 
+  /// Whether a patch is loading; a selection made meanwhile loads after it.
+  bool _loading = false;
+
   @override
   void initState() {
     super.initState();
@@ -85,12 +88,22 @@ class _DiffViewState extends State<DiffView> {
       _selected = change;
       _lines = const [];
     });
-    final patch = change == null
-        ? ''
-        : await _read(() => widget.state.patch(change.path));
-    // A newer selection replaced this one while its patch loaded.
-    if (!mounted || patch == null || _selected != change) return;
-    setState(() => _lines = parsePatch(patch));
+    if (_loading) return;
+    _loading = true;
+    try {
+      // Selections passed while a patch loaded are never read.
+      while (mounted) {
+        final wanted = _selected;
+        final patch = wanted == null
+            ? ''
+            : await _read(() => widget.state.patch(wanted.path));
+        if (!mounted || _selected != wanted) continue;
+        if (patch != null) setState(() => _lines = parsePatch(patch));
+        return;
+      }
+    } finally {
+      _loading = false;
+    }
   }
 
   void _move(int step) {

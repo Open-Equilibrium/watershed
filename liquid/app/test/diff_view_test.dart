@@ -149,7 +149,8 @@ void main() {
     expect(tester.getTopLeft(line).dx, lessThan(before - 1000));
   });
 
-  testWidgets('keeps every arrow press while a patch loads', (tester) async {
+  testWidgets('keeps every arrow press while a patch loads and reads only '
+      'the last', (tester) async {
     await tester.binding.setSurfaceSize(const Size(1600, 900));
     BridgeFileChange file(String path) => BridgeFileChange(
       path: path,
@@ -158,9 +159,9 @@ void main() {
       removed: 0,
     );
     final backend = FakeBackend()
-      ..changed = [file('a.ts'), file('b.ts'), file('c.ts')]
+      ..changed = [file('a.ts'), file('b.ts'), file('c.ts'), file('d.ts')]
       ..patches = {
-        for (final name in ['a', 'b', 'c'])
+        for (final name in ['a', 'b', 'c', 'd'])
           '$name.ts': '@@ -1 +1 @@\n+$name changed\n',
       };
     await tester.pumpWidget(
@@ -175,13 +176,19 @@ void main() {
       findsOneWidget,
     );
     backend.patchGate = Completer();
-    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
-    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    for (var press = 0; press < 3; press++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    }
     backend.patchGate!.complete();
     await tester.pumpAndSettle();
     expect(
-      find.textContaining('c changed', findRichText: true),
+      find.textContaining('d changed', findRichText: true),
       findsOneWidget,
     );
+    expect(backend.patchReads, [
+      'a.ts',
+      'b.ts',
+      'd.ts',
+    ], reason: 'c.ts was passed while b.ts loaded');
   });
 }
