@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use super::entry::{Body, Entry};
 use super::trajectory::path;
 use super::{Transcript, TranscriptItem};
-use crate::pi::call_target;
+use crate::pi::{call_target, item_kind};
 use crate::{ChangedLines, ItemKind};
 
 /// The items of up to `limit` entries on the branch ending at `leaf`, before `before`.
@@ -87,7 +87,7 @@ pub(super) fn transcript(
                         failed,
                         duration_ms,
                         lines: lines.or(written),
-                        ..item(tool_kind(&call.name), "")
+                        ..item(item_kind(&call.name), "")
                     });
                 }
             }
@@ -98,14 +98,5 @@ pub(super) fn transcript(
         items,
         more: start > 0,
         start: path[start..end].first().map(|entry| entry.id.clone()),
-    }
-}
-
-/// The item kind of one of pi's tools, as the live chat shows it.
-fn tool_kind(tool: &str) -> ItemKind {
-    match tool {
-        "bash" => ItemKind::CommandExecution,
-        "edit" | "write" => ItemKind::FileChange,
-        _ => ItemKind::DynamicToolCall,
     }
 }

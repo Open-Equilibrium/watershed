@@ -4,7 +4,7 @@
 use serde_json::Value;
 
 use super::outcome::{exit_code, patch_lines, test_counts};
-use crate::pi::{content_text, usage};
+use crate::pi::{content_text, usage, written_lines};
 use crate::{ToolOutcome, Usage};
 
 /// Longest text kept per prompt or response, in characters.
@@ -246,7 +246,6 @@ fn message(message: Option<&Value>) -> Body {
             let calls = blocks
                 .map(|call| {
                     let full = call.get("arguments").cloned().unwrap_or(Value::Null);
-                    let written = full.get("content").and_then(Value::as_str);
                     call_chars += full.to_string().chars().count();
                     Call {
                         id: call
@@ -260,9 +259,10 @@ fn message(message: Option<&Value>) -> Body {
                             .unwrap_or_default()
                             .to_owned(),
                         arguments: arguments(&full),
-                        written_lines: (call.get("name").and_then(Value::as_str) == Some("write"))
-                            .then(|| written.map(|text| count(text.lines().count())))
-                            .flatten(),
+                        written_lines: written_lines(
+                            call.get("name").and_then(Value::as_str).unwrap_or_default(),
+                            &full,
+                        ),
                     }
                 })
                 .collect();
@@ -400,10 +400,6 @@ fn arguments(value: &Value) -> String {
         }
     }
     shorten(value).to_string()
-}
-
-fn count(lines: usize) -> u32 {
-    u32::try_from(lines).unwrap_or(u32::MAX)
 }
 
 /// `text` cut to `chars` characters, with an ellipsis when cut.

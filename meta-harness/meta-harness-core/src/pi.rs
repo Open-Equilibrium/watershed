@@ -295,16 +295,11 @@ impl PiAdapter {
         events: &mut Vec<AgentEvent>,
     ) {
         let name = str_field(record, "toolName");
-        let kind = match request_kind(name) {
-            RequestKind::CommandExecutionApproval => ItemKind::CommandExecution,
-            RequestKind::FileChangeApproval => ItemKind::FileChange,
-            RequestKind::ToolApproval => ItemKind::DynamicToolCall,
-        };
+        let kind = item_kind(name);
         let item = self.next_item();
-        let written = (name == "write")
-            .then(|| record.get("args")?.get("content")?.as_str())
-            .flatten()
-            .map(|content| u32::try_from(content.lines().count()).unwrap_or(u32::MAX));
+        let written = record
+            .get("args")
+            .and_then(|arguments| written_lines(name, arguments));
         self.tools.insert(
             str_field(record, "toolCallId").to_owned(),
             OpenTool {
@@ -465,11 +460,26 @@ pub(crate) fn decision(text: &str) -> Option<Decision> {
 
 /// Classifies one of pi's tool names.
 pub(crate) fn request_kind(tool: &str) -> RequestKind {
-    match tool {
-        "bash" => RequestKind::CommandExecutionApproval,
-        "edit" | "write" => RequestKind::FileChangeApproval,
+    match item_kind(tool) {
+        ItemKind::CommandExecution => RequestKind::CommandExecutionApproval,
+        ItemKind::FileChange => RequestKind::FileChangeApproval,
         _ => RequestKind::ToolApproval,
     }
+}
+
+/// What a call of pi's `tool` does, for live and restored chat items alike.
+pub(crate) fn item_kind(tool: &str) -> ItemKind {
+    match tool {
+        "bash" => ItemKind::CommandExecution,
+        "edit" | "write" => ItemKind::FileChange,
+        _ => ItemKind::DynamicToolCall,
+    }
+}
+
+/// The lines a call of pi's `write` writes; other tools report their lines in their result.
+pub(crate) fn written_lines(tool: &str, arguments: &Value) -> Option<u32> {
+    let content = arguments.get("content")?.as_str()?;
+    (tool == "write").then(|| u32::try_from(content.lines().count()).unwrap_or(u32::MAX))
 }
 
 /// Translates one extension UI request; unknown methods yield nothing.
