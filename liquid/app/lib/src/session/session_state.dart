@@ -104,6 +104,16 @@ class SessionState {
   /// Whether the user stopped the running turn; requests it ends are no failures.
   bool _stopping = false;
 
+  /// Requests that ended before they were reported, which Stop can cause; they never show.
+  final Set<String> _endedUnseen = {};
+
+  void _end(List<BridgeRequest> open, String id) {
+    _answered.remove(id);
+    final before = open.length;
+    open.removeWhere((request) => request.id == id);
+    if (open.length == before) _endedUnseen.add(id);
+  }
+
   final status = ValueNotifier(RunStatus.idle);
   final items = ValueNotifier<List<ItemView>>(const []);
   final approval = ValueNotifier<BridgeRequest?>(null);
@@ -352,6 +362,7 @@ class SessionState {
       if (texts.isNotEmpty) draft.value = texts.join('\n\n');
       await _backend.abort();
     } on Object catch (error) {
+      _stopping = false;
       notify(BridgeLevel.error, 'Could not stop the agent: $error');
     }
   }
@@ -674,16 +685,18 @@ class SessionState {
           notify(BridgeLevel.error, 'The model request failed: $error');
         }
       case BridgeEventKind.requestOpened:
-        _approvals.add(event.request!);
+        if (!_endedUnseen.remove(event.request!.id)) {
+          _approvals.add(event.request!);
+        }
       case BridgeEventKind.requestResolved:
-        _answered.remove(event.request!.id);
-        _approvals.removeWhere((request) => request.id == event.request!.id);
+        _end(_approvals, event.request!.id);
         stored.value++;
       case BridgeEventKind.userInputRequested:
-        _questions.add(event.request!);
+        if (!_endedUnseen.remove(event.request!.id)) {
+          _questions.add(event.request!);
+        }
       case BridgeEventKind.userInputResolved:
-        _answered.remove(event.request!.id);
-        _questions.removeWhere((request) => request.id == event.request!.id);
+        _end(_questions, event.request!.id);
       case BridgeEventKind.widgetChanged:
         final lines = event.display!.lines;
         final next = {...widgets.value};

@@ -753,6 +753,67 @@ void main() {
     expect(state.notices.value, isEmpty);
   });
 
+  test('a request that ended before it was shown never shows', () async {
+    // Stop can withdraw a request while the core is still reporting it.
+    await emit(event(BridgeEventKind.turnStarted, turn: 1));
+    await emit(
+      event(BridgeEventKind.requestResolved, request: BridgeRequest(id: 'a1')),
+    );
+    await emit(
+      event(
+        BridgeEventKind.requestOpened,
+        request: BridgeRequest(
+          id: 'a1',
+          approval: BridgeApproval(
+            kind: BridgeRequestKind.commandExecution,
+            tool: 'bash',
+            text: 'npm test',
+          ),
+        ),
+      ),
+    );
+    await emit(
+      event(BridgeEventKind.userInputResolved, request: BridgeRequest(id: 'q1')),
+    );
+    await emit(
+      event(
+        BridgeEventKind.userInputRequested,
+        request: BridgeRequest(
+          id: 'q1',
+          question: BridgeQuestion(
+            kind: BridgeQuestionKind.confirm,
+            title: 'Sure?',
+            detail: '',
+            options: const [],
+          ),
+        ),
+      ),
+    );
+    expect((state.approval.value, state.question.value), (null, null));
+    expect(state.status.value, RunStatus.running);
+  });
+
+  test('a Stop that failed leaves model failures reported', () async {
+    backend.abortError = 'agent is gone';
+    await emit(event(BridgeEventKind.turnStarted, turn: 1));
+    await state.stop();
+    await emit(
+      event(
+        BridgeEventKind.modelRequestCompleted,
+        turn: 1,
+        step: BridgeStep(
+          id: 1,
+          model: 'faux/faux-1',
+          usage: usage(0, 0, 0),
+          stopReason: 'error',
+          error: '529 overloaded',
+          durationMs: 120,
+        ),
+      ),
+    );
+    expect(state.notice.value?.text, 'The model request failed: 529 overloaded');
+  });
+
   test('keeps the waiting messages and edits them', () async {
     await emit(
       event(
