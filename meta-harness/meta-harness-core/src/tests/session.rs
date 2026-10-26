@@ -1055,3 +1055,23 @@ fn reads_state_and_tree_and_branches_through_the_extension() {
         );
     });
 }
+
+#[test]
+fn requires_the_extension_that_asks_before_tool_calls() {
+    run(async {
+        let answer = |names: &str| {
+            format!(
+                "{}printf '%s\\n' '{{\"id\":\"1\",\"type\":\"response\",\"command\":\"get_commands\",\"success\":true,\"data\":{{\"commands\":[{names}]}}}}'\nIFS= read -r line || exit 0\n",
+                expect_response(&[r#""type":"get_commands""#])
+            )
+        };
+        let gate = r#"{"name":"watershed-branch","source":"extension"}"#;
+        let (mut gated, _events) = fake_agent(&answer(gate));
+        assert_eq!(gated.require_gate().await, Ok(()));
+
+        // Another extension loads fine, but nothing would ask before a tool call.
+        let other = r#"{"name":"fix-tests","source":"prompt"},{"name":"watershed-branch","source":"prompt"}"#;
+        let (mut ungated, _events) = fake_agent(&answer(other));
+        assert_eq!(ungated.require_gate().await, Err(CommandError::Ungated));
+    });
+}

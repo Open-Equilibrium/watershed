@@ -1,4 +1,4 @@
-//! Manual check of the core against real pi: two turns with a scripted model, one allowed and one
+//! Manual check of the core against real pi: the approval extension is loaded, two turns with a scripted model, one allowed and one
 //! rejected command, the branch tree and Trajectory, a branch at the second prompt, the state,
 //! then the history again after reopening the session file, a new session and the way back.
 //! Run from the repository root:
@@ -94,6 +94,10 @@ async fn check() {
     let dir = std::env::temp_dir().join(format!("pi-check-{}", std::process::id()));
     let command = pi(["--session-dir".into(), dir.clone().into()]);
     let (mut session, mut events) = Session::start(&command).expect("pi starts");
+    session
+        .require_gate()
+        .await
+        .expect("Watershed's extension is loaded");
     session
         .prompt("run it")
         .await

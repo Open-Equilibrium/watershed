@@ -16,7 +16,7 @@ After changing `liquid-bridge/src/api`, run `flutter_rust_bridge_codegen generat
 The app starts pi for the project named in the environment and opens the start page, where recent sessions continue and the first message starts a new one (ADR-0203). `flutter run -d macos` in `app/` needs Xcode and CocoaPods (`brew install cocoapods`), because the Rust plugin builds through a podspec. Release builds are signed with Developer ID, hardened and notarized, and run without the App Sandbox (ADR-0200).
 
 - `LIQUID_PROJECT` — the agent's project directory (required).
-- `LIQUID_PI_EXTENSION` — the path of `meta-harness/pi-extension/watershed.ts` (required: without it pi would run tools without approvals).
+- `LIQUID_PI_EXTENSION` — the path of `meta-harness/pi-extension/watershed.ts` (required: pi would run tools without approvals, so Liquid does not start a session unless this extension is loaded).
 - `LIQUID_PI` — the pi executable; defaults to `pi`.
 - `LIQUID_PI_SESSION` — a stored pi session file to reopen, with its Trajectory and branches.
 

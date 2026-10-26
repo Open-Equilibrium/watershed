@@ -66,6 +66,8 @@ pub enum CommandError {
     Closed,
     /// The agent's response exceeded the record limit and was skipped.
     TooLarge,
+    /// Watershed's pi extension is not loaded, so tool calls would run without asking.
+    Ungated,
 }
 
 type Reply = oneshot::Sender<Result<Value, CommandError>>;
@@ -333,6 +335,26 @@ impl Session {
             "sessionPath": file.to_string_lossy(),
         });
         self.submit_as(command, true).await
+    }
+
+    /// Fails unless Watershed's pi extension is loaded: without it the agent would run tools
+    /// without asking, so a session must not start (ADR-0188).
+    pub async fn require_gate(&mut self) -> Result<(), CommandError> {
+        let data = self.command(json!({ "type": "get_commands" })).await?;
+        let gated = data
+            .get("commands")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .any(|command| {
+                command.get("name").and_then(Value::as_str) == Some("watershed-branch")
+                    && command.get("source").and_then(Value::as_str) == Some("extension")
+            });
+        if gated {
+            Ok(())
+        } else {
+            Err(CommandError::Ungated)
+        }
     }
 
     /// The models the agent can use.

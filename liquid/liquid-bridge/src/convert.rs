@@ -46,6 +46,10 @@ pub(crate) fn describe(error: CommandError) -> String {
         CommandError::UnknownRequest => "the request is no longer open".to_owned(),
         CommandError::Closed => "the agent has exited".to_owned(),
         CommandError::TooLarge => "the agent's answer exceeded 16 MiB and was skipped".to_owned(),
+        CommandError::Ungated => {
+            "Watershed's pi extension is not loaded, so tool calls would run without asking"
+                .to_owned()
+        }
     }
 }
 

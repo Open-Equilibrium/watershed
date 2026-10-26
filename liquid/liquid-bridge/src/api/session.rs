@@ -99,6 +99,8 @@ impl AgentSession {
         let diff = RUNTIME.block_on(RunDiff::open(&command.cwd));
         let (mut session, receiver) =
             Session::start(&command).map_err(|error| error.to_string())?;
+        // Without the extension pi runs tool calls without asking; dropping the session ends it.
+        RUNTIME.block_on(session.require_gate()).map_err(describe)?;
         let stopper = session.stopper();
         Ok(Self {
             stopper: std::sync::Mutex::new(stopper),

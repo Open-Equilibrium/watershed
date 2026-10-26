@@ -18,14 +18,16 @@ use liquid_bridge::api::session::{AgentSession, SessionConfig};
 const DELTAS: usize = 20_000;
 const DELTA: &str = "sixteen bytes ok";
 const SAMPLES: usize = 20;
+const GATE: &str = r#"{"id":"1","type":"response","command":"get_commands","success":true,"data":{"commands":[{"name":"watershed-branch","source":"extension"}]}}"#;
 
 fn main() {
     let dir = std::env::temp_dir().join(format!("liquid-stream-observe-{}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("temporary directory");
     let stream = dir.join("stream.jsonl");
     std::fs::write(&stream, agent_output()).expect("stream file");
+    // The agent first confirms that Watershed's extension is loaded, as a session requires.
     let script = format!(
-        "IFS= read -r line\ncat '{}'\nIFS= read -r line || exit 0",
+        "IFS= read -r line\nprintf '%s\\n' '{GATE}'\nIFS= read -r line\ncat '{}'\nIFS= read -r line || exit 0",
         stream.display()
     );
     let mut elapsed = Vec::new();
@@ -88,7 +90,7 @@ fn rank(sorted: &[f64], quantile: f64) -> f64 {
 fn agent_output() -> String {
     let mut out = String::new();
     for line in [
-        r#"{"id":"1","type":"response","command":"prompt","success":true,"data":{"disposition":"started"}}"#,
+        r#"{"id":"2","type":"response","command":"prompt","success":true,"data":{"disposition":"started"}}"#,
         r#"{"type":"agent_start"}"#,
         r#"{"type":"turn_start"}"#,
         r#"{"type":"message_start","message":{"role":"assistant","content":[]}}"#,

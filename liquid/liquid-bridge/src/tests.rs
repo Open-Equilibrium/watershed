@@ -16,6 +16,13 @@ use crate::api::session::{
 };
 use crate::convert::{coalesce, describe};
 
+/// Answers the check every session starts with: Watershed's extension is loaded.
+fn gated(script: &str) -> String {
+    format!(
+        "IFS= read -r line\ncase \"$line\" in *'\"type\":\"get_commands\"'*) ;; *) exit 9 ;; esac\nprintf '%s\\n' '{{\"id\":\"1\",\"type\":\"response\",\"command\":\"get_commands\",\"success\":true,\"data\":{{\"commands\":[{{\"name\":\"watershed-branch\",\"source\":\"extension\"}}]}}}}'\n{script}"
+    )
+}
+
 /// Answers the `get_state` that starts a first history read, for a session pi keeps in memory.
 fn no_session_file(id: u32) -> String {
     format!(
@@ -184,12 +191,12 @@ fn the_exit_ends_the_stream_and_failures_explain_themselves() {
 #[test]
 fn drives_an_agent_through_the_bridge() {
     let script = r#"IFS= read -r line
-printf '%s\n' '{"id":"1","type":"response","command":"prompt","success":true,"data":{"disposition":"started"}}'
+printf '%s\n' '{"id":"2","type":"response","command":"prompt","success":true,"data":{"disposition":"started"}}'
 printf '%s\n' '{"type":"agent_start"}' '{"type":"agent_settled","aborted":false}'
 IFS= read -r line || exit 0"#;
     let session = AgentSession::start(SessionConfig {
         program: "/bin/sh".to_owned(),
-        args: vec!["-c".to_owned(), script.to_owned()],
+        args: vec!["-c".to_owned(), gated(script)],
         cwd: std::env::temp_dir().display().to_string(),
     })
     .expect("agent starts");
@@ -229,12 +236,12 @@ fn answers_a_question_the_agent_asks_before_taking_a_message() {
 printf '%s\n' '{"type":"extension_ui_request","id":"q1","method":"input","title":"Name","placeholder":""}'
 IFS= read -r line
 case "$line" in *'"id":"q1"'*) ;; *) exit 9 ;; esac
-printf '%s\n' '{"id":"1","type":"response","command":"prompt","success":true,"data":{"disposition":"started"}}'
+printf '%s\n' '{"id":"2","type":"response","command":"prompt","success":true,"data":{"disposition":"started"}}'
 IFS= read -r line || exit 0"#;
     let session = Arc::new(
         AgentSession::start(SessionConfig {
             program: "/bin/sh".to_owned(),
-            args: vec!["-c".to_owned(), script.to_owned()],
+            args: vec!["-c".to_owned(), gated(script)],
             cwd: std::env::temp_dir().display().to_string(),
         })
         .expect("agent starts"),
@@ -274,13 +281,13 @@ case "$line" in *'"type":"abort"'*) ;; *) exit 9 ;; esac
 IFS= read -r line
 case "$line" in *'"id":"a1"'*) ;; *) exit 9 ;; esac
 case "$line" in *'"value":"reject"'*) ;; *) exit 9 ;; esac
-printf '%s\n' '{{"id":"1","type":"response","command":"abort","success":true}}'
+printf '%s\n' '{{"id":"2","type":"response","command":"abort","success":true}}'
 IFS= read -r line || exit 0"#
     );
     let session = Arc::new(
         AgentSession::start(SessionConfig {
             program: "/bin/sh".to_owned(),
-            args: vec!["-c".to_owned(), script],
+            args: vec!["-c".to_owned(), gated(&script)],
             cwd: std::env::temp_dir().display().to_string(),
         })
         .expect("agent starts"),
@@ -345,22 +352,22 @@ fn starts_and_resumes_sessions_and_picks_models() {
         current.display()
     );
     let script = [
-        respond(1, "get_state", &state),
-        respond(2, "new_session", r#"{"cancelled":false}"#),
-        respond(3, "switch_session", r#"{"cancelled":false}"#),
+        respond(2, "get_state", &state),
+        respond(3, "new_session", r#"{"cancelled":false}"#),
+        respond(4, "switch_session", r#"{"cancelled":false}"#),
         respond(
-            4,
+            5,
             "get_available_models",
             r#"{"models":[{"provider":"faux","id":"faux-1","name":"Faux One"}]}"#,
         ),
-        respond(5, "get_state", &state),
-        respond(6, "set_model", "{}"),
+        respond(6, "get_state", &state),
+        respond(7, "set_model", "{}"),
         "IFS= read -r line || exit 0".to_owned(),
     ]
     .concat();
     let session = AgentSession::start(SessionConfig {
         program: "/bin/sh".to_owned(),
-        args: vec!["-c".to_owned(), script],
+        args: vec!["-c".to_owned(), gated(&script)],
         cwd: project.display().to_string(),
     })
     .expect("agent starts");
@@ -403,12 +410,12 @@ case "$line" in *'"type":"set_model"'*) ;; *) exit 9 ;; esac
 printf '%s\n' '{"type":"extension_ui_request","id":"q1","method":"confirm","title":"Switch?","message":"Costs more"}'
 IFS= read -r line
 case "$line" in *'"id":"q1"'*) ;; *) exit 9 ;; esac
-printf '%s\n' '{"id":"1","type":"response","command":"set_model","success":true,"data":{}}'
+printf '%s\n' '{"id":"2","type":"response","command":"set_model","success":true,"data":{}}'
 IFS= read -r line || exit 0"#;
     let session = Arc::new(
         AgentSession::start(SessionConfig {
             program: "/bin/sh".to_owned(),
-            args: vec!["-c".to_owned(), script.to_owned()],
+            args: vec!["-c".to_owned(), gated(script)],
             cwd: std::env::temp_dir().display().to_string(),
         })
         .expect("agent starts"),
@@ -442,7 +449,7 @@ fn shuts_down_while_a_query_waits_for_a_hung_agent() {
     let session = Arc::new(
         AgentSession::start(SessionConfig {
             program: "/bin/sh".to_owned(),
-            args: vec!["-c".to_owned(), script.to_owned()],
+            args: vec!["-c".to_owned(), gated(script)],
             cwd: std::env::temp_dir().display().to_string(),
         })
         .expect("agent starts"),
@@ -550,13 +557,13 @@ fn diffs_what_a_run_changed_in_its_project() {
     // The stand-in agent edits the project only after the prompt arrives.
     let script = r#"IFS= read -r line
 printf 'new\n' > a.txt
-printf '%s\n' '{"id":"1","type":"response","command":"prompt","success":true,"data":{"disposition":"started"}}'
+printf '%s\n' '{"id":"2","type":"response","command":"prompt","success":true,"data":{"disposition":"started"}}'
 IFS= read -r line
-printf '%s\n' '{"id":"2","type":"response","command":"prompt","success":false,"error":"busy"}'
+printf '%s\n' '{"id":"3","type":"response","command":"prompt","success":false,"error":"busy"}'
 IFS= read -r line || exit 0"#;
     let session = AgentSession::start(SessionConfig {
         program: "/bin/sh".to_owned(),
-        args: vec!["-c".to_owned(), script.to_owned()],
+        args: vec!["-c".to_owned(), gated(script)],
         cwd: repo.display().to_string(),
     })
     .expect("agent starts");
@@ -599,7 +606,7 @@ fn shuts_down_while_a_slow_project_is_captured() {
     let session = Arc::new(
         AgentSession::start(SessionConfig {
             program: "/bin/sh".to_owned(),
-            args: vec!["-c".to_owned(), "IFS= read -r line || exit 0".to_owned()],
+            args: vec!["-c".to_owned(), gated("IFS= read -r line || exit 0")],
             cwd: repo.display().to_string(),
         })
         .expect("agent starts"),
@@ -631,24 +638,24 @@ fn reads_the_history_of_each_branch_and_branches_from_a_step() {
         )
     };
     let script = [
-        no_session_file(1),
-        respond("2"),
+        no_session_file(2),
+        respond("3"),
         // The second read continues after the last entry; nothing was added.
         r#"IFS= read -r line
 case "$line" in *'"since":"b1"'*) ;; *) exit 9 ;; esac
-printf '%s\n' '{"id":"3","type":"response","command":"get_entries","success":true,"data":{"entries":[],"leafId":"b1"}}'
+printf '%s\n' '{"id":"4","type":"response","command":"get_entries","success":true,"data":{"entries":[],"leafId":"b1"}}'
 "#
         .to_owned(),
         r#"IFS= read -r line
 case "$line" in *'"message":"/watershed-branch e1"'*) ;; *) exit 9 ;; esac
-printf '%s\n' '{"id":"4","type":"response","command":"prompt","success":true,"data":{"disposition":"handled"}}'
+printf '%s\n' '{"id":"5","type":"response","command":"prompt","success":true,"data":{"disposition":"handled"}}'
 IFS= read -r line || exit 0"#
             .to_owned(),
     ]
     .concat();
     let session = AgentSession::start(SessionConfig {
         program: "/bin/sh".to_owned(),
-        args: vec!["-c".to_owned(), script],
+        args: vec!["-c".to_owned(), gated(&script)],
         cwd: std::env::temp_dir().display().to_string(),
     })
     .expect("agent starts");
@@ -741,13 +748,13 @@ IFS= read -r line || exit 0"#
 #[test]
 fn reads_tool_outcomes_and_what_the_model_saw() {
     let entries = r#"{"entries":[{"type":"message","id":"s1","parentId":null,"message":{"role":"system","content":"","sections":{"preamble":"You are pi."},"toolsAdded":[{"name":"write"}]}},{"type":"message","id":"u1","parentId":"s1","message":{"role":"user","content":"Write it"}},{"type":"message","id":"a1","parentId":"u1","message":{"role":"assistant","content":[{"type":"toolCall","id":"c1","name":"write","arguments":{"path":"a.ts","content":"x\ny\n"}}]}},{"type":"message","id":"r1","parentId":"a1","message":{"role":"toolResult","toolCallId":"c1","toolName":"write","content":[{"type":"text","text":"ok"}]}},{"type":"message","id":"a2","parentId":"r1","message":{"role":"assistant","content":[{"type":"text","text":"Done."}]}}],"leafId":"a2"}"#;
-    let script = no_session_file(1)
+    let script = no_session_file(2)
         + &format!(
-            "IFS= read -r line\nprintf '%s\\n' '{{\"id\":\"2\",\"type\":\"response\",\"command\":\"get_entries\",\"success\":true,\"data\":{entries}}}'\nIFS= read -r line\nprintf '%s\\n' '{{\"id\":\"3\",\"type\":\"response\",\"command\":\"get_entries\",\"success\":true,\"data\":{{\"entries\":[],\"leafId\":\"a2\"}}}}'\nIFS= read -r line || exit 0"
+            "IFS= read -r line\nprintf '%s\\n' '{{\"id\":\"3\",\"type\":\"response\",\"command\":\"get_entries\",\"success\":true,\"data\":{entries}}}'\nIFS= read -r line\nprintf '%s\\n' '{{\"id\":\"4\",\"type\":\"response\",\"command\":\"get_entries\",\"success\":true,\"data\":{{\"entries\":[],\"leafId\":\"a2\"}}}}'\nIFS= read -r line || exit 0"
         );
     let session = AgentSession::start(SessionConfig {
         program: "/bin/sh".to_owned(),
-        args: vec!["-c".to_owned(), script],
+        args: vec!["-c".to_owned(), gated(&script)],
         cwd: std::env::temp_dir().display().to_string(),
     })
     .expect("agent starts");
@@ -787,13 +794,13 @@ fn reads_tool_outcomes_and_what_the_model_saw() {
 #[test]
 fn rebuilds_the_chat_of_the_current_branch() {
     let entries = r#"{"entries":[{"type":"message","id":"u1","parentId":null,"message":{"role":"user","content":"Fix it"}},{"type":"message","id":"a1","parentId":"u1","message":{"role":"assistant","content":[{"type":"text","text":"Editing."},{"type":"toolCall","id":"c1","name":"edit","arguments":{"path":"a.ts"}}]}},{"type":"message","id":"r1","parentId":"a1","message":{"role":"toolResult","toolCallId":"c1","toolName":"edit","content":[]}}],"leafId":"r1"}"#;
-    let script = no_session_file(1)
+    let script = no_session_file(2)
         + &format!(
-            "IFS= read -r line\nprintf '%s\\n' '{{\"id\":\"2\",\"type\":\"response\",\"command\":\"get_entries\",\"success\":true,\"data\":{entries}}}'\nIFS= read -r line || exit 0"
+            "IFS= read -r line\nprintf '%s\\n' '{{\"id\":\"3\",\"type\":\"response\",\"command\":\"get_entries\",\"success\":true,\"data\":{entries}}}'\nIFS= read -r line || exit 0"
         );
     let session = AgentSession::start(SessionConfig {
         program: "/bin/sh".to_owned(),
-        args: vec!["-c".to_owned(), script],
+        args: vec!["-c".to_owned(), gated(&script)],
         cwd: std::env::temp_dir().display().to_string(),
     })
     .expect("agent starts");
@@ -839,4 +846,19 @@ fn passes_the_waiting_messages_to_dart() {
             follow_up: vec!["Also docs".to_owned()],
         })
     );
+}
+
+#[test]
+fn starts_no_agent_without_the_extension_that_asks_first() {
+    // Another extension loads fine, but none would ask before a tool call.
+    let script = r#"IFS= read -r line
+printf '%s\n' '{"id":"1","type":"response","command":"get_commands","success":true,"data":{"commands":[]}}'
+IFS= read -r line || exit 0"#;
+    let started = AgentSession::start(SessionConfig {
+        program: "/bin/sh".to_owned(),
+        args: vec!["-c".to_owned(), script.to_owned()],
+        cwd: std::env::temp_dir().display().to_string(),
+    });
+    let error = started.err().expect("no session starts");
+    assert!(error.contains("Watershed"), "{error}");
 }
