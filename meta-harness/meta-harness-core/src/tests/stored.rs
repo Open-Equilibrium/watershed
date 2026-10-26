@@ -161,8 +161,12 @@ fn names_the_open_session_as_the_start_page_does() {
         1,
     );
     session(&dir, "empty", "/work/acme-api", &[], 1);
+    // A prompt that starts with a blank line is named by its first words, as Liquid names it.
+    let spaced = r#"{"type":"message","id":"u1","parentId":null,"message":{"role":"user","content":"\n  Fix login\nand more"}}"#;
+    session(&dir, "spaced", "/work/acme-api", &[spaced], 1);
     let project = Path::new("/work/acme-api");
     let title = |name: &str| session_title(&dir.join(format!("{name}.jsonl")), project);
+    assert_eq!(title("spaced").as_deref(), Some("Fix login"));
 
     assert_eq!(title("prompt").as_deref(), Some("Add a limiter"));
     assert_eq!(title("named").as_deref(), Some("Rate limit for /login"));

@@ -118,7 +118,8 @@ fn head(path: &Path, project: &Path) -> Option<Option<String>> {
                     && entry.pointer("/message/role").and_then(Value::as_str) == Some("user") =>
             {
                 let text = content_text(entry.pointer("/message/content"));
-                let line = text.lines().next().unwrap_or_default().trim();
+                // The first line with words, as Liquid names an unsaved session.
+                let line = text.trim().lines().next().unwrap_or_default().trim();
                 prompt = Some(line.chars().take(TITLE_CHARS).collect());
             }
             _ => {}
