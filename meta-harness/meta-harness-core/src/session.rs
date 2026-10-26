@@ -23,7 +23,7 @@ use crate::{
 };
 
 /// Largest record accepted from an agent; a larger one is skipped and fails its command.
-const MAX_RECORD_BYTES: usize = 16 * 1024 * 1024;
+pub const MAX_RECORD_BYTES: usize = 16 * 1024 * 1024;
 /// Events buffered before the session stops reading agent output, which pauses the agent.
 const EVENT_BUFFER: usize = 256;
 /// Records buffered for the agent's input.
@@ -94,9 +94,7 @@ impl Pending {
     pub async fn accepted(self) -> Result<(), CommandError> {
         self.0.await.unwrap_or(Err(CommandError::Closed)).map(drop)
     }
-}
 
-impl Pending {
     /// Waits until the agent answered a session switch; `false` when an extension cancelled it.
     pub async fn switched(self) -> Result<bool, CommandError> {
         let data = self.0.await.unwrap_or(Err(CommandError::Closed))?;

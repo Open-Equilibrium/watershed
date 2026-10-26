@@ -2,10 +2,10 @@
 
 use meta_harness_core::{
     AgentEvent, ApprovalMode, ChangeStatus, CommandError, ContextDetail, ContextMessage,
-    ContextPart, Decision, EntryKind, FileChange, ItemDetail, ItemKind, ItemStatus, Model,
-    NotificationLevel, Queue, RecordKind, RequestKind, SessionEvent, StepContext, StoredSession,
-    ToolOutcome, Trajectory, TrajectoryRecord, Transcript, TranscriptItem, TreeNode, Usage,
-    UserInput,
+    ContextPart, Decision, EntryKind, FileChange, ItemDetail, ItemKind, ItemStatus,
+    MAX_RECORD_BYTES, Model, NotificationLevel, Queue, RecordKind, RequestKind, SessionEvent,
+    StepContext, StoredSession, ToolOutcome, Trajectory, TrajectoryRecord, Transcript,
+    TranscriptItem, TreeNode, Usage, UserInput,
 };
 
 use crate::api::events::{
@@ -45,7 +45,10 @@ pub(crate) fn describe(error: CommandError) -> String {
         CommandError::Rejected(reason) => format!("the agent rejected the command: {reason}"),
         CommandError::UnknownRequest => "the request is no longer open".to_owned(),
         CommandError::Closed => "the agent has exited".to_owned(),
-        CommandError::TooLarge => "the agent's answer exceeded 16 MiB and was skipped".to_owned(),
+        CommandError::TooLarge => format!(
+            "the agent's answer exceeded {} MiB and was skipped",
+            MAX_RECORD_BYTES / (1024 * 1024)
+        ),
         CommandError::Ungated => {
             "Watershed's pi extension is not loaded, so tool calls would run without asking"
                 .to_owned()

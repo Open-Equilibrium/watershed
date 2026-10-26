@@ -20,15 +20,16 @@ pub use event::{
     ItemStatus, NotificationLevel, Queue, RequestId, RequestKind, SessionTree, StepId, TreeNode,
     TurnId, Usage, UserInput,
 };
-pub use framing::{Frame, LineFramer};
+pub(crate) use framing::{Frame, LineFramer};
 pub use history::{
     ContextDetail, ContextMessage, ContextPart, History, RecordKind, StepContext, TestCount,
     ToolOutcome, Trajectory, TrajectoryRecord, Transcript, TranscriptItem,
 };
-pub use pi::PiAdapter;
+pub(crate) use pi::PiAdapter;
 pub use run_diff::{Capture, RunDiff};
 pub use session::{
-    AgentCommand, CommandError, Model, Pending, Session, SessionEvent, SessionState, Stopper,
+    AgentCommand, CommandError, MAX_RECORD_BYTES, Model, Pending, Session, SessionEvent,
+    SessionState, Stopper,
 };
 pub use stored::{StoredSession, recent_sessions, session_title};
 
