@@ -211,3 +211,31 @@ class SecondaryButton extends StatelessWidget {
     outline: context.ws.borderStrong,
   );
 }
+
+/// The input area's card; controls in it show focus and hover above its background.
+class InputCard extends StatelessWidget {
+  const InputCard({
+    super.key,
+    this.ring,
+    required this.padding,
+    required this.child,
+  });
+
+  final Color? ring;
+  final EdgeInsetsGeometry padding;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    decoration: BoxDecoration(
+      color: context.ws.surface,
+      borderRadius: BorderRadius.circular(WsMetrics.radiusXl),
+      boxShadow: [
+        if (ring case final ring?) BoxShadow(color: ring, spreadRadius: 1),
+        ...context.ws.shadow,
+      ],
+    ),
+    padding: padding,
+    child: Material(type: MaterialType.transparency, child: child),
+  );
+}
