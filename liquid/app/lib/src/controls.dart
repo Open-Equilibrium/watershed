@@ -97,6 +97,7 @@ class _Button extends StatelessWidget {
     required this.background,
     this.outline,
     this.shortcut,
+    this.focusNode,
   });
 
   final String label;
@@ -105,6 +106,9 @@ class _Button extends StatelessWidget {
   final Color foreground;
   final Color background;
   final Color? outline;
+
+  /// Makes the button take the keyboard focus; others leave it where it is.
+  final FocusNode? focusNode;
 
   @override
   Widget build(BuildContext context) {
@@ -116,7 +120,8 @@ class _Button extends StatelessWidget {
       ),
       child: InkWell(
         onTap: onPressed,
-        canRequestFocus: false,
+        focusNode: focusNode,
+        canRequestFocus: focusNode != null,
         borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
         child: Container(
           height: 28,
@@ -160,17 +165,20 @@ class PrimaryButton extends StatelessWidget {
     required this.label,
     required this.onPressed,
     this.shortcut,
+    this.focusNode,
   });
 
   final String label;
   final String? shortcut;
   final VoidCallback onPressed;
+  final FocusNode? focusNode;
 
   @override
   Widget build(BuildContext context) => _Button(
     label: label,
     shortcut: shortcut,
     onPressed: onPressed,
+    focusNode: focusNode,
     foreground: context.ws.onAccent,
     background: context.ws.accent,
   );
@@ -183,18 +191,21 @@ class SecondaryButton extends StatelessWidget {
     required this.onPressed,
     this.shortcut,
     this.color,
+    this.focusNode,
   });
 
   final String label;
   final String? shortcut;
   final Color? color;
   final VoidCallback onPressed;
+  final FocusNode? focusNode;
 
   @override
   Widget build(BuildContext context) => _Button(
     label: label,
     shortcut: shortcut,
     onPressed: onPressed,
+    focusNode: focusNode,
     foreground: color ?? context.ws.text,
     background: context.ws.canvas,
     outline: context.ws.borderStrong,

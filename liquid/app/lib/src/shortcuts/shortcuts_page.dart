@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../controls.dart';
+import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'keymap.dart';
@@ -135,6 +137,11 @@ class _ShortcutsPageState extends State<ShortcutsPage> {
   /// Why the keys pressed cannot be taken.
   String? _refused;
 
+  /// A change waiting until the user agrees that it replaces the kept Custom profile.
+  ({Command command, Keys keys, Command? clear})? _replacing;
+  final _keep = FocusNode(debugLabel: 'keep Custom');
+  final _replace = FocusNode(debugLabel: 'replace Custom');
+
   ShortcutController get _shortcuts => widget.shortcuts;
 
   @override
@@ -149,6 +156,8 @@ class _ShortcutsPageState extends State<ShortcutsPage> {
   @override
   void dispose() {
     _keys.dispose();
+    _keep.dispose();
+    _replace.dispose();
     _search.dispose();
     super.dispose();
   }
@@ -168,18 +177,42 @@ class _ShortcutsPageState extends State<ShortcutsPage> {
     _pressed = null;
     _conflict = null;
     _refused = null;
+    _replacing = null;
   });
 
-  /// Leaving the recording row stops recording, unless the focus went on to "Use anyway".
+  /// Leaving the recording row stops recording, unless the focus went on to "Use anyway" or
+  /// to the question whether to replace Custom.
   void _focusChanged() {
-    if (_recording != null && !_keys.hasPrimaryFocus && _conflict == null) {
+    if (_recording != null &&
+        !_keys.hasPrimaryFocus &&
+        _conflict == null &&
+        _replacing == null) {
       _stop();
     }
   }
 
+  /// Changes `command`'s keys, after asking when that replaces the kept Custom profile.
   void _change(Command command, Keys keys, {Command? clear}) {
+    if (_shortcuts.value.replaced == null) return _apply(command, keys, clear);
+    setState(() {
+      _pressed = keys;
+      _conflict = null;
+      _replacing = (command: command, keys: keys, clear: clear);
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _keep.requestFocus();
+    });
+  }
+
+  void _apply(Command command, Keys keys, Command? clear) {
     _shortcuts.update(_shortcuts.value.change(command, keys, clear: clear));
+    _done();
+  }
+
+  /// Ends recording and gives the keys back to the page.
+  void _done() {
     _stop();
+    _keys.requestFocus();
   }
 
   static final _modifiers = {
@@ -490,6 +523,16 @@ class _ShortcutsPageState extends State<ShortcutsPage> {
         ),
         if (refused != null)
           _Notice(children: [Text(refused, style: _Notice.text(context))]),
+        if (_replacing case final replacing?)
+          _ReplaceCustom(
+            settings: settings,
+            change: replacing,
+            keep: _keep,
+            replace: _replace,
+            onKeep: _done,
+            onReplace: () =>
+                _apply(replacing.command, replacing.keys, replacing.clear),
+          ),
         if (pressed != null && conflict != null)
           _Notice(
             children: [
@@ -808,4 +851,119 @@ class _Link extends StatelessWidget {
       style: TextStyle(color: context.ws.accent, fontSize: WsMetrics.fsSmall),
     ),
   );
+}
+
+/// Asks whether a change may replace the kept Custom profile (approved mockup); keeping it is
+/// the default, and leaving the question keeps it too.
+class _ReplaceCustom extends StatelessWidget {
+  const _ReplaceCustom({
+    required this.settings,
+    required this.change,
+    required this.keep,
+    required this.replace,
+    required this.onKeep,
+    required this.onReplace,
+  });
+
+  final ShortcutSettings settings;
+  final ({Command command, Keys keys, Command? clear}) change;
+  final FocusNode keep;
+  final FocusNode replace;
+  final VoidCallback onKeep;
+  final VoidCallback onReplace;
+
+  @override
+  Widget build(BuildContext context) {
+    final ws = context.ws;
+    final kept = settings.replaced!;
+    final changed = kept.changes.length;
+    final lost = changed > 0
+        ? '$changed changed shortcut${changed == 1 ? '' : 's'}'
+        : 'the Liquid key turned ${kept.liquidKey ? 'on' : 'off'}';
+    return CallbackShortcuts(
+      bindings: {const SingleActivator(LogicalKeyboardKey.escape): onKeep},
+      child: Focus(
+        canRequestFocus: false,
+        skipTraversal: true,
+        onFocusChange: (inside) {
+          if (!inside) onKeep();
+        },
+        child: Container(
+          margin: const EdgeInsets.symmetric(vertical: WsMetrics.space1),
+          padding: const EdgeInsets.symmetric(
+            horizontal: WsMetrics.space4,
+            vertical: WsMetrics.space3,
+          ),
+          decoration: BoxDecoration(
+            color: ws.warningSubtle,
+            border: Border.all(color: ws.warningBorder),
+            borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
+          ),
+          child: Material(
+            type: MaterialType.transparency,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  children: [
+                    Icon(
+                      LucideIcons.triangleAlert,
+                      size: 14,
+                      color: ws.warning,
+                    ),
+                    const SizedBox(width: WsMetrics.space3),
+                    const Text(
+                      'Replace the Custom profile?',
+                      style: TextStyle(fontWeight: WsMetrics.fwSemibold),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: WsMetrics.space1),
+                Text(
+                  'Changing ${change.command.label} to ${change.keys.label} starts a '
+                  'new Custom profile from ${_profileNames[settings.profile]}. This '
+                  'replaces your current Custom profile, which has $lost.',
+                ),
+                Text(
+                  'To change that profile instead, cancel and choose Custom.',
+                  style: TextStyle(
+                    color: ws.textMuted,
+                    fontSize: WsMetrics.fsSmall,
+                  ),
+                ),
+                const SizedBox(height: WsMetrics.space3),
+                FocusTraversalGroup(
+                  policy: OrderedTraversalPolicy(),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      FocusTraversalOrder(
+                        order: const NumericFocusOrder(2),
+                        child: SecondaryButton(
+                          label: 'Replace Custom',
+                          color: ws.danger,
+                          focusNode: replace,
+                          onPressed: onReplace,
+                        ),
+                      ),
+                      const SizedBox(width: WsMetrics.space3),
+                      FocusTraversalOrder(
+                        order: const NumericFocusOrder(1),
+                        child: PrimaryButton(
+                          label: 'Cancel',
+                          shortcut: '⏎',
+                          focusNode: keep,
+                          onPressed: onKeep,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }

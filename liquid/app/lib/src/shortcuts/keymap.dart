@@ -449,6 +449,17 @@ class ShortcutSettings {
       )
       .firstOrNull;
 
+  /// The kept Custom profile a change here would replace, when it holds anything its base
+  /// does not.
+  CustomProfile? get replaced => switch (custom) {
+    final kept?
+        when profile != Profile.custom &&
+            (kept.changes.isNotEmpty ||
+                kept.liquidKey != (kept.base == Profile.liquidKey)) =>
+      kept,
+    _ => null,
+  };
+
   /// The Custom profile to change: the active one, or a new one based on the active profile.
   CustomProfile get _editable =>
       _active ?? CustomProfile(profile, liquidKey, const {});

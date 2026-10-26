@@ -226,4 +226,98 @@ void main() {
     expect(store.saved, ShortcutSettings.standard());
     expect(host.calls, isEmpty);
   });
+
+  group('a change that would replace a kept Custom profile', () {
+    final kept = ShortcutSettings.liquidKey().change(
+      Command.diff,
+      const Keys(LogicalKeyboardKey.keyD, liquid: true),
+    );
+    const commandD = Keys(LogicalKeyboardKey.keyD, meta: true);
+
+    Future<void> recordDiff(WidgetTester tester) async {
+      await openSettings(tester);
+      await tester.tap(find.text('⌘3'));
+      await tester.pumpAndSettle();
+      await press(
+        tester,
+        LogicalKeyboardKey.keyD,
+        holding: LogicalKeyboardKey.metaLeft,
+      );
+    }
+
+    testWidgets('asks first, and ⏎ or esc keep everything', (tester) async {
+      await show(tester, kept.choose(Profile.standard));
+      for (final key in [LogicalKeyboardKey.enter, LogicalKeyboardKey.escape]) {
+        await recordDiff(tester);
+        expect(find.text('Replace the Custom profile?'), findsOneWidget);
+        expect(
+          find.text(
+            'Changing Diff to ⌘D starts a new Custom profile from Standard. '
+            'This replaces your current Custom profile, which has 1 changed '
+            'shortcut.',
+          ),
+          findsOneWidget,
+        );
+        expect(shortcuts.value.profile, Profile.standard, reason: 'not yet');
+
+        await press(tester, key);
+        expect(find.text('Replace the Custom profile?'), findsNothing);
+        expect(shortcuts.value, kept.choose(Profile.standard), reason: '$key');
+        expect(find.text('Shortcuts'), findsWidgets, reason: 'Settings stay');
+        if (key == LogicalKeyboardKey.escape) continue;
+        await press(tester, LogicalKeyboardKey.escape);
+      }
+
+      // Settings are still open after esc.
+      await tester.tap(find.text('⌘3'));
+      await tester.pumpAndSettle();
+      await press(
+        tester,
+        LogicalKeyboardKey.keyD,
+        holding: LogicalKeyboardKey.metaLeft,
+      );
+      expect(find.text('Replace the Custom profile?'), findsOneWidget);
+      await tester.tap(find.byType(TextField));
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Replace the Custom profile?'),
+        findsNothing,
+        reason: 'leaving the question keeps Custom too',
+      );
+      expect(shortcuts.value, kept.choose(Profile.standard));
+    });
+
+    for (final byKeyboard in [false, true]) {
+      testWidgets(
+        'replaces it ${byKeyboard ? 'with Tab and ⏎' : 'on a click'}',
+        (tester) async {
+          await show(tester, kept.choose(Profile.standard));
+          await recordDiff(tester);
+          if (byKeyboard) {
+            await press(tester, LogicalKeyboardKey.tab);
+            await press(tester, LogicalKeyboardKey.enter);
+          } else {
+            await tester.tap(find.text('Replace Custom'));
+            await tester.pumpAndSettle();
+          }
+          expect(shortcuts.value.profile, Profile.custom);
+          expect(shortcuts.value.base, Profile.standard);
+          expect(shortcuts.value.bindings(Command.diff), [commandD]);
+          expect(shortcuts.value.changes.length, 1);
+        },
+      );
+    }
+
+    testWidgets('does not ask when nothing would be lost', (tester) async {
+      await show(
+        tester,
+        ShortcutSettings.liquidKey()
+            .choose(Profile.custom)
+            .choose(Profile.standard),
+      );
+      await recordDiff(tester);
+      expect(find.text('Replace the Custom profile?'), findsNothing);
+      expect(shortcuts.value.bindings(Command.diff), [commandD]);
+    });
+  });
 }
