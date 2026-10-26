@@ -12,6 +12,9 @@ use crate::{Frame, LineFramer};
 /// Bytes read from the start of a session file to find its title.
 const START_BYTES: usize = 256 * 1024;
 
+/// The title of a session whose start names it nowhere.
+const UNTITLED: &str = "Untitled session";
+
 /// Characters of a first prompt kept as a title.
 const TITLE_CHARS: usize = 120;
 
@@ -56,7 +59,8 @@ pub fn recent_sessions(
     Ok(files
         .into_iter()
         .filter_map(|(modified_ms, path)| {
-            let title = title(&path, &project)?;
+            // A session named by nothing in the part read still shows, so it can continue.
+            let title = head(&path, &project)?.unwrap_or_else(|| UNTITLED.to_owned());
             Some(StoredSession {
                 path,
                 title,
@@ -75,6 +79,12 @@ pub fn session_title(file: &Path, project: &Path) -> Option<String> {
 
 /// The title of a session file started in `project`: its latest name, else its first prompt.
 fn title(path: &Path, project: &Path) -> Option<String> {
+    head(path, project)?
+}
+
+/// The title the start of a session file gives, if any; `None` when the file is not a session
+/// started in `project`.
+fn head(path: &Path, project: &Path) -> Option<Option<String>> {
     let mut start = Vec::new();
     std::fs::File::open(path)
         .ok()?
@@ -114,7 +124,7 @@ fn title(path: &Path, project: &Path) -> Option<String> {
             _ => {}
         }
     }
-    name.or(prompt).filter(|title: &String| !title.is_empty())
+    Some(name.or(prompt).filter(|title: &String| !title.is_empty()))
 }
 
 /// The path with links resolved, or as given when it does not exist here.

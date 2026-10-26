@@ -174,3 +174,26 @@ fn names_the_open_session_as_the_start_page_does() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn lists_a_session_whose_first_prompt_comes_late() {
+    let dir = std::env::temp_dir().join(format!("watershed-late-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("directory");
+    // A long system prompt pushes the first prompt past the part read for titles.
+    let system = format!(
+        r#"{{"type":"message","id":"s1","parentId":null,"message":{{"role":"system","content":"{}"}}}}"#,
+        "x".repeat(300 * 1024)
+    );
+    session(&dir, "late", "/work/acme-api", &[&system], 1);
+    let recent = recent_sessions(&dir, Path::new("/work/acme-api"), None, 5);
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(
+        recent.expect("listing"),
+        [StoredSession {
+            path: dir.join("late.jsonl"),
+            title: "Untitled session".to_owned(),
+            modified_ms: 1_000,
+        }]
+    );
+}
