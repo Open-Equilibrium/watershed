@@ -578,9 +578,10 @@ fn git(repo: &std::path::Path, args: &[&str]) {
 #[test]
 fn diffs_what_a_run_changed_in_its_project() {
     let repo = repository("diff");
-    // The stand-in agent edits the project only after the prompt arrives.
+    // The stand-in agent edits the project only after the prompt arrives, writing a character
+    // that reorders the line.
     let script = r#"IFS= read -r line
-printf 'new\n' > a.txt
+printf 'new\342\200\256\n' > a.txt
 printf '%s\n' '{"id":"2","type":"response","command":"prompt","success":true,"data":{"disposition":"started"}}'
 IFS= read -r line
 printf '%s\n' '{"id":"3","type":"response","command":"prompt","success":false,"error":"busy"}'
@@ -608,7 +609,7 @@ IFS= read -r line || exit 0"#;
     );
     let patch = session.patch("a.txt".to_owned()).expect("patch");
     assert!(
-        patch.contains("-old\n") && patch.contains("+new\n"),
+        patch.contains("-old\n") && patch.contains("+new<U+202E>\n"),
         "{patch}"
     );
     // A prompt the agent rejects starts no run, so the last run's changes stay in view.

@@ -66,7 +66,8 @@ abstract class AgentSession implements RustOpaqueInterface {
   /// Starts a new session in the same agent; `false` when an extension cancelled it.
   Future<bool> newSession();
 
-  /// The unified diff of one file since the latest run started.
+  /// The unified diff of one file since the latest run started; characters that could hide
+  /// or reorder its lines are written out, as in the file's shown name.
   Future<String> patch({required String path});
 
   /// Up to `limit` stored sessions of this project, newest first, without the current one.

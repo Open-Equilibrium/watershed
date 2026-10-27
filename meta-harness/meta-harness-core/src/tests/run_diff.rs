@@ -323,21 +323,6 @@ fn a_submodules_diff_runs_none_of_its_commands() {
 }
 
 #[test]
-fn a_patch_writes_out_characters_that_hide_or_reorder_its_lines() {
-    run(async {
-        let repo = Repo::new("hidden-chars");
-        let diff = RunDiff::open(repo.path()).await;
-        diff.started(diff.capture().await);
-        repo.write("a.txt", "access = \u{202e}user\u{2066}\n");
-        let patch = diff.patch("a.txt").await.expect("patch");
-        assert!(
-            patch.contains("+access = <U+202E>user<U+2066>\n"),
-            "{patch}"
-        );
-    });
-}
-
-#[test]
 fn reads_that_wait_for_each_other_count_only_their_own_git_against_the_limit() {
     run(async {
         let repo = Repo::new("queued");

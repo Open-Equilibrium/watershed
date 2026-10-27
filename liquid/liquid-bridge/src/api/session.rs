@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use meta_harness_core::{
     AgentCommand, Answer, CommandError, Delivery, DiffError, RequestId, RunDiff, Session,
-    SessionEvent, recent_sessions, session_title,
+    SessionEvent, recent_sessions, session_title, visible,
 };
 use tokio::runtime::Runtime;
 use tokio::sync::{Mutex, mpsc};
@@ -229,10 +229,12 @@ impl AgentSession {
         }
     }
 
-    /// The unified diff of one file since the latest run started.
+    /// The unified diff of one file since the latest run started; characters that could hide
+    /// or reorder its lines are written out, as in the file's shown name.
     pub fn patch(&self, path: String) -> Result<String, String> {
         RUNTIME
             .block_on(self.diff.patch(&path))
+            .map(|patch| visible(&patch))
             .map_err(|error| error.to_string())
     }
 

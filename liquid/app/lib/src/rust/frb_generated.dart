@@ -4174,7 +4174,8 @@ class AgentSessionImpl extends RustOpaque implements AgentSession {
   Future<bool> newSession() =>
       RustLib.instance.api.crateApiSessionAgentSessionNewSession(that: this);
 
-  /// The unified diff of one file since the latest run started.
+  /// The unified diff of one file since the latest run started; characters that could hide
+  /// or reorder its lines are written out, as in the file's shown name.
   Future<String> patch({required String path}) => RustLib.instance.api
       .crateApiSessionAgentSessionPatch(that: this, path: path);
 

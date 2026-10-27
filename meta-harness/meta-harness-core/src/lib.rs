@@ -12,6 +12,7 @@ mod pi;
 mod run_diff;
 mod session;
 mod stored;
+mod visible;
 
 pub use approval::ApprovalMode;
 pub use diff::{ChangeStatus, DiffError, FileChange};
@@ -26,13 +27,13 @@ pub use history::{
     ToolOutcome, Trajectory, TrajectoryRecord, Transcript, TranscriptItem,
 };
 pub(crate) use pi::PiAdapter;
-pub use pi::visible;
 pub use run_diff::{Capture, RunDiff};
 pub use session::{
     AgentCommand, CommandError, MAX_RECORD_BYTES, Model, Pending, Session, SessionEvent,
     SessionState, Stopper,
 };
 pub use stored::{StoredSession, recent_sessions, session_title};
+pub use visible::visible;
 
 #[cfg(test)]
 mod tests;

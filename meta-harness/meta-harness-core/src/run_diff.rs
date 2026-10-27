@@ -11,7 +11,6 @@ use std::time::{Duration, Instant};
 use tokio::sync::watch;
 
 use crate::diff::{DiffError, FileChange, Snapshot, WorkingTree};
-use crate::pi::visible;
 
 /// Longest one Git read of the project may take; Git is then stopped, though a filter it
 /// started runs until it ends.
@@ -131,8 +130,7 @@ impl RunDiff {
     }
 
     /// The unified diff of one file since the latest run started, as the latest list of changes
-    /// saw the project, so it needs no new pass over the project. Characters that could hide or
-    /// reorder its lines are written out, as approvals write them.
+    /// saw the project, so it needs no new pass over the project.
     pub async fn patch(&self, path: &str) -> Result<String, DiffError> {
         let listed = self.before().listed.clone();
         let (tree, before, now) = match (self.tree(), listed) {
@@ -146,9 +144,7 @@ impl RunDiff {
                 (tree, before, now)
             }
         };
-        self.bounded(tree.patch(&before, &now, path))
-            .await
-            .map(|patch| visible(&patch))
+        self.bounded(tree.patch(&before, &now, path)).await
     }
 
     /// Keeps the states a list compared for later patches, unless another run started meanwhile.
