@@ -364,7 +364,7 @@ fn shows_an_edit_as_its_path_and_its_removed_and_added_lines() {
             r#"{\"path\":\"src/a.ts\",\"edits\":[{\"oldText\":\"a\\nb\",\"newText\":\"c\"},{\"oldText\":\"x\",\"newText\":\"y\\u202e\"}]}"#,
             true,
         ),
-        // The other forms pi accepts: one edit, edits as JSON text, and the older fields.
+        // pi hands its tool only `edits` arrays; any other shape shows as it is.
         ask(
             "e2",
             "edit",
@@ -409,13 +409,6 @@ fn shows_an_edit_as_its_path_and_its_removed_and_added_lines() {
             other => panic!("an approval opens a request: {other:?}"),
         })
         .collect();
-    let one = |path: &str| {
-        Some(EditPreview {
-            path: path.to_owned(),
-            changes: vec![change("o", "n")],
-            whole_file: false,
-        })
-    };
     assert_eq!(
         previews,
         [
@@ -424,9 +417,9 @@ fn shows_an_edit_as_its_path_and_its_removed_and_added_lines() {
                 changes: vec![change("a\nb", "c"), change("x", "y<U+202E>")],
                 whole_file: false,
             }),
-            one("p"),
-            one("p"),
-            one("p"),
+            None,
+            None,
+            None,
             // A write replaces whatever the file held.
             Some(EditPreview {
                 path: "new<U+202E>.ts".to_owned(),
