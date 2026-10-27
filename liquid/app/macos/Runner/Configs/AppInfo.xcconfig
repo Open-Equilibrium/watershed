@@ -12,3 +12,6 @@ PRODUCT_BUNDLE_IDENTIFIER = org.openequilibrium.liquid
 
 // The copyright displayed in application information
 PRODUCT_COPYRIGHT = © 2026 Watershed contributors, AGPL-3.0-only
+
+// Watershed supports no Intel Macs (PLATFORMS.md); Flutter passes this on to every build step
+EXCLUDED_ARCHS = x86_64

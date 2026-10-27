@@ -1,7 +1,7 @@
-# The root pin plus the targets Liquid's build hook compiles this crate for; native_toolchain_rust
-# reads only this file. Windows is absent: Liquid embeds no core there (ADR-0201).
+# The root pin plus the targets Liquid embeds the core on (PLATFORMS.md, ADR-0201);
+# native_toolchain_rust reads only this file.
 [toolchain]
 channel = "1.99.0"
 profile = "minimal"
 components = ["rustfmt", "clippy", "llvm-tools-preview"]
-targets = ["aarch64-apple-darwin", "x86_64-apple-darwin", "x86_64-unknown-linux-gnu"]
+targets = ["aarch64-apple-darwin", "x86_64-unknown-linux-gnu"]
