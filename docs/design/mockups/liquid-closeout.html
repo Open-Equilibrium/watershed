@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Liquid: approved closeout mockups</title>
+<style>
+:root{--foreground:#37352f;--muted-foreground:#6b6a67;--success:#376e4f;--muted:#f7f7f5;--border:#e9e9e7;--radius:8px}
+.card.auto{height:auto}
+.fr{display:flex;align-items:center;gap:8px;height:26px;padding:0 8px;border-radius:6px;white-space:nowrap;overflow:hidden;font-size:12.5px}
+.tg{height:26px;display:inline-flex;align-items:center;padding:0 10px;border-radius:7px;font-size:12px;background:var(--as);color:var(--ac);font-weight:500}
+.hd{display:flex;align-items:center;gap:10px;white-space:nowrap}.hd b{font-size:13.5px}
+.keys{font-size:11.5px;color:var(--tf);border-top:1px solid #e9e9e7;padding-top:6px}
+body{margin:0;padding:0;color:var(--foreground);font:14px/1.5 ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;display:flex;flex-direction:column;gap:28px}
+h1{font-size:20px;margin:0}h2{font-size:16px;margin:0 0 4px}
+p{margin:0 0 8px;color:var(--muted-foreground);font-size:13px}p b{color:var(--foreground)}
+.opts{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,var(--min,300px)),1fr));gap:12px}
+.opt{display:flex;flex-direction:column;gap:8px;min-width:0}
+.lab{font-size:13px;font-weight:600}.rec{font-weight:500;color:var(--success);margin-left:6px}
+.pc{font-size:12px;color:var(--muted-foreground);margin:8px 0 0;padding-left:16px}
+.w{--c:#fff;--sb:#f7f7f5;--hv:#efefed;--sel:#e3eefb;--bd:#e9e9e7;--bs:#dcdbd8;--t:#37352f;--tm:#504f4c;--tf:#6b6a67;--ac:#2075d8;--oa:#fff;--as:#e7f0fb;--ok:#3d7a58;--oks:#edf3ec;--wa:#b35c00;--was:#fbecdd;--da:#c4403b;--das:#fdebec;--pop:#ededf4;--dadd:#e6ffec;--ddel:#ffebe9;
+ background:var(--c);color:var(--t);border-radius:8px;box-shadow:0 0 0 1px var(--bs);padding:14px;font-size:13px;line-height:20px;display:flex;flex-direction:column;gap:6px;min-width:0}
+.w.new{--ac:#1b63b7;--wa:#9a4f00;--da:#b03a35;--ok:#376e4f;--pop:#ffffff}
+.w.dark{--c:#191919;--sb:#202020;--t:#d4d4d4;--tm:#b7b7b7;--tf:#9d9d9d;--bs:#3a3a3a;--d1:#4c9bea;--d2:#b48ce6;--d3:#4dab9a;--on:#ffffff}
+.w.dark.new{--on:#191919}
+.row{display:flex;align-items:center;gap:6px;white-space:nowrap;overflow:hidden;min-width:0}
+.sp{flex:1}.f{color:var(--tf)}.m{color:var(--tm)}.s{font-size:12px}
+.mono,code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
+.r{font-size:11px;color:var(--tf);margin-left:6px;font-variant-numeric:tabular-nums}.w .bad{color:#b03a35}.w .good{color:#376e4f}.w.dark .bad{color:#ff7369}.w.dark .good{color:#4dab9a}
+.sess{background:var(--hv);border-radius:6px;padding:3px 8px}
+.tool{height:26px;padding:0 8px;border-radius:6px;background:var(--was);color:var(--wa)}
+.mark{height:24px;padding:0 8px;border-radius:6px;background:var(--as);color:var(--ac);font-size:12px}
+.tag{display:inline-block;font-size:11px;line-height:16px;padding:0 5px;border-radius:4px}
+.tag.msg{background:var(--as);color:var(--ac)}.tag.apr{background:var(--was);color:var(--wa)}.tag.tl{background:var(--oks);color:var(--ok)}
+.sel{background:var(--sel);border-radius:6px;padding:2px 8px}
+.notice{padding:6px 10px;border-radius:6px;background:var(--was);color:var(--wa);font-size:12px}
+.menu{background:var(--pop);border-radius:8px;padding:6px 8px;box-shadow:0 0 0 1px rgba(15,15,15,.05),0 3px 6px rgba(15,15,15,.1);font-size:12px}
+.badge{display:inline-block;font-size:11px;font-weight:600;line-height:16px;padding:0 5px;border-radius:4px;color:var(--on)}
+.lane{display:flex;gap:8px;align-items:center}
+.card{border-radius:12px;box-shadow:0 0 0 1px #f2c9a0,0 3px 6px rgba(15,15,15,.08);padding:10px 12px;display:flex;flex-direction:column;gap:8px;height:150px;box-sizing:border-box}
+.ic{display:inline-flex;width:16px;height:16px;border-radius:4px;background:var(--was);color:var(--wa);font-size:11px;font-weight:700;align-items:center;justify-content:center}
+.code{flex:1;min-height:0;overflow:hidden;background:var(--sb);border-radius:6px;padding:4px 8px;white-space:pre-wrap;word-break:break-all}
+.d{display:block;white-space:pre;padding:0 4px;border-radius:3px}.d.del{background:var(--ddel)}.d.add{background:var(--dadd)}.d.path{font-weight:600;padding:0 0 2px}
+.btn{display:inline-flex;align-items:center;gap:5px;height:24px;padding:0 9px;border-radius:6px;box-shadow:inset 0 0 0 1px var(--bs);font-size:12px;white-space:nowrap}
+.pri{background:var(--ac);color:var(--oa);box-shadow:none}
+kbd{font:11px/15px ui-sans-serif,-apple-system,sans-serif;padding:0 4px;border-radius:4px;box-shadow:inset 0 0 0 1px var(--bs);color:var(--tf)}.pri kbd{box-shadow:inset 0 0 0 1px rgba(255,255,255,.5);color:var(--oa)}
+.seg{display:inline-flex;border-radius:7px;box-shadow:inset 0 0 0 1px var(--bs);padding:2px;gap:2px;background:var(--sb)}
+.seg span{height:24px;display:inline-flex;align-items:center;padding:0 12px;border-radius:5px;font-size:12.5px;color:var(--tm)}
+.seg .on{background:var(--c);color:var(--t);font-weight:500;box-shadow:0 0 0 1px var(--bs),0 1px 2px rgba(15,15,15,.08)}
+.status{height:26px;overflow:hidden;white-space:nowrap;margin:4px -14px -14px;padding:0 12px;box-shadow:inset 0 1px 0 #e9e9e7;font-size:12px;color:var(--tm);display:flex;align-items:center;gap:8px}
+.lnk{color:var(--ac)}
+.list{border-radius:8px;box-shadow:0 0 0 1px rgba(15,15,15,.05),0 3px 6px rgba(15,15,15,.1),0 9px 24px rgba(15,15,15,.2);padding:6px;font-size:12px;display:flex;flex-direction:column;gap:2px}
+.nrow{display:flex;gap:8px;align-items:center;height:26px;padding:0 6px;border-radius:6px;white-space:nowrap;overflow:hidden}
+.nrow.open{background:var(--hv)}
+.full{margin:2px 6px 6px 24px;padding:6px 8px;border-radius:6px;background:var(--sb);white-space:pre-wrap;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px;line-height:17px;user-select:text}
+.dlgbox{border-radius:12px;box-shadow:0 0 0 1px rgba(15,15,15,.05),0 3px 6px rgba(15,15,15,.1),0 9px 24px rgba(15,15,15,.2);padding:12px;display:flex;flex-direction:column;gap:8px}
+body{background:#fff;padding:24px}
+</style></head><body>
+<div class="wrap">
+<h1>Liquid: approved closeout mockups</h1>
+<p>Variants the maintainer approved on 2026-10-27 for the agent surface (ADR-0209, ADR-0212). Colors are the light theme's tokens as of these decisions; <a href="../tokens.css">tokens.css</a> stays canonical.</p>
+
+<section>
+<h2>Session allowance says what it covers (ADR-0209)</h2>
+<div class="opts" style="--min:560px">
+<div class="opt"><div class="lab">A shell command: only this command</div><div class="w new"><div class="card auto">
+ <div class="row"><span class="ic">!</span><b>Run a shell command?</b><span class="sp"></span><span class="f s">bash</span></div>
+ <div class="code mono">npm test -- login</div>
+ <div class="row"><span class="btn pri">Allow once <kbd>⏎</kbd></span><span class="btn">Allow this command for this session <kbd>⌘⏎</kbd></span><span class="sp"></span><span class="btn">Reject <kbd>esc</kbd></span></div>
+</div></div></div>
+<div class="opt"><div class="lab">Any other tool: the whole tool</div><div class="w new"><div class="card auto">
+ <div class="row"><span class="ic">!</span><b>Change files?</b><span class="sp"></span><span class="f s">edit</span></div>
+ <div class="code mono" style="white-space:normal"><span class="d path">src/routes/login.ts</span><span class="d del">− router.post('/login', login);</span><span class="d add">+ router.post('/login', limit, login);</span></div>
+ <div class="row"><span class="btn pri">Allow once <kbd>⏎</kbd></span><span class="btn">Allow edit for this session <kbd>⌘⏎</kbd></span><span class="sp"></span><span class="btn">Reject <kbd>esc</kbd></span></div>
+</div></div></div>
+</div>
+<ul class="pc"><li>The edit card shows the path, then removed and added lines as the Diff tab does; a write adds a note that it replaces or empties the whole file. When the row is short of room, the "your draft is kept" hint goes first.</li></ul>
+</section>
+
+<section>
+<h2>Status and accent colors as text (light theme)</h2>
+<div class="w new" style="max-width:520px">
+ <div class="row sess"><span>Rate limit for /login</span><span class="sp"></span><span style="color:var(--ac)">running</span></div>
+ <div class="row sess"><span>Fix flaky sync test</span><span class="sp"></span><span style="color:var(--wa)">waiting</span><span style="color:var(--da)">· failed</span></div>
+ <div class="row"><span class="tag msg">Message</span><span class="tag apr">Approval</span><span class="tag tl">Tool</span></div>
+ <div class="notice">⌘N already runs New Session.</div>
+</div>
+<ul class="pc"><li>Accent #1b63b7, warning #9a4f00, danger #b03a35, success #376e4f and Diff comments #5f6873 reach WCAG AA on their tints, hover rows and surfaces; in the dark theme, branch badges on lane colors take dark text (token on-data).</li></ul>
+</section>
+
+<section>
+<h2>Why the Liquid key could not be turned on, inside Settings</h2>
+<div class="w new" style="max-width:640px">
+ <div class="row"><span class="m">Profile</span><span class="seg"><span>Liquid key</span><span class="on">Standard</span><span>Custom</span></span></div>
+ <div class="notice">Could not turn the Liquid key on: allow Liquid Key in System Settings → General → Login Items</div>
+</div>
+<ul class="pc"><li>The notice stays below the profile until the next profile choice.</li></ul>
+</section>
+
+<section>
+<h2>A notification's whole text</h2>
+<div class="w new" style="max-width:420px">
+ <div class="list"><div class="row" style="color:var(--tf)"><span>Notifications</span><span class="sp"></span><span>Clear all</span></div>
+ <div class="nrow open"><span style="color:var(--da)">✕</span><span>(node:4242) ExperimentalWarning: Type stripping is an exper…</span></div>
+ <div class="full">(node:4242) ExperimentalWarning: Type stripping is an experimental feature
+Error: Failed to load extension /Users/b/watershed/meta-harness/pi-extension/watershed.ts</div>
+ <div class="nrow"><span style="color:var(--wa)">!</span><span>lint: 2 warnings</span></div></div>
+</div>
+<ul class="pc"><li>A click or return on an entry shows its whole text, selectable; a failed agent's output joins the list as an error.</li></ul>
+</section>
+
+<section>
+<h2>Diff tab: whitespace, layout and Windows line ends (ADR-0212)</h2>
+<div class="w new" style="max-width:720px">
+ <div class="hd"><b>Changes in this run</b><span class="f s">compared with the project before the run</span><span class="sp"></span><span class="tg">Hide whitespace</span><span class="seg"><span class="on">Unified</span><span>Split</span></span></div>
+ <div class="mono"><span class="d del">− const max = 5;<span class="f">␍</span></span><span class="d add">+ const max = 10;<span class="f">␍</span></span></div>
+ <div class="keys">↑↓ file · ←→ folder · ⌥↑↓ hunk · U unified/split · W whitespace</div>
+</div>
+<ul class="pc"><li>Hide whitespace leaves out changes that are only whitespace; a file whose changes are all whitespace drops out of the list. The choice and the layout are kept across restarts.</li>
+<li>A carriage return that ends a line shows as a faint ␍; one elsewhere stays written out.</li></ul>
+</section>
+</div>
+</body></html>
