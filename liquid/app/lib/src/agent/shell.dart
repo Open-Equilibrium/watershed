@@ -70,6 +70,8 @@ class _AgentShellState extends State<AgentShell> {
   void initState() {
     super.initState();
     _lifecycle;
+    // The kept choice counts every change read, also before the Diff tab opens.
+    widget.state.hideWhitespace.value = _diffSettings.value.hideWhitespace;
     widget.state.draft.addListener(_applyDraft);
     widget.state.requests.addListener(_requestsChanged);
     unawaited(widget.state.loadStart());

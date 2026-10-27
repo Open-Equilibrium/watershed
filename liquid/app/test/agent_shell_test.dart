@@ -8,6 +8,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/agent/action_area.dart';
 import 'package:liquid/src/agent/chat_view.dart';
 import 'package:liquid/src/agent/shell.dart';
+import 'package:liquid/src/diff/diff_settings.dart';
 import 'package:liquid/src/agent/sidebar.dart';
 import 'package:liquid/src/rust/api/events.dart';
 import 'package:liquid/src/rust/api/history.dart';
@@ -23,14 +24,17 @@ void main() {
   late FakeBackend backend;
   late SessionState state;
 
-  Future<void> show(WidgetTester tester) async {
+  Future<void> show(
+    WidgetTester tester, {
+    DiffSettingsController? diffSettings,
+  }) async {
     await tester.binding.setSurfaceSize(const Size(1600, 900));
     backend = FakeBackend();
     state = SessionState(backend);
     await tester.pumpWidget(
       MaterialApp(
         theme: liquidTheme(Brightness.light),
-        home: AgentShell(state: state, info: info),
+        home: AgentShell(state: state, info: info, diffSettings: diffSettings),
       ),
     );
   }
@@ -120,6 +124,38 @@ void main() {
     await state.newSession();
     await tester.pumpAndSettle();
     expect(count, findsNothing, reason: 'a new session has no run yet');
+  });
+
+  testWidgets('counts changes with whitespace hidden from the start', (
+    tester,
+  ) async {
+    await show(
+      tester,
+      diffSettings: DiffSettingsController(
+        const DiffSettings(hideWhitespace: true),
+      ),
+    );
+    await tester.pumpAndSettle();
+    BridgeFileChange change(String path) => BridgeFileChange(
+      path: path,
+      shown: path,
+      status: BridgeChangeStatus.modified,
+      added: 1,
+      removed: 1,
+    );
+    backend
+      ..changed = [change('code.ts'), change('spaced.ts')]
+      ..changedWithoutWhitespace = [change('code.ts')];
+    await emit(tester, event(BridgeEventKind.turnStarted));
+    await emit(tester, event(BridgeEventKind.turnCompleted));
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('changed-files')),
+        matching: find.text('1'),
+      ),
+      findsOneWidget,
+      reason: 'the kept choice counts before the Diff tab opens',
+    );
   });
 
   testWidgets('says why the agent stopped', (tester) async {

@@ -61,7 +61,6 @@ class _DiffViewState extends State<DiffView> {
   @override
   void initState() {
     super.initState();
-    widget.state.hideWhitespace.value = widget.settings.value.hideWhitespace;
     widget.state.changed.addListener(_show);
     widget.state.ran.addListener(_show);
     // Opening the tab reads the changes again, so it shows the project as it is now.
