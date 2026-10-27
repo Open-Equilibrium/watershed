@@ -14,6 +14,7 @@ use tokio::sync::{mpsc, oneshot};
 
 use super::{CommandError, MAX_RECORD_BYTES, SessionEvent, State, Write, switched, ui_response};
 use crate::approval::needs_user;
+use crate::framing::keep_end;
 use crate::{AgentEvent, Frame, LineFramer, NotificationLevel, PiAdapter, RequestId};
 
 const READ_BUFFER: usize = 64 * 1024;
@@ -369,15 +370,13 @@ impl Supervisor {
 }
 
 /// Reads `reader` to its end and keeps the last [`MAX_ERROR_OUTPUT`] bytes in `kept`.
-pub(super) async fn keep_end(
+pub(super) async fn read_end(
     mut reader: impl tokio::io::AsyncRead + Unpin,
     kept: Arc<Mutex<Vec<u8>>>,
 ) {
     let mut chunk = [0; 8192];
     while let Ok(read @ 1..) = reader.read(&mut chunk).await {
         let mut kept = kept.lock().unwrap_or_else(PoisonError::into_inner);
-        kept.extend_from_slice(&chunk[..read]);
-        let excess = kept.len().saturating_sub(MAX_ERROR_OUTPUT);
-        kept.drain(..excess);
+        keep_end(&mut kept, &chunk[..read], MAX_ERROR_OUTPUT);
     }
 }

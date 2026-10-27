@@ -46,7 +46,7 @@ impl LineFramer {
             let complete = part.last() == Some(&b'\n');
             let body = &part[..part.len() - usize::from(complete)];
             if let Some((_, end)) = &mut self.skipping {
-                keep_end(end, body);
+                keep_end(end, body, KEPT_BYTES);
                 if complete && let Some((start, end)) = self.skipping.take() {
                     frames.push(Frame::Oversized { start, end });
                 }
@@ -62,8 +62,8 @@ impl LineFramer {
                     .copied()
                     .collect();
                 let mut end = Vec::new();
-                keep_end(&mut end, &pending);
-                keep_end(&mut end, body);
+                keep_end(&mut end, &pending, KEPT_BYTES);
+                keep_end(&mut end, body, KEPT_BYTES);
                 if complete {
                     frames.push(Frame::Oversized { start, end });
                 } else {
@@ -80,10 +80,10 @@ impl LineFramer {
     }
 }
 
-/// Appends `bytes` to `end` and keeps only its last [`KEPT_BYTES`].
-fn keep_end(end: &mut Vec<u8>, bytes: &[u8]) {
-    let bytes = &bytes[bytes.len().saturating_sub(KEPT_BYTES)..];
+/// Appends `bytes` to `end` and keeps only its last `limit` bytes.
+pub(crate) fn keep_end(end: &mut Vec<u8>, bytes: &[u8], limit: usize) {
+    let bytes = &bytes[bytes.len().saturating_sub(limit)..];
     end.extend_from_slice(bytes);
-    let excess = end.len().saturating_sub(KEPT_BYTES);
+    let excess = end.len().saturating_sub(limit);
     end.drain(..excess);
 }

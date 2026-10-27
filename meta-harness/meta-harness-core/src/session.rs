@@ -15,7 +15,7 @@ use tokio::sync::{mpsc, oneshot};
 use crate::approval::ApprovalMode;
 use crate::pi::queue;
 use crate::{AgentEvent, Answer, Decision, Delivery, History, PiAdapter, Queue, RequestId};
-use supervisor::{Supervisor, keep_end};
+use supervisor::{Supervisor, read_end};
 
 mod supervisor;
 
@@ -249,7 +249,7 @@ impl Session {
         let stdout = child.stdout.take().expect("stdout is piped");
         // Drained all along, so a talkative agent never blocks on a full pipe.
         let error_output = Arc::new(Mutex::new(Vec::new()));
-        let error_reader = tokio::spawn(keep_end(
+        let error_reader = tokio::spawn(read_end(
             child.stderr.take().expect("stderr is piped"),
             error_output.clone(),
         ));
