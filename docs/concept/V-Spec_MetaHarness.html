@@ -108,12 +108,12 @@ Liquid
     </div></section>
 
     <section id="deployment" class="section"><h2>5. Deployment modes</h2><div class="body">
-      <div class="card"><h3>Mode A — local sidecar (default single-user)</h3>
+      <div class="card"><h3>Mode A — local service (default single-user)</h3>
         <pre><code>Liquid Desktop
-  starts local Meta-Harness sidecar
+  connects to the local Meta-Harness service
     starts/monitors Flow Agent, Codex CLI, Claude Code, ...
     stores local sessions/config/metrics</code></pre>
-        <p class="muted">Liquid starts Meta-Harness locally. PowerBar commands go to the sidecar, which owns the CLI processes on that host; Liquid Blocks render sessions, transcripts, metrics and approvals. After local provisioning, this mode may bind Flow Agent to a device-local model runtime and operate its core path with network interfaces disabled.</p>
+        <p class="muted">Liquid reaches the Meta-Harness on its own host over the private local connection, like any client (ADR-0215); who starts the service is <a href="../decisions/open-decisions.html#d-074">D-074</a>. PowerBar commands go to the service, which owns the CLI processes on that host; Liquid Blocks render sessions, transcripts, metrics and approvals. After local provisioning, this mode may bind Flow Agent to a device-local model runtime and operate its core path with network interfaces disabled.</p>
       </div>
       <div class="card"><h3>Mode B — server-host Meta-Harness</h3>
         <pre><code>Liquid Desktop/Mobile → authenticated Meta-Harness API
@@ -156,7 +156,7 @@ meta approvals</code></pre></div>
         </ul></div>
       </div>
       <h3>Service / daemon surface</h3>
-      <p>The same service can run embedded in the Liquid app, as a Liquid sidecar, standalone daemon or server-host service. This changes client reachability, not Meta-Harness agent-executor ownership. One command set travels over a private local connection on the host and an authenticated network connection remotely (ADR-0185); state storage is <a href="../decisions/open-decisions.html#d-024">D-024</a>. Flow Agent's designed local control transport baseline is ADR-0029.</p>
+      <p>The service runs in its own process on the host, started by Liquid or as a login service (<a href="../decisions/open-decisions.html#d-074">D-074</a>), or as a server-host service; Liquid embeds no Meta-Harness core once the service exists (ADR-0215). This changes client reachability, not Meta-Harness agent-executor ownership. One command set travels over a private local connection on the host and an authenticated network connection remotely (ADR-0185); state storage is <a href="../decisions/open-decisions.html#d-024">D-024</a>. Flow Agent's designed local control transport baseline is ADR-0029.</p>
     </div></section>
 
     <section id="architecture" class="section"><h2>7. Architecture</h2><div class="body">
