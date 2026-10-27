@@ -243,6 +243,82 @@ fn a_first_snapshot_that_failed_still_clears_the_projects_marks() {
 }
 
 #[test]
+fn snapshots_write_nothing_into_the_projects_git_directory() {
+    run(async {
+        let repo = Repo::new("split-index");
+        repo.git(&["config", "core.splitIndex", "true"]);
+        let listing = || {
+            let mut names: Vec<_> = std::fs::read_dir(repo.path().join(".git"))
+                .expect(".git")
+                .map(|entry| entry.expect("entry").file_name())
+                .collect();
+            names.sort();
+            names
+        };
+        let before = listing();
+        let diff = RunDiff::open(repo.path()).await;
+        diff.started(diff.capture().await);
+        repo.write("a.txt", "new\n");
+        assert_eq!(diff.changes().await.expect("changes"), [modified("a.txt")]);
+        assert_eq!(listing(), before);
+    });
+}
+
+#[test]
+fn a_submodules_diff_runs_none_of_its_commands() {
+    run(async {
+        let sub = Repo::new("submodule-inner");
+        // The submodule's own textconv would write a marker when its diff runs.
+        let marker = sub.path().join("ran");
+        sub.git(&[
+            "config",
+            "diff.mark.textconv",
+            &format!("touch {}; cat", marker.display()),
+        ]);
+        sub.write(".gitattributes", "*.txt diff=mark\n");
+        sub.git(&["add", "."]);
+        sub.git(&["commit", "-q", "-m", "attributes"]);
+        let repo = Repo::new("submodule-outer");
+        repo.git(&["config", "diff.submodule", "diff"]);
+        repo.git(&[
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            "-q",
+            &sub.path().display().to_string(),
+            "sub",
+        ]);
+        repo.git(&["commit", "-q", "-m", "submodule"]);
+        let inner = repo.path().join("sub");
+        let git_in = |args: &[&str]| {
+            let status = Command::new("git")
+                .args(["-c", "user.name=Test", "-c", "user.email=test@example.com"])
+                .args(args)
+                .current_dir(&inner)
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .status()
+                .expect("git runs");
+            assert!(status.success(), "{args:?}");
+        };
+        git_in(&[
+            "config",
+            "diff.mark.textconv",
+            &format!("touch {}; cat", marker.display()),
+        ]);
+        let diff = RunDiff::open(repo.path()).await;
+        diff.started(diff.capture().await);
+        std::fs::write(inner.join("a.txt"), "changed\n").expect("file");
+        git_in(&["commit", "-q", "-am", "inner change"]);
+
+        let changes = diff.changes().await.expect("changes");
+        assert_eq!(changes.len(), 1, "{changes:?}");
+        let _ = diff.patch("sub").await.expect("patch");
+        assert!(!marker.exists(), "the submodule's textconv ran");
+    });
+}
+
+#[test]
 fn a_project_outside_git_says_so_instead_of_showing_no_changes() {
     run(async {
         let dir =

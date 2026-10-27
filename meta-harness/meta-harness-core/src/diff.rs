@@ -417,6 +417,12 @@ fn git_command(dir: &Path, env: &[(&str, OsString)], args: &[&str]) -> Command {
             "core.fileMode=true",
             "-c",
             "core.sparseCheckout=false",
+            // Nothing lands in the project's Git directory, and a submodule's diff runs none
+            // of its commands.
+            "-c",
+            "core.splitIndex=false",
+            "-c",
+            "diff.submodule=short",
             // Blank context lines keep their leading space, which Liquid reads as context.
             "-c",
             "diff.suppressBlankEmpty=false",
