@@ -3,9 +3,22 @@
 /// `text` with the characters that hide or reorder what it shows written out, such as
 /// `<U+202E>`; [`hides`] lists them. Look-alike letters stay as they are.
 pub fn visible(text: &str) -> String {
+    written_out(text, hides)
+}
+
+/// A name, such as a file's or a tool's, on one line: like [`visible`], with line breaks and
+/// tabs written out too.
+pub fn visible_name(name: &str) -> String {
+    written_out(name, |character| {
+        character == '\n' || character == '\t' || hides(character)
+    })
+}
+
+/// `text` with each character `marked` picks written out as its code point.
+fn written_out(text: &str, marked: impl Fn(char) -> bool) -> String {
     let mut shown = String::with_capacity(text.len());
     for character in text.chars() {
-        if hides(character) {
+        if marked(character) {
             shown.push_str(&format!("<U+{:04X}>", u32::from(character)));
         } else {
             shown.push(character);

@@ -9,7 +9,7 @@ use crate::event::{
     NotificationLevel, Queue, RequestId, RequestKind, TurnId, Usage, UserInput,
 };
 use crate::history::{first_line, patch_lines};
-use crate::visible::visible;
+use crate::visible::{visible, visible_name};
 
 /// Title prefix of the select dialog Watershed's pi extension uses to ask for an approval.
 pub(crate) const APPROVAL_PREFIX: &str = "watershed.approval ";
@@ -243,7 +243,7 @@ impl PiAdapter {
         );
         let arguments = record.get("args").map(Value::to_string).unwrap_or_default();
         let detail = ItemDetail::Tool {
-            name: visible(name),
+            name: visible_name(name),
             target: call_target(&arguments),
         };
         events.push(started(turn, item, kind, detail));
@@ -469,7 +469,7 @@ fn approval(request: RequestId, payload: &str, tools: &HashMap<String, OpenTool>
     AgentEvent::RequestOpened {
         request,
         kind,
-        tool: visible(tool),
+        tool: visible_name(tool),
         text: call_text(kind, &arguments),
         arguments,
         read_only: payload.get("readOnly").and_then(Value::as_bool) == Some(true),

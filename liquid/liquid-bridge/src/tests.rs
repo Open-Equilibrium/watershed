@@ -133,6 +133,14 @@ fn a_changed_file_shows_its_name_with_hiding_characters_written_out() {
         ("src/a\u{202e}b.ts", "src/a<U+202E>b.ts"),
         "the path still names the file for its patch"
     );
+    // A name stays on one line.
+    let change = BridgeFileChange::from(meta_harness_core::FileChange {
+        path: "notes.md\n\tsecret.sh".to_owned(),
+        status: meta_harness_core::ChangeStatus::Added,
+        added: 1,
+        removed: 0,
+    });
+    assert_eq!(change.shown, "notes.md<U+000A><U+0009>secret.sh");
 }
 
 #[test]

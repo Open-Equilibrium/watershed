@@ -252,7 +252,8 @@ pub enum BridgeChangeStatus {
 pub struct BridgeFileChange {
     /// The path relative to the root of the Git repository the project is in.
     pub path: String,
-    /// The path as Liquid shows it, with characters that could hide or reorder it written out.
+    /// The path as Liquid shows it, on one line, with characters that could hide or reorder it
+    /// written out.
     pub shown: String,
     /// How it changed.
     pub status: BridgeChangeStatus,

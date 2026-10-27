@@ -5,7 +5,7 @@ use meta_harness_core::{
     ContextPart, Decision, EntryKind, FileChange, ItemDetail, ItemKind, ItemStatus,
     MAX_RECORD_BYTES, Model, NotificationLevel, Queue, RecordKind, RequestKind, SessionEvent,
     StepContext, StoredSession, ToolOutcome, Trajectory, TrajectoryRecord, Transcript,
-    TranscriptItem, TreeNode, Usage, UserInput, visible,
+    TranscriptItem, TreeNode, Usage, UserInput, visible_name,
 };
 
 use crate::api::events::{
@@ -228,7 +228,7 @@ impl From<StepContext> for BridgeStepContext {
 impl From<FileChange> for BridgeFileChange {
     fn from(change: FileChange) -> Self {
         Self {
-            shown: visible(&change.path),
+            shown: visible_name(&change.path),
             path: change.path,
             status: match change.status {
                 ChangeStatus::Added => BridgeChangeStatus::Added,

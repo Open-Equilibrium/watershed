@@ -519,25 +519,26 @@ fn shows_invisible_and_reordering_characters_in_what_a_call_shows() {
 
 #[test]
 fn shows_tool_names_with_hiding_characters_written_out() {
-    // An extension's tool name that reorders what follows it, live and as stored.
+    // An extension's tool name that reorders what follows it or breaks its line, live and as
+    // stored.
     let events = translate(&[
         r#"{"type":"agent_start"}"#,
-        r#"{"type":"tool_execution_start","toolCallId":"c1","toolName":"lint\u202e","args":{}}"#,
+        r#"{"type":"tool_execution_start","toolCallId":"c1","toolName":"lint\u202e\n","args":{}}"#,
     ]);
     assert!(
         events.iter().any(|event| matches!(
             event,
             AgentEvent::ItemStarted { detail: ItemDetail::Tool { name, .. }, .. }
-                if name == "lint<U+202E>"
+                if name == "lint<U+202E><U+000A>"
         )),
         "{events:?}"
     );
     let session: Value = serde_json::from_str(
         r#"{"entries":[
           {"type":"message","id":"u1","parentId":null,"message":{"role":"user","content":"Lint"}},
-          {"type":"message","id":"a1","parentId":"u1","message":{"role":"assistant","content":[{"type":"toolCall","id":"c1","name":"lint\u202e","arguments":{}}]}},
-          {"type":"custom","id":"p1","parentId":"a1","customType":"watershed.approval","data":{"toolCallId":"c1","tool":"lint\u202e","decision":"allow-once"}},
-          {"type":"message","id":"r1","parentId":"p1","message":{"role":"toolResult","toolCallId":"c1","toolName":"lint\u202e","content":[]}}
+          {"type":"message","id":"a1","parentId":"u1","message":{"role":"assistant","content":[{"type":"toolCall","id":"c1","name":"lint\u202e\n","arguments":{}}]}},
+          {"type":"custom","id":"p1","parentId":"a1","customType":"watershed.approval","data":{"toolCallId":"c1","tool":"lint\u202e\n","decision":"allow-once"}},
+          {"type":"message","id":"r1","parentId":"p1","message":{"role":"toolResult","toolCallId":"c1","toolName":"lint\u202e\n","content":[]}}
         ],"leafId":"r1"}"#,
     )
     .expect("JSON");
@@ -548,7 +549,7 @@ fn shows_tool_names_with_hiding_characters_written_out() {
         .into_iter()
         .filter_map(|item| item.tool)
         .collect();
-    assert_eq!(chat, ["lint<U+202E>"]);
+    assert_eq!(chat, ["lint<U+202E><U+000A>"]);
     let steps: Vec<_> = history
         .trajectory(None)
         .records
@@ -556,7 +557,11 @@ fn shows_tool_names_with_hiding_characters_written_out() {
         .filter(|record| record.label.starts_with("lint"))
         .map(|record| record.label)
         .collect();
-    assert_eq!(steps, ["lint<U+202E>", "lint<U+202E>"], "approval and call");
+    assert_eq!(
+        steps,
+        ["lint<U+202E><U+000A>", "lint<U+202E><U+000A>"],
+        "approval and call"
+    );
 }
 
 #[test]

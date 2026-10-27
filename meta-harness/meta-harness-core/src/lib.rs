@@ -33,7 +33,7 @@ pub use session::{
     SessionState, Stopper,
 };
 pub use stored::{StoredSession, recent_sessions, session_title};
-pub use visible::visible;
+pub use visible::{visible, visible_name};
 
 #[cfg(test)]
 mod tests;

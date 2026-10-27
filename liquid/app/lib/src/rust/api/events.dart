@@ -226,7 +226,8 @@ class BridgeFileChange {
   /// The path relative to the root of the Git repository the project is in.
   final String path;
 
-  /// The path as Liquid shows it, with characters that could hide or reorder it written out.
+  /// The path as Liquid shows it, on one line, with characters that could hide or reorder it
+  /// written out.
   final String shown;
 
   /// How it changed.
