@@ -20,10 +20,12 @@ void main() {
     DiffSettingsController? settings,
   }) async {
     await tester.binding.setSurfaceSize(size);
-    settings ??= DiffSettingsController();
-    // As the shell does when it starts.
-    final state = SessionState(backend)
-      ..hideWhitespace.value = settings.value.hideWhitespace;
+    final kept = settings ??= DiffSettingsController();
+    final state = SessionState(backend);
+    // As the shell does: the settings own the choice the change reads use.
+    void hide() => state.hideWhitespace.value = kept.value.hideWhitespace;
+    kept.addListener(hide);
+    hide();
     await tester.pumpWidget(
       MaterialApp(
         theme: liquidTheme(Brightness.light),

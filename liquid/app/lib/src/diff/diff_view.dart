@@ -246,11 +246,13 @@ class _DiffViewState extends State<DiffView> {
   );
 
   /// Leaves out or brings back the changes that are only whitespace.
-  void _switchWhitespace() {
-    final hide = !widget.settings.value.hideWhitespace;
-    unawaited(_change(widget.settings.value.copyWith(hideWhitespace: hide)));
-    widget.state.hideWhitespace.value = hide;
-  }
+  void _switchWhitespace() => unawaited(
+    _change(
+      widget.settings.value.copyWith(
+        hideWhitespace: !widget.settings.value.hideWhitespace,
+      ),
+    ),
+  );
 
   @override
   Widget build(BuildContext context) => CallbackShortcuts(

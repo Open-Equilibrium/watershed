@@ -71,7 +71,8 @@ class _AgentShellState extends State<AgentShell> {
     super.initState();
     _lifecycle;
     // The kept choice counts every change read, also before the Diff tab opens.
-    widget.state.hideWhitespace.value = _diffSettings.value.hideWhitespace;
+    _diffSettings.addListener(_hideWhitespace);
+    _hideWhitespace();
     widget.state.draft.addListener(_applyDraft);
     widget.state.requests.addListener(_requestsChanged);
     unawaited(widget.state.loadStart());
@@ -123,6 +124,10 @@ class _AgentShellState extends State<AgentShell> {
     widget.state.draft.value = null;
   }
 
+  /// Reads the changes as the Diff settings say, which own the choice (ADR-0212).
+  void _hideWhitespace() =>
+      widget.state.hideWhitespace.value = _diffSettings.value.hideWhitespace;
+
   @override
   void dispose() {
     _lifecycle.dispose();
@@ -136,6 +141,7 @@ class _AgentShellState extends State<AgentShell> {
     _focus.dispose();
     _shortcuts.report = null;
     if (widget.shortcuts == null) _shortcuts.dispose();
+    _diffSettings.removeListener(_hideWhitespace);
     if (widget.diffSettings == null) _diffSettings.dispose();
     super.dispose();
   }
