@@ -10,11 +10,23 @@ void main(List<String> args) async {
       cratePath: '../liquid-bridge',
       extraCargoBuildArgs: ['--locked'],
     ).run(input: input, output: output, logger: buildLog(stdout));
+    // Cargo lists only the Rust sources it read; a new lock, manifest or toolchain pin
+    // rebuilds the bridge too.
+    output.dependencies.addAll([
+      for (final file in [
+        '../../Cargo.lock',
+        '../../Cargo.toml',
+        '../liquid-bridge/Cargo.toml',
+        '../liquid-bridge/rust-toolchain.toml',
+      ])
+        input.packageRoot.resolve(file),
+    ]);
   });
 }
 
-/// Writes the build's progress, but not its configuration records: the Rust builder lists the
-/// whole environment there, and the environment can hold credentials.
+/// Writes the build's progress without its configuration records, in which the Rust builder
+/// repeats the hook's environment. Flutter's hook runner still records the variables it passes
+/// to hooks (TESTING.md).
 Logger buildLog(StringSink sink) => Logger.detached('liquid_bridge')
   ..level = Level.INFO
   ..onRecord.listen(sink.writeln);
