@@ -529,8 +529,8 @@ fn line_counts(numstat: &str) -> HashMap<String, (u64, u64)> {
         .collect()
 }
 
-/// A running Git. Dropped before it ended, as at its time limit, it ends with every program it
-/// started, such as a project's clean filter (ADR-0210).
+/// A running Git. Dropped before it ended, as at its time limit, it ends with the programs it
+/// started that stay in its process group, such as a project's clean filter (ADR-0210).
 struct Git {
     child: Child,
     /// Git's process group; `None` once Git was reaped, since its id may then be reused.
@@ -539,7 +539,7 @@ struct Git {
 
 impl Git {
     fn spawn(command: &mut Command) -> Result<Self, DiffError> {
-        let child = command.spawn().map_err(DiffError::GitStart)?;
+        let child = crate::spawn(command).map_err(DiffError::GitStart)?;
         let group = child
             .id()
             .and_then(|id| i32::try_from(id).ok())

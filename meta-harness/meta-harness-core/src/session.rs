@@ -275,15 +275,16 @@ pub struct Session {
 impl Session {
     /// Starts the agent and returns the session with its event stream.
     pub fn start(command: &AgentCommand) -> std::io::Result<(Self, mpsc::Receiver<SessionEvent>)> {
-        let mut child = Command::new(&command.program)
-            .args(&command.args)
-            .args(command.pi_args())
-            .current_dir(&command.cwd)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .kill_on_drop(true)
-            .spawn()?;
+        let mut child = crate::spawn(
+            Command::new(&command.program)
+                .args(&command.args)
+                .args(command.pi_args())
+                .current_dir(&command.cwd)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .kill_on_drop(true),
+        )?;
         let stdout = child.stdout.take().expect("stdout is piped");
         // Drained all along, so a talkative agent never blocks on a full pipe.
         let error_output = Arc::new(Mutex::new(Vec::new()));

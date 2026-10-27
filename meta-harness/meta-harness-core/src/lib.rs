@@ -37,3 +37,16 @@ pub use visible::{visible_lines, visible_name};
 
 #[cfg(test)]
 mod tests;
+
+/// Starts `command` while no other part of the core starts a process. On macOS the standard
+/// library marks a new pipe close-on-exec only after creating it, so a process started in
+/// between would inherit the pipe and could hold another process's output open.
+pub(crate) fn spawn(
+    command: &mut tokio::process::Command,
+) -> std::io::Result<tokio::process::Child> {
+    static SPAWNING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _alone = SPAWNING
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    command.spawn()
+}

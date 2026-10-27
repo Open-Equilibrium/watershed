@@ -189,7 +189,6 @@ A macOS Liquid app, built ahead of M2 and M3a, that controls pi through an embed
 
 - The agent surface does not yet meet [client architecture](docs/concept/liquid-client-architecture.md) rule 4: the bridge sends every event without waiting for Dart, so a fast stream queues in Dart. Proposed: Rust coalesces running items in short windows, keeping each item's latest state, with a bounded number of pending updates, as T3 Code does with 50 ms windows; alternative: flow control that Dart acknowledges.
 - A file-change approval shows the path as pi was given it; pi resolves a leading `@`, `~` and `file://` URLs before it writes, so the card could also show the resolved absolute path.
-- About 2 in 40 local `cargo test` runs of the bridge tests fail at `shutdown()` on macOS, likely because a pipe end leaks into a process another test spawns at the same moment; CI runs each test in its own process with nextest and is unaffected.
 
 #### Liquid Git integration — next slice
 
