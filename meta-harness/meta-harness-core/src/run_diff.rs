@@ -37,8 +37,9 @@ pub struct RunDiff {
 struct Before {
     /// The project before the latest run, or why it could not be captured.
     state: Option<Result<Snapshot, String>>,
-    /// The project as the latest list of changes saw it, which patches then show too.
-    listed: Option<Snapshot>,
+    /// The two states the latest list of changes compared, which patches compare too, also
+    /// once a new run started and until the list is read again.
+    listed: Option<(Snapshot, Snapshot)>,
     /// Runs started so far.
     runs: u64,
 }
@@ -97,7 +98,6 @@ impl RunDiff {
     pub fn started(&self, capture: Capture) {
         let mut before = self.before();
         before.state = capture.0;
-        before.listed = None;
         before.runs += 1;
     }
 
@@ -122,7 +122,7 @@ impl RunDiff {
             return Ok(Vec::new());
         };
         let now = self.bounded(tree.snapshot()).await?;
-        self.list(runs, &now);
+        self.list(runs, &before, &now);
         self.bounded(tree.changes(&before, &now)).await
     }
 
@@ -130,16 +130,16 @@ impl RunDiff {
     /// saw the project, so it needs no new pass over the project. Characters that could hide or
     /// reorder its lines are written out, as approvals write them.
     pub async fn patch(&self, path: &str) -> Result<String, DiffError> {
-        let Some((tree, before, runs)) = self.compared()? else {
-            return Ok(String::new());
-        };
         let listed = self.before().listed.clone();
-        let now = match listed {
-            Some(now) => now,
-            None => {
+        let (tree, before, now) = match (self.tree(), listed) {
+            (Some(tree), Some((before, now))) => (tree, before, now),
+            _ => {
+                let Some((tree, before, runs)) = self.compared()? else {
+                    return Ok(String::new());
+                };
                 let now = self.bounded(tree.snapshot()).await?;
-                self.list(runs, &now);
-                now
+                self.list(runs, &before, &now);
+                (tree, before, now)
             }
         };
         self.bounded(tree.patch(&before, &now, path))
@@ -147,11 +147,11 @@ impl RunDiff {
             .map(|patch| visible(&patch))
     }
 
-    /// Keeps `now` as what later patches show, unless another run started meanwhile.
-    fn list(&self, runs: u64, now: &Snapshot) {
+    /// Keeps the states a list compared for later patches, unless another run started meanwhile.
+    fn list(&self, runs: u64, from: &Snapshot, now: &Snapshot) {
         let mut before = self.before();
         if before.runs == runs {
-            before.listed = Some(now.clone());
+            before.listed = Some((from.clone(), now.clone()));
         }
     }
 

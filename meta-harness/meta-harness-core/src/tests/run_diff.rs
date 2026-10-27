@@ -116,10 +116,14 @@ fn a_patch_shows_a_file_as_the_list_of_changes_saw_it() {
             "{patch}"
         );
 
+        // A new run leaves the list as it was until it is read again, and its patches too.
         diff.started(diff.capture().await);
         repo.write("a.txt", "newest\n");
         let patch = diff.patch("a.txt").await.expect("patch");
-        assert!(patch.contains("+newest\n"), "a new run reads anew: {patch}");
+        assert!(patch.contains("-old\n+new\n"), "{patch}");
+        assert_eq!(diff.changes().await.expect("changes"), [modified("a.txt")]);
+        let patch = diff.patch("a.txt").await.expect("patch");
+        assert!(patch.contains("-newer\n+newest\n"), "{patch}");
     });
 }
 
@@ -127,8 +131,8 @@ fn a_patch_shows_a_file_as_the_list_of_changes_saw_it() {
 fn a_git_that_does_not_answer_at_open_is_reported() {
     run(async {
         let repo = Repo::new("open-limit");
-        // Too short for Git to answer, as a hung Git would not.
-        let diff = RunDiff::with_timeout(repo.path(), Duration::from_millis(1)).await;
+        // No time for Git to answer, as a hung Git would not.
+        let diff = RunDiff::with_timeout(repo.path(), Duration::ZERO).await;
         assert!(matches!(
             diff.changes().await,
             Err(DiffError::NotCaptured(_))
@@ -224,7 +228,7 @@ fn a_first_snapshot_that_failed_still_clears_the_projects_marks() {
         repo.git(&["update-index", "--assume-unchanged", "a.txt"]);
         // The first snapshot runs out of time while it clears the copied index's marks.
         let mut diff = RunDiff::open(repo.path()).await;
-        diff.set_timeout(Duration::from_millis(1));
+        diff.set_timeout(Duration::ZERO);
         diff.started(diff.capture().await);
         assert!(matches!(
             diff.changes().await,
