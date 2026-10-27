@@ -1,5 +1,4 @@
 [package]
-# cargokit derives the library file name from the package name, so it keeps an underscore.
 name = "liquid_bridge"
 description = "Bridge between the Liquid Flutter app and the Meta-Harness core (ADR-0186)."
 version.workspace = true

@@ -12,8 +12,8 @@ dependencies:
   flutter:
     sdk: flutter
   flutter_rust_bridge: 2.13.0
-  liquid_bridge:
-    path: rust_builder
+  flutter_rust_bridge_hooks: 2.13.0
+  logging: ^1.3.0
 
 dev_dependencies:
   flutter_test:

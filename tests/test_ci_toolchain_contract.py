@@ -183,6 +183,15 @@ class CiWorkflowContractTest(unittest.TestCase):
         self.assertNotIn(rust_version, workflow)
         self.assertNotIn("check-latest:", workflow)
 
+    def test_liquid_build_hook_uses_the_pinned_rust(self) -> None:
+        with (ROOT / "rust-toolchain.toml").open("rb") as root_file:
+            pinned = tomllib.load(root_file)["toolchain"]
+        with (ROOT / "liquid" / "liquid-bridge" / "rust-toolchain.toml").open("rb") as bridge_file:
+            bridge = tomllib.load(bridge_file)["toolchain"]
+
+        # The build hook only reads the crate's own file, which adds the targets it builds.
+        self.assertEqual({key: value for key, value in bridge.items() if key != "targets"}, pinned)
+
     def test_minimum_node_exercises_tooling_after_the_pinned_gates(self) -> None:
         workflow = workflow_text()
         names = ("Select minimum Node", "Install minimum Node", "Check minimum Node tooling")

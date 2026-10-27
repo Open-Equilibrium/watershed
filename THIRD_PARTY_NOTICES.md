@@ -10,15 +10,6 @@ Watershed-authored files remain licensed under `AGPL-3.0-only` unless otherwise 
 - Copyright notice: `Copyright (c) 2026 openclaw`.
 - Upstream/source: `openclaw/agent-skills`.
 
-## Cargokit
-
-- Purpose: vendored build glue that compiles the Liquid Rust bridge into the Flutter app; part of the flutter_rust_bridge 2.13.0 template (ADR-0186).
-- License: MIT.
-- License text is bundled with the vendored material in `liquid/app/rust_builder/cargokit/LICENSE`.
-- Modified: `build_pod.sh` no longer prints the build environment, which can hold credentials.
-- Copyright notice: `Copyright 2022 Matej Knopp`.
-- Upstream/source: `irondash/cargokit`.
-
 ## Lucide
 
 - Purpose: icon font bundled into the Liquid app (ADR-0198); `lucide-static` 1.61.0, `font/lucide.ttf`.

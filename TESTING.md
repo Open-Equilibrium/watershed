@@ -181,7 +181,7 @@ Liquid clients use Flutter (ADR-0181), which builds desktop apps only on their o
 | Linux | Linux | clang, CMake, Ninja, pkg-config and GTK 3 development headers |
 | Android | Linux, macOS or Windows | Android SDK |
 
-Without Xcode, a Mac still runs Rust core tests, `flutter test` and `flutter analyze`. Native CI hosts can supply the other desktop builds.
+Every Liquid build, including `flutter test`, also compiles the Rust bridge through rustup with the toolchain pinned in `liquid/liquid-bridge/rust-toolchain.toml` (ADR-0213). Without Xcode, a Mac still runs Rust core tests, `flutter test` and `flutter analyze`. Native CI hosts can supply the other desktop builds.
 
 ## CI
 
