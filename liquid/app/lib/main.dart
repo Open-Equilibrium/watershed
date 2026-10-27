@@ -14,13 +14,15 @@ import 'src/shortcuts/shortcut_store.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  // Only the bridge bundled with the app: by default flutter_rust_bridge first tries a library
-  // relative to the working directory or in a folder an environment variable names.
+  // Only the bridge inside the app bundle: by default flutter_rust_bridge first tries a library
+  // relative to the working directory or in a folder an environment variable names, and a
+  // relative framework path would still be looked up in the working directory first.
+  final stem = RustLib.kDefaultExternalLibraryLoaderConfig.stem;
   await RustLib.init(
     externalLibrary: ExternalLibrary.open(
       Platform.isMacOS
-          ? 'liquid_bridge.framework/liquid_bridge'
-          : 'libliquid_bridge.so',
+          ? '@executable_path/../Frameworks/$stem.framework/$stem'
+          : 'lib$stem.so',
     ),
   );
   final settings = settingsDirectory(
