@@ -220,18 +220,6 @@ impl AgentSession {
         })
     }
 
-    /// Removes the messages waiting for the running agent and returns them.
-    pub fn clear_queue(&self) -> Result<BridgeQueue, String> {
-        RUNTIME.block_on(async {
-            let mut session = self.session.lock().await;
-            Ok(open(&mut session)?
-                .clear_queue()
-                .await
-                .map_err(describe)?
-                .into())
-        })
-    }
-
     /// Files the latest run changed, compared with the project before it; none outside Git.
     pub fn changes(&self) -> Result<Option<Vec<BridgeFileChange>>, String> {
         match RUNTIME.block_on(self.diff.changes()) {
@@ -422,6 +410,15 @@ impl AgentSession {
             .map_err(describe)?;
         // pi answers once the agent is idle; the session stays free meanwhile.
         pending.accepted().await.map_err(describe)
+    }
+
+    /// Removes the messages waiting for the running agent and returns them.
+    pub async fn clear_queue(&self) -> Result<BridgeQueue, String> {
+        Ok(open(&mut *self.session.lock().await)?
+            .clear_queue()
+            .await
+            .map_err(describe)?
+            .into())
     }
 
     /// Changes which tool calls need the user's approval.
