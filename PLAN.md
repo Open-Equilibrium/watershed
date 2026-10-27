@@ -177,13 +177,18 @@ A macOS Liquid app, built ahead of M2 and M3a, that controls pi through an embed
 3. Each approval mode pauses exactly its expected calls; a rejected call never runs; a session-wide allowance ends with its session; every user decision is a custom entry in the pi session; a missing answer, including after a core or app crash, blocks the call.
 4. The Trajectory tab shows each step with tokens, timing and what the model saw, live and after the run, and looks the same after an app restart, rebuilt from the pi session file alone.
 5. Branching from a step creates a second branch that can be compared side by side, while the original stays unchanged.
-6. The Diff tab shows a run's changes against the project state before the run.
+6. The Diff tab shows a run's changes against the project state before the run, as Git sees them under the project's settings (ADR-0210).
 7. The UI never sees pi's protocol: CI tests drive a scripted fake agent behind the same session/event model, without model calls or credentials; one manual check uses real pi.
 8. A long token stream crosses the bridge as small deltas, the Dart main isolate never waits for Rust, and closing a view releases its streams.
 9. Quitting the app ends every pi process; a crashed pi process shows an error instead of hanging.
 10. Comparable observations for token streaming and long Trajectories are recorded under [PERFORMANCE.md](PERFORMANCE.md#liquid), without thresholds.
 
-**Closeout:** green CI plus one independent read-only review, instead of the session-workflow KPI reviews, Autoreview, Clawpatch and doc_sync.
+**Closeout:** green CI plus one final round of the five KPI reviews on the final candidate, instead of Autoreview, Clawpatch and doc_sync. A review is clean without Blocker or Major findings; Minor findings are fixed when trivial and otherwise listed under the follow-ups below.
+
+**Follow-ups:**
+
+- The agent surface does not yet meet [client architecture](docs/concept/liquid-client-architecture.md) rule 4: the bridge sends every event without waiting for Dart, so a fast stream queues in Dart. Proposed: Rust coalesces running items in short windows, keeping each item's latest state, with a bounded number of pending updates, as T3 Code does with 50 ms windows; alternative: flow control that Dart acknowledges.
+- About 2 in 40 local `cargo test` runs of the bridge tests fail at `shutdown()` on macOS, likely because a pipe end leaks into a process another test spawns at the same moment; CI runs each test in its own process with nextest and is unaffected.
 
 #### Liquid Git integration — next slice
 

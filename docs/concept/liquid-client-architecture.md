@@ -29,7 +29,7 @@ flowchart TD
 1. The Dart main isolate only handles input, layout, paint and applying bounded deltas. Storage access, queries, large (de)serialization, diffing, CRDT merge, sync and App code never run on it or on Flutter's platform or raster threads.
 2. The Rust core runs on its own worker threads. Every bridge call from Dart is asynchronous; the main isolate never blocks on disk or network.
 3. The bridge carries bounded deltas addressed by stable IDs and a per-resource sequence, for example `BlockDelta { block_id, seq, op }`. It never carries a whole Page tree, a whole Database or an unbounded list. Opening a View transfers one bounded snapshot of what its viewport needs.
-4. Rust pushes updates as asynchronous streams and shares one producer per resource across synchronized Views. When the UI falls behind, Rust coalesces pending deltas per resource to the latest sequence instead of queueing every intermediate state; a consumer that detects a sequence gap requests a fresh bounded snapshot.
+4. Rust pushes updates as asynchronous streams and shares one producer per resource across synchronized Views. When the UI falls behind, Rust coalesces pending deltas per resource to the latest sequence instead of queueing every intermediate state; a consumer that detects a sequence gap requests a fresh bounded snapshot. The agent surface does not coalesce yet; see its follow-ups in [PLAN.md](../../PLAN.md).
 
 ### Rendering
 
