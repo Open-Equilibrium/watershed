@@ -110,8 +110,12 @@ class _DiffViewState extends State<DiffView> {
           widget.state.reportRead(what, null);
           if (lines.isEmpty) note = _textless;
         } on Object catch (error) {
+          // The pane names the file above it; the notification names it itself.
           note = 'Could not show the changes: $error';
-          widget.state.reportRead(what, note);
+          widget.state.reportRead(
+            what,
+            'Could not show the changes of ${wanted.shown}: $error',
+          );
         }
         if (!mounted || _selected != wanted) continue;
         setState(() {

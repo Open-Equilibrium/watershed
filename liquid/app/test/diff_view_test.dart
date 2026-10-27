@@ -161,7 +161,9 @@ void main() {
         ..add(event(BridgeEventKind.turnCompleted));
       await tester.pumpAndSettle();
     }
-    expect(state.notices.value.map((notice) => notice.text), [reason]);
+    expect(state.notices.value.map((notice) => notice.text), [
+      'Could not show the changes of big.txt: the diff is larger than 4 MiB',
+    ], reason: 'the notification names the file');
   });
 
   testWidgets('scrolls a long line sideways to its end', (tester) async {
