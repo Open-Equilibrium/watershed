@@ -12,7 +12,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::process::{ChildStdin, Command};
 use tokio::sync::{mpsc, oneshot};
 
-use crate::approval::ApprovalMode;
+use crate::approval::{Allowance, ApprovalMode};
 use crate::pi::queue;
 use crate::{AgentEvent, Answer, Decision, Delivery, History, PiAdapter, Queue, RequestId};
 use supervisor::{Supervisor, read_end};
@@ -155,11 +155,11 @@ struct Shared {
     /// Commands awaiting their response; `None` once the agent is gone.
     replies: Option<HashMap<u64, Reply>>,
     mode: ApprovalMode,
-    /// Tools the user allowed for the rest of the session, and the session they belong to.
-    allowed: HashSet<String>,
+    /// What the user allowed for the rest of the session, and the session it belongs to.
+    allowed: HashSet<Allowance>,
     allowed_in: Option<String>,
-    /// Open approval requests, the tool each one would call and its session.
-    approvals: HashMap<RequestId, (String, Option<String>)>,
+    /// Open approval requests, the allowance each one would use and its session.
+    approvals: HashMap<RequestId, (Allowance, Option<String>)>,
     /// Open questions from agent extensions.
     questions: HashSet<RequestId>,
     /// The timers of questions with a time limit.
@@ -539,13 +539,13 @@ impl Session {
     ) -> Result<(), CommandError> {
         {
             let mut shared = self.state.lock();
-            let (tool, session) = shared
+            let (allowance, session) = shared
                 .approvals
                 .remove(request)
                 .ok_or(CommandError::UnknownRequest)?;
             if decision == Decision::AllowSession {
                 shared.allow_in(session);
-                shared.allowed.insert(tool);
+                shared.allowed.insert(allowance);
             }
         }
         let value = match decision {

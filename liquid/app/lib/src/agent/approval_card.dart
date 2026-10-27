@@ -163,10 +163,14 @@ class _ApprovalCardState extends State<ApprovalCard> {
                     onPressed: () => decide(BridgeDecision.allowOnce),
                   ),
                   const SizedBox(width: WsMetrics.space3),
-                  SecondaryButton(
-                    label: 'Allow for this session',
-                    shortcut: keys.label(Command.allowSession),
-                    onPressed: () => decide(BridgeDecision.allowSession),
+                  // Short of room, the hint gives way before what the button covers.
+                  Flexible(
+                    flex: 3,
+                    child: SecondaryButton(
+                      label: _sessionLabel(approval),
+                      shortcut: keys.label(Command.allowSession),
+                      onPressed: () => decide(BridgeDecision.allowSession),
+                    ),
                   ),
                   Expanded(
                     child: Text(
@@ -195,6 +199,17 @@ class _ApprovalCardState extends State<ApprovalCard> {
       ),
     );
   }
+}
+
+/// What allowing a call for the session covers: a shell command only as shown, any other tool
+/// wholly (ADR-0209). A long tool name is cut short; the title names it in full.
+String _sessionLabel(BridgeApproval approval) {
+  if (approval.kind == BridgeRequestKind.commandExecution) {
+    return 'Allow this command for this session';
+  }
+  final tool = approval.tool;
+  final shown = tool.length > 24 ? '${tool.substring(0, 23)}…' : tool;
+  return 'Allow $shown for this session';
 }
 
 /// Code that scrolls inside a fixed height and says how many lines are below, so nothing is

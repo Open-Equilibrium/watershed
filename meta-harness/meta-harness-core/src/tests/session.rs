@@ -610,6 +610,17 @@ fn approval_in(session: &str, id: &str, tool: &str, read_only: bool) -> String {
     )
 }
 
+/// An approval request for a call of one of pi's own tools with `arguments`, JSON whose quotes
+/// are escaped as in a JSON string.
+fn approval_with(id: &str, tool: &str, arguments: &str) -> String {
+    let payload = format!(
+        r#"{{\"tool\":\"{tool}\",\"arguments\":{arguments},\"readOnly\":false,\"builtin\":true,\"session\":\"s1\"}}"#
+    );
+    format!(
+        "printf '%s\\n' '{{\"type\":\"extension_ui_request\",\"id\":\"{id}\",\"method\":\"select\",\"title\":\"watershed.approval {payload}\",\"options\":[]}}'\n"
+    )
+}
+
 #[test]
 fn answers_extension_questions() {
     run(async {
@@ -873,6 +884,56 @@ fn allowances_end_when_the_agent_asks_for_another_session() {
             ),
             "the same session runs bash at once, another one asks again"
         );
+    });
+}
+
+#[test]
+fn allows_a_shell_command_for_the_session_as_shown_and_other_tools_wholly() {
+    run(async {
+        let tests = r#"{\"command\":\"npm test\"}"#;
+        let script = [
+            approval_with("a1", "bash", tests),
+            expect_response(&[r#""id":"a1""#, r#""value":"allow-session""#]),
+            approval_with("a2", "bash", tests),
+            expect_response(&[r#""id":"a2""#, r#""value":"allow-auto""#]),
+            // Another command asks, though the tool is the same.
+            approval_with("a3", "bash", r#"{\"command\":\"rm -rf build\"}"#),
+            expect_response(&[r#""id":"a3""#, r#""value":"allow-once""#]),
+            approval_with("a4", "edit", r#"{\"path\":\"a.ts\"}"#),
+            expect_response(&[r#""id":"a4""#, r#""value":"allow-session""#]),
+            approval_with("a5", "edit", r#"{\"path\":\"b.ts\"}"#),
+            expect_response(&[r#""id":"a5""#, r#""value":"allow-auto""#]),
+            // Tells the test every call was answered.
+            r#"printf '%s\n' '{"type":"queue_update","steering":[],"followUp":[]}'
+IFS= read -r line || exit 0
+"#
+            .to_owned(),
+        ]
+        .concat();
+        let (mut session, mut events) = fake_agent(&script);
+        for (id, decision) in [
+            ("a1", Decision::AllowSession),
+            ("a3", Decision::AllowOnce),
+            ("a4", Decision::AllowSession),
+        ] {
+            assert!(
+                matches!(
+                    next(&mut events).await,
+                    SessionEvent::Agent(AgentEvent::RequestOpened { request, .. })
+                        if request == RequestId(id.to_owned())
+                ),
+                "{id} asks"
+            );
+            assert_eq!(
+                session.decide(&RequestId(id.to_owned()), decision).await,
+                Ok(())
+            );
+            let _resolved = next(&mut events).await;
+        }
+        assert!(matches!(
+            next(&mut events).await,
+            SessionEvent::Agent(AgentEvent::QueueChanged(_))
+        ));
     });
 }
 

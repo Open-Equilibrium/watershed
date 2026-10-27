@@ -13,7 +13,7 @@ use tokio::process::{Child, ChildStdout};
 use tokio::sync::{mpsc, oneshot};
 
 use super::{CommandError, MAX_RECORD_BYTES, SessionEvent, State, Write, switched, ui_response};
-use crate::approval::needs_user;
+use crate::approval::{Allowance, needs_user};
 use crate::framing::keep_end;
 use crate::{AgentEvent, Frame, LineFramer, NotificationLevel, PiAdapter, RequestId};
 
@@ -144,6 +144,7 @@ impl Supervisor {
                     request,
                     kind,
                     tool,
+                    text,
                     read_only,
                     session,
                     ..
@@ -151,13 +152,14 @@ impl Supervisor {
                     let answer = {
                         let mut shared = self.state.lock();
                         shared.allow_in(session.clone());
-                        let allowed = shared.allowed.contains(tool);
+                        let allowance = Allowance::of(*kind, tool, text);
+                        let allowed = shared.allowed.contains(&allowance);
                         if shared.stopping {
                             Some(json!({ "cancelled": true }))
                         } else if needs_user(shared.mode, *kind, *read_only, allowed) {
                             shared
                                 .approvals
-                                .insert(request.clone(), (tool.clone(), session.clone()));
+                                .insert(request.clone(), (allowance, session.clone()));
                             None
                         } else {
                             Some(json!({ "value": "allow-auto" }))

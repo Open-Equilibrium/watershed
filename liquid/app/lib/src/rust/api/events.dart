@@ -62,7 +62,7 @@ enum BridgeDecision {
   /// Allow this call only.
   allowOnce,
 
-  /// Allow this tool for the rest of the session.
+  /// Allow this shell command, or this tool, for the rest of the session (ADR-0209).
   allowSession,
 
   /// Block this call.

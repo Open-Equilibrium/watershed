@@ -130,7 +130,7 @@ pub enum RequestKind {
 pub enum Decision {
     /// Allow this call only.
     AllowOnce,
-    /// Allow this tool for the rest of the session.
+    /// Allow this shell command, or this tool, for the rest of the session (ADR-0209).
     AllowSession,
     /// Block this call.
     Reject,

@@ -421,6 +421,45 @@ void main() {
     expect(find.byKey(const Key('composer')), findsOneWidget);
   });
 
+  testWidgets('says what allowing a call for the session covers', (
+    tester,
+  ) async {
+    await show(tester);
+    final long = 'mcp__${'long_server_name_' * 3}__run_ta';
+    for (final (kind, tool, label) in [
+      (
+        BridgeRequestKind.commandExecution,
+        'bash',
+        'Allow this command for this session',
+      ),
+      (BridgeRequestKind.fileChange, 'edit', 'Allow edit for this session'),
+      (
+        BridgeRequestKind.tool,
+        long,
+        'Allow ${long.substring(0, 23)}… for this session',
+      ),
+    ]) {
+      await emit(
+        tester,
+        event(
+          BridgeEventKind.requestOpened,
+          request: BridgeRequest(
+            id: tool,
+            approval: BridgeApproval(kind: kind, tool: tool, text: '{}'),
+          ),
+        ),
+      );
+      expect(find.text(label), findsOneWidget);
+      await emit(
+        tester,
+        event(
+          BridgeEventKind.requestResolved,
+          request: BridgeRequest(id: tool),
+        ),
+      );
+    }
+  });
+
   testWidgets('sends, steers and queues from the composer', (tester) async {
     await show(tester);
     final composer = find.byKey(const Key('composer'));

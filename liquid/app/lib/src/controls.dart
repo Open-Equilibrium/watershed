@@ -135,12 +135,17 @@ class _Button extends StatelessWidget {
             // Centered when a layout stretches the button.
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Text(
-                label,
-                style: TextStyle(
-                  color: foreground,
-                  fontWeight: WsMetrics.fwMedium,
-                  fontSize: WsMetrics.fsCompact,
+              // Cut short only where a layout leaves the button too little room.
+              Flexible(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: foreground,
+                    fontWeight: WsMetrics.fwMedium,
+                    fontSize: WsMetrics.fsCompact,
+                  ),
                 ),
               ),
             ],
