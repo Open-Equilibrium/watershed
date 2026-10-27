@@ -52,6 +52,14 @@ ThemeData liquidTheme(Brightness brightness) {
     ),
     dividerColor: palette.border,
     splashFactory: NoSplash.splashFactory,
+    // Menus sit on the canvas with the card radius, as the mockups show them.
+    popupMenuTheme: PopupMenuThemeData(
+      color: palette.canvas,
+      surfaceTintColor: Colors.transparent,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
+      ),
+    ),
     textTheme: TextTheme(
       displaySmall: style(
         WsMetrics.fsDisplay,

@@ -154,6 +154,19 @@ void main() {
       findsOneWidget,
     );
     expect(find.text('Runs every call without asking.'), findsOneWidget);
+    // On the canvas, as the mockup shows menus, the risk text stays readable (AA).
+    final menu = tester.widget<Material>(
+      find
+          .ancestor(
+            of: find.text('Runs every call without asking.'),
+            matching: find.byType(Material),
+          )
+          .last,
+    );
+    expect(
+      (menu.color, menu.surfaceTintColor),
+      (const Color(0xFFFFFFFF), Colors.transparent),
+    );
   });
 
   testWidgets('focuses the input area with ⌘L from any tab', (tester) async {
