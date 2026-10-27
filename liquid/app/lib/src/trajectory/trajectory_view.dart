@@ -209,7 +209,8 @@ class _TrajectoryViewState extends State<TrajectoryView> {
     _reveal();
   }
 
-  /// Scrolls the selected step and its open inspector into view without animation.
+  /// Scrolls the selected step and its open inspector into view without animation; when both do
+  /// not fit, the step's row stays at the top, so the inspector's tabs show.
   void _reveal() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!_scroll.hasClients) return;
@@ -226,7 +227,7 @@ class _TrajectoryViewState extends State<TrajectoryView> {
       } else if (bottom > position.pixels + position.viewportDimension) {
         _scroll.jumpTo(
           math.min(
-            bottom - position.viewportDimension,
+            math.min(bottom - position.viewportDimension, top),
             position.maxScrollExtent,
           ),
         );

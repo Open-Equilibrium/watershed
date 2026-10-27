@@ -418,6 +418,17 @@ void main() {
     await tester.pump(const Duration(seconds: 7));
   });
 
+  testWidgets('an opened step keeps its tabs in view in a short window', (
+    tester,
+  ) async {
+    await show(tester, historyOf(branchA), size: shortest);
+    for (var step = 0; step < 4; step++) {
+      await press(tester, LogicalKeyboardKey.arrowDown);
+    }
+    await press(tester, LogicalKeyboardKey.enter);
+    expect(find.text('Raw').hitTestable(), findsOneWidget);
+  });
+
   testWidgets('the inspector\'s tabs and the time switch take keys', (
     tester,
   ) async {
