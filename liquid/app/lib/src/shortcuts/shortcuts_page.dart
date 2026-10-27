@@ -303,7 +303,8 @@ class _ShortcutsPageState extends State<ShortcutsPage> {
     final ws = context.ws;
     return CallbackShortcuts(
       bindings: {
-        const SingleActivator(LogicalKeyboardKey.escape): widget.onClose,
+        const SingleActivator(LogicalKeyboardKey.escape, includeRepeats: false):
+            widget.onClose,
       },
       child: Focus(
         focusNode: _keys,
@@ -899,7 +900,10 @@ class _ReplaceCustom extends StatelessWidget {
         ? '$changed changed shortcut${changed == 1 ? '' : 's'}'
         : 'the Liquid key turned ${kept.liquidKey ? 'on' : 'off'}';
     return CallbackShortcuts(
-      bindings: {const SingleActivator(LogicalKeyboardKey.escape): onKeep},
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.escape, includeRepeats: false):
+            onKeep,
+      },
       child: Focus(
         canRequestFocus: false,
         skipTraversal: true,

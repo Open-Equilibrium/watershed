@@ -217,7 +217,7 @@ enum BridgeEventKind {
   /// `success`, and `text` with the end of the agent's error output; always the last event.
   exited,
 
-  /// The messages waiting for the running agent changed.
+  /// `queue` with the messages waiting for the running agent.
   queueChanged,
 }
 

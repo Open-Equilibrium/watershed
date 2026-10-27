@@ -12,6 +12,10 @@ import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'diff_model.dart';
 
+/// Keys of the Diff tab, for the status bar.
+String diffKeys() =>
+    '${Fixed.previousOrNextFile.display} file · ${Fixed.foldFolder.display} folder';
+
 /// The changes of the latest run against the project before it: a folder tree of changed files
 /// and the selected file's unified diff. Up and Down select files, Left and Right fold and
 /// unfold the selected file's folders.
@@ -30,7 +34,7 @@ class _DiffViewState extends State<DiffView> {
   BridgeFileChange? _selected;
   List<DiffLine> _lines = const [];
 
-  /// Whether the selected file's patch was read.
+  /// Why the selected file shows no lines, if it shows none.
   String? _note;
 
   static const _textless =
@@ -205,7 +209,7 @@ class _DiffViewState extends State<DiffView> {
         child: Text(
           widget.state.ran.value
               ? 'No changes in this run'
-              : 'No run in this session yet',
+              : 'No run since Liquid opened this session',
           style: Theme.of(context).textTheme.bodySmall,
         ),
       );

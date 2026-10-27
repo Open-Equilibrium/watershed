@@ -904,6 +904,21 @@ void main() {
     expect(find.text('⌘⏎'), findsNothing);
   });
 
+  testWidgets('the status bar names the Diff tab\'s keys while Cmd is held', (
+    tester,
+  ) async {
+    await show(tester);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.digit3);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pumpAndSettle();
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pump(const Duration(milliseconds: 700));
+    expect(find.text('↑↓ file · ←→ folder'), findsOneWidget);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pump();
+  });
+
   testWidgets('puts app-wide shortcuts into the macOS menu bar', (
     tester,
   ) async {

@@ -42,7 +42,7 @@ pub enum BridgeEventKind {
     Failed,
     /// `success`, and `text` with the end of the agent's error output; always the last event.
     Exited,
-    /// The messages waiting for the running agent changed.
+    /// `queue` with the messages waiting for the running agent.
     QueueChanged,
 }
 

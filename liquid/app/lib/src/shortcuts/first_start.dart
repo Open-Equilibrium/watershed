@@ -23,7 +23,10 @@ class _FirstStart extends StatelessWidget {
     void choose(Profile profile) => Navigator.of(context).pop(profile);
     return CallbackShortcuts(
       bindings: {
-        const SingleActivator(LogicalKeyboardKey.escape): () =>
+        const SingleActivator(
+          LogicalKeyboardKey.escape,
+          includeRepeats: false,
+        ): () =>
             choose(Profile.standard),
       },
       // A focused node inside the dialog, so esc reaches the binding above.

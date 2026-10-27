@@ -101,7 +101,7 @@ void main() {
     final backend = FakeBackend();
     await show(tester, backend);
     expect(
-      find.text('No run in this session yet'),
+      find.text('No run since Liquid opened this session'),
       findsOneWidget,
       reason: 'a continued session\'s earlier runs are not compared',
     );

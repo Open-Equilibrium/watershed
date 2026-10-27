@@ -7,10 +7,10 @@ use std::time::Duration;
 use meta_harness_core::{CommandError, Session, SessionEvent};
 use tokio::sync::mpsc;
 
-/// Time an agent gets to confirm Watershed's extension after it starts.
 /// Time an agent gets to exit after its input closes before it is killed.
 pub(crate) const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
 
+/// Time an agent gets to confirm Watershed's extension after it starts.
 #[cfg(not(test))]
 pub(crate) const START_TIMEOUT: Duration = Duration::from_secs(30);
 #[cfg(test)]

@@ -286,11 +286,14 @@ class _AgentShellState extends State<AgentShell> {
                             listenable: Listenable.merge([_tab, _comparing]),
                             builder: (context, _) => StatusBar(
                               state: widget.state,
-                              keys: _tab.value != AgentTab.trajectory
-                                  ? ''
-                                  : _comparing.value
-                                  ? compareKeys(keys)
-                                  : trajectoryKeys(keys),
+                              keys: switch (_tab.value) {
+                                AgentTab.chat => '',
+                                AgentTab.diff => diffKeys(),
+                                AgentTab.trajectory =>
+                                  _comparing.value
+                                      ? compareKeys(keys)
+                                      : trajectoryKeys(keys),
+                              },
                             ),
                           ),
                         ],
