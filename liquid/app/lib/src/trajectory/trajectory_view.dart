@@ -263,7 +263,14 @@ class _TrajectoryViewState extends State<TrajectoryView> {
   /// prompt is redone from there too.
   Future<void> _branch() async {
     final index = _selectedIndex;
-    if (index < 0 || _busy || _comparing) return;
+    if (index < 0 || _comparing) return;
+    if (_busy) {
+      widget.state.notify(
+        BridgeLevel.info,
+        'Branching waits until the agent is idle.',
+      );
+      return;
+    }
     final at = _records[index].kind == BridgeRecordKind.user
         ? index
         : index - 1;
@@ -317,7 +324,10 @@ class _TrajectoryViewState extends State<TrajectoryView> {
     final branches = _graph.branches;
     final first = _graph.branchOf(_shownTip);
     final other = branches.where((branch) => branch != first).lastOrNull;
-    if (first == null || other == null) return;
+    if (first == null || other == null) {
+      widget.state.notify(BridgeLevel.info, 'Comparing needs a second branch.');
+      return;
+    }
     widget.comparing.value = true;
     setState(() {
       _comparing = true;
@@ -712,29 +722,32 @@ class _Toolbar extends StatelessWidget {
                   ('Real time', false),
                   ('Equal width', true),
                 ])
-                  GestureDetector(
-                    onTap: () => onEqualWidth(value),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 2,
-                      ),
-                      decoration: value == equalWidth
-                          ? BoxDecoration(
-                              color: ws.canvas,
-                              borderRadius: BorderRadius.circular(
-                                WsMetrics.radiusSm,
-                              ),
-                              boxShadow: [
-                                BoxShadow(color: ws.border, spreadRadius: 1),
-                              ],
-                            )
-                          : null,
-                      child: Text(
-                        label,
-                        style: TextStyle(
-                          fontSize: WsMetrics.fsCompact,
-                          color: value == equalWidth ? ws.text : ws.textMuted,
+                  Shortcuts(
+                    shortcuts: activateKeys,
+                    child: InkWell(
+                      onTap: () => onEqualWidth(value),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 2,
+                        ),
+                        decoration: value == equalWidth
+                            ? BoxDecoration(
+                                color: ws.canvas,
+                                borderRadius: BorderRadius.circular(
+                                  WsMetrics.radiusSm,
+                                ),
+                                boxShadow: [
+                                  BoxShadow(color: ws.border, spreadRadius: 1),
+                                ],
+                              )
+                            : null,
+                        child: Text(
+                          label,
+                          style: TextStyle(
+                            fontSize: WsMetrics.fsCompact,
+                            color: value == equalWidth ? ws.text : ws.textMuted,
+                          ),
                         ),
                       ),
                     ),
@@ -759,25 +772,32 @@ class _Toolbar extends StatelessWidget {
           ),
           const Spacer(),
           if (comparing)
-            Container(
-              height: 28,
-              padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space4),
-              decoration: BoxDecoration(
-                color: ws.accentSubtle,
-                borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
-              ),
-              child: Row(
-                children: [
-                  Text(
-                    'Comparing',
-                    style: TextStyle(
-                      color: ws.accent,
-                      fontSize: WsMetrics.fsCompact,
+            // Clicking it leaves the comparison, as its key does.
+            InkWell(
+              onTap: onCompare,
+              borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
+              child: Container(
+                height: 28,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: WsMetrics.space4,
+                ),
+                decoration: BoxDecoration(
+                  color: ws.accentSubtle,
+                  borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
+                ),
+                child: Row(
+                  children: [
+                    Text(
+                      'Comparing',
+                      style: TextStyle(
+                        color: ws.accent,
+                        fontSize: WsMetrics.fsCompact,
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: WsMetrics.space3),
-                  Hint(Keymap.of(context).label(Command.compare)),
-                ],
+                    const SizedBox(width: WsMetrics.space3),
+                    Hint(Keymap.of(context).label(Command.compare)),
+                  ],
+                ),
               ),
             )
           else

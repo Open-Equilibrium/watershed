@@ -75,16 +75,20 @@ class Inspector extends StatelessWidget {
                     if (message) ('Context', InspectorTab.context),
                     ('Raw', InspectorTab.raw),
                   ]) ...[
-                    GestureDetector(
-                      onTap: () => onTab(value),
-                      child: Text(
-                        label,
-                        style: TextStyle(
-                          fontSize: WsMetrics.fsCompact,
-                          color: value == shown ? ws.text : ws.textMuted,
-                          fontWeight: value == shown
-                              ? WsMetrics.fwMedium
-                              : WsMetrics.fwRegular,
+                    // Focusable, so the tabs work from the keyboard too.
+                    Shortcuts(
+                      shortcuts: activateKeys,
+                      child: InkWell(
+                        onTap: () => onTab(value),
+                        child: Text(
+                          label,
+                          style: TextStyle(
+                            fontSize: WsMetrics.fsCompact,
+                            color: value == shown ? ws.text : ws.textMuted,
+                            fontWeight: value == shown
+                                ? WsMetrics.fwMedium
+                                : WsMetrics.fwRegular,
+                          ),
                         ),
                       ),
                     ),

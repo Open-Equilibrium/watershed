@@ -128,13 +128,15 @@ void main() {
       ..patches = {'src/a\u202eb.ts': '@@ -0,0 +1 @@\n+x\n'};
     await show(tester, backend);
     expect(find.text('a<U+202E>b.ts'), findsOneWidget, reason: 'the list');
-    expect(find.text('src/a<U+202E>b.ts'), findsOneWidget, reason: 'the header');
-    expect(find.textContaining('\u202e'), findsNothing);
     expect(
-      backend.patchReads,
-      ['src/a\u202eb.ts'],
-      reason: 'the patch is read by the file\'s own name',
+      find.text('src/a<U+202E>b.ts'),
+      findsOneWidget,
+      reason: 'the header',
     );
+    expect(find.textContaining('\u202e'), findsNothing);
+    expect(backend.patchReads, [
+      'src/a\u202eb.ts',
+    ], reason: 'the patch is read by the file\'s own name');
   });
 
   testWidgets('says why a diff cannot be shown', (tester) async {

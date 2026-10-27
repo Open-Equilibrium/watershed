@@ -366,6 +366,35 @@ void main() {
     expect(opacity(tester, 'a1'), 1);
   });
 
+  testWidgets('says why compare or branch does nothing', (tester) async {
+    await show(tester, historyOf(branchA));
+    await press(tester, LogicalKeyboardKey.keyC);
+    expect(state.notice.value?.text, 'Comparing needs a second branch.');
+
+    backend.controller.add(event(BridgeEventKind.turnStarted));
+    await tester.pumpAndSettle();
+    await press(tester, LogicalKeyboardKey.arrowDown);
+    await press(tester, LogicalKeyboardKey.keyB);
+    expect(backend.calls, isNot(contains('branch e1')));
+    expect(
+      state.notice.value?.text,
+      'Branching waits until the agent is idle.',
+    );
+    await tester.pump(const Duration(seconds: 7));
+  });
+
+  testWidgets('the inspector\'s tabs take keys', (tester) async {
+    await show(tester, historyOf(branchA));
+    for (var step = 0; step < 4; step++) {
+      await press(tester, LogicalKeyboardKey.arrowDown);
+    }
+    await press(tester, LogicalKeyboardKey.enter);
+    Focus.of(tester.element(find.text('Context'))).requestFocus();
+    await tester.pump();
+    await press(tester, LogicalKeyboardKey.enter);
+    expect(find.textContaining('what the model saw'), findsOneWidget);
+  });
+
   testWidgets('compares two branches side by side', (tester) async {
     final branchB = [
       ...branchA.take(3),

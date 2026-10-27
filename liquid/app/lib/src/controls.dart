@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'shortcuts/shortcut_reveal.dart';
 import 'theme/theme.dart';
@@ -253,3 +254,9 @@ Size measureText(String text, TextStyle style) {
   painter.dispose();
   return size;
 }
+
+/// ⏎ and Space activate the focused control, before a view's own keys take them.
+const activateKeys = <ShortcutActivator, Intent>{
+  SingleActivator(LogicalKeyboardKey.enter): ActivateIntent(),
+  SingleActivator(LogicalKeyboardKey.space): ActivateIntent(),
+};
