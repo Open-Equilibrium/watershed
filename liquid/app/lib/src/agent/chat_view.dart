@@ -7,6 +7,7 @@ import '../session/session_state.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
+import '../trajectory/step_parts.dart';
 import '../trajectory/trajectory_model.dart';
 import '../trajectory/tree_view.dart';
 import 'start_page.dart';
@@ -179,19 +180,15 @@ class ToolRow extends StatelessWidget {
         final lines = outcome?.lines;
         final trailing = [
           if (waiting) TextSpan(text: 'waiting for approval'),
-          if (!waiting && lines != null) ...[
-            if (lines.added > 0)
-              TextSpan(
-                text: '+${lines.added}',
-                style: TextStyle(color: ws.success),
+          if (!waiting && lines != null)
+            ...toneSpans(
+              ws,
+              lineParts(
+                lines.added > 0 ? lines.added : null,
+                lines.removed > 0 ? lines.removed : null,
               ),
-            if (lines.added > 0 && lines.removed > 0) const TextSpan(text: ' '),
-            if (lines.removed > 0)
-              TextSpan(
-                text: '−${lines.removed}',
-                style: TextStyle(color: ws.danger),
-              ),
-          ] else if (!waiting && outcome?.durationMs != null)
+            )
+          else if (!waiting && outcome?.durationMs != null)
             TextSpan(text: formatDuration(outcome!.durationMs!)),
         ];
         return Container(

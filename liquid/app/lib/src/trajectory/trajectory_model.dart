@@ -436,21 +436,43 @@ Comparison compareBranches(List<BridgeRecord> a, List<BridgeRecord> b) {
 String toolSummary(BridgeRecord record) =>
     record.target.isEmpty ? record.label : '${record.label} · ${record.target}';
 
-/// A tool call's outcome as text, such as `+9 −2` or `exit 0 · 14 ✓`; `null` when the stored
-/// result shows none.
-String? outcomeText(BridgeToolOutcome outcome) {
-  final passed = outcome.testsPassed;
-  final failed = outcome.testsFailed ?? 0;
-  final parts = [
+/// How a part of a tool call's outcome reads; views give each tone its color.
+enum Tone { good, bad, muted, faint, plain }
+
+/// A tool call's outcome as parts with their tones, such as `+9 −2` or `exit 0 · 14 ✓`; empty
+/// when the stored result shows none.
+List<(String, Tone)> outcomeParts(BridgeToolOutcome outcome) {
+  final groups = [
     if (outcome.added != null || outcome.removed != null)
+      lineParts(outcome.added, outcome.removed),
+    if (outcome.exitCode case final code?)
+      [('exit $code', code == 0 ? Tone.muted : Tone.bad)],
+    if (outcome.testsPassed case final passed?)
       [
-        if (outcome.added case final added?) '+$added',
-        if (outcome.removed case final removed?) '−$removed',
-      ].join(' '),
-    if (outcome.exitCode case final code?) 'exit $code',
-    if (passed != null) ['$passed ✓', if (failed > 0) '$failed ✗'].join(' '),
+        ('$passed ✓', Tone.good),
+        if (outcome.testsFailed case final failed? when failed > 0)
+          (' $failed ✗', Tone.bad),
+      ],
   ];
-  return parts.isEmpty ? null : parts.join(' · ');
+  return [
+    for (final (index, group) in groups.indexed) ...[
+      if (index > 0) (' · ', Tone.faint),
+      ...group,
+    ],
+  ];
+}
+
+/// Changed lines as `+added −removed`, leaving out a missing count.
+List<(String, Tone)> lineParts(int? added, int? removed) => [
+  if (added != null) ('+$added', Tone.good),
+  if (added != null && removed != null) (' ', Tone.plain),
+  if (removed != null) ('−$removed', Tone.bad),
+];
+
+/// A tool call's outcome as text; `null` when the stored result shows none.
+String? outcomeText(BridgeToolOutcome outcome) {
+  final parts = outcomeParts(outcome);
+  return parts.isEmpty ? null : parts.map((part) => part.$1).join();
 }
 
 /// `total` split in proportion to `parts`, such as a request's tokens by the characters of
