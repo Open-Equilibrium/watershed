@@ -10,7 +10,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: [S
 - Rust workspace and Flow Agent M1: standalone CLI, canonical events, script registry, deterministic fixtures, local session logs and policy artifacts.
 - Flow Agent M1.1 practical-execution foundations: provider integration, authentication, Conversations, authoring, cancellation and durable recovery.
 - Contributor harness and mandatory cross-platform CI gates; canonical commands and policy live in `TESTING.md` and `.github/workflows/ci.yml`.
-- Liquid's agent surface on macOS, not yet released: the Meta-Harness core runs pi behind an agent-neutral session model with tool approvals, Watershed's pi extension asks before each tool call, and a Flutter client over flutter_rust_bridge shows the chat, Trajectory, Diff and shortcuts with the Liquid key (ADR-0184–ADR-0208).
+- Liquid's agent surface on macOS, not yet released: the Meta-Harness core runs pi behind an agent-neutral session model with tool approvals, Watershed's pi extension asks before each tool call, and a Flutter client over flutter_rust_bridge shows the chat, Trajectory, Diff and shortcuts with the Liquid key (ADR-0184–ADR-0212).
 
 ### Changed
 

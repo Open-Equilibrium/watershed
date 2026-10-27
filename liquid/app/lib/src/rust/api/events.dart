@@ -110,7 +110,7 @@ class BridgeEdit {
   /// The file.
   final String path;
 
-  /// The replacements in order; a write replaces nothing with all of the file.
+  /// The replacements in order; a write is one change that adds its whole content.
   final List<BridgeEditChange> changes;
 
   /// Whether the change replaces whatever the file holds, as a write does.

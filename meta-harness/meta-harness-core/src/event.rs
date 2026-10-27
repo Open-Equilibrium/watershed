@@ -131,7 +131,7 @@ pub enum RequestKind {
 pub struct EditPreview {
     /// The file, on one line.
     pub path: String,
-    /// The replacements in order; a write replaces nothing with all of the file.
+    /// The replacements in order; a write is one change that adds its whole content.
     pub changes: Vec<EditChange>,
     /// Whether the change replaces whatever the file holds, as a write does.
     pub whole_file: bool,
