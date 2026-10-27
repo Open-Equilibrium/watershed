@@ -334,9 +334,11 @@ List<String> _lines(String text) => text.isEmpty
 
 enum _EditKind { path, note, removed, added }
 
+typedef _EditLine = ({_EditKind kind, String text});
+
 /// A file change as the Diff tab shows one: the path, then each replacement's removed and added
 /// lines (approved mockup, ADR-0212). A write says that it replaces whatever the file holds.
-List<({_EditKind kind, String text})> _editLines(BridgeEdit edit) => [
+List<_EditLine> _editLines(BridgeEdit edit) => [
   (kind: _EditKind.path, text: edit.path),
   if (edit.wholeFile)
     (
@@ -353,26 +355,21 @@ List<({_EditKind kind, String text})> _editLines(BridgeEdit edit) => [
   ],
 ];
 
-Widget _editLine(BuildContext context, ({_EditKind kind, String text}) line) {
+Widget _editLine(BuildContext context, _EditLine line) {
   final ws = context.ws;
   final style = monoStyle(context);
-  final (sign, background) = switch (line.kind) {
-    _EditKind.path || _EditKind.note => (null, null),
-    _EditKind.removed => ('−', ws.diffDel),
-    _EditKind.added => ('+', ws.diffAdd),
-  };
-  if (line.kind == _EditKind.path) {
-    return Text(
-      line.text,
-      style: style.copyWith(fontWeight: WsMetrics.fwSemibold),
-    );
-  }
-  if (sign == null) {
-    return Text(line.text, style: style.copyWith(color: ws.warning));
-  }
-  return Container(
+  Widget marked(String sign, Color background) => Container(
     color: background,
     padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space1),
     child: Text('$sign ${line.text}', style: style),
   );
+  return switch (line.kind) {
+    _EditKind.path => Text(
+      line.text,
+      style: style.copyWith(fontWeight: WsMetrics.fwSemibold),
+    ),
+    _EditKind.note => Text(line.text, style: style.copyWith(color: ws.warning)),
+    _EditKind.removed => marked('−', ws.diffDel),
+    _EditKind.added => marked('+', ws.diffAdd),
+  };
 }

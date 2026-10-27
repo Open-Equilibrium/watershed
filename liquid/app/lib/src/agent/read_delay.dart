@@ -19,9 +19,6 @@ mixin ReadDelay<T extends StatefulWidget> on State<T> {
     ...HardwareKeyboard.instance.physicalKeysPressed,
   };
 
-  /// Whether the card was shown long enough to be read.
-  bool get armed => _armed;
-
   /// Runs `decision` only once the card could be read.
   void decided(VoidCallback decision) {
     if (_armed) decision();

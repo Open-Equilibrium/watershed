@@ -8,7 +8,8 @@ class MainFlutterWindow: NSWindow {
     let windowFrame = self.frame
     self.contentViewController = flutterViewController
     self.setFrame(windowFrame, display: true)
-    // Every tab fits from this size on, so the window opens this large and shrinks no further.
+    // Every tab fits from this size on, so the window shrinks no further; MainMenu.xib opens it
+    // at this size.
     self.contentMinSize = NSSize(width: 1050, height: 640)
 
     RegisterGeneratedPlugins(registry: flutterViewController)
