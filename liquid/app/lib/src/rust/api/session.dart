@@ -9,7 +9,7 @@ import 'history.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `answer`, `open`, `switched`
+// These functions are ignored because they are not marked as `pub`: `answer`, `open`, `switched`, `whitespace`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`
 // These functions are ignored (category: IgnoreBecauseExplicitAttribute): `forward`, `launch`
 
@@ -32,7 +32,8 @@ abstract class AgentSession implements RustOpaqueInterface {
   Future<void> branch({required String entry});
 
   /// Files the latest run changed, compared with the project before it; none outside Git.
-  Future<List<BridgeFileChange>?> changes();
+  /// With `hide_whitespace`, changes that are only whitespace are left out (ADR-0212).
+  Future<List<BridgeFileChange>?> changes({required bool hideWhitespace});
 
   /// Removes the messages waiting for the running agent and returns them.
   Future<BridgeQueue> clearQueue();
@@ -68,7 +69,7 @@ abstract class AgentSession implements RustOpaqueInterface {
 
   /// The unified diff of one file as the latest list of changes compared it; characters
   /// that could hide or reorder its lines are written out, as in the file's shown name.
-  Future<String> patch({required String path});
+  Future<String> patch({required String path, required bool hideWhitespace});
 
   /// Up to `limit` stored sessions of this project, newest first, without the current one.
   Future<List<BridgeStoredSession>> recentSessions({required int limit});

@@ -601,9 +601,9 @@ IFS= read -r line || exit 0"#
     ]
     .concat();
     let session = launch(gated(&script), repo.display().to_string()).expect("agent starts");
-    assert_eq!(session.changes(), Ok(Some(Vec::new())), "no run yet");
+    assert_eq!(session.changes(false), Ok(Some(Vec::new())), "no run yet");
     assert_eq!(session.send("edit".to_owned(), false), Ok(()));
-    let changes = session.changes().expect("changes");
+    let changes = session.changes(false).expect("changes");
     assert_eq!(
         changes,
         Some(vec![BridgeFileChange {
@@ -614,20 +614,20 @@ IFS= read -r line || exit 0"#
             removed: 1,
         }])
     );
-    let patch = session.patch("a.txt".to_owned()).expect("patch");
+    let patch = session.patch("a.txt".to_owned(), false).expect("patch");
     assert!(
         patch.contains("-old\n") && patch.contains("+new<U+202E>\n"),
         "{patch}"
     );
     // A prompt the agent rejects starts no run, so the last run's changes stay in view.
     assert!(session.send("again".to_owned(), false).is_err());
-    assert_eq!(session.changes().expect("changes"), changes);
+    assert_eq!(session.changes(false).expect("changes"), changes);
     // Nor does one that pi handles itself, such as a command.
     assert_eq!(session.send("/name tidy".to_owned(), false), Ok(()));
-    assert_eq!(session.changes().expect("changes"), changes);
+    assert_eq!(session.changes(false).expect("changes"), changes);
     assert!(call(session.shutdown()));
     assert_eq!(
-        session.changes(),
+        session.changes(false),
         Ok(Some(Vec::new())),
         "shutting down removes the snapshots"
     );

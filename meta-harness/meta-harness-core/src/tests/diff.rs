@@ -3,7 +3,7 @@ use std::process::Command;
 use std::time::Duration;
 
 use crate::diff::WorkingTree;
-use crate::{ChangeStatus, DiffError, FileChange};
+use crate::{ChangeStatus, DiffError, FileChange, Whitespace};
 
 /// A throwaway Git repository that ignores the user's Git configuration.
 struct Repo(PathBuf);
@@ -113,9 +113,13 @@ fn diffs_a_run_against_its_snapshot_without_touching_the_repository() {
             removed,
         };
         assert_eq!(
-            tree.changes(&snapshot, &tree.snapshot().await.expect("snapshot"))
-                .await
-                .expect("changes"),
+            tree.changes(
+                &snapshot,
+                &tree.snapshot().await.expect("snapshot"),
+                Whitespace::Shown
+            )
+            .await
+            .expect("changes"),
             [
                 change("a.txt", ChangeStatus::Modified, 1, 1),
                 change("b.txt", ChangeStatus::Added, 1, 0),
@@ -127,6 +131,7 @@ fn diffs_a_run_against_its_snapshot_without_touching_the_repository() {
                 &snapshot,
                 &tree.snapshot().await.expect("snapshot"),
                 "a.txt",
+                Whitespace::Shown,
             )
             .await
             .expect("patch");
@@ -237,7 +242,12 @@ fn shows_a_patch_without_running_the_projects_textconv() {
         let before = tree.snapshot().await.expect("snapshot");
         repo.write("a.txt", "changed\n");
         let patch = tree
-            .patch(&before, &tree.snapshot().await.expect("snapshot"), "a.txt")
+            .patch(
+                &before,
+                &tree.snapshot().await.expect("snapshot"),
+                "a.txt",
+                Whitespace::Shown,
+            )
             .await
             .expect("patch");
         assert!(patch.contains("+changed"), "{patch}");
@@ -275,9 +285,13 @@ fn diffs_a_project_given_by_a_relative_path() {
         let snapshot = tree.snapshot().await.expect("snapshot");
         repo.write("a.txt", "new\n");
         assert_eq!(
-            tree.changes(&snapshot, &tree.snapshot().await.expect("snapshot"))
-                .await
-                .expect("changes"),
+            tree.changes(
+                &snapshot,
+                &tree.snapshot().await.expect("snapshot"),
+                Whitespace::Shown
+            )
+            .await
+            .expect("changes"),
             [FileChange {
                 path: "a.txt".to_owned(),
                 status: ChangeStatus::Modified,
@@ -307,6 +321,7 @@ fn reads_the_patch_of_a_file_whose_name_looks_like_a_pattern() {
                 &snapshot,
                 &tree.snapshot().await.expect("snapshot"),
                 "a*.txt",
+                Whitespace::Shown,
             )
             .await
             .expect("patch");
@@ -332,7 +347,8 @@ fn reports_a_diff_too_large_to_read_instead_of_cutting_it() {
             tree.patch(
                 &snapshot,
                 &tree.snapshot().await.expect("snapshot"),
-                "big.txt"
+                "big.txt",
+                Whitespace::Shown,
             )
             .await,
             Err(DiffError::TooLarge)
@@ -357,9 +373,13 @@ fn snapshots_a_project_whose_git_warns_a_lot() {
             .expect("snapshot finishes")
             .expect("snapshot");
         assert_eq!(
-            tree.changes(&snapshot, &tree.snapshot().await.expect("snapshot"))
-                .await
-                .expect("changes"),
+            tree.changes(
+                &snapshot,
+                &tree.snapshot().await.expect("snapshot"),
+                Whitespace::Shown
+            )
+            .await
+            .expect("changes"),
             []
         );
     });
@@ -383,6 +403,7 @@ fn keeps_blank_context_lines_whatever_the_projects_diff_settings() {
                 &snapshot,
                 &tree.snapshot().await.expect("snapshot"),
                 "a.txt",
+                Whitespace::Shown,
             )
             .await
             .expect("patch");
@@ -416,7 +437,11 @@ fn shows_new_commits_of_a_submodule_the_project_ignores() {
         sub.git(&["commit", "-q", "-a", "-m", "two"]);
 
         let changes = tree
-            .changes(&before, &tree.snapshot().await.expect("snapshot"))
+            .changes(
+                &before,
+                &tree.snapshot().await.expect("snapshot"),
+                Whitespace::Shown,
+            )
             .await
             .expect("changes");
         assert_eq!(
@@ -447,7 +472,9 @@ fn skips_a_nested_repository_without_a_commit() {
 
         let after = tree.snapshot().await.expect("snapshot");
         assert_eq!(
-            tree.changes(&before, &after).await.expect("changes"),
+            tree.changes(&before, &after, Whitespace::Shown)
+                .await
+                .expect("changes"),
             [FileChange {
                 path: "b.txt".to_owned(),
                 status: ChangeStatus::Added,
@@ -455,5 +482,64 @@ fn skips_a_nested_repository_without_a_commit() {
                 removed: 0,
             }]
         );
+    });
+}
+
+#[test]
+fn hides_whitespace_changes_when_asked() {
+    run(async {
+        let repo = Repo::new("whitespace");
+        repo.write("spaced.txt", "x = 1\n");
+        repo.write("code.txt", "if a {\nb\n}\n");
+        repo.write("run.sh", "echo hi\n");
+        repo.git(&["add", "."]);
+        repo.git(&["commit", "-q", "-m", "base"]);
+        let tree = WorkingTree::open(repo.path())
+            .await
+            .expect("repository opens");
+        let before = tree.snapshot().await.expect("snapshot");
+
+        repo.write("spaced.txt", "x  =  1\r\n");
+        // An indented line and one new line; only the new line is more than whitespace.
+        repo.write("code.txt", "if a {\n    b\n}\nc\n");
+        std::fs::set_permissions(
+            repo.path().join("run.sh"),
+            std::os::unix::fs::PermissionsExt::from_mode(0o755),
+        )
+        .expect("mode");
+
+        let after = tree.snapshot().await.expect("snapshot");
+        let listed = |changes: Vec<FileChange>| {
+            changes
+                .into_iter()
+                .map(|change| (change.path, change.added, change.removed))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            listed(
+                tree.changes(&before, &after, Whitespace::Shown)
+                    .await
+                    .expect("changes")
+            ),
+            [
+                ("code.txt".to_owned(), 2, 1),
+                ("run.sh".to_owned(), 0, 0),
+                ("spaced.txt".to_owned(), 1, 1),
+            ]
+        );
+        assert_eq!(
+            listed(
+                tree.changes(&before, &after, Whitespace::Hidden)
+                    .await
+                    .expect("changes")
+            ),
+            [("code.txt".to_owned(), 1, 0), ("run.sh".to_owned(), 0, 0)],
+            "a file whose only change is whitespace drops out, a new mode stays"
+        );
+        let patch = tree
+            .patch(&before, &after, "code.txt", Whitespace::Hidden)
+            .await
+            .expect("patch");
+        assert!(patch.contains("+c\n") && !patch.contains("-b\n"), "{patch}");
     });
 }

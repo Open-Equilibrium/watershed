@@ -35,6 +35,7 @@ const _noticeFades = Duration(seconds: 6);
 class SessionState {
   SessionState(this._backend) {
     _subscription = _backend.events().listen(_apply);
+    hideWhitespace.addListener(() => unawaited(readChanges()));
   }
 
   final SessionBackend _backend;
@@ -357,6 +358,10 @@ class SessionState {
   /// such a run with the project before it.
   final ran = ValueNotifier(false);
 
+  /// Whether the changes leave out what is only whitespace; a change reads them again
+  /// (ADR-0212).
+  final hideWhitespace = ValueNotifier(false);
+
   /// Reads what the latest run changed. A failed read is reported once, and the Diff tab says
   /// so instead of showing an earlier run's changes.
   Future<void> readChanges() {
@@ -386,7 +391,7 @@ class SessionState {
   Future<void> _readChangesOnce() async {
     final generation = _generation;
     try {
-      final read = await _backend.changes();
+      final read = await _backend.changes(hideWhitespace: hideWhitespace.value);
       if (generation != _generation) return;
       reportRead('changes', null);
       changesProblem.value = read == null
@@ -403,7 +408,8 @@ class SessionState {
   }
 
   /// One file's unified diff as the latest list of changes compared it.
-  Future<String> patch(String path) => _backend.patch(path);
+  Future<String> patch(String path) =>
+      _backend.patch(path, hideWhitespace: hideWhitespace.value);
 
   /// The branch tree and the Trajectory of each branch ending at an entry in `leaves`, or of
   /// the current branch.

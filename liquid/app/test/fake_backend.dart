@@ -85,12 +85,17 @@ class FakeBackend implements SessionBackend {
   Completer<void>? changesGate;
   int changeReads = 0;
 
+  /// The changes once whitespace is hidden; [changed] when null.
+  List<BridgeFileChange>? changedWithoutWhitespace;
+
   @override
-  Future<List<BridgeFileChange>?> changes() async {
+  Future<List<BridgeFileChange>?> changes({
+    required bool hideWhitespace,
+  }) async {
     changeReads++;
     await changesGate?.future;
     if (changesError case final error?) throw error;
-    return changed;
+    return hideWhitespace ? changedWithoutWhitespace ?? changed : changed;
   }
 
   /// What reading a patch fails with, like the bridge does.
@@ -103,8 +108,8 @@ class FakeBackend implements SessionBackend {
   final patchReads = <String>[];
 
   @override
-  Future<String> patch(String path) async {
-    patchReads.add(path);
+  Future<String> patch(String path, {required bool hideWhitespace}) async {
+    patchReads.add(hideWhitespace ? '$path without whitespace' : path);
     await patchGate?.future;
     if (patchError case final error?) throw error;
     return patches[path] ?? '';

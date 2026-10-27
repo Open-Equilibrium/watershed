@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use meta_harness_core::{
     AgentCommand, Answer, CommandError, Delivery, DiffError, RequestId, RunDiff, Session,
-    SessionEvent, recent_sessions, session_title, visible,
+    SessionEvent, Whitespace, recent_sessions, session_title, visible,
 };
 use tokio::runtime::Runtime;
 use tokio::sync::{Mutex, mpsc};
@@ -230,8 +230,9 @@ impl AgentSession {
     }
 
     /// Files the latest run changed, compared with the project before it; none outside Git.
-    pub fn changes(&self) -> Result<Option<Vec<BridgeFileChange>>, String> {
-        match RUNTIME.block_on(self.diff.changes()) {
+    /// With `hide_whitespace`, changes that are only whitespace are left out (ADR-0212).
+    pub fn changes(&self, hide_whitespace: bool) -> Result<Option<Vec<BridgeFileChange>>, String> {
+        match RUNTIME.block_on(self.diff.changes(whitespace(hide_whitespace))) {
             Ok(changes) => Ok(Some(changes.into_iter().map(Into::into).collect())),
             Err(DiffError::NotARepository) => Ok(None),
             Err(error) => Err(error.to_string()),
@@ -240,9 +241,9 @@ impl AgentSession {
 
     /// The unified diff of one file as the latest list of changes compared it; characters
     /// that could hide or reorder its lines are written out, as in the file's shown name.
-    pub fn patch(&self, path: String) -> Result<String, String> {
+    pub fn patch(&self, path: String, hide_whitespace: bool) -> Result<String, String> {
         RUNTIME
-            .block_on(self.diff.patch(&path))
+            .block_on(self.diff.patch(&path, whitespace(hide_whitespace)))
             .map(|patch| visible(&patch))
             .map_err(|error| error.to_string())
     }
@@ -491,4 +492,13 @@ fn open(session: &mut Option<Session>) -> Result<&mut Session, String> {
     session
         .as_mut()
         .ok_or_else(|| "the session was shut down".to_owned())
+}
+
+/// Whether a diff hides changes that are only whitespace.
+fn whitespace(hide: bool) -> Whitespace {
+    if hide {
+        Whitespace::Hidden
+    } else {
+        Whitespace::Shown
+    }
 }

@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
-use crate::{ChangeStatus, DiffError, FileChange, RunDiff};
+use crate::{ChangeStatus, DiffError, FileChange, RunDiff, Whitespace};
 
 /// A throwaway Git repository with one committed file, `a.txt`.
 struct Repo(PathBuf);
@@ -81,13 +81,20 @@ fn a_run_compares_against_the_project_before_it_until_the_next_run_starts() {
     run(async {
         let repo = Repo::new("runs");
         let diff = RunDiff::open(repo.path()).await;
-        assert_eq!(diff.changes().await.expect("changes"), [], "no run yet");
+        assert_eq!(
+            diff.changes(Whitespace::Shown).await.expect("changes"),
+            [],
+            "no run yet"
+        );
 
         let capture = diff.capture().await;
         diff.started(capture);
         repo.write("a.txt", "new\n");
-        assert_eq!(diff.changes().await.expect("changes"), [modified("a.txt")]);
-        let patch = diff.patch("a.txt").await.expect("patch");
+        assert_eq!(
+            diff.changes(Whitespace::Shown).await.expect("changes"),
+            [modified("a.txt")]
+        );
+        let patch = diff.patch("a.txt", Whitespace::Shown).await.expect("patch");
         assert!(
             patch.contains("-old\n") && patch.contains("+new\n"),
             "{patch}"
@@ -96,7 +103,10 @@ fn a_run_compares_against_the_project_before_it_until_the_next_run_starts() {
         // A message the agent rejects starts no run, so its capture never counts.
         let rejected = diff.capture().await;
         drop(rejected);
-        assert_eq!(diff.changes().await.expect("changes"), [modified("a.txt")]);
+        assert_eq!(
+            diff.changes(Whitespace::Shown).await.expect("changes"),
+            [modified("a.txt")]
+        );
     });
 }
 
@@ -107,10 +117,13 @@ fn a_patch_shows_a_file_as_the_list_of_changes_saw_it() {
         let diff = RunDiff::open(repo.path()).await;
         diff.started(diff.capture().await);
         repo.write("a.txt", "new\n");
-        assert_eq!(diff.changes().await.expect("changes"), [modified("a.txt")]);
+        assert_eq!(
+            diff.changes(Whitespace::Shown).await.expect("changes"),
+            [modified("a.txt")]
+        );
         // Reading one file compares the same states, without a new pass over the project.
         repo.write("a.txt", "newer\n");
-        let patch = diff.patch("a.txt").await.expect("patch");
+        let patch = diff.patch("a.txt", Whitespace::Shown).await.expect("patch");
         assert!(
             patch.contains("+new\n") && !patch.contains("newer"),
             "{patch}"
@@ -119,10 +132,13 @@ fn a_patch_shows_a_file_as_the_list_of_changes_saw_it() {
         // A new run leaves the list as it was until it is read again, and its patches too.
         diff.started(diff.capture().await);
         repo.write("a.txt", "newest\n");
-        let patch = diff.patch("a.txt").await.expect("patch");
+        let patch = diff.patch("a.txt", Whitespace::Shown).await.expect("patch");
         assert!(patch.contains("-old\n+new\n"), "{patch}");
-        assert_eq!(diff.changes().await.expect("changes"), [modified("a.txt")]);
-        let patch = diff.patch("a.txt").await.expect("patch");
+        assert_eq!(
+            diff.changes(Whitespace::Shown).await.expect("changes"),
+            [modified("a.txt")]
+        );
+        let patch = diff.patch("a.txt", Whitespace::Shown).await.expect("patch");
         assert!(patch.contains("-newer\n+newest\n"), "{patch}");
     });
 }
@@ -134,7 +150,7 @@ fn a_git_that_does_not_answer_at_open_is_reported() {
         // No time for Git to answer, as a hung Git would not.
         let diff = RunDiff::with_timeout(repo.path(), Duration::ZERO).await;
         assert!(matches!(
-            diff.changes().await,
+            diff.changes(Whitespace::Shown).await,
             Err(DiffError::NotCaptured(_))
         ));
     });
@@ -153,13 +169,13 @@ fn a_session_switch_ends_the_diff_unless_a_run_started_meanwhile() {
         repo.write("a.txt", "newer\n");
         diff.switched(runs);
         assert_eq!(
-            diff.changes().await.expect("changes"),
+            diff.changes(Whitespace::Shown).await.expect("changes"),
             [modified("a.txt")],
             "the run that started during the switch keeps its diff"
         );
 
         diff.switched(diff.runs());
-        assert_eq!(diff.changes().await.expect("changes"), []);
+        assert_eq!(diff.changes(Whitespace::Shown).await.expect("changes"), []);
     });
 }
 
@@ -182,7 +198,7 @@ fn project_settings_that_skip_files_hide_no_change() {
             diff.started(diff.capture().await);
             repo.write("a.txt", "new\n");
             assert_eq!(
-                diff.changes().await.expect("changes"),
+                diff.changes(Whitespace::Shown).await.expect("changes"),
                 [modified("a.txt")],
                 "{}",
                 repo.path().display()
@@ -191,7 +207,7 @@ fn project_settings_that_skip_files_hide_no_change() {
             diff.started(diff.capture().await);
             repo.write("a.txt", "newest\n");
             assert_eq!(
-                diff.changes().await.expect("changes"),
+                diff.changes(Whitespace::Shown).await.expect("changes"),
                 [modified("a.txt")],
                 "a later run too: {}",
                 repo.path().display()
@@ -211,7 +227,7 @@ fn a_file_made_executable_shows_although_the_project_ignores_modes() {
         let file = repo.path().join("a.txt");
         std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o755)).expect("mode");
         assert_eq!(
-            diff.changes().await.expect("changes"),
+            diff.changes(Whitespace::Shown).await.expect("changes"),
             [FileChange {
                 added: 0,
                 removed: 0,
@@ -231,7 +247,7 @@ fn a_first_snapshot_that_failed_still_clears_the_projects_marks() {
         diff.set_timeout(Duration::ZERO);
         diff.started(diff.capture().await);
         assert!(matches!(
-            diff.changes().await,
+            diff.changes(Whitespace::Shown).await,
             Err(DiffError::NotCaptured(_))
         ));
 
@@ -239,7 +255,7 @@ fn a_first_snapshot_that_failed_still_clears_the_projects_marks() {
         diff.started(diff.capture().await);
         repo.write("a.txt", "new\n");
         assert_eq!(
-            diff.changes().await.expect("changes"),
+            diff.changes(Whitespace::Shown).await.expect("changes"),
             [modified("a.txt")],
             "the marks are cleared on the next snapshot"
         );
@@ -263,7 +279,10 @@ fn snapshots_write_nothing_into_the_projects_git_directory() {
         let diff = RunDiff::open(repo.path()).await;
         diff.started(diff.capture().await);
         repo.write("a.txt", "new\n");
-        assert_eq!(diff.changes().await.expect("changes"), [modified("a.txt")]);
+        assert_eq!(
+            diff.changes(Whitespace::Shown).await.expect("changes"),
+            [modified("a.txt")]
+        );
         assert_eq!(listing(), before);
     });
 }
@@ -315,9 +334,9 @@ fn a_submodules_diff_runs_none_of_its_commands() {
         std::fs::write(inner.join("a.txt"), "changed\n").expect("file");
         git_in(&["commit", "-q", "-am", "inner change"]);
 
-        let changes = diff.changes().await.expect("changes");
+        let changes = diff.changes(Whitespace::Shown).await.expect("changes");
         assert_eq!(changes.len(), 1, "{changes:?}");
-        let _ = diff.patch("sub").await.expect("patch");
+        let _ = diff.patch("sub", Whitespace::Shown).await.expect("patch");
         assert!(!marker.exists(), "the submodule's textconv ran");
     });
 }
@@ -345,7 +364,7 @@ fn reads_that_wait_for_each_other_count_only_their_own_git_against_the_limit() {
             .map(|_| {
                 let diff = diff.clone();
                 tokio::spawn(async move {
-                    diff.changes()
+                    diff.changes(Whitespace::Shown)
                         .await
                         .map(|changes| changes.len())
                         .map_err(|error| error.to_string())
@@ -370,11 +389,11 @@ fn a_project_outside_git_says_so_instead_of_showing_no_changes() {
         std::fs::write(dir.join("a.txt"), "new\n").expect("file");
 
         assert!(matches!(
-            diff.changes().await,
+            diff.changes(Whitespace::Shown).await,
             Err(DiffError::NotARepository)
         ));
         assert!(matches!(
-            diff.patch("a.txt").await,
+            diff.patch("a.txt", Whitespace::Shown).await,
             Err(DiffError::NotARepository)
         ));
         let _ = std::fs::remove_dir_all(&dir);
@@ -391,7 +410,7 @@ fn a_git_that_cannot_read_the_project_is_reported_instead_of_outside_git() {
         std::fs::write(&config, text).expect("config");
         let diff = RunDiff::open(repo.path()).await;
         let error = diff
-            .changes()
+            .changes(Whitespace::Shown)
             .await
             .expect_err("Git cannot read the project");
         assert!(
@@ -413,9 +432,12 @@ fn a_project_that_could_not_be_captured_is_reported_instead_of_unchanged() {
         diff.started(diff.capture().await);
         std::fs::set_permissions(&secret, std::fs::Permissions::from_mode(0o600)).expect("mode");
 
-        let error = diff.changes().await.expect_err("no diff without a capture");
+        let error = diff
+            .changes(Whitespace::Shown)
+            .await
+            .expect_err("no diff without a capture");
         assert!(matches!(error, DiffError::NotCaptured(_)), "{error}");
-        assert!(diff.patch("a.txt").await.is_err());
+        assert!(diff.patch("a.txt", Whitespace::Shown).await.is_err());
     });
 }
 
@@ -434,7 +456,7 @@ fn a_stalled_git_gives_up_and_leaves_later_snapshots_working() {
             .expect("the capture gives up within its limit");
         diff.started(capture);
         assert!(matches!(
-            diff.changes().await,
+            diff.changes(Whitespace::Shown).await,
             Err(DiffError::NotCaptured(_))
         ));
 
@@ -442,7 +464,9 @@ fn a_stalled_git_gives_up_and_leaves_later_snapshots_working() {
         diff.started(diff.capture().await);
         repo.write("a.txt", "newer\n");
         assert_eq!(
-            diff.changes().await.expect("a later snapshot works"),
+            diff.changes(Whitespace::Shown)
+                .await
+                .expect("a later snapshot works"),
             [modified("a.txt")]
         );
     });
@@ -500,7 +524,7 @@ fn closing_removes_the_private_snapshots() {
 
         diff.close().await;
         assert!(!store.exists(), "{}", store.display());
-        assert_eq!(diff.changes().await.expect("changes"), []);
+        assert_eq!(diff.changes(Whitespace::Shown).await.expect("changes"), []);
     });
 }
 
@@ -525,7 +549,10 @@ fn closing_stops_a_read_in_progress_and_removes_its_snapshots() {
         assert!(!store.exists(), "{}", store.display());
         diff.started(reading.await.expect("the read ends"));
         assert!(
-            diff.changes().await.expect("closed").is_empty(),
+            diff.changes(Whitespace::Shown)
+                .await
+                .expect("closed")
+                .is_empty(),
             "a closed diff shows nothing"
         );
     });

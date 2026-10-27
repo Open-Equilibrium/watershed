@@ -102,6 +102,7 @@ abstract class RustLibApi extends BaseApi {
 
   Future<List<BridgeFileChange>?> crateApiSessionAgentSessionChanges({
     required AgentSession that,
+    required bool hideWhitespace,
   });
 
   Future<BridgeQueue> crateApiSessionAgentSessionClearQueue({
@@ -148,6 +149,7 @@ abstract class RustLibApi extends BaseApi {
   Future<String> crateApiSessionAgentSessionPatch({
     required AgentSession that,
     required String path,
+    required bool hideWhitespace,
   });
 
   Future<List<BridgeStoredSession>> crateApiSessionAgentSessionRecentSessions({
@@ -370,6 +372,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   @override
   Future<List<BridgeFileChange>?> crateApiSessionAgentSessionChanges({
     required AgentSession that,
+    required bool hideWhitespace,
   }) {
     return handler.executeNormal(
       NormalTask(
@@ -379,6 +382,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             that,
             serializer,
           );
+          sse_encode_bool(hideWhitespace, serializer);
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
@@ -391,7 +395,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeErrorData: sse_decode_String,
         ),
         constMeta: kCrateApiSessionAgentSessionChangesConstMeta,
-        argValues: [that],
+        argValues: [that, hideWhitespace],
         apiImpl: this,
       ),
     );
@@ -400,7 +404,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   TaskConstMeta get kCrateApiSessionAgentSessionChangesConstMeta =>
       const TaskConstMeta(
         debugName: "AgentSession_changes",
-        argNames: ["that"],
+        argNames: ["that", "hideWhitespace"],
       );
 
   @override
@@ -743,6 +747,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   Future<String> crateApiSessionAgentSessionPatch({
     required AgentSession that,
     required String path,
+    required bool hideWhitespace,
   }) {
     return handler.executeNormal(
       NormalTask(
@@ -753,6 +758,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             serializer,
           );
           sse_encode_String(path, serializer);
+          sse_encode_bool(hideWhitespace, serializer);
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
@@ -765,7 +771,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeErrorData: sse_decode_String,
         ),
         constMeta: kCrateApiSessionAgentSessionPatchConstMeta,
-        argValues: [that, path],
+        argValues: [that, path, hideWhitespace],
         apiImpl: this,
       ),
     );
@@ -774,7 +780,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   TaskConstMeta get kCrateApiSessionAgentSessionPatchConstMeta =>
       const TaskConstMeta(
         debugName: "AgentSession_patch",
-        argNames: ["that", "path"],
+        argNames: ["that", "path", "hideWhitespace"],
       );
 
   @override
@@ -4131,8 +4137,12 @@ class AgentSessionImpl extends RustOpaque implements AgentSession {
       .crateApiSessionAgentSessionBranch(that: this, entry: entry);
 
   /// Files the latest run changed, compared with the project before it; none outside Git.
-  Future<List<BridgeFileChange>?> changes() =>
-      RustLib.instance.api.crateApiSessionAgentSessionChanges(that: this);
+  /// With `hide_whitespace`, changes that are only whitespace are left out (ADR-0212).
+  Future<List<BridgeFileChange>?> changes({required bool hideWhitespace}) =>
+      RustLib.instance.api.crateApiSessionAgentSessionChanges(
+        that: this,
+        hideWhitespace: hideWhitespace,
+      );
 
   /// Removes the messages waiting for the running agent and returns them.
   Future<BridgeQueue> clearQueue() =>
@@ -4184,8 +4194,12 @@ class AgentSessionImpl extends RustOpaque implements AgentSession {
 
   /// The unified diff of one file as the latest list of changes compared it; characters
   /// that could hide or reorder its lines are written out, as in the file's shown name.
-  Future<String> patch({required String path}) => RustLib.instance.api
-      .crateApiSessionAgentSessionPatch(that: this, path: path);
+  Future<String> patch({required String path, required bool hideWhitespace}) =>
+      RustLib.instance.api.crateApiSessionAgentSessionPatch(
+        that: this,
+        path: path,
+        hideWhitespace: hideWhitespace,
+      );
 
   /// Up to `limit` stored sessions of this project, newest first, without the current one.
   Future<List<BridgeStoredSession>> recentSessions({required int limit}) =>

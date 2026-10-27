@@ -1,6 +1,7 @@
 //! Changes a run made to its Git project, read without touching the repository (ADR-0190,
 //! ADR-0191).
 
+use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::fmt;
 use std::fs::DirBuilder;
@@ -36,6 +37,25 @@ pub enum ChangeStatus {
     Modified,
     /// The file was removed.
     Deleted,
+}
+
+/// Whether a diff shows changes that are only whitespace, such as indentation or line ends
+/// (ADR-0212).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Whitespace {
+    /// Shown like any other change.
+    #[default]
+    Shown,
+    /// Hidden as `git diff --ignore-all-space` hides them; a file whose only change is
+    /// whitespace drops out.
+    Hidden,
+}
+
+impl Whitespace {
+    /// The `git diff` option, if any.
+    fn option(self) -> Option<&'static str> {
+        (self == Self::Hidden).then_some("--ignore-all-space")
+    }
 }
 
 /// One changed file with its line counts; binary files count zero lines.
@@ -200,37 +220,45 @@ impl WorkingTree {
         &self,
         from: &Snapshot,
         to: &Snapshot,
+        whitespace: Whitespace,
     ) -> Result<Vec<FileChange>, DiffError> {
-        let numstat = self.diff(&["--numstat", "-z", &from.0, &to.0]).await?;
+        let counted = |whitespace: Whitespace| {
+            let mut args = vec!["--numstat", "-z", from.0.as_str(), to.0.as_str()];
+            args.extend(whitespace.option());
+            async move { Ok::<_, DiffError>(line_counts(&self.diff(&args).await?)) }
+        };
+        let counts = counted(whitespace).await?;
+        // Git leaves out a file whose changes are all whitespace once it hides them; a new mode
+        // or a binary file counts no lines either way.
+        let whitespace_only: HashSet<String> = if whitespace == Whitespace::Hidden {
+            counted(Whitespace::Shown)
+                .await?
+                .into_iter()
+                .filter(|(path, lines)| *lines != (0, 0) && !counts.contains_key(path))
+                .map(|(path, _)| path)
+                .collect()
+        } else {
+            HashSet::new()
+        };
         let statuses = self.diff(&["--name-status", "-z", &from.0, &to.0]).await?;
         let mut statuses = statuses.split('\0');
         let mut changes = Vec::new();
-        let mut positions = std::collections::HashMap::new();
         while let (Some(status), Some(path)) = (statuses.next(), statuses.next()) {
             let status = match status {
                 "A" => ChangeStatus::Added,
                 "D" => ChangeStatus::Deleted,
                 _ => ChangeStatus::Modified,
             };
-            positions.insert(path, changes.len());
+            if status == ChangeStatus::Modified && whitespace_only.contains(path) {
+                continue;
+            }
+            let (added, removed) = counts.get(path).copied().unwrap_or_default();
             changes.push(FileChange {
                 path: path.to_owned(),
                 status,
-                added: 0,
-                removed: 0,
+                added,
+                removed,
             });
-        }
-        for record in numstat.split('\0').filter(|record| !record.is_empty()) {
-            let mut fields = record.splitn(3, '\t');
-            let (Some(added), Some(removed), Some(path)) =
-                (fields.next(), fields.next(), fields.next())
-            else {
-                continue;
-            };
-            if let Some(&position) = positions.get(path) {
-                changes[position].added = added.parse().unwrap_or(0);
-                changes[position].removed = removed.parse().unwrap_or(0);
-            }
         }
         Ok(changes)
     }
@@ -241,10 +269,14 @@ impl WorkingTree {
         from: &Snapshot,
         to: &Snapshot,
         path: &str,
+        whitespace: Whitespace,
     ) -> Result<String, DiffError> {
         // A literal pathspec, so a name such as `a*.txt` selects only that file.
         let path = format!(":(literal){path}");
-        self.diff(&[&from.0, &to.0, "--", &path]).await
+        let mut args = vec![from.0.as_str(), to.0.as_str()];
+        args.extend(whitespace.option());
+        args.extend(["--", &path]);
+        self.diff(&args).await
     }
 
     async fn diff(&self, args: &[&str]) -> Result<String, DiffError> {
@@ -482,6 +514,19 @@ fn git_command(dir: &Path, env: &[(&str, OsString)], args: &[&str]) -> Command {
         .stderr(Stdio::piped())
         .kill_on_drop(true);
     command
+}
+
+/// Each file's added and removed lines from `git diff --numstat -z`; a binary file counts none.
+fn line_counts(numstat: &str) -> HashMap<String, (u64, u64)> {
+    numstat
+        .split('\0')
+        .filter_map(|record| {
+            let mut fields = record.splitn(3, '\t');
+            let (added, removed, path) = (fields.next()?, fields.next()?, fields.next()?);
+            let count = |field: &str| field.parse().unwrap_or(0);
+            Some((path.to_owned(), (count(added), count(removed))))
+        })
+        .collect()
 }
 
 /// A running Git. Dropped before it ended, as at its time limit, it ends with every program it

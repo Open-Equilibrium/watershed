@@ -304,6 +304,7 @@ fn wire__crate__api__session__AgentSession_changes_impl(
             let api_that = <RustOpaqueMoi<
                 flutter_rust_bridge::for_generated::RustAutoOpaqueInner<AgentSession>,
             >>::sse_decode(&mut deserializer);
+            let api_hide_whitespace = <bool>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, String>((move || {
@@ -321,7 +322,10 @@ fn wire__crate__api__session__AgentSession_changes_impl(
                         }
                     }
                     let api_that_guard = api_that_guard.unwrap();
-                    let output_ok = crate::api::session::AgentSession::changes(&*api_that_guard)?;
+                    let output_ok = crate::api::session::AgentSession::changes(
+                        &*api_that_guard,
+                        api_hide_whitespace,
+                    )?;
                     std::result::Result::Ok(output_ok)
                 })())
             }
@@ -838,6 +842,7 @@ fn wire__crate__api__session__AgentSession_patch_impl(
                 flutter_rust_bridge::for_generated::RustAutoOpaqueInner<AgentSession>,
             >>::sse_decode(&mut deserializer);
             let api_path = <String>::sse_decode(&mut deserializer);
+            let api_hide_whitespace = <bool>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, String>((move || {
@@ -855,8 +860,11 @@ fn wire__crate__api__session__AgentSession_patch_impl(
                         }
                     }
                     let api_that_guard = api_that_guard.unwrap();
-                    let output_ok =
-                        crate::api::session::AgentSession::patch(&*api_that_guard, api_path)?;
+                    let output_ok = crate::api::session::AgentSession::patch(
+                        &*api_that_guard,
+                        api_path,
+                        api_hide_whitespace,
+                    )?;
                     std::result::Result::Ok(output_ok)
                 })())
             }

@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 
 use tokio::sync::watch;
 
-use crate::diff::{DiffError, FileChange, Snapshot, WorkingTree};
+use crate::diff::{DiffError, FileChange, Snapshot, Whitespace, WorkingTree};
 
 /// Longest one Git read of the project may take; Git is then stopped, though a filter it
 /// started runs until it ends.
@@ -120,18 +120,18 @@ impl RunDiff {
     }
 
     /// The files the latest run changed, as the project is now.
-    pub async fn changes(&self) -> Result<Vec<FileChange>, DiffError> {
+    pub async fn changes(&self, whitespace: Whitespace) -> Result<Vec<FileChange>, DiffError> {
         let Some((tree, before, runs)) = self.compared()? else {
             return Ok(Vec::new());
         };
         let now = self.snapshot(&tree).await?;
         self.list(runs, &before, &now);
-        self.bounded(tree.changes(&before, &now)).await
+        self.bounded(tree.changes(&before, &now, whitespace)).await
     }
 
     /// The unified diff of one file between the two states the latest list of changes compared,
     /// so it needs no new pass over the project and shows the file as that list counted it.
-    pub async fn patch(&self, path: &str) -> Result<String, DiffError> {
+    pub async fn patch(&self, path: &str, whitespace: Whitespace) -> Result<String, DiffError> {
         let listed = self.before().listed.clone();
         let (tree, before, now) = match (self.tree(), listed) {
             (Some(tree), Some((before, now))) => (tree, before, now),
@@ -144,7 +144,8 @@ impl RunDiff {
                 (tree, before, now)
             }
         };
-        self.bounded(tree.patch(&before, &now, path)).await
+        self.bounded(tree.patch(&before, &now, path, whitespace))
+            .await
     }
 
     /// Keeps the states a list compared for later patches, unless another run started meanwhile.
