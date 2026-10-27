@@ -3,6 +3,7 @@ import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/agent/action_area.dart';
@@ -494,6 +495,33 @@ void main() {
     }
     expect(find.text('Run a shell command?'), findsNothing);
     expect(find.byKey(const Key('composer')), findsOneWidget);
+  });
+
+  testWidgets('drops the draft hint before what a session allowance covers', (
+    tester,
+  ) async {
+    await show(tester);
+    await emit(
+      tester,
+      event(
+        BridgeEventKind.requestOpened,
+        request: const BridgeRequest(
+          id: 'a1',
+          approval: BridgeApproval(
+            kind: BridgeRequestKind.fileChange,
+            tool: 'edit',
+            text: '{}',
+          ),
+        ),
+      ),
+    );
+    final label = find.text('Allow edit for this session');
+    expect(
+      tester.renderObject<RenderParagraph>(label).didExceedMaxLines,
+      isFalse,
+      reason: 'the button says all it covers',
+    );
+    expect(find.text('your draft is kept'), findsNothing);
   });
 
   testWidgets('takes no click or key before a decision could be read', (

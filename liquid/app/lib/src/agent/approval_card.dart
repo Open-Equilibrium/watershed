@@ -141,43 +141,66 @@ class _ApprovalCardState extends State<ApprovalCard> with ReadDelay {
                 },
               ),
               const SizedBox(height: WsMetrics.space3),
-              Row(
-                children: [
-                  PrimaryButton(
-                    label: 'Allow once',
-                    shortcut: keys.label(Command.allowOnce),
-                    onPressed: () => decide(BridgeDecision.allowOnce),
-                  ),
-                  const SizedBox(width: WsMetrics.space3),
+              LayoutBuilder(
+                builder: (context, row) {
+                  final session = SecondaryButton(
+                    label: _sessionLabel(approval),
+                    shortcut: keys.label(Command.allowSession),
+                    onPressed: () => decide(BridgeDecision.allowSession),
+                  );
+                  final hint = TextStyle(
+                    color: ws.textFaint,
+                    fontSize: WsMetrics.fsSmall,
+                  );
                   // Short of room, the hint gives way before what the button covers.
-                  Flexible(
-                    flex: 3,
-                    child: SecondaryButton(
-                      label: _sessionLabel(approval),
-                      shortcut: keys.label(Command.allowSession),
-                      onPressed: () => decide(BridgeDecision.allowSession),
-                    ),
-                  ),
-                  Expanded(
-                    child: Text(
-                      'your draft is kept',
-                      textAlign: TextAlign.end,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: ws.textFaint,
-                        fontSize: WsMetrics.fsSmall,
+                  final hinted =
+                      row.maxWidth -
+                          [
+                            'Allow once',
+                            _sessionLabel(approval),
+                            'Reject',
+                          ].fold(
+                            0.0,
+                            (sum, label) => sum + _buttonWidth(context, label),
+                          ) -
+                          3 * WsMetrics.space3 >=
+                      measureText('your draft is kept', hint).width;
+                  return Row(
+                    children: [
+                      PrimaryButton(
+                        label: 'Allow once',
+                        shortcut: keys.label(Command.allowOnce),
+                        onPressed: () => decide(BridgeDecision.allowOnce),
                       ),
-                    ),
-                  ),
-                  const SizedBox(width: WsMetrics.space3),
-                  SecondaryButton(
-                    label: 'Reject',
-                    shortcut: keys.label(Command.reject),
-                    color: ws.danger,
-                    onPressed: () => decide(BridgeDecision.reject),
-                  ),
-                ],
+                      const SizedBox(width: WsMetrics.space3),
+                      if (hinted) ...[
+                        session,
+                        Expanded(
+                          child: Text(
+                            'your draft is kept',
+                            textAlign: TextAlign.end,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: hint,
+                          ),
+                        ),
+                      ] else
+                        Expanded(
+                          child: Align(
+                            alignment: Alignment.centerLeft,
+                            child: session,
+                          ),
+                        ),
+                      const SizedBox(width: WsMetrics.space3),
+                      SecondaryButton(
+                        label: 'Reject',
+                        shortcut: keys.label(Command.reject),
+                        color: ws.danger,
+                        onPressed: () => decide(BridgeDecision.reject),
+                      ),
+                    ],
+                  );
+                },
               ),
             ],
           ),
@@ -186,6 +209,19 @@ class _ApprovalCardState extends State<ApprovalCard> with ReadDelay {
     );
   }
 }
+
+/// The width a button with `label` takes, as the shared buttons draw their labels.
+double _buttonWidth(BuildContext context, String label) =>
+    measureText(
+      label,
+      DefaultTextStyle.of(context).style.merge(
+        const TextStyle(
+          fontSize: WsMetrics.fsCompact,
+          fontWeight: WsMetrics.fwMedium,
+        ),
+      ),
+    ).width +
+    2 * WsMetrics.space4;
 
 /// What allowing a call for the session covers: a shell command only as shown, any other tool
 /// wholly (ADR-0209). A long tool name is cut short; the title names it in full.
