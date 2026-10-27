@@ -193,8 +193,8 @@ String _sessionLabel(BridgeApproval approval) {
   if (approval.kind == BridgeRequestKind.commandExecution) {
     return 'Allow this command for this session';
   }
-  final tool = approval.tool;
-  final shown = tool.length > 24 ? '${tool.substring(0, 23)}…' : tool;
+  final tool = approval.tool.characters;
+  final shown = tool.length > 24 ? '${tool.take(23)}…' : '$tool';
   return 'Allow $shown for this session';
 }
 
@@ -275,6 +275,13 @@ class _ScrollingCodeState extends State<_ScrollingCode> {
 
 double _lineHeight(TextStyle style) => measureText(' ', style).height;
 
+/// The lines of `text`; a final line break ends the last line instead of starting another.
+List<String> _lines(String text) => text.isEmpty
+    ? const []
+    : (text.endsWith('\n') ? text.substring(0, text.length - 1) : text).split(
+        '\n',
+      );
+
 /// A file change as the Diff tab shows one: the path, then each replacement's removed and added
 /// lines (approved mockup, ADR-0212).
 class _EditLines extends StatelessWidget {
@@ -299,12 +306,10 @@ class _EditLines extends StatelessWidget {
           style: style.copyWith(fontWeight: WsMetrics.fwSemibold),
         ),
         for (final change in edit.changes) ...[
-          if (change.removed.isNotEmpty)
-            for (final removed in change.removed.split('\n'))
-              line('−', removed, ws.diffDel),
-          if (change.added.isNotEmpty)
-            for (final added in change.added.split('\n'))
-              line('+', added, ws.diffAdd),
+          for (final removed in _lines(change.removed))
+            line('−', removed, ws.diffDel),
+          for (final added in _lines(change.added))
+            line('+', added, ws.diffAdd),
         ],
       ],
     );

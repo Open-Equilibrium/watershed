@@ -556,6 +556,12 @@ void main() {
         long,
         'Allow ${long.substring(0, 23)}… for this session',
       ),
+      // Cut by characters, never inside one.
+      (
+        BridgeRequestKind.tool,
+        '${'a' * 22}😀xyz',
+        'Allow ${'a' * 22}😀… for this session',
+      ),
     ]) {
       await emit(
         tester,
@@ -827,6 +833,32 @@ void main() {
     expect(find.text('+ const limit = rateLimit({ max: 5 });'), findsOneWidget);
     expect(find.text("+ router.post('/login', limit, login);"), findsOneWidget);
     expect(find.textContaining('"edits"'), findsNothing);
+    await emit(
+      tester,
+      event(BridgeEventKind.requestResolved, request: BridgeRequest(id: 'a1')),
+    );
+
+    // A file's last line break ends its last line; it adds no empty one.
+    await emit(
+      tester,
+      event(
+        BridgeEventKind.requestOpened,
+        request: const BridgeRequest(
+          id: 'a2',
+          approval: BridgeApproval(
+            kind: BridgeRequestKind.fileChange,
+            tool: 'write',
+            text: '{}',
+            edit: BridgeEdit(
+              path: 'notes.md',
+              changes: [BridgeEditChange(removed: '', added: 'one\ntwo\n')],
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(find.text('+ two'), findsOneWidget);
+    expect(find.text('+ '), findsNothing);
   });
 
   testWidgets('shows the whole call before it is allowed', (tester) async {
