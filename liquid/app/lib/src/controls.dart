@@ -242,3 +242,14 @@ class InputCard extends StatelessWidget {
     child: Material(type: MaterialType.transparency, child: child),
   );
 }
+
+/// The size `text` takes in `style`; the measuring painter is released at once.
+Size measureText(String text, TextStyle style) {
+  final painter = TextPainter(
+    text: TextSpan(text: text, style: style),
+    textDirection: TextDirection.ltr,
+  )..layout();
+  final size = painter.size;
+  painter.dispose();
+  return size;
+}

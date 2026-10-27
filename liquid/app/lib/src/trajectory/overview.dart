@@ -341,7 +341,9 @@ class _AxisPainter extends CustomPainter {
       final left = (x(tick * unit) - text.width / 2)
           .clamp(0.0, math.max(0.0, size.width - text.width))
           .toDouble();
-      text.paint(canvas, Offset(left, 0));
+      text
+        ..paint(canvas, Offset(left, 0))
+        ..dispose();
       tick += step;
     }
     final mark = this.mark;

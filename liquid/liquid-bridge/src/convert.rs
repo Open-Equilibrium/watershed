@@ -20,8 +20,10 @@ use crate::api::history::{
 };
 use crate::api::session::{BridgeApprovalMode, BridgeModel, BridgeStoredSession};
 
-/// Merges consecutive content deltas of the same item, so a lagging UI receives the latest text
-/// in fewer events instead of every intermediate one (client architecture rule 4).
+/// Merges consecutive content deltas of the same item that piled up while the forwarder was
+/// busy, so fewer events cross to Dart. flutter_rust_bridge's sink does not wait for Dart, so a
+/// stalled Dart isolate still queues what was sent; flow control that coalesces while the UI
+/// falls behind (client architecture rule 4) is not built for the agent stream.
 pub(crate) fn coalesce(events: Vec<BridgeEvent>) -> Vec<BridgeEvent> {
     let mut merged: Vec<BridgeEvent> = Vec::with_capacity(events.len());
     for event in events {

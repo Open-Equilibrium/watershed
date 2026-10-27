@@ -274,7 +274,4 @@ class _ScrollingCodeState extends State<_ScrollingCode> {
   }
 }
 
-double _lineHeight(TextStyle style) => (TextPainter(
-  text: TextSpan(text: ' ', style: style),
-  textDirection: TextDirection.ltr,
-)..layout()).height;
+double _lineHeight(TextStyle style) => measureText(' ', style).height;

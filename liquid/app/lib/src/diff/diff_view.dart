@@ -3,6 +3,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../controls.dart';
 import '../rust/api/events.dart';
 import '../session/session_state.dart';
 import '../shortcuts/keymap.dart';
@@ -424,10 +425,7 @@ class _Patch extends StatelessWidget {
                     )
                   : LayoutBuilder(
                       builder: (context, constraints) {
-                        final char = (TextPainter(
-                          text: TextSpan(text: 'M', style: monoStyle(context)),
-                          textDirection: TextDirection.ltr,
-                        )..layout()).width;
+                        final char = measureText('M', monoStyle(context)).width;
                         final widest = lines.fold(
                           0,
                           (widest, line) => math.max(widest, line.text.length),
