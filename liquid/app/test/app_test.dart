@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/app.dart';
@@ -47,6 +49,15 @@ void main() {
     expect(
       launch.problem,
       'LIQUID_PROJECT names no directory: /nonexistent/acme-api',
+    );
+  });
+
+  test('names the project by its directory', () {
+    expect(projectName('/work/acme-api/'), 'acme-api');
+    expect(projectName('/'), '/');
+    expect(
+      projectName('.'),
+      Directory.current.uri.pathSegments.lastWhere((part) => part.isNotEmpty),
     );
   });
 

@@ -26,6 +26,13 @@ List<String> piArguments(String extension, String? session) => [
   if (session != null) ...['--session', session],
 ];
 
+/// The name the sidebar shows for `project`: its directory's name, or `/` for the root.
+String projectName(String project) =>
+    Directory(project).absolute.uri
+        .normalizePath()
+        .pathSegments
+        .lastWhere((part) => part.isNotEmpty, orElse: () => '/');
+
 /// Starts pi for the project the environment names; the start page then begins or continues a
 /// session (ADR-0203).
 /// Without Watershed's pi extension there would be no approvals, so the app refuses to start pi.
@@ -55,6 +62,7 @@ Future<Launch> launchFromEnvironment(Map<String, String> environment) async {
       'LIQUID_PI_SESSION must be an absolute path: $session',
     );
   }
+  final name = projectName(project);
   try {
     final session = await AgentSession.start(
       config: SessionConfig(
@@ -68,13 +76,7 @@ Future<Launch> launchFromEnvironment(Map<String, String> environment) async {
     unawaited(state.loadChat());
     return Launch.session(
       state,
-      SessionInfo(
-        project: Directory(project).uri.pathSegments
-            .where((part) => part.isNotEmpty)
-            .last,
-        harness: 'pi',
-        device: Platform.localHostname,
-      ),
+      SessionInfo(project: name, harness: 'pi', device: Platform.localHostname),
     );
   } on Object catch (error) {
     return Launch.problem('pi did not start: $error');
