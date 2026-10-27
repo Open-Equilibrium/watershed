@@ -2,7 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::process::Stdio;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
@@ -43,11 +43,31 @@ pub struct AgentCommand {
     pub cwd: PathBuf,
 }
 
+/// `path` with `.` and `..` resolved by name and repeated slashes dropped, as pi lists the
+/// extension files it loaded; links stay as they are.
+fn by_name(path: &Path) -> PathBuf {
+    let mut resolved = PathBuf::new();
+    for part in path.components() {
+        match part {
+            Component::CurDir => {}
+            Component::ParentDir => match resolved.components().next_back() {
+                Some(Component::Normal(_)) => {
+                    resolved.pop();
+                }
+                Some(Component::RootDir | Component::Prefix(_)) => {}
+                _ => resolved.push(part),
+            },
+            part => resolved.push(part),
+        }
+    }
+    resolved
+}
+
 impl AgentCommand {
     /// pi's arguments: RPC mode with Watershed's extension and the session to reopen.
     fn pi_args(&self) -> Vec<OsString> {
         let mut args: Vec<OsString> = vec!["--mode".into(), "rpc".into(), "-e".into()];
-        args.push(self.extension.clone().into());
+        args.push(by_name(&self.extension).into());
         if let Some(session) = &self.session {
             args.extend(["--session".into(), session.clone().into()]);
         }
@@ -308,7 +328,7 @@ impl Session {
             }),
             history: History::default(),
             cwd: command.cwd.clone(),
-            extension: command.extension.clone(),
+            extension: by_name(&command.extension),
         };
         Ok((session, receiver))
     }

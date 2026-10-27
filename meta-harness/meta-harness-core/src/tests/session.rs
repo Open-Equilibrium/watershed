@@ -1171,6 +1171,26 @@ fn starts_pi_in_rpc_mode_with_watersheds_extension_and_the_stored_session() {
 }
 
 #[test]
+fn names_the_extension_as_pi_reports_it_when_its_path_has_dot_dot() {
+    run(async {
+        // pi resolves `..`, `.` and repeated slashes in the path it lists, as Liquid passes it on.
+        let script = format!(
+            "[ \"$0 $*\" = '--mode rpc -e {EXTENSION}' ] || exit 9\n{}IFS= read -r line || exit 0\n",
+            gate(1)
+        );
+        let command = AgentCommand {
+            program: "/bin/sh".into(),
+            args: vec!["-c".into(), script.into()],
+            extension: "/w/./liquid/..//meta-harness/pi-extension/watershed.ts".into(),
+            session: None,
+            cwd: std::env::temp_dir(),
+        };
+        let (mut session, _events) = Session::start(&command).expect("fake agent starts");
+        assert_eq!(session.require_gate().await, Ok(()));
+    });
+}
+
+#[test]
 fn checks_the_extension_before_every_message_that_starts_a_run() {
     run(async {
         let commands = |id: u32, names: &str| {
