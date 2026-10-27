@@ -4,7 +4,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
 /// A card that decides something for the agent takes keys and clicks only once it could be read:
-/// 0.5 s after it appears or Liquid comes back in front (ADR-0207, ADR-0209).
+/// 0.5 s after its first frame is drawn or Liquid comes back in front, so a slow first frame
+/// counts nothing toward the wait (ADR-0207, ADR-0209).
 mixin ReadDelay<T extends StatefulWidget> on State<T> {
   bool _armed = false;
   Timer? _arming;
@@ -37,7 +38,9 @@ mixin ReadDelay<T extends StatefulWidget> on State<T> {
   void initState() {
     super.initState();
     _front = AppLifecycleListener(onStateChange: (_) => _arm());
-    _arm();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _arm();
+    });
   }
 
   /// Takes keys and clicks 0.5 s after Liquid is in front with the card.

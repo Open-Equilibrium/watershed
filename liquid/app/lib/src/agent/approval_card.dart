@@ -24,6 +24,12 @@ class _ApprovalCardState extends State<ApprovalCard> with ReadDelay {
   final _focus = FocusNode(debugLabel: 'approval');
   final _code = ScrollController();
 
+  /// A file change's lines, worked out once, since a write can be long (ADR-0212).
+  late final _edit = switch (widget.request.approval!.edit) {
+    final edit? => _editLines(edit),
+    null => null,
+  };
+
   @override
   void initState() {
     super.initState();
@@ -132,13 +138,19 @@ class _ApprovalCardState extends State<ApprovalCard> with ReadDelay {
               ),
               const SizedBox(height: WsMetrics.space3),
               Expanded(
-                child: _ScrollingCode(
-                  controller: _code,
-                  child: switch (approval.edit) {
-                    final edit? => _EditLines(edit),
-                    null => Text(approval.text, style: monoStyle(context)),
-                  },
-                ),
+                child: switch (_edit) {
+                  final lines? => _ScrollingCode(
+                    controller: _code,
+                    count: lines.length,
+                    line: (context, index) => _editLine(context, lines[index]),
+                  ),
+                  null => _ScrollingCode(
+                    controller: _code,
+                    count: 1,
+                    line: (context, _) =>
+                        Text(approval.text, style: monoStyle(context)),
+                  ),
+                },
               ),
               const SizedBox(height: WsMetrics.space3),
               Row(
@@ -201,10 +213,16 @@ String _sessionLabel(BridgeApproval approval) {
 /// Code that scrolls inside a fixed height and says how many lines are below, so nothing is
 /// hidden without a hint (approved approval mockup).
 class _ScrollingCode extends StatefulWidget {
-  const _ScrollingCode({required this.child, required this.controller});
+  const _ScrollingCode({
+    required this.count,
+    required this.line,
+    required this.controller,
+  });
 
-  /// The call, in the monospaced style whose lines the hint counts.
-  final Widget child;
+  /// The call's parts, in the monospaced style whose lines the hint counts; each is built only
+  /// once it scrolls into view.
+  final int count;
+  final IndexedWidgetBuilder line;
   final ScrollController controller;
 
   @override
@@ -241,13 +259,14 @@ class _ScrollingCodeState extends State<_ScrollingCode> {
               child: NotificationListener<ScrollUpdateNotification>(
                 onNotification: (notification) =>
                     _measure(notification.metrics, lineHeight),
-                child: SingleChildScrollView(
+                child: ListView.builder(
                   controller: widget.controller,
                   padding: const EdgeInsets.symmetric(
                     horizontal: WsMetrics.space4,
                     vertical: WsMetrics.space2,
                   ),
-                  child: SizedBox(width: double.infinity, child: widget.child),
+                  itemCount: widget.count,
+                  itemBuilder: widget.line,
                 ),
               ),
             ),
@@ -282,36 +301,37 @@ List<String> _lines(String text) => text.isEmpty
         '\n',
       );
 
+enum _EditKind { path, removed, added }
+
 /// A file change as the Diff tab shows one: the path, then each replacement's removed and added
 /// lines (approved mockup, ADR-0212).
-class _EditLines extends StatelessWidget {
-  const _EditLines(this.edit);
+List<({_EditKind kind, String text})> _editLines(BridgeEdit edit) => [
+  (kind: _EditKind.path, text: edit.path),
+  for (final change in edit.changes) ...[
+    for (final removed in _lines(change.removed))
+      (kind: _EditKind.removed, text: removed),
+    for (final added in _lines(change.added))
+      (kind: _EditKind.added, text: added),
+  ],
+];
 
-  final BridgeEdit edit;
-
-  @override
-  Widget build(BuildContext context) {
-    final ws = context.ws;
-    final style = monoStyle(context);
-    Widget line(String sign, String text, Color background) => Container(
-      color: background,
-      padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space1),
-      child: Text('$sign $text', style: style),
-    );
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Text(
-          edit.path,
-          style: style.copyWith(fontWeight: WsMetrics.fwSemibold),
-        ),
-        for (final change in edit.changes) ...[
-          for (final removed in _lines(change.removed))
-            line('−', removed, ws.diffDel),
-          for (final added in _lines(change.added))
-            line('+', added, ws.diffAdd),
-        ],
-      ],
+Widget _editLine(BuildContext context, ({_EditKind kind, String text}) line) {
+  final ws = context.ws;
+  final style = monoStyle(context);
+  final (sign, background) = switch (line.kind) {
+    _EditKind.path => (null, null),
+    _EditKind.removed => ('−', ws.diffDel),
+    _EditKind.added => ('+', ws.diffAdd),
+  };
+  if (sign == null) {
+    return Text(
+      line.text,
+      style: style.copyWith(fontWeight: WsMetrics.fwSemibold),
     );
   }
+  return Container(
+    color: background,
+    padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space1),
+    child: Text('$sign ${line.text}', style: style),
+  );
 }

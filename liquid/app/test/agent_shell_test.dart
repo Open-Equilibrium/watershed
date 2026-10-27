@@ -864,10 +864,21 @@ void main() {
         ),
       ),
     );
+    // Lines are built as they scroll into the card's view.
+    Future<void> reveal(String line) => tester.scrollUntilVisible(
+      find.text(line),
+      20,
+      scrollable: find
+          .descendant(
+            of: find.byType(ActionArea),
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
     expect(find.text('src/routes/login.ts'), findsOneWidget);
     expect(find.text("− router.post('/login', login);"), findsOneWidget);
-    expect(find.text('+ const limit = rateLimit({ max: 5 });'), findsOneWidget);
-    expect(find.text("+ router.post('/login', limit, login);"), findsOneWidget);
+    await reveal('+ const limit = rateLimit({ max: 5 });');
+    await reveal("+ router.post('/login', limit, login);");
     expect(find.textContaining('"edits"'), findsNothing);
     await emit(
       tester,
@@ -893,8 +904,47 @@ void main() {
         ),
       ),
     );
-    expect(find.text('+ two'), findsOneWidget);
+    await reveal('+ two');
     expect(find.text('+ '), findsNothing);
+    expect(
+      find.textContaining('more lines'),
+      findsNothing,
+      reason: 'two is last',
+    );
+  });
+
+  testWidgets('builds only the lines of a large file change that show', (
+    tester,
+  ) async {
+    await show(tester);
+    final content = [for (var line = 0; line < 5000; line++) 'line $line'];
+    await emit(
+      tester,
+      event(
+        BridgeEventKind.requestOpened,
+        request: BridgeRequest(
+          id: 'a1',
+          approval: BridgeApproval(
+            kind: BridgeRequestKind.fileChange,
+            tool: 'write',
+            text: '{}',
+            edit: BridgeEdit(
+              path: 'big.txt',
+              changes: [
+                BridgeEditChange(removed: '', added: content.join('\n')),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(find.text('+ line 0'), findsOneWidget);
+    expect(
+      find.text('+ line 4999'),
+      findsNothing,
+      reason: 'a line far below is built once it scrolls into view',
+    );
+    expect(find.textContaining('more lines'), findsOneWidget);
   });
 
   testWidgets('shows the whole call before it is allowed', (tester) async {
@@ -929,10 +979,9 @@ void main() {
       reason: 'the hint covers none of the call',
     );
     await tester.drag(
-      find.ancestor(
-        of: find.text(command),
-        matching: find.byType(SingleChildScrollView),
-      ),
+      find
+          .ancestor(of: find.text(command), matching: find.byType(Scrollable))
+          .first,
       const Offset(0, -2000),
     );
     await tester.pumpAndSettle();
