@@ -449,6 +449,47 @@ fn a_stalled_git_gives_up_and_leaves_later_snapshots_working() {
 }
 
 #[test]
+fn a_git_past_its_limit_ends_with_the_programs_it_started() {
+    run(async {
+        let repo = Repo::new("group");
+        let pid = std::env::temp_dir().join(format!("watershed-filter-{}", std::process::id()));
+        // The project's clean filter starts a program that would outlive Git.
+        repo.git(&[
+            "config",
+            "filter.slow.clean",
+            &format!("echo $$ > {}; exec sleep 30", pid.display()),
+        ]);
+        repo.write(".gitattributes", "*.txt filter=slow\n");
+        repo.write("a.txt", "new\n");
+        let diff = RunDiff::with_timeout(repo.path(), Duration::from_millis(300)).await;
+        let started = std::time::Instant::now();
+        while !pid.exists() && started.elapsed() < Duration::from_secs(4) {
+            diff.started(diff.capture().await);
+        }
+        let filter = std::fs::read_to_string(&pid).expect("the filter ran");
+        let _ = std::fs::remove_file(&pid);
+        let alive = || {
+            std::process::Command::new("kill")
+                .args(["-0", filter.trim()])
+                .stderr(std::process::Stdio::null())
+                .status()
+                .is_ok_and(|status| status.success())
+        };
+        let stopped = std::time::Instant::now();
+        while alive() && stopped.elapsed() < Duration::from_secs(2) {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        let survived = alive();
+        if survived {
+            let _ = std::process::Command::new("kill")
+                .args(["-9", filter.trim()])
+                .status();
+        }
+        assert!(!survived, "the filter outlived its Git");
+    });
+}
+
+#[test]
 fn closing_removes_the_private_snapshots() {
     run(async {
         let repo = Repo::new("close");

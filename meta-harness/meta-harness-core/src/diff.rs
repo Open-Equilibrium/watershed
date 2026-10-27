@@ -12,7 +12,7 @@ use std::process::Stdio;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWriteExt, BufReader};
-use tokio::process::Command;
+use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 
 /// Largest Git output read for one file list or patch; longer output is cut off.
@@ -342,11 +342,10 @@ impl WorkingTree {
     /// Clears the marks with which the project told Git to assume files unchanged or outside its
     /// work in the copied index; `git add` would skip those files and hide their changes.
     async fn unmark(&self, env: &[(&'static str, OsString)]) -> Result<(), DiffError> {
-        let mut listing = git_command(&self.root, env, &["ls-files", "-z", "-v"])
-            .stderr(Stdio::null())
-            .spawn()
-            .map_err(DiffError::GitStart)?;
-        let mut entries = BufReader::new(listing.stdout.take().expect("stdout is piped")).split(0);
+        let mut command = git_command(&self.root, env, &["ls-files", "-z", "-v"]);
+        let mut listing = Git::spawn(command.stderr(Stdio::null()))?;
+        let stdout = listing.child.stdout.take().expect("stdout is piped");
+        let mut entries = BufReader::new(stdout).split(0);
         let mut marked = Vec::new();
         let unreadable = |error: std::io::Error| DiffError::Git(error.to_string());
         while let Some(entry) = entries.next_segment().await.map_err(unreadable)? {
@@ -368,14 +367,15 @@ impl WorkingTree {
             return Ok(());
         }
         for mark in ["--no-assume-unchanged", "--no-skip-worktree"] {
-            let mut clearing =
-                git_command(&self.root, env, &["update-index", mark, "-z", "--stdin"])
+            let mut command =
+                git_command(&self.root, env, &["update-index", mark, "-z", "--stdin"]);
+            let mut clearing = Git::spawn(
+                command
                     .stdin(Stdio::piped())
                     .stdout(Stdio::null())
-                    .stderr(Stdio::null())
-                    .spawn()
-                    .map_err(DiffError::GitStart)?;
-            let mut input = clearing.stdin.take().expect("stdin is piped");
+                    .stderr(Stdio::null()),
+            )?;
+            let mut input = clearing.child.stdin.take().expect("stdin is piped");
             input.write_all(&marked).await.map_err(unreadable)?;
             drop(input);
             if !clearing.wait().await.map_err(unreadable)?.success() {
@@ -409,16 +409,14 @@ impl WorkingTree {
 
 /// Runs the host's `git` in `dir` and returns at most [`MAX_OUTPUT_BYTES`] of its output.
 async fn git(dir: &Path, env: &[(&str, OsString)], args: &[&str]) -> Result<String, DiffError> {
-    let mut child = git_command(dir, env, args)
-        .spawn()
-        .map_err(DiffError::GitStart)?;
+    let mut child = Git::spawn(&mut git_command(dir, env, args))?;
     // Git's warnings drain meanwhile, so a full error pipe never blocks it.
-    let stderr = child.stderr.take().expect("stderr is piped");
+    let stderr = child.child.stderr.take().expect("stderr is piped");
     let errors = tokio::spawn(keep_start(stderr, MAX_ERROR_BYTES));
     let mut output = Vec::new();
     // Reading one byte past the limit tells a cut-off output apart; dropping the child then
     // stops Git instead of buffering unbounded output.
-    let stdout = child.stdout.take().expect("stdout is piped");
+    let stdout = child.child.stdout.take().expect("stdout is piped");
     stdout
         .take(MAX_OUTPUT_BYTES + 1)
         .read_to_end(&mut output)
@@ -474,6 +472,8 @@ fn git_command(dir: &Path, env: &[(&str, OsString)], args: &[&str]) -> Command {
         ])
         .args(args)
         .current_dir(dir)
+        // A group of its own, so Git ends with the programs it starts (see [`Git`]).
+        .process_group(0)
         // Git's messages in English, as Liquid shows them and reads one.
         .env("LC_ALL", "C")
         .envs(env.iter().map(|(name, value)| (name, value)))
@@ -482,6 +482,41 @@ fn git_command(dir: &Path, env: &[(&str, OsString)], args: &[&str]) -> Command {
         .stderr(Stdio::piped())
         .kill_on_drop(true);
     command
+}
+
+/// A running Git. Dropped before it ended, as at its time limit, it ends with every program it
+/// started, such as a project's clean filter (ADR-0210).
+struct Git {
+    child: Child,
+    /// Git's process group; `None` once Git was reaped, since its id may then be reused.
+    group: Option<rustix::process::Pid>,
+}
+
+impl Git {
+    fn spawn(command: &mut Command) -> Result<Self, DiffError> {
+        let child = command.spawn().map_err(DiffError::GitStart)?;
+        let group = child
+            .id()
+            .and_then(|id| i32::try_from(id).ok())
+            .and_then(rustix::process::Pid::from_raw);
+        Ok(Self { child, group })
+    }
+
+    async fn wait(&mut self) -> std::io::Result<std::process::ExitStatus> {
+        let status = self.child.wait().await;
+        if status.is_ok() {
+            self.group = None;
+        }
+        status
+    }
+}
+
+impl Drop for Git {
+    fn drop(&mut self) {
+        if let Some(group) = self.group {
+            let _ = rustix::process::kill_process_group(group, rustix::process::Signal::KILL);
+        }
+    }
 }
 
 /// Reads `reader` to its end and keeps at most `limit` bytes from its start.
