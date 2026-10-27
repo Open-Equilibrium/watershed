@@ -249,12 +249,14 @@ impl WorkingTree {
 
     async fn diff(&self, args: &[&str]) -> Result<String, DiffError> {
         // A project's textconv would run a command the project names (ADR-0206).
+        // A project's diff settings must not hide a submodule's new commits (ADR-0210).
         let mut command = vec![
             "diff",
             "--no-renames",
             "--no-ext-diff",
             "--no-textconv",
             "--no-color",
+            "--ignore-submodules=none",
         ];
         command.extend_from_slice(args);
         git(&self.root, &self.env(&self.store.0.join("index")), &command).await
@@ -287,11 +289,54 @@ impl WorkingTree {
             }
         }
         let env = self.env(&index);
-        git(&self.root, &env, &["add", "--all", "--", "."]).await?;
+        if let Err(error) = git(&self.root, &env, &["add", "--all", "--", "."]).await {
+            // Git cannot record a nested repository without a commit and refuses the whole
+            // snapshot, so such repositories are left out, as T3 Code does (ADR-0210).
+            let skipped = self.uncommitted_repositories(&env).await;
+            if skipped.is_empty() {
+                return Err(error);
+            }
+            let mut args = vec!["add", "--all", "--", "."];
+            args.extend(skipped.iter().map(String::as_str));
+            git(&self.root, &env, &args).await?;
+        }
         Ok(git(&self.root, &env, &["write-tree"])
             .await?
             .trim()
             .to_owned())
+    }
+
+    /// Pathspecs that leave out each untracked nested repository without a commit.
+    async fn uncommitted_repositories(&self, env: &[(&'static str, OsString)]) -> Vec<String> {
+        let Ok(untracked) = git(
+            &self.root,
+            env,
+            &[
+                "ls-files",
+                "-z",
+                "--others",
+                "--exclude-standard",
+                "--",
+                ".",
+            ],
+        )
+        .await
+        else {
+            return Vec::new();
+        };
+        let mut skipped = Vec::new();
+        // Git lists a nested repository as its directory, ending in a slash.
+        for entry in untracked.split('\0').filter(|entry| entry.ends_with('/')) {
+            let nested = self.root.join(entry);
+            if !nested.join(".git").exists() {
+                continue;
+            }
+            let commit = ["rev-parse", "--verify", "--quiet", "HEAD^{commit}"];
+            if git(&nested, &[], &commit).await.is_err() {
+                skipped.push(format!(":(exclude,literal){entry}"));
+            }
+        }
+        skipped
     }
 
     /// Clears the marks with which the project told Git to assume files unchanged or outside its

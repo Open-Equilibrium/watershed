@@ -390,3 +390,70 @@ fn keeps_blank_context_lines_whatever_the_projects_diff_settings() {
         assert!(patch.contains(" one\n \n-three\n"), "{patch:?}");
     });
 }
+
+#[test]
+fn shows_new_commits_of_a_submodule_the_project_ignores() {
+    run(async {
+        let repo = Repo::new("submodule");
+        let sub = Repo::at(repo.path().join("sub"));
+        sub.write("f.txt", "one\n");
+        sub.git(&["add", "."]);
+        sub.git(&["commit", "-q", "-m", "one"]);
+        repo.write(
+            ".gitmodules",
+            "[submodule \"sub\"]\n\tpath = sub\n\turl = ./sub\n",
+        );
+        repo.git(&["add", ".gitmodules", "sub"]);
+        repo.git(&["config", "diff.ignoreSubmodules", "all"]);
+        repo.git(&["config", "submodule.sub.ignore", "all"]);
+        repo.git(&["commit", "-q", "-m", "base"]);
+        let tree = WorkingTree::open(repo.path())
+            .await
+            .expect("repository opens");
+        let before = tree.snapshot().await.expect("snapshot");
+
+        sub.write("f.txt", "two\n");
+        sub.git(&["commit", "-q", "-a", "-m", "two"]);
+
+        let changes = tree
+            .changes(&before, &tree.snapshot().await.expect("snapshot"))
+            .await
+            .expect("changes");
+        assert_eq!(
+            changes
+                .iter()
+                .map(|change| (change.path.as_str(), change.status))
+                .collect::<Vec<_>>(),
+            [("sub", ChangeStatus::Modified)]
+        );
+    });
+}
+
+#[test]
+fn skips_a_nested_repository_without_a_commit() {
+    run(async {
+        let repo = Repo::new("nested");
+        repo.write("a.txt", "a\n");
+        repo.git(&["add", "."]);
+        repo.git(&["commit", "-q", "-m", "base"]);
+        let tree = WorkingTree::open(repo.path())
+            .await
+            .expect("repository opens");
+        let before = tree.snapshot().await.expect("snapshot");
+
+        // Git cannot record a repository without a commit, so it would refuse the whole snapshot.
+        let _empty = Repo::at(repo.path().join("empty"));
+        repo.write("b.txt", "b\n");
+
+        let after = tree.snapshot().await.expect("snapshot");
+        assert_eq!(
+            tree.changes(&before, &after).await.expect("changes"),
+            [FileChange {
+                path: "b.txt".to_owned(),
+                status: ChangeStatus::Added,
+                added: 1,
+                removed: 0,
+            }]
+        );
+    });
+}
