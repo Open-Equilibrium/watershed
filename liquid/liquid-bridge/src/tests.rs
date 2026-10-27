@@ -19,11 +19,17 @@ use crate::convert::{coalesce, describe};
 /// The extension path the fake agents are started with.
 const EXTENSION: &str = "/w/meta-harness/pi-extension/watershed.ts";
 
-/// Answers the check every session starts with: Watershed's extension is loaded.
-fn gated(script: &str) -> String {
+/// Answers the check before a session starts or a message may start a run: Watershed's
+/// extension is loaded.
+fn gate(id: u32) -> String {
     format!(
-        "IFS= read -r line\ncase \"$line\" in *'\"type\":\"get_commands\"'*) ;; *) exit 9 ;; esac\nprintf '%s\\n' '{{\"id\":\"1\",\"type\":\"response\",\"command\":\"get_commands\",\"success\":true,\"data\":{{\"commands\":[{{\"name\":\"watershed-branch\",\"source\":\"extension\",\"sourceInfo\":{{\"path\":\"{EXTENSION}\"}}}}]}}}}'\n{script}"
+        "IFS= read -r line\ncase \"$line\" in *'\"type\":\"get_commands\"'*) ;; *) exit 9 ;; esac\nprintf '%s\\n' '{{\"id\":\"{id}\",\"type\":\"response\",\"command\":\"get_commands\",\"success\":true,\"data\":{{\"commands\":[{{\"name\":\"watershed-branch\",\"source\":\"extension\",\"sourceInfo\":{{\"path\":\"{EXTENSION}\"}}}}]}}}}'\n"
     )
+}
+
+/// Answers the check every session starts with, then runs `script`.
+fn gated(script: &str) -> String {
+    format!("{}{script}", gate(1))
 }
 
 /// Starts a scripted stand-in for pi in `cwd`; `sh` takes pi's arguments as `$0` and `$@`.
@@ -240,12 +246,13 @@ fn the_exit_ends_the_stream_and_failures_explain_themselves() {
 
 #[test]
 fn drives_an_agent_through_the_bridge() {
-    let script = r#"IFS= read -r line
-printf '%s\n' '{"id":"2","type":"response","command":"prompt","success":true,"data":{"disposition":"started"}}'
+    let script = gate(2)
+        + r#"IFS= read -r line
+printf '%s\n' '{"id":"3","type":"response","command":"prompt","success":true,"data":{"disposition":"started"}}'
 printf '%s\n' '{"type":"agent_start"}' '{"type":"agent_settled","aborted":false}'
 IFS= read -r line || exit 0"#;
     let session =
-        launch(gated(script), std::env::temp_dir().display().to_string()).expect("agent starts");
+        launch(gated(&script), std::env::temp_dir().display().to_string()).expect("agent starts");
     let (sender, receiver) = mpsc::channel();
     session
         .forward(move |event| sender.send(event).is_ok())
@@ -278,14 +285,15 @@ IFS= read -r line || exit 0"#;
 #[test]
 fn answers_a_question_the_agent_asks_before_taking_a_message() {
     // pi accepts a message only after its command handlers ran, and they may ask first.
-    let script = r#"IFS= read -r line
+    let script = gate(2)
+        + r#"IFS= read -r line
 printf '%s\n' '{"type":"extension_ui_request","id":"q1","method":"input","title":"Name","placeholder":""}'
 IFS= read -r line
 case "$line" in *'"id":"q1"'*) ;; *) exit 9 ;; esac
-printf '%s\n' '{"id":"2","type":"response","command":"prompt","success":true,"data":{"disposition":"started"}}'
+printf '%s\n' '{"id":"3","type":"response","command":"prompt","success":true,"data":{"disposition":"started"}}'
 IFS= read -r line || exit 0"#;
     let session = Arc::new(
-        launch(gated(script), std::env::temp_dir().display().to_string()).expect("agent starts"),
+        launch(gated(&script), std::env::temp_dir().display().to_string()).expect("agent starts"),
     );
     let (sender, receiver) = mpsc::channel();
     session
@@ -573,15 +581,26 @@ fn diffs_what_a_run_changed_in_its_project() {
     let repo = repository("diff");
     // The stand-in agent edits the project only after the prompt arrives, writing a character
     // that reorders the line.
-    let script = r#"IFS= read -r line
+    let script = [
+        gate(2),
+        r#"IFS= read -r line
 printf 'new\342\200\256\n' > a.txt
-printf '%s\n' '{"id":"2","type":"response","command":"prompt","success":true,"data":{"disposition":"started"}}'
-IFS= read -r line
-printf '%s\n' '{"id":"3","type":"response","command":"prompt","success":false,"error":"busy"}'
-IFS= read -r line
-printf '%s\n' '{"id":"4","type":"response","command":"prompt","success":true,"data":{"disposition":"handled"}}'
-IFS= read -r line || exit 0"#;
-    let session = launch(gated(script), repo.display().to_string()).expect("agent starts");
+printf '%s\n' '{"id":"3","type":"response","command":"prompt","success":true,"data":{"disposition":"started"}}'
+"#
+        .to_owned(),
+        gate(4),
+        r#"IFS= read -r line
+printf '%s\n' '{"id":"5","type":"response","command":"prompt","success":false,"error":"busy"}'
+"#
+        .to_owned(),
+        gate(6),
+        r#"IFS= read -r line
+printf '%s\n' '{"id":"7","type":"response","command":"prompt","success":true,"data":{"disposition":"handled"}}'
+IFS= read -r line || exit 0"#
+            .to_owned(),
+    ]
+    .concat();
+    let session = launch(gated(&script), repo.display().to_string()).expect("agent starts");
     assert_eq!(session.changes(), Ok(Some(Vec::new())), "no run yet");
     assert_eq!(session.send("edit".to_owned(), false), Ok(()));
     let changes = session.changes().expect("changes");
@@ -664,9 +683,10 @@ case "$line" in *'"since":"b1"'*) ;; *) exit 9 ;; esac
 printf '%s\n' '{"id":"4","type":"response","command":"get_entries","success":true,"data":{"entries":[],"leafId":"b1"}}'
 "#
         .to_owned(),
+        gate(5),
         r#"IFS= read -r line
 case "$line" in *'"message":"/watershed-branch e1"'*) ;; *) exit 9 ;; esac
-printf '%s\n' '{"id":"5","type":"response","command":"prompt","success":true,"data":{"disposition":"handled"}}'
+printf '%s\n' '{"id":"6","type":"response","command":"prompt","success":true,"data":{"disposition":"handled"}}'
 IFS= read -r line || exit 0"#
             .to_owned(),
     ]

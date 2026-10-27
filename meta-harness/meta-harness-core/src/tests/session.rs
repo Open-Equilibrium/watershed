@@ -70,14 +70,15 @@ async fn next(events: &mut Receiver<SessionEvent>) -> SessionEvent {
 #[test]
 fn prompts_the_agent_and_streams_its_turn() {
     run(async {
-        let (mut session, mut events) = fake_agent(
-            r#"IFS= read -r line
+        let (mut session, mut events) = fake_agent(&format!(
+            r#"{}IFS= read -r line
 case "$line" in *'"type":"prompt"'*) ;; *) exit 9 ;; esac
 case "$line" in *'"message":"Say hi"'*) ;; *) exit 9 ;; esac
-printf '%s\n' '{"id":"1","type":"response","command":"prompt","success":true,"data":{"disposition":"started"}}'
-printf '%s\n' '{"type":"agent_start"}' '{"type":"message_end","message":{"role":"user","content":"Say hi"}}' '{"type":"agent_settled","aborted":false}'
+printf '%s\n' '{{"id":"2","type":"response","command":"prompt","success":true,"data":{{"disposition":"started"}}}}'
+printf '%s\n' '{{"type":"agent_start"}}' '{{"type":"message_end","message":{{"role":"user","content":"Say hi"}}}}' '{{"type":"agent_settled","aborted":false}}'
 IFS= read -r line || exit 0"#,
-        );
+            gate(1)
+        ));
         assert_eq!(accepted(session.prompt("Say hi").await).await, Ok(()));
         let turn = TurnId(1);
         let (item, kind) = (ItemId(1), ItemKind::UserMessage);
@@ -114,11 +115,12 @@ IFS= read -r line || exit 0"#,
 #[test]
 fn reports_rejected_commands_and_crashes() {
     run(async {
-        let (mut session, mut events) = fake_agent(
-            r#"IFS= read -r line
-printf '%s\n' '{"id":"1","type":"response","command":"prompt","success":false,"error":"Agent is busy"}'
+        let (mut session, mut events) = fake_agent(&format!(
+            r#"{}IFS= read -r line
+printf '%s\n' '{{"id":"2","type":"response","command":"prompt","success":false,"error":"Agent is busy"}}'
 exit 3"#,
-        );
+            gate(1)
+        ));
         assert_eq!(
             accepted(session.prompt("Say hi").await).await,
             Err(CommandError::Rejected("Agent is busy".to_owned()))
@@ -394,11 +396,11 @@ fn shutdown_ends_an_agent_that_stopped_reading() {
     run(async {
         let (mut session, _events) = fake_agent("trap '' TERM; while :; do sleep 1; done");
         // Fills the pipe and the queue of records waiting to be written.
-        let message = "x".repeat(100_000);
+        let model = "x".repeat(100_000);
         for _ in 0..200 {
             let sent = timeout(
                 Duration::from_millis(200),
-                session.send(&message, Delivery::Steer),
+                session.set_model("faux", &model),
             )
             .await;
             if sent.is_err() {
@@ -516,22 +518,24 @@ fn skips_an_oversized_record_and_keeps_the_session() {
 fn delivers_messages_as_pi_decides_and_clears_the_queue() {
     run(async {
         let script = [
+            gate(1),
             expect_response(&[
                 r#""type":"prompt""#,
                 r#""message":"Use Redis""#,
                 r#""streamingBehavior":"steer""#,
             ]),
-            r#"printf '%s\n' '{"id":"1","type":"response","command":"prompt","success":true,"data":{"disposition":"queued"}}'
+            r#"printf '%s\n' '{"id":"2","type":"response","command":"prompt","success":true,"data":{"disposition":"queued"}}'
 "#
             .to_owned(),
+            gate(3),
             expect_response(&[r#""message":"Also docs""#, r#""streamingBehavior":"followUp""#]),
-            r#"printf '%s\n' '{"id":"2","type":"response","command":"prompt","success":true,"data":{"disposition":"queued"}}'
+            r#"printf '%s\n' '{"id":"4","type":"response","command":"prompt","success":true,"data":{"disposition":"queued"}}'
 printf '%s\n' '{"type":"agent_start"}'
 printf '%s\n' '{"type":"queue_update","steering":["Use Redis"],"followUp":["Also docs"]}'
 "#
             .to_owned(),
-            expect_response(&[r#""type":"clear_queue""#, r#""id":"3""#]),
-            r#"printf '%s\n' '{"id":"3","type":"response","command":"clear_queue","success":true,"data":{"steering":["Use Redis"],"followUp":["Also docs"]}}'
+            expect_response(&[r#""type":"clear_queue""#, r#""id":"5""#]),
+            r#"printf '%s\n' '{"id":"5","type":"response","command":"clear_queue","success":true,"data":{"steering":["Use Redis"],"followUp":["Also docs"]}}'
 IFS= read -r line || exit 0
 "#
             .to_owned(),
@@ -573,6 +577,14 @@ fn expect_response(fragments: &[&str]) -> String {
         ));
     }
     script
+}
+
+/// Answers the check before a message that may start a run: Watershed's extension is loaded.
+fn gate(id: u32) -> String {
+    format!(
+        "{}printf '%s\\n' '{{\"id\":\"{id}\",\"type\":\"response\",\"command\":\"get_commands\",\"success\":true,\"data\":{{\"commands\":[{GATE}]}}}}'\n",
+        expect_response(&[r#""type":"get_commands""#, &format!(r#""id":"{id}""#)])
+    )
 }
 
 /// Answers the `get_state` that starts a first history read, for a session pi keeps in memory.
@@ -1003,8 +1015,9 @@ fn reads_state_and_tree_and_branches_through_the_extension() {
             r#"printf '%s\n' '{"id":"3","type":"response","command":"get_entries","success":true,"data":{"entries":[{"type":"message","id":"e1","parentId":null,"message":{"role":"user","content":"hi"}}],"leafId":"e1"}}'
 "#
             .to_owned(),
-            expect_response(&[r#""type":"prompt""#, r#""id":"4""#, r#""message":"/watershed-branch e1 B""#]),
-            r#"printf '%s\n' '{"id":"4","type":"response","command":"prompt","success":true,"data":{"disposition":"handled"}}'
+            gate(4),
+            expect_response(&[r#""type":"prompt""#, r#""id":"5""#, r#""message":"/watershed-branch e1 B""#]),
+            r#"printf '%s\n' '{"id":"5","type":"response","command":"prompt","success":true,"data":{"disposition":"handled"}}'
 "#
             .to_owned(),
         ]
@@ -1096,7 +1109,7 @@ fn starts_pi_in_rpc_mode_with_watersheds_extension_and_the_stored_session() {
 }
 
 #[test]
-fn checks_the_extension_again_before_the_first_message_after_a_session_switch() {
+fn checks_the_extension_before_every_message_that_starts_a_run() {
     run(async {
         let commands = |id: u32, names: &str| {
             format!(
@@ -1111,34 +1124,32 @@ fn checks_the_extension_again_before_the_first_message_after_a_session_switch() 
             )
         };
         let script = [
-            expect_response(&[r#""type":"new_session""#, r#""id":"1""#]),
-            r#"printf '%s\n' '{"id":"1","type":"response","command":"new_session","success":true,"data":{"cancelled":false}}'
+            commands(1, GATE),
+            prompt(2),
+            // An extension command switched sessions unseen, and pi loaded the new session's
+            // extensions without Watershed's.
+            commands(3, ""),
+            expect_response(&[r#""type":"new_session""#, r#""id":"4""#]),
+            r#"printf '%s\n' '{"id":"4","type":"response","command":"new_session","success":true,"data":{"cancelled":false}}'
 "#
             .to_owned(),
-            // pi reloaded its extensions for the new session, and Watershed's is gone.
-            commands(2, ""),
-            commands(3, GATE),
-            prompt(4),
-            prompt(5),
+            commands(5, GATE),
+            prompt(6),
             "IFS= read -r line || exit 0\n".to_owned(),
         ]
         .concat();
         let (mut session, _events) = fake_agent(&script);
+        assert_eq!(accepted(session.prompt("Hi").await).await, Ok(()));
+        assert_eq!(
+            session.send("Again", Delivery::Steer).await.map(drop),
+            Err(CommandError::Ungated),
+            "the message never reaches an agent that would run tools without asking"
+        );
         assert_eq!(
             session.new_session().await.expect("sent").switched().await,
             Ok(true)
         );
-        assert_eq!(
-            session.prompt("Hi").await.map(drop),
-            Err(CommandError::Ungated),
-            "the message never reaches an agent that would run tools without asking"
-        );
         assert_eq!(accepted(session.prompt("Hi").await).await, Ok(()));
-        assert_eq!(
-            accepted(session.send("Again", Delivery::Steer).await).await,
-            Ok(()),
-            "checked once per switch"
-        );
     });
 }
 

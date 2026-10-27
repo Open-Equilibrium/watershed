@@ -345,7 +345,6 @@ impl Supervisor {
             let mut shared = self.state.lock();
             shared.allowed.clear();
             shared.switched = true;
-            shared.unchecked = true;
         }
         let _ = reply.send(result);
     }

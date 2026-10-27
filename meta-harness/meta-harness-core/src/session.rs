@@ -171,9 +171,6 @@ struct Shared {
     /// Whether the agent switched sessions since the history was read; the next read starts
     /// over, since sessions can share entry ids.
     switched: bool,
-    /// Whether the agent switched sessions since its extensions were checked: pi loads them
-    /// anew for each session, so the next message checks again.
-    unchecked: bool,
     /// Whether an abort waits for the turn to settle; dialogs arriving meanwhile are withdrawn
     /// or dismissed, since the agent stops only once they are answered.
     stopping: bool,
@@ -318,7 +315,7 @@ impl Session {
 
     /// Sends a prompt that starts a turn.
     pub async fn prompt(&mut self, message: &str) -> Result<Pending, CommandError> {
-        self.checked().await?;
+        self.require_gate().await?;
         self.submit(json!({ "type": "prompt", "message": message }))
             .await
     }
@@ -330,7 +327,7 @@ impl Session {
         message: &str,
         delivery: Delivery,
     ) -> Result<Pending, CommandError> {
-        self.checked().await?;
+        self.require_gate().await?;
         let behavior = match delivery {
             Delivery::Steer => "steer",
             Delivery::FollowUp => "followUp",
@@ -389,8 +386,9 @@ impl Session {
 
     /// Fails unless Watershed's pi extension is loaded from the file the session named, which
     /// pi shows by listing its `watershed-branch` command with that path: without it the agent
-    /// would run tools without asking, so a session must not start, and the first message after
-    /// a session switch checks again (ADR-0188, ADR-0211).
+    /// would run tools without asking, so a session must not start, and every message that may
+    /// start a run checks again: pi loads extensions anew for each session, and an extension can
+    /// switch sessions unseen (ADR-0188, ADR-0209, ADR-0211).
     pub async fn require_gate(&mut self) -> Result<(), CommandError> {
         let data = self.command(json!({ "type": "get_commands" })).await?;
         let gated = data
@@ -411,15 +409,6 @@ impl Session {
         } else {
             Err(CommandError::Ungated)
         }
-    }
-
-    /// Checks the extension again after a session switch, before a message could run tools.
-    async fn checked(&mut self) -> Result<(), CommandError> {
-        if self.state.lock().unchecked {
-            self.require_gate().await?;
-            self.state.lock().unchecked = false;
-        }
-        Ok(())
     }
 
     /// The models the agent can use.
