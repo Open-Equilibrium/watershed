@@ -601,27 +601,31 @@ class _Toggle extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ws = context.ws;
-    return Material(
-      type: MaterialType.transparency,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
-        child: Ink(
-          height: 28,
-          padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space4),
-          decoration: BoxDecoration(
-            color: on ? ws.accentSubtle : null,
-            border: on ? null : Border.all(color: ws.borderStrong),
-            borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
-          ),
-          child: Center(
-            widthFactor: 1,
-            child: Text(
-              label,
-              style: TextStyle(
-                fontSize: WsMetrics.fsCompact,
-                color: on ? ws.accent : ws.textMuted,
-                fontWeight: on ? WsMetrics.fwMedium : WsMetrics.fwRegular,
+    // Its state is told to assistive technology, not only drawn.
+    return Semantics(
+      toggled: on,
+      child: Material(
+        type: MaterialType.transparency,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
+          child: Ink(
+            height: 28,
+            padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space4),
+            decoration: BoxDecoration(
+              color: on ? ws.accentSubtle : null,
+              border: on ? null : Border.all(color: ws.borderStrong),
+              borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
+            ),
+            child: Center(
+              widthFactor: 1,
+              child: Text(
+                label,
+                style: TextStyle(
+                  fontSize: WsMetrics.fsCompact,
+                  color: on ? ws.accent : ws.textMuted,
+                  fontWeight: on ? WsMetrics.fwMedium : WsMetrics.fwRegular,
+                ),
               ),
             ),
           ),

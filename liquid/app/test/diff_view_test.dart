@@ -456,8 +456,22 @@ void main() {
     await show(tester, backend, settings: settings);
     expect(find.text('spaced.ts'), findsOneWidget);
 
+    final toggle = find.text('Hide whitespace');
+    expect(
+      tester.getSemantics(toggle),
+      isSemantics(hasToggledState: true, isToggled: false),
+    );
+    expect(
+      tester.getSemantics(find.text('Unified')),
+      isSemantics(isSelected: true),
+    );
     await press(tester, LogicalKeyboardKey.keyW);
     expect(settings.value.hideWhitespace, isTrue);
+    expect(
+      tester.getSemantics(toggle),
+      isSemantics(hasToggledState: true, isToggled: true),
+      reason: 'the state is told, not only drawn',
+    );
     expect(find.text('spaced.ts'), findsNothing);
     expect(backend.patchReads.last, 'code.ts without whitespace');
 

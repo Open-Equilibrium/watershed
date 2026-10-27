@@ -323,28 +323,33 @@ class _Segment extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ws = context.ws;
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
-      // Ink, so the focus highlight shows above the selected segment.
-      child: Ink(
-        height: 24,
-        padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space4),
-        decoration: selected
-            ? BoxDecoration(
-                color: ws.canvas,
-                borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
-                border: Border.all(color: ws.borderStrong),
-              )
-            : null,
-        child: Center(
-          widthFactor: 1,
-          child: Text(
-            label,
-            style: TextStyle(
-              fontSize: WsMetrics.fsCompact,
-              color: selected ? ws.text : ws.textMuted,
-              fontWeight: selected ? WsMetrics.fwMedium : WsMetrics.fwRegular,
+    // Which segment is chosen is told to assistive technology, not only drawn.
+    return Semantics(
+      selected: selected,
+      inMutuallyExclusiveGroup: true,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
+        // Ink, so the focus highlight shows above the selected segment.
+        child: Ink(
+          height: 24,
+          padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space4),
+          decoration: selected
+              ? BoxDecoration(
+                  color: ws.canvas,
+                  borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
+                  border: Border.all(color: ws.borderStrong),
+                )
+              : null,
+          child: Center(
+            widthFactor: 1,
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: WsMetrics.fsCompact,
+                color: selected ? ws.text : ws.textMuted,
+                fontWeight: selected ? WsMetrics.fwMedium : WsMetrics.fwRegular,
+              ),
             ),
           ),
         ),
