@@ -5,10 +5,10 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../controls.dart';
+import '../diff/diff_settings.dart';
 import '../diff/diff_view.dart';
 import '../rust/api/events.dart';
 import '../session/session_state.dart';
-import '../diff/diff_settings.dart';
 import '../shortcuts/first_start.dart';
 import '../shortcuts/keymap.dart';
 import '../shortcuts/shortcut_reveal.dart';

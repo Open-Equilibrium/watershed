@@ -23,8 +23,9 @@ fn main() {
     runtime.block_on(check());
 }
 
-/// pi with the scripted model and Watershed's extension, storing the session as `session` says.
-fn pi(session: [OsString; 2]) -> AgentCommand {
+/// pi with the scripted model and Watershed's extension, storing new sessions in `dir` or
+/// reopening the stored `session`, which the core passes to pi itself.
+fn pi(dir: &Path, session: Option<&Path>) -> AgentCommand {
     let extensions = std::env::current_dir()
         .expect("working directory")
         .join("meta-harness/pi-extension");
@@ -39,13 +40,13 @@ fn pi(session: [OsString; 2]) -> AgentCommand {
     .into_iter()
     .map(Into::into)
     .collect();
-    args.extend(session);
+    args.extend(["--session-dir".into(), dir.into()]);
     args.extend(["-e".into(), extensions.join("check/faux-model.ts").into()]);
     AgentCommand {
         program: "pi".into(),
         args,
         extension: extensions.join("watershed.ts"),
-        session: None,
+        session: session.map(Path::to_path_buf),
         cwd: std::env::temp_dir(),
     }
 }
@@ -53,7 +54,8 @@ fn pi(session: [OsString; 2]) -> AgentCommand {
 /// Starts pi again on the stored session file and reads its history from there.
 async fn reopen(file: &Path, entries: usize) {
     let (mut session, _events) =
-        Session::start(&pi(["--session".into(), file.into()])).expect("pi starts again");
+        Session::start(&pi(file.parent().expect("session folder"), Some(file)))
+            .expect("pi starts again");
     let tree = session.history().await.expect("history").tree();
     println!(
         "reopened from the session file: {} entries, leaf {:?}",
@@ -90,7 +92,7 @@ async fn reopen(file: &Path, entries: usize) {
 
 async fn check() {
     let dir = std::env::temp_dir().join(format!("pi-check-{}", std::process::id()));
-    let command = pi(["--session-dir".into(), dir.clone().into()]);
+    let command = pi(&dir, None);
     let (mut session, mut events) = Session::start(&command).expect("pi starts");
     session
         .require_gate()

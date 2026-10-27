@@ -794,7 +794,7 @@ class _SplitLine extends StatelessWidget {
 final _token = RegExp(
   r'(//.*$)|("(?:[^"\\]|\\.)*"|'
   r"'(?:[^'\\]|\\.)*')"
-  r'|\b(import|from|export|const|let|var|async|await|return|if|else|function|fn|pub|use|let|mut|impl|struct|enum|match|class|new)\b|\b(\d[\d_.]*)\b',
+  r'|\b(import|from|export|const|let|var|async|await|return|if|else|function|fn|pub|use|mut|impl|struct|enum|match|class|new)\b|\b(\d[\d_.]*)\b',
 );
 
 /// Light syntax colors for common languages; unknown text stays plain.

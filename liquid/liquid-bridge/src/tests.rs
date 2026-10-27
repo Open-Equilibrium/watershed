@@ -937,9 +937,9 @@ exit 1"#;
 fn starts_after_an_agent_says_much_before_it_is_ready() {
     // More events than the session's channel holds, before the answer to the start check.
     let script = r#"i=0; while [ $i -lt 300 ]; do printf '%s\n' "{\"type\":\"extension_ui_request\",\"id\":\"s$i\",\"method\":\"setStatus\",\"statusKey\":\"k\",\"statusText\":\"$i\"}"; i=$((i+1)); done
-IFS= read -r line
-printf '%s\n' '{"id":"1","type":"response","command":"get_commands","success":true,"data":{"commands":[{"name":"watershed-branch","source":"extension","sourceInfo":{"path":"/w/meta-harness/pi-extension/watershed.ts"}}]}}'
-IFS= read -r line || exit 0"#;
+"#
+    .to_owned()
+        + &gated("IFS= read -r line || exit 0");
     let (done, started) = mpsc::channel();
     std::thread::spawn(move || {
         let _ = done.send(launch(

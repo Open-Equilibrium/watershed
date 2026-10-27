@@ -1,4 +1,4 @@
-use crate::{visible, visible_lines};
+use crate::visible::{visible, visible_lines};
 
 #[test]
 fn keeps_windows_line_ends_and_writes_out_other_carriage_returns() {
