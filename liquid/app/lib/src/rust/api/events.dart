@@ -113,10 +113,17 @@ class BridgeEdit {
   /// The replacements in order; a write replaces nothing with all of the file.
   final List<BridgeEditChange> changes;
 
-  const BridgeEdit({required this.path, required this.changes});
+  /// Whether the change replaces whatever the file holds, as a write does.
+  final bool wholeFile;
+
+  const BridgeEdit({
+    required this.path,
+    required this.changes,
+    required this.wholeFile,
+  });
 
   @override
-  int get hashCode => path.hashCode ^ changes.hashCode;
+  int get hashCode => path.hashCode ^ changes.hashCode ^ wholeFile.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -124,7 +131,8 @@ class BridgeEdit {
       other is BridgeEdit &&
           runtimeType == other.runtimeType &&
           path == other.path &&
-          changes == other.changes;
+          changes == other.changes &&
+          wholeFile == other.wholeFile;
 }
 
 /// One replacement in a file.

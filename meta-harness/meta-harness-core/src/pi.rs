@@ -523,6 +523,7 @@ fn edit_preview(tool: &str, arguments: &Value) -> Option<EditPreview> {
     Some(EditPreview {
         path: visible_name(path),
         changes,
+        whole_file: tool == "write",
     })
 }
 

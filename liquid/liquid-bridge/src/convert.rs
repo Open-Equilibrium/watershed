@@ -452,6 +452,7 @@ impl From<AgentEvent> for BridgeEvent {
                                     added: change.added,
                                 })
                                 .collect(),
+                            whole_file: edit.whole_file,
                         }),
                     }),
                     ..request(id.0)

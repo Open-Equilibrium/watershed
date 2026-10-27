@@ -851,6 +851,7 @@ void main() {
             text: '{"edits":[],"path":"src/routes/login.ts"}',
             edit: BridgeEdit(
               path: 'src/routes/login.ts',
+              wholeFile: false,
               changes: [
                 BridgeEditChange(
                   removed: "router.post('/login', login);",
@@ -898,12 +899,14 @@ void main() {
             text: '{}',
             edit: BridgeEdit(
               path: 'notes.md',
+              wholeFile: true,
               changes: [BridgeEditChange(removed: '', added: 'one\ntwo\n')],
             ),
           ),
         ),
       ),
     );
+    expect(find.text('Replaces the whole file'), findsOneWidget);
     await reveal('+ two');
     expect(find.text('+ '), findsNothing);
     expect(
@@ -911,6 +914,30 @@ void main() {
       findsNothing,
       reason: 'two is last',
     );
+  });
+
+  testWidgets('says when a write empties the whole file', (tester) async {
+    await show(tester);
+    await emit(
+      tester,
+      event(
+        BridgeEventKind.requestOpened,
+        request: const BridgeRequest(
+          id: 'a1',
+          approval: BridgeApproval(
+            kind: BridgeRequestKind.fileChange,
+            tool: 'write',
+            text: '{}',
+            edit: BridgeEdit(
+              path: '/Users/me/.ssh/authorized_keys',
+              wholeFile: true,
+              changes: [BridgeEditChange(removed: '', added: '')],
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(find.text('Empties the whole file'), findsOneWidget);
   });
 
   testWidgets('builds only the lines of a large file change that show', (
@@ -930,6 +957,7 @@ void main() {
             text: '{}',
             edit: BridgeEdit(
               path: 'big.txt',
+              wholeFile: true,
               changes: [
                 BridgeEditChange(removed: '', added: content.join('\n')),
               ],
@@ -938,7 +966,7 @@ void main() {
         ),
       ),
     );
-    expect(find.text('+ line 0'), findsOneWidget);
+    expect(find.text('Replaces the whole file'), findsOneWidget);
     expect(
       find.text('+ line 4999'),
       findsNothing,

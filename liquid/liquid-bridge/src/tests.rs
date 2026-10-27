@@ -182,6 +182,7 @@ fn requests_and_questions_reach_dart_with_their_answers() {
                 removed: String::new(),
                 added: "one".to_owned(),
             }],
+            whole_file: true,
         }),
     });
     let request = opened.request.expect("request");
@@ -199,6 +200,7 @@ fn requests_and_questions_reach_dart_with_their_answers() {
                     removed: String::new(),
                     added: "one".to_owned(),
                 }],
+                whole_file: true,
             }),
         })
     );

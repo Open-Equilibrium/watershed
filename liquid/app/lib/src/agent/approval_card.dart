@@ -301,12 +301,19 @@ List<String> _lines(String text) => text.isEmpty
         '\n',
       );
 
-enum _EditKind { path, removed, added }
+enum _EditKind { path, note, removed, added }
 
 /// A file change as the Diff tab shows one: the path, then each replacement's removed and added
-/// lines (approved mockup, ADR-0212).
+/// lines (approved mockup, ADR-0212). A write says that it replaces whatever the file holds.
 List<({_EditKind kind, String text})> _editLines(BridgeEdit edit) => [
   (kind: _EditKind.path, text: edit.path),
+  if (edit.wholeFile)
+    (
+      kind: _EditKind.note,
+      text: edit.changes.every((change) => change.added.isEmpty)
+          ? 'Empties the whole file'
+          : 'Replaces the whole file',
+    ),
   for (final change in edit.changes) ...[
     for (final removed in _lines(change.removed))
       (kind: _EditKind.removed, text: removed),
@@ -319,15 +326,18 @@ Widget _editLine(BuildContext context, ({_EditKind kind, String text}) line) {
   final ws = context.ws;
   final style = monoStyle(context);
   final (sign, background) = switch (line.kind) {
-    _EditKind.path => (null, null),
+    _EditKind.path || _EditKind.note => (null, null),
     _EditKind.removed => ('−', ws.diffDel),
     _EditKind.added => ('+', ws.diffAdd),
   };
-  if (sign == null) {
+  if (line.kind == _EditKind.path) {
     return Text(
       line.text,
       style: style.copyWith(fontWeight: WsMetrics.fwSemibold),
     );
+  }
+  if (sign == null) {
+    return Text(line.text, style: style.copyWith(color: ws.warning));
   }
   return Container(
     color: background,

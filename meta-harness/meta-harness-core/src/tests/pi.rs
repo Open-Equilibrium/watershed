@@ -413,6 +413,7 @@ fn shows_an_edit_as_its_path_and_its_removed_and_added_lines() {
         Some(EditPreview {
             path: path.to_owned(),
             changes: vec![change("o", "n")],
+            whole_file: false,
         })
     };
     assert_eq!(
@@ -421,13 +422,16 @@ fn shows_an_edit_as_its_path_and_its_removed_and_added_lines() {
             Some(EditPreview {
                 path: "src/a.ts".to_owned(),
                 changes: vec![change("a\nb", "c"), change("x", "y<U+202E>")],
+                whole_file: false,
             }),
             one("p"),
             one("p"),
             one("p"),
+            // A write replaces whatever the file held.
             Some(EditPreview {
                 path: "new<U+202E>.ts".to_owned(),
                 changes: vec![change("", "one\ntwo")],
+                whole_file: true,
             }),
             None,
         ]

@@ -133,6 +133,8 @@ pub struct EditPreview {
     pub path: String,
     /// The replacements in order; a write replaces nothing with all of the file.
     pub changes: Vec<EditChange>,
+    /// Whether the change replaces whatever the file holds, as a write does.
+    pub whole_file: bool,
 }
 
 /// One replacement in a file.
