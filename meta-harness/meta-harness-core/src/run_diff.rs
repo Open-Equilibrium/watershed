@@ -12,8 +12,8 @@ use tokio::sync::watch;
 
 use crate::diff::{DiffError, FileChange, Snapshot, Whitespace, WorkingTree};
 
-/// Longest one Git read of the project may take; Git is then stopped, though a filter it
-/// started runs until it ends.
+/// Longest one Git read of the project may take; Git is then stopped with the programs it
+/// started that stay in its process group.
 const GIT_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Longest closing waits for reads in progress to stop their Git.
