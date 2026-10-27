@@ -135,6 +135,45 @@ void main() {
     expect(find.textContaining('Error: No models available'), findsOneWidget);
   });
 
+  testWidgets('keeps a failed agent\'s whole output readable in the list', (
+    tester,
+  ) async {
+    await show(tester);
+    const output =
+        '(node:4242) ExperimentalWarning: Type stripping is an experimental feature\n'
+        'Error: Failed to load extension /w/watershed.ts\n'
+        "  Cannot find module '@earendil-works/pi-coding-agent'";
+    await emit(
+      tester,
+      event(BridgeEventKind.exited, success: false, text: output),
+    );
+    await tester.tap(find.byKey(const Key('status')));
+    await tester.pumpAndSettle();
+    final entry = find.descendant(
+      of: find.byType(ListView),
+      matching: find.textContaining('ExperimentalWarning'),
+    );
+    expect(find.byType(SelectableText), findsNothing);
+
+    await tester.tap(entry.first);
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<SelectableText>(find.byType(SelectableText)).data,
+      output,
+      reason: 'the whole output shows, selectable',
+    );
+
+    Focus.of(tester.element(entry.first)).requestFocus();
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(
+      find.byType(SelectableText),
+      findsNothing,
+      reason: '⏎ on the entry closes it',
+    );
+  });
+
   testWidgets('the mode menu explains each mode and what Allow edits risks', (
     tester,
   ) async {

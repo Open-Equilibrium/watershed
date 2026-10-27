@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../controls.dart';
 import '../format.dart';
 import '../rust/api/events.dart';
 import '../session/session_state.dart';
@@ -193,7 +194,7 @@ Color _tone(BuildContext context, BridgeLevel level) => switch (level) {
 };
 
 /// The latest notifications above the status bar.
-class _NoticeList extends StatelessWidget {
+class _NoticeList extends StatefulWidget {
   const _NoticeList({
     required this.state,
     required this.link,
@@ -207,16 +208,25 @@ class _NoticeList extends StatelessWidget {
   final VoidCallback onClose;
 
   @override
+  State<_NoticeList> createState() => _NoticeListState();
+}
+
+class _NoticeListState extends State<_NoticeList> {
+  /// The entry that shows its whole text.
+  Notice? _open;
+
+  @override
   Widget build(BuildContext context) {
     final ws = context.ws;
+    final state = widget.state;
     final small = TextStyle(color: ws.textFaint, fontSize: WsMetrics.fsSmall);
     // The list takes the keys while open, so esc closes it.
     return CallbackShortcuts(
-      bindings: {escapeKey: onClose},
+      bindings: {escapeKey: widget.onClose},
       child: Focus(
-        focusNode: focus,
+        focusNode: widget.focus,
         child: CompositedTransformFollower(
-          link: link,
+          link: widget.link,
           targetAnchor: Alignment.topLeft,
           followerAnchor: Alignment.bottomLeft,
           offset: const Offset(-WsMetrics.space2, -WsMetrics.space3),
@@ -250,7 +260,7 @@ class _NoticeList extends StatelessWidget {
                             InkWell(
                               onTap: () {
                                 state.clearNotices();
-                                onClose();
+                                widget.onClose();
                               },
                               child: Text('Clear all', style: small),
                             ),
@@ -262,37 +272,81 @@ class _NoticeList extends StatelessWidget {
                         child: ListView(
                           shrinkWrap: true,
                           children: [
-                            for (final notice in notices)
-                              SizedBox(
-                                height: WsMetrics.rowNav,
-                                child: Row(
-                                  children: [
-                                    const SizedBox(width: WsMetrics.space2),
-                                    Icon(
-                                      _mark(notice.level),
-                                      size: 13,
-                                      color: _tone(context, notice.level),
-                                    ),
-                                    const SizedBox(width: WsMetrics.space3),
-                                    Expanded(
-                                      child: Text(
-                                        notice.text,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: const TextStyle(
-                                          fontSize: WsMetrics.fsCompact,
-                                        ),
+                            for (final notice in notices) ...[
+                              // A click or ⏎ shows the whole text (approved mockup).
+                              Shortcuts(
+                                shortcuts: activateKeys,
+                                child: InkWell(
+                                  onTap: () => setState(
+                                    () =>
+                                        _open = _open == notice ? null : notice,
+                                  ),
+                                  borderRadius: BorderRadius.circular(
+                                    WsMetrics.radiusMd,
+                                  ),
+                                  child: Ink(
+                                    height: WsMetrics.rowNav,
+                                    decoration: BoxDecoration(
+                                      color: _open == notice ? ws.hover : null,
+                                      borderRadius: BorderRadius.circular(
+                                        WsMetrics.radiusMd,
                                       ),
                                     ),
-                                    Text(
-                                      '${notice.at.hour.toString().padLeft(2, '0')}:'
-                                      '${notice.at.minute.toString().padLeft(2, '0')}',
-                                      style: small,
+                                    child: Row(
+                                      children: [
+                                        const SizedBox(width: WsMetrics.space2),
+                                        Icon(
+                                          _mark(notice.level),
+                                          size: 13,
+                                          color: _tone(context, notice.level),
+                                        ),
+                                        const SizedBox(width: WsMetrics.space3),
+                                        Expanded(
+                                          child: Text(
+                                            notice.text,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: const TextStyle(
+                                              fontSize: WsMetrics.fsCompact,
+                                            ),
+                                          ),
+                                        ),
+                                        Text(
+                                          '${notice.at.hour.toString().padLeft(2, '0')}:'
+                                          '${notice.at.minute.toString().padLeft(2, '0')}',
+                                          style: small,
+                                        ),
+                                        const SizedBox(width: WsMetrics.space2),
+                                      ],
                                     ),
-                                    const SizedBox(width: WsMetrics.space2),
-                                  ],
+                                  ),
                                 ),
                               ),
+                              if (_open == notice)
+                                Container(
+                                  margin: const EdgeInsets.fromLTRB(
+                                    WsMetrics.space7,
+                                    WsMetrics.space1,
+                                    WsMetrics.space2,
+                                    WsMetrics.space2,
+                                  ),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: WsMetrics.space3,
+                                    vertical: WsMetrics.space2,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: ws.subtle,
+                                    borderRadius: BorderRadius.circular(
+                                      WsMetrics.radiusMd,
+                                    ),
+                                  ),
+                                  child: SelectableText(
+                                    notice.text,
+                                    style: monoStyle(context)
+                                        .copyWith(fontSize: WsMetrics.fsSmall),
+                                  ),
+                                ),
+                            ],
                           ],
                         ),
                       ),

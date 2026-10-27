@@ -454,6 +454,13 @@ class SessionState {
   Future<void> loadEarlier() => _chat.loadEarlier();
 
   /// Shows a notification in the status bar and keeps it in the list.
+  /// Says why the agent stopped, and keeps all of it among the notifications, where it can be
+  /// read in full (approved mockup).
+  void _failed(String? text) {
+    failure.value = text;
+    if (text != null && text.isNotEmpty) notify(BridgeLevel.error, text);
+  }
+
   void notify(BridgeLevel level, String text) {
     final shown = Notice(level, text, DateTime.now());
     notices.value = [shown, ...notices.value].take(_keptNotices).toList();
@@ -595,7 +602,7 @@ class SessionState {
       case BridgeEventKind.notification:
         notify(event.display?.level ?? BridgeLevel.info, event.text ?? '');
       case BridgeEventKind.failed:
-        failure.value = event.text;
+        _failed(event.text);
       case BridgeEventKind.exited:
         // Nothing an exited agent started is still running.
         for (final view in _byId.values) {
@@ -606,7 +613,7 @@ class SessionState {
         }
         // A failed agent's error output says why, such as an extension that did not load.
         if (event.success != true && failure.value == null) {
-          failure.value = event.text;
+          _failed(event.text);
         }
         // A gone agent asks nothing more; its open cards cannot be answered.
         _approvals.clear();
