@@ -453,7 +453,6 @@ class SessionState {
   /// Reads the stored entries before the earliest one the chat covers.
   Future<void> loadEarlier() => _chat.loadEarlier();
 
-  /// Shows a notification in the status bar and keeps it in the list.
   /// Says why the agent stopped, and keeps all of it among the notifications, where it can be
   /// read in full (approved mockup).
   void _failed(String? text) {
@@ -461,6 +460,7 @@ class SessionState {
     if (text != null && text.isNotEmpty) notify(BridgeLevel.error, text);
   }
 
+  /// Shows a notification in the status bar and keeps it in the list.
   void notify(BridgeLevel level, String text) {
     final shown = Notice(level, text, DateTime.now());
     notices.value = [shown, ...notices.value].take(_keptNotices).toList();
