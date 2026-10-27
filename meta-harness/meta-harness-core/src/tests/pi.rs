@@ -300,8 +300,10 @@ fn translates_extension_questions_and_display_updates() {
 fn turns_watershed_approval_questions_into_requests() {
     let events = translate(&[
         r#"{"type":"extension_ui_request","id":"a1","method":"select","title":"watershed.approval {\"tool\":\"bash\",\"arguments\":{\"command\":\"npm test\"},\"readOnly\":false,\"session\":\"s1\"}","options":["allow-once","allow-session","reject","allow-auto"]}"#,
-        r#"{"type":"extension_ui_request","id":"a2","method":"select","title":"watershed.approval {\"tool\":\"write\",\"arguments\":{},\"readOnly\":false}","options":[]}"#,
+        r#"{"type":"extension_ui_request","id":"a2","method":"select","title":"watershed.approval {\"tool\":\"write\",\"arguments\":{},\"readOnly\":false,\"builtin\":true}","options":[]}"#,
         r#"{"type":"extension_ui_request","id":"a3","method":"select","title":"watershed.approval {\"tool\":\"read\",\"arguments\":{\"path\":\"a\"},\"readOnly\":true}","options":[]}"#,
+        // An extension's own write is no file change Allow edits may run.
+        r#"{"type":"extension_ui_request","id":"a5","method":"select","title":"watershed.approval {\"tool\":\"write\",\"arguments\":{},\"readOnly\":false}","options":[]}"#,
         // An extension's tool name cannot hide characters either.
         r#"{"type":"extension_ui_request","id":"a4","method":"select","title":"watershed.approval {\"tool\":\"safe\\u202e\",\"arguments\":{},\"readOnly\":false}","options":[]}"#,
     ]);
@@ -334,6 +336,7 @@ fn turns_watershed_approval_questions_into_requests() {
                 r#"{"path":"a"}"#,
                 true
             ),
+            opened("a5", RequestKind::ToolApproval, "write", "{}", false),
             opened("a4", RequestKind::ToolApproval, "safe<U+202E>", "{}", false),
         ]
     );

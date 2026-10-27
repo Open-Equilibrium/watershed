@@ -503,9 +503,16 @@ fn approval(request: RequestId, payload: &str, tools: &HashMap<String, OpenTool>
         .get("arguments")
         .map(Value::to_string)
         .unwrap_or_default();
+    // Allow edits runs file changes without asking, so only pi's own file tools count as such;
+    // an extension's tool of the same name asks like any other (ADR-0208).
+    let builtin = payload.get("builtin").and_then(Value::as_bool) == Some(true);
+    let kind = match request_kind(tool) {
+        RequestKind::FileChangeApproval if !builtin => RequestKind::ToolApproval,
+        kind => kind,
+    };
     AgentEvent::RequestOpened {
         request,
-        kind: request_kind(tool),
+        kind,
         tool: visible(tool),
         text: call_text(tool, &arguments),
         arguments,

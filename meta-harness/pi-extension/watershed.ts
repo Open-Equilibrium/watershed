@@ -37,6 +37,8 @@ function watershed(pi: ExtensionAPI, clock: Clock): void {
       tool: event.toolName,
       arguments: event.input,
       readOnly: tool?.sourceInfo?.source === "builtin" && READING_BUILTINS.has(tool.name),
+      // Only pi's own tools count as what their names say, such as edits (ADR-0208).
+      builtin: tool?.sourceInfo?.source === "builtin",
       // Allowances for a session end with it, also when an extension command switches it.
       session: ctx.sessionManager.getSessionId(),
       // The call the user decides on, among a response's calls that pi started.

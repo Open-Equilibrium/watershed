@@ -84,6 +84,7 @@ test("asks the core before every tool call and records user decisions", async ()
       tool: "bash",
       arguments: { command: "ls" },
       readOnly: false,
+      builtin: true,
       session: "s1",
       toolCallId: "c1",
     });

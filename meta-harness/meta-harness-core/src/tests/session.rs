@@ -579,10 +579,11 @@ fn approval_request(id: &str, tool: &str, read_only: bool) -> String {
     approval_in("s1", id, tool, read_only)
 }
 
-/// An approval request from the session `session`, as the extension asks it.
+/// An approval request for one of pi's own tools from the session `session`, as the extension
+/// asks it.
 fn approval_in(session: &str, id: &str, tool: &str, read_only: bool) -> String {
     let payload = format!(
-        r#"{{\"tool\":\"{tool}\",\"arguments\":{{}},\"readOnly\":{read_only},\"session\":\"{session}\"}}"#
+        r#"{{\"tool\":\"{tool}\",\"arguments\":{{}},\"readOnly\":{read_only},\"builtin\":true,\"session\":\"{session}\"}}"#
     );
     format!(
         "printf '%s\\n' '{{\"type\":\"extension_ui_request\",\"id\":\"{id}\",\"method\":\"select\",\"title\":\"watershed.approval {payload}\",\"options\":[]}}'\n"
