@@ -452,7 +452,11 @@ void main() {
     expect(find.text('Files changed'), findsOneWidget);
     expect(find.text('Tests'), findsOneWidget);
 
-    await press(tester, LogicalKeyboardKey.keyC);
+    // The pill leaves the comparison as its key does, also from the keyboard.
+    Focus.of(tester.element(find.text('Comparing'))).requestFocus();
+    await tester.pump();
+    await press(tester, LogicalKeyboardKey.enter);
+    expect(find.text('Comparing'), findsNothing);
     await tester.tap(find.byKey(const ValueKey('tree-e6')));
     await tester.pumpAndSettle();
     expect(backend.calls.last, 'history e6');

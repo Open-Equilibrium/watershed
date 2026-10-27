@@ -772,31 +772,34 @@ class _Toolbar extends StatelessWidget {
           ),
           const Spacer(),
           if (comparing)
-            // Clicking it leaves the comparison, as its key does.
-            InkWell(
-              onTap: onCompare,
-              borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
-              child: Container(
-                height: 28,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: WsMetrics.space4,
-                ),
-                decoration: BoxDecoration(
-                  color: ws.accentSubtle,
-                  borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
-                ),
-                child: Row(
-                  children: [
-                    Text(
-                      'Comparing',
-                      style: TextStyle(
-                        color: ws.accent,
-                        fontSize: WsMetrics.fsCompact,
+            // Clicking it, return or space leave the comparison, as its key does.
+            Shortcuts(
+              shortcuts: activateKeys,
+              child: InkWell(
+                onTap: onCompare,
+                borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
+                child: Container(
+                  height: 28,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: WsMetrics.space4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: ws.accentSubtle,
+                    borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
+                  ),
+                  child: Row(
+                    children: [
+                      Text(
+                        'Comparing',
+                        style: TextStyle(
+                          color: ws.accent,
+                          fontSize: WsMetrics.fsCompact,
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: WsMetrics.space3),
-                    Hint(Keymap.of(context).label(Command.compare)),
-                  ],
+                      const SizedBox(width: WsMetrics.space3),
+                      Hint(Keymap.of(context).label(Command.compare)),
+                    ],
+                  ),
                 ),
               ),
             )
