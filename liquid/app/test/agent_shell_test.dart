@@ -127,37 +127,53 @@ void main() {
     expect(count, findsNothing, reason: 'a new session has no run yet');
   });
 
-  testWidgets('counts changes with whitespace hidden from the start', (
-    tester,
-  ) async {
-    await show(
-      tester,
-      diffSettings: DiffSettingsController(
-        const DiffSettings(hideWhitespace: true),
-      ),
-    );
-    await tester.pumpAndSettle();
-    BridgeFileChange change(String path) => BridgeFileChange(
-      path: path,
-      shown: path,
-      status: BridgeChangeStatus.modified,
-      added: 1,
-      removed: 1,
-    );
-    backend
-      ..changed = [change('code.ts'), change('spaced.ts')]
-      ..changedWithoutWhitespace = [change('code.ts')];
-    await emit(tester, event(BridgeEventKind.turnStarted));
-    await emit(tester, event(BridgeEventKind.turnCompleted));
-    expect(
-      find.descendant(
-        of: find.byKey(const Key('changed-files')),
-        matching: find.text('1'),
-      ),
-      findsOneWidget,
-      reason: 'the kept choice counts before the Diff tab opens',
-    );
-  });
+  testWidgets(
+    'counts changes as the whitespace choice says, kept or switched',
+    (tester) async {
+      await show(
+        tester,
+        diffSettings: DiffSettingsController(
+          const DiffSettings(hideWhitespace: true),
+        ),
+      );
+      await tester.pumpAndSettle();
+      BridgeFileChange change(String path) => BridgeFileChange(
+        path: path,
+        shown: path,
+        status: BridgeChangeStatus.modified,
+        added: 1,
+        removed: 1,
+      );
+      backend
+        ..changed = [change('code.ts'), change('spaced.ts')]
+        ..changedWithoutWhitespace = [change('code.ts')];
+      await emit(tester, event(BridgeEventKind.turnStarted));
+      await emit(tester, event(BridgeEventKind.turnCompleted));
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('changed-files')),
+          matching: find.text('1'),
+        ),
+        findsOneWidget,
+        reason: 'the kept choice counts before the Diff tab opens',
+      );
+
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.digit3);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+      await tester.pumpAndSettle();
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyW);
+      await tester.pumpAndSettle();
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('changed-files')),
+          matching: find.text('2'),
+        ),
+        findsOneWidget,
+        reason: 'W shows whitespace changes again',
+      );
+    },
+  );
 
   testWidgets('says why the agent stopped', (tester) async {
     await show(tester);
