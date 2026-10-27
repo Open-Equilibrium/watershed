@@ -640,6 +640,14 @@ class _ProfileRow extends StatelessWidget {
             ],
           ),
         ),
+        ValueListenableBuilder(
+          valueListenable: shortcuts.liquidKeyProblem,
+          builder: (context, problem, _) => problem == null
+              ? const SizedBox.shrink()
+              : _Notice(
+                  children: [Text(problem, style: _Notice.text(context))],
+                ),
+        ),
         if (available && settings.profile == Profile.custom)
           _Row(
             label: 'Use Caps Lock as the Liquid key',

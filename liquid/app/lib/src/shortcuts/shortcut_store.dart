@@ -143,6 +143,7 @@ class ShortcutController extends ValueNotifier<ShortcutSettings> {
   Future<void> update(ShortcutSettings next) {
     value = next;
     firstStart = false;
+    liquidKeyProblem.value = null;
     return _sync(save: true);
   }
 
@@ -196,6 +197,20 @@ class ShortcutController extends ValueNotifier<ShortcutSettings> {
     return false;
   }
 
-  void _failed(bool on, String reason) =>
-      _problem('Could not turn the Liquid key ${on ? 'on' : 'off'}: $reason');
+  void _failed(bool on, String reason) {
+    final problem =
+        'Could not turn the Liquid key ${on ? 'on' : 'off'}: $reason';
+    if (on) liquidKeyProblem.value = problem;
+    _problem(problem);
+  }
+
+  /// Why the Liquid key could not be turned on; Settings show it below the profile until the
+  /// next choice, since they cover the status bar (approved mockup).
+  final liquidKeyProblem = ValueNotifier<String?>(null);
+
+  @override
+  void dispose() {
+    liquidKeyProblem.dispose();
+    super.dispose();
+  }
 }

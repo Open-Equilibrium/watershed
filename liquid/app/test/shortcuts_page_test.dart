@@ -7,6 +7,7 @@ import 'package:liquid/src/rust/api/events.dart';
 import 'package:liquid/src/session/session_state.dart';
 import 'package:liquid/src/shortcuts/keymap.dart';
 import 'package:liquid/src/shortcuts/shortcut_store.dart';
+import 'package:liquid/src/shortcuts/shortcuts_page.dart';
 import 'package:liquid/src/theme/theme.dart';
 
 import 'fake_backend.dart';
@@ -205,6 +206,37 @@ void main() {
     expect(shortcuts.value.liquidKey, isTrue);
     expect(host.calls, [true, false, true]);
   });
+
+  testWidgets(
+    'says inside Settings why the Liquid key could not be turned on',
+    (tester) async {
+      await show(tester, ShortcutSettings.standard());
+      host.failure = PlatformException(
+        code: 'approval',
+        message: 'macOS needs your approval in System Settings → General → Login Items.',
+      );
+      await openSettings(tester);
+      await tester.tap(find.text('Liquid key'));
+      await tester.pumpAndSettle();
+      final reason = find.textContaining(
+        'Could not turn the Liquid key on: macOS needs your approval',
+      );
+      expect(shortcuts.value.profile, Profile.standard);
+      expect(
+        find.descendant(of: find.byType(ShortcutsPage), matching: reason),
+        findsOneWidget,
+      );
+
+      host.failure = null;
+      await tester.tap(find.text('Custom'));
+      await tester.pumpAndSettle();
+      expect(
+        find.descendant(of: find.byType(ShortcutsPage), matching: reason),
+        findsNothing,
+        reason: 'choosing a profile again clears the reason',
+      );
+    },
+  );
 
   testWidgets('search narrows the list to matching actions and keys', (
     tester,
