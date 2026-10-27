@@ -75,6 +75,16 @@ body{background:#fff;padding:24px}
 </section>
 
 <section>
+<h2>An edit's line break that ends only one side</h2>
+<div class="w new" style="max-width:560px"><div class="card auto">
+ <div class="row"><span class="ic">!</span><b>Change files?</b><span class="sp"></span><span class="f s">edit</span></div>
+ <div class="code mono" style="white-space:normal"><span class="d path">install.sh</span><span class="d del">− # disabled: </span><span class="d add">+ # disabled: <span class="f">↵</span></span></div>
+ <div class="row"><span class="btn pri">Allow once <kbd>⏎</kbd></span><span class="btn">Allow edit for this session <kbd>⌘⏎</kbd></span><span class="sp"></span><span class="btn">Reject <kbd>esc</kbd></span></div>
+</div></div>
+<ul class="pc"><li>A faint ↵ marks a line break only where one side of a replacement ends with it and the other does not; a write shows none. Spaces and tabs at line ends stay unmarked.</li></ul>
+</section>
+
+<section>
 <h2>Status and accent colors as text (light theme)</h2>
 <div class="w new" style="max-width:520px">
  <div class="row sess"><span>Rate limit for /login</span><span class="sp"></span><span style="color:var(--ac)">running</span></div>
