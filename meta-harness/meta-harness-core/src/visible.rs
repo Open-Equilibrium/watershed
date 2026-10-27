@@ -14,6 +14,18 @@ pub fn visible_name(name: &str) -> String {
     })
 }
 
+/// Lines as the Diff tab shows them: like [`visible`], but a carriage return that ends a line
+/// stays, as Windows line ends have one, so the tab can mark it (ADR-0212).
+pub fn visible_lines(text: &str) -> String {
+    text.split('\n')
+        .map(|line| match line.strip_suffix('\r') {
+            Some(line) => visible(line) + "\r",
+            None => visible(line),
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// `text` with each character `marked` picks written out as its code point.
 fn written_out(text: &str, marked: impl Fn(char) -> bool) -> String {
     let mut shown = String::with_capacity(text.len());

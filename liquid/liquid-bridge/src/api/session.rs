@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use meta_harness_core::{
     AgentCommand, Answer, CommandError, Delivery, DiffError, RequestId, RunDiff, Session,
-    SessionEvent, Whitespace, recent_sessions, session_title, visible,
+    SessionEvent, Whitespace, recent_sessions, session_title, visible_lines,
 };
 use tokio::runtime::Runtime;
 use tokio::sync::{Mutex, mpsc};
@@ -240,11 +240,12 @@ impl AgentSession {
     }
 
     /// The unified diff of one file as the latest list of changes compared it; characters
-    /// that could hide or reorder its lines are written out, as in the file's shown name.
+    /// that could hide or reorder its lines are written out, as in the file's shown name, but
+    /// for the carriage returns of Windows line ends, which the Diff tab marks.
     pub fn patch(&self, path: String, hide_whitespace: bool) -> Result<String, String> {
         RUNTIME
             .block_on(self.diff.patch(&path, whitespace(hide_whitespace)))
-            .map(|patch| visible(&patch))
+            .map(|patch| visible_lines(&patch))
             .map_err(|error| error.to_string())
     }
 

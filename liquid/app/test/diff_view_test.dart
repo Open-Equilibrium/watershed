@@ -483,4 +483,22 @@ void main() {
       tester.getTopLeft(code('new')).dy,
     );
   });
+
+  testWidgets('marks a Windows line end with a faint ␍', (tester) async {
+    final backend = FakeBackend()
+      ..changed = [modified('max.ts', 1, 1)]
+      ..patches = {
+        'max.ts': '@@ -1 +1 @@\n-const max = 5;\r\n+const max = 10;\r\n',
+      };
+    await show(tester, backend);
+    expect(code('const max = 10;␍'), findsOneWidget);
+    final line = tester.widget<RichText>(code('const max = 10;␍'));
+    TextSpan? mark;
+    line.text.visitChildren((span) {
+      if (span is TextSpan && span.text == '␍') mark = span;
+      return true;
+    });
+    final palette = tester.element(code('const max = 10;␍')).ws;
+    expect(mark?.style?.color, palette.textFaint);
+  });
 }

@@ -673,21 +673,41 @@ class _Toggle extends StatelessWidget {
   );
 }
 
-/// A line's code, colored lightly; a hunk header in the faint small style.
-Widget _code(BuildContext context, DiffLine line) => line.kind == DiffKind.hunk
-    ? Text(
-        line.text,
-        style: monoStyle(
-          context,
-          color: context.ws.textFaint,
-        ).copyWith(fontSize: WsMetrics.fsSmall),
-      )
-    : Text.rich(
-        highlight(context, line.text),
-        maxLines: 1,
-        overflow: TextOverflow.clip,
-        softWrap: false,
-      );
+/// A line's code, colored lightly, with a faint ␍ for a Windows line end (ADR-0212); a hunk
+/// header in the faint small style.
+Widget _code(BuildContext context, DiffLine line) {
+  final faint = context.ws.textFaint;
+  if (line.kind == DiffKind.hunk) {
+    return Text(
+      line.text,
+      style: monoStyle(
+        context,
+        color: faint,
+      ).copyWith(fontSize: WsMetrics.fsSmall),
+    );
+  }
+  final code = line.text.endsWith('\r')
+      ? line.text.substring(0, line.text.length - 1)
+      : null;
+  final shown = highlight(context, code ?? line.text);
+  return Text.rich(
+    code == null
+        ? shown
+        : TextSpan(
+            style: shown.style,
+            children: [
+              ...?shown.children,
+              TextSpan(
+                text: '␍',
+                style: TextStyle(color: faint),
+              ),
+            ],
+          ),
+    maxLines: 1,
+    overflow: TextOverflow.clip,
+    softWrap: false,
+  );
+}
 
 class _LineRow extends StatelessWidget {
   const _LineRow({required this.line});

@@ -8,3 +8,4 @@ mod session;
 mod stored;
 mod trajectory;
 mod transcript;
+mod visible;
