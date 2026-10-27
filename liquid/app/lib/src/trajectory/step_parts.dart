@@ -120,6 +120,7 @@ class OutcomeText extends StatelessWidget {
     return Text.rich(
       TextSpan(children: toneSpans(context.ws, parts)),
       maxLines: 1,
+      overflow: TextOverflow.ellipsis,
       style: const TextStyle(
         fontSize: WsMetrics.fsCompact,
         fontFeatures: [FontFeature.tabularFigures()],

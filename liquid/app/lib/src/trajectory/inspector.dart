@@ -94,13 +94,19 @@ class Inspector extends StatelessWidget {
                     ),
                     const SizedBox(width: WsMetrics.space5),
                   ],
-                  const Spacer(),
-                  if (canBranch)
-                    PrimaryButton(
-                      label: 'Branch from here',
-                      shortcut: Keymap.of(context).label(Command.branch),
-                      onPressed: onBranch,
-                    ),
+                  Expanded(
+                    child: canBranch
+                        ? Align(
+                            alignment: Alignment.centerRight,
+                            child: PrimaryButton(
+                              label: 'Branch from here',
+                              shortcut: Keymap.of(context)
+                                  .label(Command.branch),
+                              onPressed: onBranch,
+                            ),
+                          )
+                        : const SizedBox.shrink(),
+                  ),
                 ],
               ),
             ),

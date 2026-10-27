@@ -10,11 +10,17 @@ import 'package:liquid/src/rust/api/events.dart';
 import 'package:liquid/src/rust/api/history.dart';
 import 'package:liquid/src/session/session_state.dart';
 import 'package:liquid/src/theme/theme.dart';
+import 'package:liquid/src/trajectory/compare_view.dart';
 import 'package:liquid/src/trajectory/overview.dart';
 
 import 'fake_backend.dart';
 
 const info = SessionInfo(project: 'acme-api', harness: 'pi', device: 'MacBook');
+
+/// The smallest window Liquid allows is 1050 x 640 (MainFlutterWindow.swift). The test font is
+/// much wider than the app's, so a test checks one side of it at a time.
+const shortest = Size(1600, 640);
+const narrowest = Size(1050, 900);
 
 BridgeUsage tokens(
   int input,
@@ -102,8 +108,12 @@ void main() {
   late FakeBackend backend;
   late SessionState state;
 
-  Future<void> show(WidgetTester tester, BridgeHistory history) async {
-    await tester.binding.setSurfaceSize(const Size(1600, 900));
+  Future<void> show(
+    WidgetTester tester,
+    BridgeHistory history, {
+    Size size = const Size(1600, 900),
+  }) async {
+    await tester.binding.setSurfaceSize(size);
     backend = FakeBackend()..stored = history;
     state = SessionState(backend);
     await tester.pumpWidget(
@@ -446,7 +456,11 @@ void main() {
         preview: 'bash',
       ),
     ];
-    await show(tester, historyOf(branchB, tree: tree, leaf: 'b2'));
+    await show(
+      tester,
+      historyOf(branchB, tree: tree, leaf: 'b2'),
+      size: shortest,
+    );
     backend.histories['e6 b2'] = historyOf(
       branchA,
       tree: tree,
@@ -466,15 +480,22 @@ void main() {
     );
     await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
     await tester.pump();
-    expect(
-      find.text('Steps 1–3 shared · prompt, message, read'),
-      findsOneWidget,
-    );
-    expect(find.text('“Use a token bucket”'), findsOneWidget);
-    expect(find.text('only in A'), findsWidgets);
     expect(find.text('Duration'), findsOneWidget);
     expect(find.text('Files changed'), findsOneWidget);
     expect(find.text('Tests'), findsOneWidget);
+    // A short window scrolls the comparison under the table's header.
+    await tester.scrollUntilVisible(
+      find.text('Steps 1–3 shared · prompt, message, read'),
+      50,
+      scrollable: find
+          .descendant(
+            of: find.byType(CompareView),
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
+    expect(find.text('“Use a token bucket”'), findsOneWidget);
+    expect(find.text('only in A'), findsWidgets);
 
     // The pill leaves the comparison as its key does, also from the keyboard.
     Focus.of(tester.element(find.text('Comparing'))).requestFocus();
@@ -539,6 +560,7 @@ void main() {
           context: saw,
         ),
       ]),
+      size: narrowest,
     );
     backend.contexts['m1'] = const BridgeContextDetail(
       sections: [BridgeContextPart(name: 'AGENTS.md', chars: 920)],

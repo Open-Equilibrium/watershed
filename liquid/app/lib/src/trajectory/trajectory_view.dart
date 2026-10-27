@@ -967,12 +967,20 @@ class _StepRow extends StatelessWidget {
         child: _columns([
           Text('$number', style: figures.copyWith(color: ws.textFaint)),
           KindTag(record.kind),
-          Row(
-            children: [
-              Flexible(child: StepText(record)),
-              const SizedBox(width: WsMetrics.space3),
-              OutcomeText(record.outcome),
-            ],
+          // The result gives way before the step's name loses more than half the column.
+          LayoutBuilder(
+            builder: (context, constraints) => Row(
+              children: [
+                Flexible(child: StepText(record)),
+                const SizedBox(width: WsMetrics.space3),
+                ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxWidth: constraints.maxWidth / 2,
+                  ),
+                  child: OutcomeText(record.outcome),
+                ),
+              ],
+            ),
           ),
           Text(
             record.kind == BridgeRecordKind.user

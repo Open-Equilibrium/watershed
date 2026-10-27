@@ -169,10 +169,18 @@ class _StatusBarState extends State<StatusBar> {
                   ),
                 ),
               ],
-              const Spacer(),
               // The view's keys show only while the reveal key is held (ADR-0204).
-              if (ShortcutReveal.shown(context))
-                Text(widget.keys, style: text.copyWith(color: ws.textFaint)),
+              Expanded(
+                child: ShortcutReveal.shown(context)
+                    ? Text(
+                        widget.keys,
+                        textAlign: TextAlign.end,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: text.copyWith(color: ws.textFaint),
+                      )
+                    : const SizedBox.shrink(),
+              ),
             ],
           );
         },

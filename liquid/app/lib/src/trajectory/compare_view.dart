@@ -53,21 +53,23 @@ class CompareView extends StatelessWidget {
         WsMetrics.space5,
         0,
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          _Metrics(a: a, b: b, comparison: comparison),
-          const SizedBox(height: WsMetrics.space4),
-          Expanded(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                border: Border.all(color: ws.border),
-                borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Container(
+      // Everything scrolls together under the table's pinned header, so a short window cuts
+      // rows, never the header.
+      child: CustomScrollView(
+        slivers: [
+          SliverToBoxAdapter(
+            child: _Metrics(a: a, b: b, comparison: comparison),
+          ),
+          const SliverToBoxAdapter(child: SizedBox(height: WsMetrics.space4)),
+          DecoratedSliver(
+            decoration: BoxDecoration(
+              border: Border.all(color: ws.border),
+              borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
+            ),
+            sliver: SliverMainAxisGroup(
+              slivers: [
+                PinnedHeaderSliver(
+                  child: Container(
                     height: WsMetrics.rowTable,
                     color: ws.subtle,
                     child: Row(
@@ -82,7 +84,9 @@ class CompareView extends StatelessWidget {
                       ],
                     ),
                   ),
-                  Container(
+                ),
+                SliverToBoxAdapter(
+                  child: Container(
                     height: 30,
                     alignment: Alignment.center,
                     decoration: BoxDecoration(
@@ -93,34 +97,33 @@ class CompareView extends StatelessWidget {
                           ? 'No shared steps'
                           : 'Steps 1–${shared.length} shared · '
                                 '${shared.take(3).map(_sharedLabel).join(', ')}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         color: ws.textFaint,
                         fontSize: WsMetrics.fsSmall,
                       ),
                     ),
                   ),
-                  Expanded(
-                    child: ListView.builder(
-                      itemExtent: WsMetrics.rowTable,
-                      itemCount: rows.length,
-                      itemBuilder: (context, index) {
-                        final (left, right) = rows[index];
-                        return Row(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            _Cell(step: left, other: right, side: 'A'),
-                            Container(width: 1, color: ws.border),
-                            _Cell(step: right, other: left, side: 'B'),
-                          ],
-                        );
-                      },
-                    ),
-                  ),
-                ],
-              ),
+                ),
+                SliverFixedExtentList(
+                  itemExtent: WsMetrics.rowTable,
+                  delegate: SliverChildBuilderDelegate((context, index) {
+                    final (left, right) = rows[index];
+                    return Row(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        _Cell(step: left, other: right, side: 'A'),
+                        Container(width: 1, color: ws.border),
+                        _Cell(step: right, other: left, side: 'B'),
+                      ],
+                    );
+                  }, childCount: rows.length),
+                ),
+              ],
             ),
           ),
-          const SizedBox(height: WsMetrics.space4),
+          const SliverToBoxAdapter(child: SizedBox(height: WsMetrics.space4)),
         ],
       ),
     );
