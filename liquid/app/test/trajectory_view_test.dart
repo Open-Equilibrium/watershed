@@ -418,7 +418,9 @@ void main() {
     await tester.pump(const Duration(seconds: 7));
   });
 
-  testWidgets('the inspector\'s tabs take keys', (tester) async {
+  testWidgets('the inspector\'s tabs and the time switch take keys', (
+    tester,
+  ) async {
     await show(tester, historyOf(branchA));
     for (var step = 0; step < 4; step++) {
       await press(tester, LogicalKeyboardKey.arrowDown);
@@ -428,6 +430,26 @@ void main() {
     await tester.pump();
     await press(tester, LogicalKeyboardKey.enter);
     expect(find.textContaining('what the model saw'), findsOneWidget);
+    expect(
+      tester.getSemantics(find.text('Context')),
+      isSemantics(isSelected: true),
+      reason: 'the open tab is told, not only drawn',
+    );
+
+    // Return presses the focused switch rather than opening the step.
+    Focus.of(tester.element(find.text('Equal width'))).requestFocus();
+    await tester.pump();
+    await press(tester, LogicalKeyboardKey.enter);
+    expect(
+      tester.getSemantics(find.text('Equal width')),
+      isSemantics(isSelected: true),
+    );
+    await press(tester, LogicalKeyboardKey.space);
+    expect(
+      tester.getSemantics(find.text('Equal width')),
+      isSemantics(isSelected: true),
+      reason: 'space presses it again; it stays chosen',
+    );
   });
 
   testWidgets('compares two branches side by side', (tester) async {
