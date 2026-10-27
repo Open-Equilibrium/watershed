@@ -421,28 +421,30 @@ class SessionState {
   Future<BridgeContextDetail?> context(String entry) => _backend.context(entry);
 
   /// Continues the session from `entry`; the next prompt starts a new branch there. The chat
-  /// then shows the branch the session continues. A branch asked for while one runs waits for
-  /// that one instead of branching again.
-  Future<void> branch(String entry) => _branching ??= _branch(
-    entry,
-    _generation,
-  ).whenComplete(() => _branching = null);
-
-  Future<void>? _branching;
-
-  Future<void> _branch(String entry, int generation) async {
-    // The entry belongs to the session the branch was asked in; a switch meanwhile drops it.
-    await _switching?.future;
-    if (generation != _generation) {
+  /// then shows the branch the session continues. Returns whether this call branched: one asked
+  /// for while another runs waits for that one instead, and one asked for while the session
+  /// changes is dropped, as its entry may belong to the session being replaced.
+  Future<bool> branch(String entry) {
+    if (_branching case final running?) {
+      return running.then((_) => false, onError: (Object _) => false);
+    }
+    if (_switching != null) {
       notify(
         BridgeLevel.info,
-        'The session changed, so the branch was not made.',
+        'The session is changing, so the branch was not made.',
       );
-      return;
+      return Future.value(false);
     }
+    return _branching = _branch(entry).whenComplete(() => _branching = null);
+  }
+
+  Future<bool>? _branching;
+
+  Future<bool> _branch(String entry) async {
     await _backend.branch(entry);
     stored.value++;
     await loadChat();
+    return true;
   }
 
   /// Rebuilds the chat from the session's current branch, as the model sees it, and marks

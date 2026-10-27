@@ -345,7 +345,9 @@ void main() {
       final reload = state.loadChat();
       await pumpEventQueue();
       backend.gate!.complete();
-      await Future.wait([first, second, reload]);
+      expect(await first, isTrue);
+      expect(await second, isFalse, reason: 'the second waited for the first');
+      await reload;
       expect(backend.calls.where((call) => call.startsWith('branch')), [
         'branch a1',
       ], reason: 'a double press branches once');
@@ -573,17 +575,16 @@ void main() {
       reason: 'the message goes to the new session',
     );
 
-    // A branch names an entry of the session it was asked in, so a switch drops it.
+    // A branch names an entry of the session shown, which a switch replaces, so it is dropped.
     backend.switchGate = Completer();
     final switchingAgain = state.newSession();
-    final branching = state.branch('e1');
-    await pumpEventQueue();
+    expect(await state.branch('e1'), isFalse);
     backend.switchGate!.complete();
-    await Future.wait([switchingAgain, branching]);
+    await switchingAgain;
     expect(backend.calls, isNot(contains('branch e1')));
     expect(
       state.notice.value?.text,
-      'The session changed, so the branch was not made.',
+      'The session is changing, so the branch was not made.',
     );
   });
 

@@ -389,6 +389,24 @@ void main() {
     await tester.pump(const Duration(seconds: 7));
   });
 
+  testWidgets('drops a branch asked for while the session changes', (
+    tester,
+  ) async {
+    await show(tester, historyOf(branchA));
+    backend.switchGate = Completer();
+    final switching = state.newSession();
+    await press(tester, LogicalKeyboardKey.arrowDown);
+    await press(tester, LogicalKeyboardKey.keyB);
+    backend.switchGate!.complete();
+    await switching;
+    await tester.pumpAndSettle();
+    expect(backend.calls, isNot(contains('branch e1')));
+    expect(state.notices.value.map((notice) => notice.text), [
+      'The session is changing, so the branch was not made.',
+    ], reason: 'no error follows the notice');
+    await tester.pump(const Duration(seconds: 7));
+  });
+
   testWidgets('the inspector\'s tabs take keys', (tester) async {
     await show(tester, historyOf(branchA));
     for (var step = 0; step < 4; step++) {

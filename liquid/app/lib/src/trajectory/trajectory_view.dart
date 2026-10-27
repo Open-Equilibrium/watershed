@@ -281,7 +281,8 @@ class _TrajectoryViewState extends State<TrajectoryView> {
               ?.parent
         : from.entry;
     try {
-      await widget.state.branch(from.entry);
+      // A branch not made said why or waits for one already running.
+      if (!await widget.state.branch(from.entry)) return;
     } on Object catch (error) {
       widget.state.notify(
         BridgeLevel.error,
