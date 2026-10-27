@@ -79,6 +79,8 @@ class _AgentShellState extends State<AgentShell> {
 
   Future<void> _askProfile() async {
     final profile = await askProfile(context);
+    // An approval or a question closed it before a choice; it asks again once they are done.
+    if (profile == null) return;
     await _shortcuts.update(_shortcuts.value.choose(profile));
   }
 
@@ -95,6 +97,8 @@ class _AgentShellState extends State<AgentShell> {
         widget.state.question.value != null) {
       _settings.value = false;
       Navigator.of(context).popUntil((route) => route.isFirst);
+    } else if (_shortcuts.firstStart && ModalRoute.of(context)!.isCurrent) {
+      unawaited(_askProfile());
     }
   }
 

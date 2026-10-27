@@ -7,14 +7,12 @@ import '../theme/tokens.g.dart';
 import 'keymap.dart';
 
 /// Asks once which profile to start with (approved mockup, ADR-0205). Nothing is preselected;
-/// esc keeps Standard.
-Future<Profile> askProfile(BuildContext context) async =>
-    await showDialog<Profile>(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => const _FirstStart(),
-    ) ??
-    Profile.standard;
+/// esc keeps Standard. None when something else closed the question before a choice.
+Future<Profile?> askProfile(BuildContext context) => showDialog<Profile>(
+  context: context,
+  barrierDismissible: false,
+  builder: (context) => const _FirstStart(),
+);
 
 class _FirstStart extends StatelessWidget {
   const _FirstStart();

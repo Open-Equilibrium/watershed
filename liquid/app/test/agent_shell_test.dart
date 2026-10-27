@@ -300,6 +300,52 @@ void main() {
     expect(shown(), contains('idle'), reason: 'Esc dismisses');
   });
 
+  testWidgets('the notification list closes for a request, a click or esc', (
+    tester,
+  ) async {
+    await show(tester);
+    await emit(
+      tester,
+      event(
+        BridgeEventKind.notification,
+        display: BridgeDisplay(key: '', level: BridgeLevel.warning),
+        text: 'lint: 2 warnings',
+      ),
+    );
+    final status = find.byKey(const Key('status'));
+    Future<void> open() async {
+      await tester.tap(status);
+      await tester.pumpAndSettle();
+      expect(find.text('Notifications'), findsOneWidget);
+    }
+
+    await open();
+    await tester.tapAt(const Offset(800, 200));
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Notifications'),
+      findsNothing,
+      reason: 'a click elsewhere',
+    );
+
+    await open();
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(find.text('Notifications'), findsNothing, reason: 'esc');
+
+    await open();
+    await emit(
+      tester,
+      event(BridgeEventKind.requestOpened, request: approval('a1')),
+    );
+    expect(
+      find.text('Notifications'),
+      findsNothing,
+      reason: 'it would hide the call',
+    );
+    await tester.pump(const Duration(seconds: 7));
+  });
+
   testWidgets('opens and clears the notifications from the keyboard', (
     tester,
   ) async {

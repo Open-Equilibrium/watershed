@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/agent/shell.dart';
 import 'package:liquid/src/agent/sidebar.dart';
+import 'package:liquid/src/rust/api/events.dart';
 import 'package:liquid/src/session/session_state.dart';
 import 'package:liquid/src/shortcuts/keymap.dart';
 import 'package:liquid/src/shortcuts/shortcut_store.dart';
@@ -17,9 +18,11 @@ void main() {
   late FakeHost host;
   late MemoryStore store;
   late ShortcutController shortcuts;
+  late FakeBackend backend;
 
   Future<void> show(WidgetTester tester, ShortcutSettings? stored) async {
     await tester.binding.setSurfaceSize(const Size(1600, 1000));
+    backend = FakeBackend();
     host = FakeHost();
     store = MemoryStore(stored);
     shortcuts = await ShortcutController.load(store, host);
@@ -27,7 +30,7 @@ void main() {
       MaterialApp(
         theme: liquidTheme(Brightness.light),
         home: AgentShell(
-          state: SessionState(FakeBackend()),
+          state: SessionState(backend),
           info: info,
           shortcuts: shortcuts,
         ),
@@ -229,6 +232,39 @@ void main() {
     expect(find.text('How do you want to use the keyboard?'), findsNothing);
     expect(store.saved, ShortcutSettings.liquidKey());
     expect(host.calls, [true]);
+  });
+
+  testWidgets('a question during the first start leaves the choice open', (
+    tester,
+  ) async {
+    await show(tester, null);
+    const asks = 'How do you want to use the keyboard?';
+    backend.controller.add(
+      event(
+        BridgeEventKind.userInputRequested,
+        request: BridgeRequest(
+          id: 'q1',
+          question: BridgeQuestion(
+            kind: BridgeQuestionKind.confirm,
+            title: 'Sure?',
+            detail: '',
+            options: const [],
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text(asks), findsNothing, reason: 'the question goes first');
+    expect(store.saved, isNull, reason: 'nobody chose a profile');
+
+    backend.controller.add(
+      event(
+        BridgeEventKind.userInputResolved,
+        request: BridgeRequest(id: 'q1'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text(asks), findsOneWidget);
   });
 
   testWidgets('esc at the first start keeps Standard', (tester) async {

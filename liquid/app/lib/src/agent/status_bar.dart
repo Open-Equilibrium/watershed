@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../format.dart';
 import '../rust/api/events.dart';
@@ -26,6 +27,39 @@ class StatusBar extends StatefulWidget {
 class _StatusBarState extends State<StatusBar> {
   final _list = OverlayPortalController();
   final _anchor = LayerLink();
+  final _listFocus = FocusNode(debugLabel: 'notifications');
+
+  /// Opens the list with the keys, so esc closes it, or closes it.
+  void _toggle() {
+    if (_list.isShowing) return _list.hide();
+    _list.show();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_list.isShowing) _listFocus.requestFocus();
+    });
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    widget.state.approval.addListener(_asked);
+    widget.state.question.addListener(_asked);
+  }
+
+  @override
+  void dispose() {
+    widget.state.approval.removeListener(_asked);
+    widget.state.question.removeListener(_asked);
+    _listFocus.dispose();
+    super.dispose();
+  }
+
+  /// The list would cover an approval or a question in the input area.
+  void _asked() {
+    if (widget.state.approval.value != null ||
+        widget.state.question.value != null) {
+      _list.hide();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -64,46 +98,55 @@ class _StatusBarState extends State<StatusBar> {
                   link: _anchor,
                   child: OverlayPortal(
                     controller: _list,
-                    overlayChildBuilder: (context) => _NoticeList(
-                      state: state,
-                      link: _anchor,
-                      onClose: _list.hide,
+                    // A click outside the list or its opener closes it.
+                    overlayChildBuilder: (context) => TapRegion(
+                      groupId: _list,
+                      onTapOutside: (_) => _list.hide(),
+                      child: _NoticeList(
+                        state: state,
+                        link: _anchor,
+                        focus: _listFocus,
+                        onClose: _list.hide,
+                      ),
                     ),
                     // Focusable, so the list opens from the keyboard too.
-                    child: InkWell(
-                      onTap: _list.toggle,
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          if (notice != null) ...[
-                            Icon(
-                              _mark(notice.level),
-                              size: 13,
-                              color: _tone(context, notice.level),
-                            ),
-                            const SizedBox(width: WsMetrics.space2),
-                          ],
-                          Flexible(
-                            child: Text(
-                              notice?.text ?? '● ${failure ?? label}',
-                              key: const Key('status'),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: text.copyWith(
-                                color: notice == null
-                                    ? color
-                                    : _tone(context, notice.level),
+                    child: TapRegion(
+                      groupId: _list,
+                      child: InkWell(
+                        onTap: _toggle,
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (notice != null) ...[
+                              Icon(
+                                _mark(notice.level),
+                                size: 13,
+                                color: _tone(context, notice.level),
+                              ),
+                              const SizedBox(width: WsMetrics.space2),
+                            ],
+                            Flexible(
+                              child: Text(
+                                notice?.text ?? '● ${failure ?? label}',
+                                key: const Key('status'),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: text.copyWith(
+                                  color: notice == null
+                                      ? color
+                                      : _tone(context, notice.level),
+                                ),
                               ),
                             ),
-                          ),
-                          if (notice != null && more > 0) ...[
-                            const SizedBox(width: WsMetrics.space2),
-                            Text(
-                              '· $more more',
-                              style: text.copyWith(color: ws.textFaint),
-                            ),
+                            if (notice != null && more > 0) ...[
+                              const SizedBox(width: WsMetrics.space2),
+                              Text(
+                                '· $more more',
+                                style: text.copyWith(color: ws.textFaint),
+                              ),
+                            ],
                           ],
-                        ],
+                        ),
                       ),
                     ),
                   ),
@@ -159,99 +202,111 @@ class _NoticeList extends StatelessWidget {
   const _NoticeList({
     required this.state,
     required this.link,
+    required this.focus,
     required this.onClose,
   });
 
   final SessionState state;
   final LayerLink link;
+  final FocusNode focus;
   final VoidCallback onClose;
 
   @override
   Widget build(BuildContext context) {
     final ws = context.ws;
     final small = TextStyle(color: ws.textFaint, fontSize: WsMetrics.fsSmall);
-    return CompositedTransformFollower(
-      link: link,
-      targetAnchor: Alignment.topLeft,
-      followerAnchor: Alignment.bottomLeft,
-      offset: const Offset(-WsMetrics.space2, -WsMetrics.space3),
-      child: Align(
-        alignment: Alignment.bottomLeft,
-        child: Material(
-          color: ws.canvas,
-          elevation: 0,
-          borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
-          child: Container(
-            width: 320,
-            constraints: const BoxConstraints(maxHeight: 320),
-            padding: const EdgeInsets.all(WsMetrics.space2),
-            decoration: BoxDecoration(
+    // The list takes the keys while open, so esc closes it.
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.escape, includeRepeats: false):
+            onClose,
+      },
+      child: Focus(
+        focusNode: focus,
+        child: CompositedTransformFollower(
+          link: link,
+          targetAnchor: Alignment.topLeft,
+          followerAnchor: Alignment.bottomLeft,
+          offset: const Offset(-WsMetrics.space2, -WsMetrics.space3),
+          child: Align(
+            alignment: Alignment.bottomLeft,
+            child: Material(
+              color: ws.canvas,
+              elevation: 0,
               borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
-              boxShadow: ws.shadow,
-            ),
-            child: ValueListenableBuilder(
-              valueListenable: state.notices,
-              builder: (context, notices, _) => Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  SizedBox(
-                    height: WsMetrics.rowNav,
-                    child: Row(
-                      children: [
-                        const SizedBox(width: WsMetrics.space2),
-                        Text('Notifications', style: small),
-                        const Spacer(),
-                        InkWell(
-                          onTap: () {
-                            state.clearNotices();
-                            onClose();
-                          },
-                          child: Text('Clear all', style: small),
-                        ),
-                        const SizedBox(width: WsMetrics.space2),
-                      ],
-                    ),
-                  ),
-                  Flexible(
-                    child: ListView(
-                      shrinkWrap: true,
-                      children: [
-                        for (final notice in notices)
-                          SizedBox(
-                            height: WsMetrics.rowNav,
-                            child: Row(
-                              children: [
-                                const SizedBox(width: WsMetrics.space2),
-                                Icon(
-                                  _mark(notice.level),
-                                  size: 13,
-                                  color: _tone(context, notice.level),
-                                ),
-                                const SizedBox(width: WsMetrics.space3),
-                                Expanded(
-                                  child: Text(
-                                    notice.text,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
-                                      fontSize: WsMetrics.fsCompact,
-                                    ),
-                                  ),
-                                ),
-                                Text(
-                                  '${notice.at.hour.toString().padLeft(2, '0')}:'
-                                  '${notice.at.minute.toString().padLeft(2, '0')}',
-                                  style: small,
-                                ),
-                                const SizedBox(width: WsMetrics.space2),
-                              ],
+              child: Container(
+                width: 320,
+                constraints: const BoxConstraints(maxHeight: 320),
+                padding: const EdgeInsets.all(WsMetrics.space2),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
+                  boxShadow: ws.shadow,
+                ),
+                child: ValueListenableBuilder(
+                  valueListenable: state.notices,
+                  builder: (context, notices, _) => Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      SizedBox(
+                        height: WsMetrics.rowNav,
+                        child: Row(
+                          children: [
+                            const SizedBox(width: WsMetrics.space2),
+                            Text('Notifications', style: small),
+                            const Spacer(),
+                            InkWell(
+                              onTap: () {
+                                state.clearNotices();
+                                onClose();
+                              },
+                              child: Text('Clear all', style: small),
                             ),
-                          ),
-                      ],
-                    ),
+                            const SizedBox(width: WsMetrics.space2),
+                          ],
+                        ),
+                      ),
+                      Flexible(
+                        child: ListView(
+                          shrinkWrap: true,
+                          children: [
+                            for (final notice in notices)
+                              SizedBox(
+                                height: WsMetrics.rowNav,
+                                child: Row(
+                                  children: [
+                                    const SizedBox(width: WsMetrics.space2),
+                                    Icon(
+                                      _mark(notice.level),
+                                      size: 13,
+                                      color: _tone(context, notice.level),
+                                    ),
+                                    const SizedBox(width: WsMetrics.space3),
+                                    Expanded(
+                                      child: Text(
+                                        notice.text,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          fontSize: WsMetrics.fsCompact,
+                                        ),
+                                      ),
+                                    ),
+                                    Text(
+                                      '${notice.at.hour.toString().padLeft(2, '0')}:'
+                                      '${notice.at.minute.toString().padLeft(2, '0')}',
+                                      style: small,
+                                    ),
+                                    const SizedBox(width: WsMetrics.space2),
+                                  ],
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ],
                   ),
-                ],
+                ),
               ),
             ),
           ),
