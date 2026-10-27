@@ -37,4 +37,17 @@ void main() {
       expect(settings.value.hideWhitespace, isFalse);
     },
   );
+
+  test('saves quick changes one after another, keeping the last', () async {
+    final settings = await DiffSettingsController.load(SettingsFile(file));
+    for (var round = 0; round < 20; round++) {
+      await Future.wait([
+        settings.change(const DiffSettings(layout: DiffLayout.split)),
+        settings.change(const DiffSettings(hideWhitespace: true)),
+      ]);
+      final kept = await DiffSettingsController.load(SettingsFile(file));
+      expect(kept.value.layout, DiffLayout.unified);
+      expect(kept.value.hideWhitespace, isTrue);
+    }
+  });
 }

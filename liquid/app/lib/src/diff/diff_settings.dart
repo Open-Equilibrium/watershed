@@ -49,9 +49,16 @@ class DiffSettingsController extends ValueNotifier<DiffSettings> {
 
   final SettingsFile? _file;
 
+  /// The latest save; each waits for the one before, so the last change is the one kept.
+  Future<void> _saving = Future.value();
+
   /// Uses `settings` at once; fails if they could not be saved.
-  Future<void> change(DiffSettings settings) async {
+  Future<void> change(DiffSettings settings) {
     value = settings;
-    await _file?.save(settings.toJson());
+    final file = _file;
+    if (file == null) return Future.value();
+    final saved = _saving.then((_) => file.save(settings.toJson()));
+    _saving = saved.then((_) {}, onError: (Object _) {});
+    return saved;
   }
 }
