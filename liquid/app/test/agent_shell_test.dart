@@ -987,6 +987,8 @@ void main() {
                   added: '# disabled: \n',
                 ),
                 BridgeEditChange(removed: 'keep\n', added: 'kept\n'),
+                // Would join the line above with the next one.
+                BridgeEditChange(removed: '# on error\n', added: ''),
               ],
             ),
           ),
@@ -1013,6 +1015,7 @@ void main() {
       findsOneWidget,
       reason: 'a line break both sides end with is not marked',
     );
+    await revealLine(tester, '− # on error↵');
   });
 
   testWidgets('says when a write empties the whole file', (tester) async {

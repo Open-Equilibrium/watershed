@@ -349,17 +349,17 @@ List<_EditLine> _editLines(BridgeEdit edit) => [
       breaks: false,
     ),
   for (final change in edit.changes) ...[
-    ..._side(_EditKind.removed, change.removed, change.added),
-    ..._side(_EditKind.added, change.added, change.removed),
+    ..._side(_EditKind.removed, change.removed, change.added, edit.wholeFile),
+    ..._side(_EditKind.added, change.added, change.removed, edit.wholeFile),
   ],
 ];
 
-/// One side of a replacement. Its last line marks a line break that ends only this side, so
-/// adding or removing one never looks like no change (approved mockup).
-List<_EditLine> _side(_EditKind kind, String text, String other) {
+/// One side of a replacement. Unless a write replaces the whole file, its last line marks a line
+/// break that ends only this side, so adding or removing one never looks like no change
+/// (approved mockup).
+List<_EditLine> _side(_EditKind kind, String text, String other, bool write) {
   final lines = _lines(text);
-  final breaks =
-      other.isNotEmpty && text.endsWith('\n') && !other.endsWith('\n');
+  final breaks = !write && text.endsWith('\n') && !other.endsWith('\n');
   return [
     for (final (index, line) in lines.indexed)
       (kind: kind, text: line, breaks: breaks && index == lines.length - 1),
