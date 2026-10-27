@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../controls.dart';
 import '../theme/theme.dart';
@@ -22,13 +21,7 @@ class _FirstStart extends StatelessWidget {
     final ws = context.ws;
     void choose(Profile profile) => Navigator.of(context).pop(profile);
     return CallbackShortcuts(
-      bindings: {
-        const SingleActivator(
-          LogicalKeyboardKey.escape,
-          includeRepeats: false,
-        ): () =>
-            choose(Profile.standard),
-      },
+      bindings: {escapeKey: () => choose(Profile.standard)},
       // A focused node inside the dialog, so esc reaches the binding above.
       child: Focus(
         autofocus: true,
@@ -63,7 +56,7 @@ class _FirstStart extends StatelessWidget {
                         Expanded(
                           child: _Choice(
                             cap: '⇪',
-                            name: 'Liquid key',
+                            name: Profile.liquidKey.label,
                             points: const [
                               'Tap Caps Lock in any app to open Liquid.',
                               'In Liquid, hold it to see shortcuts; add a key to run one, like '
@@ -74,7 +67,7 @@ class _FirstStart extends StatelessWidget {
                             note:
                                 'Adds a small background item, so the key also opens Liquid when '
                                 "it isn't running. macOS lists it under Login Items.",
-                            action: 'Use Liquid key',
+                            action: 'Use ${Profile.liquidKey.label}',
                             onChoose: () => choose(Profile.liquidKey),
                           ),
                         ),
@@ -82,7 +75,7 @@ class _FirstStart extends StatelessWidget {
                         Expanded(
                           child: _Choice(
                             cap: '⌘',
-                            name: 'Standard',
+                            name: Profile.standard.label,
                             points: const [
                               'Caps Lock stays as it is.',
                               '⌘ shortcuts, like ⌘N for a new session.',

@@ -6,6 +6,10 @@ import 'package:flutter/widgets.dart';
 /// (ADR-0205).
 const liquidKey = LogicalKeyboardKey.f18;
 
+/// Esc pressed afresh and alone, which closes what is open.
+final ShortcutActivator escapeKey = const Keys(LogicalKeyboardKey.escape)
+    .activator;
+
 /// A key with the modifiers held for it; `liquid` is the Liquid key.
 @immutable
 class Keys {
@@ -327,7 +331,16 @@ enum Command {
   final bool liquid;
 }
 
-enum Profile { liquidKey, standard, custom }
+enum Profile {
+  liquidKey('Liquid key'),
+  standard('Standard'),
+  custom('Custom');
+
+  const Profile(this.label);
+
+  /// The profile's name, as Liquid shows it.
+  final String label;
+}
 
 /// What a command's keys may not be: keys a fixed row or macOS uses, or keys that type where the
 /// command works; null when the keys are free.

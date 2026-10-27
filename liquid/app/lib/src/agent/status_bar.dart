@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../format.dart';
 import '../rust/api/events.dart';
 import '../session/session_state.dart';
+import '../shortcuts/keymap.dart';
 import '../shortcuts/shortcut_reveal.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
@@ -41,24 +41,19 @@ class _StatusBarState extends State<StatusBar> {
   @override
   void initState() {
     super.initState();
-    widget.state.approval.addListener(_asked);
-    widget.state.question.addListener(_asked);
+    widget.state.requests.addListener(_asked);
   }
 
   @override
   void dispose() {
-    widget.state.approval.removeListener(_asked);
-    widget.state.question.removeListener(_asked);
+    widget.state.requests.removeListener(_asked);
     _listFocus.dispose();
     super.dispose();
   }
 
   /// The list would cover an approval or a question in the input area.
   void _asked() {
-    if (widget.state.approval.value != null ||
-        widget.state.question.value != null) {
-      _list.hide();
-    }
+    if (widget.state.asking) _list.hide();
   }
 
   @override
@@ -217,10 +212,7 @@ class _NoticeList extends StatelessWidget {
     final small = TextStyle(color: ws.textFaint, fontSize: WsMetrics.fsSmall);
     // The list takes the keys while open, so esc closes it.
     return CallbackShortcuts(
-      bindings: {
-        const SingleActivator(LogicalKeyboardKey.escape, includeRepeats: false):
-            onClose,
-      },
+      bindings: {escapeKey: onClose},
       child: Focus(
         focusNode: focus,
         child: CompositedTransformFollower(

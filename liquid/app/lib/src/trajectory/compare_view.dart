@@ -148,7 +148,7 @@ class _Header extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space4),
         child: Row(
           children: [
-            RefBadge(branch: branch),
+            RefBadge(ref: branch.ref, lane: branch.lane),
             const SizedBox(width: WsMetrics.space3),
             Expanded(
               child: Text(

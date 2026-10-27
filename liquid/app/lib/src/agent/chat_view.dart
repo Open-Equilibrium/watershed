@@ -93,9 +93,7 @@ class BranchMark extends StatelessWidget {
           Icon(LucideIcons.gitBranch, size: 13, color: ws.accent),
           const SizedBox(width: WsMetrics.space2),
           if (ref != null) ...[
-            RefBadge(
-              branch: Branch(tip: '', ref: ref, name: '', lane: marker.lane),
-            ),
+            RefBadge(ref: ref, lane: marker.lane),
             const SizedBox(width: WsMetrics.space2),
           ] else ...[
             Text('New branch', style: style),

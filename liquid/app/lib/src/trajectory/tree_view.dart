@@ -171,7 +171,7 @@ class _RowContent extends StatelessWidget {
           const SizedBox(width: WsMetrics.space2),
         ],
         if (branch != null) ...[
-          RefBadge(branch: branch),
+          RefBadge(ref: branch.ref, lane: branch.lane),
           const SizedBox(width: WsMetrics.space2),
           Expanded(
             child: Text(
@@ -223,19 +223,21 @@ class _RowContent extends StatelessWidget {
 
 /// A branch's letter in its lane color.
 class RefBadge extends StatelessWidget {
-  const RefBadge({super.key, required this.branch});
+  const RefBadge({super.key, required this.ref, required this.lane});
 
-  final Branch branch;
+  /// A branch's letter, such as `A`, shown in the color of its `lane`.
+  final String ref;
+  final int lane;
 
   @override
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space2),
     decoration: BoxDecoration(
-      color: laneColor(context.ws, branch.lane),
+      color: laneColor(context.ws, lane),
       borderRadius: BorderRadius.circular(WsMetrics.radiusSm),
     ),
     child: Text(
-      branch.ref,
+      ref,
       style: const TextStyle(
         color: Colors.white,
         fontSize: WsMetrics.fsSmall,

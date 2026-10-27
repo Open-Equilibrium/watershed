@@ -61,6 +61,13 @@ class SessionState {
   final items = ValueNotifier<List<ItemView>>(const []);
   final approval = ValueNotifier<BridgeRequest?>(null);
   final question = ValueNotifier<BridgeRequest?>(null);
+
+  /// Notifies when an approval or a question opens or ends.
+  late final Listenable requests = Listenable.merge([approval, question]);
+
+  /// Whether an approval or a question waits for the user.
+  bool get asking => approval.value != null || question.value != null;
+
   final widgets = ValueNotifier<Map<String, List<String>>>(const {});
   final statuses = ValueNotifier<Map<String, String>>(const {});
   final title = ValueNotifier<String?>(null);
@@ -622,7 +629,8 @@ class SessionState {
   }
 }
 
-/// A message's first line, as long as a stored session's title can be.
+/// A message's first line, as long as a stored session's title can be; the core names stored
+/// sessions by the same rule (`TITLE_CHARS` in meta-harness-core's `stored.rs`).
 String _firstLine(String message) {
   final line = message.trim().split('\n').first.trim();
   return String.fromCharCodes(line.runes.take(120));

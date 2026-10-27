@@ -65,8 +65,7 @@ class _AgentShellState extends State<AgentShell> {
     super.initState();
     _lifecycle;
     widget.state.draft.addListener(_applyDraft);
-    widget.state.approval.addListener(_asked);
-    widget.state.question.addListener(_asked);
+    widget.state.requests.addListener(_requestsChanged);
     unawaited(widget.state.loadStart());
     // A reopened Trajectory tab starts outside the comparison.
     _tab.addListener(() => _comparing.value = false);
@@ -91,10 +90,10 @@ class _AgentShellState extends State<AgentShell> {
   }
 
   /// An approval or a question closes Settings and any menu or dialog, which would cover it
-  /// or take the keys meant for it.
-  void _asked() {
-    if (widget.state.approval.value != null ||
-        widget.state.question.value != null) {
+  /// or take the keys meant for it; once none is left, a first start asks for the profile
+  /// again.
+  void _requestsChanged() {
+    if (widget.state.asking) {
       _settings.value = false;
       Navigator.of(context).popUntil((route) => route.isFirst);
     } else if (_shortcuts.firstStart && ModalRoute.of(context)!.isCurrent) {
@@ -120,8 +119,7 @@ class _AgentShellState extends State<AgentShell> {
   void dispose() {
     _lifecycle.dispose();
     widget.state.draft.removeListener(_applyDraft);
-    widget.state.approval.removeListener(_asked);
-    widget.state.question.removeListener(_asked);
+    widget.state.requests.removeListener(_requestsChanged);
     _composer.dispose();
     _composerFocus.dispose();
     _tab.dispose();

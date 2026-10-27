@@ -108,12 +108,6 @@ const List<_Group> _right = [
   ),
 ];
 
-const _profileNames = {
-  Profile.liquidKey: 'Liquid key',
-  Profile.standard: 'Standard',
-  Profile.custom: 'Custom',
-};
-
 /// Settings → Shortcuts (approved mockup, ADR-0204, ADR-0205): the profile, every action's
 /// keys and recording new ones. It replaces the main area; esc closes it.
 class ShortcutsPage extends StatefulWidget {
@@ -302,10 +296,7 @@ class _ShortcutsPageState extends State<ShortcutsPage> {
   Widget build(BuildContext context) {
     final ws = context.ws;
     return CallbackShortcuts(
-      bindings: {
-        const SingleActivator(LogicalKeyboardKey.escape, includeRepeats: false):
-            widget.onClose,
-      },
+      bindings: {escapeKey: widget.onClose},
       child: Focus(
         focusNode: _keys,
         onKeyEvent: _onKey,
@@ -462,7 +453,7 @@ class _ShortcutsPageState extends State<ShortcutsPage> {
                 Text(
                   changed > 0
                       ? '$changed shortcut${changed == 1 ? '' : 's'} changed'
-                      : '${_profileNames[settings.profile]} profile',
+                      : '${settings.profile.label} profile',
                   style: small,
                 ),
                 const Spacer(),
@@ -644,7 +635,7 @@ class _ProfileRow extends StatelessWidget {
                       for (final profile in Profile.values)
                         if (available || profile != Profile.liquidKey)
                           _Segment(
-                            label: _profileNames[profile]!,
+                            label: profile.label,
                             selected: settings.profile == profile,
                             onTap: () =>
                                 shortcuts.update(settings.choose(profile)),
@@ -655,7 +646,7 @@ class _ProfileRow extends StatelessWidget {
               ),
               if (settings.profile == Profile.custom)
                 Text(
-                  'based on ${_profileNames[settings.base]}',
+                  'based on ${settings.base.label}',
                   style: TextStyle(
                     color: ws.textFaint,
                     fontSize: WsMetrics.fsSmall,
@@ -900,10 +891,7 @@ class _ReplaceCustom extends StatelessWidget {
         ? '$changed changed shortcut${changed == 1 ? '' : 's'}'
         : 'the Liquid key turned ${kept.liquidKey ? 'on' : 'off'}';
     return CallbackShortcuts(
-      bindings: {
-        const SingleActivator(LogicalKeyboardKey.escape, includeRepeats: false):
-            onKeep,
-      },
+      bindings: {escapeKey: onKeep},
       child: Focus(
         canRequestFocus: false,
         skipTraversal: true,
@@ -943,7 +931,7 @@ class _ReplaceCustom extends StatelessWidget {
                 const SizedBox(height: WsMetrics.space1),
                 Text(
                   'Changing ${change.command.label} to ${change.keys.label} starts a '
-                  'new Custom profile from ${_profileNames[settings.profile]}. This '
+                  'new Custom profile from ${settings.profile.label}. This '
                   'replaces your current Custom profile, which has $lost.',
                 ),
                 Text(

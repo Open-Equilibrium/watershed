@@ -90,10 +90,7 @@ class _OptionListState extends State<_OptionList> {
                       () => _move(-1),
                       () => _move(1),
                     ]),
-                    for (final keys in Keymap.of(
-                      context,
-                    ).bindings(Command.answer))
-                      keys.activator: _pick,
+                    ...Keymap.of(context).bind({Command.answer: _pick}),
                   },
                   child: TextField(
                     key: const Key('filter'),

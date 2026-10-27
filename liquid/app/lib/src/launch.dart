@@ -43,17 +43,17 @@ Future<Launch> launchFromEnvironment(Map<String, String> environment) async {
   if (!Directory(project).existsSync()) {
     return Launch.problem('LIQUID_PROJECT names no directory: $project');
   }
-  // pi starts inside the project, which could supply a relative program or session file.
-  for (final (name, relative) in [
-    (
-      'LIQUID_PI',
-      (String path) => path.contains('/') && !File(path).isAbsolute,
-    ),
-    ('LIQUID_PI_SESSION', (String path) => !File(path).isAbsolute),
-  ]) {
-    if (environment[name] case final path? when relative(path)) {
-      return Launch.problem('$name must be an absolute path: $path');
-    }
+  // pi starts inside the project, which could supply a relative program or session file; a
+  // bare program name is looked up on PATH.
+  if (environment['LIQUID_PI'] case final pi?
+      when pi.contains('/') && !File(pi).isAbsolute) {
+    return Launch.problem('LIQUID_PI must be an absolute path: $pi');
+  }
+  if (environment['LIQUID_PI_SESSION'] case final session?
+      when !File(session).isAbsolute) {
+    return Launch.problem(
+      'LIQUID_PI_SESSION must be an absolute path: $session',
+    );
   }
   try {
     final session = await AgentSession.start(

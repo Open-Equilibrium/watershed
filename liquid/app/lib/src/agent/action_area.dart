@@ -38,33 +38,24 @@ class ActionArea extends StatefulWidget {
 }
 
 class _ActionAreaState extends State<ActionArea> {
-  late final _waiting = Listenable.merge([
-    widget.state.approval,
-    widget.state.question,
-  ]);
-
   /// Whether a card was shown when the requests last changed.
   bool _asking = false;
-
-  bool get _shown =>
-      widget.state.approval.value != null ||
-      widget.state.question.value != null;
 
   @override
   void initState() {
     super.initState();
-    _asking = _shown;
-    _waiting.addListener(_changed);
+    _asking = widget.state.asking;
+    widget.state.requests.addListener(_changed);
   }
 
   @override
   void dispose() {
-    _waiting.removeListener(_changed);
+    widget.state.requests.removeListener(_changed);
     super.dispose();
   }
 
   void _changed() {
-    final asking = _shown;
+    final asking = widget.state.asking;
     if (_asking && !asking) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) widget.composerFocus?.requestFocus();
