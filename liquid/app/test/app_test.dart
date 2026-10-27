@@ -21,6 +21,24 @@ void main() {
     expect(launch.problem, contains('absolute path'));
   });
 
+  test('refuses a program or session path the project could supply', () async {
+    for (final (name, value) in [
+      ('LIQUID_PI', 'node_modules/.bin/pi'),
+      ('LIQUID_PI_SESSION', 'sessions/old.jsonl'),
+    ]) {
+      final launch = await launchFromEnvironment({
+        'LIQUID_PROJECT': '/tmp',
+        'LIQUID_PI_EXTENSION': '/w/watershed.ts',
+        name: value,
+      });
+      expect(
+        launch.problem,
+        '$name must be an absolute path: $value',
+        reason: name,
+      );
+    }
+  });
+
   test('says when the project directory does not exist', () async {
     final launch = await launchFromEnvironment({
       'LIQUID_PROJECT': '/nonexistent/acme-api',

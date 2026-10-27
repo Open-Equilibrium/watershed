@@ -17,8 +17,8 @@ The app starts pi for the project named in the environment and opens the start p
 
 - `LIQUID_PROJECT` — the agent's project directory (required).
 - `LIQUID_PI_EXTENSION` — the absolute path of `meta-harness/pi-extension/watershed.ts` (required: pi would run tools without approvals, so Liquid does not start a session unless this extension is loaded).
-- `LIQUID_PI` — the pi executable; defaults to `pi`.
-- `LIQUID_PI_SESSION` — a stored pi session file to reopen, with its Trajectory and branches.
+- `LIQUID_PI` — the pi executable, a name looked up on `PATH` or an absolute path; defaults to `pi`.
+- `LIQUID_PI_SESSION` — the absolute path of a stored pi session file to reopen, with its Trajectory and branches.
 
 ## Liquid key
 
