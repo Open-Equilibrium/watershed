@@ -334,26 +334,37 @@ List<String> _lines(String text) => text.isEmpty
 
 enum _EditKind { path, note, removed, added }
 
-typedef _EditLine = ({_EditKind kind, String text});
+typedef _EditLine = ({_EditKind kind, String text, bool breaks});
 
 /// A file change as the Diff tab shows one: the path, then each replacement's removed and added
 /// lines (approved mockup, ADR-0212). A write says that it replaces whatever the file holds.
 List<_EditLine> _editLines(BridgeEdit edit) => [
-  (kind: _EditKind.path, text: edit.path),
+  (kind: _EditKind.path, text: edit.path, breaks: false),
   if (edit.wholeFile)
     (
       kind: _EditKind.note,
       text: edit.changes.every((change) => change.added.isEmpty)
           ? 'Empties the whole file'
           : 'Replaces the whole file',
+      breaks: false,
     ),
   for (final change in edit.changes) ...[
-    for (final removed in _lines(change.removed))
-      (kind: _EditKind.removed, text: removed),
-    for (final added in _lines(change.added))
-      (kind: _EditKind.added, text: added),
+    ..._side(_EditKind.removed, change.removed, change.added),
+    ..._side(_EditKind.added, change.added, change.removed),
   ],
 ];
+
+/// One side of a replacement. Its last line marks a line break that ends only this side, so
+/// adding or removing one never looks like no change (approved mockup).
+List<_EditLine> _side(_EditKind kind, String text, String other) {
+  final lines = _lines(text);
+  final breaks =
+      other.isNotEmpty && text.endsWith('\n') && !other.endsWith('\n');
+  return [
+    for (final (index, line) in lines.indexed)
+      (kind: kind, text: line, breaks: breaks && index == lines.length - 1),
+  ];
+}
 
 Widget _editLine(BuildContext context, _EditLine line) {
   final ws = context.ws;
@@ -361,7 +372,19 @@ Widget _editLine(BuildContext context, _EditLine line) {
   Widget marked(String sign, Color background) => Container(
     color: background,
     padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space1),
-    child: Text('$sign ${line.text}', style: style),
+    child: Text.rich(
+      TextSpan(
+        text: '$sign ${line.text}',
+        children: [
+          if (line.breaks)
+            TextSpan(
+              text: '↵',
+              style: TextStyle(color: ws.textFaint),
+            ),
+        ],
+      ),
+      style: style,
+    ),
   );
   return switch (line.kind) {
     _EditKind.path => Text(

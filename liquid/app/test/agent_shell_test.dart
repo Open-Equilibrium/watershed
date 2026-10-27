@@ -879,6 +879,19 @@ void main() {
     expect(find.text('Call $tool?'), findsOneWidget);
   });
 
+  /// Scrolls an approval's code to `line`, which is built only once it scrolls into view.
+  Future<void> revealLine(WidgetTester tester, String line) =>
+      tester.scrollUntilVisible(
+        find.text(line),
+        20,
+        scrollable: find
+            .descendant(
+              of: find.byType(ActionArea),
+              matching: find.byType(Scrollable),
+            )
+            .first,
+      );
+
   testWidgets('shows a file change as its path and changed lines', (
     tester,
   ) async {
@@ -909,17 +922,7 @@ void main() {
         ),
       ),
     );
-    // Lines are built as they scroll into the card's view.
-    Future<void> reveal(String line) => tester.scrollUntilVisible(
-      find.text(line),
-      20,
-      scrollable: find
-          .descendant(
-            of: find.byType(ActionArea),
-            matching: find.byType(Scrollable),
-          )
-          .first,
-    );
+    Future<void> reveal(String line) => revealLine(tester, line);
     expect(find.text('src/routes/login.ts'), findsOneWidget);
     expect(find.text("− router.post('/login', login);"), findsOneWidget);
     await reveal('+ const limit = rateLimit({ max: 5 });');
@@ -957,6 +960,58 @@ void main() {
       find.textContaining('more lines'),
       findsNothing,
       reason: 'two is last',
+    );
+  });
+
+  testWidgets('marks a line break that ends only one side of a replacement', (
+    tester,
+  ) async {
+    await show(tester);
+    await emit(
+      tester,
+      event(
+        BridgeEventKind.requestOpened,
+        request: const BridgeRequest(
+          id: 'a1',
+          approval: BridgeApproval(
+            kind: BridgeRequestKind.fileChange,
+            tool: 'edit',
+            text: '{}',
+            edit: BridgeEdit(
+              path: 'install.sh',
+              wholeFile: false,
+              changes: [
+                // Would turn the commented line below into a command.
+                BridgeEditChange(
+                  removed: '# disabled: ',
+                  added: '# disabled: \n',
+                ),
+                BridgeEditChange(removed: 'keep\n', added: 'kept\n'),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(find.text('− # disabled: '), findsOneWidget);
+    await revealLine(tester, '+ # disabled: ↵');
+    final line = tester.widget<RichText>(
+      find.text('+ # disabled: ↵', findRichText: true),
+    );
+    TextSpan? mark;
+    line.text.visitChildren((span) {
+      if (span is TextSpan && span.text == '↵') mark = span;
+      return true;
+    });
+    expect(
+      mark?.style?.color,
+      tester.element(find.byType(ActionArea)).ws.textFaint,
+    );
+    await revealLine(tester, '+ kept');
+    expect(
+      find.text('− keep'),
+      findsOneWidget,
+      reason: 'a line break both sides end with is not marked',
     );
   });
 
