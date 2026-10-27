@@ -138,7 +138,7 @@ M2 delivers Meta-Harness as a **self-contained, host-scoped headless control pla
 **Deliverables:**
 
 - Meta-Harness CLI (headless user/admin: run/session/config/metrics commands).
-- Local service/daemon shape (embedded in Liquid, sidecar or standalone daemon) serving that API over both connections.
+- Local service in its own process, serving that API over both connections; who starts it is [D-074](docs/decisions/open-decisions.html#d-074). Liquid then connects to it like any client and drops its embedded core (ADR-0215).
 - API/protocol surface for Liquid and BYOA: session registry, live event and transcript streams, artifact/log/handoff queries, config read/write proposals, agent schedule/trigger control, approval/reject/revert.
 - Central configuration model that resolves shared Watershed building blocks to each target's documented config surface. Flow Agent receives only its global authority and explicit Flows rather than a project-local config layer; device-local Runtime bindings remain owned by the execution host.
 - Control plane: session registry, routing, task state, attention state and agent schedule/trigger skeleton.
