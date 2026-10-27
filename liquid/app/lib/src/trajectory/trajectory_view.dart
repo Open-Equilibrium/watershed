@@ -13,6 +13,7 @@ import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'compare_view.dart';
+import 'context_details.dart';
 import 'inspector.dart';
 import 'overview.dart';
 import 'step_parts.dart';
@@ -70,12 +71,9 @@ class _TrajectoryViewState extends State<TrajectoryView> {
   bool _inspecting = false;
   InspectorTab _tab = InspectorTab.summary;
 
-  /// What the model saw for the latest responses opened, loaded when their inspector opens.
-  final _details = <String, BridgeContextDetail?>{};
-  static const _keptDetails = 4;
-
-  /// Why what the model saw for a response could not be read, by entry.
-  final _unread = <String, String>{};
+  /// What the model saw, loaded when a response's inspector opens.
+  late final _details = ContextDetails(widget.state.context)
+    ..addListener(() => setState(() {}));
   final _folded = <int>{};
   bool _equalWidth = false;
   (double, double)? _range;
@@ -105,6 +103,7 @@ class _TrajectoryViewState extends State<TrajectoryView> {
   @override
   void dispose() {
     widget.state.stored.removeListener(_reload);
+    _details.dispose();
     _focus.dispose();
     _scroll.dispose();
     super.dispose();
@@ -386,41 +385,6 @@ class _TrajectoryViewState extends State<TrajectoryView> {
     }
   }
 
-  /// The context detail of a response, starting its load the first time it is asked for.
-  BridgeContextDetail? _detailFor(BridgeRecord record) {
-    if (record.kind != BridgeRecordKind.message) return null;
-    final entry = record.entry;
-    if (!_details.containsKey(entry)) {
-      // Each context lists the branch before it, so only the latest few stay.
-      if (_details.length == _keptDetails) {
-        final oldest = _details.keys.first;
-        _details.remove(oldest);
-        _unread.remove(oldest);
-      }
-      _details[entry] = null;
-      widget.state
-          .context(entry)
-          .then(
-            (detail) {
-              if (!mounted || !_details.containsKey(entry)) return;
-              setState(() {
-                if (detail == null) {
-                  _unread[entry] = 'the session has no such response';
-                } else {
-                  _details[entry] = detail;
-                }
-              });
-            },
-            onError: (Object error) {
-              if (mounted && _details.containsKey(entry)) {
-                setState(() => _unread[entry] = '$error');
-              }
-            },
-          );
-    }
-    return _details[entry];
-  }
-
   void _escape() {
     if (_range != null || _window != null) {
       setState(() {
@@ -676,8 +640,8 @@ class _TrajectoryViewState extends State<TrajectoryView> {
                 ),
               ),
               _InspectorLine(index: final step) => Inspector(
-                detail: _detailFor(records[step]),
-                unread: _unread[records[step].entry],
+                detail: _details.detailFor(records[step]),
+                unread: _details.unread(records[step].entry),
                 records: records,
                 index: step,
                 tab: _tab,
