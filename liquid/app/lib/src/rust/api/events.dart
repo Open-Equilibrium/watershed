@@ -206,9 +206,6 @@ enum BridgeEventKind {
   widgetChanged,
 
   /// `text`.
-  titleChanged,
-
-  /// `text`.
   inputTextSet,
 
   /// `text` with the reason the session stopped the agent.

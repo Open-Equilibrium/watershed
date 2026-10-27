@@ -505,10 +505,6 @@ impl From<AgentEvent> for BridgeEvent {
                 }),
                 ..event(Kind::WidgetChanged)
             },
-            AgentEvent::TitleChanged { title } => BridgeEvent {
-                text: Some(title),
-                ..event(Kind::TitleChanged)
-            },
             AgentEvent::InputTextSet { text } => BridgeEvent {
                 text: Some(text),
                 ..event(Kind::InputTextSet)

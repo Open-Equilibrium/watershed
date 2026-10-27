@@ -35,8 +35,6 @@ pub enum BridgeEventKind {
     /// `display` with key and optional lines.
     WidgetChanged,
     /// `text`.
-    TitleChanged,
-    /// `text`.
     InputTextSet,
     /// `text` with the reason the session stopped the agent.
     Failed,

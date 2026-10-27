@@ -70,7 +70,6 @@ class SessionState {
 
   final widgets = ValueNotifier<Map<String, List<String>>>(const {});
   final statuses = ValueNotifier<Map<String, String>>(const {});
-  final title = ValueNotifier<String?>(null);
 
   /// The open session's title, as the start page names stored sessions; until pi stored one,
   /// the first line of the first message sent.
@@ -165,19 +164,13 @@ class SessionState {
     final switching = _switching = Completer<void>();
     // Extension displays belong to their session. The new session's extensions may set theirs
     // before pi confirms the switch, so the old ones go now and come back if it does not happen.
-    final (shownWidgets, shownStatuses, shownTitle) = (
-      widgets.value,
-      statuses.value,
-      title.value,
-    );
+    final (shownWidgets, shownStatuses) = (widgets.value, statuses.value);
     widgets.value = const {};
     statuses.value = const {};
-    title.value = null;
     try {
       if (!await _replace(switchTo)) {
         widgets.value = shownWidgets;
         statuses.value = shownStatuses;
-        title.value = shownTitle;
       }
     } finally {
       _switching = null;
@@ -588,8 +581,6 @@ class SessionState {
             ? next.remove(event.display!.key)
             : next[event.display!.key] = text;
         statuses.value = next;
-      case BridgeEventKind.titleChanged:
-        title.value = event.text;
       case BridgeEventKind.inputTextSet:
         draft.value = event.text;
       case BridgeEventKind.queueChanged:

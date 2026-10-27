@@ -422,11 +422,6 @@ fn extension_ui(
                 lines: strings(record.get("widgetLines")),
             });
         }
-        "setTitle" => {
-            return Some(AgentEvent::TitleChanged {
-                title: text("title"),
-            });
-        }
         "set_editor_text" => return Some(AgentEvent::InputTextSet { text: text("text") }),
         _ => return None,
     };

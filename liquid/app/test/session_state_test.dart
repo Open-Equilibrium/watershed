@@ -165,7 +165,6 @@ void main() {
         text: '1/2',
       ),
     );
-    await emit(event(BridgeEventKind.titleChanged, text: 'pi - acme'));
     await emit(event(BridgeEventKind.inputTextSet, text: 'draft'));
     await emit(
       event(
@@ -178,7 +177,7 @@ void main() {
       'todo': ['one', 'two'],
     });
     expect(state.statuses.value, {'todo': '1/2'});
-    expect((state.title.value, state.draft.value), ('pi - acme', 'draft'));
+    expect(state.draft.value, 'draft');
     expect(
       (state.notice.value?.level, state.notice.value?.text),
       (BridgeLevel.warning, 'Careful'),

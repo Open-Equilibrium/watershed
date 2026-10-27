@@ -328,11 +328,6 @@ pub enum AgentEvent {
         /// The lines, or `None` when cleared.
         lines: Option<Vec<String>>,
     },
-    /// An agent extension set the session title.
-    TitleChanged {
-        /// The title.
-        title: String,
-    },
     /// An agent extension replaced the text in the input area.
     InputTextSet {
         /// The text.

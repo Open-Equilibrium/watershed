@@ -1667,11 +1667,10 @@ impl SseDecode for crate::api::events::BridgeEventKind {
             12 => crate::api::events::BridgeEventKind::Notification,
             13 => crate::api::events::BridgeEventKind::StatusChanged,
             14 => crate::api::events::BridgeEventKind::WidgetChanged,
-            15 => crate::api::events::BridgeEventKind::TitleChanged,
-            16 => crate::api::events::BridgeEventKind::InputTextSet,
-            17 => crate::api::events::BridgeEventKind::Failed,
-            18 => crate::api::events::BridgeEventKind::Exited,
-            19 => crate::api::events::BridgeEventKind::QueueChanged,
+            15 => crate::api::events::BridgeEventKind::InputTextSet,
+            16 => crate::api::events::BridgeEventKind::Failed,
+            17 => crate::api::events::BridgeEventKind::Exited,
+            18 => crate::api::events::BridgeEventKind::QueueChanged,
             _ => unreachable!("Invalid variant for BridgeEventKind: {}", inner),
         };
     }
@@ -2888,11 +2887,10 @@ impl flutter_rust_bridge::IntoDart for crate::api::events::BridgeEventKind {
             Self::Notification => 12.into_dart(),
             Self::StatusChanged => 13.into_dart(),
             Self::WidgetChanged => 14.into_dart(),
-            Self::TitleChanged => 15.into_dart(),
-            Self::InputTextSet => 16.into_dart(),
-            Self::Failed => 17.into_dart(),
-            Self::Exited => 18.into_dart(),
-            Self::QueueChanged => 19.into_dart(),
+            Self::InputTextSet => 15.into_dart(),
+            Self::Failed => 16.into_dart(),
+            Self::Exited => 17.into_dart(),
+            Self::QueueChanged => 18.into_dart(),
             _ => unreachable!(),
         }
     }
@@ -3659,11 +3657,10 @@ impl SseEncode for crate::api::events::BridgeEventKind {
                 crate::api::events::BridgeEventKind::Notification => 12,
                 crate::api::events::BridgeEventKind::StatusChanged => 13,
                 crate::api::events::BridgeEventKind::WidgetChanged => 14,
-                crate::api::events::BridgeEventKind::TitleChanged => 15,
-                crate::api::events::BridgeEventKind::InputTextSet => 16,
-                crate::api::events::BridgeEventKind::Failed => 17,
-                crate::api::events::BridgeEventKind::Exited => 18,
-                crate::api::events::BridgeEventKind::QueueChanged => 19,
+                crate::api::events::BridgeEventKind::InputTextSet => 15,
+                crate::api::events::BridgeEventKind::Failed => 16,
+                crate::api::events::BridgeEventKind::Exited => 17,
+                crate::api::events::BridgeEventKind::QueueChanged => 18,
                 _ => {
                     unimplemented!("");
                 }
