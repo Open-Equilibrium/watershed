@@ -131,7 +131,15 @@ class _ApprovalCardState extends State<ApprovalCard> with ReadDelay {
                 ],
               ),
               const SizedBox(height: WsMetrics.space3),
-              Expanded(child: _ScrollingCode(approval.text, controller: _code)),
+              Expanded(
+                child: _ScrollingCode(
+                  controller: _code,
+                  child: switch (approval.edit) {
+                    final edit? => _EditLines(edit),
+                    null => Text(approval.text, style: monoStyle(context)),
+                  },
+                ),
+              ),
               const SizedBox(height: WsMetrics.space3),
               Row(
                 children: [
@@ -193,9 +201,10 @@ String _sessionLabel(BridgeApproval approval) {
 /// Code that scrolls inside a fixed height and says how many lines are below, so nothing is
 /// hidden without a hint (approved approval mockup).
 class _ScrollingCode extends StatefulWidget {
-  const _ScrollingCode(this.text, {required this.controller});
+  const _ScrollingCode({required this.child, required this.controller});
 
-  final String text;
+  /// The call, in the monospaced style whose lines the hint counts.
+  final Widget child;
   final ScrollController controller;
 
   @override
@@ -238,10 +247,7 @@ class _ScrollingCodeState extends State<_ScrollingCode> {
                     horizontal: WsMetrics.space4,
                     vertical: WsMetrics.space2,
                   ),
-                  child: SizedBox(
-                    width: double.infinity,
-                    child: Text(widget.text, style: style),
-                  ),
+                  child: SizedBox(width: double.infinity, child: widget.child),
                 ),
               ),
             ),
@@ -268,3 +274,39 @@ class _ScrollingCodeState extends State<_ScrollingCode> {
 }
 
 double _lineHeight(TextStyle style) => measureText(' ', style).height;
+
+/// A file change as the Diff tab shows one: the path, then each replacement's removed and added
+/// lines (approved mockup, ADR-0212).
+class _EditLines extends StatelessWidget {
+  const _EditLines(this.edit);
+
+  final BridgeEdit edit;
+
+  @override
+  Widget build(BuildContext context) {
+    final ws = context.ws;
+    final style = monoStyle(context);
+    Widget line(String sign, String text, Color background) => Container(
+      color: background,
+      padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space1),
+      child: Text('$sign $text', style: style),
+    );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          edit.path,
+          style: style.copyWith(fontWeight: WsMetrics.fwSemibold),
+        ),
+        for (final change in edit.changes) ...[
+          if (change.removed.isNotEmpty)
+            for (final removed in change.removed.split('\n'))
+              line('−', removed, ws.diffDel),
+          if (change.added.isNotEmpty)
+            for (final added in change.added.split('\n'))
+              line('+', added, ws.diffAdd),
+        ],
+      ],
+    );
+  }
+}

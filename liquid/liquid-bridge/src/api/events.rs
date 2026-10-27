@@ -173,6 +173,27 @@ pub struct BridgeApproval {
     pub text: String,
     /// The id of the call's item in the chat, when known.
     pub item: Option<i64>,
+    /// What a file change does, when pi's own `edit` or `write` asks; the card shows it as
+    /// removed and added lines (ADR-0212).
+    pub edit: Option<BridgeEdit>,
+}
+
+/// A file change as its approval shows it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgeEdit {
+    /// The file.
+    pub path: String,
+    /// The replacements in order; a write replaces nothing with all of the file.
+    pub changes: Vec<BridgeEditChange>,
+}
+
+/// One replacement in a file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgeEditChange {
+    /// The text it removes.
+    pub removed: String,
+    /// The text it adds.
+    pub added: String,
 }
 
 /// The user's answer to an approval request.

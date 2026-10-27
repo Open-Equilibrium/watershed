@@ -7,7 +7,7 @@ import '../frb_generated.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
 /// A tool call awaiting approval.
 class BridgeApproval {
@@ -23,16 +23,25 @@ class BridgeApproval {
   /// The id of the call's item in the chat, when known.
   final PlatformInt64? item;
 
+  /// What a file change does, when pi's own `edit` or `write` asks; the card shows it as
+  /// removed and added lines (ADR-0212).
+  final BridgeEdit? edit;
+
   const BridgeApproval({
     required this.kind,
     required this.tool,
     required this.text,
     this.item,
+    this.edit,
   });
 
   @override
   int get hashCode =>
-      kind.hashCode ^ tool.hashCode ^ text.hashCode ^ item.hashCode;
+      kind.hashCode ^
+      tool.hashCode ^
+      text.hashCode ^
+      item.hashCode ^
+      edit.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -42,7 +51,8 @@ class BridgeApproval {
           kind == other.kind &&
           tool == other.tool &&
           text == other.text &&
-          item == other.item;
+          item == other.item &&
+          edit == other.edit;
 }
 
 /// How a file changed in a run.
@@ -93,6 +103,50 @@ class BridgeDisplay {
           key == other.key &&
           level == other.level &&
           lines == other.lines;
+}
+
+/// A file change as its approval shows it.
+class BridgeEdit {
+  /// The file.
+  final String path;
+
+  /// The replacements in order; a write replaces nothing with all of the file.
+  final List<BridgeEditChange> changes;
+
+  const BridgeEdit({required this.path, required this.changes});
+
+  @override
+  int get hashCode => path.hashCode ^ changes.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeEdit &&
+          runtimeType == other.runtimeType &&
+          path == other.path &&
+          changes == other.changes;
+}
+
+/// One replacement in a file.
+class BridgeEditChange {
+  /// The text it removes.
+  final String removed;
+
+  /// The text it adds.
+  final String added;
+
+  const BridgeEditChange({required this.removed, required this.added});
+
+  @override
+  int get hashCode => removed.hashCode ^ added.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeEditChange &&
+          runtimeType == other.runtimeType &&
+          removed == other.removed &&
+          added == other.added;
 }
 
 /// One session event for Dart.

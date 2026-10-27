@@ -1046,6 +1046,7 @@ fn asks_only_for_calls_the_approval_mode_does_not_allow() {
                     read_only: false,
                     session: Some("s1".to_owned()),
                     item: None,
+                    edit: None,
                 })
             );
             assert_eq!(session.decide(&request, decision).await, Ok(()));

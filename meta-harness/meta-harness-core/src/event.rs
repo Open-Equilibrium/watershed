@@ -125,6 +125,25 @@ pub enum RequestKind {
     ToolApproval,
 }
 
+/// What a file change would do, as its approval shows it: the file and each replacement, with
+/// the characters that could hide or reorder them written out.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EditPreview {
+    /// The file, on one line.
+    pub path: String,
+    /// The replacements in order; a write replaces nothing with all of the file.
+    pub changes: Vec<EditChange>,
+}
+
+/// One replacement in a file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EditChange {
+    /// The text it removes.
+    pub removed: String,
+    /// The text it adds.
+    pub added: String,
+}
+
 /// The user's answer to an approval request.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Decision {
@@ -289,6 +308,8 @@ pub enum AgentEvent {
         session: Option<String>,
         /// The call's item, when the agent says which call it asks about.
         item: Option<ItemId>,
+        /// What a file change does, when pi's own `edit` or `write` asks (ADR-0212).
+        edit: Option<EditPreview>,
     },
     /// An approval request ended, answered or withdrawn.
     RequestResolved {

@@ -75,6 +75,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeDisplay dco_decode_box_autoadd_bridge_display(dynamic raw);
 
   @protected
+  BridgeEdit dco_decode_box_autoadd_bridge_edit(dynamic raw);
+
+  @protected
   BridgeItem dco_decode_box_autoadd_bridge_item(dynamic raw);
 
   @protected
@@ -133,6 +136,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeDisplay dco_decode_bridge_display(dynamic raw);
+
+  @protected
+  BridgeEdit dco_decode_bridge_edit(dynamic raw);
+
+  @protected
+  BridgeEditChange dco_decode_bridge_edit_change(dynamic raw);
 
   @protected
   BridgeEntryKind dco_decode_bridge_entry_kind(dynamic raw);
@@ -227,6 +236,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<BridgeContextPart> dco_decode_list_bridge_context_part(dynamic raw);
 
   @protected
+  List<BridgeEditChange> dco_decode_list_bridge_edit_change(dynamic raw);
+
+  @protected
   List<BridgeFileChange> dco_decode_list_bridge_file_change(dynamic raw);
 
   @protected
@@ -271,6 +283,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeDisplay? dco_decode_opt_box_autoadd_bridge_display(dynamic raw);
+
+  @protected
+  BridgeEdit? dco_decode_opt_box_autoadd_bridge_edit(dynamic raw);
 
   @protected
   BridgeItem? dco_decode_opt_box_autoadd_bridge_item(dynamic raw);
@@ -384,6 +399,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeEdit sse_decode_box_autoadd_bridge_edit(SseDeserializer deserializer);
+
+  @protected
   BridgeItem sse_decode_box_autoadd_bridge_item(SseDeserializer deserializer);
 
   @protected
@@ -462,6 +480,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeDisplay sse_decode_bridge_display(SseDeserializer deserializer);
+
+  @protected
+  BridgeEdit sse_decode_bridge_edit(SseDeserializer deserializer);
+
+  @protected
+  BridgeEditChange sse_decode_bridge_edit_change(SseDeserializer deserializer);
 
   @protected
   BridgeEntryKind sse_decode_bridge_entry_kind(SseDeserializer deserializer);
@@ -570,6 +594,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  List<BridgeEditChange> sse_decode_list_bridge_edit_change(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   List<BridgeFileChange> sse_decode_list_bridge_file_change(
     SseDeserializer deserializer,
   );
@@ -628,6 +657,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeDisplay? sse_decode_opt_box_autoadd_bridge_display(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeEdit? sse_decode_opt_box_autoadd_bridge_edit(
     SseDeserializer deserializer,
   );
 
@@ -772,6 +806,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_box_autoadd_bridge_edit(
+    BridgeEdit self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_box_autoadd_bridge_item(
     BridgeItem self,
     SseSerializer serializer,
@@ -884,6 +924,15 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_bridge_display(BridgeDisplay self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_bridge_edit(BridgeEdit self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_bridge_edit_change(
+    BridgeEditChange self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_bridge_entry_kind(
@@ -1027,6 +1076,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_list_bridge_edit_change(
+    List<BridgeEditChange> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_list_bridge_file_change(
     List<BridgeFileChange> self,
     SseSerializer serializer,
@@ -1101,6 +1156,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_opt_box_autoadd_bridge_display(
     BridgeDisplay? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_bridge_edit(
+    BridgeEdit? self,
     SseSerializer serializer,
   );
 

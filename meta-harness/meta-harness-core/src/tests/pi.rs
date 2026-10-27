@@ -1,9 +1,9 @@
 use serde_json::{Map, Value};
 
 use crate::{
-    AgentEvent, ChangedLines, EntryKind, History, ItemDetail, ItemId, ItemKind, ItemStatus,
-    NotificationLevel, PiAdapter, RequestId, RequestKind, SessionTree, TreeNode, TurnId, Usage,
-    UserInput,
+    AgentEvent, ChangedLines, EditChange, EditPreview, EntryKind, History, ItemDetail, ItemId,
+    ItemKind, ItemStatus, NotificationLevel, PiAdapter, RequestId, RequestKind, SessionTree,
+    TreeNode, TurnId, Usage, UserInput,
 };
 
 const TURN: TurnId = TurnId(1);
@@ -317,6 +317,7 @@ fn turns_watershed_approval_questions_into_requests() {
             read_only,
             session: (id == "a1").then(|| "s1".to_owned()),
             item: None,
+            edit: None,
         };
     assert_eq!(
         events,
@@ -345,6 +346,90 @@ fn turns_watershed_approval_questions_into_requests() {
                 false
             ),
             opened("a4", RequestKind::ToolApproval, "safe<U+202E>", "{}", false),
+        ]
+    );
+}
+
+#[test]
+fn shows_an_edit_as_its_path_and_its_removed_and_added_lines() {
+    let ask = |id: &str, tool: &str, arguments: &str, builtin: bool| {
+        format!(
+            r#"{{"type":"extension_ui_request","id":"{id}","method":"select","title":"watershed.approval {{\"tool\":\"{tool}\",\"arguments\":{arguments},\"readOnly\":false,\"builtin\":{builtin}}}","options":[]}}"#
+        )
+    };
+    let records = [
+        ask(
+            "e1",
+            "edit",
+            r#"{\"path\":\"src/a.ts\",\"edits\":[{\"oldText\":\"a\\nb\",\"newText\":\"c\"},{\"oldText\":\"x\",\"newText\":\"y\\u202e\"}]}"#,
+            true,
+        ),
+        // The other forms pi accepts: one edit, edits as JSON text, and the older fields.
+        ask(
+            "e2",
+            "edit",
+            r#"{\"path\":\"p\",\"edits\":{\"oldText\":\"o\",\"newText\":\"n\"}}"#,
+            true,
+        ),
+        ask(
+            "e3",
+            "edit",
+            r#"{\"path\":\"p\",\"edits\":\"[{\\\"oldText\\\":\\\"o\\\",\\\"newText\\\":\\\"n\\\"}]\"}"#,
+            true,
+        ),
+        ask(
+            "e4",
+            "edit",
+            r#"{\"path\":\"p\",\"oldText\":\"o\",\"newText\":\"n\"}"#,
+            true,
+        ),
+        ask(
+            "e5",
+            "write",
+            r#"{\"path\":\"new\\u202e.ts\",\"content\":\"one\\ntwo\"}"#,
+            true,
+        ),
+        // An extension's edit shows all of its arguments instead.
+        ask(
+            "e6",
+            "edit",
+            r#"{\"path\":\"p\",\"oldText\":\"o\",\"newText\":\"n\"}"#,
+            false,
+        ),
+    ];
+    let events = translate(&records.iter().map(String::as_str).collect::<Vec<_>>());
+    let change = |removed: &str, added: &str| EditChange {
+        removed: removed.to_owned(),
+        added: added.to_owned(),
+    };
+    let previews: Vec<_> = events
+        .iter()
+        .map(|event| match event {
+            AgentEvent::RequestOpened { edit, .. } => edit.clone(),
+            other => panic!("an approval opens a request: {other:?}"),
+        })
+        .collect();
+    let one = |path: &str| {
+        Some(EditPreview {
+            path: path.to_owned(),
+            changes: vec![change("o", "n")],
+        })
+    };
+    assert_eq!(
+        previews,
+        [
+            Some(EditPreview {
+                path: "src/a.ts".to_owned(),
+                changes: vec![change("a\nb", "c"), change("x", "y<U+202E>")],
+            }),
+            one("p"),
+            one("p"),
+            one("p"),
+            Some(EditPreview {
+                path: "new<U+202E>.ts".to_owned(),
+                changes: vec![change("", "one\ntwo")],
+            }),
+            None,
         ]
     );
 }

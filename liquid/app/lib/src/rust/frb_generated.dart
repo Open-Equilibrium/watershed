@@ -1298,6 +1298,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgeEdit dco_decode_box_autoadd_bridge_edit(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_bridge_edit(raw);
+  }
+
+  @protected
   BridgeItem dco_decode_box_autoadd_bridge_item(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return dco_decode_bridge_item(raw);
@@ -1373,13 +1379,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeApproval dco_decode_bridge_approval(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 4)
-      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
+    if (arr.length != 5)
+      throw Exception('unexpected arr length: expect 5 but see ${arr.length}');
     return BridgeApproval(
       kind: dco_decode_bridge_request_kind(arr[0]),
       tool: dco_decode_String(arr[1]),
       text: dco_decode_String(arr[2]),
       item: dco_decode_opt_box_autoadd_i_64(arr[3]),
+      edit: dco_decode_opt_box_autoadd_bridge_edit(arr[4]),
     );
   }
 
@@ -1451,6 +1458,30 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       key: dco_decode_String(arr[0]),
       level: dco_decode_opt_box_autoadd_bridge_level(arr[1]),
       lines: dco_decode_opt_list_String(arr[2]),
+    );
+  }
+
+  @protected
+  BridgeEdit dco_decode_bridge_edit(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 2)
+      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    return BridgeEdit(
+      path: dco_decode_String(arr[0]),
+      changes: dco_decode_list_bridge_edit_change(arr[1]),
+    );
+  }
+
+  @protected
+  BridgeEditChange dco_decode_bridge_edit_change(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 2)
+      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    return BridgeEditChange(
+      removed: dco_decode_String(arr[0]),
+      added: dco_decode_String(arr[1]),
     );
   }
 
@@ -1808,6 +1839,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  List<BridgeEditChange> dco_decode_list_bridge_edit_change(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_bridge_edit_change).toList();
+  }
+
+  @protected
   List<BridgeFileChange> dco_decode_list_bridge_file_change(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return (raw as List<dynamic>).map(dco_decode_bridge_file_change).toList();
@@ -1899,6 +1936,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeDisplay? dco_decode_opt_box_autoadd_bridge_display(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw == null ? null : dco_decode_box_autoadd_bridge_display(raw);
+  }
+
+  @protected
+  BridgeEdit? dco_decode_opt_box_autoadd_bridge_edit(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_box_autoadd_bridge_edit(raw);
   }
 
   @protected
@@ -2122,6 +2165,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgeEdit sse_decode_box_autoadd_bridge_edit(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_bridge_edit(deserializer));
+  }
+
+  @protected
   BridgeItem sse_decode_box_autoadd_bridge_item(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return (sse_decode_bridge_item(deserializer));
@@ -2216,11 +2265,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_tool = sse_decode_String(deserializer);
     var var_text = sse_decode_String(deserializer);
     var var_item = sse_decode_opt_box_autoadd_i_64(deserializer);
+    var var_edit = sse_decode_opt_box_autoadd_bridge_edit(deserializer);
     return BridgeApproval(
       kind: var_kind,
       tool: var_tool,
       text: var_text,
       item: var_item,
+      edit: var_edit,
     );
   }
 
@@ -2300,6 +2351,22 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_level = sse_decode_opt_box_autoadd_bridge_level(deserializer);
     var var_lines = sse_decode_opt_list_String(deserializer);
     return BridgeDisplay(key: var_key, level: var_level, lines: var_lines);
+  }
+
+  @protected
+  BridgeEdit sse_decode_bridge_edit(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_path = sse_decode_String(deserializer);
+    var var_changes = sse_decode_list_bridge_edit_change(deserializer);
+    return BridgeEdit(path: var_path, changes: var_changes);
+  }
+
+  @protected
+  BridgeEditChange sse_decode_bridge_edit_change(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_removed = sse_decode_String(deserializer);
+    var var_added = sse_decode_String(deserializer);
+    return BridgeEditChange(removed: var_removed, added: var_added);
   }
 
   @protected
@@ -2724,6 +2791,20 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  List<BridgeEditChange> sse_decode_list_bridge_edit_change(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <BridgeEditChange>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_bridge_edit_change(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
   List<BridgeFileChange> sse_decode_list_bridge_file_change(
     SseDeserializer deserializer,
   ) {
@@ -2895,6 +2976,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
     if (sse_decode_bool(deserializer)) {
       return (sse_decode_box_autoadd_bridge_display(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
+  BridgeEdit? sse_decode_opt_box_autoadd_bridge_edit(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_bridge_edit(deserializer));
     } else {
       return null;
     }
@@ -3221,6 +3315,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_box_autoadd_bridge_edit(
+    BridgeEdit self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_bridge_edit(self, serializer);
+  }
+
+  @protected
   void sse_encode_box_autoadd_bridge_item(
     BridgeItem self,
     SseSerializer serializer,
@@ -3335,6 +3438,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.tool, serializer);
     sse_encode_String(self.text, serializer);
     sse_encode_opt_box_autoadd_i_64(self.item, serializer);
+    sse_encode_opt_box_autoadd_bridge_edit(self.edit, serializer);
   }
 
   @protected
@@ -3404,6 +3508,23 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.key, serializer);
     sse_encode_opt_box_autoadd_bridge_level(self.level, serializer);
     sse_encode_opt_list_String(self.lines, serializer);
+  }
+
+  @protected
+  void sse_encode_bridge_edit(BridgeEdit self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.path, serializer);
+    sse_encode_list_bridge_edit_change(self.changes, serializer);
+  }
+
+  @protected
+  void sse_encode_bridge_edit_change(
+    BridgeEditChange self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.removed, serializer);
+    sse_encode_String(self.added, serializer);
   }
 
   @protected
@@ -3726,6 +3847,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_list_bridge_edit_change(
+    List<BridgeEditChange> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_bridge_edit_change(item, serializer);
+    }
+  }
+
+  @protected
   void sse_encode_list_bridge_file_change(
     List<BridgeFileChange> self,
     SseSerializer serializer,
@@ -3888,6 +4021,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_bool(self != null, serializer);
     if (self != null) {
       sse_encode_box_autoadd_bridge_display(self, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_opt_box_autoadd_bridge_edit(
+    BridgeEdit? self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_bridge_edit(self, serializer);
     }
   }
 
@@ -4193,7 +4339,8 @@ class AgentSessionImpl extends RustOpaque implements AgentSession {
       RustLib.instance.api.crateApiSessionAgentSessionNewSession(that: this);
 
   /// The unified diff of one file as the latest list of changes compared it; characters
-  /// that could hide or reorder its lines are written out, as in the file's shown name.
+  /// that could hide or reorder its lines are written out, as in the file's shown name, but
+  /// for the carriage returns of Windows line ends, which the Diff tab marks.
   Future<String> patch({required String path, required bool hideWhitespace}) =>
       RustLib.instance.api.crateApiSessionAgentSessionPatch(
         that: this,

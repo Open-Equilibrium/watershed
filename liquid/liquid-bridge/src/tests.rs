@@ -1,11 +1,13 @@
 use meta_harness_core::{
-    AgentCommand, AgentEvent, ChangedLines, CommandError, Decision, ItemDetail, ItemId, ItemKind,
-    ItemStatus, RequestId, RequestKind, SessionEvent, TurnId, Usage, UserInput,
+    AgentCommand, AgentEvent, ChangedLines, CommandError, Decision, EditChange, EditPreview,
+    ItemDetail, ItemId, ItemKind, ItemStatus, RequestId, RequestKind, SessionEvent, TurnId, Usage,
+    UserInput,
 };
 
 use crate::api::events::{
-    BridgeApproval, BridgeChangeStatus, BridgeDecision, BridgeEvent, BridgeEventKind,
-    BridgeFileChange, BridgeItemKind, BridgeQuestionKind, BridgeQueue, BridgeRequestKind,
+    BridgeApproval, BridgeChangeStatus, BridgeDecision, BridgeEdit, BridgeEditChange, BridgeEvent,
+    BridgeEventKind, BridgeFileChange, BridgeItemKind, BridgeQuestionKind, BridgeQueue,
+    BridgeRequestKind,
 };
 use std::sync::{Arc, mpsc};
 use std::time::Duration;
@@ -174,6 +176,13 @@ fn requests_and_questions_reach_dart_with_their_answers() {
         read_only: false,
         session: None,
         item: Some(ItemId(7)),
+        edit: Some(EditPreview {
+            path: "a.ts".to_owned(),
+            changes: vec![EditChange {
+                removed: String::new(),
+                added: "one".to_owned(),
+            }],
+        }),
     });
     let request = opened.request.expect("request");
     assert_eq!(request.id, "a1");
@@ -184,6 +193,13 @@ fn requests_and_questions_reach_dart_with_their_answers() {
             tool: "write".to_owned(),
             text: "{}".to_owned(),
             item: Some(7),
+            edit: Some(BridgeEdit {
+                path: "a.ts".to_owned(),
+                changes: vec![BridgeEditChange {
+                    removed: String::new(),
+                    added: "one".to_owned(),
+                }],
+            }),
         })
     );
     let resolved = bridge(AgentEvent::RequestResolved {

@@ -1506,11 +1506,13 @@ impl SseDecode for crate::api::events::BridgeApproval {
         let mut var_tool = <String>::sse_decode(deserializer);
         let mut var_text = <String>::sse_decode(deserializer);
         let mut var_item = <Option<i64>>::sse_decode(deserializer);
+        let mut var_edit = <Option<crate::api::events::BridgeEdit>>::sse_decode(deserializer);
         return crate::api::events::BridgeApproval {
             kind: var_kind,
             tool: var_tool,
             text: var_text,
             item: var_item,
+            edit: var_edit,
         };
     }
 }
@@ -1610,6 +1612,30 @@ impl SseDecode for crate::api::events::BridgeDisplay {
             key: var_key,
             level: var_level,
             lines: var_lines,
+        };
+    }
+}
+
+impl SseDecode for crate::api::events::BridgeEdit {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_path = <String>::sse_decode(deserializer);
+        let mut var_changes = <Vec<crate::api::events::BridgeEditChange>>::sse_decode(deserializer);
+        return crate::api::events::BridgeEdit {
+            path: var_path,
+            changes: var_changes,
+        };
+    }
+}
+
+impl SseDecode for crate::api::events::BridgeEditChange {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_removed = <String>::sse_decode(deserializer);
+        let mut var_added = <String>::sse_decode(deserializer);
+        return crate::api::events::BridgeEditChange {
+            removed: var_removed,
+            added: var_added,
         };
     }
 }
@@ -2128,6 +2154,20 @@ impl SseDecode for Vec<crate::api::history::BridgeContextPart> {
     }
 }
 
+impl SseDecode for Vec<crate::api::events::BridgeEditChange> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = Vec::with_capacity(len_ as usize);
+        for idx_ in 0..len_ {
+            ans_.push(<crate::api::events::BridgeEditChange>::sse_decode(
+                deserializer,
+            ));
+        }
+        return ans_;
+    }
+}
+
 impl SseDecode for Vec<crate::api::events::BridgeFileChange> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -2304,6 +2344,17 @@ impl SseDecode for Option<crate::api::events::BridgeDisplay> {
             return Some(<crate::api::events::BridgeDisplay>::sse_decode(
                 deserializer,
             ));
+        } else {
+            return None;
+        }
+    }
+}
+
+impl SseDecode for Option<crate::api::events::BridgeEdit> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<crate::api::events::BridgeEdit>::sse_decode(deserializer));
         } else {
             return None;
         }
@@ -2655,6 +2706,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::events::BridgeApproval {
             self.tool.into_into_dart().into_dart(),
             self.text.into_into_dart().into_dart(),
             self.item.into_into_dart().into_dart(),
+            self.edit.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -2822,6 +2874,48 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::events::BridgeDisplay>
     for crate::api::events::BridgeDisplay
 {
     fn into_into_dart(self) -> crate::api::events::BridgeDisplay {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::events::BridgeEdit {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.path.into_into_dart().into_dart(),
+            self.changes.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::events::BridgeEdit
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::events::BridgeEdit>
+    for crate::api::events::BridgeEdit
+{
+    fn into_into_dart(self) -> crate::api::events::BridgeEdit {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::events::BridgeEditChange {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.removed.into_into_dart().into_dart(),
+            self.added.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::events::BridgeEditChange
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::events::BridgeEditChange>
+    for crate::api::events::BridgeEditChange
+{
+    fn into_into_dart(self) -> crate::api::events::BridgeEditChange {
         self
     }
 }
@@ -3522,6 +3616,7 @@ impl SseEncode for crate::api::events::BridgeApproval {
         <String>::sse_encode(self.tool, serializer);
         <String>::sse_encode(self.text, serializer);
         <Option<i64>>::sse_encode(self.item, serializer);
+        <Option<crate::api::events::BridgeEdit>>::sse_encode(self.edit, serializer);
     }
 }
 
@@ -3610,6 +3705,22 @@ impl SseEncode for crate::api::events::BridgeDisplay {
         <String>::sse_encode(self.key, serializer);
         <Option<crate::api::events::BridgeLevel>>::sse_encode(self.level, serializer);
         <Option<Vec<String>>>::sse_encode(self.lines, serializer);
+    }
+}
+
+impl SseEncode for crate::api::events::BridgeEdit {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.path, serializer);
+        <Vec<crate::api::events::BridgeEditChange>>::sse_encode(self.changes, serializer);
+    }
+}
+
+impl SseEncode for crate::api::events::BridgeEditChange {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.removed, serializer);
+        <String>::sse_encode(self.added, serializer);
     }
 }
 
@@ -4006,6 +4117,16 @@ impl SseEncode for Vec<crate::api::history::BridgeContextPart> {
     }
 }
 
+impl SseEncode for Vec<crate::api::events::BridgeEditChange> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::api::events::BridgeEditChange>::sse_encode(item, serializer);
+        }
+    }
+}
+
 impl SseEncode for Vec<crate::api::events::BridgeFileChange> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -4142,6 +4263,16 @@ impl SseEncode for Option<crate::api::events::BridgeDisplay> {
         <bool>::sse_encode(self.is_some(), serializer);
         if let Some(value) = self {
             <crate::api::events::BridgeDisplay>::sse_encode(value, serializer);
+        }
+    }
+}
+
+impl SseEncode for Option<crate::api::events::BridgeEdit> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <crate::api::events::BridgeEdit>::sse_encode(value, serializer);
         }
     }
 }

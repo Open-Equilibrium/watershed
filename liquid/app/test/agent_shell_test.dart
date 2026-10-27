@@ -793,6 +793,42 @@ void main() {
     expect(find.text('Call $tool?'), findsOneWidget);
   });
 
+  testWidgets('shows a file change as its path and changed lines', (
+    tester,
+  ) async {
+    await show(tester);
+    await emit(
+      tester,
+      event(
+        BridgeEventKind.requestOpened,
+        request: const BridgeRequest(
+          id: 'a1',
+          approval: BridgeApproval(
+            kind: BridgeRequestKind.fileChange,
+            tool: 'edit',
+            text: '{"edits":[],"path":"src/routes/login.ts"}',
+            edit: BridgeEdit(
+              path: 'src/routes/login.ts',
+              changes: [
+                BridgeEditChange(
+                  removed: "router.post('/login', login);",
+                  added:
+                      'const limit = rateLimit({ max: 5 });\n'
+                      "router.post('/login', limit, login);",
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(find.text('src/routes/login.ts'), findsOneWidget);
+    expect(find.text("− router.post('/login', login);"), findsOneWidget);
+    expect(find.text('+ const limit = rateLimit({ max: 5 });'), findsOneWidget);
+    expect(find.text("+ router.post('/login', limit, login);"), findsOneWidget);
+    expect(find.textContaining('"edits"'), findsNothing);
+  });
+
   testWidgets('shows the whole call before it is allowed', (tester) async {
     await show(tester);
     final command = [

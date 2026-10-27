@@ -5,8 +5,8 @@ use std::collections::HashMap;
 use serde_json::{Map, Value};
 
 use crate::event::{
-    AgentEvent, ChangedLines, Decision, ItemDetail, ItemId, ItemKind, ItemStatus,
-    NotificationLevel, Queue, RequestId, RequestKind, TurnId, Usage, UserInput,
+    AgentEvent, ChangedLines, Decision, EditChange, EditPreview, ItemDetail, ItemId, ItemKind,
+    ItemStatus, NotificationLevel, Queue, RequestId, RequestKind, TurnId, Usage, UserInput,
 };
 use crate::history::{first_line, patch_lines};
 use crate::visible::{visible, visible_name};
@@ -449,10 +449,8 @@ fn model_response(turn: TurnId, record: &Map<String, Value>, events: &mut Vec<Ag
 fn approval(request: RequestId, payload: &str, tools: &HashMap<String, OpenTool>) -> AgentEvent {
     let payload: Map<String, Value> = serde_json::from_str(payload).unwrap_or_default();
     let tool = str_field(&payload, "tool");
-    let arguments = payload
-        .get("arguments")
-        .map(Value::to_string)
-        .unwrap_or_default();
+    let call = payload.get("arguments");
+    let arguments = call.map(Value::to_string).unwrap_or_default();
     // Only pi's own tools are what their names say: Allow edits runs file changes without
     // asking, and a shell command shows only its command. An extension's tool of the same name
     // asks like any other, with all of its arguments (ADR-0208).
@@ -475,7 +473,57 @@ fn approval(request: RequestId, payload: &str, tools: &HashMap<String, OpenTool>
         item: tools
             .get(str_field(&payload, "toolCallId"))
             .map(|tool| tool.item),
+        edit: (kind == RequestKind::FileChangeApproval)
+            .then(|| edit_preview(tool, call?))
+            .flatten(),
     }
+}
+
+/// What a call of pi's own `edit` or `write` changes (ADR-0212): its file and each
+/// replacement, in every form pi's `edit` accepts. `None` for arguments pi would refuse, which
+/// the approval then shows as they are.
+fn edit_preview(tool: &str, arguments: &Value) -> Option<EditPreview> {
+    let path = arguments.get("path")?.as_str()?;
+    let text = |value: &Value, field| value.get(field)?.as_str().map(visible);
+    let changes = match tool {
+        "write" => vec![EditChange {
+            removed: String::new(),
+            added: text(arguments, "content")?,
+        }],
+        "edit" => {
+            let mut edits = match arguments.get("edits") {
+                Some(Value::String(json)) => match serde_json::from_str(json) {
+                    Ok(Value::Array(edits)) => edits,
+                    Ok(edit @ Value::Object(_)) => vec![edit],
+                    _ => Vec::new(),
+                },
+                Some(Value::Array(edits)) => edits.clone(),
+                Some(edit @ Value::Object(_)) => vec![edit.clone()],
+                _ => Vec::new(),
+            };
+            // The older form names one replacement at the top.
+            if arguments.get("oldText").is_some_and(Value::is_string)
+                && arguments.get("newText").is_some_and(Value::is_string)
+            {
+                edits.push(arguments.clone());
+            }
+            edits
+                .iter()
+                .map(|edit| {
+                    Some(EditChange {
+                        removed: text(edit, "oldText")?,
+                        added: text(edit, "newText")?,
+                    })
+                })
+                .collect::<Option<Vec<_>>>()
+                .filter(|changes| !changes.is_empty())?
+        }
+        _ => return None,
+    };
+    Some(EditPreview {
+        path: visible_name(path),
+        changes,
+    })
 }
 
 fn strings(value: Option<&Value>) -> Option<Vec<String>> {

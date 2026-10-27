@@ -68,7 +68,8 @@ abstract class AgentSession implements RustOpaqueInterface {
   Future<bool> newSession();
 
   /// The unified diff of one file as the latest list of changes compared it; characters
-  /// that could hide or reorder its lines are written out, as in the file's shown name.
+  /// that could hide or reorder its lines are written out, as in the file's shown name, but
+  /// for the carriage returns of Windows line ends, which the Diff tab marks.
   Future<String> patch({required String path, required bool hideWhitespace});
 
   /// Up to `limit` stored sessions of this project, newest first, without the current one.

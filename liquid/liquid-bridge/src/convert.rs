@@ -9,9 +9,10 @@ use meta_harness_core::{
 };
 
 use crate::api::events::{
-    BridgeApproval, BridgeChangeStatus, BridgeDecision, BridgeDisplay, BridgeEvent,
-    BridgeEventKind, BridgeFileChange, BridgeItem, BridgeItemKind, BridgeLevel, BridgeQuestion,
-    BridgeQuestionKind, BridgeQueue, BridgeRequest, BridgeRequestKind, BridgeStep, BridgeUsage,
+    BridgeApproval, BridgeChangeStatus, BridgeDecision, BridgeDisplay, BridgeEdit,
+    BridgeEditChange, BridgeEvent, BridgeEventKind, BridgeFileChange, BridgeItem, BridgeItemKind,
+    BridgeLevel, BridgeQuestion, BridgeQuestionKind, BridgeQueue, BridgeRequest, BridgeRequestKind,
+    BridgeStep, BridgeUsage,
 };
 use crate::api::history::{
     BridgeContextDetail, BridgeContextMessage, BridgeContextPart, BridgeEntryKind, BridgeRecord,
@@ -432,6 +433,7 @@ impl From<AgentEvent> for BridgeEvent {
                 tool,
                 text,
                 item,
+                edit,
                 ..
             } => BridgeEvent {
                 request: Some(BridgeRequest {
@@ -440,6 +442,17 @@ impl From<AgentEvent> for BridgeEvent {
                         tool,
                         text,
                         item: item.map(|item| int(item.0)),
+                        edit: edit.map(|edit| BridgeEdit {
+                            path: edit.path,
+                            changes: edit
+                                .changes
+                                .into_iter()
+                                .map(|change| BridgeEditChange {
+                                    removed: change.removed,
+                                    added: change.added,
+                                })
+                                .collect(),
+                        }),
                     }),
                     ..request(id.0)
                 }),
