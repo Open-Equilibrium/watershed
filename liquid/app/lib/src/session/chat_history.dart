@@ -4,7 +4,7 @@ import '../rust/api/events.dart';
 import '../rust/api/history.dart';
 import '../trajectory/trajectory_model.dart';
 import 'backend.dart';
-import 'session_state.dart';
+import 'chat_items.dart';
 
 /// A session's chat as it stores it: the current branch, read back page by page from the
 /// newest, with a mark where the branch leaves the others.

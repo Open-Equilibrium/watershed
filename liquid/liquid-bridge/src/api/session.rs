@@ -2,7 +2,6 @@
 //! the Dart main isolate, and events stream to Dart as they arrive (ADR-0182).
 
 use std::sync::{LazyLock, PoisonError};
-use std::time::Duration;
 
 use std::path::{Path, PathBuf};
 
@@ -17,10 +16,7 @@ use crate::api::events::{BridgeDecision, BridgeEvent, BridgeFileChange, BridgeQu
 use crate::api::history::{BridgeContextDetail, BridgeHistory, BridgeTranscript};
 use crate::convert::{coalesce, describe};
 use crate::frb_generated::StreamSink;
-use crate::ready::{START_TIMEOUT, error_output, ready};
-
-/// Time an agent gets to exit after its input closes before it is killed.
-pub(crate) const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
+use crate::ready::{SHUTDOWN_GRACE, START_TIMEOUT, error_output, ready};
 
 static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
     tokio::runtime::Builder::new_multi_thread()
