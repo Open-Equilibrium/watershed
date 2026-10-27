@@ -573,17 +573,17 @@ void main() {
       reason: 'the message goes to the new session',
     );
 
-    // A branch is a message too, which the new session checks first.
+    // A branch names an entry of the session it was asked in, so a switch drops it.
     backend.switchGate = Completer();
     final switchingAgain = state.newSession();
     final branching = state.branch('e1');
     await pumpEventQueue();
-    expect(backend.calls, isNot(contains('branch e1')));
     backend.switchGate!.complete();
     await Future.wait([switchingAgain, branching]);
+    expect(backend.calls, isNot(contains('branch e1')));
     expect(
-      backend.calls.indexOf('branch e1'),
-      greaterThan(backend.calls.lastIndexOf('new session')),
+      state.notice.value?.text,
+      'The session changed, so the branch was not made.',
     );
   });
 

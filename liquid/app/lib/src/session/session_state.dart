@@ -416,14 +416,23 @@ class SessionState {
   /// Continues the session from `entry`; the next prompt starts a new branch there. The chat
   /// then shows the branch the session continues. A branch asked for while one runs waits for
   /// that one instead of branching again.
-  Future<void> branch(String entry) =>
-      _branching ??= _branch(entry).whenComplete(() => _branching = null);
+  Future<void> branch(String entry) => _branching ??= _branch(
+    entry,
+    _generation,
+  ).whenComplete(() => _branching = null);
 
   Future<void>? _branching;
 
-  Future<void> _branch(String entry) async {
-    // Like a message, a branch goes to the session a switch in progress leads to.
+  Future<void> _branch(String entry, int generation) async {
+    // The entry belongs to the session the branch was asked in; a switch meanwhile drops it.
     await _switching?.future;
+    if (generation != _generation) {
+      notify(
+        BridgeLevel.info,
+        'The session changed, so the branch was not made.',
+      );
+      return;
+    }
     await _backend.branch(entry);
     stored.value++;
     await loadChat();
