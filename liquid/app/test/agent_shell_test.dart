@@ -922,11 +922,10 @@ void main() {
         ),
       ),
     );
-    Future<void> reveal(String line) => revealLine(tester, line);
     expect(find.text('src/routes/login.ts'), findsOneWidget);
     expect(find.text("− router.post('/login', login);"), findsOneWidget);
-    await reveal('+ const limit = rateLimit({ max: 5 });');
-    await reveal("+ router.post('/login', limit, login);");
+    await revealLine(tester, '+ const limit = rateLimit({ max: 5 });');
+    await revealLine(tester, "+ router.post('/login', limit, login);");
     expect(find.textContaining('"edits"'), findsNothing);
     await emit(
       tester,
@@ -954,7 +953,7 @@ void main() {
       ),
     );
     expect(find.text('Replaces the whole file'), findsOneWidget);
-    await reveal('+ two');
+    await revealLine(tester, '+ two');
     expect(find.text('+ '), findsNothing);
     expect(
       find.textContaining('more lines'),
