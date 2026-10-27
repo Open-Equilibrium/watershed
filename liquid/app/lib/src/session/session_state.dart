@@ -398,6 +398,8 @@ class SessionState {
   Future<void>? _branching;
 
   Future<void> _branch(String entry) async {
+    // Like a message, a branch goes to the session a switch in progress leads to.
+    await _switching?.future;
     await _backend.branch(entry);
     stored.value++;
     await loadChat();

@@ -572,6 +572,19 @@ void main() {
       'send Hi',
       reason: 'the message goes to the new session',
     );
+
+    // A branch is a message too, which the new session checks first.
+    backend.switchGate = Completer();
+    final switchingAgain = state.newSession();
+    final branching = state.branch('e1');
+    await pumpEventQueue();
+    expect(backend.calls, isNot(contains('branch e1')));
+    backend.switchGate!.complete();
+    await Future.wait([switchingAgain, branching]);
+    expect(
+      backend.calls.indexOf('branch e1'),
+      greaterThan(backend.calls.lastIndexOf('new session')),
+    );
   });
 
   test('drops a chat read that ends after the session changed', () async {
