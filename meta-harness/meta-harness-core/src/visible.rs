@@ -26,11 +26,13 @@ pub fn visible_lines(text: &str) -> String {
         .join("\n")
 }
 
-/// `text` with each character `marked` picks written out as its code point.
+/// `text` with each character `marked` picks written out as its code point. The `<` of a
+/// literal `<U+` is written out too, so no two texts show alike.
 fn written_out(text: &str, marked: impl Fn(char) -> bool) -> String {
     let mut shown = String::with_capacity(text.len());
-    for character in text.chars() {
-        if marked(character) {
+    for (at, character) in text.char_indices() {
+        let marker = character == '<' && text[at + 1..].starts_with("U+");
+        if marked(character) || marker {
             shown.push_str(&format!("<U+{:04X}>", u32::from(character)));
         } else {
             shown.push(character);
