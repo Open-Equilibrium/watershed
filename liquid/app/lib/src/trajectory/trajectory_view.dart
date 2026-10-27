@@ -708,50 +708,10 @@ class _Toolbar extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space5),
       child: Row(
         children: [
-          Container(
-            padding: const EdgeInsets.all(2),
-            decoration: BoxDecoration(
-              color: ws.subtle,
-              borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
-            ),
-            child: Row(
-              children: [
-                for (final (label, value) in [
-                  ('Real time', false),
-                  ('Equal width', true),
-                ])
-                  Shortcuts(
-                    shortcuts: activateKeys,
-                    child: InkWell(
-                      onTap: () => onEqualWidth(value),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 2,
-                        ),
-                        decoration: value == equalWidth
-                            ? BoxDecoration(
-                                color: ws.canvas,
-                                borderRadius: BorderRadius.circular(
-                                  WsMetrics.radiusSm,
-                                ),
-                                boxShadow: [
-                                  BoxShadow(color: ws.border, spreadRadius: 1),
-                                ],
-                              )
-                            : null,
-                        child: Text(
-                          label,
-                          style: TextStyle(
-                            fontSize: WsMetrics.fsCompact,
-                            color: value == equalWidth ? ws.text : ws.textMuted,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-              ],
-            ),
+          Segments(
+            options: const [(false, 'Real time'), (true, 'Equal width')],
+            selected: equalWidth,
+            onSelect: onEqualWidth,
           ),
           const SizedBox(width: WsMetrics.space2),
           // Return and space press it rather than the view's own keys.

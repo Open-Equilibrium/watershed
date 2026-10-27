@@ -257,16 +257,22 @@ class _Check extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ws = context.ws;
-    return Container(
-      width: 13,
-      height: 13,
-      alignment: Alignment.center,
-      decoration: BoxDecoration(
-        color: on ? ws.accent : null,
-        borderRadius: BorderRadius.circular(3),
-        border: on ? null : Border.all(color: ws.borderStrong, width: 1.5),
+    // Whether the branch is picked is told to assistive technology, not only drawn.
+    return Semantics(
+      checked: on,
+      child: Container(
+        width: 13,
+        height: 13,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: on ? ws.accent : null,
+          borderRadius: BorderRadius.circular(3),
+          border: on ? null : Border.all(color: ws.borderStrong, width: 1.5),
+        ),
+        child: on
+            ? Icon(LucideIcons.check, size: 10, color: ws.onAccent)
+            : null,
       ),
-      child: on ? Icon(LucideIcons.check, size: 10, color: ws.onAccent) : null,
     );
   }
 }

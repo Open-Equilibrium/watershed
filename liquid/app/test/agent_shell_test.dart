@@ -1367,6 +1367,11 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.digit3);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
     await tester.pumpAndSettle();
+    expect(
+      tester.getSemantics(find.text('Diff').first),
+      isSemantics(isSelected: true),
+      reason: 'the open tab is told, not only drawn',
+    );
     await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
     await tester.pump(const Duration(milliseconds: 700));
     expect(

@@ -405,58 +405,63 @@ class _Tabs extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             for (final entry in _commands.entries)
-              InkWell(
-                canRequestFocus: false,
-                onTap: () => tab.value = entry.key,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: WsMetrics.space4,
-                  ),
-                  decoration: BoxDecoration(
-                    border: Border(
-                      bottom: BorderSide(
-                        color: entry.key == active
-                            ? ws.text
-                            : Colors.transparent,
-                        width: 2,
+              // Which tab is open is told to assistive technology, not only drawn.
+              Semantics(
+                selected: entry.key == active,
+                inMutuallyExclusiveGroup: true,
+                child: InkWell(
+                  canRequestFocus: false,
+                  onTap: () => tab.value = entry.key,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: WsMetrics.space4,
+                    ),
+                    decoration: BoxDecoration(
+                      border: Border(
+                        bottom: BorderSide(
+                          color: entry.key == active
+                              ? ws.text
+                              : Colors.transparent,
+                          width: 2,
+                        ),
                       ),
                     ),
-                  ),
-                  alignment: Alignment.center,
-                  // The hint sits on the label's corner, so the tab keeps its size.
-                  child: Stack(
-                    clipBehavior: Clip.none,
-                    children: [
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            entry.value.label,
-                            style: TextStyle(
-                              color: entry.key == active
-                                  ? ws.text
-                                  : ws.textMuted,
-                              fontWeight: entry.key == active
-                                  ? WsMetrics.fwMedium
-                                  : WsMetrics.fwRegular,
+                    alignment: Alignment.center,
+                    // The hint sits on the label's corner, so the tab keeps its size.
+                    child: Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              entry.value.label,
+                              style: TextStyle(
+                                color: entry.key == active
+                                    ? ws.text
+                                    : ws.textMuted,
+                                fontWeight: entry.key == active
+                                    ? WsMetrics.fwMedium
+                                    : WsMetrics.fwRegular,
+                              ),
                             ),
-                          ),
-                          if (entry.key == AgentTab.diff)
-                            _ChangedFiles(state: state),
-                        ],
-                      ),
-                      // Keys the menu bar shows stay out of the GUI (ADR-0204); the Liquid
-                      // key, which it cannot show, gets a hint (ADR-0205).
-                      if (shown &&
-                          keys.label(entry.value).isNotEmpty &&
-                          keys.label(entry.value) !=
-                              keys.menu(entry.value)?.label)
-                        Positioned(
-                          top: -11,
-                          right: -14,
-                          child: KeyBadge(keys.label(entry.value)),
+                            if (entry.key == AgentTab.diff)
+                              _ChangedFiles(state: state),
+                          ],
                         ),
-                    ],
+                        // Keys the menu bar shows stay out of the GUI (ADR-0204); the Liquid
+                        // key, which it cannot show, gets a hint (ADR-0205).
+                        if (shown &&
+                            keys.label(entry.value).isNotEmpty &&
+                            keys.label(entry.value) !=
+                                keys.menu(entry.value)?.label)
+                          Positioned(
+                            top: -11,
+                            right: -14,
+                            child: KeyBadge(keys.label(entry.value)),
+                          ),
+                      ],
+                    ),
                   ),
                 ),
               ),

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' show SemanticsFlag;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -471,6 +472,11 @@ void main() {
 
     await press(tester, LogicalKeyboardKey.keyC);
     expect(backend.calls.last, 'history e6 b2');
+    expect(
+      find.semantics.byFlag(SemanticsFlag.isChecked),
+      findsNWidgets(2),
+      reason: 'the compared branches are told, not only drawn',
+    );
     // The view's keys show while ⌘ is held (ADR-0204).
     await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
     await tester.pump(const Duration(milliseconds: 700));
