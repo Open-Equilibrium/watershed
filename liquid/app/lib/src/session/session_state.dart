@@ -409,7 +409,7 @@ class SessionState {
     }
   }
 
-  /// One file's unified diff since the latest run started.
+  /// One file's unified diff as the latest list of changes compared it.
   Future<String> patch(String path) => _backend.patch(path);
 
   /// The branch tree and the Trajectory of each branch ending at an entry in `leaves`, or of

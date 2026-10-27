@@ -129,8 +129,8 @@ impl RunDiff {
         self.bounded(tree.changes(&before, &now)).await
     }
 
-    /// The unified diff of one file since the latest run started, as the latest list of changes
-    /// saw the project, so it needs no new pass over the project.
+    /// The unified diff of one file between the two states the latest list of changes compared,
+    /// so it needs no new pass over the project and shows the file as that list counted it.
     pub async fn patch(&self, path: &str) -> Result<String, DiffError> {
         let listed = self.before().listed.clone();
         let (tree, before, now) = match (self.tree(), listed) {

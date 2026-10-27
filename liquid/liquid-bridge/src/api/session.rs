@@ -229,8 +229,8 @@ impl AgentSession {
         }
     }
 
-    /// The unified diff of one file since the latest run started; characters that could hide
-    /// or reorder its lines are written out, as in the file's shown name.
+    /// The unified diff of one file as the latest list of changes compared it; characters
+    /// that could hide or reorder its lines are written out, as in the file's shown name.
     pub fn patch(&self, path: String) -> Result<String, String> {
         RUNTIME
             .block_on(self.diff.patch(&path))

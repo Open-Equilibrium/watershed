@@ -166,7 +166,7 @@ A macOS Liquid app, built ahead of M2 and M3a, that controls pi through an embed
 - Tool approvals in three modes (ADR-0188).
 - Trajectory tab, live and retrospective: steps, tokens, timing and what the model saw; branch from a step and compare both branches side by side.
 - Diff view of a run's changes in the agent's Git project (ADR-0190).
-- Shared [design guidelines](docs/design/guidelines.md) and tokens, plus approved mockups of the agent view, Trajectory tab and diff view before their implementation (ADR-0194).
+- Shared [design guidelines](docs/design/guidelines.md) and tokens, plus approved mockups of the agent view, Trajectory tab and Diff tab before their implementation (ADR-0194).
 - CI: `flutter analyze` and `flutter test` on Linux as required checks; a macOS app build on a macOS runner becomes required once it runs reliably.
 - Out of scope: Trajectory search and attribution of entries to the extension that produced them. The agent-surface mockup's Git branch in the sidebar and its context-window display follow in a later step.
 
@@ -177,7 +177,7 @@ A macOS Liquid app, built ahead of M2 and M3a, that controls pi through an embed
 3. Each approval mode pauses exactly its expected calls; a rejected call never runs; a session-wide allowance ends with its session; every user decision is a custom entry in the pi session; a missing answer, including after a core or app crash, blocks the call.
 4. The Trajectory tab shows each step with tokens, timing and what the model saw, live and after the run, and looks the same after an app restart, rebuilt from the pi session file alone.
 5. Branching from a step creates a second branch that can be compared side by side, while the original stays unchanged.
-6. The diff view shows a run's changes against the project state before the run.
+6. The Diff tab shows a run's changes against the project state before the run.
 7. The UI never sees pi's protocol: CI tests drive a scripted fake agent behind the same session/event model, without model calls or credentials; one manual check uses real pi.
 8. A long token stream crosses the bridge as small deltas, the Dart main isolate never waits for Rust, and closing a view releases its streams.
 9. Quitting the app ends every pi process; a crashed pi process shows an error instead of hanging.
