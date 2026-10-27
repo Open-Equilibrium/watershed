@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 
 import '../controls.dart';
 import '../rust/api/events.dart';
@@ -255,18 +256,30 @@ class _ScrollingCode extends StatefulWidget {
 
 class _ScrollingCodeState extends State<_ScrollingCode> {
   int _below = 0;
+  int _last = 0;
+  bool _counting = false;
 
-  bool _measure(ScrollMetrics metrics, double lineHeight) {
-    final below = (metrics.extentAfter / lineHeight).ceil();
-    if (below != _below) setState(() => _below = below);
-    return false;
+  /// Counts what lies below once a layout is done. Lines not yet reached count by the call's
+  /// lines, since lines below are built only as they scroll into view; within the last line,
+  /// which may wrap, by the lines it shows as.
+  void _laidOut(int last) {
+    _last = last;
+    if (_counting) return;
+    _counting = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _counting = false;
+      if (!mounted || !widget.controller.hasClients) return;
+      final after = widget.controller.position.extentAfter;
+      final below = _last < widget.count - 1
+          ? widget.count - 1 - _last
+          : (after / _lineHeight(monoStyle(context))).ceil();
+      if (below != _below) setState(() => _below = below);
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     final ws = context.ws;
-    final style = monoStyle(context);
-    final lineHeight = _lineHeight(style);
     return Container(
       decoration: BoxDecoration(
         color: ws.code,
@@ -277,21 +290,18 @@ class _ScrollingCodeState extends State<_ScrollingCode> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Expanded(
-            child: NotificationListener<ScrollMetricsNotification>(
-              onNotification: (notification) =>
-                  _measure(notification.metrics, lineHeight),
-              child: NotificationListener<ScrollUpdateNotification>(
-                onNotification: (notification) =>
-                    _measure(notification.metrics, lineHeight),
-                child: ListView.builder(
-                  controller: widget.controller,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: WsMetrics.space4,
-                    vertical: WsMetrics.space2,
-                  ),
-                  itemCount: widget.count,
-                  itemBuilder: widget.line,
-                ),
+            // No lines are built ahead, so the last one laid out is the last one in view.
+            child: ListView.custom(
+              controller: widget.controller,
+              scrollCacheExtent: const ScrollCacheExtent.pixels(0),
+              padding: const EdgeInsets.symmetric(
+                horizontal: WsMetrics.space4,
+                vertical: WsMetrics.space2,
+              ),
+              childrenDelegate: _Lines(
+                widget.line,
+                childCount: widget.count,
+                laidOut: _laidOut,
               ),
             ),
           ),
@@ -314,6 +324,16 @@ class _ScrollingCodeState extends State<_ScrollingCode> {
       ),
     );
   }
+}
+
+/// Lines built on demand that report the last one each layout reached.
+class _Lines extends SliverChildBuilderDelegate {
+  _Lines(super.builder, {required super.childCount, required this.laidOut});
+
+  final void Function(int last) laidOut;
+
+  @override
+  void didFinishLayout(int firstIndex, int lastIndex) => laidOut(lastIndex);
 }
 
 double _lineHeight(TextStyle style) => measureText(' ', style).height;

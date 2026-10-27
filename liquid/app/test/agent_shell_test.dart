@@ -1003,6 +1003,61 @@ void main() {
     expect(find.textContaining('more lines'), findsOneWidget);
   });
 
+  testWidgets(
+    'counts the lines below a file change by its lines, however they wrap',
+    (tester) async {
+      await show(tester);
+      final lines = [
+        for (var line = 0; line < 6; line++) '$line${'x' * 400}',
+        for (var line = 0; line < 100; line++) 'short $line',
+      ];
+      await emit(
+        tester,
+        event(
+          BridgeEventKind.requestOpened,
+          request: BridgeRequest(
+            id: 'a1',
+            approval: BridgeApproval(
+              kind: BridgeRequestKind.fileChange,
+              tool: 'write',
+              text: '{}',
+              edit: BridgeEdit(
+                path: 'notes.md',
+                wholeFile: true,
+                changes: [
+                  BridgeEditChange(removed: '', added: lines.join('\n')),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+      // Lines leave the tree once they scroll out of view, so the view is found once.
+      final code = tester.getRect(
+        find
+            .ancestor(
+              of: find.text('notes.md'),
+              matching: find.byType(Scrollable),
+            )
+            .first,
+      );
+      Future<void> expectExactHint() async {
+        await tester.pumpAndSettle();
+        final shown = lines.lastIndexWhere((line) {
+          final text = find.text('+ $line');
+          return text.evaluate().isNotEmpty &&
+              tester.getRect(text).top < code.bottom;
+        });
+        final below = lines.length - 1 - shown;
+        expect(find.text('↓ $below more lines'), findsOneWidget);
+      }
+
+      await expectExactHint();
+      await tester.dragFrom(code.center, const Offset(0, -300));
+      await expectExactHint();
+    },
+  );
+
   testWidgets('shows the whole call before it is allowed', (tester) async {
     await show(tester);
     final command = [
