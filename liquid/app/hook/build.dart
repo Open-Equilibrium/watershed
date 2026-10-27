@@ -18,6 +18,7 @@ void main(List<String> args) async {
         '../../Cargo.toml',
         '../liquid-bridge/Cargo.toml',
         '../liquid-bridge/rust-toolchain.toml',
+        '../../meta-harness/meta-harness-core/Cargo.toml',
       ])
         input.packageRoot.resolve(file),
     ]);
