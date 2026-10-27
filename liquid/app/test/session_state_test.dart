@@ -819,6 +819,21 @@ void main() {
     );
   });
 
+  test('reads the changes once more at most while a read runs', () async {
+    // Each read takes a snapshot of the project, so piled-up reads would wait on each other.
+    backend.changesGate = Completer();
+    final reads = [for (var read = 0; read < 4; read++) state.readChanges()];
+    await pumpEventQueue();
+    expect(backend.changeReads, 1);
+    backend.changesGate!.complete();
+    await Future.wait(reads);
+    expect(
+      backend.changeReads,
+      2,
+      reason: 'one more read covers the changes meanwhile',
+    );
+  });
+
   test('keeps the waiting messages and edits them', () async {
     await emit(
       event(

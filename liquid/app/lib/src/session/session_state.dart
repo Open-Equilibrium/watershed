@@ -359,7 +359,31 @@ class SessionState {
 
   /// Reads what the latest run changed. A failed read is reported once, and the Diff tab says
   /// so instead of showing an earlier run's changes.
-  Future<void> readChanges() async {
+  Future<void> readChanges() {
+    // Each read takes a snapshot of the project, so a read asked for meanwhile runs once after
+    // the current one instead of queueing.
+    if (_readingChanges case final reading?) {
+      _changesAgain = true;
+      return reading;
+    }
+    return _readingChanges = _readChanges();
+  }
+
+  Future<void>? _readingChanges;
+  bool _changesAgain = false;
+
+  Future<void> _readChanges() async {
+    try {
+      do {
+        _changesAgain = false;
+        await _readChangesOnce();
+      } while (_changesAgain);
+    } finally {
+      _readingChanges = null;
+    }
+  }
+
+  Future<void> _readChangesOnce() async {
     final generation = _generation;
     try {
       final read = await _backend.changes();

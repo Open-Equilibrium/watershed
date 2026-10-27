@@ -81,8 +81,14 @@ class FakeBackend implements SessionBackend {
   /// What reading the changes fails with.
   Object? changesError;
 
+  /// Holds change reads until it completes.
+  Completer<void>? changesGate;
+  int changeReads = 0;
+
   @override
   Future<List<BridgeFileChange>?> changes() async {
+    changeReads++;
+    await changesGate?.future;
     if (changesError case final error?) throw error;
     return changed;
   }

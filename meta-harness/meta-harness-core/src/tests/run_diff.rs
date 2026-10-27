@@ -338,6 +338,43 @@ fn a_patch_writes_out_characters_that_hide_or_reorder_its_lines() {
 }
 
 #[test]
+fn reads_that_wait_for_each_other_count_only_their_own_git_against_the_limit() {
+    run(async {
+        let repo = Repo::new("queued");
+        // Each snapshot takes about 0.4 s in this project's clean filter.
+        repo.git(&["config", "filter.slow.clean", "sleep 0.4; cat"]);
+        repo.write(".gitattributes", "*.txt filter=slow\n");
+        let diff = std::sync::Arc::new(
+            RunDiff::with_timeout(repo.path(), Duration::from_millis(1500)).await,
+        );
+        diff.started(diff.capture().await);
+        // The file keeps changing, so every snapshot runs the filter again.
+        let file = repo.path().join("a.txt");
+        let writing = std::thread::spawn(move || {
+            for round in 0..60 {
+                std::fs::write(&file, format!("round {round}\n")).expect("file");
+                std::thread::sleep(Duration::from_millis(50));
+            }
+        });
+        let reads: Vec<_> = (0..5)
+            .map(|_| {
+                let diff = diff.clone();
+                tokio::spawn(async move {
+                    diff.changes()
+                        .await
+                        .map(|changes| changes.len())
+                        .map_err(|error| error.to_string())
+                })
+            })
+            .collect();
+        for read in reads {
+            assert_eq!(read.await.expect("read ends"), Ok(1));
+        }
+        writing.join().expect("writer ends");
+    });
+}
+
+#[test]
 fn a_project_outside_git_says_so_instead_of_showing_no_changes() {
     run(async {
         let dir =

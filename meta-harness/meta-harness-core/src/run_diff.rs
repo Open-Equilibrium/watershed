@@ -31,6 +31,9 @@ pub struct RunDiff {
     timeout: Duration,
     /// Tells reads in progress that the diff closed.
     closed: watch::Sender<bool>,
+    /// Snapshots run one after another; one waiting for its turn does not count its wait
+    /// against the time limit.
+    snapshots: tokio::sync::Mutex<()>,
 }
 
 #[derive(Debug, Default)]
@@ -77,6 +80,7 @@ impl RunDiff {
             before: Mutex::default(),
             timeout,
             closed: watch::Sender::new(false),
+            snapshots: tokio::sync::Mutex::new(()),
         }
     }
 
@@ -87,7 +91,7 @@ impl RunDiff {
             return Capture(None);
         };
         Capture(Some(
-            self.bounded(tree.snapshot())
+            self.snapshot(&tree)
                 .await
                 .map_err(|error| error.to_string()),
         ))
@@ -121,7 +125,7 @@ impl RunDiff {
         let Some((tree, before, runs)) = self.compared()? else {
             return Ok(Vec::new());
         };
-        let now = self.bounded(tree.snapshot()).await?;
+        let now = self.snapshot(&tree).await?;
         self.list(runs, &before, &now);
         self.bounded(tree.changes(&before, &now)).await
     }
@@ -137,7 +141,7 @@ impl RunDiff {
                 let Some((tree, before, runs)) = self.compared()? else {
                     return Ok(String::new());
                 };
-                let now = self.bounded(tree.snapshot()).await?;
+                let now = self.snapshot(&tree).await?;
                 self.list(runs, &before, &now);
                 (tree, before, now)
             }
@@ -202,17 +206,38 @@ impl RunDiff {
         }
     }
 
-    /// Runs `read` until its time limit or until the diff closes; dropping it stops its Git.
+    /// Takes a snapshot once earlier ones ended.
+    async fn snapshot(&self, tree: &WorkingTree) -> Result<Snapshot, DiffError> {
+        let _turn = self
+            .until_closed(async { Ok(self.snapshots.lock().await) })
+            .await?;
+        self.bounded(tree.snapshot()).await
+    }
+
+    /// Runs `read` until its time limit or until the diff closes.
     async fn bounded<T>(
         &self,
         read: impl Future<Output = Result<T, DiffError>>,
     ) -> Result<T, DiffError> {
-        let mut read = pin!(tokio::time::timeout(self.timeout, read));
+        self.until_closed(async {
+            tokio::time::timeout(self.timeout, read)
+                .await
+                .unwrap_or(Err(DiffError::TimedOut(self.timeout)))
+        })
+        .await
+    }
+
+    /// Runs `work` until it ends or the diff closes; dropping it stops its Git.
+    async fn until_closed<T>(
+        &self,
+        work: impl Future<Output = Result<T, DiffError>>,
+    ) -> Result<T, DiffError> {
+        let mut work = pin!(work);
         let mut closed = self.closed.subscribe();
         let mut closing = pin!(closed.wait_for(|closed| *closed));
         poll_fn(|context| {
-            if let Poll::Ready(result) = read.as_mut().poll(context) {
-                return Poll::Ready(result.unwrap_or(Err(DiffError::TimedOut(self.timeout))));
+            if let Poll::Ready(result) = work.as_mut().poll(context) {
+                return Poll::Ready(result);
             }
             closing
                 .as_mut()
