@@ -399,7 +399,9 @@ pub(crate) fn request_kind(tool: &str) -> RequestKind {
     }
 }
 
-/// What a call of pi's `tool` does, for live and restored chat items alike.
+/// What a call of pi's `tool` does, for live and restored chat items alike. Records name
+/// no tool's source, so an extension's tool of the same name shows the same; only approvals
+/// tell them apart (ADR-0208).
 pub(crate) fn item_kind(tool: &str) -> ItemKind {
     match tool {
         "bash" => ItemKind::CommandExecution,

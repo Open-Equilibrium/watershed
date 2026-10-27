@@ -181,7 +181,7 @@ class BridgeRecord {
   /// The prompt, the response's first line or the tool name.
   final String label;
 
-  /// Tool arguments as JSON text, or an approval's decision.
+  /// Tool arguments as JSON text.
   final String detail;
 
   /// What a tool call works on, such as a command or a path, on one line.

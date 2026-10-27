@@ -71,7 +71,7 @@ pub struct BridgeRecord {
     pub kind: BridgeRecordKind,
     /// The prompt, the response's first line or the tool name.
     pub label: String,
-    /// Tool arguments as JSON text, or an approval's decision.
+    /// Tool arguments as JSON text.
     pub detail: String,
     /// What a tool call works on, such as a command or a path, on one line.
     pub target: String,
