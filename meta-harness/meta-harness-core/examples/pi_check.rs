@@ -29,8 +29,6 @@ fn pi(session: [OsString; 2]) -> AgentCommand {
         .expect("working directory")
         .join("meta-harness/pi-extension");
     let mut args: Vec<OsString> = [
-        "--mode",
-        "rpc",
         "--provider",
         "faux",
         "--model",
@@ -42,12 +40,12 @@ fn pi(session: [OsString; 2]) -> AgentCommand {
     .map(Into::into)
     .collect();
     args.extend(session);
-    for extension in ["check/faux-model.ts", "watershed.ts"] {
-        args.extend(["-e".into(), extensions.join(extension).into()]);
-    }
+    args.extend(["-e".into(), extensions.join("check/faux-model.ts").into()]);
     AgentCommand {
         program: "pi".into(),
         args,
+        extension: extensions.join("watershed.ts"),
+        session: None,
         cwd: std::env::temp_dir(),
     }
 }

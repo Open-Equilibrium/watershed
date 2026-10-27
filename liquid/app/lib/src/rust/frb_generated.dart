@@ -1979,12 +1979,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   SessionConfig dco_decode_session_config(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 3)
-      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+    if (arr.length != 4)
+      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
     return SessionConfig(
       program: dco_decode_String(arr[0]),
-      args: dco_decode_list_String(arr[1]),
-      cwd: dco_decode_String(arr[2]),
+      extensionPath: dco_decode_String(arr[1]),
+      session: dco_decode_opt_String(arr[2]),
+      cwd: dco_decode_String(arr[3]),
     );
   }
 
@@ -3060,9 +3061,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   SessionConfig sse_decode_session_config(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_program = sse_decode_String(deserializer);
-    var var_args = sse_decode_list_String(deserializer);
+    var var_extensionPath = sse_decode_String(deserializer);
+    var var_session = sse_decode_opt_String(deserializer);
     var var_cwd = sse_decode_String(deserializer);
-    return SessionConfig(program: var_program, args: var_args, cwd: var_cwd);
+    return SessionConfig(
+      program: var_program,
+      extensionPath: var_extensionPath,
+      session: var_session,
+      cwd: var_cwd,
+    );
   }
 
   @protected
@@ -4048,7 +4055,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   void sse_encode_session_config(SessionConfig self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_String(self.program, serializer);
-    sse_encode_list_String(self.args, serializer);
+    sse_encode_String(self.extensionPath, serializer);
+    sse_encode_opt_String(self.session, serializer);
     sse_encode_String(self.cwd, serializer);
   }
 

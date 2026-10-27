@@ -26,15 +26,33 @@ const EVENT_BUFFER: usize = 256;
 /// Records buffered for the agent's input.
 const WRITE_BUFFER: usize = 64;
 
-/// How to start an agent process that speaks pi's RPC protocol.
+/// How to start pi in RPC mode; the session adds pi's own arguments (ADR-0211).
 #[derive(Debug, Clone)]
 pub struct AgentCommand {
     /// The executable.
     pub program: PathBuf,
-    /// Its arguments.
+    /// Arguments before the ones the session adds, such as an interpreter's script or more pi
+    /// options.
     pub args: Vec<OsString>,
+    /// Watershed's pi extension, which makes pi ask before tool calls; the session checks that
+    /// pi loaded this file.
+    pub extension: PathBuf,
+    /// A session file pi reopens instead of starting a new session.
+    pub session: Option<PathBuf>,
     /// Its working directory.
     pub cwd: PathBuf,
+}
+
+impl AgentCommand {
+    /// pi's arguments: RPC mode with Watershed's extension and the session to reopen.
+    fn pi_args(&self) -> Vec<OsString> {
+        let mut args: Vec<OsString> = vec!["--mode".into(), "rpc".into(), "-e".into()];
+        args.push(self.extension.clone().into());
+        if let Some(session) = &self.session {
+            args.extend(["--session".into(), session.clone().into()]);
+        }
+        args
+    }
 }
 
 /// Something that happened in a session.
@@ -233,6 +251,8 @@ pub struct Session {
     history: History,
     /// The directory the agent works in; a relative path it reports starts there.
     cwd: PathBuf,
+    /// The extension file pi was told to load.
+    extension: PathBuf,
 }
 
 impl Session {
@@ -240,6 +260,7 @@ impl Session {
     pub fn start(command: &AgentCommand) -> std::io::Result<(Self, mpsc::Receiver<SessionEvent>)> {
         let mut child = Command::new(&command.program)
             .args(&command.args)
+            .args(command.pi_args())
             .current_dir(&command.cwd)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -290,6 +311,7 @@ impl Session {
             }),
             history: History::default(),
             cwd: command.cwd.clone(),
+            extension: command.extension.clone(),
         };
         Ok((session, receiver))
     }
@@ -365,10 +387,10 @@ impl Session {
         self.submit_as(command, true).await
     }
 
-    /// Fails unless Watershed's pi extension is loaded, which pi shows by listing its
-    /// `watershed-branch` command: without it the agent would run tools without asking, so a
-    /// session must not start, and the first message after a session switch checks again
-    /// (ADR-0188).
+    /// Fails unless Watershed's pi extension is loaded from the file the session named, which
+    /// pi shows by listing its `watershed-branch` command with that path: without it the agent
+    /// would run tools without asking, so a session must not start, and the first message after
+    /// a session switch checks again (ADR-0188, ADR-0211).
     pub async fn require_gate(&mut self) -> Result<(), CommandError> {
         let data = self.command(json!({ "type": "get_commands" })).await?;
         let gated = data
@@ -379,6 +401,10 @@ impl Session {
             .any(|command| {
                 command.get("name").and_then(Value::as_str) == Some("watershed-branch")
                     && command.get("source").and_then(Value::as_str) == Some("extension")
+                    && command
+                        .pointer("/sourceInfo/path")
+                        .and_then(Value::as_str)
+                        .is_some_and(|path| Path::new(path) == self.extension)
             });
         if gated {
             Ok(())

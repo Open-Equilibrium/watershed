@@ -16,16 +16,6 @@ class Launch {
   final String? problem;
 }
 
-/// pi's arguments: RPC mode with Watershed's extension, reopening the stored `session` file
-/// when given, so its Trajectory and branches come back after a restart.
-List<String> piArguments(String extension, String? session) => [
-  '--mode',
-  'rpc',
-  '-e',
-  extension,
-  if (session != null) ...['--session', session],
-];
-
 /// The name the sidebar shows for `project`: its directory's name, or `/` for the root.
 String projectName(String project) =>
     Directory(project).absolute.uri
@@ -67,7 +57,9 @@ Future<Launch> launchFromEnvironment(Map<String, String> environment) async {
     final session = await AgentSession.start(
       config: SessionConfig(
         program: environment['LIQUID_PI'] ?? 'pi',
-        args: piArguments(extension, environment['LIQUID_PI_SESSION']),
+        extensionPath: extension,
+        // A stored session reopens with its Trajectory and branches after a restart.
+        session: environment['LIQUID_PI_SESSION'],
         cwd: project,
       ),
     );

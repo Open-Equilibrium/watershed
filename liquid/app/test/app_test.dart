@@ -60,21 +60,4 @@ void main() {
       Directory.current.uri.pathSegments.lastWhere((part) => part.isNotEmpty),
     );
   });
-
-  test('reopens a stored pi session when one is named', () {
-    expect(piArguments('/w/watershed.ts', null), [
-      '--mode',
-      'rpc',
-      '-e',
-      '/w/watershed.ts',
-    ]);
-    expect(piArguments('/w/watershed.ts', '/s/session.jsonl'), [
-      '--mode',
-      'rpc',
-      '-e',
-      '/w/watershed.ts',
-      '--session',
-      '/s/session.jsonl',
-    ]);
-  });
 }

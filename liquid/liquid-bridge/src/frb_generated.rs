@@ -2459,11 +2459,13 @@ impl SseDecode for crate::api::session::SessionConfig {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut var_program = <String>::sse_decode(deserializer);
-        let mut var_args = <Vec<String>>::sse_decode(deserializer);
+        let mut var_extensionPath = <String>::sse_decode(deserializer);
+        let mut var_session = <Option<String>>::sse_decode(deserializer);
         let mut var_cwd = <String>::sse_decode(deserializer);
         return crate::api::session::SessionConfig {
             program: var_program,
-            args: var_args,
+            extension_path: var_extensionPath,
+            session: var_session,
             cwd: var_cwd,
         };
     }
@@ -3438,7 +3440,8 @@ impl flutter_rust_bridge::IntoDart for crate::api::session::SessionConfig {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
             self.program.into_into_dart().into_dart(),
-            self.args.into_into_dart().into_dart(),
+            self.extension_path.into_into_dart().into_dart(),
+            self.session.into_into_dart().into_dart(),
             self.cwd.into_into_dart().into_dart(),
         ]
         .into_dart()
@@ -4269,7 +4272,8 @@ impl SseEncode for crate::api::session::SessionConfig {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <String>::sse_encode(self.program, serializer);
-        <Vec<String>>::sse_encode(self.args, serializer);
+        <String>::sse_encode(self.extension_path, serializer);
+        <Option<String>>::sse_encode(self.session, serializer);
         <String>::sse_encode(self.cwd, serializer);
     }
 }

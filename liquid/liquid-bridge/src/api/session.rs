@@ -26,12 +26,14 @@ static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
         .expect("the bridge runtime starts")
 });
 
-/// How to start an agent process that speaks pi's RPC protocol.
+/// How to start pi; the core adds its arguments (ADR-0211).
 pub struct SessionConfig {
     /// The executable.
     pub program: String,
-    /// Its arguments.
-    pub args: Vec<String>,
+    /// Watershed's pi extension, by absolute path.
+    pub extension_path: String,
+    /// A stored session file to reopen, by absolute path.
+    pub session: Option<String>,
     /// Its working directory.
     pub cwd: String,
 }
@@ -87,13 +89,20 @@ pub struct AgentSession {
 }
 
 impl AgentSession {
-    /// Starts an agent; subscribe with [`AgentSession::events`].
+    /// Starts pi; subscribe with [`AgentSession::events`].
     pub fn start(config: SessionConfig) -> Result<Self, String> {
-        let command = AgentCommand {
+        Self::launch(AgentCommand {
             program: config.program.into(),
-            args: config.args.into_iter().map(Into::into).collect(),
+            args: Vec::new(),
+            extension: config.extension_path.into(),
+            session: config.session.map(Into::into),
             cwd: config.cwd.into(),
-        };
+        })
+    }
+
+    /// Starts an agent as `command` says.
+    #[flutter_rust_bridge::frb(ignore)]
+    pub fn launch(command: AgentCommand) -> Result<Self, String> {
         let _runtime = RUNTIME.enter();
         let diff = RUNTIME.block_on(RunDiff::open(&command.cwd));
         let (mut session, mut receiver) = Session::start(&command)

@@ -13,11 +13,19 @@ use crate::{
 
 const WAIT: Duration = Duration::from_secs(10);
 
-/// Starts a scripted stand-in for `pi --mode rpc`.
+/// The extension path the fake agents are started with.
+const EXTENSION: &str = "/w/meta-harness/pi-extension/watershed.ts";
+
+/// The command pi lists when it loaded Watershed's extension from [`EXTENSION`].
+const GATE: &str = r#"{"name":"watershed-branch","source":"extension","sourceInfo":{"path":"/w/meta-harness/pi-extension/watershed.ts","source":"cli"}}"#;
+
+/// Starts a scripted stand-in for `pi --mode rpc`; `sh` takes pi's arguments as `$0` and `$@`.
 fn fake_agent(script: &str) -> (Session, Receiver<SessionEvent>) {
     let command = AgentCommand {
         program: "/bin/sh".into(),
         args: vec!["-c".into(), script.into()],
+        extension: EXTENSION.into(),
+        session: None,
         cwd: std::env::temp_dir(),
     };
     Session::start(&command).expect("fake agent starts")
@@ -1048,14 +1056,42 @@ fn requires_the_extension_that_asks_before_tool_calls() {
                 expect_response(&[r#""type":"get_commands""#])
             )
         };
-        let gate = r#"{"name":"watershed-branch","source":"extension"}"#;
-        let (mut gated, _events) = fake_agent(&answer(gate));
+        let (mut gated, _events) = fake_agent(&answer(GATE));
         assert_eq!(gated.require_gate().await, Ok(()));
 
         // Another extension loads fine, but nothing would ask before a tool call.
         let other = r#"{"name":"fix-tests","source":"prompt"},{"name":"watershed-branch","source":"prompt"}"#;
         let (mut ungated, _events) = fake_agent(&answer(other));
         assert_eq!(ungated.require_gate().await, Err(CommandError::Ungated));
+
+        // An extension from another file registers the same command, for example a project's
+        // own copy that never asks.
+        let copy = r#"{"name":"watershed-branch","source":"extension","sourceInfo":{"path":"/p/.pi/extensions/watershed.ts","source":"local"}}"#;
+        let (mut copied, _events) = fake_agent(&answer(copy));
+        assert_eq!(copied.require_gate().await, Err(CommandError::Ungated));
+    });
+}
+
+#[test]
+fn starts_pi_in_rpc_mode_with_watersheds_extension_and_the_stored_session() {
+    run(async {
+        let reopen = Some("/s/session.jsonl");
+        let stored = " --session /s/session.jsonl";
+        for (file, args) in [(None, ""), (reopen, stored)] {
+            let script = format!(
+                "[ \"$0 $*\" = '--mode rpc -e {EXTENSION}{args}' ] || exit 9\n{}printf '%s\\n' '{{\"id\":\"1\",\"type\":\"response\",\"command\":\"get_commands\",\"success\":true,\"data\":{{\"commands\":[{GATE}]}}}}'\nIFS= read -r line || exit 0\n",
+                expect_response(&[r#""type":"get_commands""#])
+            );
+            let command = AgentCommand {
+                program: "/bin/sh".into(),
+                args: vec!["-c".into(), script.into()],
+                extension: EXTENSION.into(),
+                session: file.map(Into::into),
+                cwd: std::env::temp_dir(),
+            };
+            let (mut session, _events) = Session::start(&command).expect("fake agent starts");
+            assert_eq!(session.require_gate().await, Ok(()), "{args:?}");
+        }
     });
 }
 
@@ -1081,7 +1117,7 @@ fn checks_the_extension_again_before_the_first_message_after_a_session_switch() 
             .to_owned(),
             // pi reloaded its extensions for the new session, and Watershed's is gone.
             commands(2, ""),
-            commands(3, r#"{"name":"watershed-branch","source":"extension"}"#),
+            commands(3, GATE),
             prompt(4),
             prompt(5),
             "IFS= read -r line || exit 0\n".to_owned(),

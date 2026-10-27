@@ -13,12 +13,13 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use liquid_bridge::api::events::BridgeEventKind;
-use liquid_bridge::api::session::{AgentSession, SessionConfig};
+use liquid_bridge::api::session::AgentSession;
+use meta_harness_core::AgentCommand;
 
 const DELTAS: usize = 20_000;
 const DELTA: &str = "sixteen bytes ok";
 const SAMPLES: usize = 20;
-const GATE: &str = r#"{"id":"1","type":"response","command":"get_commands","success":true,"data":{"commands":[{"name":"watershed-branch","source":"extension"}]}}"#;
+const GATE: &str = r#"{"id":"1","type":"response","command":"get_commands","success":true,"data":{"commands":[{"name":"watershed-branch","source":"extension","sourceInfo":{"path":"/watershed.ts"}}]}}"#;
 
 fn main() {
     let dir = std::env::temp_dir().join(format!("liquid-stream-observe-{}", std::process::id()));
@@ -32,10 +33,12 @@ fn main() {
     );
     let mut elapsed = Vec::new();
     for sample in 0..SAMPLES {
-        let session = AgentSession::start(SessionConfig {
-            program: "/bin/sh".to_owned(),
-            args: vec!["-c".to_owned(), script.clone()],
-            cwd: dir.display().to_string(),
+        let session = AgentSession::launch(AgentCommand {
+            program: "/bin/sh".into(),
+            args: vec!["-c".into(), script.clone().into()],
+            extension: "/watershed.ts".into(),
+            session: None,
+            cwd: dir.clone(),
         })
         .expect("agent starts");
         let (sender, receiver) = mpsc::channel();

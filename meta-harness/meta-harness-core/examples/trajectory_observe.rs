@@ -75,6 +75,8 @@ async fn observe() {
     let command = AgentCommand {
         program: "/bin/sh".into(),
         args: vec!["-c".into(), script.into()],
+        extension: "/watershed.ts".into(),
+        session: None,
         cwd: dir.clone(),
     };
     let mut totals = Vec::new();

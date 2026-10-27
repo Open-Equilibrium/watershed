@@ -11,7 +11,7 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 // These functions are ignored because they are not marked as `pub`: `answer`, `open`, `switched`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`
-// These functions are ignored (category: IgnoreBecauseExplicitAttribute): `forward`
+// These functions are ignored (category: IgnoreBecauseExplicitAttribute): `forward`, `launch`
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<AgentSession>>
 abstract class AgentSession implements RustOpaqueInterface {
@@ -88,7 +88,7 @@ abstract class AgentSession implements RustOpaqueInterface {
   /// successfully.
   Future<bool> shutdown();
 
-  /// Starts an agent; subscribe with [`AgentSession::events`].
+  /// Starts pi; subscribe with [`AgentSession::events`].
   static Future<AgentSession> start({required SessionConfig config}) =>
       RustLib.instance.api.crateApiSessionAgentSessionStart(config: config);
 
@@ -176,25 +176,33 @@ class BridgeStoredSession {
           modifiedMs == other.modifiedMs;
 }
 
-/// How to start an agent process that speaks pi's RPC protocol.
+/// How to start pi; the core adds its arguments (ADR-0211).
 class SessionConfig {
   /// The executable.
   final String program;
 
-  /// Its arguments.
-  final List<String> args;
+  /// Watershed's pi extension, by absolute path.
+  final String extensionPath;
+
+  /// A stored session file to reopen, by absolute path.
+  final String? session;
 
   /// Its working directory.
   final String cwd;
 
   const SessionConfig({
     required this.program,
-    required this.args,
+    required this.extensionPath,
+    this.session,
     required this.cwd,
   });
 
   @override
-  int get hashCode => program.hashCode ^ args.hashCode ^ cwd.hashCode;
+  int get hashCode =>
+      program.hashCode ^
+      extensionPath.hashCode ^
+      session.hashCode ^
+      cwd.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -202,6 +210,7 @@ class SessionConfig {
       other is SessionConfig &&
           runtimeType == other.runtimeType &&
           program == other.program &&
-          args == other.args &&
+          extensionPath == other.extensionPath &&
+          session == other.session &&
           cwd == other.cwd;
 }
