@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../controls.dart';
 import '../rust/api/events.dart';
@@ -90,21 +89,10 @@ class _ApprovalCardState extends State<ApprovalCard> with ReadDelay {
           () => _scroll(1, page: true),
         ]),
       },
+      // A key pressed before the card was read decides nothing (see [ReadDelay]); a held key
+      // never does.
       child: Focus(
         focusNode: _focus,
-        // A key pressed before the card was read decides nothing; a held key never does.
-        onKeyEvent: (node, event) =>
-            !armed &&
-                decisions.keys
-                    .expand(keys.bindings)
-                    .any(
-                      (decision) => decision.activator.accepts(
-                        event,
-                        HardwareKeyboard.instance,
-                      ),
-                    )
-            ? KeyEventResult.handled
-            : KeyEventResult.ignored,
         child: InputCard(
           ring: ws.warningBorder,
           padding: const EdgeInsets.all(WsMetrics.space4),
