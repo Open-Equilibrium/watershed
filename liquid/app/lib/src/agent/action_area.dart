@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../controls.dart';
 import '../rust/api/session.dart';
@@ -159,18 +160,35 @@ class Composer extends StatelessWidget {
                     Command.queue: () => _send(followUp: true),
                     if (running) Command.stop: state.stop,
                   }),
-                  child: TextField(
-                    key: const Key('composer'),
-                    controller: controller,
-                    focusNode: focusNode,
-                    maxLines: null,
-                    expands: true,
-                    style: Theme.of(context).textTheme.bodyLarge,
-                    decoration: InputDecoration.collapsed(
-                      hintText: starting
-                          ? 'Describe the task…'
-                          : 'Steer the agent or queue a follow-up…',
-                      hintStyle: TextStyle(color: ws.textFaint),
+                  // A held key acts once; its repeats type no new lines either.
+                  child: Focus(
+                    canRequestFocus: false,
+                    skipTraversal: true,
+                    onKeyEvent: (node, event) =>
+                        event is KeyRepeatEvent &&
+                            [Command.send, Command.queue, Command.stop]
+                                .expand(keys.bindings)
+                                .any(
+                                  (held) => held.repeating.accepts(
+                                    event,
+                                    HardwareKeyboard.instance,
+                                  ),
+                                )
+                        ? KeyEventResult.handled
+                        : KeyEventResult.ignored,
+                    child: TextField(
+                      key: const Key('composer'),
+                      controller: controller,
+                      focusNode: focusNode,
+                      maxLines: null,
+                      expands: true,
+                      style: Theme.of(context).textTheme.bodyLarge,
+                      decoration: InputDecoration.collapsed(
+                        hintText: starting
+                            ? 'Describe the task…'
+                            : 'Steer the agent or queue a follow-up…',
+                        hintStyle: TextStyle(color: ws.textFaint),
+                      ),
                     ),
                   ),
                 ),

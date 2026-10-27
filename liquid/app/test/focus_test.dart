@@ -282,8 +282,9 @@ void main() {
         tester,
         event(BridgeEventKind.requestResolved, request: BridgeRequest(id: id)),
       );
-      // The key repeats in the input area, which has the keys again.
-      await tester.sendKeyRepeatEvent(key);
+      // The key repeats in the input area, which has the keys again; it takes the repeat
+      // itself, so the text field types no new line either.
+      expect(await tester.sendKeyRepeatEvent(key), isTrue, reason: '$key');
       await tester.sendKeyUpEvent(key);
       await tester.pumpAndSettle();
     }
