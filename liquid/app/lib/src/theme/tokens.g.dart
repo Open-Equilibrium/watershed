@@ -102,6 +102,7 @@ final class WsPalette {
     required this.data1,
     required this.data2,
     required this.data3,
+    required this.onData,
     required this.shadow,
   });
 
@@ -138,6 +139,7 @@ final class WsPalette {
   final Color data1;
   final Color data2;
   final Color data3;
+  final Color onData;
   final List<BoxShadow> shadow;
 
   static const light = WsPalette(
@@ -152,15 +154,15 @@ final class WsPalette {
     text: Color(0xFF37352F),
     textMuted: Color(0xFF504F4C),
     textFaint: Color(0xFF6B6A67),
-    accent: Color(0xFF2075D8),
+    accent: Color(0xFF1B63B7),
     onAccent: Color(0xFFFFFFFF),
     accentSubtle: Color(0xFFE7F0FB),
-    success: Color(0xFF3D7A58),
+    success: Color(0xFF376E4F),
     successSubtle: Color(0xFFEDF3EC),
-    warning: Color(0xFFB35C00),
+    warning: Color(0xFF9A4F00),
     warningSubtle: Color(0xFFFBECDD),
     warningBorder: Color(0xFFF2C9A0),
-    danger: Color(0xFFC4403B),
+    danger: Color(0xFFB03A35),
     dangerSubtle: Color(0xFFFDEBEC),
     diffAdd: Color(0xFFE6FFEC),
     diffAddStrong: Color(0xFFCCFFD8),
@@ -169,11 +171,12 @@ final class WsPalette {
     code: Color(0xFFF7F6F3),
     synKw: Color(0xFFCF222E),
     synStr: Color(0xFF0A3069),
-    synCom: Color(0xFF6E7781),
+    synCom: Color(0xFF5F6873),
     synNum: Color(0xFF0550AE),
     data1: Color(0xFF2075D8),
     data2: Color(0xFF8A5FAD),
     data3: Color(0xFF3D7A58),
+    onData: Color(0xFFFFFFFF),
     shadow: [
       BoxShadow(
         offset: Offset(0, 0),
@@ -230,6 +233,7 @@ final class WsPalette {
     data1: Color(0xFF4C9BEA),
     data2: Color(0xFFB48CE6),
     data3: Color(0xFF4DAB9A),
+    onData: Color(0xFF191919),
     shadow: [
       BoxShadow(
         offset: Offset(0, 0),

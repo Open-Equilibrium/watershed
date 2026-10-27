@@ -95,6 +95,14 @@ class DesignTokens(unittest.TestCase):
                  for background in backgrounds]
         # Diff line numbers sit on the strong diff colors in muted.
         pairs += [("text-muted", "diff-add-strong"), ("text-muted", "diff-del-strong")]
+        # Status colors are text on surfaces, hover rows and their own tints (ADR-0212).
+        for tone, tint in [("accent", "accent-subtle"), ("success", "success-subtle"),
+                           ("warning", "warning-subtle"), ("danger", "danger-subtle")]:
+            pairs += [(tone, background)
+                      for background in ["canvas", "subtle", "surface", "hover", tint]]
+        pairs += [("on-accent", "accent")]
+        pairs += [("on-data", f"data-{lane}") for lane in (1, 2, 3)]
+        pairs += [("syn-com", background) for background in ["diff-add", "diff-del", "code"]]
         for theme in [".theme-light", ".theme-dark"]:
             tokens = blocks[theme]
             for tone, background in pairs:
