@@ -444,11 +444,13 @@ void main() {
       tester.getSemantics(find.text('Equal width')),
       isSemantics(isSelected: true),
     );
+    Focus.of(tester.element(find.text('Real time'))).requestFocus();
+    await tester.pump();
     await press(tester, LogicalKeyboardKey.space);
     expect(
-      tester.getSemantics(find.text('Equal width')),
+      tester.getSemantics(find.text('Real time')),
       isSemantics(isSelected: true),
-      reason: 'space presses it again; it stays chosen',
+      reason: 'space presses it too',
     );
   });
 
