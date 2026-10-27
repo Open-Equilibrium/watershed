@@ -619,30 +619,15 @@ class _ProfileRow extends StatelessWidget {
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
               Text('Profile', style: TextStyle(color: ws.textMuted)),
-              Container(
-                padding: const EdgeInsets.all(2),
-                decoration: BoxDecoration(
-                  color: ws.subtle,
-                  border: Border.all(color: ws.borderStrong),
-                  borderRadius: BorderRadius.circular(WsMetrics.radiusMd + 1),
-                ),
-                // Focus shows above the group's background.
-                child: Material(
-                  type: MaterialType.transparency,
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      for (final profile in Profile.values)
-                        if (available || profile != Profile.liquidKey)
-                          _Segment(
-                            label: profile.label,
-                            selected: settings.profile == profile,
-                            onTap: () =>
-                                shortcuts.update(settings.choose(profile)),
-                          ),
-                    ],
-                  ),
-                ),
+              Segments(
+                options: [
+                  for (final profile in Profile.values)
+                    if (available || profile != Profile.liquidKey)
+                      (profile, profile.label),
+                ],
+                selected: settings.profile,
+                onSelect: (profile) =>
+                    shortcuts.update(settings.choose(profile)),
               ),
               if (settings.profile == Profile.custom)
                 Text(
@@ -673,50 +658,6 @@ class _ProfileRow extends StatelessWidget {
             ],
           ),
       ],
-    );
-  }
-}
-
-class _Segment extends StatelessWidget {
-  const _Segment({
-    required this.label,
-    required this.selected,
-    required this.onTap,
-  });
-
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final ws = context.ws;
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
-      // Ink, so the focus highlight shows above the selected segment.
-      child: Ink(
-        height: 24,
-        padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space4),
-        decoration: selected
-            ? BoxDecoration(
-                color: ws.canvas,
-                borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
-                border: Border.all(color: ws.borderStrong),
-              )
-            : null,
-        child: Center(
-          widthFactor: 1,
-          child: Text(
-            label,
-            style: TextStyle(
-              fontSize: WsMetrics.fsCompact,
-              color: selected ? ws.text : ws.textMuted,
-              fontWeight: selected ? WsMetrics.fwMedium : WsMetrics.fwRegular,
-            ),
-          ),
-        ),
-      ),
     );
   }
 }

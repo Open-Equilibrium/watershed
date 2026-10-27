@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:liquid/src/diff/diff_settings.dart';
 import 'package:liquid/src/diff/diff_view.dart';
 import 'package:liquid/src/rust/api/events.dart';
 import 'package:liquid/src/session/session_state.dart';
@@ -16,13 +17,19 @@ void main() {
     WidgetTester tester,
     FakeBackend backend, {
     Size size = const Size(1600, 900),
+    DiffSettingsController? settings,
   }) async {
     await tester.binding.setSurfaceSize(size);
     final state = SessionState(backend);
     await tester.pumpWidget(
       MaterialApp(
         theme: liquidTheme(Brightness.light),
-        home: Material(child: DiffView(state: state)),
+        home: Material(
+          child: DiffView(
+            state: state,
+            settings: settings ?? DiffSettingsController(),
+          ),
+        ),
       ),
     );
     await tester.pumpAndSettle();
@@ -361,6 +368,119 @@ void main() {
         'No text changes to show, as for a binary file or a new file mode.',
       ),
       findsOneWidget,
+    );
+  });
+
+  BridgeFileChange modified(String path, int added, int removed) =>
+      BridgeFileChange(
+        path: path,
+        shown: path,
+        status: BridgeChangeStatus.modified,
+        added: added,
+        removed: removed,
+      );
+
+  Finder code(String text) => find.text(text, findRichText: true);
+
+  testWidgets('shows a file side by side with U and back from the control', (
+    tester,
+  ) async {
+    final backend = FakeBackend()
+      ..changed = [modified('a.ts', 1, 1)]
+      ..patches = {'a.ts': '@@ -1,2 +1,2 @@\n keep\n-old\n+new\n'};
+    final settings = DiffSettingsController();
+    await show(tester, backend, settings: settings);
+    expect(
+      tester.getTopLeft(code('old')).dy,
+      lessThan(tester.getTopLeft(code('new')).dy),
+    );
+
+    await press(tester, LogicalKeyboardKey.keyU);
+    expect(settings.value.layout, DiffLayout.split);
+    expect(
+      tester.getTopLeft(code('old')).dy,
+      tester.getTopLeft(code('new')).dy,
+      reason: 'the old and the new line share a row',
+    );
+    expect(code('keep'), findsNWidgets(2));
+
+    await tester.tap(find.text('Unified'));
+    await tester.pumpAndSettle();
+    expect(settings.value.layout, DiffLayout.unified);
+    expect(code('keep'), findsOneWidget);
+  });
+
+  testWidgets('jumps between the changes of a file with ⌥↑↓', (tester) async {
+    final unchanged = [for (var line = 1; line <= 200; line++) ' line $line'];
+    final backend = FakeBackend()
+      ..changed = [modified('a.ts', 2, 2)]
+      ..patches = {
+        'a.ts': [
+          '@@ -1,201 +1,201 @@',
+          '-first',
+          '+first changed',
+          ...unchanged,
+          '@@ -400,1 +400,1 @@',
+          '-second',
+          '+second changed',
+          '',
+        ].join('\n'),
+      };
+    await show(tester, backend);
+    Future<void> alt(LogicalKeyboardKey key) async {
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.altLeft);
+      await tester.sendKeyEvent(key);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.altLeft);
+      await tester.pumpAndSettle();
+    }
+
+    expect(find.text('@@ -1,201 +1,201 @@'), findsOneWidget);
+    expect(find.text('@@ -400,1 +400,1 @@'), findsNothing);
+    await alt(LogicalKeyboardKey.arrowDown);
+    expect(find.text('@@ -400,1 +400,1 @@'), findsOneWidget);
+    expect(find.text('@@ -1,201 +1,201 @@'), findsNothing);
+    await alt(LogicalKeyboardKey.arrowUp);
+    expect(find.text('@@ -1,201 +1,201 @@'), findsOneWidget);
+  });
+
+  testWidgets('hides whitespace changes with W and from the control', (
+    tester,
+  ) async {
+    final backend = FakeBackend()
+      ..changed = [modified('code.ts', 2, 1), modified('spaced.ts', 1, 1)]
+      ..changedWithoutWhitespace = [modified('code.ts', 1, 0)]
+      ..patches = {'code.ts': '@@ -1 +1,2 @@\n keep\n+added\n'};
+    final settings = DiffSettingsController();
+    await show(tester, backend, settings: settings);
+    expect(find.text('spaced.ts'), findsOneWidget);
+
+    await press(tester, LogicalKeyboardKey.keyW);
+    expect(settings.value.hideWhitespace, isTrue);
+    expect(find.text('spaced.ts'), findsNothing);
+    expect(backend.patchReads.last, 'code.ts without whitespace');
+
+    await tester.tap(find.text('Hide whitespace'));
+    await tester.pumpAndSettle();
+    expect(settings.value.hideWhitespace, isFalse);
+    expect(find.text('spaced.ts'), findsOneWidget);
+  });
+
+  testWidgets('opens with the Diff settings kept from before', (tester) async {
+    final backend = FakeBackend()
+      ..changed = [modified('code.ts', 2, 1), modified('spaced.ts', 1, 1)]
+      ..changedWithoutWhitespace = [modified('code.ts', 1, 0)]
+      ..patches = {'code.ts': '@@ -1,2 +1,2 @@\n keep\n-old\n+new\n'};
+    await show(
+      tester,
+      backend,
+      settings: DiffSettingsController(
+        const DiffSettings(layout: DiffLayout.split, hideWhitespace: true),
+      ),
+    );
+    expect(find.text('spaced.ts'), findsNothing);
+    expect(
+      tester.getTopLeft(code('old')).dy,
+      tester.getTopLeft(code('new')).dy,
     );
   });
 }

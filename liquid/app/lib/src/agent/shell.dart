@@ -8,6 +8,7 @@ import '../controls.dart';
 import '../diff/diff_view.dart';
 import '../rust/api/events.dart';
 import '../session/session_state.dart';
+import '../diff/diff_settings.dart';
 import '../shortcuts/first_start.dart';
 import '../shortcuts/keymap.dart';
 import '../shortcuts/shortcut_reveal.dart';
@@ -31,6 +32,7 @@ class AgentShell extends StatefulWidget {
     required this.state,
     required this.info,
     this.shortcuts,
+    this.diffSettings,
   });
 
   final SessionState state;
@@ -38,6 +40,9 @@ class AgentShell extends StatefulWidget {
 
   /// The shortcut settings; Standard, unsaved, without them.
   final ShortcutController? shortcuts;
+
+  /// How the Diff tab shows changes; the defaults, unsaved, without them.
+  final DiffSettingsController? diffSettings;
 
   @override
   State<AgentShell> createState() => _AgentShellState();
@@ -51,6 +56,7 @@ class _AgentShellState extends State<AgentShell> {
   final _settings = ValueNotifier(false);
   final _focus = FocusNode(debugLabel: 'shell');
   late final _shortcuts = widget.shortcuts ?? ShortcutController.memory();
+  late final _diffSettings = widget.diffSettings ?? DiffSettingsController();
 
   /// Stops the agent before the app exits, so no pi process outlives Liquid.
   late final _lifecycle = AppLifecycleListener(
@@ -128,6 +134,7 @@ class _AgentShellState extends State<AgentShell> {
     _focus.dispose();
     _shortcuts.report = null;
     if (widget.shortcuts == null) _shortcuts.dispose();
+    if (widget.diffSettings == null) _diffSettings.dispose();
     super.dispose();
   }
 
@@ -254,7 +261,10 @@ class _AgentShellState extends State<AgentShell> {
                                   state: widget.state,
                                   project: widget.info.project,
                                 ),
-                                AgentTab.diff => DiffView(state: widget.state),
+                                AgentTab.diff => DiffView(
+                                  state: widget.state,
+                                  settings: _diffSettings,
+                                ),
                                 AgentTab.trajectory => TrajectoryView(
                                   state: widget.state,
                                   onBranched: _composerFocus.requestFocus,

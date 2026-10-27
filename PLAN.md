@@ -165,7 +165,7 @@ A macOS Liquid app, built ahead of M2 and M3a, that controls pi through an embed
 - Agent view: send a prompt, follow the response live, steer and abort; pi dialogs, status and widgets.
 - Tool approvals in three modes (ADR-0188).
 - Trajectory tab, live and retrospective: steps, tokens, timing and what the model saw; branch from a step and compare both branches side by side.
-- Diff view of a run's changes in the agent's Git project (ADR-0190).
+- Diff view of a run's changes in the agent's Git project, unified or split and with whitespace changes hidden on request (ADR-0190, ADR-0212).
 - Shared [design guidelines](docs/design/guidelines.md) and tokens, plus approved mockups of the agent view, Trajectory tab and Diff tab before their implementation (ADR-0194).
 - CI: `flutter analyze` and `flutter test` on Linux as required checks; a macOS app build on a macOS runner becomes required once it runs reliably.
 - Out of scope: Trajectory search and attribution of entries to the extension that produced them. The agent-surface mockup's Git branch in the sidebar and its context-window display follow in a later step.

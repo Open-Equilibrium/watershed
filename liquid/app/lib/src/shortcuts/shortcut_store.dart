@@ -1,10 +1,10 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
+import '../settings_file.dart';
 import 'keymap.dart';
 
 /// The folder for Liquid's settings in the platform's app data location.
@@ -21,35 +21,23 @@ String settingsDirectory(
 
 /// Shortcut settings as a JSON file (ADR-0205).
 class ShortcutStore {
-  ShortcutStore(this.file);
+  ShortcutStore(File file) : _file = SettingsFile(file);
 
-  final File file;
-
-  /// Far above any real settings; a larger file is not Liquid's.
-  static const _limit = 64 * 1024;
+  final SettingsFile _file;
 
   /// The stored settings, or null before the first choice or when the file is unreadable.
   Future<ShortcutSettings?> load() async {
+    final json = await _file.load();
+    if (json == null) return null;
     try {
-      if (await file.length() > _limit) return null;
-      final json = jsonDecode(await file.readAsString());
-      return json is Map<String, Object?>
-          ? ShortcutSettings.fromJson(json)
-          : null;
-    } on FileSystemException {
-      return null;
+      return ShortcutSettings.fromJson(json);
     } on FormatException {
       return null;
     }
   }
 
   /// Replaces the file whole, so a crash leaves the old or the new settings.
-  Future<void> save(ShortcutSettings settings) async {
-    await file.parent.create(recursive: true);
-    final pending = File('${file.path}.pending');
-    await pending.writeAsString(jsonEncode(settings.toJson()), flush: true);
-    await pending.rename(file.path);
-  }
+  Future<void> save(ShortcutSettings settings) => _file.save(settings.toJson());
 }
 
 /// Turns the Liquid key on or off on this computer (ADR-0205).

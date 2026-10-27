@@ -1050,7 +1050,12 @@ void main() {
     await tester.pumpAndSettle();
     await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
     await tester.pump(const Duration(milliseconds: 700));
-    expect(find.text('↑↓ file · ←→ folder'), findsOneWidget);
+    expect(
+      find.text(
+        '↑↓ file · ←→ folder · ⌥↑↓ hunk · U unified/split · W whitespace',
+      ),
+      findsOneWidget,
+    );
     await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
     await tester.pump();
   });

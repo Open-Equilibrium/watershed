@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -11,18 +12,24 @@ import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'diff_model.dart';
+import 'diff_settings.dart';
 
-/// Keys of the Diff tab, for the status bar.
+/// Keys of the Diff tab, for the status bar (approved mockup).
 String diffKeys() =>
-    '${Fixed.previousOrNextFile.display} file · ${Fixed.foldFolder.display} folder';
+    '${Fixed.previousOrNextFile.display} file · ${Fixed.foldFolder.display} folder · '
+    '${Fixed.previousOrNextHunk.display} hunk · ${Fixed.unifiedOrSplit.display} unified/split · '
+    '${Fixed.hideWhitespace.display} whitespace';
 
 /// The changes of the latest run against the project before it: a folder tree of changed files
-/// and the selected file's unified diff. Up and Down select files, Left and Right fold and
-/// unfold the selected file's folders.
+/// and the selected file's diff, unified or split. Up and Down select files, Left and Right fold
+/// and unfold the selected file's folders, ⌥Up and ⌥Down move between the file's changes.
 class DiffView extends StatefulWidget {
-  const DiffView({super.key, required this.state});
+  const DiffView({super.key, required this.state, required this.settings});
 
   final SessionState state;
+
+  /// How the tab shows the changes, kept across restarts (ADR-0212).
+  final DiffSettingsController settings;
 
   @override
   State<DiffView> createState() => _DiffViewState();
@@ -48,9 +55,13 @@ class _DiffViewState extends State<DiffView> {
   /// Whether a patch is loading; a selection made meanwhile loads after it.
   bool _loading = false;
 
+  /// Scrolls the selected file's lines.
+  final _scroll = ScrollController();
+
   @override
   void initState() {
     super.initState();
+    widget.state.hideWhitespace.value = widget.settings.value.hideWhitespace;
     widget.state.changed.addListener(_show);
     widget.state.ran.addListener(_show);
     // Opening the tab reads the changes again, so it shows the project as it is now.
@@ -68,6 +79,7 @@ class _DiffViewState extends State<DiffView> {
     widget.state.changed.removeListener(_show);
     widget.state.ran.removeListener(_show);
     _focus.dispose();
+    _scroll.dispose();
     super.dispose();
   }
 
@@ -122,6 +134,8 @@ class _DiffViewState extends State<DiffView> {
           _lines = lines;
           _note = note;
         });
+        // Another file starts at its top.
+        if (_scroll.hasClients) _scroll.jumpTo(0);
         return;
       }
     } finally {
@@ -183,11 +197,70 @@ class _DiffViewState extends State<DiffView> {
     );
   }
 
+  DiffLayout get _layout => widget.settings.value.layout;
+
+  /// The rows each hunk starts at, in the shown layout.
+  List<int> get _hunks => _layout == DiffLayout.split
+      ? [
+          for (final (index, row) in splitRows(_lines).indexed)
+            if (row.hunk != null) index,
+        ]
+      : [
+          for (final (index, line) in _lines.indexed)
+            if (line.kind == DiffKind.hunk) index,
+        ];
+
+  /// Scrolls to the previous or next change in the selected file.
+  void _jump(int step) {
+    if (!_scroll.hasClients) return;
+    final position = _scroll.position;
+    final offsets = [for (final row in _hunks) row * _LineRow.height];
+    final now = position.pixels;
+    final target = step > 0
+        ? offsets.where((offset) => offset > now + 1).firstOrNull
+        : offsets.where((offset) => offset < now - 1).lastOrNull;
+    if (target == null) return;
+    _scroll.jumpTo(
+      target.clamp(position.minScrollExtent, position.maxScrollExtent),
+    );
+  }
+
+  /// Uses `settings` at once and keeps them for the next start.
+  Future<void> _change(DiffSettings settings) async {
+    final saving = widget.settings.change(settings);
+    setState(() {});
+    try {
+      await saving;
+    } on FileSystemException catch (error) {
+      widget.state.notify(
+        BridgeLevel.warning,
+        'Could not save the Diff settings: ${error.message}',
+      );
+    }
+  }
+
+  void _showLayout(DiffLayout layout) =>
+      unawaited(_change(widget.settings.value.copyWith(layout: layout)));
+
+  void _switchLayout() => _showLayout(
+    _layout == DiffLayout.unified ? DiffLayout.split : DiffLayout.unified,
+  );
+
+  /// Leaves out or brings back the changes that are only whitespace.
+  void _switchWhitespace() {
+    final hide = !widget.settings.value.hideWhitespace;
+    unawaited(_change(widget.settings.value.copyWith(hideWhitespace: hide)));
+    widget.state.hideWhitespace.value = hide;
+  }
+
   @override
   Widget build(BuildContext context) => CallbackShortcuts(
     bindings: {
       ...Fixed.previousOrNextFile.bind([() => _move(-1), () => _move(1)]),
       ...Fixed.foldFolder.bind([_fold, _unfold]),
+      ...Fixed.previousOrNextHunk.bind([() => _jump(-1), () => _jump(1)]),
+      ...Fixed.unifiedOrSplit.bind([_switchLayout]),
+      ...Fixed.hideWhitespace.bind([_switchWhitespace]),
     },
     child: Focus(
       focusNode: _focus,
@@ -211,9 +284,12 @@ class _DiffViewState extends State<DiffView> {
     if (_changes.isEmpty) {
       return Center(
         child: Text(
-          widget.state.ran.value
-              ? 'No changes in this run'
-              : 'No run since Liquid opened this session',
+          !widget.state.ran.value
+              ? 'No run since Liquid opened this session'
+              : widget.settings.value.hideWhitespace
+              ? 'No changes in this run with whitespace hidden; '
+                    '${Fixed.hideWhitespace.display} shows them'
+              : 'No changes in this run',
           style: Theme.of(context).textTheme.bodySmall,
         ),
       );
@@ -260,7 +336,15 @@ class _DiffViewState extends State<DiffView> {
           ),
         ),
         Expanded(
-          child: _Patch(change: _selected, lines: _lines, note: _note),
+          child: _Patch(
+            change: _selected,
+            lines: _lines,
+            note: _note,
+            settings: widget.settings.value,
+            scroll: _scroll,
+            onLayout: _showLayout,
+            onWhitespace: _switchWhitespace,
+          ),
         ),
       ],
     );
@@ -364,13 +448,25 @@ class _FileTile extends StatelessWidget {
 }
 
 class _Patch extends StatelessWidget {
-  const _Patch({required this.change, required this.lines, required this.note});
+  const _Patch({
+    required this.change,
+    required this.lines,
+    required this.note,
+    required this.settings,
+    required this.scroll,
+    required this.onLayout,
+    required this.onWhitespace,
+  });
 
   final BridgeFileChange? change;
   final List<DiffLine> lines;
 
   /// Why the file shows no lines.
   final String? note;
+  final DiffSettings settings;
+  final ScrollController scroll;
+  final ValueChanged<DiffLayout> onLayout;
+  final VoidCallback onWhitespace;
 
   @override
   Widget build(BuildContext context) {
@@ -378,6 +474,7 @@ class _Patch extends StatelessWidget {
     final change = this.change;
     final note = this.note;
     if (change == null) return const SizedBox.shrink();
+    final split = settings.layout == DiffLayout.split;
     return Padding(
       padding: const EdgeInsets.fromLTRB(
         WsMetrics.space7,
@@ -396,9 +493,27 @@ class _Patch extends StatelessWidget {
                     ?.copyWith(fontWeight: WsMetrics.fwSemibold),
               ),
               const SizedBox(width: WsMetrics.space4),
-              Text(
-                'compared with the project before the run',
-                style: Theme.of(context).textTheme.bodySmall,
+              Expanded(
+                child: Text(
+                  'compared with the project before the run',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ),
+              _Toggle(
+                label: 'Hide whitespace',
+                on: settings.hideWhitespace,
+                onTap: onWhitespace,
+              ),
+              const SizedBox(width: WsMetrics.space3),
+              Segments(
+                options: const [
+                  (DiffLayout.unified, 'Unified'),
+                  (DiffLayout.split, 'Split'),
+                ],
+                selected: settings.layout,
+                onSelect: onLayout,
               ),
             ],
           ),
@@ -438,20 +553,28 @@ class _Patch extends StatelessWidget {
                           0,
                           (widest, line) => math.max(widest, line.text.length),
                         );
+                        // Split shows each side as wide as the unified view's code.
+                        final code = widest * char + WsMetrics.space6;
+                        final rows = split
+                            ? splitRows(lines)
+                            : const <SplitRow>[];
                         return SingleChildScrollView(
                           scrollDirection: Axis.horizontal,
                           child: SizedBox(
                             width: math.max(
                               constraints.maxWidth,
-                              _LineRow.gutter +
-                                  widest * char +
-                                  WsMetrics.space6,
+                              split
+                                  ? 2 * (_LineRow.side + code)
+                                  : _LineRow.gutter + code,
                             ),
                             height: constraints.maxHeight,
                             child: ListView.builder(
-                              itemCount: lines.length,
-                              itemBuilder: (context, index) =>
-                                  _LineRow(line: lines[index]),
+                              controller: scroll,
+                              itemExtent: _LineRow.height,
+                              itemCount: split ? rows.length : lines.length,
+                              itemBuilder: (context, index) => split
+                                  ? _SplitLine(row: rows[index])
+                                  : _LineRow(line: lines[index]),
                             ),
                           ),
                         );
@@ -466,71 +589,183 @@ class _Patch extends StatelessWidget {
   }
 }
 
+/// A switch shown as a button that stays pressed while on (approved mockup).
+class _Toggle extends StatelessWidget {
+  const _Toggle({required this.label, required this.on, required this.onTap});
+
+  final String label;
+  final bool on;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final ws = context.ws;
+    return Material(
+      type: MaterialType.transparency,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
+        child: Ink(
+          height: 28,
+          padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space4),
+          decoration: BoxDecoration(
+            color: on ? ws.accentSubtle : null,
+            border: on ? null : Border.all(color: ws.borderStrong),
+            borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
+          ),
+          child: Center(
+            widthFactor: 1,
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: WsMetrics.fsCompact,
+                color: on ? ws.accent : ws.textMuted,
+                fontWeight: on ? WsMetrics.fwMedium : WsMetrics.fwRegular,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The colors, sign and number of one side of a line.
+({Color? background, Widget number, Widget sign}) _lineParts(
+  BuildContext context,
+  DiffLine line,
+  int? value,
+) {
+  final ws = context.ws;
+  final (background, gutter, sign) = switch (line.kind) {
+    DiffKind.added => (ws.diffAdd, ws.diffAddStrong, '+'),
+    DiffKind.removed => (ws.diffDel, ws.diffDelStrong, '−'),
+    DiffKind.hunk => (ws.subtle, ws.subtle, ''),
+    DiffKind.context => (null, null, ''),
+  };
+  return (
+    background: background,
+    number: Container(
+      width: 44,
+      color: gutter,
+      padding: const EdgeInsets.only(right: WsMetrics.space4),
+      alignment: Alignment.centerRight,
+      // Muted, as faint lacks contrast on the strong diff colors.
+      child: Text(
+        value?.toString() ?? '',
+        style: TextStyle(
+          color: ws.textMuted,
+          fontSize: WsMetrics.fsSmall,
+          fontFeatures: const [FontFeature.tabularFigures()],
+        ),
+      ),
+    ),
+    sign: SizedBox(
+      width: 20,
+      child: Text(
+        sign,
+        textAlign: TextAlign.center,
+        style: TextStyle(
+          color: line.kind == DiffKind.added ? ws.success : ws.danger,
+        ),
+      ),
+    ),
+  );
+}
+
+/// A line's code, colored lightly; a hunk header in the faint small style.
+Widget _code(BuildContext context, DiffLine line) => line.kind == DiffKind.hunk
+    ? Text(
+        line.text,
+        style: monoStyle(
+          context,
+          color: context.ws.textFaint,
+        ).copyWith(fontSize: WsMetrics.fsSmall),
+      )
+    : Text.rich(
+        highlight(context, line.text),
+        maxLines: 1,
+        overflow: TextOverflow.clip,
+        softWrap: false,
+      );
+
 class _LineRow extends StatelessWidget {
   const _LineRow({required this.line});
 
+  static const height = 22.0;
+
   /// Width of the two line numbers and the sign before the code.
   static const gutter = 44.0 + 44.0 + 20.0;
+
+  /// Width of one side's line number and sign in the split view.
+  static const side = 44.0 + 20.0;
 
   final DiffLine line;
 
   @override
   Widget build(BuildContext context) {
-    final ws = context.ws;
-    final (background, gutter, sign) = switch (line.kind) {
-      DiffKind.added => (ws.diffAdd, ws.diffAddStrong, '+'),
-      DiffKind.removed => (ws.diffDel, ws.diffDelStrong, '−'),
-      DiffKind.hunk => (ws.subtle, ws.subtle, ''),
-      DiffKind.context => (null, null, ''),
-    };
-    // Muted, as faint lacks contrast on the strong diff colors.
-    final number = TextStyle(
-      color: ws.textMuted,
-      fontSize: WsMetrics.fsSmall,
-      fontFeatures: const [FontFeature.tabularFigures()],
-    );
-    Widget cell(int? value) => Container(
-      width: 44,
-      color: gutter,
-      padding: const EdgeInsets.only(right: WsMetrics.space4),
-      alignment: Alignment.centerRight,
-      child: Text(value?.toString() ?? '', style: number),
-    );
+    final old = _lineParts(context, line, line.oldNumber);
+    final now = _lineParts(context, line, line.newNumber);
     return Container(
-      height: 22,
-      color: background,
+      color: old.background,
       child: Row(
         children: [
-          cell(line.oldNumber),
-          cell(line.newNumber),
-          SizedBox(
-            width: 20,
-            child: Text(
-              sign,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: line.kind == DiffKind.added ? ws.success : ws.danger,
-              ),
-            ),
-          ),
-          Expanded(
-            child: line.kind == DiffKind.hunk
-                ? Text(
-                    line.text,
-                    style: monoStyle(
-                      context,
-                      color: ws.textFaint,
-                    ).copyWith(fontSize: WsMetrics.fsSmall),
-                  )
-                : Text.rich(
-                    highlight(context, line.text),
-                    maxLines: 1,
-                    overflow: TextOverflow.clip,
-                    softWrap: false,
-                  ),
-          ),
+          old.number,
+          now.number,
+          old.sign,
+          Expanded(child: _code(context, line)),
         ],
       ),
+    );
+  }
+}
+
+/// One row of the split view: the line before the run on the left, after it on the right.
+class _SplitLine extends StatelessWidget {
+  const _SplitLine({required this.row});
+
+  final SplitRow row;
+
+  @override
+  Widget build(BuildContext context) {
+    final ws = context.ws;
+    if (row.hunk case final hunk?) {
+      return Container(
+        color: ws.subtle,
+        padding: const EdgeInsets.only(left: _LineRow.side),
+        alignment: Alignment.centerLeft,
+        child: _code(context, hunk),
+      );
+    }
+    Widget side(DiffLine? line, {required bool before}) {
+      // A side without a line, beside one only the other side has.
+      if (line == null) return Expanded(child: ColoredBox(color: ws.subtle));
+      final parts = _lineParts(
+        context,
+        line,
+        before ? line.oldNumber : line.newNumber,
+      );
+      return Expanded(
+        child: Container(
+          color: parts.background,
+          child: Row(
+            children: [
+              parts.number,
+              parts.sign,
+              Expanded(child: _code(context, line)),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        side(row.left, before: true),
+        VerticalDivider(width: 1, color: ws.border),
+        side(row.right, before: false),
+      ],
     );
   }
 }

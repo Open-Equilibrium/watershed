@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import '../rust/api/events.dart';
 
 /// One row of the changed-files tree: a folder or a changed file.
@@ -116,4 +118,56 @@ List<DiffLine> parsePatch(String patch) {
     }
   }
   return lines;
+}
+
+/// One row of the split view: a hunk header across both sides, or a line of the file before
+/// the run beside its line after it.
+class SplitRow {
+  const SplitRow({this.hunk, this.left, this.right});
+
+  final DiffLine? hunk;
+  final DiffLine? left;
+  final DiffLine? right;
+}
+
+/// Sets a patch's lines side by side: unchanged lines on both sides, and each run of removed
+/// lines beside the added lines that follow it.
+List<SplitRow> splitRows(List<DiffLine> lines) {
+  final rows = <SplitRow>[];
+  final removed = <DiffLine>[];
+  final added = <DiffLine>[];
+  void pair() {
+    for (
+      var index = 0;
+      index < math.max(removed.length, added.length);
+      index++
+    ) {
+      rows.add(
+        SplitRow(
+          left: index < removed.length ? removed[index] : null,
+          right: index < added.length ? added[index] : null,
+        ),
+      );
+    }
+    removed.clear();
+    added.clear();
+  }
+
+  for (final line in lines) {
+    switch (line.kind) {
+      case DiffKind.removed:
+        if (added.isNotEmpty) pair();
+        removed.add(line);
+      case DiffKind.added:
+        added.add(line);
+      case DiffKind.hunk:
+        pair();
+        rows.add(SplitRow(hunk: line));
+      case DiffKind.context:
+        pair();
+        rows.add(SplitRow(left: line, right: line));
+    }
+  }
+  pair();
+  return rows;
 }

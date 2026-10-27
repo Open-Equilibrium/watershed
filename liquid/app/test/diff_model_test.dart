@@ -98,4 +98,28 @@ index 0..2
       ],
     );
   });
+
+  test('pairs removed and added lines side by side for the split view', () {
+    final rows = splitRows(
+      parsePatch('''@@ -1,4 +1,4 @@
+ keep
+-old one
+-old two
++new one
+ also kept
++only new
+'''),
+    );
+    expect(
+      rows.map((row) => (row.hunk?.text, row.left?.text, row.right?.text)),
+      [
+        ('@@ -1,4 +1,4 @@', null, null),
+        (null, 'keep', 'keep'),
+        (null, 'old one', 'new one'),
+        (null, 'old two', null),
+        (null, 'also kept', 'also kept'),
+        (null, null, 'only new'),
+      ],
+    );
+  });
 }

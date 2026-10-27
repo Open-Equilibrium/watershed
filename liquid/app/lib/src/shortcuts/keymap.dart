@@ -213,9 +213,25 @@ enum Fixed {
   foldFolder('Fold or unfold the folder', Area.diff, '←→', [
     Keys(LogicalKeyboardKey.arrowLeft),
     Keys(LogicalKeyboardKey.arrowRight),
-  ]);
+  ]),
+  previousOrNextHunk('Previous or next change', Area.diff, '⌥↑↓', [
+    Keys(LogicalKeyboardKey.arrowUp, alt: true),
+    Keys(LogicalKeyboardKey.arrowDown, alt: true),
+  ]),
+  unifiedOrSplit('Unified or split', Area.diff, 'U', [
+    Keys(LogicalKeyboardKey.keyU),
+  ], repeats: false),
+  hideWhitespace('Hide or show whitespace changes', Area.diff, 'W', [
+    Keys(LogicalKeyboardKey.keyW),
+  ], repeats: false);
 
-  const Fixed(this.label, this.area, this.display, this.keys);
+  const Fixed(
+    this.label,
+    this.area,
+    this.display,
+    this.keys, {
+    this.repeats = true,
+  });
 
   final String label;
   final Area area;
@@ -224,12 +240,15 @@ enum Fixed {
   final String display;
   final List<Keys> keys;
 
+  /// Whether a held key acts again, as for moving through a list; a switch acts once.
+  final bool repeats;
+
   /// Binds each key to the action at its position, such as ↑ to back and ↓ to on.
   Map<ShortcutActivator, VoidCallback> bind(List<VoidCallback> actions) {
     assert(actions.length == keys.length, '$name binds ${keys.length} keys');
     return {
       for (final (index, keys) in this.keys.indexed)
-        keys.repeating: actions[index],
+        repeats ? keys.repeating : keys.activator: actions[index],
     };
   }
 }

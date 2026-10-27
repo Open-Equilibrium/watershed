@@ -265,3 +265,90 @@ const activateKeys = <ShortcutActivator, Intent>{
   SingleActivator(LogicalKeyboardKey.enter): ActivateIntent(),
   SingleActivator(LogicalKeyboardKey.space): ActivateIntent(),
 };
+
+/// A choice of one among a few, as the segments of one control (approved mockups).
+class Segments<T> extends StatelessWidget {
+  const Segments({
+    super.key,
+    required this.options,
+    required this.selected,
+    required this.onSelect,
+  });
+
+  /// Each option with its label, in order.
+  final List<(T, String)> options;
+  final T selected;
+  final ValueChanged<T> onSelect;
+
+  @override
+  Widget build(BuildContext context) {
+    final ws = context.ws;
+    return Container(
+      padding: const EdgeInsets.all(2),
+      decoration: BoxDecoration(
+        color: ws.subtle,
+        border: Border.all(color: ws.borderStrong),
+        borderRadius: BorderRadius.circular(WsMetrics.radiusMd + 1),
+      ),
+      // Focus shows above the group's background.
+      child: Material(
+        type: MaterialType.transparency,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (final (value, label) in options)
+              _Segment(
+                label: label,
+                selected: value == selected,
+                onTap: () => onSelect(value),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _Segment extends StatelessWidget {
+  const _Segment({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final ws = context.ws;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
+      // Ink, so the focus highlight shows above the selected segment.
+      child: Ink(
+        height: 24,
+        padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space4),
+        decoration: selected
+            ? BoxDecoration(
+                color: ws.canvas,
+                borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
+                border: Border.all(color: ws.borderStrong),
+              )
+            : null,
+        child: Center(
+          widthFactor: 1,
+          child: Text(
+            label,
+            style: TextStyle(
+              fontSize: WsMetrics.fsCompact,
+              color: selected ? ws.text : ws.textMuted,
+              fontWeight: selected ? WsMetrics.fwMedium : WsMetrics.fwRegular,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
