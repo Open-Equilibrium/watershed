@@ -152,6 +152,15 @@ void main() {
     expect(find.text('Done.'), findsNothing, reason: 'the turn folded');
     await press(tester, LogicalKeyboardKey.arrowRight);
     expect(find.text('Done.'), findsOneWidget);
+    // The fold button takes return from the keyboard, as a click.
+    Focus.of(tester.element(find.text('Fold turns'))).requestFocus();
+    await tester.pump();
+    await press(tester, LogicalKeyboardKey.enter);
+    expect(
+      find.byKey(const ValueKey('step-e2')),
+      findsNothing,
+      reason: 'the turns folded',
+    );
   });
 
   testWidgets('opens what the model saw and branches from a step', (
@@ -376,10 +385,7 @@ void main() {
     await press(tester, LogicalKeyboardKey.arrowDown);
     await press(tester, LogicalKeyboardKey.keyB);
     expect(backend.calls, isNot(contains('branch e1')));
-    expect(
-      state.notice.value?.text,
-      'Branching waits until the agent is idle.',
-    );
+    expect(state.notice.value?.text, 'Branch once the agent is idle.');
     await tester.pump(const Duration(seconds: 7));
   });
 

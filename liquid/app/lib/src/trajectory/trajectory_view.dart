@@ -265,10 +265,7 @@ class _TrajectoryViewState extends State<TrajectoryView> {
     final index = _selectedIndex;
     if (index < 0 || _comparing) return;
     if (_busy) {
-      widget.state.notify(
-        BridgeLevel.info,
-        'Branching waits until the agent is idle.',
-      );
+      widget.state.notify(BridgeLevel.info, 'Branch once the agent is idle.');
       return;
     }
     final at = _records[index].kind == BridgeRecordKind.user
@@ -756,18 +753,22 @@ class _Toolbar extends StatelessWidget {
             ),
           ),
           const SizedBox(width: WsMetrics.space2),
-          TextButton(
-            onPressed: onFold,
-            style: TextButton.styleFrom(
-              foregroundColor: ws.textMuted,
-              textStyle: const TextStyle(fontSize: WsMetrics.fsCompact),
-            ),
-            child: Row(
-              children: [
-                const Text('Fold turns'),
-                const SizedBox(width: WsMetrics.space3),
-                Hint(Keymap.of(context).label(Command.foldAll)),
-              ],
+          // Return and space press it rather than the view's own keys.
+          Shortcuts(
+            shortcuts: activateKeys,
+            child: TextButton(
+              onPressed: onFold,
+              style: TextButton.styleFrom(
+                foregroundColor: ws.textMuted,
+                textStyle: const TextStyle(fontSize: WsMetrics.fsCompact),
+              ),
+              child: Row(
+                children: [
+                  const Text('Fold turns'),
+                  const SizedBox(width: WsMetrics.space3),
+                  Hint(Keymap.of(context).label(Command.foldAll)),
+                ],
+              ),
             ),
           ),
           const Spacer(),
