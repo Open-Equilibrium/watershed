@@ -88,20 +88,24 @@ void main() {
   bool focused(WidgetTester tester, Key key) =>
       tester.widget<TextField>(find.byKey(key)).focusNode?.hasFocus ?? false;
 
-  testWidgets('a confirmation takes ⏎ at once', (tester) async {
+  testWidgets('a confirmation takes ⏎ without a click first', (tester) async {
     await show(tester);
     await emit(tester, question(BridgeQuestionKind.confirm));
+    await read(tester);
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
     expect(backend.calls, contains('confirm q1 true'));
   });
 
-  testWidgets('a selection takes ↓ and ⏎ at once', (tester) async {
+  testWidgets('a selection takes ↓ and ⏎ without a click first', (
+    tester,
+  ) async {
     await show(tester);
     await emit(
       tester,
       question(BridgeQuestionKind.select, options: ['Sliding', 'Fixed']),
     );
+    await read(tester);
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
@@ -112,6 +116,7 @@ void main() {
     await show(tester);
     await emit(tester, question(BridgeQuestionKind.input));
     expect(focused(tester, const Key('answer')), isTrue);
+    await read(tester);
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
     expect(backend.calls, contains('dismiss q1'));
@@ -157,6 +162,7 @@ void main() {
   ) async {
     await show(tester);
     await emit(tester, question(BridgeQuestionKind.confirm));
+    await read(tester);
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     expect(backend.calls.last, 'dismiss q1');
     await emit(

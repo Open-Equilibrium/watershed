@@ -6,6 +6,7 @@ import '../session/session_state.dart';
 import '../shortcuts/keymap.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
+import 'read_delay.dart';
 
 /// A selection that narrows as the user types; arrows move and Enter picks (approved mockup).
 class _OptionList extends StatefulWidget {
@@ -159,7 +160,7 @@ class QuestionCard extends StatefulWidget {
   State<QuestionCard> createState() => _QuestionCardState();
 }
 
-class _QuestionCardState extends State<QuestionCard> {
+class _QuestionCardState extends State<QuestionCard> with ReadDelay {
   late final TextEditingController _text = TextEditingController(
     text: widget.request.question!.kind == BridgeQuestionKind.editor
         ? widget.request.question!.detail
@@ -194,10 +195,15 @@ class _QuestionCardState extends State<QuestionCard> {
     final state = widget.state;
     final id = widget.request.id;
     final keys = Keymap.of(context);
+    // Answers count once the question could be read, whether by key or click (ADR-0209).
+    void answerText(String text) => decided(() => state.answerText(id, text));
+    void answerConfirm(bool confirmed) =>
+        decided(() => state.answerConfirm(id, confirmed));
+    void dismiss() => decided(() => state.dismiss(id));
     final answer = switch (question.kind) {
       BridgeQuestionKind.select => _OptionList(
         options: question.options,
-        onPick: (option) => state.answerText(id, option),
+        onPick: answerText,
         focusNode: _field,
       ),
       BridgeQuestionKind.confirm => Row(
@@ -205,13 +211,10 @@ class _QuestionCardState extends State<QuestionCard> {
           PrimaryButton(
             label: 'Yes',
             shortcut: keys.label(Command.answer),
-            onPressed: () => state.answerConfirm(id, true),
+            onPressed: () => answerConfirm(true),
           ),
           const SizedBox(width: WsMetrics.space3),
-          SecondaryButton(
-            label: 'No',
-            onPressed: () => state.answerConfirm(id, false),
-          ),
+          SecondaryButton(label: 'No', onPressed: () => answerConfirm(false)),
         ],
       ),
       // An editor fills the card: Enter adds a line, ⌘Enter answers (approved mockup).
@@ -221,7 +224,7 @@ class _QuestionCardState extends State<QuestionCard> {
           Expanded(
             child: CallbackShortcuts(
               bindings: keys.bind({
-                Command.answerEditor: () => state.answerText(id, _text.text),
+                Command.answerEditor: () => answerText(_text.text),
               }),
               child: Container(
                 padding: const EdgeInsets.symmetric(
@@ -254,7 +257,7 @@ class _QuestionCardState extends State<QuestionCard> {
               PrimaryButton(
                 label: 'Answer',
                 shortcut: keys.label(Command.answerEditor),
-                onPressed: () => state.answerText(id, _text.text),
+                onPressed: () => answerText(_text.text),
               ),
             ],
           ),
@@ -265,7 +268,7 @@ class _QuestionCardState extends State<QuestionCard> {
           Expanded(
             child: CallbackShortcuts(
               bindings: keys.bind({
-                Command.answer: () => state.answerText(id, _text.text),
+                Command.answer: () => answerText(_text.text),
               }),
               child: TextField(
                 key: const Key('answer'),
@@ -282,7 +285,7 @@ class _QuestionCardState extends State<QuestionCard> {
           PrimaryButton(
             label: 'Answer',
             shortcut: keys.label(Command.answer),
-            onPressed: () => state.answerText(id, _text.text),
+            onPressed: () => answerText(_text.text),
           ),
         ],
       ),
@@ -312,18 +315,20 @@ class _QuestionCardState extends State<QuestionCard> {
         SecondaryButton(
           label: 'Dismiss',
           shortcut: keys.label(Command.dismissQuestion),
-          onPressed: () => state.dismiss(id),
+          onPressed: dismiss,
         ),
       ],
     );
     return CallbackShortcuts(
       bindings: keys.bind({
-        Command.dismissQuestion: () => state.dismiss(id),
+        Command.dismissQuestion: dismiss,
         if (question.kind == BridgeQuestionKind.confirm)
-          Command.answer: () => state.answerConfirm(id, true),
+          Command.answer: () => answerConfirm(true),
       }),
       child: Focus(
         focusNode: _card,
+        // A key held from before, such as the ⏎ that sent the message, types nothing.
+        onKeyEvent: skipHeld,
         child: InputCard(
           ring: context.ws.borderStrong,
           padding: const EdgeInsets.all(WsMetrics.space4),

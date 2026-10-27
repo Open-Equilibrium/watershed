@@ -421,6 +421,85 @@ void main() {
     expect(find.byKey(const Key('composer')), findsOneWidget);
   });
 
+  testWidgets('takes no click or key before a decision could be read', (
+    tester,
+  ) async {
+    await show(tester);
+    await emit(
+      tester,
+      event(BridgeEventKind.requestOpened, request: approval('a1')),
+    );
+    await tester.tap(find.text('Allow once'));
+    await tester.pump();
+    expect(backend.calls.where((call) => call.startsWith('decide')), isEmpty);
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.tap(find.text('Allow once'));
+    expect(backend.calls.last, 'decide a1 allowOnce');
+    await emit(
+      tester,
+      event(BridgeEventKind.requestResolved, request: BridgeRequest(id: 'a1')),
+    );
+
+    await emit(
+      tester,
+      event(
+        BridgeEventKind.userInputRequested,
+        request: BridgeRequest(
+          id: 'q1',
+          question: BridgeQuestion(
+            kind: BridgeQuestionKind.confirm,
+            title: 'Deploy now?',
+            detail: '',
+            options: const [],
+          ),
+        ),
+      ),
+    );
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.tap(find.text('Yes'));
+    await tester.tap(find.text('Dismiss'));
+    await tester.pump();
+    expect(backend.calls.where((call) => call.contains('q1')), isEmpty);
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    expect(backend.calls.last, 'confirm q1 true');
+  });
+
+  testWidgets('keeps a key held from before out of a question field', (
+    tester,
+  ) async {
+    await show(tester);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.keyA);
+    await emit(
+      tester,
+      event(
+        BridgeEventKind.userInputRequested,
+        request: BridgeRequest(
+          id: 'q1',
+          question: BridgeQuestion(
+            kind: BridgeQuestionKind.input,
+            title: 'Name',
+            detail: '',
+            options: const [],
+          ),
+        ),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(
+      await tester.sendKeyRepeatEvent(LogicalKeyboardKey.keyA),
+      isTrue,
+      reason: 'the repeat never reaches the field',
+    );
+    expect(await tester.sendKeyUpEvent(LogicalKeyboardKey.keyA), isTrue);
+    expect(
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.keyB),
+      isFalse,
+      reason: 'a key pressed for the question types',
+    );
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.keyB);
+  });
+
   testWidgets('says what allowing a call for the session covers', (
     tester,
   ) async {
@@ -589,6 +668,7 @@ void main() {
       ),
     );
     expect(find.byKey(const Key('composer')), findsNothing);
+    await tester.pump(const Duration(milliseconds: 500));
     await tester.tap(find.text('Fixed'));
     await tester.pump();
     expect(backend.calls.last, 'answer q1 Fixed');
@@ -621,6 +701,8 @@ void main() {
     await emit(tester, ask('q1', BridgeQuestionKind.confirm, 'Detail: $long'));
     inArea(find.text('Yes'));
     inArea(find.text('No'));
+    // A question takes answers once it could be read (ADR-0209).
+    await tester.pump(const Duration(milliseconds: 500));
     await tester.tap(find.text('No'));
     expect(backend.calls.last, 'confirm q1 false');
     await emit(
@@ -633,6 +715,7 @@ void main() {
 
     await emit(tester, ask('q2', BridgeQuestionKind.select, ''));
     inArea(find.text('Fixed'));
+    await tester.pump(const Duration(milliseconds: 500));
     await tester.tap(find.text('Fixed'));
     expect(backend.calls.last, 'answer q2 Fixed');
   });
@@ -750,6 +833,7 @@ void main() {
     await tester.pump();
     expect(find.text('2 / 14'), findsOneWidget);
     expect(find.text('staging-eu'), findsNothing);
+    await tester.pump(const Duration(milliseconds: 500));
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     expect(backend.calls.last, 'answer q1 production-us');

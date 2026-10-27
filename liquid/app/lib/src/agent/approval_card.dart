@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -9,6 +7,7 @@ import '../session/session_state.dart';
 import '../shortcuts/keymap.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
+import 'read_delay.dart';
 
 /// A tool call waiting for approval: Enter allows once, Cmd+Enter for the session, Esc rejects.
 class ApprovalCard extends StatefulWidget {
@@ -21,17 +20,9 @@ class ApprovalCard extends StatefulWidget {
   State<ApprovalCard> createState() => _ApprovalCardState();
 }
 
-class _ApprovalCardState extends State<ApprovalCard> {
+class _ApprovalCardState extends State<ApprovalCard> with ReadDelay {
   final _focus = FocusNode(debugLabel: 'approval');
   final _code = ScrollController();
-
-  /// Whether the card was shown long enough to be read; until then no key decides (ADR-0207).
-  bool _armed = false;
-  Timer? _arming;
-
-  /// Starts the wait again whenever Liquid comes back in front, since the card may have
-  /// appeared while the user worked elsewhere.
-  late final AppLifecycleListener _front;
 
   @override
   void initState() {
@@ -40,24 +31,10 @@ class _ApprovalCardState extends State<ApprovalCard> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _focus.requestFocus();
     });
-    _front = AppLifecycleListener(onStateChange: (_) => _arm());
-    _arm();
-  }
-
-  /// Takes keys 0.5 s after Liquid is in front with the card.
-  void _arm() {
-    _armed = false;
-    _arming?.cancel();
-    if (WidgetsBinding.instance.lifecycleState
-        case null || AppLifecycleState.resumed) {
-      _arming = Timer(const Duration(milliseconds: 500), () => _armed = true);
-    }
   }
 
   @override
   void dispose() {
-    _arming?.cancel();
-    _front.dispose();
     _focus.dispose();
     _code.dispose();
     super.dispose();
@@ -82,7 +59,8 @@ class _ApprovalCardState extends State<ApprovalCard> {
   Widget build(BuildContext context) {
     final state = widget.state;
     final id = widget.request.id;
-    void decide(BridgeDecision decision) => state.decide(id, decision);
+    void decide(BridgeDecision decision) =>
+        decided(() => state.decide(id, decision));
     final approval = widget.request.approval!;
     final ws = context.ws;
     final title = switch (approval.kind) {
@@ -110,7 +88,7 @@ class _ApprovalCardState extends State<ApprovalCard> {
         focusNode: _focus,
         // A key pressed before the card was read decides nothing; a held key never does.
         onKeyEvent: (node, event) =>
-            !_armed &&
+            !armed &&
                 decisions.keys
                     .expand(keys.bindings)
                     .any(
