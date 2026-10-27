@@ -181,7 +181,7 @@ Liquid clients use Flutter (ADR-0181), which builds desktop apps only on their o
 | Linux | Linux | clang, CMake, Ninja, pkg-config and GTK 3 development headers |
 | Android | Linux, macOS or Windows | Android SDK |
 
-Every Liquid build, including `flutter test`, also compiles the Rust bridge through rustup with the toolchain pinned in `liquid/liquid-bridge/rust-toolchain.toml` (ADR-0213). Flutter passes hooks only a few environment variables, such as `PATH`, `HOME` and proxy settings, and records them in `liquid/app/.dart_tool/hooks_runner` and in verbose output; keep credentials out of proxy URLs on build hosts. Without Xcode, a Mac still runs Rust core tests, `flutter test` and `flutter analyze`. Native CI hosts can supply the other desktop builds.
+Every Liquid build, including `flutter test`, also compiles the Rust bridge through rustup with the toolchain pinned in `liquid/liquid-bridge/rust-toolchain.toml` (ADR-0213). Flutter passes hooks only a few environment variables, such as `PATH`, `HOME` and proxy settings, and records them in `liquid/app/.dart_tool/hooks_runner` and in verbose output; keep credentials out of proxy URLs on build hosts. flutter_rust_bridge has one main maintainer, so every Flutter or Rust pin update also checks its recent releases and open issues for whether it is still maintained (ADR-0217). Without Xcode, a Mac still runs Rust core tests, `flutter test` and `flutter analyze`. Native CI hosts can supply the other desktop builds.
 
 ## CI
 
