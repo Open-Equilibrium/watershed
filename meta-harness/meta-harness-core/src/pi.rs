@@ -243,7 +243,7 @@ impl PiAdapter {
         );
         let arguments = record.get("args").map(Value::to_string).unwrap_or_default();
         let detail = ItemDetail::Tool {
-            name: name.to_owned(),
+            name: visible(name),
             target: call_target(&arguments),
         };
         events.push(started(turn, item, kind, detail));

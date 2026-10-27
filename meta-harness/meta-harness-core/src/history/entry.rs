@@ -5,6 +5,7 @@ use serde_json::Value;
 
 use super::outcome::{exit_code, patch_lines, test_counts};
 use crate::pi::{content_text, item_kind, usage, written_lines};
+use crate::visible::visible;
 use crate::{ItemKind, ToolOutcome, Usage};
 
 /// Longest text kept per prompt or response, in characters.
@@ -253,11 +254,7 @@ fn message(message: Option<&Value>) -> Body {
                             .and_then(Value::as_str)
                             .unwrap_or_default()
                             .to_owned(),
-                        name: call
-                            .get("name")
-                            .and_then(Value::as_str)
-                            .unwrap_or_default()
-                            .to_owned(),
+                        name: visible(call.get("name").and_then(Value::as_str).unwrap_or_default()),
                         arguments: arguments(&full),
                         written_lines: written_lines(
                             call.get("name").and_then(Value::as_str).unwrap_or_default(),
@@ -283,7 +280,7 @@ fn message(message: Option<&Value>) -> Body {
             }
         }
         Some("toolResult") => {
-            let tool = field("toolName");
+            let tool = visible(&field("toolName"));
             let failed = message.get("isError").and_then(Value::as_bool) == Some(true);
             let patch = message
                 .get("details")
@@ -337,7 +334,7 @@ fn custom(kind: String, data: Option<&Value>) -> Body {
             _ => Body::Custom,
         },
         "watershed.approval" => Body::Approval {
-            tool: text("tool"),
+            tool: visible(&text("tool")),
             decision: text("decision"),
             waited_ms: millis("waitedMs"),
         },
@@ -365,7 +362,7 @@ fn system(message: &Value) -> SystemChange {
         appended_chars: content_text(message.get("content")).chars().count(),
         tools_added: tools()
             .filter_map(|tool| {
-                let name = tool.get("name")?.as_str()?.to_owned();
+                let name = visible(tool.get("name")?.as_str()?);
                 Some((name, tool.to_string().chars().count()))
             })
             .collect(),
@@ -375,7 +372,7 @@ fn system(message: &Value) -> SystemChange {
             .into_iter()
             .flatten()
             .filter_map(|tool| tool.get("name").and_then(Value::as_str))
-            .map(str::to_owned)
+            .map(visible)
             .collect(),
     }
 }

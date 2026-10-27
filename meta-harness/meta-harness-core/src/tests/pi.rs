@@ -503,6 +503,48 @@ fn shows_invisible_and_reordering_characters_in_what_a_call_shows() {
 }
 
 #[test]
+fn shows_tool_names_with_hiding_characters_written_out() {
+    // An extension's tool name that reorders what follows it, live and as stored.
+    let events = translate(&[
+        r#"{"type":"agent_start"}"#,
+        r#"{"type":"tool_execution_start","toolCallId":"c1","toolName":"lint\u202e","args":{}}"#,
+    ]);
+    assert!(
+        events.iter().any(|event| matches!(
+            event,
+            AgentEvent::ItemStarted { detail: ItemDetail::Tool { name, .. }, .. }
+                if name == "lint<U+202E>"
+        )),
+        "{events:?}"
+    );
+    let session: Value = serde_json::from_str(
+        r#"{"entries":[
+          {"type":"message","id":"u1","parentId":null,"message":{"role":"user","content":"Lint"}},
+          {"type":"message","id":"a1","parentId":"u1","message":{"role":"assistant","content":[{"type":"toolCall","id":"c1","name":"lint\u202e","arguments":{}}]}},
+          {"type":"custom","id":"p1","parentId":"a1","customType":"watershed.approval","data":{"toolCallId":"c1","tool":"lint\u202e","decision":"allow-once"}},
+          {"type":"message","id":"r1","parentId":"p1","message":{"role":"toolResult","toolCallId":"c1","toolName":"lint\u202e","content":[]}}
+        ],"leafId":"r1"}"#,
+    )
+    .expect("JSON");
+    let history = History::from_entries(&session);
+    let chat: Vec<_> = history
+        .transcript(None, 10)
+        .items
+        .into_iter()
+        .filter_map(|item| item.tool)
+        .collect();
+    assert_eq!(chat, ["lint<U+202E>"]);
+    let steps: Vec<_> = history
+        .trajectory(None)
+        .records
+        .into_iter()
+        .filter(|record| record.label.starts_with("lint"))
+        .map(|record| record.label)
+        .collect();
+    assert_eq!(steps, ["lint<U+202E>", "lint<U+202E>"], "approval and call");
+}
+
+#[test]
 fn ends_the_items_an_abort_leaves_open() {
     let events = translate(&[
         r#"{"type":"agent_start"}"#,
