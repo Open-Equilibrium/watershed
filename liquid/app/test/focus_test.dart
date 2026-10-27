@@ -24,12 +24,14 @@ void main() {
       ..changed = [
         BridgeFileChange(
           path: 'a.txt',
+          shown: 'a.txt',
           status: BridgeChangeStatus.modified,
           added: 1,
           removed: 1,
         ),
         BridgeFileChange(
           path: 'b.txt',
+          shown: 'b.txt',
           status: BridgeChangeStatus.modified,
           added: 1,
           removed: 1,

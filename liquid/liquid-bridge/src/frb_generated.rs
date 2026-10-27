@@ -1674,11 +1674,13 @@ impl SseDecode for crate::api::events::BridgeFileChange {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut var_path = <String>::sse_decode(deserializer);
+        let mut var_shown = <String>::sse_decode(deserializer);
         let mut var_status = <crate::api::events::BridgeChangeStatus>::sse_decode(deserializer);
         let mut var_added = <i64>::sse_decode(deserializer);
         let mut var_removed = <i64>::sse_decode(deserializer);
         return crate::api::events::BridgeFileChange {
             path: var_path,
+            shown: var_shown,
             status: var_status,
             added: var_added,
             removed: var_removed,
@@ -2904,6 +2906,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::events::BridgeFileChange {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
             self.path.into_into_dart().into_dart(),
+            self.shown.into_into_dart().into_dart(),
             self.status.into_into_dart().into_dart(),
             self.added.into_into_dart().into_dart(),
             self.removed.into_into_dart().into_dart(),
@@ -3667,6 +3670,7 @@ impl SseEncode for crate::api::events::BridgeFileChange {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <String>::sse_encode(self.path, serializer);
+        <String>::sse_encode(self.shown, serializer);
         <crate::api::events::BridgeChangeStatus>::sse_encode(self.status, serializer);
         <i64>::sse_encode(self.added, serializer);
         <i64>::sse_encode(self.removed, serializer);

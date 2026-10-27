@@ -9,6 +9,7 @@ BridgeFileChange change(
   int removed,
 ) => BridgeFileChange(
   path: path,
+  shown: path,
   status: status,
   added: added,
   removed: removed,

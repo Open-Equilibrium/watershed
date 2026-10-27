@@ -1482,13 +1482,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeFileChange dco_decode_bridge_file_change(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 4)
-      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
+    if (arr.length != 5)
+      throw Exception('unexpected arr length: expect 5 but see ${arr.length}');
     return BridgeFileChange(
       path: dco_decode_String(arr[0]),
-      status: dco_decode_bridge_change_status(arr[1]),
-      added: dco_decode_i_64(arr[2]),
-      removed: dco_decode_i_64(arr[3]),
+      shown: dco_decode_String(arr[1]),
+      status: dco_decode_bridge_change_status(arr[2]),
+      added: dco_decode_i_64(arr[3]),
+      removed: dco_decode_i_64(arr[4]),
     );
   }
 
@@ -2335,11 +2336,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeFileChange sse_decode_bridge_file_change(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_path = sse_decode_String(deserializer);
+    var var_shown = sse_decode_String(deserializer);
     var var_status = sse_decode_bridge_change_status(deserializer);
     var var_added = sse_decode_i_64(deserializer);
     var var_removed = sse_decode_i_64(deserializer);
     return BridgeFileChange(
       path: var_path,
+      shown: var_shown,
       status: var_status,
       added: var_added,
       removed: var_removed,
@@ -3428,6 +3431,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_String(self.path, serializer);
+    sse_encode_String(self.shown, serializer);
     sse_encode_bridge_change_status(self.status, serializer);
     sse_encode_i_64(self.added, serializer);
     sse_encode_i_64(self.removed, serializer);

@@ -121,6 +121,21 @@ fn model_requests_carry_usage_and_how_they_ended() {
 }
 
 #[test]
+fn a_changed_file_shows_its_name_with_hiding_characters_written_out() {
+    let change = BridgeFileChange::from(meta_harness_core::FileChange {
+        path: "src/a\u{202e}b.ts".to_owned(),
+        status: meta_harness_core::ChangeStatus::Added,
+        added: 1,
+        removed: 0,
+    });
+    assert_eq!(
+        (change.path.as_str(), change.shown.as_str()),
+        ("src/a\u{202e}b.ts", "src/a<U+202E>b.ts"),
+        "the path still names the file for its patch"
+    );
+}
+
+#[test]
 fn requests_and_questions_reach_dart_with_their_answers() {
     let opened = bridge(AgentEvent::RequestOpened {
         request: RequestId("a1".to_owned()),
@@ -585,6 +600,7 @@ IFS= read -r line || exit 0"#;
         changes,
         Some(vec![BridgeFileChange {
             path: "a.txt".to_owned(),
+            shown: "a.txt".to_owned(),
             status: BridgeChangeStatus::Modified,
             added: 1,
             removed: 1,

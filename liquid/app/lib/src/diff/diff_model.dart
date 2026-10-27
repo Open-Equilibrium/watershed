@@ -21,7 +21,7 @@ class FileRow {
 List<FileRow> fileTree(List<BridgeFileChange> changes) {
   final root = _Folder('');
   for (final change in changes) {
-    final parts = change.path.split('/');
+    final parts = change.shown.split('/');
     var folder = root;
     for (final part in parts.take(parts.length - 1)) {
       folder = folder.folders.putIfAbsent(

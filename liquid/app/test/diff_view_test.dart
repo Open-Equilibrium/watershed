@@ -41,12 +41,14 @@ void main() {
         ..changed = [
           BridgeFileChange(
             path: 'src/routes/login.ts',
+            shown: 'src/routes/login.ts',
             status: BridgeChangeStatus.modified,
             added: 1,
             removed: 1,
           ),
           BridgeFileChange(
             path: 'src/middleware/rateLimit.ts',
+            shown: 'src/middleware/rateLimit.ts',
             status: BridgeChangeStatus.added,
             added: 2,
             removed: 0,
@@ -110,11 +112,37 @@ void main() {
     expect(find.text('No changes in this run'), findsOneWidget);
   });
 
+  testWidgets('shows a file\'s name with hiding characters written out', (
+    tester,
+  ) async {
+    final backend = FakeBackend()
+      ..changed = [
+        BridgeFileChange(
+          path: 'src/a\u202eb.ts',
+          shown: 'src/a<U+202E>b.ts',
+          status: BridgeChangeStatus.added,
+          added: 1,
+          removed: 0,
+        ),
+      ]
+      ..patches = {'src/a\u202eb.ts': '@@ -0,0 +1 @@\n+x\n'};
+    await show(tester, backend);
+    expect(find.text('a<U+202E>b.ts'), findsOneWidget, reason: 'the list');
+    expect(find.text('src/a<U+202E>b.ts'), findsOneWidget, reason: 'the header');
+    expect(find.textContaining('\u202e'), findsNothing);
+    expect(
+      backend.patchReads,
+      ['src/a\u202eb.ts'],
+      reason: 'the patch is read by the file\'s own name',
+    );
+  });
+
   testWidgets('says why a diff cannot be shown', (tester) async {
     final backend = FakeBackend()
       ..changed = [
         BridgeFileChange(
           path: 'big.txt',
+          shown: 'big.txt',
           status: BridgeChangeStatus.modified,
           added: 200000,
           removed: 0,
@@ -140,6 +168,7 @@ void main() {
       ..changed = [
         BridgeFileChange(
           path: 'wide.ts',
+          shown: 'wide.ts',
           status: BridgeChangeStatus.modified,
           added: 1,
           removed: 0,
@@ -161,6 +190,7 @@ void main() {
       'the last', (tester) async {
     BridgeFileChange file(String path) => BridgeFileChange(
       path: path,
+      shown: path,
       status: BridgeChangeStatus.modified,
       added: 1,
       removed: 0,
@@ -196,6 +226,7 @@ void main() {
   testWidgets('folds folders by click and with ← and →', (tester) async {
     BridgeFileChange file(String path) => BridgeFileChange(
       path: path,
+      shown: path,
       status: BridgeChangeStatus.modified,
       added: 1,
       removed: 0,
@@ -233,6 +264,7 @@ void main() {
       ..changed = [
         BridgeFileChange(
           path: 'old.ts',
+          shown: 'old.ts',
           status: BridgeChangeStatus.modified,
           added: 1,
           removed: 0,
@@ -278,6 +310,7 @@ void main() {
   testWidgets('moves past a folded folder in both directions', (tester) async {
     BridgeFileChange file(String path) => BridgeFileChange(
       path: path,
+      shown: path,
       status: BridgeChangeStatus.modified,
       added: 1,
       removed: 0,
@@ -308,6 +341,7 @@ void main() {
       ..changed = [
         BridgeFileChange(
           path: 'logo.png',
+          shown: 'logo.png',
           status: BridgeChangeStatus.modified,
           added: 0,
           removed: 0,

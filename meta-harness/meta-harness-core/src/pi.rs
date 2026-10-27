@@ -333,7 +333,7 @@ pub(crate) fn changed_path(tool: &str, arguments: &str) -> Option<String> {
 
 /// `text` with the characters that hide or reorder what it shows written out, such as
 /// `<U+202E>`; [`hides`] lists them. Look-alike letters stay as they are.
-pub(crate) fn visible(text: &str) -> String {
+pub fn visible(text: &str) -> String {
     let mut shown = String::with_capacity(text.len());
     for character in text.chars() {
         if hides(character) {

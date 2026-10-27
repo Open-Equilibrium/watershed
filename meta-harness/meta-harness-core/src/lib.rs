@@ -26,6 +26,7 @@ pub use history::{
     ToolOutcome, Trajectory, TrajectoryRecord, Transcript, TranscriptItem,
 };
 pub(crate) use pi::PiAdapter;
+pub use pi::visible;
 pub use run_diff::{Capture, RunDiff};
 pub use session::{
     AgentCommand, CommandError, MAX_RECORD_BYTES, Model, Pending, Session, SessionEvent,

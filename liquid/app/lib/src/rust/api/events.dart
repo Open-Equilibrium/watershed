@@ -226,6 +226,9 @@ class BridgeFileChange {
   /// The path relative to the root of the Git repository the project is in.
   final String path;
 
+  /// The path as Liquid shows it, with characters that could hide or reorder it written out.
+  final String shown;
+
   /// How it changed.
   final BridgeChangeStatus status;
 
@@ -237,6 +240,7 @@ class BridgeFileChange {
 
   const BridgeFileChange({
     required this.path,
+    required this.shown,
     required this.status,
     required this.added,
     required this.removed,
@@ -244,7 +248,11 @@ class BridgeFileChange {
 
   @override
   int get hashCode =>
-      path.hashCode ^ status.hashCode ^ added.hashCode ^ removed.hashCode;
+      path.hashCode ^
+      shown.hashCode ^
+      status.hashCode ^
+      added.hashCode ^
+      removed.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -252,6 +260,7 @@ class BridgeFileChange {
       other is BridgeFileChange &&
           runtimeType == other.runtimeType &&
           path == other.path &&
+          shown == other.shown &&
           status == other.status &&
           added == other.added &&
           removed == other.removed;

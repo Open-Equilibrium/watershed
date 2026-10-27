@@ -405,7 +405,7 @@ class _Patch extends StatelessWidget {
               ),
             ),
             alignment: Alignment.centerLeft,
-            child: Text(change.path, style: monoStyle(context)),
+            child: Text(change.shown, style: monoStyle(context)),
           ),
           Expanded(
             child: DecoratedBox(

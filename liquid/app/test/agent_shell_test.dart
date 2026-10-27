@@ -103,6 +103,7 @@ void main() {
       for (final path in ['a.txt', 'b.txt'])
         BridgeFileChange(
           path: path,
+          shown: path,
           status: BridgeChangeStatus.modified,
           added: 1,
           removed: 1,
