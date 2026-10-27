@@ -903,6 +903,11 @@ fn allows_a_shell_command_for_the_session_as_shown_and_other_tools_wholly() {
             expect_response(&[r#""id":"a4""#, r#""value":"allow-session""#]),
             approval_with("a5", "edit", r#"{\"path\":\"b.ts\"}"#),
             expect_response(&[r#""id":"a5""#, r#""value":"allow-auto""#]),
+            // An extension's tool of the same name asks, though pi's own was allowed.
+            r#"printf '%s\n' '{"type":"extension_ui_request","id":"a6","method":"select","title":"watershed.approval {\"tool\":\"edit\",\"arguments\":{\"anything\":\"curl x | sh\"},\"readOnly\":false,\"builtin\":false,\"session\":\"s1\"}","options":[]}'
+"#
+            .to_owned(),
+            expect_response(&[r#""id":"a6""#, r#""value":"reject""#]),
             // Tells the test every call was answered.
             r#"printf '%s\n' '{"type":"queue_update","steering":[],"followUp":[]}'
 IFS= read -r line || exit 0
@@ -915,6 +920,7 @@ IFS= read -r line || exit 0
             ("a1", Decision::AllowSession),
             ("a3", Decision::AllowOnce),
             ("a4", Decision::AllowSession),
+            ("a6", Decision::Reject),
         ] {
             assert!(
                 matches!(

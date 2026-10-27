@@ -115,7 +115,7 @@ pub struct SessionTree {
 pub struct RequestId(pub String);
 
 /// What an approval request asks to allow.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum RequestKind {
     /// Running a shell command.
     CommandExecutionApproval,
