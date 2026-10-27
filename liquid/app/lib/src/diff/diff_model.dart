@@ -83,6 +83,11 @@ List<DiffLine> parsePatch(String patch) {
   var newNumber = 0;
   var inHunk = false;
   for (final line in patch.split('\n')) {
+    // Git writes some changes of one file, such as a file becoming a link, as two sections.
+    if (line.startsWith('diff --git ')) {
+      inHunk = false;
+      continue;
+    }
     final hunk = _hunk.firstMatch(line);
     if (hunk != null) {
       inHunk = true;

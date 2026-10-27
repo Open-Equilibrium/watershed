@@ -68,4 +68,34 @@ index 1..2 100644
       ],
     );
   });
+
+  test('starts over at each file section, as when a file becomes a link', () {
+    final lines = parsePatch('''diff --git a/x b/x
+deleted file mode 100644
+index 1..0
+--- a/x
++++ /dev/null
+@@ -1 +0,0 @@
+-content
+diff --git a/x b/x
+new file mode 120000
+index 0..2
+--- /dev/null
++++ b/x
+@@ -0,0 +1 @@
++target
+\\ No newline at end of file
+''');
+    expect(
+      lines.map(
+        (line) => (line.kind, line.oldNumber, line.newNumber, line.text),
+      ),
+      [
+        (DiffKind.hunk, null, null, '@@ -1 +0,0 @@'),
+        (DiffKind.removed, 1, null, 'content'),
+        (DiffKind.hunk, null, null, '@@ -0,0 +1 @@'),
+        (DiffKind.added, null, 1, 'target'),
+      ],
+    );
+  });
 }
