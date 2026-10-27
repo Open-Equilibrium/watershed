@@ -162,7 +162,7 @@ class _ApprovalCardState extends State<ApprovalCard> with ReadDelay {
                             'Reject',
                           ].fold(
                             0.0,
-                            (sum, label) => sum + _buttonWidth(context, label),
+                            (sum, label) => sum + buttonWidth(context, label),
                           ) -
                           3 * WsMetrics.space3 >=
                       measureText('your draft is kept', hint).width;
@@ -210,19 +210,6 @@ class _ApprovalCardState extends State<ApprovalCard> with ReadDelay {
     );
   }
 }
-
-/// The width a button with `label` takes, as the shared buttons draw their labels.
-double _buttonWidth(BuildContext context, String label) =>
-    measureText(
-      label,
-      DefaultTextStyle.of(context).style.merge(
-        const TextStyle(
-          fontSize: WsMetrics.fsCompact,
-          fontWeight: WsMetrics.fwMedium,
-        ),
-      ),
-    ).width +
-    2 * WsMetrics.space4;
 
 /// What allowing a call for the session covers: a shell command only as shown, any other tool
 /// wholly (ADR-0209). A long tool name is cut short; the title names it in full.

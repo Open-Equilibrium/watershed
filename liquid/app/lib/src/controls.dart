@@ -129,7 +129,7 @@ class _Button extends StatelessWidget {
         borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
         child: Container(
           height: 28,
-          padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space4),
+          padding: const EdgeInsets.symmetric(horizontal: _buttonPadding),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             // Centered when a layout stretches the button.
@@ -141,11 +141,7 @@ class _Button extends StatelessWidget {
                   label,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: foreground,
-                    fontWeight: WsMetrics.fwMedium,
-                    fontSize: WsMetrics.fsCompact,
-                  ),
+                  style: _buttonLabel.copyWith(color: foreground),
                 ),
               ),
             ],
@@ -167,6 +163,20 @@ class _Button extends StatelessWidget {
     );
   }
 }
+
+const _buttonLabel = TextStyle(
+  fontWeight: WsMetrics.fwMedium,
+  fontSize: WsMetrics.fsCompact,
+);
+const _buttonPadding = WsMetrics.space4;
+
+/// The width a shared button with `label` takes, for layouts that must know before drawing it.
+double buttonWidth(BuildContext context, String label) =>
+    measureText(
+      label,
+      DefaultTextStyle.of(context).style.merge(_buttonLabel),
+    ).width +
+    2 * _buttonPadding;
 
 class PrimaryButton extends StatelessWidget {
   const PrimaryButton({
