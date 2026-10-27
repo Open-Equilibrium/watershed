@@ -299,11 +299,13 @@ fn translates_extension_questions_and_display_updates() {
 #[test]
 fn turns_watershed_approval_questions_into_requests() {
     let events = translate(&[
-        r#"{"type":"extension_ui_request","id":"a1","method":"select","title":"watershed.approval {\"tool\":\"bash\",\"arguments\":{\"command\":\"npm test\"},\"readOnly\":false,\"session\":\"s1\"}","options":["allow-once","allow-session","reject","allow-auto"]}"#,
+        r#"{"type":"extension_ui_request","id":"a1","method":"select","title":"watershed.approval {\"tool\":\"bash\",\"arguments\":{\"command\":\"npm test\"},\"readOnly\":false,\"builtin\":true,\"session\":\"s1\"}","options":["allow-once","allow-session","reject","allow-auto"]}"#,
         r#"{"type":"extension_ui_request","id":"a2","method":"select","title":"watershed.approval {\"tool\":\"write\",\"arguments\":{},\"readOnly\":false,\"builtin\":true}","options":[]}"#,
         r#"{"type":"extension_ui_request","id":"a3","method":"select","title":"watershed.approval {\"tool\":\"read\",\"arguments\":{\"path\":\"a\"},\"readOnly\":true}","options":[]}"#,
         // An extension's own write is no file change Allow edits may run.
         r#"{"type":"extension_ui_request","id":"a5","method":"select","title":"watershed.approval {\"tool\":\"write\",\"arguments\":{},\"readOnly\":false}","options":[]}"#,
+        // Nor is an extension's bash a shell command whose other arguments may stay hidden.
+        r#"{"type":"extension_ui_request","id":"a6","method":"select","title":"watershed.approval {\"tool\":\"bash\",\"arguments\":{\"command\":\"ls\",\"script\":\"rm -rf ~\"},\"readOnly\":false}","options":[]}"#,
         // An extension's tool name cannot hide characters either.
         r#"{"type":"extension_ui_request","id":"a4","method":"select","title":"watershed.approval {\"tool\":\"safe\\u202e\",\"arguments\":{},\"readOnly\":false}","options":[]}"#,
     ]);
@@ -337,6 +339,13 @@ fn turns_watershed_approval_questions_into_requests() {
                 true
             ),
             opened("a5", RequestKind::ToolApproval, "write", "{}", false),
+            opened(
+                "a6",
+                RequestKind::ToolApproval,
+                "bash",
+                r#"{"command":"ls","script":"rm -rf ~"}"#,
+                false
+            ),
             opened("a4", RequestKind::ToolApproval, "safe<U+202E>", "{}", false),
         ]
     );
@@ -475,7 +484,7 @@ fn shows_invisible_and_reordering_characters_in_what_a_call_shows() {
     // stay.
     let command = r#"{"command":"rm -rf /\u202egnp.txt\u200b\r\n\techo\u0000"}"#;
     assert_eq!(
-        call_text("bash", command),
+        call_text(RequestKind::CommandExecutionApproval, command),
         "rm -rf /<U+202E>gnp.txt<U+200B><U+000D>\n\techo<U+0000>"
     );
     assert_eq!(
@@ -489,17 +498,23 @@ fn shows_invisible_and_reordering_characters_in_what_a_call_shows() {
         Some("a<U+2066>b.rs")
     );
     assert_eq!(
-        call_text("edit", &edit),
+        call_text(RequestKind::FileChangeApproval, &edit),
         r#"{"oldText":"x<U+2028>y","path":"a<U+2066>b.rs"}"#,
         "other tools show their arguments"
     );
     // Characters Unicode lets renderers ignore: variation selectors, fillers, joiners and tags.
     let ignorable = r#"{"command":"rm\ufe0f \u3164-\u115f\u034f\u17b4\u180b\udb40\udd00"}"#;
     assert_eq!(
-        call_text("bash", ignorable),
+        call_text(RequestKind::CommandExecutionApproval, ignorable),
         "rm<U+FE0F> <U+3164>-<U+115F><U+034F><U+17B4><U+180B><U+E0100>"
     );
-    assert_eq!(call_text("bash", r#"{"command":"ls -la"}"#), "ls -la");
+    assert_eq!(
+        call_text(
+            RequestKind::CommandExecutionApproval,
+            r#"{"command":"ls -la"}"#
+        ),
+        "ls -la"
+    );
 }
 
 #[test]

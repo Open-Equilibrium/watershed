@@ -307,9 +307,10 @@ pub(crate) fn call_target(arguments: &str) -> String {
     call_argument(arguments).unwrap_or_else(|| first_line(&visible(arguments), TARGET_CHARS))
 }
 
-/// The whole call an approval shows: a shell command itself, other tools their arguments.
-pub(crate) fn call_text(tool: &str, arguments: &str) -> String {
-    let command = (item_kind(tool) == ItemKind::CommandExecution)
+/// The whole call an approval of `kind` shows: a shell command itself, other calls their
+/// arguments.
+pub(crate) fn call_text(kind: RequestKind, arguments: &str) -> String {
+    let command = (kind == RequestKind::CommandExecutionApproval)
         .then(|| serde_json::from_str::<Value>(arguments).ok())
         .flatten();
     visible(
@@ -457,18 +458,19 @@ fn approval(request: RequestId, payload: &str, tools: &HashMap<String, OpenTool>
         .get("arguments")
         .map(Value::to_string)
         .unwrap_or_default();
-    // Allow edits runs file changes without asking, so only pi's own file tools count as such;
-    // an extension's tool of the same name asks like any other (ADR-0208).
-    let builtin = payload.get("builtin").and_then(Value::as_bool) == Some(true);
-    let kind = match request_kind(tool) {
-        RequestKind::FileChangeApproval if !builtin => RequestKind::ToolApproval,
-        kind => kind,
+    // Only pi's own tools are what their names say: Allow edits runs file changes without
+    // asking, and a shell command shows only its command. An extension's tool of the same name
+    // asks like any other, with all of its arguments (ADR-0208).
+    let kind = if payload.get("builtin").and_then(Value::as_bool) == Some(true) {
+        request_kind(tool)
+    } else {
+        RequestKind::ToolApproval
     };
     AgentEvent::RequestOpened {
         request,
         kind,
         tool: visible(tool),
-        text: call_text(tool, &arguments),
+        text: call_text(kind, &arguments),
         arguments,
         read_only: payload.get("readOnly").and_then(Value::as_bool) == Some(true),
         session: payload
