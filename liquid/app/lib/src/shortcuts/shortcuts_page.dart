@@ -104,7 +104,13 @@ const List<_Group> _right = [
   (
     'Diff',
     null,
-    [_Entry.fixed(Fixed.previousOrNextFile), _Entry.fixed(Fixed.foldFolder)],
+    [
+      _Entry.fixed(Fixed.previousOrNextFile),
+      _Entry.fixed(Fixed.foldFolder),
+      _Entry.fixed(Fixed.previousOrNextHunk),
+      _Entry.fixed(Fixed.unifiedOrSplit),
+      _Entry.fixed(Fixed.hideWhitespace),
+    ],
   ),
 ];
 

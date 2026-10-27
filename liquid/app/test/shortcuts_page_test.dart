@@ -255,6 +255,23 @@ void main() {
     expect(find.text('Diff'), findsNothing);
   });
 
+  testWidgets('lists every key that never changes', (tester) async {
+    await show(tester, ShortcutSettings.standard());
+    await openSettings(tester);
+    for (final fixed in Fixed.values) {
+      await tester.enterText(find.byType(TextField), fixed.label);
+      await tester.pumpAndSettle();
+      // A row of the list, not the search field that holds the same words.
+      expect(
+        find.byWidgetPredicate(
+          (widget) => widget is Text && widget.data == fixed.label,
+        ),
+        findsOneWidget,
+        reason: fixed.name,
+      );
+    }
+  });
+
   testWidgets('the first start asks for a profile', (tester) async {
     await show(tester, null);
 
