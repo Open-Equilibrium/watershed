@@ -7,6 +7,22 @@ from pathlib import Path
 
 from test_ci_toolchain_contract import ROOT, step_lines, step_run, workflow_text
 
+DOCUMENTATION_GATES = (
+    "Check Node version",
+    "Run repository tooling tests",
+    "Install gate tools",
+    "Install pinned Corepack",
+    "Enable Corepack",
+    "Install Node dev tools",
+    "Render HTML docs",
+    "Check documentation links",
+)
+SCOPE_OUTPUTS = {
+    "setup": "product=false\ndocs=false\n",
+    "docs": "product=false\ndocs=true\n",
+    "product": "product=true\ndocs=true\n",
+}
+
 
 class CiProductScopeTest(unittest.TestCase):
     def setUp(self) -> None:
@@ -20,7 +36,10 @@ class CiProductScopeTest(unittest.TestCase):
         self.git("config", "user.email", "scope@example.invalid")
         self.git("config", "commit.gpgSign", "false")
         self.git("config", "core.autocrlf", "false")
-        self.base = self.commit({"README.md": "Product documentation\n"})
+        self.base = self.commit({
+            "README.md": "Product documentation\n",
+            "src/main.rs": "fn main() {}\n",
+        })
         self.git("update-ref", "refs/remotes/origin/main", self.base)
 
     def git(self, *args: str) -> str:
@@ -37,7 +56,7 @@ class CiProductScopeTest(unittest.TestCase):
         self.git("commit", "--quiet", "-m", "Scope fixture")
         return self.git("rev-parse", "HEAD")
 
-    def classify(self, event_name: str, event: dict, expected: bool | None) -> None:
+    def classify(self, event_name: str, event: dict, expected: str | None) -> None:
         event_path = self.root / "event.json"
         output_path = self.root / "output"
         event_path.write_text(json.dumps(event), encoding="utf-8")
@@ -60,10 +79,7 @@ class CiProductScopeTest(unittest.TestCase):
             self.assertEqual(output_path.read_text(encoding="utf-8"), "")
         else:
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(
-                output_path.read_text(encoding="utf-8"),
-                f"product={str(expected).lower()}\n",
-            )
+            self.assertEqual(output_path.read_text(encoding="utf-8"), SCOPE_OUTPUTS[expected])
 
     def test_setup_only_changes_do_not_hide_product_changes_in_a_pull_request(self) -> None:
         setup = self.commit({
@@ -77,33 +93,68 @@ class CiProductScopeTest(unittest.TestCase):
             ("pull_request", {"pull_request": {"base": {"sha": self.base}}}),
         ):
             with self.subTest(event=event_name, payload=event):
-                self.classify(event_name, event, False)
-        self.classify("workflow_dispatch", {}, True)
+                self.classify(event_name, event, "setup")
+        self.classify("workflow_dispatch", {}, "product")
 
         product = self.commit({
-            "README.md": "Changed product documentation\n",
+            "src/main.rs": "fn main() { }\n",
             ".codex/agents/fixture.toml": "fixture = false\n",
         })
-        self.classify("push", {"before": setup}, True)
-        self.classify("push", {"before": "0" * 40}, True)
+        self.classify("push", {"before": setup}, "product")
+        self.classify("push", {"before": "0" * 40}, "product")
         self.commit({"AGENTS.md": "Changed fixture instructions\n"})
-        self.classify("push", {"before": product}, False)
+        self.classify("push", {"before": product}, "setup")
         self.classify(
-            "pull_request", {"pull_request": {"base": {"sha": self.base}}}, True
+            "pull_request", {"pull_request": {"base": {"sha": self.base}}}, "product"
         )
 
-    def test_moving_product_content_into_setup_still_requires_product_gates(self) -> None:
-        (self.repo / ".agents").mkdir()
-        self.git("mv", "README.md", ".agents/README.md")
-        self.git("commit", "--quiet", "-m", "Move fixture")
-        self.classify("push", {"before": self.base}, True)
+    def test_documentation_only_changes_do_not_hide_product_changes(self) -> None:
+        docs = self.commit({
+            "README.md": "Changed product documentation\n",
+            "docs/mockups/page.html": "<p>Mockup</p>\n",
+            "liquid/README.md": "Nested documentation\n",
+            "AGENTS.md": "Fixture instructions\n",
+        })
+        for event_name, event in (
+            ("push", {"before": self.base}),
+            ("push", {"before": "0" * 40}),
+            ("pull_request", {"pull_request": {"base": {"sha": self.base}}}),
+        ):
+            with self.subTest(event=event_name, payload=event):
+                self.classify(event_name, event, "docs")
+        self.classify("workflow_dispatch", {}, "product")
 
-    def test_setup_exclusions_do_not_cover_similarly_named_product_paths(self) -> None:
+        self.commit({"src/main.rs": "fn main() { }\n"})
+        self.classify("push", {"before": docs}, "product")
+        self.classify(
+            "pull_request", {"pull_request": {"base": {"sha": self.base}}}, "product"
+        )
+
+    def test_moving_product_content_into_setup_or_documentation_still_requires_product_gates(
+        self,
+    ) -> None:
+        for target in (".agents/main.rs", "docs/main.md"):
+            with self.subTest(target=target):
+                self.git("reset", "--quiet", "--hard", self.base)
+                (self.repo / target).parent.mkdir(exist_ok=True)
+                self.git("mv", "src/main.rs", target)
+                self.git("commit", "--quiet", "-m", "Move fixture")
+                self.classify("push", {"before": self.base}, "product")
+
+    def test_exclusions_do_not_cover_similarly_named_paths(self) -> None:
         before = self.base
-        for name in ("docs/AGENTS.md", ".codex-tools/helper.mjs", ".agents.md"):
+        for name, expected in (
+            ("docs/AGENTS.md", "docs"),
+            (".agents.md", "docs"),
+            (".codex-tools/helper.mjs", "product"),
+            ("docs/tokens.css", "product"),
+            ("docs/page.htm", "product"),
+            ("docs/page.mdx", "product"),
+            ("docs/page.md.rs", "product"),
+        ):
             with self.subTest(path=name):
-                current = self.commit({name: "Product fixture\n"})
-                self.classify("push", {"before": before}, True)
+                current = self.commit({name: "Fixture\n"})
+                self.classify("push", {"before": before}, expected)
                 before = current
 
     def test_unavailable_comparison_base_fails_without_a_skip_result(self) -> None:
@@ -129,6 +180,10 @@ class CiProductScopeTest(unittest.TestCase):
                               for line in step_lines(workflow, name)
                               if line.startswith("        if:")]
                 self.assertEqual(len(conditions), 1)
-                self.assertRegex(
-                    conditions[0], r"^steps\.scope\.outputs\.product == 'true'(?:$| && \()"
-                )
+                if name in DOCUMENTATION_GATES:
+                    self.assertEqual(conditions[0], "steps.scope.outputs.docs == 'true'")
+                else:
+                    self.assertRegex(
+                        conditions[0], r"^steps\.scope\.outputs\.product == 'true'(?:$| && \()"
+                    )
+        self.assertLessEqual(set(DOCUMENTATION_GATES), set(steps))
