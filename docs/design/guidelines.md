@@ -29,3 +29,4 @@ References: Notion, AppFlowy, Microsoft Loop and T3 Code.
 
 - The input area keeps one position and height in every view of a session; approvals and agent dialogs appear inside it, and widgets sit directly above it.
 - Focusing a range dims everything outside it instead of filtering it out.
+- A choice of one among a few options uses the shared segments as the [closeout mockups](mockups/liquid-closeout.html) draw them, framed and the same in every view; older mockups that draw it otherwise are superseded.
