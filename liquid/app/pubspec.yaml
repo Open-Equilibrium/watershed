@@ -1,0 +1,31 @@
+name: liquid
+description: "Liquid, the Watershed workspace app."
+publish_to: 'none'
+version: 0.0.0
+
+environment:
+  sdk: ^3.13.5
+  # The exact Flutter release; CI reads it from here (ADR-0193).
+  flutter: 3.47.7
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_rust_bridge: 2.13.0
+  flutter_rust_bridge_hooks: 2.13.0
+  logging: ^1.3.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+  # Ships the font's license notice inside every app bundle.
+  assets:
+    - assets/fonts/LICENSE-lucide
+  fonts:
+    - family: Lucide
+      fonts:
+        - asset: assets/fonts/lucide.ttf

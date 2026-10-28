@@ -17,4 +17,4 @@
 - [ ] Decisions/ADRs are referenced where relevant.
 - [ ] New terminology has a `GLOSSARY.md` entry where relevant.
 - [ ] No undecided architectural choices were made.
-- [ ] No project-code VCS/history behavior was added to the MVP.
+- [ ] No Watershed-owned project-code VCS engine or project history was added.

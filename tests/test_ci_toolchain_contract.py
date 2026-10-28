@@ -22,6 +22,7 @@ ACTION_PINS = {
     "actions/checkout": "3d3c42e5aac5ba805825da76410c181273ba90b1",
     "actions/setup-node": "820762786026740c76f36085b0efc47a31fe5020",
     "actions/upload-artifact": "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+    "subosito/flutter-action": "1a449444c387b1966244ae4d4f8c696479add0b2",
     "taiki-e/install-action": "83ac0ad63c0167e6f06796fab0fce28db1bf3db0",
 }
 TOPIC_BRANCH_TYPES = ("feat", "fix", "docs", "test", "ci", "chore", "refactor")
@@ -181,6 +182,15 @@ class CiWorkflowContractTest(unittest.TestCase):
         self.assertIn("rust-toolchain.toml", step_run(workflow, "Select pinned Rust"))
         self.assertNotIn(rust_version, workflow)
         self.assertNotIn("check-latest:", workflow)
+
+    def test_liquid_build_hook_uses_the_pinned_rust(self) -> None:
+        with (ROOT / "rust-toolchain.toml").open("rb") as root_file:
+            pinned = tomllib.load(root_file)["toolchain"]
+        with (ROOT / "liquid" / "liquid-bridge" / "rust-toolchain.toml").open("rb") as bridge_file:
+            bridge = tomllib.load(bridge_file)["toolchain"]
+
+        # The build hook only reads the crate's own file, which adds the targets it builds.
+        self.assertEqual({key: value for key, value in bridge.items() if key != "targets"}, pinned)
 
     def test_minimum_node_exercises_tooling_after_the_pinned_gates(self) -> None:
         workflow = workflow_text()

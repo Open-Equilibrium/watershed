@@ -21,6 +21,7 @@ summary{cursor:pointer}summary h3{display:inline;margin:0}summary:focus-visible{
       <a href="#m2">Meta-Harness (M2)</a>
       <a href="#m3">Liquid (M3)</a>
       <a href="#post-m1">Flow Agent: extended capabilities</a>
+      <a href="#later">Later: AgentPulse</a>
     </nav>
   </header>
 
@@ -68,28 +69,14 @@ summary{cursor:pointer}summary h3{display:inline;margin:0}summary:focus-visible{
   </section>
 
   <section id="m2">
-    <h2>M2 - Meta-Harness And AgentPulse</h2>
+    <h2>M2 - Meta-Harness</h2>
     <div class="grid">
-      <details id="d-010" class="decision">
-        <summary><h3>D-010 - AgentPulse v0 Formulas</h3></summary>
-        <p><strong>Status:</strong> Open, M2 blocker.</p>
-        <p><strong>Question:</strong> Should the three scores use only facts already recorded during runs, or also an AI judgment?</p>
-        <ul><li><strong>A:</strong> Use recorded run facts only. Pro: the same input always gives the same auditable score. Con: the first version captures fewer nuances.</li><li><strong>B:</strong> Add AI-assigned quality labels. Pro: captures more nuance. Con: scores become subjective and harder to test.</li></ul>
-        <p><strong>Recommendation:</strong> A for M2; reserve model-scored labels for later evaluation.</p>
-      </details>
       <details id="d-021" class="decision">
         <summary><h3>D-021 - Meta-Harness Packaging</h3></summary>
         <p><strong>Status:</strong> Open implementation detail before M2; ADR-0018 already requires a non-graphical controller.</p>
         <p><strong>Question:</strong> How should that controller be packaged for its first release?</p>
         <ul><li><strong>A:</strong> A command-line app plus a background service. Pro: useful without Liquid and easy to test. Con: no rich interface.</li><li><strong>B:</strong> Add a small status screen after the controller works. Pro: easier demonstrations. Con: another part to package and maintain.</li></ul>
         <p><strong>Recommendation:</strong> A; no competing full standalone GUI in the MVP.</p>
-      </details>
-      <details id="d-023" class="decision">
-        <summary><h3>D-023 - Meta-Harness Service/API Transport</h3></summary>
-        <p><strong>Status:</strong> Open before M2 implementation.</p>
-        <p><strong>Question:</strong> How should programs on the same computer, and authenticated Liquid clients on other devices, communicate with Meta-Harness without moving agent ownership off the host?</p>
-        <ul><li><strong>A:</strong> Use a private connection that works only on the same computer. Pro: smallest security surface. Con: remote Liquid needs a later gateway.</li><li><strong>B:</strong> Use one protected web connection for local and remote clients. Pro: one network-capable path. Con: larger local security surface.</li><li><strong>C:</strong> Define one shared set of commands, carried by a private local connection on the host and a protected network connection remotely. Pro: fits both topologies. Con: both connections must behave alike.</li></ul>
-        <p><strong>Recommendation:</strong> C as the direction, starting with only the parts M2 needs.</p>
       </details>
       <details id="d-024" class="decision">
         <summary><h3>D-024 - Meta-Harness State Storage</h3></summary>
@@ -106,19 +93,20 @@ summary{cursor:pointer}summary h3{display:inline;margin:0}summary:focus-visible{
         <p><strong>Recommendation:</strong> A behind a backend-neutral Meta-Harness agent-executor contract, subject to a bounded integration spike; keep direct semantic adapters where they provide richer events.</p>
         <p><strong>Acceptance criterion:</strong> The spike starts, steers, observes and restores Codex plus one other CLI agent without an attached HerdR UI; preserves stable Meta-Harness session identity across detach and service restarts; routes every mutation through the Meta-Harness policy/audit gate; normalizes HerdR events without treating terminal inference as semantic truth; rejects cross-host process claims; and documents fail-closed behavior for unsupported capabilities on the native targets in <a href="../../PLATFORMS.md">PLATFORMS.md</a>.</p>
       </details>
+      <details id="d-074" class="decision">
+        <summary><h3>D-074 - Who Starts The Local Meta-Harness Service</h3></summary>
+        <p><strong>Status:</strong> Open; decide with the service-mode slice. ADR-0215 settled that Liquid reaches its own host's Meta-Harness as a separate service.</p>
+        <p><strong>Question:</strong> On a Mac or Linux computer, who starts the Meta-Harness service, and does it keep running when Liquid closes?</p>
+        <ul><li><strong>A: Liquid starts it when needed and stops it when it quits</strong>, as T3 Code does with its server, restarting it after a crash. Pro: nothing to install or register, and no background process while Liquid is closed. Con: agents end when Liquid quits or updates, and the CLI needs its own instance or must find Liquid's.</li><li><strong>B: A login service runs it</strong> (a launchd user agent on macOS, a systemd user unit on Linux, both without administrator rights); Liquid and the CLI connect to it. Pro: agents keep running through Liquid closing, crashing or updating; one instance serves Liquid, the CLI and remote clients; the operating system restarts it. Con: installation registers the service and removal must unregister it, a process runs while nobody uses it, and updating it must not end running agents.</li><li><strong>C: Liquid starts it if none runs, and it stays while agents run.</strong> Pro: no installation step, and agents finish after Liquid closes. Con: more lifetime rules to get right, and a service nobody stops if they are wrong.</li></ul>
+        <p><strong>Recommendation:</strong> B, which matches the background service <a href="#d-021">D-021</a> recommends: agents survive the window, and the operating system supervises the service instead of our own restart code.</p>
+        <p><strong>Acceptance criterion:</strong> The ADR log names who starts and stops the service, and tests show Liquid connecting to a running service and reporting one it cannot reach.</p>
+      </details>
     </div>
   </section>
 
   <section id="m3">
     <h2>M3 - Liquid</h2>
     <div class="grid">
-      <details id="d-068" class="decision">
-        <summary><h3>D-068 - Liquid Rust–Flutter Bridge</h3></summary>
-        <p><strong>Status:</strong> Open before Liquid app shell work; Flutter over the Rust core is decided (ADR-0181).</p>
-        <p><strong>Question:</strong> How should the Flutter UI call the Rust Liquid core and receive its update streams? ADR-0182 requires asynchronous calls, small change messages instead of whole documents, and streams that are released when a View closes.</p>
-        <ul><li><strong>A:</strong> flutter_rust_bridge v2, which generates the binding code. Pro: asynchronous calls and Rust-to-Dart streams built in, little hand-written unsafe code. Con: a code generator in the build and a dependency to track.</li><li><strong>B:</strong> A hand-written C interface with Dart's built-in FFI and a binary message format, as AppFlowy does with Protocol Buffers. Pro: no generator, full control over memory and threads. Con: more unsafe glue code and hand-built stream handling.</li></ul>
-        <p><strong>Recommendation:</strong> A, provided its generated code keeps work off the Dart main isolate and supports bounded change messages and stream disposal.</p>
-      </details>
       <details id="d-027" class="decision">
         <summary><h3>D-027 - Liquid CLI/API Surface</h3></summary>
         <p><strong>Status:</strong> Open before external-agent Liquid edits.</p>
@@ -230,6 +218,19 @@ summary{cursor:pointer}summary h3{display:inline;margin:0}summary:focus-visible{
         <ul><li><strong>A:</strong> Sign the canonical root manifest with a source device/user key chained to a known identity. Pro: offline attribution and tamper evidence. Con: enrollment, rotation, revocation and lost-device handling are required.</li><li><strong>B:</strong> Authenticate the root with a shared user/Workspace archive key. Pro: compact offline verification across devices. Con: shared-secret distribution weakens sender attribution and increases compromise impact.</li><li><strong>C:</strong> Import as explicitly unauthenticated, non-executable evidence, require human review and let the destination re-seal a new local root before any continuation. Pro: no cross-device key infrastructure. Con: cannot preserve trusted provenance or automatic continuation.</li></ul>
         <p><strong>Recommendation:</strong> A; retain C as a clearly separate recovery path that never claims verified source history.</p>
         <p><strong>Acceptance criterion:</strong> For A/B, define canonical signed/MACed bytes, identity binding, key storage/rotation/revocation limits, replay/downgrade rules, attribution and verification errors; tampering with the authenticated root, content, branch links or version must fail before destination mutation or provider/Tool effects. For C, label every record unauthenticated, permit no Portable continuation or effects, define explicit human review and destination resealing as new local evidence, and never claim source attribution or source-history verification.</p>
+      </details>
+    </div>
+  </section>
+
+  <section id="later">
+    <h2>Later - AgentPulse</h2>
+    <div class="grid">
+      <details id="d-010" class="decision">
+        <summary><h3>D-010 - AgentPulse v0 Formulas</h3></summary>
+        <p><strong>Status:</strong> Open; deferred with AgentPulse to the end of the roadmap (ADR-0187).</p>
+        <p><strong>Question:</strong> Should the three scores use only facts already recorded during runs, or also an AI judgment?</p>
+        <ul><li><strong>A:</strong> Use recorded run facts only. Pro: the same input always gives the same auditable score. Con: the first version captures fewer nuances.</li><li><strong>B:</strong> Add AI-assigned quality labels. Pro: captures more nuance. Con: scores become subjective and harder to test.</li></ul>
+        <p><strong>Recommendation:</strong> A for the first version; reserve model-scored labels for later evaluation.</p>
       </details>
     </div>
   </section>

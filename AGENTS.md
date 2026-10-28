@@ -25,7 +25,7 @@ The visual V-Spec files under `docs/concept/` optimize for information quality a
 6. **Watershed tests are sacred.** Write a failing (red) test before new Watershed behavior; never weaken, skip, delete, or lower coverage thresholds to make a run pass. Tests must be meaningful, behavior-focused, and proportionate to the behavior under test; implementation-symptom tests do not count.
 7. **Durable artifacts over chat.** Record decisions and state in files, not in conversation history. Human review is the final gate.
 8. **Concurrency awareness.** At any time another agent may be active in any of the other tools (Liquid / Flow Agent / Meta-Harness). Coordinate through Git branches/PRs and the open-decisions flow; never assume exclusive ownership of files or branches; expect and cleanly merge parallel changes.
-9. **MVP VCS boundary.** Do not add Watershed-owned project-code VCS/history behavior. Liquid workspace action history over its own data remains in scope (ADR-0011; `SECURITY.md`).
+9. **MVP VCS boundary.** Do not build a Watershed-owned project-code VCS engine or project history. Liquid workspace action history over its own data remains in scope, as does the Git integration for agent projects, which Meta-Harness runs and Liquid presents (ADR-0011, ADR-0190; `SECURITY.md`).
 
 ## Decision flow
 
@@ -39,6 +39,7 @@ Open milestone-relevant question → add it to `docs/decisions/open-decisions.ht
 
 - **Audience and responsibility:** Agentic Engineers configure Building Blocks and their capability boundaries; other users may run predefined Flows without making security decisions. Preserve informed configuration choice and keep execution simple; responsibility follows the configured Building Blocks. This never weakens fail-closed invariants, secret handling, explicit destructive actions or required approvals.
 - **Platform scope:** Follow the per-product and per-capability contract in `PLATFORMS.md`. Do not preserve native Windows compatibility for Flow Agent or Meta-Harness. Evaluate shared dependencies against their actual consumers, including Liquid, rather than inferring a workspace-wide support promise.
+- **GUI design:** every GUI change starts with HTML mockups that the maintainer approves before implementation; keep every Watershed GUI consistent with the shared [design guidelines](docs/design/guidelines.md) and their central tokens (ADR-0194).
 - **Less is more:** prefer deletion and consolidation over addition; every net-new line must be the smallest evidence-backed way to preserve required behavior without duplicating code, tests, docs or abstractions.
 - **Maintainability and modularity:** the human maintainer is the bottleneck. Keep modules cohesive, boundaries narrow and responsibilities explicit; reuse only when it reduces duplication and maintenance cost, and avoid abstractions that add indirection without making change simpler. Treat unusually large files as mandatory audit signals; split them when they contain independent reasons to change, not to satisfy an arbitrary line target.
 - **Meaningful tests:** follow the test-economy rules in `TESTING.md`.

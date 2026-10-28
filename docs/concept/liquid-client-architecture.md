@@ -1,6 +1,6 @@
 # Liquid client architecture
 
-This document turns the accepted Liquid client stack (Flutter UI over a Rust Liquid core) and its performance and stability invariants (ADR-0181, ADR-0182) into implementation rules. Product behavior is canonical in the [Liquid V-Spec](V-Spec_Liquid.html), targets in [`PLATFORMS.md`](../../PLATFORMS.md), performance evidence in [`PERFORMANCE.md`](../../PERFORMANCE.md#liquid), security in [`SECURITY.md`](../../SECURITY.md) and pass/fail evidence in [`TESTING.md`](../../TESTING.md). The bridge library, History model, storage engine and CRDT library remain [D-068](../decisions/open-decisions.html#d-068), [D-028](../decisions/open-decisions.html#d-028), [D-029](../decisions/open-decisions.html#d-029) and [D-035](../decisions/open-decisions.html#d-035).
+This document turns the accepted Liquid client stack (Flutter UI over a Rust Liquid core) and its performance and stability invariants (ADR-0181, ADR-0182) into implementation rules. Product behavior is canonical in the [Liquid V-Spec](V-Spec_Liquid.html), targets in [`PLATFORMS.md`](../../PLATFORMS.md), performance evidence in [`PERFORMANCE.md`](../../PERFORMANCE.md#liquid), security in [`SECURITY.md`](../../SECURITY.md) and pass/fail evidence in [`TESTING.md`](../../TESTING.md). The bridge is flutter_rust_bridge v2 (ADR-0186); the History model, storage engine and CRDT library remain [D-028](../decisions/open-decisions.html#d-028), [D-029](../decisions/open-decisions.html#d-029) and [D-035](../decisions/open-decisions.html#d-035).
 
 ## Priority
 
@@ -10,7 +10,7 @@ Input responsiveness and zero loss of acknowledged local changes take precedence
 
 ```mermaid
 flowchart TD
-  UI["Flutter UI<br/>main isolate: input, layout, paint"] -->|"async intents"| BR["Bridge (D-068)"]
+  UI["Flutter UI<br/>main isolate: input, layout, paint"] -->|"async intents"| BR["Bridge (flutter_rust_bridge v2)"]
   BR --> CORE["Rust Liquid core<br/>mutation pipeline, History, queries"]
   CORE --> ST["Local replica<br/>durable store (D-029)"]
   CORE --> SY["Sync client<br/>committed changes, CRDT merge (D-035)"]
@@ -27,9 +27,9 @@ flowchart TD
 ### Threads and bridge
 
 1. The Dart main isolate only handles input, layout, paint and applying bounded deltas. Storage access, queries, large (de)serialization, diffing, CRDT merge, sync and App code never run on it or on Flutter's platform or raster threads.
-2. The Rust core runs on its own worker threads. Every bridge call from Dart is asynchronous; the main isolate never blocks on disk or network.
+2. The Rust core runs on its own worker threads. Every bridge call from Dart is asynchronous; the main isolate never blocks on disk or network. The Workspace crosses the bridge through a few message-shaped calls: apply a mutation, subscribe to a resource's deltas, query, and close a subscription. Their Rust mutation and delta types are the schema that UI, CLI/API, external agents and sync share, so replacing the bridge touches only these calls (ADR-0216).
 3. The bridge carries bounded deltas addressed by stable IDs and a per-resource sequence, for example `BlockDelta { block_id, seq, op }`. It never carries a whole Page tree, a whole Database or an unbounded list. Opening a View transfers one bounded snapshot of what its viewport needs.
-4. Rust pushes updates as asynchronous streams and shares one producer per resource across synchronized Views. When the UI falls behind, Rust coalesces pending deltas per resource to the latest sequence instead of queueing every intermediate state; a consumer that detects a sequence gap requests a fresh bounded snapshot.
+4. Rust pushes updates as asynchronous streams and shares one producer per resource across synchronized Views. When the UI falls behind, Rust coalesces pending deltas per resource to the latest sequence instead of queueing every intermediate state; a consumer that detects a sequence gap requests a fresh bounded snapshot. The agent surface does not coalesce yet; see its follow-ups in [PLAN.md](../../PLAN.md).
 
 ### Rendering
 

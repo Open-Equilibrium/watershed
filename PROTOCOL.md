@@ -9,7 +9,7 @@ Flow Agent is a **standalone host-local product**, and its event stream is a pub
 ## Participants
 
 - **Flow Agent** — standalone CLI that emits execution events and accepts commands on its current host; its event stream is public.
-- **Meta-Harness** — self-contained, host-scoped headless control plane: consumes events from CLI agents on its own host through adapters; issues control/config commands; emits metrics; and exposes a local-or-remote CLI/API/service surface for Liquid and BYOA (transport: D-023; see [`docs/concept/V-Spec_MetaHarness.html`](docs/concept/V-Spec_MetaHarness.html)). It never controls another host's processes.
+- **Meta-Harness** — self-contained, host-scoped headless control plane: consumes events from CLI agents on its own host through adapters; issues control/config commands; emits metrics; and exposes a local-or-remote CLI/API/service surface for Liquid and BYOA (one command set over a private local or authenticated remote connection, ADR-0185; see [`docs/concept/V-Spec_MetaHarness.html`](docs/concept/V-Spec_MetaHarness.html)). It never controls another host's processes.
 - **Liquid** — standalone local-first workspace product. Each interactive or headless instance reads and mutates a local replica, exchanges committed Workspace changes through the central Sync Server, and may present projections from one or more Meta-Harness instances. Every projection retains its instance identity, freshness and authority. Liquid exposes its **own** Workspace CLI/API so external agents and integrations use typed actions through its Role, permission and History pipeline (see [`docs/concept/V-Spec_Liquid.html`](docs/concept/V-Spec_Liquid.html), D-027). Flow Agent and Meta-Harness do not mutate Liquid storage internals.
 - **Sync Server** — central star-topology service for resumable Workspace change exchange. It neither runs Liquid Apps nor routes Meta-Harness commands.
 - **Adapters** — translate external agents (Codex CLI, Claude Code and future agents) into the same contract.
@@ -441,7 +441,7 @@ Canonical byte limits count only the serialized JSON value, excluding record fra
 ## Contract rules
 
 - **Versioned.** Each parser accepts only its declared current schema.
-- **Normalized events.** Adapters must map native agent events into the families above; do not leak native shapes.
+- **Normalized events.** Adapters must map native agent events into the families above; do not leak native shapes. Exception: the embedded Meta-Harness core of the Liquid agent-surface slice uses its own in-process model, built on T3 Code's runtime event vocabulary, until its service mode (ADR-0195).
 - **Artifact contract over runtime parity.** Agents differ in runtime semantics; they must agree only on this message contract.
 - **Deterministic ordering within a session.** A participant must follow the event envelope's `sequence` rule per session.
 - **No exfiltration via protocol.** Events and future commands carrying writes are subject to the security policy in `SECURITY.md`.

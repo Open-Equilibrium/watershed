@@ -37,6 +37,7 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **BYOA** — "Bring Your Own Agent"; plugging an external agent in as the Meta-Agent.
 - **AgentPulse** — Meta-Harness subsystem measuring rework ratio, first-attempt success rate, and cost-per-productive-outcome. Meta-Harness computes/stores the metrics; Liquid only renders them.
 - **Adapter** — A Meta-Harness subsystem that translates an external agent (Codex CLI, Claude Code or a future agent) into normalized protocol events/commands. Native agent shapes do not leak past the adapter.
+- **Agent event** — One event of the in-process session model the embedded Meta-Harness core gives Liquid's agent surface until its service mode (ADR-0195): turns, items, content deltas, requests and usage. Not a Flow Agent runtime event.
 
 ## Flow Agent primitives
 
@@ -133,10 +134,19 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **Explorer** — Liquid's primary Workspace navigation surface, listing Pages and Sources as peer entries.
 - **Page template** — A reusable starting composition of Blocks, Views, Connections and Automations for one use case; it creates an ordinary Page.
 - **PowerBar** — Liquid's command and creation surface for finding Workspace objects, adding Blocks and invoking permitted Workspace or agent actions.
+- **Liquid key** — Caps Lock when the user opts in: a tap opens Liquid from any app, holding it in Liquid reveals shortcuts and ⇪ plus a key runs a Liquid command (ADR-0205).
+- **Shortcut profile** — Liquid's set of shortcuts: Liquid key, Standard (⌘ only) or Custom (ADR-0205).
+- **Reveal key** — The key whose hold shows contextual shortcut hints: the Liquid key while it is on, ⌘ otherwise (ADR-0204, ADR-0205).
 - **Role** — A reusable allow-only composition of permissions assigned to users, groups, agent profiles, sessions or Automations. Anything not allowed is denied by default; explicit deny/blacklist rules are post-MVP.
 - **History** — Liquid's attributed and reversible record of Workspace Actions; also called **workspace action history / workspace VCS** when distinguishing it from project-code VCS. Its detailed storage/recovery model remains open in [D-028](docs/decisions/open-decisions.html#d-028) and [D-031](docs/decisions/open-decisions.html#d-031).
+- **Agent surface** — Liquid's view of one agent session: the sidebar, the Chat, Trajectory and Diff tabs, the widget strip, the input area and the status bar.
+- **Start page** — What the agent surface shows before a session's first message: the project's recent sessions to continue and chips to set the new one up (ADR-0203).
+- **Input area** — The fixed-height area at the bottom of the agent surface: the composer, or in its place an approval or an agent question (ADR-0199).
+- **Approval mode** — How much an agent may do without asking: Ask (every call that is not read-only), Allow edits (file changes too) or Full access (every call) (ADR-0188).
+- **Trajectory** — Liquid's step-by-step view of an agent session: model responses, tool calls, tokens, timing and the context the model saw. A session can branch from any step, and two branches can be compared side by side.
+- **Git integration** — Git operations on the projects agents work in — diffs, branches, commits, push, pull requests and worktrees — run by Meta-Harness on its host and presented in Liquid (ADR-0190). It operates the project's own Git repository and is not a Watershed VCS; Liquid's own VCS is History.
 - **CRDT** — Conflict-free replicated data type: a data structure whose independently edited copies merge deterministically to the same state. Liquid sync uses an established CRDT library (ADR-0182); the choice remains [D-035](docs/decisions/open-decisions.html#d-035).
-- **Rust–Flutter bridge** — The asynchronous call and stream boundary between Liquid's Flutter UI and its Rust core. It carries bounded deltas, never whole Pages or Databases (ADR-0182); the library remains [D-068](docs/decisions/open-decisions.html#d-068).
+- **Rust–Flutter bridge** — The asynchronous call and stream boundary between Liquid's Flutter UI and its Rust core. It carries bounded deltas, never whole Pages or Databases (ADR-0182); it uses flutter_rust_bridge v2 (ADR-0186).
 - **Liquid replica** — A complete local working copy of an authorized Workspace. Interactive reads and writes never require a remote round trip.
 - **Sync Server** — Central service in the replica star topology. It stores and exchanges committed Workspace changes resumably; it does not execute App Blocks or control agents.
 - **Headless Liquid replica** — Optional Liquid replica without a user interface. A Workspace must opt in before this replica can sync it; same-host agents then use Liquid's normal permission and action surfaces while user devices are offline.

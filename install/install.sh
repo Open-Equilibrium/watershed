@@ -358,7 +358,7 @@ readiness_shell='
         [ -x "$readiness_scanner" ] || return 0
         if readiness_members=$("$readiness_scanner" -g "$readiness_pgid" 2>/dev/null); then
             for readiness_member in $readiness_members; do
-                [ "$readiness_member" = "$readiness_pid" ] || return 0
+                case "$readiness_member" in "$readiness_pid"|"$readiness_timer") ;; *) return 0 ;; esac
             done
             return 1
         else
@@ -368,10 +368,13 @@ readiness_shell='
         fi
     }
     wait_for_readiness_group() {
+        # Slow scans or late wakeups must not stretch the one-second grace.
+        /bin/sleep 1 </dev/null >/dev/null 2>&1 &
+        readiness_timer=$!
         wait_attempts=10
         while readiness_group_has_descendant; do
             [ -x "$readiness_scanner" ] || return 1
-            [ "$wait_attempts" -gt 0 ] || return 1
+            [ "$wait_attempts" -gt 0 ] && kill -s 0 "$readiness_timer" 2>/dev/null || return 1
             /bin/sleep 0.1
             wait_attempts=$((wait_attempts - 1))
         done

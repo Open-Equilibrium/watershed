@@ -264,10 +264,16 @@ class ReadinessContractTest(unittest.TestCase):
                  ("before-inner", False, "/usr/bin/pgrep"),
                  ("after-inner", False, "/usr/bin/pgrep"),
                  ("after-inner", True, "/usr/bin/pgrep"),
-                 ("after-inner", True, "/missing/pgrep"))
+                 ("after-inner", True, "/missing/pgrep"),
+                 ("before-inner", False, "slow-pgrep"))
         for phase, separate_group, scanner in cases:
             with self.subTest(phase=phase, separate_group=separate_group, scanner=scanner), tempfile.TemporaryDirectory() as temporary:
                 root = pathlib.Path(temporary)
+                if scanner == "slow-pgrep":
+                    # A slow host must not stretch the bounded escalation.
+                    scanner = root / scanner
+                    scanner.write_text('#!/bin/sh\n/bin/sleep 0.3\nexec /usr/bin/pgrep "$@"\n')
+                    scanner.chmod(0o755)
                 home = root / "home"
                 home.mkdir(mode=0o700)
                 channel = root / "control"
@@ -308,7 +314,7 @@ class ReadinessContractTest(unittest.TestCase):
                         server.listen(1)
                     with _captured_readiness(
                         ["/bin/sh", "-c", body, "flow-readiness", "outer", str(home), str(flow),
-                         str(home / "status"), str(channel), str(os.getpgrp()), scanner, body,
+                         str(home / "status"), str(channel), str(os.getpgrp()), str(scanner), body,
                          sys.executable, "-c", helper, phase, str(separate_group), str(ready), str(owner)],
                         stdin=subprocess.PIPE, env={"PATH": ""},
                     ) as (process, notice):
