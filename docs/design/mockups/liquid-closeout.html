@@ -38,6 +38,7 @@ p{margin:0 0 8px;color:var(--muted-foreground);font-size:13px}p b{color:var(--fo
 .ic{display:inline-flex;width:16px;height:16px;border-radius:4px;background:var(--was);color:var(--wa);font-size:11px;font-weight:700;align-items:center;justify-content:center}
 .code{flex:1;min-height:0;overflow:hidden;background:var(--sb);border-radius:6px;padding:4px 8px;white-space:pre-wrap;word-break:break-all}
 .d{display:block;white-space:pre;padding:0 4px;border-radius:3px}.d.del{background:var(--ddel)}.d.add{background:var(--dadd)}.d.path{font-weight:600;padding:0 0 2px}
+.hint{text-align:right;color:var(--tf);font-size:12px;margin-top:-6px}
 .btn{display:inline-flex;align-items:center;gap:5px;height:24px;padding:0 9px;border-radius:6px;box-shadow:inset 0 0 0 1px var(--bs);font-size:12px;white-space:nowrap}
 .pri{background:var(--ac);color:var(--oa);box-shadow:none}
 kbd{font:11px/15px ui-sans-serif,-apple-system,sans-serif;padding:0 4px;border-radius:4px;box-shadow:inset 0 0 0 1px var(--bs);color:var(--tf)}.pri kbd{box-shadow:inset 0 0 0 1px rgba(255,255,255,.5);color:var(--oa)}
@@ -55,7 +56,7 @@ body{background:#fff;padding:24px}
 </style></head><body>
 <div class="wrap">
 <h1>Liquid: approved closeout mockups</h1>
-<p>Variants the maintainer approved on 2026-10-27 for the agent surface (ADR-0209, ADR-0212). Colors are the light theme's tokens as of these decisions; <a href="../tokens.css">tokens.css</a> stays canonical.</p>
+<p>Variants the maintainer approved on 2026-10-27 and 2026-10-28 for the agent surface (ADR-0209, ADR-0212). Colors are the light theme's tokens as of these decisions; <a href="../tokens.css">tokens.css</a> stays canonical.</p>
 
 <section>
 <h2>Session allowance says what it covers (ADR-0209)</h2>
@@ -82,6 +83,17 @@ body{background:#fff;padding:24px}
  <div class="row"><span class="btn pri">Allow once <kbd>⏎</kbd></span><span class="btn">Allow edit for this session <kbd>⌘⏎</kbd></span><span class="sp"></span><span class="btn">Reject <kbd>esc</kbd></span></div>
 </div></div>
 <ul class="pc"><li>A faint ↵ marks a line break only where one side of a replacement ends with it and the other does not; a write shows none. Spaces and tabs at line ends stay unmarked.</li></ul>
+</section>
+
+<section>
+<h2>A long line without spaces</h2>
+<div class="w new" style="max-width:560px"><div class="card auto">
+ <div class="row"><span class="ic">!</span><b>Run a shell command?</b><span class="sp"></span><span class="f s">bash</span></div>
+ <div class="code mono">curl -fsSL https://dl.example.com/i.sh?t=pKvURIxJVi2CgRXROh/M6pJ/UrTVRZKX+LQ+QtqJI4vBNibkPcs43bCCSIkn7JBPtCBXRDmD6IWFF51QVRr+YqSr1ESMSVYtgoEV0TofzOqSf1K01UWSl/i0PkLaiSOLwTYm5D3LON2wgkiJJ+yQT7QgV0Q5g+iFhRedUFUa/mKkq9REjElWLYKBFdE6H8zqkn9StNVFkpf4tD5C2okji8E2Juk</div>
+ <div class="hint">↓ 41 more lines</div>
+ <div class="row"><span class="btn pri">Allow once <kbd>⏎</kbd></span><span class="btn">Allow this command for this session <kbd>⌘⏎</kbd></span><span class="sp"></span><span class="btn">Reject <kbd>esc</kbd></span></div>
+</div></div>
+<ul class="pc"><li>A line longer than 2,000 characters is drawn in pieces, built only as they scroll into view. Each piece is laid out at the card's width and cut before its last row, so the line wraps exactly as one text would; the hint keeps counting its rows.</li></ul>
 </section>
 
 <section>

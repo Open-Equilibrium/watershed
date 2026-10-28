@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 
@@ -24,10 +26,13 @@ class _ApprovalCardState extends State<ApprovalCard> with ReadDelay {
   final _focus = FocusNode(debugLabel: 'approval');
   final _code = ScrollController();
 
-  /// A file change's lines, worked out once, since a write can be long (ADR-0212).
-  late final _edit = switch (widget.request.approval!.edit) {
-    final edit? => _editLines(edit),
-    null => null,
+  /// The call's lines, worked out once, since a write can be long (ADR-0212): a file change's
+  /// path and changed lines, any other call as its text.
+  late final _lines = switch (widget.request.approval!) {
+    BridgeApproval(:final edit?) => _editLines(edit),
+    final approval => [
+      (kind: _LineKind.call, text: approval.text, breaks: false),
+    ],
   };
 
   @override
@@ -127,19 +132,7 @@ class _ApprovalCardState extends State<ApprovalCard> with ReadDelay {
               ),
               const SizedBox(height: WsMetrics.space3),
               Expanded(
-                child: switch (_edit) {
-                  final lines? => _ScrollingCode(
-                    controller: _code,
-                    count: lines.length,
-                    line: (context, index) => _editLine(context, lines[index]),
-                  ),
-                  null => _ScrollingCode(
-                    controller: _code,
-                    count: 1,
-                    line: (context, _) =>
-                        Text(approval.text, style: monoStyle(context)),
-                  ),
-                },
+                child: _ScrollingCode(controller: _code, lines: _lines),
               ),
               const SizedBox(height: WsMetrics.space3),
               LayoutBuilder(
@@ -225,26 +218,36 @@ String _sessionLabel(BridgeApproval approval) {
 /// Code that scrolls inside a fixed height and says how many lines are below, so nothing is
 /// hidden without a hint (approved approval mockup).
 class _ScrollingCode extends StatefulWidget {
-  const _ScrollingCode({
-    required this.count,
-    required this.line,
-    required this.controller,
-  });
+  const _ScrollingCode({required this.lines, required this.controller});
 
-  /// The call's parts, in the monospaced style whose lines the hint counts; each is built only
-  /// once it scrolls into view.
-  final int count;
-  final IndexedWidgetBuilder line;
+  /// The call's lines; their pieces are built only once they scroll into view.
+  final List<_CodeLine> lines;
   final ScrollController controller;
 
   @override
   State<_ScrollingCode> createState() => _ScrollingCodeState();
 }
 
+/// Part of a line, at most [_pieceChars] long, since a text without spaces lays out in time
+/// that grows with the square of its length. Its height is known when its line had to be cut.
+typedef _Piece = ({int line, String text, bool last, double? height});
+
+const _pieceChars = 2000;
+
 class _ScrollingCodeState extends State<_ScrollingCode> {
   int _below = 0;
   int _last = 0;
   bool _counting = false;
+
+  /// The pieces for the width, style and text scale they were cut at.
+  List<_Piece> _pieces = const [];
+  Object? _cutFor;
+
+  @override
+  void didUpdateWidget(_ScrollingCode old) {
+    super.didUpdateWidget(old);
+    if (!identical(old.lines, widget.lines)) _cutFor = null;
+  }
 
   /// Counts what lies below once a layout is done. Lines not yet reached count by the call's
   /// lines, since lines below are built only as they scroll into view; within the last line,
@@ -257,11 +260,109 @@ class _ScrollingCodeState extends State<_ScrollingCode> {
       _counting = false;
       if (!mounted || !widget.controller.hasClients) return;
       final after = widget.controller.position.extentAfter;
-      final below = _last < widget.count - 1
-          ? widget.count - 1 - _last
+      final line = _pieces[_last].line;
+      final lines = widget.lines.length;
+      final below = line < lines - 1
+          ? lines - 1 - line
           : (after / _lineHeight(monoStyle(context))).ceil();
       if (below != _below) setState(() => _below = below);
     });
+  }
+
+  /// Cuts each line into pieces that wrap as the whole line would at `width` (approved
+  /// mockup). A long line is laid out a piece at a time and cut before the last row the piece
+  /// fills, since only that row could change with the characters after it.
+  void _cut(BuildContext context, double width) {
+    final base = DefaultTextStyle.of(context).style;
+    final scaler = MediaQuery.textScalerOf(context);
+    final key = (width, base.merge(monoStyle(context)), scaler);
+    if (key == _cutFor) return;
+    _cutFor = key;
+    final painter = TextPainter(
+      textDirection: TextDirection.ltr,
+      textScaler: scaler,
+    );
+    _pieces = [];
+    for (final (index, line) in widget.lines.indexed) {
+      final text = _shown(line);
+      if (text.length <= _pieceChars) {
+        _pieces.add((line: index, text: text, last: true, height: null));
+        continue;
+      }
+      final style = base.merge(_style(context, line));
+      var start = 0;
+      while (true) {
+        var end = math.min(start + _pieceChars, text.length);
+        final last = end == text.length;
+        // A piece never ends inside a character's pair of UTF-16 units.
+        if (!last && _leadSurrogate(text.codeUnitAt(end - 1))) end--;
+        painter
+          ..text = TextSpan(
+            text: text.substring(start, end) + (last && line.breaks ? '↵' : ''),
+            style: style,
+          )
+          ..layout(maxWidth: width - _inset(line));
+        if (last) {
+          _pieces.add((
+            line: index,
+            text: text.substring(start),
+            last: true,
+            height: painter.height,
+          ));
+          break;
+        }
+        final rows = painter.computeLineMetrics();
+        var cut = painter
+            .getLineBoundary(TextPosition(offset: end - start))
+            .start;
+        var kept = rows.length - 1;
+        // A piece one row long stays whole.
+        if (cut == 0) (cut, kept) = (end - start, rows.length);
+        final piece = text.substring(start, start + cut);
+        _pieces.add((
+          line: index,
+          // A row that ends with a line break shows as a piece without it.
+          text: piece.endsWith('\n')
+              ? piece.substring(0, piece.length - 1)
+              : piece,
+          last: false,
+          height: rows
+              .take(kept)
+              .fold<double>(0, (sum, row) => sum + row.height),
+        ));
+        start += cut;
+      }
+    }
+    painter.dispose();
+  }
+
+  Widget _piece(BuildContext context, int index) {
+    final piece = _pieces[index];
+    final line = widget.lines[piece.line];
+    final ws = context.ws;
+    final style = _style(context, line);
+    Widget marked(Color background) => Container(
+      color: background,
+      padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space1),
+      child: Text.rich(
+        TextSpan(
+          text: piece.text,
+          children: [
+            if (line.breaks && piece.last)
+              TextSpan(
+                text: '↵',
+                style: TextStyle(color: ws.textFaint),
+              ),
+          ],
+        ),
+        style: style,
+      ),
+    );
+    return switch (line.kind) {
+      _LineKind.removed => marked(ws.diffDel),
+      _LineKind.added => marked(ws.diffAdd),
+      _ => Text(piece.text, style: style),
+    };
   }
 
   @override
@@ -277,19 +378,24 @@ class _ScrollingCodeState extends State<_ScrollingCode> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Expanded(
-            // No lines are built ahead, so the last one laid out is the last one in view.
-            child: ListView.custom(
-              controller: widget.controller,
-              scrollCacheExtent: const ScrollCacheExtent.pixels(0),
-              padding: const EdgeInsets.symmetric(
-                horizontal: WsMetrics.space4,
-                vertical: WsMetrics.space2,
-              ),
-              childrenDelegate: _Lines(
-                widget.line,
-                childCount: widget.count,
-                laidOut: _laidOut,
-              ),
+            child: LayoutBuilder(
+              builder: (context, box) {
+                _cut(context, box.maxWidth - 2 * WsMetrics.space4);
+                // No pieces are built ahead, so the last one laid out is the last one in view.
+                return ListView.custom(
+                  controller: widget.controller,
+                  scrollCacheExtent: const ScrollCacheExtent.pixels(0),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: WsMetrics.space4,
+                    vertical: WsMetrics.space2,
+                  ),
+                  childrenDelegate: _Pieces(
+                    _piece,
+                    pieces: _pieces,
+                    laidOut: _laidOut,
+                  ),
+                );
+              },
             ),
           ),
           if (_below > 0)
@@ -313,15 +419,36 @@ class _ScrollingCodeState extends State<_ScrollingCode> {
   }
 }
 
-/// Lines built on demand that report the last one each layout reached.
-class _Lines extends SliverChildBuilderDelegate {
-  _Lines(super.builder, {required super.childCount, required this.laidOut});
+/// Pieces built on demand that report the last one each layout reached. The pieces of a line
+/// that was cut have known heights, so below the last one reached, the extent is exact.
+class _Pieces extends SliverChildBuilderDelegate {
+  _Pieces(super.builder, {required this.pieces, required this.laidOut})
+    : super(childCount: pieces.length);
 
+  final List<_Piece> pieces;
   final void Function(int last) laidOut;
 
   @override
   void didFinishLayout(int firstIndex, int lastIndex) => laidOut(lastIndex);
+
+  @override
+  double? estimateMaxScrollOffset(
+    int firstIndex,
+    int lastIndex,
+    double leadingScrollOffset,
+    double trailingScrollOffset,
+  ) {
+    var extent = trailingScrollOffset;
+    for (final piece in pieces.skip(lastIndex + 1)) {
+      final height = piece.height;
+      if (height == null) return null;
+      extent += height;
+    }
+    return extent;
+  }
 }
+
+bool _leadSurrogate(int unit) => unit >= 0xD800 && unit <= 0xDBFF;
 
 double _lineHeight(TextStyle style) => measureText(' ', style).height;
 
@@ -332,32 +459,33 @@ List<String> _lines(String text) => text.isEmpty
         '\n',
       );
 
-enum _EditKind { path, note, removed, added }
+enum _LineKind { call, path, note, removed, added }
 
-typedef _EditLine = ({_EditKind kind, String text, bool breaks});
+/// A line of the call; `breaks` marks a line break that ends only its side of a replacement.
+typedef _CodeLine = ({_LineKind kind, String text, bool breaks});
 
 /// A file change as the Diff tab shows one: the path, then each replacement's removed and added
 /// lines (approved mockup, ADR-0212). A write says that it replaces whatever the file holds.
-List<_EditLine> _editLines(BridgeEdit edit) => [
-  (kind: _EditKind.path, text: edit.path, breaks: false),
+List<_CodeLine> _editLines(BridgeEdit edit) => [
+  (kind: _LineKind.path, text: edit.path, breaks: false),
   if (edit.wholeFile)
     (
-      kind: _EditKind.note,
+      kind: _LineKind.note,
       text: edit.changes.every((change) => change.added.isEmpty)
           ? 'Empties the whole file'
           : 'Replaces the whole file',
       breaks: false,
     ),
   for (final change in edit.changes) ...[
-    ..._side(_EditKind.removed, change.removed, change.added, edit.wholeFile),
-    ..._side(_EditKind.added, change.added, change.removed, edit.wholeFile),
+    ..._side(_LineKind.removed, change.removed, change.added, edit.wholeFile),
+    ..._side(_LineKind.added, change.added, change.removed, edit.wholeFile),
   ],
 ];
 
 /// One side of a replacement. Unless a write replaces the whole file, its last line marks a line
 /// break that ends only this side, so adding or removing one never looks like no change
 /// (approved mockup).
-List<_EditLine> _side(_EditKind kind, String text, String other, bool write) {
+List<_CodeLine> _side(_LineKind kind, String text, String other, bool write) {
   final lines = _lines(text);
   final breaks = !write && text.endsWith('\n') && !other.endsWith('\n');
   return [
@@ -366,33 +494,24 @@ List<_EditLine> _side(_EditKind kind, String text, String other, bool write) {
   ];
 }
 
-Widget _editLine(BuildContext context, _EditLine line) {
-  final ws = context.ws;
+/// A line as drawn, with the sign that marks a changed one.
+String _shown(_CodeLine line) => switch (line.kind) {
+  _LineKind.removed => '− ${line.text}',
+  _LineKind.added => '+ ${line.text}',
+  _ => line.text,
+};
+
+TextStyle _style(BuildContext context, _CodeLine line) {
   final style = monoStyle(context);
-  Widget marked(String sign, Color background) => Container(
-    color: background,
-    padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space1),
-    child: Text.rich(
-      TextSpan(
-        text: '$sign ${line.text}',
-        children: [
-          if (line.breaks)
-            TextSpan(
-              text: '↵',
-              style: TextStyle(color: ws.textFaint),
-            ),
-        ],
-      ),
-      style: style,
-    ),
-  );
   return switch (line.kind) {
-    _EditKind.path => Text(
-      line.text,
-      style: style.copyWith(fontWeight: WsMetrics.fwSemibold),
-    ),
-    _EditKind.note => Text(line.text, style: style.copyWith(color: ws.warning)),
-    _EditKind.removed => marked('−', ws.diffDel),
-    _EditKind.added => marked('+', ws.diffAdd),
+    _LineKind.path => style.copyWith(fontWeight: WsMetrics.fwSemibold),
+    _LineKind.note => style.copyWith(color: context.ws.warning),
+    _ => style,
   };
 }
+
+/// The room a changed line's background takes beside its text.
+double _inset(_CodeLine line) =>
+    line.kind == _LineKind.removed || line.kind == _LineKind.added
+    ? 2 * WsMetrics.space1
+    : 0;

@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:collection';
+import 'dart:math' as math;
 import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
@@ -16,6 +18,7 @@ import 'package:liquid/src/rust/api/history.dart';
 import 'package:liquid/src/session/session_state.dart';
 import 'package:liquid/src/theme/icons.dart';
 import 'package:liquid/src/theme/theme.dart';
+import 'package:liquid/src/theme/tokens.g.dart';
 
 import 'fake_backend.dart';
 
@@ -1152,6 +1155,160 @@ void main() {
       await expectExactHint();
     },
   );
+
+  Finder callView() => find
+      .descendant(
+        of: find.byType(ActionArea),
+        matching: find.byType(Scrollable),
+      )
+      .first;
+
+  /// The texts the call's view draws, top to bottom, scrolling it through to its end.
+  Future<List<String>> scrollThroughCall(WidgetTester tester) async {
+    final position = tester.state<ScrollableState>(callView()).position;
+    final top = tester.getRect(callView()).top;
+    final drawn = SplayTreeMap<int, String>();
+    while (true) {
+      final texts = find.descendant(
+        of: callView(),
+        matching: find.byType(RichText),
+      );
+      for (final text in texts.evaluate()) {
+        final box = text.renderObject! as RenderBox;
+        final offset =
+            box.localToGlobal(Offset.zero).dy - top + position.pixels;
+        drawn[offset.round()] = (text.widget as RichText).text.toPlainText();
+      }
+      if (position.pixels >= position.maxScrollExtent) {
+        return drawn.values.toList();
+      }
+      position.jumpTo(
+        math.min(
+          position.pixels + position.viewportDimension / 2,
+          position.maxScrollExtent,
+        ),
+      );
+      await tester.pump();
+    }
+  }
+
+  /// `whole` laid out as one text, in the style and at the width of the first piece of it the
+  /// call's view draws.
+  TextPainter oneText(WidgetTester tester, String whole) {
+    final first = find.descendant(
+      of: callView(),
+      matching: find.byWidgetPredicate(
+        (widget) =>
+            widget is RichText && whole.startsWith(widget.text.toPlainText()),
+      ),
+    );
+    final paragraph = tester.renderObject<RenderParagraph>(first.first);
+    final painter = TextPainter(
+      text: TextSpan(text: whole, style: paragraph.text.style),
+      textDirection: TextDirection.ltr,
+      textScaler: paragraph.textScaler,
+    )..layout(maxWidth: paragraph.constraints.maxWidth);
+    addTearDown(painter.dispose);
+    return painter;
+  }
+
+  /// Expects `pieces` to be short and to wrap exactly as `whole` does as one text: each piece
+  /// starts one of its rows, so no piece ends a row early.
+  void expectRowsOfOneText(List<String> pieces, TextPainter whole) {
+    final text = whole.text!.toPlainText();
+    expect(pieces.join(), text);
+    expect(pieces.length, greaterThan(1));
+    var start = 0;
+    for (final piece in pieces) {
+      expect(piece.length, lessThanOrEqualTo(2000));
+      expect(
+        whole.getLineBoundary(TextPosition(offset: start)).start,
+        start,
+        reason: 'the piece at $start starts a row',
+      );
+      start += piece.length;
+    }
+  }
+
+  testWidgets('draws a long call in short pieces that wrap as the call would', (
+    tester,
+  ) async {
+    await show(tester);
+    final token = [
+      for (var char = 0; char < 5000; char++) 'abcdefghij'[char % 10],
+    ].join();
+    final words = [for (var word = 0; word < 150; word++) 'word$word']
+        .join(' ');
+    final command =
+        'curl -fsSL https://dl.example.com/i.sh?t=$token && echo $words';
+    await emit(
+      tester,
+      event(
+        BridgeEventKind.requestOpened,
+        request: BridgeRequest(
+          id: 'a1',
+          approval: BridgeApproval(
+            kind: BridgeRequestKind.commandExecution,
+            tool: 'bash',
+            text: command,
+          ),
+        ),
+      ),
+    );
+    expect(
+      find.textContaining(command.substring(command.length - 40)),
+      findsNothing,
+      reason: "the call's end is built once it scrolls into view",
+    );
+    final whole = oneText(tester, command);
+    final below =
+        ((whole.height +
+                    2 * WsMetrics.space2 -
+                    tester.getSize(callView()).height) /
+                whole.preferredLineHeight)
+            .ceil();
+    expect(
+      find.text('↓ $below more lines'),
+      findsOneWidget,
+      reason: 'the hint counts the rows below',
+    );
+    expectRowsOfOneText(await scrollThroughCall(tester), whole);
+    expect(find.textContaining('more lines'), findsNothing);
+  });
+
+  testWidgets('marks a long changed line\'s line break on its last piece', (
+    tester,
+  ) async {
+    await show(tester);
+    final long = [
+      for (var char = 0; char < 4000; char++) 'abcdefghij'[char % 10],
+    ].join();
+    await emit(
+      tester,
+      event(
+        BridgeEventKind.requestOpened,
+        request: BridgeRequest(
+          id: 'a1',
+          approval: BridgeApproval(
+            kind: BridgeRequestKind.fileChange,
+            tool: 'edit',
+            text: '{}',
+            edit: BridgeEdit(
+              path: 'notes.md',
+              wholeFile: false,
+              changes: [BridgeEditChange(removed: '', added: '$long\n')],
+            ),
+          ),
+        ),
+      ),
+    );
+    final whole = oneText(tester, '+ $long↵');
+    final pieces = await scrollThroughCall(tester);
+    expectRowsOfOneText(
+      pieces.where((text) => text != 'notes.md').toList(),
+      whole,
+    );
+  });
 
   testWidgets('shows the whole call before it is allowed', (tester) async {
     await show(tester);
