@@ -14,7 +14,7 @@ Linux and macOS share the same [public installation guarantee and maintenance li
 | Liquid desktop client | Linux x86_64; macOS ARM64; Windows 11 x86_64 | In development on macOS ARM64: the agent surface for one pi session, not released. Linux and Windows are not implemented. |
 | Liquid mobile client | Android ARM64 | Not implemented. |
 
-Linux ARM64 and Windows 11 ARM64 are deferred beyond Release 1. Earlier Windows versions and macOS x86_64 (Intel Macs) are unsupported by every product. Flow Agent and Meta-Harness have no native Windows support or future Windows-backend commitment. Liquid's mobile and headless capabilities retain their separate contracts in its [V-Spec](docs/concept/V-Spec_Liquid.html); desktop support does not certify them.
+Linux ARM64 is deferred beyond Release 1. Windows on ARM64, earlier Windows versions and macOS x86_64 (Intel Macs) are unsupported by every product (ADR-0218). Flow Agent and Meta-Harness have no native Windows support or future Windows-backend commitment. Liquid's mobile and headless capabilities retain their separate contracts in its [V-Spec](docs/concept/V-Spec_Liquid.html); desktop support does not certify them.
 
 Ubuntu 24.04 x86_64 and macOS 27 ARM64 are the current concrete Flow verification targets. Other Linux distributions or OS versions do not acquire a support claim from sharing an architecture or passing compilation. Liquid and Meta-Harness must establish their own runtime evidence, not inherit Flow's verification results.
 
