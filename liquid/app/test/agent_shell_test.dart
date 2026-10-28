@@ -584,6 +584,28 @@ void main() {
     expect(backend.calls.last, 'confirm q1 true');
   });
 
+  testWidgets(
+    'counts the wait for a decision from its first frame, however late',
+    (tester) async {
+      await show(tester);
+      backend.controller.add(
+        event(BridgeEventKind.requestOpened, request: approval('a1')),
+      );
+      await tester.idle();
+      // The card is built and laid out now, but its frame, slow to lay out, ends 20 s later.
+      tester.binding.buildOwner!.buildScope(tester.binding.rootElement!);
+      tester.binding.rootPipelineOwner.flushLayout();
+      expect(find.text('Allow once', skipOffstage: false), findsOneWidget);
+      await tester.pump(const Duration(seconds: 20));
+      await tester.tap(find.text('Allow once'));
+      await tester.pump();
+      expect(backend.calls.where((call) => call.startsWith('decide')), isEmpty);
+      await tester.pump(const Duration(milliseconds: 500));
+      await tester.tap(find.text('Allow once'));
+      expect(backend.calls.last, 'decide a1 allowOnce');
+    },
+  );
+
   testWidgets('keeps a key held from before out of a question field', (
     tester,
   ) async {

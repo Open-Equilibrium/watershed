@@ -189,7 +189,7 @@ A macOS Liquid app, built ahead of M2 and M3a, that controls pi through an embed
 
 - The agent surface does not yet meet [client architecture](docs/concept/liquid-client-architecture.md) rule 4: the bridge sends every event without waiting for Dart, so a fast stream queues in Dart. Proposed: Rust coalesces running items in short windows, keeping each item's latest state, with a bounded number of pending updates, as T3 Code does with 50 ms windows; alternative: flow control that Dart acknowledges.
 - A file-change approval shows the path as pi was given it; pi resolves a leading `@`, `~` and `file://` URLs before it writes, so the card could also show the resolved absolute path.
-- An approval draws a call's line without spaces as one text, whose layout grows with the square of its length: in the closeout review a 1 MB line kept Liquid from responding for about 20 s, while the card took no keys. Proposed: draw such a line in bounded pieces. No test yet drives the read delay with a slow first frame.
+- An approval draws a call's line without spaces as one text, whose layout grows with the square of its length: in the closeout review a 1 MB line kept Liquid from responding for about 20 s, while the card took no keys. Proposed: draw such a line in bounded pieces.
 - At the smallest window, 1050 x 640, the Trajectory fits but its Step column is about 70 px wide, so step names and results show only their first letters, and the comparison shows no step rows until scrolled. Proposed: narrow the session tree or leave out the token columns below a width, after an approved mockup.
 
 #### Liquid Git integration — next slice
