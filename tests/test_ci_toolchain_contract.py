@@ -113,6 +113,7 @@ def assert_step_state(
     *,
     condition: str | None = None,
     continue_on_error: bool = False,
+    scope: str = "product",
 ) -> list[str]:
     lines = step_lines(workflow, name)
     conditions = [
@@ -120,8 +121,10 @@ def assert_step_state(
         for line in lines
         if line.startswith("        if:")
     ]
-    product = "steps.scope.outputs.product == 'true'"
-    case.assertEqual(conditions, [product if condition is None else f"{product} && ({condition})"])
+    selected = f"steps.scope.outputs.{scope} == 'true'"
+    case.assertEqual(
+        conditions, [selected if condition is None else f"{selected} && ({condition})"]
+    )
     case.assertEqual(
         [line for line in lines if line.startswith("        continue-on-error:")],
         ["        continue-on-error: true"] if continue_on_error else [],
@@ -214,7 +217,7 @@ class CiWorkflowContractTest(unittest.TestCase):
 
     def test_corepack_is_explicitly_provisioned_before_use(self) -> None:
         workflow = workflow_text()
-        assert_step_state(self, workflow, "Install pinned Corepack")
+        assert_step_state(self, workflow, "Install pinned Corepack", scope="docs")
         provision = step_run(workflow, "Install pinned Corepack")
         self.assertIn("Join-Path $env:RUNNER_TEMP watershed-node-tools", provision)
         self.assertRegex(
@@ -241,6 +244,15 @@ class CiWorkflowContractTest(unittest.TestCase):
             self.assertEqual(sha, ACTION_PINS[action])
             seen.add(action)
         self.assertEqual(seen, set(ACTION_PINS))
+
+    def test_a_newer_run_supersedes_its_branch_or_pull_request_but_not_main(self) -> None:
+        lines = workflow_text().splitlines()
+        start = lines.index("concurrency:")
+        self.assertEqual(lines[start + 1 : start + 3], [
+            "  group: ci-${{ github.event_name }}-"
+            "${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}",
+            "  cancel-in-progress: true",
+        ])
 
     def test_ci_runs_on_every_permitted_topic_branch(self) -> None:
         self.assertEqual(
@@ -320,11 +332,14 @@ class CiWorkflowContractTest(unittest.TestCase):
             "Check RustSec advisories": "cargo audit",
             "Check dependency policy": "cargo deny check",
             "Check Node advisories": "pnpm audit",
-            "Render HTML docs": "node scripts/check-html-render.mjs",
         }
         for name, command in commands.items():
             assert_step_state(self, workflow, name)
             self.assertEqual(step_run(workflow, name), command)
+        assert_step_state(self, workflow, "Render HTML docs", scope="docs")
+        self.assertEqual(
+            step_run(workflow, "Render HTML docs"), "node scripts/check-html-render.mjs"
+        )
 
         assert_step_state(self, workflow, "Run M1.2 installer contract tests")
         self.assertEqual(
