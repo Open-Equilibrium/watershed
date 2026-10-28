@@ -14,16 +14,16 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **Wedge** — The first narrow adoption path used to validate and grow the platform. Flow Agent is the developer/open-source execution wedge, Meta-Harness the team/control/governance wedge, Liquid the long-term workspace/action wedge.
 - **AGPL/free-software posture** — The project's commitment to transparent, inspectable, self-hostable software under the repository's `AGPL-3.0-only` license; not a proprietary/open-core monetization stance.
 - **Offline after provisioning** — The state in which installed Watershed binaries, approved model/runtime artifacts, required Global Flow configuration, one applicable Runtime binding and local-runtime readiness are already present, so the core local Flow, control and Workspace paths operate with network interfaces disabled. Requested remote-only actions fail visibly when unavailable; sync reports offline/stale state and waits resumably without blocking local work.
-- **Topic branch** — Short-lived Git branch for one logical change; can span multiple sessions and is PR'd back to `main` (ADR-0046).
-- **Git upstream** — Remote-tracking branch a local branch uses by default for pull/push; topic branches must not use `origin/main` (ADR-0048).
-- **Commit metadata** — Commit subject, body, comment text and trailers; metadata changes must not change file content (ADR-0048).
-- **Unpublished commit** — Commit not yet pushed or otherwise shared; only these commits may be reworded for metadata corrections (ADR-0048).
+- **Topic branch** — Short-lived Git branch for one logical change; can span multiple sessions and is PR'd back to `main`.
+- **Git upstream** — Remote-tracking branch a local branch uses by default for pull/push; topic branches must not use `origin/main`.
+- **Commit metadata** — Commit subject, body, comment text and trailers; metadata changes must not change file content.
+- **Unpublished commit** — Commit not yet pushed or otherwise shared; only these commits may be reworded for metadata corrections.
 
 ## Tools
 
-- **Liquid** — Standalone local-first workspace and app-building product built from Pages, Blocks, Views, Sources, Connections and Automations. Every client works through a local replica; optional sync, agent integration and headless execution extend rather than replace that product. CLI binary: `liq` (ADR-0013).
-- **Flow Agent** — Host-local, CLI-only, Rust-core, script-driven deterministic Flow runtime (not a generic coding agent). M1 is fixture-bounded; productive execution validates Tool calls and requires native self-protection. Guarantees and responsibilities are canonical in [SECURITY.md](SECURITY.md#accepted-flow-agent-security-target). CLI binary: `flow` (ADR-0013).
-- **Meta-Harness** — Self-contained host-scoped headless control plane over CLI agents on one host (session registry, central config resolution, agent schedules/triggers, artifact indexing, AgentPulse), reachable through local or authenticated remote clients. Runs without Liquid; Liquid is its primary rich UI. CLI binary: `meta` (ADR-0013).
+- **Liquid** — Standalone local-first workspace and app-building product built from Pages, Blocks, Views, Sources, Connections and Automations. Every client works through a local replica; optional sync, agent integration and headless execution extend rather than replace that product. CLI binary: `liq`.
+- **Flow Agent** — Host-local, CLI-only, Rust-core, script-driven deterministic Flow runtime (not a generic coding agent). M1 is fixture-bounded; productive execution validates Tool calls and requires native self-protection. Guarantees and responsibilities are canonical in [SECURITY.md](SECURITY.md#accepted-flow-agent-security-target). CLI binary: `flow`.
+- **Meta-Harness** — Self-contained host-scoped headless control plane over CLI agents on one host (session registry, central config resolution, agent schedules/triggers, artifact indexing, AgentPulse), reachable through local or authenticated remote clients. Runs without Liquid; Liquid is its primary rich UI. CLI binary: `meta`.
 - **Execution location** — User-editable label for the host and owning Meta-Harness target used to start or control a session. Technical identifiers remain internal while routing authority is preserved.
 - **Runtime binding** — Device-local resolution from a Flow's model/runtime requirements to one concrete provider endpoint and its applicable provider/model identity, optional local artifact/quantization/runtime identity, optional typed provider/audience-bound credential reference and resource policy. Credential material remains in its Flow-owned protected store. The binding is operational host state, not Global Flow configuration or Conversation authority; D-059 owns the exact capability-dependent schema.
 
@@ -78,7 +78,7 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 
 - **Access-control list (ACL)** — Operating-system permission entries that grant or deny named users or groups access beyond ordinary file-mode permissions. Installation prerequisites are in [PLATFORMS.md](PLATFORMS.md#installation-prerequisites).
 
-- **flow-value-v0** — The closed, explicitly tagged and provider-neutral M1.1 value contract shared by root input, Phase input/results, Instruction parameters, Tool parameters and Tool outputs. It permits no implicit coercion or floating-point values; large or binary values use immutable session-object references (ADR-0092, ADR-0098).
+- **flow-value-v0** — The closed, explicitly tagged and provider-neutral M1.1 value contract shared by root input, Phase input/results, Instruction parameters, Tool parameters and Tool outputs. It permits no implicit coercion or floating-point values; large or binary values use immutable session-object references.
 - **flow-run-input-v0** — The versioned run-input document containing one complete `flow-value-v0` value for the selected root Flow; its canonical contract is in `PROTOCOL.md`.
 - **flow-tool-result-v0** — The fixed Tool-result envelope for status, stdout and stderr flow values, with exit code only when observed; its canonical contract is in `PROTOCOL.md`.
 - **flow-m11-performance-evidence-v0** — Release-mode Ubuntu JSONL schema for the finite M1.1 observational workload set; it records exact inputs, raw samples and unadjusted timing and RSS aggregates without performance thresholds.
@@ -104,7 +104,7 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **Context manifest** — The reproducible per-provider-turn record of the context profile, budget inputs, ordered included/projected sources, omissions, cache boundaries, token estimate and final context hash.
 - **Runtime event** — One normalized event Flow Agent emits over its public contract (see `PROTOCOL.md`); the same events feed JSONL mode, future RPC mode and the session store.
 - **JSONL event stream** — Flow Agent's headless mode that streams newline-delimited JSON runtime events to stdout for automation/CI/consumers.
-- **RPC mode** — Flow Agent's designed-for bidirectional stdin/stdout control mode. ADR-0055 selects the initial command/request shape; runtime events remain the public event contract.
+- **RPC mode** — Flow Agent's designed-for bidirectional stdin/stdout control mode. [PROTOCOL.md](PROTOCOL.md) defines its initial command/request shape; runtime events remain the public event contract.
 - **Session store** — Flow Agent's conversation trees and owned run bundles in a canonical-path-keyed private user-global Workspace store. Runtime state only; **not** a project VCS/history engine.
 - **Live-event notification** — A bounded, best-effort wake-up reporting a session's earliest pending and highest committed sequences; it carries no event payload, and receivers replay events after their cursor from the authoritative session log.
 - **Persistence-before-notification** — The local guarantee that one serial session writer successfully appends a canonical event to the authoritative log before updating its high-watermark and attempting a live-event notification; physical `fsync` follows separate bounded durability checkpoints.
@@ -119,7 +119,7 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **Smoke-flow** — The smallest golden flow: one phase, one tool and one instruction, used as the first localizable gate.
 - **Hello-flow** — The showcase golden flow that exercises multiple Phases, scoped Instructions/Tools and subflow reuse.
 - **Sandbox-negative fixture** — A tiny flow that intentionally attempts a forbidden operation and must be rejected.
-- **HTML render gate** — The CI validation that browser-renders self-contained HTML docs; `pnpm run docs:render-check` invokes `scripts/check-html-render.mjs` at `1440x900` and `390x844` (ADR-0043, ADR-0045).
+- **HTML render gate** — The CI validation that browser-renders self-contained HTML docs; `pnpm run docs:render-check` invokes `scripts/check-html-render.mjs` at `1440x900` and `390x844`.
 
 ## Liquid primitives
 
@@ -134,14 +134,14 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **Explorer** — Liquid's primary Workspace navigation surface, listing Pages and Sources as peer entries.
 - **Page template** — A reusable starting composition of Blocks, Views, Connections and Automations for one use case; it creates an ordinary Page.
 - **PowerBar** — Liquid's command and creation surface for finding Workspace objects, adding Blocks and invoking permitted Workspace or agent actions.
-- **Liquid key** — Caps Lock when the user opts in: a tap opens Liquid from any app, holding it in Liquid reveals shortcuts and ⇪ plus a key runs a Liquid command (ADR-0205).
-- **Shortcut profile** — Liquid's set of shortcuts: Liquid key, Standard (⌘ only) or Custom (ADR-0205).
-- **Reveal key** — The key whose hold shows contextual shortcut hints: the Liquid key while it is on, ⌘ otherwise (ADR-0204, ADR-0205).
+- **Liquid key** — Caps Lock when the user opts in: a tap opens Liquid from any app, holding it in Liquid reveals shortcuts and ⇪ plus a key runs a Liquid command.
+- **Shortcut profile** — Liquid's set of shortcuts: Liquid key, Standard (⌘ only) or Custom.
+- **Reveal key** — The key whose hold shows contextual shortcut hints: the Liquid key while it is on, ⌘ otherwise.
 - **Role** — A reusable allow-only composition of permissions assigned to users, groups, agent profiles, sessions or Automations. Anything not allowed is denied by default; explicit deny/blacklist rules are post-MVP.
 - **History** — Liquid's attributed and reversible record of Workspace Actions; also called **workspace action history / workspace VCS** when distinguishing it from project-code VCS. Its detailed storage/recovery model remains open in [D-028](docs/decisions/open-decisions.html#d-028) and [D-031](docs/decisions/open-decisions.html#d-031).
 - **Agent surface** — Liquid's view of one agent session: the sidebar, the Chat, Trajectory and Diff tabs, the widget strip, the input area and the status bar.
-- **Start page** — What the agent surface shows before a session's first message: the project's recent sessions to continue and chips to set the new one up (ADR-0203).
-- **Input area** — The fixed-height area at the bottom of the agent surface: the composer, or in its place an approval or an agent question (ADR-0199).
+- **Start page** — What the agent surface shows before a session's first message: the project's recent sessions to continue and chips to set the new one up.
+- **Input area** — The fixed-height area at the bottom of the agent surface: the composer, or in its place an approval or an agent question.
 - **Approval mode** — How much an agent may do without asking: Ask (every call that is not read-only), Allow edits (file changes too) or Full access (every call) (ADR-0188).
 - **Trajectory** — Liquid's step-by-step view of an agent session: model responses, tool calls, tokens, timing and the context the model saw. A session can branch from any step, and two branches can be compared side by side.
 - **Git integration** — Git operations on the projects agents work in — diffs, branches, commits, push, pull requests and worktrees — run by Meta-Harness on its host and presented in Liquid (ADR-0190). It operates the project's own Git repository and is not a Watershed VCS; Liquid's own VCS is History.

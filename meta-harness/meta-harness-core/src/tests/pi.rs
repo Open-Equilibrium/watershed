@@ -286,7 +286,7 @@ fn translates_extension_questions_and_display_updates() {
                 key: "todo".to_owned(),
                 lines: None,
             },
-            // A title an extension sets is dropped (ADR-0211).
+            // A title an extension sets is dropped.
             AgentEvent::InputTextSet {
                 text: "draft".to_owned(),
             },

@@ -38,7 +38,7 @@ class ChatView extends StatelessWidget {
       },
       child: ValueListenableBuilder(
         valueListenable: state.items,
-        // A session without a conversation shows the start page (ADR-0203).
+        // A session without a conversation shows the start page.
         builder: (context, items, _) => items.isEmpty
             ? StartPage(state: state, project: project)
             : ListView.builder(

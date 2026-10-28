@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       mac_self_protection_evaluation:
-        description: Run the ADR-0167 experimental Mac guard probe (not release proof)
+        description: Run the experimental Mac guard probe (not release proof)
         type: boolean
         default: false
   pull_request:

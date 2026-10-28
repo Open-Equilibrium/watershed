@@ -165,7 +165,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    // An approval takes keys once it could be read (ADR-0207).
+    // An approval takes keys once it could be read.
     await tester.pump(const Duration(milliseconds: 500));
 
     await liquid(tester, LogicalKeyboardKey.enter);

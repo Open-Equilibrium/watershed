@@ -512,7 +512,7 @@ void main() {
       findsNWidgets(2),
       reason: 'the compared branches are told, not only drawn',
     );
-    // The view's keys show while ⌘ is held (ADR-0204).
+    // The view's keys show while ⌘ is held.
     await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
     await tester.pump(const Duration(milliseconds: 700));
     expect(

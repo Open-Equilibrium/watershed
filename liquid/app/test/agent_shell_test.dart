@@ -43,7 +43,7 @@ void main() {
     );
   }
 
-  /// Holds ⌘ long enough for the contextual shortcuts to show (ADR-0204).
+  /// Holds ⌘ long enough for the contextual shortcuts to show.
   Future<void> holdCommand(WidgetTester tester) async {
     await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
     await tester.pump(const Duration(milliseconds: 700));
@@ -497,7 +497,7 @@ void main() {
       );
       expect(find.text('Run a shell command?'), findsOneWidget);
       expect(find.textContaining('npm test -- login'), findsWidgets);
-      // An approval takes keys once it could be read (ADR-0207).
+      // An approval takes keys once it could be read.
       await tester.pump(const Duration(milliseconds: 500));
       for (final key in keys) {
         await tester.sendKeyDownEvent(key);
@@ -851,7 +851,7 @@ void main() {
     await emit(tester, ask('q1', BridgeQuestionKind.confirm, 'Detail: $long'));
     inArea(find.text('Yes'));
     inArea(find.text('No'));
-    // A question takes answers once it could be read (ADR-0209).
+    // A question takes answers once it could be read.
     await tester.pump(const Duration(milliseconds: 500));
     await tester.tap(find.text('No'));
     expect(backend.calls.last, 'confirm q1 false');

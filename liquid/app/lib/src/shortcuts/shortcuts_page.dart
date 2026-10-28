@@ -114,7 +114,7 @@ const List<_Group> _right = [
   ),
 ];
 
-/// Settings → Shortcuts (approved mockup, ADR-0204, ADR-0205): the profile, every action's
+/// Settings → Shortcuts (approved mockup): the profile, every action's
 /// keys and recording new ones. It replaces the main area; esc closes it.
 class ShortcutsPage extends StatefulWidget {
   const ShortcutsPage({

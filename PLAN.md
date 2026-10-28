@@ -26,7 +26,7 @@ The initial adoption wedge is technical teams that need reusable, measurable, an
 
 - Rust workspace and the `core`, `proto`, `flow-agent`, `meta-harness`, and `liquid` scaffold.
 - Versioned building-block, event, runtime, session, policy, and sandbox contracts. Canonical owners: `PROTOCOL.md`, `SECURITY.md`, and the Flow Agent V-Spec.
-- Deterministic fixtures and expected streams per `TESTING.md` (ADR-0034).
+- Deterministic fixtures and expected streams per `TESTING.md`.
 - Cross-platform CI, dependency, coverage, link, and render gates per `TESTING.md`, `SECURITY.md`, and `.github/workflows/ci.yml`.
 
 **Decision state:** M0 and M1 are unblocked; accepted decisions are in [`ADR-LOG.md`](docs/adr/ADR-LOG.md).
@@ -59,7 +59,7 @@ M1 does not provide a real provider adapter, general external process execution,
 
 #### M1.1 entry criteria — architecture hardening
 
-The M1 deterministic runtime foundation satisfies the following criteria. They remain mandatory boundaries before real provider integration or general subprocess execution begins (ADR-0079):
+The M1 deterministic runtime foundation satisfies the following criteria. They remain mandatory boundaries before real provider integration or general subprocess execution begins:
 
 1. **Protocol validation ownership:** `proto` alone owns Event-envelope and Event-payload structure validation; `flow-agent-core` delegates it. Runtime retains only stream, sequence, budget and lifecycle invariants, without parallel payload schemas or duplicated `EventType` matches.
 2. **Real `core-script` modules:** production uses real Rust modules with explicit visibility/imports, no `include!` assembly and a minimal public API.
@@ -97,7 +97,7 @@ The M1 deterministic runtime foundation satisfies the following criteria. They r
 **DoD:**
 
 - A non-fixture workspace runs a real Flow through a real provider adapter.
-- Init, Validate and Create for Tool, Instruction, Phase and Flow satisfy the exact long-flag and delimited-group grammar in `PROTOCOL.md` plus the identity-bound transaction contract (ADR-0104); valid output round-trips through registry validation, while failure preserves existing bytes and publishes no partial output.
+- Init, Validate and Create for Tool, Instruction, Phase and Flow satisfy the exact long-flag and delimited-group grammar in `PROTOCOL.md` plus the identity-bound transaction contract; valid output round-trips through registry validation, while failure preserves existing bytes and publishes no partial output.
 - Recursive composite/leaf execution, typed Instruction binding, output contracts, whole-result handoff, ordered forward Transitions and both loop bounds are enforced before or during deterministic orchestration.
 - At least one predefined command and one own-script Tool use the bounded runner.
 - Root input, Phase results, Instruction parameters and provider-requested Tool parameters are typed and validated. Tool declarations make capabilities available but cause no automatic execution.
@@ -121,9 +121,9 @@ No implementation or release claim follows from a documentation decision alone. 
 
 ### M1.2 — Flow Agent OS isolation
 
-**Status:** The native self-protection replacement and version/platform download packaging are implemented; [TESTING.md](TESTING.md#native-verification-status) owns native and downloaded-bundle acceptance results and their limits, while [PERFORMANCE.md](PERFORMANCE.md#flow-agent) links native measurements. ADR-0166–ADR-0176 own the approved security and installation decisions. Configuration administration remains manual for the first Flow Agent release; deferred work and discussion context belong to the [later roadmap](#later-flow-agent-roadmap). The final native gate and [repository review and closeout](AGENTS.md#session-workflow) remain incomplete. This entry updates status, not the separate three-workstream development plan.
+**Status:** The native self-protection replacement and version/platform download packaging are implemented; [TESTING.md](TESTING.md#native-verification-status) owns native and downloaded-bundle acceptance results and their limits, while [PERFORMANCE.md](PERFORMANCE.md#flow-agent) links native measurements. [SECURITY.md](SECURITY.md#accepted-flow-agent-security-target) owns the approved security and installation decisions. Configuration administration remains manual for the first Flow Agent release; deferred work and discussion context belong to the [later roadmap](#later-flow-agent-roadmap). The final native gate and [repository review and closeout](AGENTS.md#session-workflow) remain incomplete. This entry updates status, not the separate three-workstream development plan.
 
-**Current implementation:** One shared one-shot lifecycle uses Linux Bubblewrap/seccomp or macOS Seatbelt to protect this installation's Flow-owned objects. Tool commands and typed parameters, Ready/Start, durable intent, bounded results and self-protection receipts replace broad mount/profile/network/process-capacity policy. Schemas reject removed requirements rather than ignoring them. The wire contract is canonical in [PROTOCOL.md](PROTOCOL.md#m12-executor-protocol-adr-0146-adr-0160-adr-0161-adr-0162); [TESTING.md](TESTING.md#m12-transition-and-executor-evidence) owns executable evidence.
+**Current implementation:** One shared one-shot lifecycle uses Linux Bubblewrap/seccomp or macOS Seatbelt to protect this installation's Flow-owned objects. Tool commands and typed parameters, Ready/Start, durable intent, bounded results and self-protection receipts replace broad mount/profile/network/process-capacity policy. Schemas reject removed requirements rather than ignoring them. The wire contract is canonical in [PROTOCOL.md](PROTOCOL.md#m12-executor-protocol); [TESTING.md](TESTING.md#m12-transition-and-executor-evidence) owns executable evidence.
 
 **Contract:** The [security contract](SECURITY.md#accepted-flow-agent-security-target) and [execution/security architecture](docs/concept/flow-agent-executor-architecture.md) define guarantees and Engineer responsibilities. The unreleased migration adds no compatibility aliases.
 
@@ -165,8 +165,8 @@ A macOS Liquid app, built ahead of M2 and M3a, that controls pi through an embed
 - Agent view: send a prompt, follow the response live, steer and abort; pi dialogs, status and widgets.
 - Tool approvals in three modes (ADR-0188).
 - Trajectory tab, live and retrospective: steps, tokens, timing and what the model saw; branch from a step and compare both branches side by side.
-- Diff view of a run's changes in the agent's Git project, unified or split and with whitespace changes hidden on request (ADR-0190, ADR-0212).
-- Shared [design guidelines](docs/design/guidelines.md) and tokens, plus approved mockups of the agent view, Trajectory tab and Diff tab before their implementation (ADR-0194).
+- Diff view of a run's changes in the agent's Git project, unified or split and with whitespace changes hidden on request (ADR-0190).
+- Shared [design guidelines](docs/design/guidelines.md) and tokens, plus approved mockups of the agent view, Trajectory tab and Diff tab before their implementation.
 - CI: `flutter analyze` and `flutter test` on Linux as required checks; a macOS app build on a macOS runner becomes required once it runs reliably.
 - Out of scope: Trajectory search and attribution of entries to the extension that produced them. The agent-surface mockup's Git branch in the sidebar and its context-window display follow in a later step.
 
@@ -197,7 +197,7 @@ Completes the Git integration for the agent's Git project (ADR-0190, ADR-0191): 
 #### M3a — Local Workspace foundation
 
 - Local replica as the only interactive store; storage choice remains D-029.
-- Flutter clients over the Rust core follow the [client architecture](docs/concept/liquid-client-architecture.md) invariants (ADR-0181, ADR-0182).
+- Flutter clients over the Rust core follow the [client architecture](docs/concept/liquid-client-architecture.md) invariants (ADR-0182).
 - Pages, Blocks, Views, Sources, Connections, Automations, Roles, History and settings.
 - Explorer with Pages and Sources as peer navigation entries; Page templates create use-case compositions rather than new Page Types.
 - PowerBar for finding Workspace objects, creating Blocks and invoking permitted Workspace actions.
@@ -249,7 +249,7 @@ These entries retain scope and decision context, not detailed future-feature spe
 
 **Deferred until after the first Flow Agent release (ADR-0173).** The purpose is to let Tools request limited configuration changes without direct access to Flow files. Manual administration is sufficient initially and avoids building a proposal protocol and approval UI before the core execution boundary is ready.
 
-**Prior discussion (ADR-0167/ADR-0168):** The approved direction was Flow-applied, scope-limited proposals with default denial, optional local-owner approval or preconfigured limited permission. The initial scope was model/context-budget settings, not credentials, executable selection or Tool permissions. Review after Tool completion, bounded waiting, exact non-reusable consent and changes affecting future Runs were intended to avoid self-escalation and accidental repeated changes. Revisit the useful scope, unattended operation, review experience and conflict/recovery handling when scheduling this feature; retain no detailed protocol or diagram in advance.
+**Prior discussion:** The approved direction was Flow-applied, scope-limited proposals with default denial, optional local-owner approval or preconfigured limited permission. The initial scope was model/context-budget settings, not credentials, executable selection or Tool permissions. Review after Tool completion, bounded waiting, exact non-reusable consent and changes affecting future Runs were intended to avoid self-escalation and accidental repeated changes. Revisit the useful scope, unattended operation, review experience and conflict/recovery handling when scheduling this feature; retain no detailed protocol or diagram in advance.
 
 ### Protection of other independent Flow installations
 
@@ -257,4 +257,4 @@ These entries retain scope and decision context, not detailed future-feature spe
 
 ## AgentPulse — last roadmap item
 
-Low priority; scheduled after every other roadmap entry (ADR-0187). Meta-Harness computes and stores AgentPulse v0 metrics — rework ratio, first-attempt success and cost-per-productive-outcome — and exposes them through its CLI/API. The formulas remain [D-010](docs/decisions/open-decisions.html#d-010).
+Low priority; scheduled after every other roadmap entry. Meta-Harness computes and stores AgentPulse v0 metrics — rework ratio, first-attempt success and cost-per-productive-outcome — and exposes them through its CLI/API. The formulas remain [D-010](docs/decisions/open-decisions.html#d-010).

@@ -1,6 +1,6 @@
 import 'package:flutter/widgets.dart';
 
-/// Lucide icons (ISC, ADR-0198) from the vendored font `assets/fonts/lucide.ttf` of
+/// Lucide icons (ISC) from the vendored font `assets/fonts/lucide.ttf` of
 /// lucide-static 1.61.0; the codepoints come from its `font/codepoints.json`. Release builds
 /// keep only the glyphs used here.
 abstract final class LucideIcons {

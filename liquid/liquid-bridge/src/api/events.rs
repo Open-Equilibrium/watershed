@@ -174,7 +174,7 @@ pub struct BridgeApproval {
     /// The id of the call's item in the chat, when known.
     pub item: Option<i64>,
     /// What a file change does, when pi's own `edit` or `write` asks; the card shows it as
-    /// removed and added lines (ADR-0212).
+    /// removed and added lines.
     pub edit: Option<BridgeEdit>,
 }
 
@@ -205,7 +205,7 @@ pub struct BridgeEditChange {
 pub enum BridgeDecision {
     /// Allow this call only.
     AllowOnce,
-    /// Allow this shell command, or this tool, for the rest of the session (ADR-0209).
+    /// Allow this shell command, or this tool, for the rest of the session.
     AllowSession,
     /// Block this call.
     Reject,

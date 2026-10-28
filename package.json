@@ -5,7 +5,7 @@
   "engines": {
     "node": ">=24.15.0"
   },
-  "description": "Dev-only tooling manifest. Not part of the product: Watershed ships no Node runtime (ADR-0001).",
+  "description": "Dev-only tooling manifest. Not part of the product: Watershed ships no Node runtime.",
   "license": "AGPL-3.0-only",
   "scripts": {
     "tooling:test": "node scripts/run-python.mjs -m unittest discover -s tests -p \"test_*.py\"",

@@ -485,7 +485,7 @@ fn approval(request: RequestId, payload: &str, tools: &HashMap<String, OpenTool>
     }
 }
 
-/// What a call of pi's own `edit` or `write` changes (ADR-0212): its file and each
+/// What a call of pi's own `edit` or `write` changes: its file and each
 /// replacement, as pi hands them to its tool once it brought every form it accepts into one
 /// `edits` array. An edit's carriage returns show as the line breaks pi's tool turns them
 /// into. `None` for any other shape, which the approval then shows as it is.

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Builds the Liquid key helper into Liquid.app as a login item (ADR-0205). Runs as an Xcode
+# Builds the Liquid key helper into Liquid.app as a login item. Runs as an Xcode
 # build phase of the Runner target, before Xcode signs the app around it.
 set -eu
 here="$PROJECT_DIR/LiquidKey"

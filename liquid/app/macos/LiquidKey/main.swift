@@ -3,7 +3,7 @@ import Carbon.HIToolbox
 import IOKit
 import IOKit.hidsystem
 
-// The Liquid key helper (ADR-0205): a login item inside Liquid.app. It turns Caps Lock into the
+// The Liquid key helper: a login item inside Liquid.app. It turns Caps Lock into the
 // Liquid key on every keyboard, opens or focuses Liquid when the key is tapped in another app
 // and turns capitals on or off with Shift + Caps Lock. It needs no permission. `--remove` gives
 // the remapping back and exits. The remapping holds for the whole computer, so the helper

@@ -28,7 +28,7 @@ class DiffView extends StatefulWidget {
 
   final SessionState state;
 
-  /// How the tab shows the changes, kept across restarts (ADR-0212).
+  /// How the tab shows the changes, kept across restarts.
   final DiffSettingsController settings;
 
   @override
@@ -678,7 +678,7 @@ class _Toggle extends StatelessWidget {
   );
 }
 
-/// A line's code, colored lightly, with a faint ␍ for a Windows line end (ADR-0212); a hunk
+/// A line's code, colored lightly, with a faint ␍ for a Windows line end; a hunk
 /// header in the faint small style.
 Widget _code(BuildContext context, DiffLine line) {
   final faint = context.ws.textFaint;

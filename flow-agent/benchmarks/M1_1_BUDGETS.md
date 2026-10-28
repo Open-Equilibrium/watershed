@@ -1,6 +1,6 @@
 # M1.1 Limits and Performance Evidence
 
-This is the canonical M1.1 source for hard functional limits, their boundary proofs and the selected observational workloads. Its counting rules, fixtures and exclusions are fixed by ADR-0107; ADR-0123 adds CV-15, ADR-0124 adds PR-01/PR-02, ADR-0127 adds CV-16/CV-17 and ADR-0177 adds OA-24.
+This is the canonical M1.1 source for hard functional limits, their boundary proofs and the selected observational workloads. It also fixes their counting rules, fixtures and exclusions.
 
 ## Evidence rules
 

@@ -26,7 +26,7 @@ static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
         .expect("the bridge runtime starts")
 });
 
-/// How to start pi; the core adds its arguments (ADR-0211).
+/// How to start pi; the core adds its arguments.
 pub struct SessionConfig {
     /// The executable.
     pub program: String,
@@ -230,7 +230,7 @@ impl AgentSession {
     }
 
     /// Files the latest run changed, compared with the project before it; none outside Git.
-    /// With `hide_whitespace`, changes that are only whitespace are left out (ADR-0212).
+    /// With `hide_whitespace`, changes that are only whitespace are left out.
     pub fn changes(&self, hide_whitespace: bool) -> Result<Option<Vec<BridgeFileChange>>, String> {
         match RUNTIME.block_on(self.diff.changes(whitespace(hide_whitespace))) {
             Ok(changes) => Ok(Some(changes.into_iter().map(Into::into).collect())),

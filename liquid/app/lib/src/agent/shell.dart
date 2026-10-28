@@ -124,7 +124,7 @@ class _AgentShellState extends State<AgentShell> {
     widget.state.draft.value = null;
   }
 
-  /// Reads the changes as the Diff settings say, which own the choice (ADR-0212).
+  /// Reads the changes as the Diff settings say, which own the choice.
   void _hideWhitespace() =>
       widget.state.hideWhitespace.value = _diffSettings.value.hideWhitespace;
 
@@ -146,7 +146,7 @@ class _AgentShellState extends State<AgentShell> {
     super.dispose();
   }
 
-  /// Starts a new session in the chat, ready to describe the task (ADR-0203).
+  /// Starts a new session in the chat, ready to describe the task.
   void _newSession() {
     _tab.value = AgentTab.chat;
     _composerFocus.requestFocus();
@@ -164,7 +164,7 @@ class _AgentShellState extends State<AgentShell> {
     Command.settings: _toggleSettings,
   };
 
-  /// App-wide shortcuts in the macOS menu bar, where they stay out of the GUI (ADR-0204);
+  /// App-wide shortcuts in the macOS menu bar, where they stay out of the GUI;
   /// the menu shows ⌘ keys, the bindings below handle every key on every platform.
   Widget _menus(ShortcutSettings keys, Widget child) {
     if (defaultTargetPlatform != TargetPlatform.macOS) return child;
@@ -449,8 +449,8 @@ class _Tabs extends StatelessWidget {
                               _ChangedFiles(state: state),
                           ],
                         ),
-                        // Keys the menu bar shows stay out of the GUI (ADR-0204); the Liquid
-                        // key, which it cannot show, gets a hint (ADR-0205).
+                        // Keys the menu bar shows stay out of the GUI; the Liquid key,
+                        // which it cannot show, gets a hint.
                         if (shown &&
                             keys.label(entry.value).isNotEmpty &&
                             keys.label(entry.value) !=

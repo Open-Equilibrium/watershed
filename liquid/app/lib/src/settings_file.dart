@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
-/// One of Liquid's settings files: a JSON object, replaced whole on each save (ADR-0205).
+/// One of Liquid's settings files: a JSON object, replaced whole on each save.
 class SettingsFile {
   SettingsFile(this.file);
 

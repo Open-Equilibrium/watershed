@@ -2,8 +2,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
-/// The key Liquid sees for the Liquid key: macOS turns Caps Lock into F18 while it is on
-/// (ADR-0205).
+/// The key Liquid sees for the Liquid key: macOS turns Caps Lock into F18 while it is
+/// on.
 const liquidKey = LogicalKeyboardKey.f18;
 
 /// Esc pressed afresh and alone, which closes what is open.
@@ -346,7 +346,7 @@ enum Command {
   final Keys keys;
 
   /// Whether the Liquid key profile adds ⇪ + the same key; platform standards such as
-  /// Settings… keep ⌘ only (ADR-0205).
+  /// Settings… keep ⌘ only.
   final bool liquid;
 }
 
@@ -436,7 +436,7 @@ class CustomProfile {
 }
 
 /// The active profile, and the Custom profile kept while another one is active, so choosing
-/// Custom again brings it back (ADR-0204, ADR-0205).
+/// Custom again brings it back.
 @immutable
 class ShortcutSettings {
   const ShortcutSettings._(this.profile, this.custom);

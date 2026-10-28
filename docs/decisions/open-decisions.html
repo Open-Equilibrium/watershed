@@ -47,7 +47,7 @@ summary{cursor:pointer}summary h3{display:inline;margin:0}summary:focus-visible{
     <div class="grid">
       <details id="d-065" class="decision" style="grid-column:1/-1">
         <summary><h3>D-065 - Development And Release Publication Safeguards</h3></summary>
-        <p><strong>Status:</strong> Must be decided, implemented and verified before each affected product's first release: Flow Agent, Meta-Harness and Liquid. This entry records open work, not active protection. The approved download contract is canonical in <a href="../../SECURITY.md#m12-tool-execution-trust-boundary">SECURITY.md</a> (ADR-0164/ADR-0165); it does not require users to install a build-provenance verifier.</p>
+        <p><strong>Status:</strong> Must be decided, implemented and verified before each affected product's first release: Flow Agent, Meta-Harness and Liquid. This entry records open work, not active protection. The approved download contract is canonical in <a href="../../SECURITY.md#m12-tool-execution-trust-boundary">SECURITY.md</a>; it does not require users to install a build-provenance verifier.</p>
         <p><strong>Problem:</strong> A stolen publishing account or an unsafe build step could place a harmful program in the real GitHub Release, even while the visible source code remains unchanged. HTTPS and a matching checksum would still succeed. The development team must protect that trusted source without making installation harder for users.</p>
         <h4>Decisions required</h4>
         <ul>
@@ -73,7 +73,7 @@ summary{cursor:pointer}summary h3{display:inline;margin:0}summary:focus-visible{
     <div class="grid">
       <details id="d-021" class="decision">
         <summary><h3>D-021 - Meta-Harness Packaging</h3></summary>
-        <p><strong>Status:</strong> Open implementation detail before M2; ADR-0018 already requires a non-graphical controller.</p>
+        <p><strong>Status:</strong> Open implementation detail before M2; Meta-Harness must already run headless, without Liquid (<a href="../concept/V-Spec_MetaHarness.html">Meta-Harness V-Spec</a>).</p>
         <p><strong>Question:</strong> How should that controller be packaged for its first release?</p>
         <ul><li><strong>A:</strong> A command-line app plus a background service. Pro: useful without Liquid and easy to test. Con: no rich interface.</li><li><strong>B:</strong> Add a small status screen after the controller works. Pro: easier demonstrations. Con: another part to package and maintain.</li></ul>
         <p><strong>Recommendation:</strong> A; no competing full standalone GUI in the MVP.</p>
@@ -173,7 +173,7 @@ summary{cursor:pointer}summary h3{display:inline;margin:0}summary:focus-visible{
         <summary><h3>D-056 - Existing Output Security-Metadata Matrix</h3></summary>
         <p><strong>Status:</strong> Open before post-M1 existing-output replacement; not an M1.1 blocker.</p>
         <p><strong>Question:</strong> Which exact security-metadata fields must atomic own-script output replacement preserve on Flow Agent's native targets in <a href="../../PLATFORMS.md">PLATFORMS.md</a>, and what happens when a required field cannot be read or applied?</p>
-        <p><strong>Decided direction:</strong> The ADR-0087/ADR-0088 create-only boundary rejects every existing output target in M1.1; replacement remains unavailable until this finite per-platform field matrix is decided and implemented.</p>
+        <p><strong>Decided direction:</strong> The create-only output boundary in <a href="../../SECURITY.md">SECURITY.md</a> rejects every existing output target in M1.1; replacement remains unavailable until this finite per-platform field matrix is decided and implemented.</p>
         <ul><li><strong>A:</strong> Preserve a maintainer-selected native field set and fail when any selected field is unavailable. Pro: explicit, testable preservation. Con: replacements can fail because of privileges or platform support.</li><li><strong>B:</strong> Preserve a smaller maintainer-selected field set and reject targets carrying selected unsupported metadata. Pro: a narrower implementation. Con: detection and rejection rules remain platform-specific.</li></ul>
         <p><strong>Recommendation:</strong> A; choose the exact fields and unavailable-field behavior only with platform evidence.</p>
         <p><strong>Acceptance criterion:</strong> Record the exact finite matrix and failure behavior, then pass native fixtures on each supported Flow Agent target for every required field before restoring existing-output replacement.</p>
@@ -227,7 +227,7 @@ summary{cursor:pointer}summary h3{display:inline;margin:0}summary:focus-visible{
     <div class="grid">
       <details id="d-010" class="decision">
         <summary><h3>D-010 - AgentPulse v0 Formulas</h3></summary>
-        <p><strong>Status:</strong> Open; deferred with AgentPulse to the end of the roadmap (ADR-0187).</p>
+        <p><strong>Status:</strong> Open; deferred with AgentPulse to the end of the roadmap.</p>
         <p><strong>Question:</strong> Should the three scores use only facts already recorded during runs, or also an AI judgment?</p>
         <ul><li><strong>A:</strong> Use recorded run facts only. Pro: the same input always gives the same auditable score. Con: the first version captures fewer nuances.</li><li><strong>B:</strong> Add AI-assigned quality labels. Pro: captures more nuance. Con: scores become subjective and harder to test.</li></ul>
         <p><strong>Recommendation:</strong> A for the first version; reserve model-scored labels for later evaluation.</p>

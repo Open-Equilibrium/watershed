@@ -2,7 +2,7 @@ import Foundation
 import IOKit.hid
 import IOKit.hidsystem
 
-/// Caps Lock as the Liquid key (ADR-0205): every keyboard sends F18 for it while the key is on.
+/// Caps Lock as the Liquid key: every keyboard sends F18 for it while the key is on.
 enum Mapping {
     static let capsLock: UInt64 = 0x7_0000_0039
     static let f18: UInt64 = 0x7_0000_006D

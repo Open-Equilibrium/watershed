@@ -1,4 +1,4 @@
-"""Liquid's Dart design tokens must follow the canonical CSS tokens (ADR-0194)."""
+"""Liquid's Dart design tokens must follow the canonical CSS tokens."""
 
 import importlib.util
 import re
@@ -95,7 +95,7 @@ class DesignTokens(unittest.TestCase):
                  for background in backgrounds]
         # Diff line numbers sit on the strong diff colors in muted.
         pairs += [("text-muted", "diff-add-strong"), ("text-muted", "diff-del-strong")]
-        # Status colors are text on surfaces, hover rows and their own tints (ADR-0212).
+        # Status colors are text on surfaces, hover rows and their own tints.
         for tone, tint in [("accent", "accent-subtle"), ("success", "success-subtle"),
                            ("warning", "warning-subtle"), ("danger", "danger-subtle")]:
             pairs += [(tone, background)

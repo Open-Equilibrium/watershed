@@ -8,7 +8,7 @@ import 'theme/tokens.g.dart';
 /// Width of the reading column in the chat and the input area.
 const double readingWidth = 740;
 
-/// A contextual shortcut hint, shown only while the reveal key is held (ADR-0204). It takes no space, so
+/// A contextual shortcut hint, shown only while the reveal key is held. It takes no space, so
 /// nothing moves when it appears.
 class Hint extends StatelessWidget {
   const Hint(this.text, {super.key});

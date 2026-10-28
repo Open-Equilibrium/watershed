@@ -24,7 +24,7 @@ String projectName(String project) =>
         .lastWhere((part) => part.isNotEmpty, orElse: () => '/');
 
 /// Starts pi for the project the environment names; the start page then begins or continues a
-/// session (ADR-0203).
+/// session.
 /// Without Watershed's pi extension there would be no approvals, so the app refuses to start pi.
 Future<Launch> launchFromEnvironment(Map<String, String> environment) async {
   final project = environment['LIQUID_PROJECT'];

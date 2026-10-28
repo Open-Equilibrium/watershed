@@ -81,7 +81,7 @@ void main() {
     ),
   );
 
-  /// Lets an approval take keys (ADR-0207).
+  /// Lets an approval take keys.
   Future<void> read(WidgetTester tester) =>
       tester.pump(const Duration(milliseconds: 500));
 

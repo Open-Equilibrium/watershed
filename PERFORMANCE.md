@@ -28,7 +28,7 @@ CI may fail when the workload, lifecycle, schema, measurement integrity, report 
 
 Flow Agent should add little overhead around provider and Tool work, remain responsive under useful concurrency and stream histories and artifacts without retaining complete data unnecessarily. Roots and Subflows share the hard process-wide capacity limit below; provider and Tool processes, network latency and caller-owned buffers are outside Flow Agent performance evidence.
 
-### ADR-0068 safety envelope
+### Safety envelope
 
 These hard capacity and liveness limits are not performance thresholds and are not multiplied into one promised maximum workload:
 

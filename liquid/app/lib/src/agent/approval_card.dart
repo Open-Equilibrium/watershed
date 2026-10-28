@@ -26,7 +26,7 @@ class _ApprovalCardState extends State<ApprovalCard> with ReadDelay {
   final _focus = FocusNode(debugLabel: 'approval');
   final _code = ScrollController();
 
-  /// The call's lines, worked out once, since a write can be long (ADR-0212): a file change's
+  /// The call's lines, worked out once, since a write can be long: a file change's
   /// path and changed lines, any other call as its text.
   late final _lines = switch (widget.request.approval!) {
     BridgeApproval(:final edit?) => _editLines(edit),
@@ -205,7 +205,7 @@ class _ApprovalCardState extends State<ApprovalCard> with ReadDelay {
 }
 
 /// What allowing a call for the session covers: a shell command only as shown, any other tool
-/// wholly (ADR-0209). A long tool name is cut short; the title names it in full.
+/// wholly. A long tool name is cut short; the title names it in full.
 String _sessionLabel(BridgeApproval approval) {
   if (approval.kind == BridgeRequestKind.commandExecution) {
     return 'Allow this command for this session';
@@ -465,7 +465,7 @@ enum _LineKind { call, path, writesTo, note, removed, added }
 typedef _CodeLine = ({_LineKind kind, String text, bool breaks});
 
 /// A file change as the Diff tab shows one: the path, then each replacement's removed and added
-/// lines (approved mockup, ADR-0212). A path that does not say plainly which file pi writes is
+/// lines (approved mockup). A path that does not say plainly which file pi writes is
 /// followed by that file; a write says that it replaces whatever the file holds.
 List<_CodeLine> _editLines(BridgeEdit edit) => [
   (kind: _LineKind.path, text: edit.path, breaks: false),

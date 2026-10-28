@@ -238,7 +238,7 @@ class RefBadge extends StatelessWidget {
     ),
     child: Text(
       ref,
-      // Light lane colors in the dark theme take dark text (ADR-0212).
+      // Light lane colors in the dark theme take dark text.
       style: TextStyle(
         color: context.ws.onData,
         fontSize: WsMetrics.fsSmall,

@@ -21,7 +21,7 @@ class MainFlutterWindow: NSWindow {
   }
 }
 
-/// Turns the Liquid key on or off (ADR-0205): the login item inside the app bundle remaps
+/// Turns the Liquid key on or off: the login item inside the app bundle remaps
 /// Caps Lock and listens for it, also after a restart or for keyboards attached later;
 /// `--remove` gives Caps Lock back. The work runs off the main thread, so a slow helper never
 /// stalls the window.

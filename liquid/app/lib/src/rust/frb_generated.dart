@@ -4294,7 +4294,7 @@ class AgentSessionImpl extends RustOpaque implements AgentSession {
       .crateApiSessionAgentSessionBranch(that: this, entry: entry);
 
   /// Files the latest run changed, compared with the project before it; none outside Git.
-  /// With `hide_whitespace`, changes that are only whitespace are left out (ADR-0212).
+  /// With `hide_whitespace`, changes that are only whitespace are left out.
   Future<List<BridgeFileChange>?> changes({required bool hideWhitespace}) =>
       RustLib.instance.api.crateApiSessionAgentSessionChanges(
         that: this,

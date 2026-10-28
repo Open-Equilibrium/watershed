@@ -32,7 +32,7 @@ abstract class AgentSession implements RustOpaqueInterface {
   Future<void> branch({required String entry});
 
   /// Files the latest run changed, compared with the project before it; none outside Git.
-  /// With `hide_whitespace`, changes that are only whitespace are left out (ADR-0212).
+  /// With `hide_whitespace`, changes that are only whitespace are left out.
   Future<List<BridgeFileChange>?> changes({required bool hideWhitespace});
 
   /// Removes the messages waiting for the running agent and returns them.
@@ -178,7 +178,7 @@ class BridgeStoredSession {
           modifiedMs == other.modifiedMs;
 }
 
-/// How to start pi; the core adds its arguments (ADR-0211).
+/// How to start pi; the core adds its arguments.
 class SessionConfig {
   /// The executable.
   final String program;

@@ -154,7 +154,7 @@ pub struct EditChange {
 pub enum Decision {
     /// Allow this call only.
     AllowOnce,
-    /// Allow this shell command, or this tool, for the rest of the session (ADR-0209).
+    /// Allow this shell command, or this tool, for the rest of the session.
     AllowSession,
     /// Block this call.
     Reject,
@@ -313,7 +313,7 @@ pub enum AgentEvent {
         session: Option<String>,
         /// The call's item, when the agent says which call it asks about.
         item: Option<ItemId>,
-        /// What a file change does, when pi's own `edit` or `write` asks (ADR-0212).
+        /// What a file change does, when pi's own `edit` or `write` asks.
         edit: Option<EditPreview>,
     },
     /// An approval request ended, answered or withdrawn.

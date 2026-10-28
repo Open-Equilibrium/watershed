@@ -195,7 +195,7 @@ class _QuestionCardState extends State<QuestionCard> with ReadDelay {
     final state = widget.state;
     final id = widget.request.id;
     final keys = Keymap.of(context);
-    // Answers count once the question could be read, whether by key or click (ADR-0209).
+    // Answers count once the question could be read, whether by key or click.
     void answerText(String text) => decided(() => state.answerText(id, text));
     void answerConfirm(bool confirmed) =>
         decided(() => state.answerConfirm(id, confirmed));

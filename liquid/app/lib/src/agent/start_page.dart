@@ -12,8 +12,8 @@ import '../theme/tokens.g.dart';
 /// The device a local session runs on, as the start page's device chip names it.
 final localDevice = Platform.isMacOS ? 'This Mac' : 'This computer';
 
-/// The main area of a session without a conversation yet (approved start page mockup,
-/// ADR-0203): the project's recent sessions to continue; the input area below starts a new one.
+/// The main area of a session without a conversation yet (approved start page mockup):
+/// the project's recent sessions to continue; the input area below starts a new one.
 class StartPage extends StatelessWidget {
   const StartPage({super.key, required this.state, required this.project});
 

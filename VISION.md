@@ -28,7 +28,7 @@ Each product works without the layers above it. Together they add normalized ses
 
 Flow Agent builds on deterministic orchestration and practical provider/Tool execution. It trusts Tool implementations while requiring native protection of this installation's Flow-owned files; it does not promise containment of arbitrary hostile Tools. The [execution/security architecture](docs/concept/flow-agent-executor-architecture.md) explains configuration authority, manual administration and delegated effects. [PLAN.md](PLAN.md#m12--flow-agent-os-isolation) owns implementation and verification status.
 
-Watershed is AGPL/free software: users can inspect, run, self-host, fork and verify its behavior. This is a public-good and community-trust posture, not an open-core monetization model (ADR-0019).
+Watershed is AGPL/free software: users can inspect, run, self-host, fork and verify its behavior. This is a public-good and community-trust posture, not an open-core monetization model.
 
 ## Integration and ownership
 

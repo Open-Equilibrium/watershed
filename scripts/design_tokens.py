@@ -1,4 +1,4 @@
-"""Generates Liquid's Dart design tokens from the canonical docs/design/tokens.css (ADR-0194).
+"""Generates Liquid's Dart design tokens from the canonical docs/design/tokens.css.
 
 Run without arguments to rewrite the Dart file; `--check` fails when it is out of date.
 """

@@ -39,8 +39,8 @@ pub enum ChangeStatus {
     Deleted,
 }
 
-/// Whether a diff shows changes that are only whitespace, such as indentation or line ends
-/// (ADR-0212).
+/// Whether a diff shows changes that are only whitespace, such as indentation or line
+/// ends.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Whitespace {
     /// Shown like any other change.

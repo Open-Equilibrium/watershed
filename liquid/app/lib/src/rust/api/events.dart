@@ -24,7 +24,7 @@ class BridgeApproval {
   final PlatformInt64? item;
 
   /// What a file change does, when pi's own `edit` or `write` asks; the card shows it as
-  /// removed and added lines (ADR-0212).
+  /// removed and added lines.
   final BridgeEdit? edit;
 
   const BridgeApproval({
@@ -72,7 +72,7 @@ enum BridgeDecision {
   /// Allow this call only.
   allowOnce,
 
-  /// Allow this shell command, or this tool, for the rest of the session (ADR-0209).
+  /// Allow this shell command, or this tool, for the rest of the session.
   allowSession,
 
   /// Block this call.

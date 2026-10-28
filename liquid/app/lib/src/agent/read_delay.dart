@@ -5,7 +5,7 @@ import 'package:flutter/widgets.dart';
 
 /// A card that decides something for the agent takes keys and clicks only once it could be read:
 /// 0.5 s after its first frame is drawn or Liquid comes back in front, so a slow first frame
-/// counts nothing toward the wait (ADR-0207, ADR-0209).
+/// counts nothing toward the wait.
 mixin ReadDelay<T extends StatefulWidget> on State<T> {
   bool _armed = false;
   Timer? _arming;

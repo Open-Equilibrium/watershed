@@ -6,8 +6,8 @@ import 'package:flutter/widgets.dart';
 import 'keymap.dart';
 
 /// Shows contextual shortcut hints while the reveal key alone is held for a moment, so they
-/// stay out of the GUI otherwise (ADR-0204): the Liquid key while it is on, ⌘ otherwise
-/// (ADR-0205). Pressing another key meanwhile, as for a shortcut, shows nothing.
+/// stay out of the GUI otherwise: the Liquid key while it is on, ⌘ otherwise. Pressing
+/// another key meanwhile, as for a shortcut, shows nothing.
 class ShortcutReveal extends StatefulWidget {
   const ShortcutReveal({super.key, required this.liquid, required this.child});
 

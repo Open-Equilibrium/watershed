@@ -26,7 +26,7 @@ const EVENT_BUFFER: usize = 256;
 /// Records buffered for the agent's input.
 const WRITE_BUFFER: usize = 64;
 
-/// How to start pi in RPC mode; the session adds pi's own arguments (ADR-0211).
+/// How to start pi in RPC mode; the session adds pi's own arguments.
 #[derive(Debug, Clone)]
 pub struct AgentCommand {
     /// The executable.
@@ -409,7 +409,7 @@ impl Session {
     /// pi shows by listing its `watershed-branch` command with that path: without it the agent
     /// would run tools without asking, so a session must not start, and every message that may
     /// start a run checks again: pi loads extensions anew for each session, and an extension can
-    /// switch sessions unseen (ADR-0188, ADR-0209, ADR-0211).
+    /// switch sessions unseen (ADR-0188).
     pub async fn require_gate(&mut self) -> Result<(), CommandError> {
         let data = self.command(json!({ "type": "get_commands" })).await?;
         let gated = data
