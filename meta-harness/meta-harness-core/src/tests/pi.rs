@@ -432,6 +432,49 @@ fn shows_an_edit_as_its_path_and_its_removed_and_added_lines() {
 }
 
 #[test]
+fn shows_an_edit_s_carriage_returns_as_the_line_breaks_pi_writes() {
+    let ask = |id: &str, tool: &str, arguments: &str| {
+        format!(
+            r#"{{"type":"extension_ui_request","id":"{id}","method":"select","title":"watershed.approval {{\"tool\":\"{tool}\",\"arguments\":{arguments},\"readOnly\":false,\"builtin\":true}}","options":[]}}"#
+        )
+    };
+    let records = [
+        ask(
+            "e1",
+            "edit",
+            r#"{\"path\":\"p\",\"edits\":[{\"oldText\":\"a\\r\\nb\\rc\",\"newText\":\"d\\r\"}]}"#,
+        ),
+        // pi's write keeps them, so they stay written out.
+        ask(
+            "e2",
+            "write",
+            r#"{\"path\":\"p\",\"content\":\"one\\r\\ntwo\\r\"}"#,
+        ),
+    ];
+    let events = translate(&records.iter().map(String::as_str).collect::<Vec<_>>());
+    let changes: Vec<_> = events
+        .iter()
+        .map(|event| match event {
+            AgentEvent::RequestOpened {
+                edit: Some(edit), ..
+            } => edit.changes.clone(),
+            other => panic!("an approval opens a request with its edit: {other:?}"),
+        })
+        .collect();
+    let change = |removed: &str, added: &str| EditChange {
+        removed: removed.to_owned(),
+        added: added.to_owned(),
+    };
+    assert_eq!(
+        changes,
+        [
+            vec![change("a\nb\nc", "d\n")],
+            vec![change("", "one<U+000D>\ntwo<U+000D>")],
+        ]
+    );
+}
+
+#[test]
 fn ties_an_approval_to_the_call_it_asks_about() {
     // pi starts each call of a response, then asks about it before running it, so an earlier
     // call of the same tool can still be running.

@@ -481,10 +481,15 @@ fn approval(request: RequestId, payload: &str, tools: &HashMap<String, OpenTool>
 
 /// What a call of pi's own `edit` or `write` changes (ADR-0212): its file and each
 /// replacement, as pi hands them to its tool once it brought every form it accepts into one
-/// `edits` array. `None` for any other shape, which the approval then shows as it is.
+/// `edits` array. An edit's carriage returns show as the line breaks pi's tool turns them
+/// into. `None` for any other shape, which the approval then shows as it is.
 fn edit_preview(tool: &str, arguments: &Value) -> Option<EditPreview> {
     let path = arguments.get("path")?.as_str()?;
     let text = |value: &Value, field| value.get(field)?.as_str().map(visible);
+    let edited = |value: &Value, field| {
+        let text = value.get(field)?.as_str()?;
+        Some(visible(&text.replace("\r\n", "\n").replace('\r', "\n")))
+    };
     let changes = match tool {
         "write" => vec![EditChange {
             removed: String::new(),
@@ -496,8 +501,8 @@ fn edit_preview(tool: &str, arguments: &Value) -> Option<EditPreview> {
             .iter()
             .map(|edit| {
                 Some(EditChange {
-                    removed: text(edit, "oldText")?,
-                    added: text(edit, "newText")?,
+                    removed: edited(edit, "oldText")?,
+                    added: edited(edit, "newText")?,
                 })
             })
             .collect::<Option<Vec<_>>>()
