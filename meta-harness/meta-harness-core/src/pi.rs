@@ -474,7 +474,13 @@ fn approval(request: RequestId, payload: &str, tools: &HashMap<String, OpenTool>
             .get(str_field(&payload, "toolCallId"))
             .map(|tool| tool.item),
         edit: (kind == RequestKind::FileChangeApproval)
-            .then(|| edit_preview(tool, call?))
+            .then(|| {
+                let writes_to = payload.get("writesTo").and_then(Value::as_str);
+                Some(EditPreview {
+                    writes_to: writes_to.map(visible_name),
+                    ..edit_preview(tool, call?)?
+                })
+            })
             .flatten(),
     }
 }
@@ -511,6 +517,7 @@ fn edit_preview(tool: &str, arguments: &Value) -> Option<EditPreview> {
     };
     Some(EditPreview {
         path: visible_name(path),
+        writes_to: None,
         changes,
         whole_file: tool == "write",
     })

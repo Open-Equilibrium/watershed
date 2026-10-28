@@ -107,8 +107,11 @@ class BridgeDisplay {
 
 /// A file change as its approval shows it.
 class BridgeEdit {
-  /// The file.
+  /// The file, as the agent gave it.
   final String path;
+
+  /// The file pi changes, when the path does not say so plainly.
+  final String? writesTo;
 
   /// The replacements in order; a write is one change that adds its whole content.
   final List<BridgeEditChange> changes;
@@ -118,12 +121,14 @@ class BridgeEdit {
 
   const BridgeEdit({
     required this.path,
+    this.writesTo,
     required this.changes,
     required this.wholeFile,
   });
 
   @override
-  int get hashCode => path.hashCode ^ changes.hashCode ^ wholeFile.hashCode;
+  int get hashCode =>
+      path.hashCode ^ writesTo.hashCode ^ changes.hashCode ^ wholeFile.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -131,6 +136,7 @@ class BridgeEdit {
       other is BridgeEdit &&
           runtimeType == other.runtimeType &&
           path == other.path &&
+          writesTo == other.writesTo &&
           changes == other.changes &&
           wholeFile == other.wholeFile;
 }

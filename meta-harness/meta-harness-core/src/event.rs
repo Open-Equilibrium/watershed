@@ -129,8 +129,11 @@ pub enum RequestKind {
 /// the characters that could hide or reorder them written out.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EditPreview {
-    /// The file, on one line.
+    /// The file, on one line, as the agent gave it.
     pub path: String,
+    /// The file pi changes, on one line, when the path does not say so plainly: Watershed's
+    /// pi extension resolves it as pi does.
+    pub writes_to: Option<String>,
     /// The replacements in order; a write is one change that adds its whole content.
     pub changes: Vec<EditChange>,
     /// Whether the change replaces whatever the file holds, as a write does.

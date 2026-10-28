@@ -444,6 +444,7 @@ impl From<AgentEvent> for BridgeEvent {
                         item: item.map(|item| int(item.0)),
                         edit: edit.map(|edit| BridgeEdit {
                             path: edit.path,
+                            writes_to: edit.writes_to,
                             changes: edit
                                 .changes
                                 .into_iter()

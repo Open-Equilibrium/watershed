@@ -917,6 +917,36 @@ void main() {
             .first,
       );
 
+  testWidgets(
+    'names the file a change writes to below a path that does not say so',
+    (tester) async {
+      await show(tester);
+      await emit(
+        tester,
+        event(
+          BridgeEventKind.requestOpened,
+          request: const BridgeRequest(
+            id: 'a1',
+            approval: BridgeApproval(
+              kind: BridgeRequestKind.fileChange,
+              tool: 'edit',
+              text: '{}',
+              edit: BridgeEdit(
+                path: '@~/.zshrc',
+                writesTo: '/Users/me/.zshrc',
+                wholeFile: false,
+                changes: [BridgeEditChange(removed: 'a', added: 'b')],
+              ),
+            ),
+          ),
+        ),
+      );
+      final path = tester.getRect(find.text('@~/.zshrc'));
+      final file = tester.getRect(find.text('writes to /Users/me/.zshrc'));
+      expect(file.top, moreOrLessEquals(path.bottom), reason: 'below the path');
+    },
+  );
+
   testWidgets('shows a file change as its path and changed lines', (
     tester,
   ) async {

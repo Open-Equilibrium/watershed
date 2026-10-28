@@ -181,8 +181,10 @@ pub struct BridgeApproval {
 /// A file change as its approval shows it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BridgeEdit {
-    /// The file.
+    /// The file, as the agent gave it.
     pub path: String,
+    /// The file pi changes, when the path does not say so plainly.
+    pub writes_to: Option<String>,
     /// The replacements in order; a write is one change that adds its whole content.
     pub changes: Vec<BridgeEditChange>,
     /// Whether the change replaces whatever the file holds, as a write does.

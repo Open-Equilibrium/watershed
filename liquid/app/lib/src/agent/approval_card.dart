@@ -459,15 +459,18 @@ List<String> _lines(String text) => text.isEmpty
         '\n',
       );
 
-enum _LineKind { call, path, note, removed, added }
+enum _LineKind { call, path, writesTo, note, removed, added }
 
 /// A line of the call; `breaks` marks a line break that ends only its side of a replacement.
 typedef _CodeLine = ({_LineKind kind, String text, bool breaks});
 
 /// A file change as the Diff tab shows one: the path, then each replacement's removed and added
-/// lines (approved mockup, ADR-0212). A write says that it replaces whatever the file holds.
+/// lines (approved mockup, ADR-0212). A path that does not say plainly which file pi writes is
+/// followed by that file; a write says that it replaces whatever the file holds.
 List<_CodeLine> _editLines(BridgeEdit edit) => [
   (kind: _LineKind.path, text: edit.path, breaks: false),
+  if (edit.writesTo case final file?)
+    (kind: _LineKind.writesTo, text: 'writes to $file', breaks: false),
   if (edit.wholeFile)
     (
       kind: _LineKind.note,
@@ -505,6 +508,7 @@ TextStyle _style(BuildContext context, _CodeLine line) {
   final style = monoStyle(context);
   return switch (line.kind) {
     _LineKind.path => style.copyWith(fontWeight: WsMetrics.fwSemibold),
+    _LineKind.writesTo => style.copyWith(color: context.ws.textFaint),
     _LineKind.note => style.copyWith(color: context.ws.warning),
     _ => style,
   };

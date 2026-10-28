@@ -178,6 +178,7 @@ fn requests_and_questions_reach_dart_with_their_answers() {
         item: Some(ItemId(7)),
         edit: Some(EditPreview {
             path: "a.ts".to_owned(),
+            writes_to: Some("/work/a.ts".to_owned()),
             changes: vec![EditChange {
                 removed: String::new(),
                 added: "one".to_owned(),
@@ -196,6 +197,7 @@ fn requests_and_questions_reach_dart_with_their_answers() {
             item: Some(7),
             edit: Some(BridgeEdit {
                 path: "a.ts".to_owned(),
+                writes_to: Some("/work/a.ts".to_owned()),
                 changes: vec![BridgeEditChange {
                     removed: String::new(),
                     added: "one".to_owned(),

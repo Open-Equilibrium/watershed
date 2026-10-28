@@ -414,6 +414,7 @@ fn shows_an_edit_as_its_path_and_its_removed_and_added_lines() {
         [
             Some(EditPreview {
                 path: "src/a.ts".to_owned(),
+                writes_to: None,
                 changes: vec![change("a\nb", "c"), change("x", "y<U+202E>")],
                 whole_file: false,
             }),
@@ -423,6 +424,7 @@ fn shows_an_edit_as_its_path_and_its_removed_and_added_lines() {
             // A write replaces whatever the file held.
             Some(EditPreview {
                 path: "new<U+202E>.ts".to_owned(),
+                writes_to: None,
                 changes: vec![change("", "one\ntwo")],
                 whole_file: true,
             }),
@@ -470,6 +472,40 @@ fn shows_an_edit_s_carriage_returns_as_the_line_breaks_pi_writes() {
         [
             vec![change("a\nb\nc", "d\n")],
             vec![change("", "one<U+000D>\ntwo<U+000D>")],
+        ]
+    );
+}
+
+#[test]
+fn names_the_file_a_change_writes_to_as_the_extension_resolved_it() {
+    let ask = |id: &str, writes_to: &str| {
+        format!(
+            r#"{{"type":"extension_ui_request","id":"{id}","method":"select","title":"watershed.approval {{\"tool\":\"write\",\"arguments\":{{\"path\":\"@~/.zshrc\",\"content\":\"\"}},\"readOnly\":false,\"builtin\":true{writes_to}}}","options":[]}}"#
+        )
+    };
+    let records = [
+        ask("w1", r#",\"writesTo\":\"/Users/me/.zshrc\""#),
+        // A character that could reorder the line is written out, as in the path.
+        ask("w2", r#",\"writesTo\":\"/Users/me/\\u202e.zshrc\""#),
+        // The extension names no file for a plain path inside the project.
+        ask("w3", ""),
+    ];
+    let events = translate(&records.iter().map(String::as_str).collect::<Vec<_>>());
+    let written: Vec<_> = events
+        .iter()
+        .map(|event| match event {
+            AgentEvent::RequestOpened {
+                edit: Some(edit), ..
+            } => edit.writes_to.clone(),
+            other => panic!("an approval opens a request with its edit: {other:?}"),
+        })
+        .collect();
+    assert_eq!(
+        written,
+        [
+            Some("/Users/me/.zshrc".to_owned()),
+            Some("/Users/me/<U+202E>.zshrc".to_owned()),
+            None
         ]
     );
 }
