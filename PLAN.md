@@ -187,6 +187,7 @@ A macOS Liquid app, built ahead of M2 and M3a, that controls pi through an embed
 
 **Follow-ups:**
 
+- On a Mac keyboard with the Liquid key on, ⇪1, ⇪2 and ⇪3 work, but ⇪L and ⇪N do nothing and type nothing either (hardware test, 2026-10-28), while widget tests with the same keys pass. Next: log the macOS key events and their modifier flags with the key held to find what differs for letters.
 - The agent surface does not yet meet [client architecture](docs/concept/liquid-client-architecture.md) rule 4: the bridge sends every event without waiting for Dart, so a fast stream queues in Dart. Proposed: Rust coalesces running items in short windows, keeping each item's latest state, with a bounded number of pending updates, as T3 Code does with 50 ms windows; alternative: flow control that Dart acknowledges.
 - At the smallest window, 1050 x 640, the Trajectory fits but its Step column is about 70 px wide, so step names and results show only their first letters, and the comparison shows no step rows until scrolled. Proposed: narrow the session tree or leave out the token columns below a width, after an approved mockup.
 
