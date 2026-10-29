@@ -6,7 +6,7 @@ Created: 2026-06-05
 
 ## MVP boundary
 
-The first MVP is **Flow Agent as a CLI-only harness**. It runs inside normal Git projects but does not own project history, auto-commit, branch management or any Watershed-specific **project-code** VCS engine. This is distinct from Liquid's internal **workspace** action history/VCS (over Liquid's own workspace data), which is in scope for the Liquid MVP (M3), and from the Git integration for agent projects, which Meta-Harness runs and Liquid presents (ADR-0190).
+The first MVP is **Flow Agent as a CLI-only harness**. It runs inside normal Git projects but does not own project history, auto-commit, branch management or any Watershed-specific **project-code** VCS engine. This is distinct from Liquid's internal **workspace** action history/VCS (over Liquid's own workspace data), which is in scope for the Liquid MVP (M3), and from the Git integration for agent projects, which Meta-Harness runs and Liquid presents (ADR-0190), including its per-turn checkpoints (ADR-0220).
 
 ## Sequencing and adoption
 
@@ -193,7 +193,7 @@ A macOS Liquid app, built ahead of M2 and M3a, that controls pi through an embed
 
 #### Liquid Git integration — next slice
 
-Completes the Git integration for the agent's Git project (ADR-0190, ADR-0191): branches, commits, push, pull requests and worktrees. Meta-Harness runs the host's `git` and `gh`; Liquid provides the UI.
+Completes the Git integration for the agent's Git project (ADR-0190, ADR-0191): branches, commits, push, pull requests and worktrees, plus per-turn checkpoints that the Diff tab shows and a user can return the files to (ADR-0220, details in [D-075](docs/decisions/open-decisions.html#d-075)). Meta-Harness runs the host's `git` and `gh`; Liquid provides the UI.
 
 #### M3a — Local Workspace foundation
 
