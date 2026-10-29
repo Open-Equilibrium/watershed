@@ -420,7 +420,7 @@ class _Tabs extends StatelessWidget {
                       border: Border(
                         bottom: BorderSide(
                           color: entry.key == active
-                              ? ws.text
+                              ? ws.accent
                               : Colors.transparent,
                           width: 2,
                         ),

@@ -1650,6 +1650,28 @@ void main() {
     await tester.pump();
   });
 
+  testWidgets('underlines only the open tab, in the accent', (tester) async {
+    await show(tester);
+    await tester.pumpAndSettle();
+    Color underline(String tab) =>
+        (tester
+                    .widget<Container>(
+                      find
+                          .ancestor(
+                            of: find.text(tab),
+                            matching: find.byType(Container),
+                          )
+                          .first,
+                    )
+                    .decoration!
+                as BoxDecoration)
+            .border!
+            .bottom
+            .color;
+    expect(underline('Chat'), WsPalette.light.accent);
+    expect(underline('Trajectory'), Colors.transparent);
+  });
+
   testWidgets('puts app-wide shortcuts into the macOS menu bar', (
     tester,
   ) async {

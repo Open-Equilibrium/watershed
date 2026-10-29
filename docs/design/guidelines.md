@@ -17,7 +17,7 @@ References: Notion, AppFlowy, Microsoft Loop and T3 Code.
 
 ## Tokens
 
-- **Color:** Notion's warm neutrals (`canvas`, `subtle`, `surface`, `hover`, `selected`), very light borders, three text levels, Notion blue as the accent (darkened for AA contrast), status colors (`success`, `warning`, `danger`), GitHub-style diff and syntax colors and data-series colors. Surfaces are separated by background rather than borders. Light and dark values share names; a GUI selects `.theme-light` or `.theme-dark`, and system mode follows the operating system.
+- **Color:** Notion's warm neutrals (`canvas`, `subtle`, `surface`, `hover`, `selected`), very light borders, three text levels, Liquid azure as the accent (the logo's blue, AA contrast), status colors (`success`, `warning`, `danger`), GitHub-style diff and syntax colors and data-series colors. Surfaces are separated by background rather than borders. Light and dark values share names; a GUI selects `.theme-light` or `.theme-dark`, and system mode follows the operating system.
 - **Type:** Notion's platform UI font stack and a monospace font for code, with AppFlowy's sizes: display 32/40 bold, h1 24/32, h2 20/28 and h3 16/22 semibold, prose 16/24, UI 14/20, compact 13/20 for dense rows, chips and buttons, small 12/18, caption 11/14 for chart axes, badges and tags, mono 13/20.
 - **Spacing:** 4, 6, 8, 12, 16, 20, 24 and 32 px.
 - **Radii:** 4 for tags, 6 for buttons, inputs and list items, 8 for cards and panels, 12 for windows, dialogs and the input area.
