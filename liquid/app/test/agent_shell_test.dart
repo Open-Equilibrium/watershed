@@ -17,6 +17,7 @@ import 'package:liquid/src/rust/api/events.dart';
 import 'package:liquid/src/rust/api/history.dart';
 import 'package:liquid/src/session/session_state.dart';
 import 'package:liquid/src/theme/icons.dart';
+import 'package:liquid/src/theme/logo.dart';
 import 'package:liquid/src/theme/theme.dart';
 import 'package:liquid/src/theme/tokens.g.dart';
 
@@ -98,6 +99,27 @@ void main() {
       expect(find.text('New session'), findsNWidgets(2));
     },
   );
+
+  testWidgets('heads the sidebar with the Liquid mark and name', (
+    tester,
+  ) async {
+    await show(tester);
+    await tester.pumpAndSettle();
+    final sidebar = find.byType(Sidebar);
+    final mark = find.descendant(
+      of: sidebar,
+      matching: find.byType(LiquidMark),
+    );
+    final name = find.descendant(of: sidebar, matching: find.text('Liquid'));
+    expect(tester.getSize(mark), const Size.square(18));
+    expect(tester.getCenter(mark).dy, closeTo(tester.getCenter(name).dy, 1));
+    expect(tester.getRect(mark).right, lessThan(tester.getRect(name).left));
+    expect(
+      tester.getRect(name).bottom,
+      lessThan(tester.getRect(find.text('Agent sessions')).top),
+      reason: 'above the sessions',
+    );
+  });
 
   testWidgets('the Diff tab counts the files the latest run changed', (
     tester,

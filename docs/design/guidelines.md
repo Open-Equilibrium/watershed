@@ -24,6 +24,7 @@ References: Notion, AppFlowy, Microsoft Loop and T3 Code.
 - **Rows:** 28 px for navigation items, 34 px for table rows.
 - **Motion:** 120 ms for hover and press, 200 ms for panels, ease-out; none when the user prefers reduced motion.
 - **Icons:** Lucide (ISC), 16 px in rows and buttons, in the text color of their context; status icons always come with text (principle 5).
+- **Logo:** [liquid-logo.svg](liquid-logo.svg) is the source of Liquid's app icon, on Apple's icon grid, and of its sidebar mark.
 
 ## Patterns
 

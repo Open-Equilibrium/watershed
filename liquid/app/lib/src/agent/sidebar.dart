@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../session/session_state.dart';
+import '../theme/logo.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 
@@ -67,6 +68,21 @@ class Sidebar extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space3),
+            child: Row(
+              children: [
+                const LiquidMark(),
+                const SizedBox(width: WsMetrics.space3),
+                Text(
+                  'Liquid',
+                  style: Theme.of(context).textTheme.labelMedium
+                      ?.copyWith(fontWeight: WsMetrics.fwSemibold),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: WsMetrics.space5),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space3),
             child: Row(children: [Text('Agent sessions', style: small)]),
