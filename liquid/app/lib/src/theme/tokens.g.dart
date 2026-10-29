@@ -147,7 +147,7 @@ final class WsPalette {
     subtle: Color(0xFFF7F7F5),
     surface: Color(0xFFFFFFFF),
     hover: Color(0xFFEFEFED),
-    selected: Color(0xFFE3EEFB),
+    selected: Color(0xFFDFEDFC),
     titlebar: Color(0xFFF7F7F5),
     border: Color(0xFFE9E9E7),
     borderStrong: Color(0xFFDCDBD8),
