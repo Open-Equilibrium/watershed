@@ -100,6 +100,7 @@ class _Button extends StatelessWidget {
     required this.foreground,
     required this.background,
     this.outline,
+    this.icon,
     this.shortcut,
     this.focusNode,
   });
@@ -110,6 +111,9 @@ class _Button extends StatelessWidget {
   final Color foreground;
   final Color background;
   final Color? outline;
+
+  /// A Lucide icon before the label.
+  final IconData? icon;
 
   /// Makes the button take the keyboard focus; others leave it where it is.
   final FocusNode? focusNode;
@@ -135,6 +139,10 @@ class _Button extends StatelessWidget {
             // Centered when a layout stretches the button.
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
+              if (icon case final icon?) ...[
+                Icon(icon, size: 16, color: foreground),
+                const SizedBox(width: WsMetrics.space2),
+              ],
               // Cut short only where a layout leaves the button too little room.
               Flexible(
                 child: Text(
@@ -208,12 +216,14 @@ class SecondaryButton extends StatelessWidget {
     super.key,
     required this.label,
     required this.onPressed,
+    this.icon,
     this.shortcut,
     this.color,
     this.focusNode,
   });
 
   final String label;
+  final IconData? icon;
   final String? shortcut;
   final Color? color;
   final VoidCallback onPressed;
@@ -222,12 +232,42 @@ class SecondaryButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) => _Button(
     label: label,
+    icon: icon,
     shortcut: shortcut,
     onPressed: onPressed,
     focusNode: focusNode,
     foreground: color ?? context.ws.text,
     background: context.ws.canvas,
     outline: context.ws.borderStrong,
+  );
+}
+
+/// A quiet button without a frame, for view options beside the main actions.
+class GhostButton extends StatelessWidget {
+  const GhostButton({
+    super.key,
+    required this.label,
+    required this.onPressed,
+    this.icon,
+    this.shortcut,
+    this.focusNode,
+  });
+
+  final String label;
+  final IconData? icon;
+  final String? shortcut;
+  final VoidCallback onPressed;
+  final FocusNode? focusNode;
+
+  @override
+  Widget build(BuildContext context) => _Button(
+    label: label,
+    icon: icon,
+    shortcut: shortcut,
+    onPressed: onPressed,
+    focusNode: focusNode,
+    foreground: context.ws.textMuted,
+    background: Colors.transparent,
   );
 }
 

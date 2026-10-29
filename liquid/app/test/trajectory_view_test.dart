@@ -174,6 +174,33 @@ void main() {
     );
   });
 
+  testWidgets('one toolbar holds the view switch, the summary and Compare', (
+    tester,
+  ) async {
+    await show(tester, historyOf(branchA));
+    double row(Finder finder) => tester.getCenter(finder).dy;
+    final summary = find.text('branch A · 7 steps · 24.5 s');
+    for (final control in ['Real time', 'Fold turns', 'Compare']) {
+      expect(
+        row(find.text(control)),
+        closeTo(row(summary), 1),
+        reason: control,
+      );
+    }
+    expect(
+      tester.getRect(summary).right,
+      lessThan(tester.getRect(find.text('Compare')).left),
+    );
+    expect(find.text('Overview'), findsNothing, reason: 'no header row');
+    // The overview's hint is the tooltip of an icon at the end of its time axis.
+    const hint = 'drag to focus · scroll to zoom';
+    expect(find.text(hint), findsNothing);
+    final info = tester.getRect(find.byTooltip(hint));
+    final tracks = tester.getRect(find.byKey(const Key('overview-tracks')));
+    expect(info.left, greaterThanOrEqualTo(tracks.right));
+    expect(info.top, closeTo(tracks.top, 1));
+  });
+
   testWidgets('opens what the model saw and branches from a step', (
     tester,
   ) async {

@@ -61,6 +61,7 @@ class TrajectoryView extends StatefulWidget {
 
 class _TrajectoryViewState extends State<TrajectoryView> {
   final _focus = FocusNode(debugLabel: 'trajectory');
+  final _foldFocus = FocusNode(debugLabel: 'fold turns');
   final _scroll = ScrollController();
   BridgeHistory? _history;
   SessionGraph _graph = sessionGraph(const [], null);
@@ -105,6 +106,7 @@ class _TrajectoryViewState extends State<TrajectoryView> {
     widget.state.stored.removeListener(_reload);
     _details.dispose();
     _focus.dispose();
+    _foldFocus.dispose();
     _scroll.dispose();
     super.dispose();
   }
@@ -455,6 +457,9 @@ class _TrajectoryViewState extends State<TrajectoryView> {
             _Toolbar(
               equalWidth: _equalWidth,
               comparing: _comparing,
+              summary: comparing ? _compareSummary(history) : _summary(),
+              rangeLabel: comparing ? null : _rangeLabel(),
+              foldFocus: _foldFocus,
               onEqualWidth: (value) => setState(() {
                 _equalWidth = value;
                 _range = null;
@@ -499,21 +504,29 @@ class _TrajectoryViewState extends State<TrajectoryView> {
     orElse: () => Branch(tip: tip, ref: '?', name: '', lane: 0),
   );
 
+  /// The shown branch, its steps and its duration.
+  String _summary() {
+    final branch = _shownBranch;
+    return [
+      branch == null ? 'new branch' : 'branch ${branch.ref}',
+      '${_records.length} steps',
+      formatDuration(_history?.trajectories.firstOrNull?.durationMs ?? 0),
+    ].join(' · ');
+  }
+
+  /// The focused range and how many steps it holds; `null` without one.
+  String? _rangeLabel() {
+    final range = _range;
+    if (range == null) return null;
+    final focused = inRange(_records, range, equalWidth: _equalWidth);
+    return '${_axisLabel(range)} · ${focused.where((on) => on).length} steps';
+  }
+
   Widget _overview() {
     final records = _records;
-    final branch = _shownBranch;
-    final range = _range;
-    final focused = range == null
-        ? null
-        : inRange(records, range, equalWidth: _equalWidth);
     final selected = _selectedIndex;
     final steps = segments(records, equalWidth: _equalWidth);
     return Overview(
-      summary: [
-        branch == null ? 'new branch' : 'branch ${branch.ref}',
-        '${records.length} steps',
-        formatDuration(_history?.trajectories.firstOrNull?.durationMs ?? 0),
-      ].join(' · '),
       tracks: [
         for (final (label, lane) in [
           ('Model', OverviewLane.model),
@@ -528,10 +541,7 @@ class _TrajectoryViewState extends State<TrajectoryView> {
       span: span(records, equalWidth: _equalWidth),
       equalWidth: _equalWidth,
       window: _window,
-      range: range,
-      rangeLabel: range == null
-          ? null
-          : '${_axisLabel(range)} · ${focused!.where((on) => on).length} steps',
+      range: _range,
       onRange: (range) => setState(() => _range = range),
       onWindow: (window) => setState(() => _window = window),
       mark: selected < 0
@@ -550,6 +560,15 @@ class _TrajectoryViewState extends State<TrajectoryView> {
         history.trajectories[0].records,
         history.trajectories[1].records,
       );
+
+  /// The compared branches and where they part.
+  String _compareSummary(BridgeHistory history) {
+    final shared = _comparison(history).shared;
+    return [
+      '${_branchFor(_picked[0]).ref} ↔ ${_branchFor(_picked[1]).ref} on one time axis',
+      if (shared > 0) '◆ branch point after step $shared',
+    ].join(' · ');
+  }
 
   Widget _compareOverview(BridgeHistory history) {
     final a = history.trajectories[0].records;
@@ -576,10 +595,6 @@ class _TrajectoryViewState extends State<TrajectoryView> {
           ),
     ];
     return Overview(
-      summary: [
-        '${_branchFor(_picked[0]).ref} ↔ ${_branchFor(_picked[1]).ref} on one time axis',
-        if (shared > 0) '◆ branch point after step $shared',
-      ].join(' · '),
       tracks: [
         OverviewTrack(_branchFor(_picked[0]).ref, own(a, comparison.idleA)),
         OverviewTrack(_branchFor(_picked[1]).ref, own(b, comparison.idleB)),
@@ -593,7 +608,6 @@ class _TrajectoryViewState extends State<TrajectoryView> {
       equalWidth: _equalWidth,
       window: _window,
       range: null,
-      rangeLabel: null,
       onRange: (_) {},
       onWindow: (window) => setState(() => _window = window),
       mark: branchPoint,
@@ -686,10 +700,15 @@ class _InspectorLine extends _Line {
   final int index;
 }
 
+/// One row (approved look mockup): the view switch and folding on the left, the summary and
+/// Compare on the right.
 class _Toolbar extends StatelessWidget {
   const _Toolbar({
     required this.equalWidth,
     required this.comparing,
+    required this.summary,
+    required this.rangeLabel,
+    required this.foldFocus,
     required this.onEqualWidth,
     required this.onFold,
     required this.onCompare,
@@ -697,6 +716,11 @@ class _Toolbar extends StatelessWidget {
 
   final bool equalWidth;
   final bool comparing;
+  final String summary;
+
+  /// The focused range, while there is one.
+  final String? rangeLabel;
+  final FocusNode foldFocus;
   final ValueChanged<bool> onEqualWidth;
   final VoidCallback onFold;
   final VoidCallback onCompare;
@@ -704,8 +728,10 @@ class _Toolbar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ws = context.ws;
+    final keys = Keymap.of(context);
+    final small = TextStyle(color: ws.textFaint, fontSize: WsMetrics.fsSmall);
     return Container(
-      height: 44,
+      height: 40,
       padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space5),
       child: Row(
         children: [
@@ -714,26 +740,48 @@ class _Toolbar extends StatelessWidget {
             selected: equalWidth,
             onSelect: onEqualWidth,
           ),
-          const SizedBox(width: WsMetrics.space2),
+          const SizedBox(width: WsMetrics.space3),
           // Return and space press it rather than the view's own keys.
           Shortcuts(
             shortcuts: activateKeys,
-            child: TextButton(
+            child: GhostButton(
+              icon: LucideIcons.foldVertical,
+              label: 'Fold turns',
+              shortcut: keys.label(Command.foldAll),
+              focusNode: foldFocus,
               onPressed: onFold,
-              style: TextButton.styleFrom(
-                foregroundColor: ws.textMuted,
-                textStyle: const TextStyle(fontSize: WsMetrics.fsCompact),
-              ),
-              child: Row(
-                children: [
-                  const Text('Fold turns'),
-                  const SizedBox(width: WsMetrics.space3),
-                  Hint(Keymap.of(context).label(Command.foldAll)),
-                ],
-              ),
             ),
           ),
-          const Spacer(),
+          Expanded(
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                if (rangeLabel case final rangeLabel?) ...[
+                  Flexible(
+                    child: Text(
+                      rangeLabel,
+                      key: const Key('range'),
+                      style: small.copyWith(color: ws.accent),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  const SizedBox(width: WsMetrics.space2),
+                  Hint(keys.label(Command.closeStep)),
+                  const SizedBox(width: WsMetrics.space5),
+                ],
+                Flexible(
+                  child: Text(
+                    summary,
+                    style: small,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: WsMetrics.space4),
           if (comparing)
             // Clicking it, return or space leave the comparison, as its key does.
             Shortcuts(
@@ -760,7 +808,7 @@ class _Toolbar extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(width: WsMetrics.space3),
-                      Hint(Keymap.of(context).label(Command.compare)),
+                      Hint(keys.label(Command.compare)),
                     ],
                   ),
                 ),
@@ -768,8 +816,9 @@ class _Toolbar extends StatelessWidget {
             )
           else
             SecondaryButton(
+              icon: LucideIcons.arrowLeftRight,
               label: 'Compare',
-              shortcut: Keymap.of(context).label(Command.compare),
+              shortcut: keys.label(Command.compare),
               onPressed: onCompare,
             ),
         ],

@@ -3,8 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
-import '../controls.dart';
-import '../shortcuts/keymap.dart';
+import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'trajectory_model.dart';
@@ -23,20 +22,17 @@ class OverviewTrack {
 class Overview extends StatefulWidget {
   const Overview({
     super.key,
-    required this.summary,
     required this.tracks,
     required this.span,
     required this.equalWidth,
     required this.window,
     required this.range,
-    required this.rangeLabel,
     required this.onRange,
     required this.onWindow,
     this.mark,
     this.legend = false,
   });
 
-  final String summary;
   final List<OverviewTrack> tracks;
 
   /// The axis length: milliseconds, or steps with `equalWidth`.
@@ -48,7 +44,6 @@ class Overview extends StatefulWidget {
 
   /// The focused range.
   final (double, double)? range;
-  final String? rangeLabel;
   final ValueChanged<(double, double)?> onRange;
   final ValueChanged<(double, double)?> onWindow;
 
@@ -73,13 +68,11 @@ class _OverviewState extends State<Overview> {
   Widget build(BuildContext context) {
     final ws = context.ws;
     final Overview(
-      :summary,
       :tracks,
       :span,
       :equalWidth,
       :window,
       :range,
-      :rangeLabel,
       :onRange,
       :onWindow,
       :mark,
@@ -90,7 +83,7 @@ class _OverviewState extends State<Overview> {
     return Container(
       padding: const EdgeInsets.fromLTRB(
         WsMetrics.space5,
-        10,
+        WsMetrics.space3,
         WsMetrics.space5,
         WsMetrics.space4,
       ),
@@ -101,48 +94,10 @@ class _OverviewState extends State<Overview> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
-            children: [
-              Text(
-                'Overview',
-                style: small.copyWith(
-                  color: ws.textMuted,
-                  fontWeight: WsMetrics.fwMedium,
-                ),
-              ),
-              const SizedBox(width: 14),
-              Flexible(
-                child: Text(
-                  summary,
-                  style: small,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              const SizedBox(width: 14),
-              Flexible(
-                child: Text(
-                  'drag to focus · scroll to zoom',
-                  style: small,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              const Spacer(),
-              if (rangeLabel != null) ...[
-                Text(
-                  rangeLabel,
-                  key: const Key('range'),
-                  style: small.copyWith(color: ws.accent),
-                ),
-                const SizedBox(width: WsMetrics.space2),
-                Hint(Keymap.of(context).label(Command.closeStep)),
-              ],
-            ],
-          ),
-          const SizedBox(height: WsMetrics.space3),
           LayoutBuilder(
             builder: (context, constraints) {
-              final width = constraints.maxWidth - 56;
+              final width =
+                  constraints.maxWidth - 56 - WsMetrics.space2 - _infoSize;
               double at(double x) =>
                   visible.$1 +
                   (x.clamp(0, width) / width) * (visible.$2 - visible.$1);
@@ -262,6 +217,15 @@ class _OverviewState extends State<Overview> {
                       ),
                     ),
                   ),
+                  const SizedBox(width: WsMetrics.space2),
+                  Tooltip(
+                    message: 'drag to focus · scroll to zoom',
+                    child: Icon(
+                      LucideIcons.info,
+                      size: _infoSize,
+                      color: ws.textFaint,
+                    ),
+                  ),
                 ],
               );
             },
@@ -299,6 +263,9 @@ class _OverviewState extends State<Overview> {
     );
   }
 }
+
+/// The size of the hint's icon at the end of the axis.
+const _infoSize = 14.0;
 
 class _AxisPainter extends CustomPainter {
   _AxisPainter({
