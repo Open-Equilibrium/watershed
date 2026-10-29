@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Advisory Stop hook for conflict markers introduced in tracked changes.
 
-Experimental Codex hook; advisory only. See ADR-0024.
+Experimental Codex hook; advisory only. See AGENTS.md, Repository agent setup.
 """
 import json
 import subprocess
