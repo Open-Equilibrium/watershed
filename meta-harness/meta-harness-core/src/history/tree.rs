@@ -12,29 +12,23 @@ const PREVIEW_CHARS: usize = 80;
 pub(super) fn session_tree(entries: &[Entry], leaf: Option<&str>) -> SessionTree {
     let mut label_parents: HashMap<&str, Option<&str>> = HashMap::new();
     let mut labels: HashMap<&str, Option<&str>> = HashMap::new();
-    // What each tool call works on, by call id, for its result's preview.
-    let mut targets: HashMap<&str, String> = HashMap::new();
+    let by_id: HashMap<&str, &Entry> = entries
+        .iter()
+        .map(|entry| (entry.id.as_str(), entry))
+        .collect();
     for entry in entries {
-        match &entry.body {
-            Body::Label { target, label } => {
-                label_parents.insert(&entry.id, entry.parent.as_deref());
-                if let Some(target) = target {
-                    labels.insert(target, label.as_deref());
-                }
+        if let Body::Label { target, label } = &entry.body {
+            label_parents.insert(&entry.id, entry.parent.as_deref());
+            if let Some(target) = target {
+                labels.insert(target, label.as_deref());
             }
-            Body::Assistant { calls, .. } => {
-                for call in calls {
-                    targets.insert(&call.id, pi::call_target(&call.arguments));
-                }
-            }
-            _ => {}
         }
     }
     let nodes = entries
         .iter()
         .filter(|entry| !matches!(entry.body, Body::Label { .. }))
         .map(|entry| {
-            let (kind, preview) = summary(&entry.body, &targets);
+            let (kind, preview) = summary(&entry.body, || call_target(&by_id, entry));
             TreeNode {
                 id: entry.id.clone(),
                 parent: resolve(&label_parents, entry.parent.as_deref()),
@@ -77,13 +71,32 @@ fn resolve<'a>(
     id.map(str::to_owned)
 }
 
-fn summary(body: &Body, targets: &HashMap<&str, String>) -> (EntryKind, String) {
+/// What the call a tool result answers works on, from the nearest response above it: call ids
+/// repeat, for example as empty ones from servers that send none.
+fn call_target(by_id: &HashMap<&str, &Entry>, result: &Entry) -> Option<String> {
+    let Body::ToolResult { call, .. } = &result.body else {
+        return None;
+    };
+    let mut next = result.parent.as_deref();
+    // A stored cycle ends the walk instead of the reader.
+    for _ in 0..by_id.len() {
+        let entry = by_id.get(next?)?;
+        if let Body::Assistant { calls, .. } = &entry.body {
+            let found = calls.iter().find(|candidate| &candidate.id == call)?;
+            return Some(pi::call_target(&found.arguments));
+        }
+        next = entry.parent.as_deref();
+    }
+    None
+}
+
+fn summary(body: &Body, target: impl FnOnce() -> Option<String>) -> (EntryKind, String) {
     let line = |text: &str| first_line(text, PREVIEW_CHARS);
     match body {
         Body::User { text, .. } => (EntryKind::User, line(text)),
         Body::Assistant { text, .. } => (EntryKind::Assistant, line(text)),
-        Body::ToolResult { tool, call, .. } => {
-            let preview = match targets.get(call.as_str()) {
+        Body::ToolResult { tool, .. } => {
+            let preview = match target() {
                 Some(target) if !target.is_empty() => format!("{tool} {target}"),
                 _ => tool.clone(),
             };

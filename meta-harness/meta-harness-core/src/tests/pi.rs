@@ -652,6 +652,28 @@ fn names_what_a_tool_ran_on_and_whether_it_failed_in_the_tree() {
 }
 
 #[test]
+fn names_each_result_after_its_own_call_when_ids_repeat() {
+    // A server that sends no call ids leaves every call with the same empty one.
+    let data: Value = serde_json::from_str(
+        r#"{"entries":[
+          {"type":"message","id":"a1","parentId":null,"message":{"role":"assistant","content":[{"type":"toolCall","id":"","name":"bash","arguments":{"command":"ls"}}]}},
+          {"type":"message","id":"r1","parentId":"a1","message":{"role":"toolResult","toolCallId":"","toolName":"bash","content":[]}},
+          {"type":"message","id":"a2","parentId":"r1","message":{"role":"assistant","content":[{"type":"toolCall","id":"","name":"bash","arguments":{"command":"rm -rf build"}}]}},
+          {"type":"message","id":"r2","parentId":"a2","message":{"role":"toolResult","toolCallId":"","toolName":"bash","content":[]}}],
+          "leafId":"r2"}"#,
+    )
+    .expect("JSON");
+    let previews: Vec<_> = History::from_entries(&data)
+        .tree()
+        .nodes
+        .into_iter()
+        .filter(|node| node.kind == EntryKind::ToolResult)
+        .map(|node| node.preview)
+        .collect();
+    assert_eq!(previews, ["bash ls", "bash rm -rf build"]);
+}
+
+#[test]
 fn reports_extension_errors_as_notifications() {
     assert_eq!(
         translate(&[
