@@ -16,8 +16,25 @@ class MainFlutterWindow: NSWindow {
     FlutterMethodChannel(
       name: "liquid/liquid_key", binaryMessenger: flutterViewController.engine.binaryMessenger
     ).setMethodCallHandler(liquidKey)
+    logKeysIfAsked()
 
     super.awakeFromNib()
+  }
+}
+
+/// With LIQUID_KEY_LOG=1, writes every key event macOS hands the window to stderr, beside
+/// Flutter's own log of them, to find why some Liquid key shortcuts do nothing (PLAN.md).
+private func logKeysIfAsked() {
+  guard ProcessInfo.processInfo.environment["LIQUID_KEY_LOG"] == "1" else { return }
+  NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp, .flagsChanged]) { event in
+    let characters = event.type == .flagsChanged ? "-" : (event.characters ?? "-")
+    let plain = event.type == .flagsChanged ? "-" : (event.charactersIgnoringModifiers ?? "-")
+    FileHandle.standardError.write(
+      Data(
+        ("native key: \(event.type.rawValue) code \(event.keyCode) chars \"\(characters)\" "
+          + "plain \"\(plain)\" flags 0x\(String(event.modifierFlags.rawValue, radix: 16)) "
+          + "repeat \(event.type == .keyDown && event.isARepeat)\n").utf8))
+    return event
   }
 }
 

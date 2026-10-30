@@ -189,7 +189,7 @@ A macOS Liquid app, built ahead of M2 and M3a, that controls pi through an embed
 **Follow-ups:**
 
 - Close the cheap record gaps (ADR-0222): record every approval decision, also those made without asking, with its reason, the approval mode and a hash of the approved arguments; show the nested tool calls pi records; and say in the Diff and Trajectory tabs exactly what they cover, after an approved mockup.
-- On a Mac keyboard with the Liquid key on, ⇪1, ⇪2 and ⇪3 work, but ⇪L and ⇪N do nothing and type nothing either (hardware test, 2026-10-28), while widget tests with the same keys pass. Next: log the macOS key events and their modifier flags with the key held to find what differs for letters.
+- On a Mac keyboard with the Liquid key on, ⇪1, ⇪2 and ⇪3 work, but ⇪L and ⇪N do nothing and type nothing either (hardware test, 2026-10-28), while widget tests with the same keys pass. Next: run Liquid from a terminal with `LIQUID_KEY_LOG=1`, press ⇪1, ⇪L and ⇪N, and compare the native and Flutter lines for the letters ([liquid/README.md](liquid/README.md#run)).
 - At the smallest window, 1050 x 640, the session tree starts collapsed, so the Trajectory's Step column keeps about 190 px and the context track shows; the comparison still shows no step rows until scrolled.
 
 #### Liquid Git integration — next slice
