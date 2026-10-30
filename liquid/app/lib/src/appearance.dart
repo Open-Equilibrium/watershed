@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
 import 'controls.dart';
@@ -119,13 +121,37 @@ class UiScale extends StatelessWidget {
 }
 
 /// Settings → Appearance (approved look mockup): the theme and the text size, applied at once.
-class AppearancePane extends StatelessWidget {
+class AppearancePane extends StatefulWidget {
   const AppearancePane({super.key, required this.appearance});
 
   final AppearanceController appearance;
 
   @override
+  State<AppearancePane> createState() => _AppearancePaneState();
+}
+
+class _AppearancePaneState extends State<AppearancePane> {
+  /// Why the latest change could not be saved; it still applies until Liquid quits.
+  String? _failure;
+
+  void _change(Appearance next) {
+    setState(() => _failure = null);
+    widget.appearance.change(next).catchError((Object error) {
+      if (mounted) {
+        setState(
+          () => _failure = switch (error) {
+            FileSystemException(:final message) =>
+              'Could not save the appearance: $message',
+            _ => 'Could not save the appearance: $error',
+          },
+        );
+      }
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final appearance = widget.appearance;
     final ws = context.ws;
     final label = TextStyle(color: ws.textMuted, fontSize: WsMetrics.fsCompact);
     Widget row(String title, Widget control) => Padding(
@@ -164,8 +190,7 @@ class AppearancePane extends StatelessWidget {
                   (ThemeChoice.dark, 'Dark'),
                 ],
                 selected: chosen.theme,
-                onSelect: (theme) =>
-                    appearance.change(chosen.copyWith(theme: theme)),
+                onSelect: (theme) => _change(chosen.copyWith(theme: theme)),
               ),
             ),
             row(
@@ -177,10 +202,14 @@ class AppearancePane extends StatelessWidget {
                   (TextSize.large, 'Large'),
                 ],
                 selected: chosen.textSize,
-                onSelect: (size) =>
-                    appearance.change(chosen.copyWith(textSize: size)),
+                onSelect: (size) => _change(chosen.copyWith(textSize: size)),
               ),
             ),
+            if (_failure case final failure?)
+              Text(
+                failure,
+                style: TextStyle(color: ws.danger, fontSize: WsMetrics.fsSmall),
+              ),
           ],
         ),
       ),

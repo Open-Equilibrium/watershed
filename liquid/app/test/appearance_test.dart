@@ -8,6 +8,7 @@ import 'package:liquid/src/appearance.dart';
 import 'package:liquid/src/launch.dart';
 import 'package:liquid/src/session/session_state.dart';
 import 'package:liquid/src/settings_file.dart';
+import 'package:liquid/src/theme/theme.dart';
 
 import 'fake_backend.dart';
 
@@ -88,4 +89,29 @@ void main() {
       expect(appearance.value.textSize, TextSize.large);
     },
   );
+
+  testWidgets('says when the appearance could not be saved', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1600, 900));
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: liquidTheme(Brightness.light),
+        home: Scaffold(body: AppearancePane(appearance: _Unsaved())),
+      ),
+    );
+    await tester.tap(find.text('Dark'));
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Could not save the appearance: disk full'),
+      findsOneWidget,
+    );
+  });
+}
+
+/// An appearance that applies but cannot be saved.
+class _Unsaved extends AppearanceController {
+  @override
+  Future<void> change(Appearance appearance) {
+    value = appearance;
+    return Future.error(const FileSystemException('disk full'));
+  }
 }

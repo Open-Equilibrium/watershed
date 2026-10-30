@@ -22,18 +22,27 @@ class MainFlutterWindow: NSWindow {
   }
 }
 
-/// With LIQUID_KEY_LOG=1, writes every key event macOS hands the window to stderr, beside
-/// Flutter's own log of them, to find why some Liquid key shortcuts do nothing (PLAN.md).
+/// With LIQUID_KEY_LOG=1, writes the key events macOS hands the window while ⌘, ⌃, ⌥ or the
+/// Liquid key (F18) is held to stderr, beside Flutter's own log of them, to find why some
+/// Liquid key shortcuts do nothing (PLAN.md). Plain typing never lands in the log.
 private func logKeysIfAsked() {
   guard ProcessInfo.processInfo.environment["LIQUID_KEY_LOG"] == "1" else { return }
+  let f18: UInt16 = 79
+  var liquidKeyDown = false
   NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp, .flagsChanged]) { event in
+    if event.type != .flagsChanged && event.keyCode == f18 {
+      liquidKeyDown = event.type == .keyDown
+    }
+    let held = event.modifierFlags.intersection([.command, .control, .option])
+    guard liquidKeyDown || !held.isEmpty || event.keyCode == f18 || event.type == .flagsChanged
+    else { return event }
     let characters = event.type == .flagsChanged ? "-" : (event.characters ?? "-")
     let plain = event.type == .flagsChanged ? "-" : (event.charactersIgnoringModifiers ?? "-")
     FileHandle.standardError.write(
       Data(
         ("native key: \(event.type.rawValue) code \(event.keyCode) chars \"\(characters)\" "
           + "plain \"\(plain)\" flags 0x\(String(event.modifierFlags.rawValue, radix: 16)) "
-          + "repeat \(event.type == .keyDown && event.isARepeat)\n").utf8))
+          + "liquid \(liquidKeyDown) repeat \(event.type == .keyDown && event.isARepeat)\n").utf8))
     return event
   }
 }
