@@ -46,6 +46,10 @@ code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12p
 .eb{padding:8px 12px;display:flex;flex-direction:column;gap:3px}.it{display:flex;gap:8px;align-items:center}.box{width:13px;height:13px;border-radius:3px;box-shadow:inset 0 0 0 1.5px #a5a4a0;flex:none}.box.on{background:var(--ac);box-shadow:none}
 .add{background:#e6ffec;border-radius:4px;padding:0 4px}.del{background:#ffebe9;border-radius:4px;padding:0 4px;text-decoration:line-through;color:#8a3b34}
 .ef{padding:5px 10px;border-top:1px solid var(--bd);font-size:11px;color:var(--tf)}.ph{padding:14px;color:var(--tf);font-size:12px;text-align:center}
+.sb{background:var(--sb);border-right:1px solid var(--bd);padding:10px 8px;display:flex;flex-direction:column;gap:4px}.srow{border-radius:6px;padding:4px 8px;background:var(--hv)}
+.lk{display:grid;grid-template-columns:150px 1fr;min-height:250px}.lk .mn{display:flex;flex-direction:column;min-width:0}.hdr{display:flex;align-items:center;gap:6px;padding:8px 14px 0}.hchip{border-radius:4px;box-shadow:inset 0 0 0 1px var(--bs);padding:0 6px;font-size:11px;color:var(--tm)}
+.greet{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;padding-top:28px;gap:4px}.greet b{font-size:15px}
+.cmp{margin:0 14px 10px;border-radius:12px;box-shadow:0 0 0 1px var(--bs),0 6px 18px rgba(15,15,15,.08);padding:8px 10px;color:var(--tf)}
 </style></head><body>
 <div class="wrap">
 <h1>Liquid: approved look mockups</h1>
@@ -114,6 +118,29 @@ code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12p
 <li>Without the gauge above, the view gains about 70 px of height, which helps the smallest window (1050 × 640).</li>
 </ul>
 <ul class="pc"><li>Turns are lines with their summary on the line; "Collapse all turns" / "Expand all turns" sits in the header's first cell, aligned with the turns' chevrons, and <kbd>⌥</kbd>-click on a chevron toggles all.</li><li>The Context column draws each step's context against the model's window, a line through the bars, pi's compaction point as a dashed line and ··· for a collapsed turn; solid bars are exact, light ones estimates (≈). Window/Fit switches the scale. Indicator panes and alert rules are later steps.</li></ul>
+</section>
+<section>
+<h2>Settings: Appearance and the sidebar's gear (3A)</h2>
+<div class="w" style="max-width:760px"><div class="lk">
+<div class="sb"><b>Liquid</b><span class="f s">Agent sessions</span><div class="srow">● New session <span class="f">idle</span></div><span style="flex:1"></span><span class="f">⚙ Settings <span class="mono">⌘,</span></span></div>
+<div class="mn" style="flex-direction:row">
+<div style="width:150px;background:var(--sb);border-right:1px solid var(--bd);padding:10px 8px;display:flex;flex-direction:column;gap:4px"><span class="f s">Settings</span><span class="sel" style="font-weight:500">Appearance</span><span style="padding:1px 8px">Shortcuts</span></div>
+<div style="padding:14px 18px;display:flex;flex-direction:column;gap:12px"><b style="font-size:14px">Appearance</b>
+<div class="row"><span class="f" style="width:90px">Theme</span><span class="seg"><span class="on">System</span><span>Light</span><span>Dark</span></span></div>
+<div class="row"><span class="f" style="width:90px">Text size</span><span class="seg"><span>Compact</span><span class="on">Default</span><span>Large</span></span></div></div>
+</div></div></div>
+<ul class="pc"><li>A gear row in the sidebar footer opens Settings, as in T3 Code; ⌘, still does. Settings open on Appearance; Shortcuts is the existing page.</li><li>Theme follows the system by default. Text size scales text and rows together: Compact (UI text 13 px), Default (15 px) and Large (17 px). Both apply at once and are kept across restarts.</li></ul>
+</section>
+<section>
+<h2>Larger, with a header and a start (4B)</h2>
+<div class="w" style="max-width:760px"><div class="lk">
+<div class="sb"><b>Liquid</b><span class="f s">Agent sessions</span><span class="f">acme-api</span><div class="srow">● New session <span class="f">idle</span><br><span class="f s">pi · MacBook</span></div></div>
+<div class="mn"><div class="hdr"><b>New session</b><span class="hchip">acme-api</span><span class="hchip">claude-opus-5-5</span></div>
+<div class="tabs"><span class="on">Chat</span><span>Trajectory</span><span>Diff</span></div>
+<div class="greet"><b>What should we build in acme-api?</b><span class="f s">pi on MacBook · Ask before changes</span></div>
+<div class="cmp">Describe the task…</div></div>
+</div></div>
+<ul class="pc"><li>UI text 15/22 px instead of 14/20, navigation rows 32 px instead of 28, the sidebar 280 px instead of 264; the reading width stays 740 px.</li><li>The session header names the project and the model as chips; the branch joins them with the Git slice. Each session in the sidebar shows its status. Chat messages start at the top and flow down.</li><li>A new session greets with its project, harness, device and approval mode instead of an empty area, as in T3 Code.</li></ul>
 </section>
 <section>
 <h2>Agent chat: Liquid content as a live reference</h2>
