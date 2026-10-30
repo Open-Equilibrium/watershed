@@ -117,20 +117,6 @@ summary{cursor:pointer}summary h3{display:inline;margin:0}summary:focus-visible{
         <p><strong>Recommendation:</strong> Take over T3 Code's timing, content and return rules; differ in the own <code>refs/watershed/</code> namespace, in deleting a session's checkpoints with the session, and in the file list before a return.</p>
         <p><strong>Acceptance criterion:</strong> The ADR log names these choices, and tests show a turn's checkpoints, its diff, a return to it, a refused return while an agent runs, and the removal of a session's checkpoints.</p>
       </details>
-      <details id="d-077" class="decision">
-        <summary><h3>D-077 - Durable Agents Across Four Levels</h3></summary>
-        <p><strong>Status:</strong> Open; the maintainer wants one approach that covers all four levels and prefers Pi Durable's replay rule. The former open question on moving a session to another device is merged here.</p>
-        <p><strong>Background:</strong> Durable work has four levels: <strong>A</strong> switch the client while the agent keeps running; <strong>B</strong> survive a crash of client, harness or host; <strong>C</strong> move an agent to another host; <strong>D</strong> work across hosts, including agents on different hosts working together. T3 Code covers A and, with its linked environments, D; Earendil's Pi Durable (<code>@earendil-works/pi-durable</code>, experimental) covers B; neither moves a running session (C). Flow Agent already records each provider and Tool attempt before it starts and resumes exactly.</p>
-        <p><strong>Question:</strong> Which architecture covers all four levels?</p>
-        <ul>
-          <li><strong>A: Meta-Harness on every host, with session records synced through Liquid.</strong> Each host's Meta-Harness runs as a service and serves every Liquid client (A). It journals harness events before they are shown and tool intents before they run, through the pi extension or a harness's hooks, and after a crash resumes the harness by itself with the replay rule (B). It mirrors each session's record into an agent-sessions area of the Workspace, so another of the person's agent hosts can continue it at a turn boundary, taking the files from the Git checkpoint refs (ADR-0220), its own credentials and the person's grant (C, ADR-0223). Linked hosts hand each other tasks and messages, and later run tools on another host (D). Pro: covers all four with pieces Watershed already plans; fits Liquid as the storage platform. Con: the session record exists twice, with the harness's own file authoritative on its host; moves only at turn boundaries.</li>
-          <li><strong>B: Meta-Harness on every host, moving sessions host to host.</strong> Pro: session content never enters the Workspace. Con: C needs the source host online; devices without that host cannot show the session.</li>
-          <li><strong>C: a central durable runtime,</strong> such as Pi Durable on a server, with tools run remotely over SSH as Earendil's pi-env does. Pro: state lives apart from any host. Con: reverses ADR-0001 and ADR-0189; coding agents still need files and credentials on a machine; Pi Durable cannot load coding-agent extensions yet.</li>
-        </ul>
-        <p><strong>Replay rule (maintainer preference):</strong> after a crash, pi's own reading tools and Tools declared replay-safe run again automatically; any other tool reports "interrupted" to the model, which continues without a restart click. Flow Agent keeps its own journal, which works without Meta-Harness, and relaxes its rule never to repeat an effect only for Tools declared replay-safe.</p>
-        <p><strong>Recommendation:</strong> A, built with service mode (ADR-0215).</p>
-        <p><strong>Acceptance criterion:</strong> The ADR log names the architecture; tests show a client switch, a pi crash continued automatically, a session moved at a turn boundary to another host, and a task handed between two hosts.</p>
-      </details>
     </div>
   </section>
 
@@ -173,61 +159,18 @@ summary{cursor:pointer}summary h3{display:inline;margin:0}summary:focus-visible{
         <p><strong>Recommendation:</strong> B, because it does not silently drop a concurrent change, unless the acceptance spike shows it cannot keep typing and memory use responsive; then reconsider A. Either way every replica keeps applying received changes through its own mutation pipeline as <a href="../../SECURITY.md">SECURITY.md</a> requires.</p>
         <p><strong>Acceptance criterion:</strong> The chosen library passes convergence tests for the M3 Block Types (text, Database rows, View order, deletion cascade), retains fixed observational typing and memory evidence on the Liquid targets, and a remote change denied by Roles is rejected identically for every replica.</p>
       </details>
-      <details id="d-081" class="decision">
-        <summary><h3>D-081 - Encryption Of Workspace Data On The Sync Server And Devices</h3></summary>
-        <p><strong>Status:</strong> Open; the only enterprise layers ADR-0224 left open. Search keeps working with any option, because each device indexes its own replica, as Anytype and Proton Mail do; what end-to-end encryption removes is everything the server would do with content.</p>
-        <p><strong>Question:</strong> How do the Sync Server and devices store Workspace data?</p>
+      <details id="d-085" class="decision">
+        <summary><h3>D-085 - Liquid Content Inside Agent Chats</h3></summary>
+        <p><strong>Status:</strong> Open; idea raised by the maintainer on 2026-10-30.</p>
+        <p><strong>Question:</strong> How does an agent's reply show Liquid content, such as the shopping list it just changed, without making a second copy?</p>
+        <p><strong>Idea:</strong> the reply carries a reference to a Block or Page with a revision, "latest" or a History id. Liquid renders it in the chat from the person's own replica, with a breadcrumb of where it lives and a link that opens it there. The chat stores only the reference, so the Page stays the single source of truth, and the person sees only what they may access.</p>
         <ul>
-          <li><strong>Server A: plaintext.</strong> Pro: server-side search, previews, legal hold and data-loss checks are simple. Con: a stolen disk, a backup or a breached server exposes everything.</li>
-          <li><strong>Server B: encrypted at rest with the operator's key; in Liquid Cloud with customer-managed keys,</strong> as Notion, Slack and Box offer. Pro: protects disks and backups, the customer can revoke access, and compliance features keep working. Con: the operator can still read while the key is active.</li>
-          <li><strong>Server C: end-to-end, chosen per Workspace.</strong> Pro: the operator, including us, cannot read or hand out content. Con: no server-side content features such as eDiscovery, legal hold or data-loss checks; a lost recovery key loses data; every device and agent host needs keys. Microsoft recommends its comparable option only for the most sensitive few percent of data.</li>
-          <li><strong>Device A: plaintext</strong>, relying on disk encryption. <strong>Device B: an encrypted database</strong> whose key the keychain releases only to Liquid. B protects a stolen device and, on macOS, keeps an agent's shell under the same account out; Liquid cannot use the macOS App Sandbox (ADR-0200).</li>
+          <li><strong>A: a live, read-only embed</strong> with breadcrumb, revision and link. Pro: simple and safe. Con: editing means opening the Page.</li>
+          <li><strong>B: A plus editing in place</strong> with the same Block editor and mutation pipeline. Pro: no switching. Con: an editor inside the chat's scrolling list needs its own focus and keyboard rules.</li>
+          <li><strong>C: A plus "what changed"</strong>: the agent's revision against the current state, with its edits marked. Pro: shows exactly what the agent did. Con: needs History revision ids and a diff per Block Type.</li>
         </ul>
-        <p><strong>Clarified 2026-10-30:</strong> AI is no argument against end-to-end encryption in Liquid, because agents and Liquid AI run on agent hosts that hold keys for their areas. A forgotten password can still be recovered, through a recovery key, another signed-in device or a company escrow key. eDiscovery, legal hold and data-loss checks can run in a company-run replica that holds the company key, so the operator stays blind.</p>
-        <ul><li><strong>Server D: area keys from day one.</strong> Devices encrypt content per area; each area key is wrapped for every device and agent host allowed there and, unless the Workspace chooses end-to-end encryption, also for the server. Switching a Workspace to end-to-end later removes the server's copy instead of re-encrypting everything. Pro: one design for both modes, matching the areas ADR-0224 already introduces. Con: key management, device approval and key rotation on revocation are needed from M3.</li></ul>
-        <p><strong>Recommendation:</strong> Server D, with the server's copy by default, customer-managed keys in Liquid Cloud and end-to-end per Workspace as an option; Device B. A company that self-hosts and trusts its own server administrators needs no end-to-end encryption.</p>
-        <p><strong>Acceptance criterion:</strong> The ADR log names server and device storage; tests show search on a device, a stolen-disk copy that stays unreadable, and for C a server that stores only ciphertext.</p>
-      </details>
-      <details id="d-082" class="decision">
-        <summary><h3>D-082 - Local Relay For An Agent Host On The Same Device</h3></summary>
-        <p><strong>Status:</strong> Open; raised by the maintainer on 2026-10-30. In the accepted target an agent host on a person's laptop is its own replica and, like every replica, syncs only with the Sync Server (ADR-0069, ADR-0223).</p>
-        <p><strong>Question:</strong> May that agent host sync through the laptop's Liquid instead?</p>
-        <ul>
-          <li><strong>A: only through the Sync Server.</strong> Pro: one sync path, and the server checks every change. Con: offline, the agent and the person on the same laptop see each other's changes only after reconnecting.</li>
-          <li><strong>B: through the local Liquid, which relays to the server.</strong> Pro: works offline and is faster. Con: Liquid must serve a filtered copy, enforce the agent's grant and its revocation itself, and the agent host stops syncing while Liquid is closed; reverses "never peer to peer" for this case.</li>
-          <li><strong>C: through the local Liquid while it runs, otherwise through the server.</strong> Pro: the offline benefit without depending on the app. Con: two paths to build and test.</li>
-        </ul>
-        <p><strong>Recommendation:</strong> A for M3; C later if offline agent work on a laptop matters. Either way the Sync Server verifies signed changes when they arrive.</p>
-        <p><strong>Acceptance criterion:</strong> The ADR log names the path; for C, tests show an offline exchange on one device, the server rejecting a change after the grant was revoked, and the fallback while Liquid is closed.</p>
-      </details>
-      <details id="d-083" class="decision">
-        <summary><h3>D-083 - Agent Hosts On Personal Devices: Isolation And Liquid AI</h3></summary>
-        <p><strong>Status:</strong> Open. In the target an agent host is a separate replica in a sandbox (ADR-0223); Liquid itself cannot use the macOS App Sandbox, because it starts agents and tools (ADR-0200). The glossary today places Liquid AI inside Liquid.</p>
-        <p><strong>Question 1:</strong> How is an agent host on a person's device kept from reading Liquid's data?</p>
-        <ul>
-          <li><strong>A: a separate operating-system account.</strong> Pro: the strongest, built into the OS. Con: needs administrator rights at installation; agents lose the user's tools, credentials and projects unless granted one by one.</li>
-          <li><strong>B: a sandbox profile on each agent process</strong> that blocks Liquid's data folder: Seatbelt on macOS and Bubblewrap on Linux, as Flow Agent's self-protection uses, or Landlock on Linux. Pro: no administrator rights; agents keep the user's tools and projects. Con: blocks named paths, not everything; Seatbelt's interface is deprecated; Windows has no equally light mechanism.</li>
-          <li><strong>C: a virtual machine or container.</strong> Pro: strong. Con: heavy; ADR-0163 excludes a Linux-VM path on macOS; tools differ from the host's.</li>
-        </ul>
-        <p><strong>Question 2:</strong> Where does Liquid AI run?</p>
-        <ul>
-          <li><strong>A: inside Liquid,</strong> with its own agent identity and grant, on the person's replica. Pro: works without a reachable Meta-Harness. Con: a second agent runtime; model settings and credentials on every device, against ADR-0227.</li>
-          <li><strong>B: as a built-in agent profile on a Meta-Harness host,</strong> the local one or, for a phone, a remote one. Pro: one agent model; configuration, credentials, usage, approvals and durability in one place; it reads only its agent host's replica. Con: needs a reachable Meta-Harness.</li>
-        </ul>
-        <p><strong>Recommendation:</strong> Question 1: B, plus the device database key of <a href="#d-081">D-081</a> released only to Liquid; A as an option for managed company devices and on Windows. Question 2: B, consistent with every agent running under Meta-Harness; this revises the earlier recommendation of A.</p>
-        <p><strong>Acceptance criterion:</strong> The ADR log names both; native tests show an agent process unable to read Liquid's data folder on each supported OS, and Liquid AI working from a phone through a remote host.</p>
-      </details>
-      <details id="d-084" class="decision">
-        <summary><h3>D-084 - Blocks, Files And Media In One Store</h3></summary>
-        <p><strong>Status:</strong> Open; decide with Liquid's History together with <a href="#d-028">D-028</a>, <a href="#d-029">D-029</a> and <a href="#d-035">D-035</a>. Late-roadmap direction raised by the maintainer on 2026-10-30: Liquid as cloud storage like Dropbox or Google Drive, later optimized for media like Google Photos.</p>
-        <p><strong>Question:</strong> How does Liquid store Blocks, files and media, so that file and media features can follow without a new storage layer?</p>
-        <ul>
-          <li><strong>A: Blocks only;</strong> files are attachments of Blocks. Pro: the smallest M3. Con: a drive or photo library later needs a second store.</li>
-          <li><strong>B: one store for all of it,</strong> built for attachments in M3: Block and file metadata (tree, names, tags, versions, Roles) in the CRDT; contents as content-addressed, chunked and encrypted blobs outside it, loaded on demand; Markdown and HTML only for import and export. Later views add a drive with OS integration (macOS File Provider, Windows Cloud Files, Linux FUSE) and a media library with previews and on-device indexing. Pro: one model for permissions, History, sync and encryption. Con: binary files cannot merge, so concurrent edits keep both versions; large data raises storage, quota and backup questions.</li>
-          <li><strong>C: leave files to external drives,</strong> reached as Sources. Pro: no storage business. Con: permissions, History and offline use end at the drive's border.</li>
-        </ul>
-        <p><strong>Recommendation:</strong> B, building only attachments in M3; external drives stay reachable as Sources. One CRDT document per Page, grouped into areas for Roles and replication.</p>
-        <p><strong>Acceptance criterion:</strong> The ADR log names the content model and blob store; tests show an attachment synced on demand, deduplicated and encrypted, and a Page loaded without loading its area's other Pages.</p>
+        <p><strong>Recommendation:</strong> A first, C once History exists, B later. References use stable resource ids, and the CLI/API returns a ready reference for every change, so any harness can cite it.</p>
+        <p><strong>Acceptance criterion:</strong> An agent changes a list through the CLI/API; its reply renders the list live from the replica; a pinned revision shows the earlier state; a person without access sees a placeholder; the link opens the Page at the Block.</p>
       </details>
     </div>
   </section>

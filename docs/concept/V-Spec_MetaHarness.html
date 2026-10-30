@@ -22,9 +22,10 @@
     <a href="#config">8. Central config</a>
     <a href="#agentpulse">9. AgentPulse</a>
     <a href="#automations">10. Agent scheduling &amp; orchestration</a>
-    <a href="#byoa">11. BYOA / external control</a>
-    <a href="#m2">12. M2 implementation reference</a>
-    <a href="#open">13. Open decisions</a>
+    <a href="#durability">11. Durability</a>
+    <a href="#byoa">12. BYOA / external control</a>
+    <a href="#m2">13. M2 implementation reference</a>
+    <a href="#open">14. Open decisions</a>
   </aside>
   <main>
     <header class="hero">
@@ -225,7 +226,37 @@ liquid integration
       </ul>
     </div></section>
 
-    <section id="byoa" class="section"><h2>11. BYOA / external control</h2><div class="body">
+    <section id="durability" class="section"><h2>11. Durability</h2><div class="body">
+      <p>Accepted target (ADR-0229). Durable work has four levels, and Meta-Harness on every host covers all four: agents depend on the files, tools and credentials of a machine, so every host needs its own supervisor, and Liquid sync plus Git checkpoints give the hosts a shared state.</p>
+      <svg viewBox="0 0 640 330" role="img" aria-label="Durability across four levels" style="width:100%;max-width:760px;height:auto;display:block">
+        <g font-family="system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif" font-size="11" fill="#e6e8ee">
+        <rect x="230" y="8" width="180" height="56" rx="10" fill="none" stroke="#4ea1ff"/><text x="320" y="28" text-anchor="middle" font-weight="600">Liquid on every device</text><text x="320" y="44" text-anchor="middle" font-size="10" fill="#9aa3b2">laptop · phone · another computer</text><text x="320" y="57" text-anchor="middle" font-size="10" fill="#4ea1ff">A: attaches to the host</text>
+        <rect x="10" y="110" width="250" height="150" rx="10" fill="#c9a0ff" fill-opacity=".06" stroke="#c9a0ff"/><text x="135" y="130" text-anchor="middle" font-weight="600">Host 1 · Meta-Harness service</text>
+        <text x="24" y="152" font-size="10">• journal before display and effect</text><text x="24" y="168" font-size="10">• supervises pi, Flow Agent, …</text><text x="24" y="184" font-size="10" fill="#c9a0ff">B: resumes after a crash</text><text x="24" y="206" font-size="10">• the harness's session file</text><text x="24" y="222" font-size="10">• project + checkpoint refs (Git)</text><text x="24" y="244" font-size="10">• its own credentials</text>
+        <rect x="380" y="110" width="250" height="150" rx="10" fill="#c9a0ff" fill-opacity=".06" stroke="#c9a0ff"/><text x="505" y="130" text-anchor="middle" font-weight="600">Host 2 · Meta-Harness service</text>
+        <text x="394" y="152" font-size="10">• the same as host 1</text><text x="394" y="174" font-size="10" fill="#c9a0ff">C: continues a session at a</text><text x="394" y="188" font-size="10" fill="#c9a0ff">turn boundary: record + checkpoint</text><text x="394" y="210" font-size="10" fill="#c9a0ff">D: runs tasks from host 1,</text><text x="394" y="224" font-size="10" fill="#c9a0ff">later single tools</text><text x="394" y="246" font-size="10">• its own credentials</text>
+        <rect x="200" y="282" width="240" height="40" rx="10" fill="#7ee0a8" fill-opacity=".07" stroke="#7ee0a8"/><text x="320" y="300" text-anchor="middle" font-weight="600">Liquid sync: agent-sessions area</text><text x="320" y="315" text-anchor="middle" font-size="10" fill="#9aa3b2">session records for the person's hosts and devices</text>
+        <rect x="240" y="170" width="160" height="40" rx="8" fill="none" stroke="#9aa3b2" stroke-dasharray="4 3"/><text x="320" y="187" text-anchor="middle" font-size="10.5">Git remote</text><text x="320" y="201" text-anchor="middle" font-size="10" fill="#9aa3b2">branch + checkpoint refs</text>
+        <g stroke-width="1.6" fill="none"><line x1="290" y1="64" x2="200" y2="110" stroke="#4ea1ff"/><line x1="350" y1="64" x2="440" y2="110" stroke="#4ea1ff"/><line x1="260" y1="150" x2="380" y2="150" stroke="#c9a0ff" stroke-dasharray="5 4"/><line x1="260" y1="190" x2="240" y2="190" stroke="#9aa3b2"/><line x1="400" y1="190" x2="380" y2="190" stroke="#9aa3b2"/><line x1="135" y1="260" x2="230" y2="282" stroke="#7ee0a8"/><line x1="505" y1="260" x2="410" y2="282" stroke="#7ee0a8"/></g>
+        <text x="320" y="144" text-anchor="middle" font-size="10" fill="#c9a0ff">host link (D)</text>
+        </g>
+      </svg>
+      <ul>
+        <li><strong>A · Switch the client:</strong> Meta-Harness runs as a service; Liquid on any device attaches over the authenticated remote connection (ADR-0185) and sees the same live session. The Workspace copy of the session record lets every device show its history without a connection.</li>
+        <li><strong>B · Survive a crash:</strong> every harness event is journaled before Liquid shows it and every tool intent before the tool runs. After a crash Meta-Harness restarts the harness with its session; pi's own reading tools and Tools declared replay-safe run again, any other tool reports "interrupted" to the model, which continues without a restart click. A model answer cut off mid-stream is requested again.</li>
+        <li><strong>C · Move an agent:</strong> at a turn boundary another of the person's hosts takes the session over: the record from Liquid, the files from the Git checkpoint ref (ADR-0220), its own credentials and the person's grant (ADR-0223). The Sync Server gives the session to one host; two hosts continuing offline create two branches.</li>
+        <li><strong>D · Several hosts:</strong> linked Meta-Harness hosts hand each other tasks and messages and return results, as T3 Code's linked environments do; approvals stay with the host that runs the work. Running single tools on another host follows later.</li>
+      </ul>
+      <table>
+        <tr><th>Harness</th><th>Journal before display</th><th>Tool intent before it runs</th><th>Resume</th><th>Replay-safe</th></tr>
+        <tr><td>pi</td><td>Meta-Harness journals each RPC event first</td><td>through Watershed's pi extension</td><td>restart with <code>--session</code>, open calls reported as interrupted</td><td>pi's own reading tools</td></tr>
+        <tr><td>Flow Agent</td><td>its own journal</td><td>its own journal</td><td>Meta-Harness calls <code>flow resume</code></td><td>Tools declared replay-safe</td></tr>
+        <tr><td>Later adapters</td><td>Meta-Harness's journal</td><td>through their hooks where they exist</td><td>through their own session resume</td><td>their reading tools</td></tr>
+      </table>
+      <p class="muted">Each adapter reports which levels it reaches. The harness's own session file stays authoritative on its host; the Workspace record is the portable copy (ADR-0189). Without a Git project only the conversation moves.</p>
+    </div></section>
+
+    <section id="byoa" class="section"><h2>12. BYOA / external control</h2><div class="body">
       <p>Meta-Harness exposes itself to other tools and agents through its API/CLI. Typical BYOA interactions:</p>
       <ul>
         <li>an external agent asks Meta-Harness for current sessions;</li>
@@ -237,11 +268,11 @@ liquid integration
       <p>All sensitive commands go through the permission/policy gates in <a href="../../SECURITY.md">SECURITY.md</a>.</p>
     </div></section>
 
-    <section id="m2" class="section"><h2>12. M2 implementation reference</h2><div class="body">
+    <section id="m2" class="section"><h2>13. M2 implementation reference</h2><div class="body">
       <p>See the canonical M2 scope and Definition of Done in <a href="../../PLAN.md">PLAN.md</a>. This V-Spec defines the product and runtime shape without moving agent-process ownership across hosts.</p>
     </div></section>
 
-    <section id="open" class="section"><h2>13. Open decisions</h2><div class="body">
+    <section id="open" class="section"><h2>14. Open decisions</h2><div class="body">
       <p>See <a href="../decisions/open-decisions.html">open-decisions.html</a>: product packaging (<a href="../decisions/open-decisions.html#d-021">D-021</a>), state storage (<a href="../decisions/open-decisions.html#d-024">D-024</a>), CLI-agent backend integration (<a href="../decisions/open-decisions.html#d-048">D-048</a>) and AgentPulse formulas (<a href="../decisions/open-decisions.html#d-010">D-010</a>). Host-scoped execution and multi-instance projection ownership are decided, not open.</p>
     </div></section>
   </main>

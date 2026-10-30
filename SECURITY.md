@@ -17,7 +17,7 @@ Product targets, available capabilities and native release requirements are cano
 | Flow-owned files | A mandatory native boundary blocks direct Tool/child writes, deletion and replacement of this installation's protected Flow configuration, registry, runtime/credential stores and installed program objects. Tools cannot choose the protected set or disable it. Missing protection fails before Tool launch. | Do not treat this as whole-host or cross-installation isolation. Privileged actors, controller/OS compromise and effects delegated to independent unconfined services are excluded. File/object discovery and inherited protection require native proof. |
 | Configuration changes | The first Flow Agent release provides no Tool-initiated configuration-change path. Direct protected writes remain blocked; no permission prompt or automatic retry lifts the block. | Administrators change configuration manually outside Tool execution. Later proposals belong to the roadmap, not first-release capabilities. |
 | Authority integrity | A Tool cannot grant itself authority, widen its own permission, replace enforcement code or silently change the authority of the current Run. | Administrators remain responsible for trusted installation and deliberate out-of-band changes. |
-| Effects and recovery | Retain durable intent before effects, bounded I/O and waiting, cancellation of further dispatch, truthful terminal evidence and no automatic replay of uncertain effects. | A successful command is not proof of a correct result. Tool effects on external systems need their own correctness and recovery design. Unknown descendant cleanup must not be reported as complete. |
+| Effects and recovery | Retain durable intent before effects, bounded I/O and waiting, cancellation of further dispatch, truthful terminal evidence and no automatic replay of uncertain effects; a later target lets Tools declared replay-safe run again (ADR-0229). | A successful command is not proof of a correct result. Tool effects on external systems need their own correctness and recovery design. Unknown descendant cleanup must not be reported as complete. |
 | Credentials | Never automatically forward Flow-owned provider credentials through Tool environments, requests, results or logs. Retain the provider-authentication contract below. | Write protection alone is not read isolation or secret classification. Deliberately admitted inputs and Tool-returned data may contain secrets. Do not infer credential confidentiality against arbitrary host-authority code. |
 
 Flow's own configuration, context, provider and storage operations are internal runtime responsibilities, not model-selected Tools. The promise is **controlled invocations and workflows with trusted Tool implementations**, not that every runtime file access appears as a Building Block command.
@@ -165,14 +165,19 @@ Accepted target for agents (ADR-0223):
 - Agents change Workspace data only through the CLI/API and mutation pipeline of the replica on their own host, never in its store; that replica receives only the areas the agent Roles allow.
 - Each Role sets which changes are sensitive and wait for the person's approval, by default deletion, permission, grant and Automation changes. A grant may waive these approvals, at the discretion of the person who issues it.
 - History records the agent as actor and the person it acts for. Revoking the session or grant makes the Sync Server refuse the agent's further changes.
+- On a person's device, agents run under a sandbox profile that blocks Liquid's data folder, Seatbelt on macOS and Bubblewrap or Landlock on Linux, and Liquid's database key is released only to Liquid; managed company devices and Windows 11 use a separate operating-system account (ADR-0229).
+- Liquid AI is a built-in agent profile on a Meta-Harness host, local or remote, limited to Liquid actions (ADR-0229).
+- Agent hosts sync through the Sync Server; a later offline path through the device's Liquid is required, and the Sync Server verifies signed changes either way (ADR-0228).
 
-Accepted enterprise target for sign-in and sync (ADR-0224); how the Sync Server and devices store Workspace data remains open in [D-081](docs/decisions/open-decisions.html#d-081):
+Accepted enterprise target for sign-in, sync and storage (ADR-0224, ADR-0228):
 
 - Liquid accounts sign in with passkeys from M3; companies add single sign-on through OIDC or SAML, with SCIM provisioning.
 - Each device holds its own key in the Secure Enclave or TPM and connects over TLS 1.3. Every change is signed, and from M3 the Sync Server accepts a change only if its signer's Role allows it.
 - M3 starts with complete Workspace replicas, but the data model is divided into areas from the start, so that each device can later receive only what its person may access.
 - Signed changes make History tamper-evident, and the Sync Server keeps an audit log that companies can export to their security monitoring.
 - Liquid runs both as Liquid Cloud, with a chosen region and customer-managed keys, and self-hosted.
+- Devices encrypt Workspace content per area from M3. Each area key is wrapped for every device and agent host allowed in the area and, unless the Workspace chooses end-to-end encryption, for the Sync Server; choosing it later removes the server's copy. A company may run a compliance replica with its own key for search, legal hold and data-loss checks.
+- A new device receives keys only after a signed-in device approves it; a second recovery method follows. Liquid ships native apps only, with no web client.
 - App execution, external MCP calls and external-agent edits are separate risk classes and keep separate capability grants.
 
 This is Liquid's **workspace** action history (over Liquid's own data), not a project-code VCS. Detail: [`docs/concept/V-Spec_Liquid.html`](docs/concept/V-Spec_Liquid.html).
