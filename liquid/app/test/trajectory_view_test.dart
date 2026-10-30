@@ -860,6 +860,28 @@ void main() {
     expect(find.byKey(const Key('range')), findsNothing);
   });
 
+  testWidgets('a tree node outside the range clears it to show its step', (
+    tester,
+  ) async {
+    await show(tester, historyOf(long));
+    final tracks = tester.getRect(find.byKey(const Key('overview-tracks')));
+    await tester.dragFrom(
+      tester.getCenter(find.byKey(const Key('range-start'))),
+      Offset(
+        tracks.left +
+            tracks.width * 0.9 -
+            tester.getCenter(find.byKey(const Key('range-start'))).dx,
+        0,
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('step-s3')), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('tree-s3')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('range')), findsNothing);
+    expect(find.byKey(const ValueKey('step-s3')), findsOneWidget);
+  });
+
   testWidgets('dragging the range slowly scrolls the list', (tester) async {
     await show(tester, historyOf(long));
     String shown() =>

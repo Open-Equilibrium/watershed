@@ -555,13 +555,17 @@ class _TrajectoryViewState extends State<TrajectoryView> {
     }
   }
 
-  /// Selects a tree row's step, expanding its turn and showing its branch when the ledger
-  /// shows another one.
+  /// Selects a tree row's step, expanding its turn, leaving a range that hides it and showing
+  /// its branch when the ledger shows another one.
   void _jump(GraphRow row) {
     setState(() {
       _selected = row.node.id;
-      for (final record in _records) {
-        if (record.entry == row.node.id) _folded.remove(record.turn);
+      final index = _records.indexWhere(
+        (record) => record.entry == row.node.id,
+      );
+      if (index >= 0) {
+        if (!(_inRange()?[index] ?? true)) _range = null;
+        _folded.remove(_records[index].turn);
       }
     });
     if (_records.any((record) => record.entry == row.node.id)) {
