@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use super::entry::{Body, Entry, first_line};
-use crate::{EntryKind, SessionTree, TreeNode};
+use crate::{EntryKind, SessionTree, TreeNode, pi};
 
 /// Longest preview kept for a tree entry, in characters.
 const PREVIEW_CHARS: usize = 80;
@@ -12,19 +12,29 @@ const PREVIEW_CHARS: usize = 80;
 pub(super) fn session_tree(entries: &[Entry], leaf: Option<&str>) -> SessionTree {
     let mut label_parents: HashMap<&str, Option<&str>> = HashMap::new();
     let mut labels: HashMap<&str, Option<&str>> = HashMap::new();
+    // What each tool call works on, by call id, for its result's preview.
+    let mut targets: HashMap<&str, String> = HashMap::new();
     for entry in entries {
-        if let Body::Label { target, label } = &entry.body {
-            label_parents.insert(&entry.id, entry.parent.as_deref());
-            if let Some(target) = target {
-                labels.insert(target, label.as_deref());
+        match &entry.body {
+            Body::Label { target, label } => {
+                label_parents.insert(&entry.id, entry.parent.as_deref());
+                if let Some(target) = target {
+                    labels.insert(target, label.as_deref());
+                }
             }
+            Body::Assistant { calls, .. } => {
+                for call in calls {
+                    targets.insert(&call.id, pi::call_target(&call.arguments));
+                }
+            }
+            _ => {}
         }
     }
     let nodes = entries
         .iter()
         .filter(|entry| !matches!(entry.body, Body::Label { .. }))
         .map(|entry| {
-            let (kind, preview) = summary(&entry.body);
+            let (kind, preview) = summary(&entry.body, &targets);
             TreeNode {
                 id: entry.id.clone(),
                 parent: resolve(&label_parents, entry.parent.as_deref()),
@@ -36,6 +46,11 @@ pub(super) fn session_tree(entries: &[Entry], leaf: Option<&str>) -> SessionTree
                     .flatten()
                     .map(str::to_owned),
                 at_ms: entry.at_ms,
+                failed: match &entry.body {
+                    Body::ToolResult { failed, .. } => *failed,
+                    Body::Assistant { stop_reason, .. } => stop_reason == "error",
+                    _ => false,
+                },
             }
         })
         .collect();
@@ -62,12 +77,18 @@ fn resolve<'a>(
     id.map(str::to_owned)
 }
 
-fn summary(body: &Body) -> (EntryKind, String) {
+fn summary(body: &Body, targets: &HashMap<&str, String>) -> (EntryKind, String) {
     let line = |text: &str| first_line(text, PREVIEW_CHARS);
     match body {
         Body::User { text, .. } => (EntryKind::User, line(text)),
         Body::Assistant { text, .. } => (EntryKind::Assistant, line(text)),
-        Body::ToolResult { tool, .. } => (EntryKind::ToolResult, line(tool)),
+        Body::ToolResult { tool, call, .. } => {
+            let preview = match targets.get(call.as_str()) {
+                Some(target) if !target.is_empty() => format!("{tool} {target}"),
+                _ => tool.clone(),
+            };
+            (EntryKind::ToolResult, line(&preview))
+        }
         Body::System(_) => (EntryKind::System, String::new()),
         Body::Approval { tool, .. } => (EntryKind::Approval, line(tool)),
         Body::RequestTiming { .. } | Body::ToolTiming { .. } | Body::Custom => {

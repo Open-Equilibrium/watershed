@@ -30,6 +30,8 @@ pub struct BridgeTreeNode {
     pub label: Option<String>,
     /// Unix milliseconds when the entry was stored, if known.
     pub at_ms: Option<i64>,
+    /// Whether a tool call or model response failed.
+    pub failed: bool,
 }
 
 /// What a tree entry holds.

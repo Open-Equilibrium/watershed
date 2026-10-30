@@ -1114,6 +1114,7 @@ fn reads_state_and_tree_and_branches_through_the_extension() {
                     preview: "hi".to_owned(),
                     label: None,
                     at_ms: None,
+                    failed: false,
                 }],
                 leaf: Some("e1".to_owned()),
             }

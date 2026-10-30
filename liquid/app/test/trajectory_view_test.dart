@@ -575,6 +575,7 @@ void main() {
         ...historyOf(branchA).tree,
         for (final (index, step) in long.indexed)
           BridgeTreeNode(
+            failed: false,
             id: step.entry,
             parent: index == 0 ? 'e1' : long[index - 1].entry,
             kind: BridgeEntryKind.toolResult,
@@ -730,18 +731,21 @@ void main() {
     final tree = [
       for (final (index, step) in branchA.indexed)
         BridgeTreeNode(
+          failed: false,
           id: step.entry,
           parent: index == 0 ? null : branchA[index - 1].entry,
           kind: BridgeEntryKind.other,
           preview: step.label,
         ),
       const BridgeTreeNode(
+        failed: false,
         id: 'b1',
         parent: 'e3',
         kind: BridgeEntryKind.user,
         preview: 'Use a token bucket',
       ),
       const BridgeTreeNode(
+        failed: false,
         id: 'b2',
         parent: 'b1',
         kind: BridgeEntryKind.toolResult,

@@ -1781,8 +1781,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeTreeNode dco_decode_bridge_tree_node(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 6)
-      throw Exception('unexpected arr length: expect 6 but see ${arr.length}');
+    if (arr.length != 7)
+      throw Exception('unexpected arr length: expect 7 but see ${arr.length}');
     return BridgeTreeNode(
       id: dco_decode_String(arr[0]),
       parent: dco_decode_opt_String(arr[1]),
@@ -1790,6 +1790,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       preview: dco_decode_String(arr[3]),
       label: dco_decode_opt_String(arr[4]),
       atMs: dco_decode_opt_box_autoadd_i_64(arr[5]),
+      failed: dco_decode_bool(arr[6]),
     );
   }
 
@@ -2731,6 +2732,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_preview = sse_decode_String(deserializer);
     var var_label = sse_decode_opt_String(deserializer);
     var var_atMs = sse_decode_opt_box_autoadd_i_64(deserializer);
+    var var_failed = sse_decode_bool(deserializer);
     return BridgeTreeNode(
       id: var_id,
       parent: var_parent,
@@ -2738,6 +2740,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       preview: var_preview,
       label: var_label,
       atMs: var_atMs,
+      failed: var_failed,
     );
   }
 
@@ -3815,6 +3818,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.preview, serializer);
     sse_encode_opt_String(self.label, serializer);
     sse_encode_opt_box_autoadd_i_64(self.atMs, serializer);
+    sse_encode_bool(self.failed, serializer);
   }
 
   @protected

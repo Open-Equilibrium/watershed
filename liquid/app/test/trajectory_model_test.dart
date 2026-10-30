@@ -545,6 +545,7 @@ BridgeTreeNode node(
   String? label,
   int? at,
 }) => BridgeTreeNode(
+  failed: false,
   id: id,
   parent: parent,
   kind: kind,

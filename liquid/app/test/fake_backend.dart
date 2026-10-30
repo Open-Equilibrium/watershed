@@ -336,12 +336,14 @@ BridgeHistory historyOf(
       tree ??
       [
         const BridgeTreeNode(
+          failed: false,
           id: 'root',
           kind: BridgeEntryKind.other,
           preview: '',
         ),
         for (final (index, record) in records.indexed)
           BridgeTreeNode(
+            failed: record.failed,
             id: record.entry,
             parent: index == 0 ? 'root' : records[index - 1].entry,
             kind: switch (record.kind) {

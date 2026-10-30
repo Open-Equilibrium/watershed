@@ -549,6 +549,9 @@ class BridgeTreeNode {
   /// Unix milliseconds when the entry was stored, if known.
   final PlatformInt64? atMs;
 
+  /// Whether a tool call or model response failed.
+  final bool failed;
+
   const BridgeTreeNode({
     required this.id,
     this.parent,
@@ -556,6 +559,7 @@ class BridgeTreeNode {
     required this.preview,
     this.label,
     this.atMs,
+    required this.failed,
   });
 
   @override
@@ -565,7 +569,8 @@ class BridgeTreeNode {
       kind.hashCode ^
       preview.hashCode ^
       label.hashCode ^
-      atMs.hashCode;
+      atMs.hashCode ^
+      failed.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -577,5 +582,6 @@ class BridgeTreeNode {
           kind == other.kind &&
           preview == other.preview &&
           label == other.label &&
-          atMs == other.atMs;
+          atMs == other.atMs &&
+          failed == other.failed;
 }

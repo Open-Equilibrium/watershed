@@ -592,6 +592,7 @@ fn builds_the_session_tree_from_flat_entries() {
             preview: preview.to_owned(),
             label: label.map(str::to_owned),
             at_ms: None,
+            failed: false,
         };
     assert_eq!(
         History::from_entries(&data).tree(),
@@ -620,6 +621,33 @@ fn builds_the_session_tree_from_flat_entries() {
             ],
             leaf: Some("e4".to_owned()),
         }
+    );
+}
+
+#[test]
+fn names_what_a_tool_ran_on_and_whether_it_failed_in_the_tree() {
+    let data: Value = serde_json::from_str(
+        r#"{"entries":[
+          {"type":"message","id":"a1","parentId":null,"message":{"role":"assistant","content":[{"type":"toolCall","id":"c1","name":"bash","arguments":{"command":"npm test"}},{"type":"toolCall","id":"c2","name":"read","arguments":{"path":"a.ts"}}]}},
+          {"type":"message","id":"r1","parentId":"a1","message":{"role":"toolResult","toolCallId":"c1","toolName":"bash","isError":true,"content":[]}},
+          {"type":"message","id":"r2","parentId":"r1","message":{"role":"toolResult","toolCallId":"c2","toolName":"read","content":[]}},
+          {"type":"message","id":"a2","parentId":"r2","message":{"role":"assistant","stopReason":"error","content":[]}}],
+          "leafId":"a2"}"#,
+    )
+    .expect("JSON");
+    let nodes = History::from_entries(&data).tree().nodes;
+    assert_eq!(
+        nodes
+            .iter()
+            .map(|node| (node.id.as_str(), node.preview.as_str(), node.failed))
+            .collect::<Vec<_>>(),
+        [
+            ("a1", "", false),
+            ("r1", "bash npm test", true),
+            ("r2", "read a.ts", false),
+            ("a2", "", true),
+        ],
+        "a tool result names what its call ran on; a failed tool or response is marked"
     );
 }
 

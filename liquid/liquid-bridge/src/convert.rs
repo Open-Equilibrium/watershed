@@ -93,6 +93,7 @@ impl From<TreeNode> for BridgeTreeNode {
             preview: node.preview,
             label: node.label,
             at_ms: node.at_ms.map(int),
+            failed: node.failed,
         }
     }
 }

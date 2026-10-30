@@ -813,6 +813,12 @@ fn reads_tool_outcomes_and_what_the_model_saw() {
     let records = &history.trajectories[0].records;
     assert_eq!(records[2].kind, BridgeRecordKind::Tool);
     assert_eq!(records[2].outcome.added, Some(2), "lines the write wrote");
+    let result = history.tree.iter().find(|node| node.id == "r1");
+    assert_eq!(
+        result.map(|node| (node.preview.as_str(), node.failed)),
+        Some(("write a.ts", false)),
+        "the tree names what the write wrote to"
+    );
     assert_eq!(
         records
             .iter()

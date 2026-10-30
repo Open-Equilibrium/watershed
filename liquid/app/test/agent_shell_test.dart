@@ -396,23 +396,27 @@ void main() {
       [],
       tree: [
         const BridgeTreeNode(
+          failed: false,
           id: 'u1',
           kind: BridgeEntryKind.user,
           preview: 'Go',
         ),
         const BridgeTreeNode(
+          failed: false,
           id: 'a1',
           parent: 'u1',
           kind: BridgeEntryKind.assistant,
           preview: 'Looked',
         ),
         const BridgeTreeNode(
+          failed: false,
           id: 'a2',
           parent: 'a1',
           kind: BridgeEntryKind.assistant,
           preview: 'Done',
         ),
         const BridgeTreeNode(
+          failed: false,
           id: 'b1',
           parent: 'a1',
           kind: BridgeEntryKind.user,
