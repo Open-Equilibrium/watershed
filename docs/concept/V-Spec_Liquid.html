@@ -164,7 +164,7 @@ Liquid        = local-first workspace and App platform</code></pre>
         <div class="node"><strong>5 · History</strong><br><span class="muted">Actor: the agent; on behalf of: the person; origin: CLI; revertible.</span></div><span class="arrow">→</span>
         <div class="node"><strong>6 · Sync</strong><br><span class="muted">The signed change reaches other replicas; the Sync Server refuses it once the grant is revoked.</span></div>
       </div>
-      <p class="muted">Accepted target (ADR-0223, ADR-0224). Agents write only through the CLI/API of the replica on their own host, which holds only their Roles' areas; the rules are canonical in <a href="../../SECURITY.md#liquid-workspace-access--external-agent-edits">SECURITY.md</a>.</p>
+      <p class="muted">Accepted target (ADR-0223, ADR-0224). Agents write only through the CLI/API of the replica on their own host, which holds only their Roles' areas once selective replication follows the complete M3 replicas; the rules are canonical in <a href="../../SECURITY.md#liquid-workspace-access--external-agent-edits">SECURITY.md</a>.</p>
       <p>Sandbox and supply-chain requirements are canonical in <a href="../../SECURITY.md">SECURITY.md</a>.</p>
     </div></section>
 

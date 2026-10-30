@@ -162,7 +162,7 @@ Liquid is a standalone workspace product that external agents and tools can read
 Accepted target for agents (ADR-0223):
 
 - An agent acts with its own identity and a grant signed by the person it works for, naming an area, actions and an expiry. Its authority never exceeds that person's: it is the intersection of the agent's Role, the person's authority and the grant.
-- Agents change Workspace data only through the CLI/API and mutation pipeline of the replica on their own host, never in its store; that replica receives only the areas the agent Roles allow.
+- Agents change Workspace data only through the CLI/API and mutation pipeline of the replica on their own host, never in its store; once selective replication follows the complete M3 replicas, that replica receives only the areas the agent Roles allow (ADR-0224).
 - Each Role sets which changes are sensitive and wait for the person's approval, by default deletion, permission, grant and Automation changes. A grant may waive these approvals, at the discretion of the person who issues it.
 - History records the agent as actor and the person it acts for. Revoking the session or grant makes the Sync Server refuse the agent's further changes.
 - On a person's device, agents run under a sandbox profile that blocks Liquid's data folder, Seatbelt on macOS and Bubblewrap or Landlock on Linux, rechecked after operating-system updates, and Liquid's database key is released only to Liquid; managed company devices use a separate operating-system account, and on Windows 11 agents run in WSL under the Linux profile, which also blocks the Windows drives WSL mounts and starting Windows programs from WSL (ADR-0226, ADR-0229).
