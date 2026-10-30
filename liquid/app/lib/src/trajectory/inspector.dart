@@ -28,7 +28,7 @@ class Inspector extends StatelessWidget {
     required this.index,
     required this.detail,
     this.unread,
-    this.windowOf,
+    required this.windowOf,
     required this.tab,
     required this.canBranch,
     required this.onTab,
@@ -42,7 +42,7 @@ class Inspector extends StatelessWidget {
   final BridgeContextDetail? detail;
 
   /// The context window of a model, when known.
-  final int? Function(String model)? windowOf;
+  final int? Function(String model) windowOf;
 
   /// Why [detail] could not be read.
   final String? unread;
@@ -480,7 +480,7 @@ class _ContextTab extends StatelessWidget {
   final int? request;
   final BridgeContextDetail? detail;
   final String? unread;
-  final int? Function(String model)? windowOf;
+  final int? Function(String model) windowOf;
 
   @override
   Widget build(BuildContext context) {
@@ -517,7 +517,7 @@ class _ContextTab extends StatelessWidget {
       BridgeRecordKind.approval => 'the next request',
     };
     // The window of the model that read it, which an earlier model switch may change.
-    final window = windowOf?.call(read.model);
+    final window = windowOf(read.model);
     final compaction = window == null ? null : compactionPoint(window);
     final stepLabel = message ? 'New since the last request' : 'This step';
     return SingleChildScrollView(

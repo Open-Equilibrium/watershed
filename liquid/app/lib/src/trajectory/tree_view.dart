@@ -49,8 +49,13 @@ class SessionTreeView extends StatelessWidget {
   final bool open;
   final ValueChanged<bool>? onOpen;
 
-  /// The rows on the paths from the root to the shown tips.
+  /// The rows on the paths from the root to the shown tips; the same set while the tips stay, so
+  /// rows compare it at once and repaint only when it changes.
   Set<int> _path() {
+    if (_pathOf[graph] case (final tips, final path)
+        when setEquals(tips, shown)) {
+      return path;
+    }
     final path = <int>{};
     for (final (index, row) in graph.rows.indexed) {
       if (!shown.contains(row.node.id)) continue;
@@ -59,6 +64,7 @@ class SessionTreeView extends StatelessWidget {
         at = graph.rows[at].parentRow;
       }
     }
+    _pathOf[graph] = (Set.of(shown), path);
     return path;
   }
 
@@ -471,6 +477,9 @@ class _RowLines {
 
 /// The lines of each graph, computed once per graph rather than on every build.
 final _linesOf = Expando<List<_RowLines>>();
+
+/// The shown tips of each graph and the rows on their paths.
+final _pathOf = Expando<(Set<String>, Set<int>)>();
 
 List<_RowLines> _lines(SessionGraph graph) {
   final lines = [for (final _ in graph.rows) _RowLines()];

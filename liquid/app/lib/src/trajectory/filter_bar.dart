@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../controls.dart';
-import '../shortcuts/keymap.dart';
 import '../rust/api/history.dart';
+import '../shortcuts/keymap.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'trajectory_model.dart';
