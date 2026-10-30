@@ -1,3 +1,4 @@
+import Carbon.HIToolbox
 import Cocoa
 import FlutterMacOS
 import ServiceManagement
@@ -22,19 +23,27 @@ class MainFlutterWindow: NSWindow {
   }
 }
 
-/// With LIQUID_KEY_LOG=1, writes the key events macOS hands the window while ⌘, ⌃, ⌥ or the
-/// Liquid key (F18) is held to stderr, beside Flutter's own log of them, to find why some
-/// Liquid key shortcuts do nothing (PLAN.md). Plain typing never lands in the log.
+/// With LIQUID_KEY_LOG=1, writes the key events macOS hands the window with the Liquid key
+/// (F18), or with ⌘ or ⌃ but not ⌥, to stderr, beside Flutter's own log of them, to find why
+/// some Liquid key shortcuts do nothing (PLAN.md). Plain typing stays out of the log: ⌥ types
+/// characters such as @ on many layouts, and only Caps Lock of the modifier keys is logged.
 private func logKeysIfAsked() {
   guard ProcessInfo.processInfo.environment["LIQUID_KEY_LOG"] == "1" else { return }
-  let f18: UInt16 = 79
+  let f18 = UInt16(kVK_F18)
   var liquidKeyDown = false
+  // A Liquid key let go in another app never reaches this window.
+  NotificationCenter.default.addObserver(
+    forName: NSApplication.didResignActiveNotification, object: nil, queue: .main
+  ) { _ in liquidKeyDown = false }
   NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp, .flagsChanged]) { event in
     if event.type != .flagsChanged && event.keyCode == f18 {
       liquidKeyDown = event.type == .keyDown
     }
-    let held = event.modifierFlags.intersection([.command, .control, .option])
-    guard liquidKeyDown || !held.isEmpty || event.keyCode == f18 || event.type == .flagsChanged
+    let chord =
+      !event.modifierFlags.intersection([.command, .control]).isEmpty
+      && !event.modifierFlags.contains(.option)
+    let capsLock = event.type == .flagsChanged && event.keyCode == UInt16(kVK_CapsLock)
+    guard liquidKeyDown || event.keyCode == f18 || capsLock || (chord && event.type != .flagsChanged)
     else { return event }
     let characters = event.type == .flagsChanged ? "-" : (event.characters ?? "-")
     let plain = event.type == .flagsChanged ? "-" : (event.charactersIgnoringModifiers ?? "-")

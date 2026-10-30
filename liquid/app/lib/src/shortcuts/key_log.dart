@@ -29,22 +29,19 @@ String describeKeyEvent(
   ].join(' ');
 }
 
-/// Whether the log takes `event`: only while ⌘, ⌃, ⌥ or the Liquid key is held, so plain
-/// typing, such as a password or token, never lands in it.
-bool logsKey(KeyEvent event, Set<LogicalKeyboardKey> pressed) =>
-    event.logicalKey == liquidKey ||
-    pressed.any(
-      (key) =>
-          key == liquidKey ||
-          LogicalKeyboardKey.expandSynonyms({
-            LogicalKeyboardKey.meta,
-            LogicalKeyboardKey.control,
-            LogicalKeyboardKey.alt,
-          }).contains(key),
-    );
+/// Whether the log takes `event`: with the Liquid key, or with ⌘ or ⌃ but not ⌥, so plain
+/// typing, such as a password or token, stays out of it; ⌥ types characters such as @ on many
+/// layouts, and AltGr reaches Flutter as ⌃⌥ on Windows.
+bool logsKey(KeyEvent event, Set<LogicalKeyboardKey> pressed) {
+  bool held(LogicalKeyboardKey modifier) =>
+      pressed.any(LogicalKeyboardKey.expandSynonyms({modifier}).contains);
+  if (event.logicalKey == liquidKey || pressed.contains(liquidKey)) return true;
+  return (held(LogicalKeyboardKey.meta) || held(LogicalKeyboardKey.control)) &&
+      !held(LogicalKeyboardKey.alt);
+}
 
-/// With `LIQUID_KEY_LOG=1`, writes the key events Flutter receives while a modifier or the
-/// Liquid key is held to stderr; the macOS runner logs the native events beside them.
+/// With `LIQUID_KEY_LOG=1`, writes the key events Flutter receives that [logsKey] takes to
+/// stderr; the macOS runner logs the native events beside them.
 void logKeysIfAsked(Map<String, String> environment) {
   if (environment['LIQUID_KEY_LOG'] != '1') return;
   HardwareKeyboard.instance.addHandler((event) {

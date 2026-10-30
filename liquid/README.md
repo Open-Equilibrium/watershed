@@ -19,7 +19,7 @@ The app starts pi for the project named in the environment and opens the start p
 - `LIQUID_PI_EXTENSION` — the absolute path of `meta-harness/pi-extension/watershed.ts` (required: pi would run tools without approvals, so Liquid does not start a session unless this extension is loaded).
 - `LIQUID_PI` — the pi executable, a name looked up on `PATH` or an absolute path; defaults to `pi`.
 - `LIQUID_PI_SESSION` — the absolute path of a stored pi session file to reopen, with its Trajectory and branches.
-- `LIQUID_KEY_LOG=1` — writes key events to stderr twice, as macOS hands them to the window (`native key`) and as Flutter receives them (`flutter key`), to diagnose shortcuts; only while ⌘, ⌃, ⌥ or the Liquid key is held, so plain typing is not recorded.
+- `LIQUID_KEY_LOG=1` — writes key events to stderr twice, as macOS hands them to the window (`native key`) and as Flutter receives them (`flutter key`), to diagnose shortcuts; only with the Liquid key, or with ⌘ or ⌃ but not ⌥ (which types characters such as @ on many layouts), so plain typing is not recorded.
 
 ## Liquid key
 

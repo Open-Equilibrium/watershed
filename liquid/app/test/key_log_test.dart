@@ -26,7 +26,7 @@ void main() {
     },
   );
 
-  test('logs only while a modifier or the Liquid key is held', () {
+  test('logs only the Liquid key and ⌘ or ⌃ shortcuts, never typing', () {
     expect(
       logsKey(keyL, {LogicalKeyboardKey.keyL}),
       isFalse,
@@ -36,6 +36,26 @@ void main() {
     expect(
       logsKey(keyL, {LogicalKeyboardKey.metaLeft, LogicalKeyboardKey.keyL}),
       isTrue,
+    );
+    const at = KeyDownEvent(
+      physicalKey: PhysicalKeyboardKey.keyL,
+      logicalKey: LogicalKeyboardKey.keyL,
+      character: '@',
+      timeStamp: Duration.zero,
+    );
+    expect(
+      logsKey(at, {LogicalKeyboardKey.altLeft, LogicalKeyboardKey.keyL}),
+      isFalse,
+      reason: '⌥ types characters such as @ on German layouts',
+    );
+    expect(
+      logsKey(at, {
+        LogicalKeyboardKey.controlLeft,
+        LogicalKeyboardKey.altRight,
+        LogicalKeyboardKey.keyL,
+      }),
+      isFalse,
+      reason: 'AltGr reaches Flutter as ⌃⌥ on Windows',
     );
   });
 }
