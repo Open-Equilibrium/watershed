@@ -6,20 +6,20 @@ Observational evidence for the [agent-surface slice](../../PLAN.md) under the [e
 
 - Apple M6, 24 GB, macOS 27.0 (26A428).
 - Rust 1.99.0, release builds; Flutter 3.47.7 `flutter test` (debug JIT).
-- The first three workloads observed on 2026-10-26 at commit `733887b`; one run each. The long approval line observed on 2026-10-28 at `24af34f`, as one text, and with that commit's approval card replaced by pieces; one run each.
+- Token streaming observed on 2026-10-30 at commit `7781c3f`; the two long Trajectory workloads on 2026-10-26 at commit `733887b`; one run each. The long approval line observed on 2026-10-28 at `24af34f`, as one text, and with that commit's approval card replaced by pieces; one run each.
 
 ## Workloads
 
 | Workload | Command | Input | Exclusions |
 | --- | --- | --- | --- |
-| Token streaming | `/usr/bin/time -l target/release/examples/stream_observe` after `cargo build --release -p liquid_bridge --example stream_observe` | One response of 20,000 text deltas of 16 bytes from a scripted agent, through the core and the bridge's event forwarding to a consumer that takes each event at once; 20 samples, each a fresh session | No model; the Dart isolate and flutter_rust_bridge's transfer to Dart |
+| Token streaming | `/usr/bin/time -l target/release/examples/stream_observe` after `cargo build --release -p liquid_bridge --example stream_observe` | One response of 20,000 text deltas of 16 bytes from a scripted agent, through the core and the bridge's event forwarding, which gathers streaming text for 50 ms and merges it as it arrives, to a consumer that takes each event at once; 20 samples, each a fresh session | No model; the Dart isolate and flutter_rust_bridge's transfer to Dart |
 | Long Trajectory, core | `/usr/bin/time -l target/release/examples/trajectory_observe` after `cargo build --release -p meta-harness-core --example trajectory_observe` | A session file of 1,000 turns of eight entries (prompt, response with a tool call, approval, tool result, final response and three timing entries) and eight forks of ten turns: 8,640 entries in 2,050,826 bytes; per sample a fresh session reads the stored entries from the file, asks the scripted agent for newer ones, builds the tree and the Trajectories of the main branch and the last fork, then reads again, which only asks for entries after the last one; 20 samples. A second run of the example writes the file first, so building it stays out of the measured process | No model; agent-side time to produce the data |
 | Long Trajectory, Dart | `flutter test benchmark/trajectory_observe_test.dart` in `liquid/app` | The core's session shape plus a ninth, early fork of ten turns: 8,720 tree nodes and 5,000 records on the main branch; the late fork shares 4,440 steps, the early fork 555; three warmups and 20 samples per operation | Widget building and painting |
 | Long approval line | `flutter test benchmark/approval_line_observe_test.dart` in `liquid/app` | A shell command of 1,000,000 characters without spaces opens as an approval in the agent shell at 1600 × 900; five samples, each from a new shell, timed until the card has settled | Rust, the bridge and the first frame of the shell |
 
 ## Observations
 
-Token streaming: the 20,000 deltas arrive as 173 to 184 events, the largest carrying 3,120 bytes of merged text. Maximum resident set size 9.3 MB, peak memory footprint 7.9 MB.
+Token streaming: the 20,000 deltas arrive as 2 text events, 7 events in all, the larger carrying 318,000 bytes of merged text. Maximum resident set size 8.8 MB, peak memory footprint 7.3 MB. Earlier records before the 50 ms window counted 173 to 184 events and are not comparable.
 
 Long Trajectory, core: the first read from the session file takes most of each sample (10.7 ms p50); the tree and both Trajectories over the compact index take about 3.4 ms together, and the follow-up read of new entries about 0.06 ms. The process's peak memory footprint is 17.2 MB. `/usr/bin/time` reports 50.9 MB maximum resident set size, but that counts the waited-for writer run too, so only the footprint describes the measured process. Earlier records built the session file in the measured process and are not comparable, nor are runs that read the stored entries from one agent response.
 
@@ -32,27 +32,27 @@ Long approval line: as one text, the card took 19.3 to 21.4 s to settle, since a
 Token streaming:
 
 ```json
-{"sample":0,"elapsed_ms":19.985,"events":180,"delta_events":175,"largest_delta_bytes":2448}
-{"sample":1,"elapsed_ms":13.484,"events":178,"delta_events":173,"largest_delta_bytes":2608}
-{"sample":2,"elapsed_ms":11.284,"events":175,"delta_events":170,"largest_delta_bytes":2480}
-{"sample":3,"elapsed_ms":11.238,"events":176,"delta_events":171,"largest_delta_bytes":2576}
-{"sample":4,"elapsed_ms":11.190,"events":175,"delta_events":170,"largest_delta_bytes":2464}
-{"sample":5,"elapsed_ms":11.433,"events":184,"delta_events":179,"largest_delta_bytes":2544}
-{"sample":6,"elapsed_ms":11.531,"events":175,"delta_events":170,"largest_delta_bytes":2896}
-{"sample":7,"elapsed_ms":11.416,"events":174,"delta_events":169,"largest_delta_bytes":2480}
-{"sample":8,"elapsed_ms":11.330,"events":175,"delta_events":170,"largest_delta_bytes":2480}
-{"sample":9,"elapsed_ms":11.320,"events":180,"delta_events":175,"largest_delta_bytes":2576}
-{"sample":10,"elapsed_ms":11.460,"events":174,"delta_events":169,"largest_delta_bytes":2576}
-{"sample":11,"elapsed_ms":11.360,"events":176,"delta_events":171,"largest_delta_bytes":2608}
-{"sample":12,"elapsed_ms":11.426,"events":177,"delta_events":172,"largest_delta_bytes":2480}
-{"sample":13,"elapsed_ms":11.308,"events":178,"delta_events":173,"largest_delta_bytes":2992}
-{"sample":14,"elapsed_ms":11.429,"events":174,"delta_events":169,"largest_delta_bytes":3120}
-{"sample":15,"elapsed_ms":11.233,"events":176,"delta_events":171,"largest_delta_bytes":2560}
-{"sample":16,"elapsed_ms":11.401,"events":180,"delta_events":175,"largest_delta_bytes":2464}
-{"sample":17,"elapsed_ms":11.218,"events":174,"delta_events":169,"largest_delta_bytes":2512}
-{"sample":18,"elapsed_ms":11.394,"events":175,"delta_events":170,"largest_delta_bytes":2592}
-{"sample":19,"elapsed_ms":11.498,"events":173,"delta_events":168,"largest_delta_bytes":2464}
-{"summary":"stream","deltas_in":20000,"delta_bytes":16,"samples":20,"p50_ms":11.394,"p95_ms":13.484,"max_ms":19.985}
+{"sample":0,"elapsed_ms":12.947,"events":7,"delta_events":2,"largest_delta_bytes":318000}
+{"sample":1,"elapsed_ms":10.626,"events":7,"delta_events":2,"largest_delta_bytes":318000}
+{"sample":2,"elapsed_ms":10.797,"events":7,"delta_events":2,"largest_delta_bytes":318000}
+{"sample":3,"elapsed_ms":10.897,"events":7,"delta_events":2,"largest_delta_bytes":318000}
+{"sample":4,"elapsed_ms":10.890,"events":7,"delta_events":2,"largest_delta_bytes":318000}
+{"sample":5,"elapsed_ms":10.621,"events":7,"delta_events":2,"largest_delta_bytes":318000}
+{"sample":6,"elapsed_ms":10.772,"events":7,"delta_events":2,"largest_delta_bytes":318000}
+{"sample":7,"elapsed_ms":10.739,"events":7,"delta_events":2,"largest_delta_bytes":318000}
+{"sample":8,"elapsed_ms":10.867,"events":7,"delta_events":2,"largest_delta_bytes":318000}
+{"sample":9,"elapsed_ms":10.947,"events":7,"delta_events":2,"largest_delta_bytes":318000}
+{"sample":10,"elapsed_ms":10.897,"events":7,"delta_events":2,"largest_delta_bytes":318000}
+{"sample":11,"elapsed_ms":10.950,"events":7,"delta_events":2,"largest_delta_bytes":318000}
+{"sample":12,"elapsed_ms":10.646,"events":7,"delta_events":2,"largest_delta_bytes":318000}
+{"sample":13,"elapsed_ms":11.015,"events":7,"delta_events":2,"largest_delta_bytes":318000}
+{"sample":14,"elapsed_ms":10.778,"events":7,"delta_events":2,"largest_delta_bytes":318000}
+{"sample":15,"elapsed_ms":10.743,"events":7,"delta_events":2,"largest_delta_bytes":318000}
+{"sample":16,"elapsed_ms":10.788,"events":7,"delta_events":2,"largest_delta_bytes":317536}
+{"sample":17,"elapsed_ms":10.974,"events":7,"delta_events":2,"largest_delta_bytes":318000}
+{"sample":18,"elapsed_ms":10.779,"events":7,"delta_events":2,"largest_delta_bytes":318000}
+{"sample":19,"elapsed_ms":10.900,"events":7,"delta_events":2,"largest_delta_bytes":318000}
+{"summary":"stream","deltas_in":20000,"delta_bytes":16,"samples":20,"p50_ms":10.797,"p95_ms":11.015,"max_ms":12.947}
 ```
 
 Long Trajectory, core:
