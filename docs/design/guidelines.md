@@ -1,12 +1,12 @@
 # Design guidelines
 
-These rules apply to every Watershed GUI. Every GUI change starts with HTML mockups that the maintainer approves; approved mockups live in [mockups/](mockups/liquid-agent-surface.html), [session flows](mockups/liquid-session-flows.html) and [look](mockups/liquid-look.html). Design tokens are canonical in [tokens.css](tokens.css); components use tokens, never raw values. Flutter reads them from `liquid/app/lib/src/theme/tokens.g.dart`, which `scripts/design_tokens.py` generates; a tooling test fails when it falls out of date.
+These rules apply to every Watershed GUI. Every GUI change starts with HTML mockups that the maintainer approves; approved mockups live in [mockups/](mockups/liquid-agent-surface.html), [session flows](mockups/liquid-session-flows.html), [look](mockups/liquid-look.html) and [navigation](mockups/liquid-trajectory-navigation.html). Design tokens are canonical in [tokens.css](tokens.css); components use tokens, never raw values. Flutter reads them from `liquid/app/lib/src/theme/tokens.g.dart`, which `scripts/design_tokens.py` generates; a tooling test fails when it falls out of date.
 
 References: Notion, AppFlowy, Microsoft Loop and T3 Code.
 
 ## Principles
 
-1. **Content first.** Chrome recedes: generous whitespace, few lines, controls appear when needed.
+1. **Content first.** Chrome recedes: generous whitespace, few lines, controls appear when needed. Every screen still explains itself: the session header names the project and model, and a new session greets with its project; nothing is decorative.
 2. **Calm neutrals, one accent.** Color always carries meaning: the accent marks selection and the primary action, warning marks "waiting for you", success and danger mark results.
 3. **Dense where people develop.** Monospace for code, paths and tool calls; tabular figures for numbers; prose stays airy.
 4. **Everything through tokens.** Color, type, spacing, radii, shadows and motion are named tokens, so changing a token changes every GUI.
@@ -18,16 +18,18 @@ References: Notion, AppFlowy, Microsoft Loop and T3 Code.
 ## Tokens
 
 - **Color:** Notion's warm neutrals (`canvas`, `subtle`, `surface`, `hover`, `selected`), very light borders, three text levels, Liquid azure as the accent (the logo's blue, AA contrast), status colors (`success`, `warning`, `danger`), GitHub-style diff and syntax colors and data-series colors. Surfaces are separated by background rather than borders. Light and dark values share names; a GUI selects `.theme-light` or `.theme-dark`, and system mode follows the operating system.
-- **Type:** Notion's platform UI font stack and a monospace font for code, with AppFlowy's sizes: display 32/40 bold, h1 24/32, h2 20/28 and h3 16/22 semibold, prose 16/24, UI 14/20, compact 13/20 for dense rows, chips and buttons, small 12/18, caption 11/14 for chart axes, badges and tags, mono 13/20.
+- **Type:** Notion's platform UI font stack and a monospace font for code, with AppFlowy's sizes: display 32/40 bold, h1 24/32, h2 20/28 and h3 16/22 semibold, prose 16/24, UI 15/22, compact 13/20 for dense rows, chips and buttons, small 12/18, caption 11/14 for chart axes, badges and tags, mono 13/20.
 - **Spacing:** 4, 6, 8, 12, 16, 20, 24 and 32 px.
 - **Radii:** 4 for tags, 6 for buttons, inputs and list items, 8 for cards and panels, 12 for windows, dialogs and the input area.
-- **Rows:** 28 px for navigation items, 34 px for table rows.
+- **Rows:** 32 px for navigation items, 34 px for table rows.
+- **Text size:** Settings → Appearance scales text and rows together: Compact, Default (the sizes above) or Large.
 - **Motion:** 120 ms for hover and press, 200 ms for panels, ease-out; none when the user prefers reduced motion.
 - **Icons:** Lucide (ISC), 16 px in rows and buttons, in the text color of their context; status icons always come with text (principle 5).
 - **Logo:** [liquid-logo.svg](liquid-logo.svg) is the source of Liquid's app icon, on Apple's icon grid, and of its sidebar mark.
 
 ## Patterns
 
-- The input area keeps one position and height in every view of a session; approvals and agent dialogs appear inside it, and widgets sit directly above it.
-- Focusing a range dims everything outside it instead of filtering it out.
+- The input area floats at the bottom of each tab's main column, centered within the reading width, as T3 Code's composer does; content runs on beneath it. Approvals and agent dialogs appear inside it, and widgets sit directly above it.
+- Filters dim what does not match instead of hiding it; a range set with the timeline's handles limits the list to its steps.
+- A step's kind has one shape and color everywhere: the Kind tags, the timeline and the session tree.
 - A choice of one among a few options uses the shared segments as the [closeout mockups](mockups/liquid-closeout.html) draw them, framed and the same in every view; older mockups that draw it otherwise are superseded.
