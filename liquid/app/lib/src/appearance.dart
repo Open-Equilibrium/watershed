@@ -134,10 +134,15 @@ class _AppearancePaneState extends State<AppearancePane> {
   /// Why the latest change could not be saved; it still applies until Liquid quits.
   String? _failure;
 
+  /// Counts the changes, so only the latest one's save decides what the pane says: each save
+  /// writes the whole appearance.
+  int _changes = 0;
+
   void _change(Appearance next) {
+    final change = ++_changes;
     setState(() => _failure = null);
     widget.appearance.change(next).catchError((Object error) {
-      if (mounted) {
+      if (mounted && change == _changes) {
         setState(
           () => _failure = switch (error) {
             FileSystemException(:final message) =>

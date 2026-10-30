@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -105,6 +106,39 @@ void main() {
       findsOneWidget,
     );
   });
+
+  testWidgets('a later saved change clears an earlier failure', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1600, 900));
+    final saves = _Slow();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: liquidTheme(Brightness.light),
+        home: Scaffold(body: AppearancePane(appearance: saves)),
+      ),
+    );
+    await tester.tap(find.text('Dark'));
+    await tester.tap(find.text('Large'));
+    saves.pending[0].completeError(const FileSystemException('disk full'));
+    saves.pending[1].complete();
+    await tester.pumpAndSettle();
+    expect(
+      find.textContaining('Could not save'),
+      findsNothing,
+      reason: 'the later save wrote the whole appearance',
+    );
+  });
+}
+
+/// An appearance whose saves end when the test says so.
+class _Slow extends AppearanceController {
+  final pending = <Completer<void>>[];
+
+  @override
+  Future<void> change(Appearance appearance) {
+    value = appearance;
+    pending.add(Completer());
+    return pending.last.future;
+  }
 }
 
 /// An appearance that applies but cannot be saved.
