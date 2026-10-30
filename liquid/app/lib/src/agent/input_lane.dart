@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../controls.dart';
 import '../theme/theme.dart';
@@ -55,11 +56,57 @@ class InputLane extends StatelessWidget {
           child: Center(
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: readingWidth),
-              child: SizedBox(width: double.infinity, child: input),
+              child: SizedBox(
+                width: double.infinity,
+                child: InputScope(child: input),
+              ),
             ),
           ),
         ),
       ],
     );
   }
+}
+
+/// Marks the input area, so a tab's own keys can leave typing in it alone.
+class InputScope extends StatelessWidget {
+  const InputScope({super.key, required this.child});
+
+  final Widget child;
+
+  /// Whether the keyboard is in the input area.
+  static bool hasFocus() =>
+      FocusManager.instance.primaryFocus?.context
+          ?.findAncestorWidgetOfExactType<InputScope>() !=
+      null;
+
+  @override
+  Widget build(BuildContext context) => child;
+}
+
+/// A tab's own keys, as [CallbackShortcuts] binds them, except while the keyboard is in the
+/// floating input area: there its keys type, and app-wide keys above still work.
+class ViewShortcuts extends StatelessWidget {
+  const ViewShortcuts({super.key, required this.bindings, required this.child});
+
+  final Map<ShortcutActivator, VoidCallback> bindings;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => Focus(
+    canRequestFocus: false,
+    skipTraversal: true,
+    onKeyEvent: (node, event) {
+      if (InputScope.hasFocus()) return KeyEventResult.ignored;
+      for (final MapEntry(key: activator, value: callback)
+          in bindings.entries) {
+        if (activator.accepts(event, HardwareKeyboard.instance)) {
+          callback();
+          return KeyEventResult.handled;
+        }
+      }
+      return KeyEventResult.ignored;
+    },
+    child: child,
+  );
 }

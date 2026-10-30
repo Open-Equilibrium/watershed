@@ -765,6 +765,48 @@ void main() {
     }
   });
 
+  testWidgets('typing in the input area never runs a tab\'s own keys', (
+    tester,
+  ) async {
+    final diffSettings = DiffSettingsController();
+    await show(tester, diffSettings: diffSettings);
+    await tester.pumpAndSettle();
+    final composer = find.byKey(const Key('composer'));
+    Future<void> openTab(LogicalKeyboardKey digit) async {
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+      await tester.sendKeyEvent(digit);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+      await tester.pumpAndSettle();
+    }
+
+    await openTab(LogicalKeyboardKey.digit2);
+    await tester.tap(composer);
+    await tester.pump();
+    for (final key in [
+      LogicalKeyboardKey.keyC,
+      LogicalKeyboardKey.keyB,
+      LogicalKeyboardKey.space,
+    ]) {
+      await tester.sendKeyEvent(key);
+    }
+    await tester.pumpAndSettle();
+    expect(state.notice.value, isNull, reason: 'c did not compare');
+    expect(
+      backend.calls.where((call) => call.startsWith('branch')),
+      isEmpty,
+      reason: 'b did not branch',
+    );
+
+    await openTab(LogicalKeyboardKey.digit3);
+    await tester.tap(composer);
+    await tester.pump();
+    final before = diffSettings.value;
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyU);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyW);
+    await tester.pumpAndSettle();
+    expect(diffSettings.value, before, reason: 'u and w typed, not switched');
+  });
+
   testWidgets('the session header names the project and the model', (
     tester,
   ) async {

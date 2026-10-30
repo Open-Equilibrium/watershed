@@ -667,7 +667,7 @@ class _TrajectoryViewState extends State<TrajectoryView> {
             onChanged: (filter) => setState(() => _filter = filter),
           ),
         Expanded(
-          child: CallbackShortcuts(
+          child: ViewShortcuts(
             bindings: {
               ...keys.bind({
                 Command.foldAll: _foldAll,

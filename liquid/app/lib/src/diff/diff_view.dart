@@ -264,7 +264,7 @@ class _DiffViewState extends State<DiffView> {
   );
 
   @override
-  Widget build(BuildContext context) => CallbackShortcuts(
+  Widget build(BuildContext context) => ViewShortcuts(
     bindings: {
       ...Fixed.previousOrNextFile.bind([() => _move(-1), () => _move(1)]),
       ...Fixed.foldFolder.bind([_fold, _unfold]),
