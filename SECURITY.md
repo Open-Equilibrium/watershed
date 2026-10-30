@@ -168,6 +168,8 @@ Accepted target for agents (ADR-0223):
 - On a person's device, agents run under a sandbox profile that blocks Liquid's data folder, Seatbelt on macOS and Bubblewrap or Landlock on Linux, rechecked after operating-system updates, and Liquid's database key is released only to Liquid; managed company devices use a separate operating-system account, and on Windows 11 agents run in WSL under the Linux profile (ADR-0226, ADR-0229).
 - Liquid AI is a built-in agent profile on a Meta-Harness host, local or remote, limited to Liquid actions (ADR-0229).
 - Agent hosts sync through the Sync Server; a later offline path through the device's Liquid is required, and the Sync Server verifies signed changes either way (ADR-0228).
+- A company may limit where agent hosts run. The Sync Server then wraps no area keys and accepts no grants for other hosts, and Liquid follows the company's device-management policy, starting no local Meta-Harness. Agents installed outside Liquid are the device management's to block (ADR-0233).
+- Others with access watch a shared session and propose prompts that its owner sends; the agent keeps the owner's grant. Team agents later take a grant from a Role, steered only by people who hold its rights themselves (ADR-0232).
 
 Accepted enterprise target for sign-in, sync and storage (ADR-0224, ADR-0228):
 
