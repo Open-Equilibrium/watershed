@@ -324,6 +324,11 @@ enum Command {
     Keys(LogicalKeyboardKey.arrowLeft, alt: true),
   ),
   openStep('Open the step', Area.trajectory, Keys(LogicalKeyboardKey.enter)),
+  filterSteps(
+    'Filter steps',
+    Area.trajectory,
+    Keys(LogicalKeyboardKey.keyF, meta: true),
+  ),
   closeStep('Close the step', Area.trajectory, Keys(LogicalKeyboardKey.escape)),
   branch(
     'Branch from the step',

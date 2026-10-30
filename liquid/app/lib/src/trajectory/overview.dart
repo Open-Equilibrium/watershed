@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
@@ -17,8 +18,24 @@ class OverviewTrack {
   final List<Segment> segments;
 }
 
-/// The Trajectory's single top section: every step on one time axis. Dragging focuses a range,
-/// scrolling zooms around the pointer.
+/// The part of the axis the list shows, or the range it is limited to, and how to read it.
+@immutable
+class Brush {
+  const Brush(this.start, this.end, this.label, {this.range = false});
+
+  final double start;
+  final double end;
+
+  /// Which steps it covers, for assistive technology.
+  final String label;
+
+  /// Whether it is a range that limits the list rather than what the list shows.
+  final bool range;
+}
+
+/// The Trajectory's single top section: every step on one time axis (approved navigation
+/// mockup). A brush marks what the list shows; its handles limit the list to a range, dragging
+/// it scrolls the list, a click jumps to the step there and scrolling zooms around the pointer.
 class Overview extends StatefulWidget {
   const Overview({
     super.key,
@@ -26,9 +43,12 @@ class Overview extends StatefulWidget {
     required this.span,
     required this.equalWidth,
     required this.window,
-    required this.range,
-    required this.onRange,
     required this.onWindow,
+    this.brush,
+    this.onRange,
+    this.onPan,
+    this.onJump,
+    this.matches,
     this.mark,
     this.legend = false,
   });
@@ -41,11 +61,22 @@ class Overview extends StatefulWidget {
 
   /// The zoomed part of the axis; `null` shows all of it.
   final (double, double)? window;
-
-  /// The focused range.
-  final (double, double)? range;
-  final ValueChanged<(double, double)?> onRange;
   final ValueChanged<(double, double)?> onWindow;
+
+  /// What the list shows or the range limiting it; none while comparing.
+  final ValueListenable<Brush?>? brush;
+
+  /// A handle set the range, or cleared it with `null`.
+  final ValueChanged<(double, double)?>? onRange;
+
+  /// Dragging the brush asks the list to start at this point of the axis.
+  final ValueChanged<double>? onPan;
+
+  /// A click at this point of the axis.
+  final ValueChanged<double>? onJump;
+
+  /// Which records match the filters; the others draw faint.
+  final List<bool>? matches;
 
   /// A diamond on the axis: the selected step or the branch point.
   final double? mark;
@@ -58,9 +89,6 @@ class Overview extends StatefulWidget {
 }
 
 class _OverviewState extends State<Overview> {
-  /// Where the current drag started on the axis.
-  double? _anchor;
-
   /// The trackpad pinch scale seen last during the current gesture.
   double _lastScale = 1;
 
@@ -72,9 +100,10 @@ class _OverviewState extends State<Overview> {
       :span,
       :equalWidth,
       :window,
-      :range,
-      :onRange,
       :onWindow,
+      :brush,
+      :onJump,
+      :matches,
       :mark,
       :legend,
     ) = widget;
@@ -159,67 +188,73 @@ class _OverviewState extends State<Overview> {
                         scale: update.scale,
                       ),
                       onPointerPanZoomEnd: (_) => _lastScale = 1,
-                      child: GestureDetector(
-                        key: const Key('overview-tracks'),
-                        behavior: HitTestBehavior.opaque,
-                        dragStartBehavior: DragStartBehavior.down,
-                        // Trackpad gestures zoom; a pressed trackpad drags as a mouse.
-                        supportedDevices: const {
-                          PointerDeviceKind.mouse,
-                          PointerDeviceKind.touch,
-                          PointerDeviceKind.stylus,
-                          PointerDeviceKind.invertedStylus,
-                        },
-                        onTap: () => onRange(null),
-                        onHorizontalDragStart: (details) =>
-                            _anchor = at(details.localPosition.dx),
-                        onHorizontalDragEnd: (_) => _anchor = null,
-                        onHorizontalDragUpdate: (details) {
-                          final from = _anchor;
-                          if (from == null) return;
-                          final to = at(details.localPosition.dx);
-                          onRange((math.min(from, to), math.max(from, to)));
-                        },
-                        child: Column(
-                          children: [
-                            SizedBox(
-                              height: 14,
-                              width: double.infinity,
-                              child: CustomPaint(
-                                painter: _AxisPainter(
-                                  visible: visible,
-                                  equalWidth: equalWidth,
-                                  mark: mark,
-                                  palette: ws,
-                                ),
-                              ),
-                            ),
-                            for (final track in tracks)
-                              Padding(
-                                padding: const EdgeInsets.only(
-                                  top: WsMetrics.space2,
-                                ),
-                                child: SizedBox(
-                                  height: 12,
+                      child: Stack(
+                        children: [
+                          GestureDetector(
+                            key: const Key('overview-tracks'),
+                            behavior: HitTestBehavior.opaque,
+                            onTapUp: onJump == null
+                                ? null
+                                : (details) =>
+                                      onJump(at(details.localPosition.dx)),
+                            child: Column(
+                              children: [
+                                SizedBox(
+                                  height: 14,
                                   width: double.infinity,
                                   child: CustomPaint(
-                                    painter: _TrackPainter(
-                                      segments: track.segments,
+                                    painter: _AxisPainter(
                                       visible: visible,
-                                      range: range,
+                                      equalWidth: equalWidth,
+                                      mark: mark,
                                       palette: ws,
                                     ),
                                   ),
                                 ),
-                              ),
-                          ],
-                        ),
+                                for (final track in tracks)
+                                  Padding(
+                                    padding: const EdgeInsets.only(
+                                      top: WsMetrics.space2,
+                                    ),
+                                    child: SizedBox(
+                                      height: 12,
+                                      width: double.infinity,
+                                      child: CustomPaint(
+                                        painter: _TrackPainter(
+                                          segments: track.segments,
+                                          visible: visible,
+                                          matches: matches,
+                                          palette: ws,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                          if (brush != null)
+                            ValueListenableBuilder(
+                              valueListenable: brush,
+                              builder: (context, brush, _) => brush == null
+                                  ? const SizedBox.shrink()
+                                  : _BrushView(
+                                      brush: brush,
+                                      width: width,
+                                      visible: visible,
+                                      at: at,
+                                      onRange: widget.onRange,
+                                      onPan: widget.onPan,
+                                    ),
+                            ),
+                        ],
                       ),
                     ),
                   ),
                   const SizedBox(width: WsMetrics.space2),
                   Tooltip(
-                    message: 'drag to focus · scroll to zoom',
+                    message:
+                        'drag a handle to limit the list · click to jump · '
+                        'scroll to zoom',
                     child: Icon(
                       LucideIcons.info,
                       size: _infoSize,
@@ -266,6 +301,115 @@ class _OverviewState extends State<Overview> {
 
 /// The size of the hint's icon at the end of the axis.
 const _infoSize = 14.0;
+
+/// The brush over the tracks with a handle at each end (approved navigation mockup).
+class _BrushView extends StatelessWidget {
+  const _BrushView({
+    required this.brush,
+    required this.width,
+    required this.visible,
+    required this.at,
+    required this.onRange,
+    required this.onPan,
+  });
+
+  final Brush brush;
+  final double width;
+  final (double, double) visible;
+
+  /// The axis point at a horizontal position.
+  final double Function(double x) at;
+  final ValueChanged<(double, double)?>? onRange;
+  final ValueChanged<double>? onPan;
+
+  @override
+  Widget build(BuildContext context) {
+    final ws = context.ws;
+    double x(double value) =>
+        ((value - visible.$1) / (visible.$2 - visible.$1) * width).clamp(
+          0.0,
+          width,
+        );
+    final left = x(brush.start);
+    final right = math.max(x(brush.end), left + 2);
+    // At least a hundredth of the shown axis, so the handles never cross.
+    final gap = (visible.$2 - visible.$1) / 100;
+    Widget handle(Key key, double center, bool start) => Positioned(
+      left: (center - 4).clamp(0.0, math.max(0.0, width - 8)),
+      top: 14 + WsMetrics.space2,
+      bottom: 0,
+      width: 8,
+      child: GestureDetector(
+        key: key,
+        behavior: HitTestBehavior.opaque,
+        dragStartBehavior: DragStartBehavior.down,
+        onDoubleTap: onRange == null ? null : () => onRange!(null),
+        onHorizontalDragUpdate: onRange == null
+            ? null
+            : (details) {
+                // The brush's own box, not the moving handle's, places the pointer.
+                final box = context.findRenderObject()! as RenderBox;
+                final value = at(box.globalToLocal(details.globalPosition).dx);
+                onRange!(
+                  start
+                      ? (math.min(value, brush.end - gap), brush.end)
+                      : (brush.start, math.max(value, brush.start + gap)),
+                );
+              },
+        child: Center(
+          child: Container(
+            width: 7,
+            height: 18,
+            decoration: BoxDecoration(
+              color: ws.surface,
+              border: Border.all(color: ws.accent),
+              borderRadius: BorderRadius.circular(3),
+            ),
+          ),
+        ),
+      ),
+    );
+    return Positioned.fill(
+      child: Stack(
+        children: [
+          Positioned(
+            left: left,
+            width: right - left,
+            top: 14 + WsMetrics.space2 - 3,
+            bottom: 0,
+            child: Semantics(
+              key: const Key('range-brush'),
+              container: true,
+              label: brush.label,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onHorizontalDragUpdate: onPan == null
+                    ? null
+                    : (details) => onPan!(
+                        brush.start +
+                            details.delta.dx /
+                                width *
+                                (visible.$2 - visible.$1),
+                      ),
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: ws.accent.withValues(alpha: 0.08),
+                    border: Border.all(
+                      color: ws.accent.withValues(alpha: 0.55),
+                    ),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          handle(const Key('range-start'), left, true),
+          handle(const Key('range-end'), right, false),
+        ],
+      ),
+    );
+  }
+}
 
 class _AxisPainter extends CustomPainter {
   _AxisPainter({
@@ -357,13 +501,15 @@ class _TrackPainter extends CustomPainter {
   _TrackPainter({
     required this.segments,
     required this.visible,
-    required this.range,
+    required this.matches,
     required this.palette,
   });
 
   final List<Segment> segments;
   final (double, double) visible;
-  final (double, double)? range;
+
+  /// Which records match the filters; the others draw faint.
+  final List<bool>? matches;
   final WsPalette palette;
 
   @override
@@ -378,6 +524,13 @@ class _TrackPainter extends CustomPainter {
       final left = x(segment.start);
       final right = math.max(x(segment.end), left + 2);
       final rect = Rect.fromLTRB(left, bar.top, right, bar.bottom);
+      final faint = matches != null && !matches![segment.index];
+      if (faint) {
+        canvas.saveLayer(
+          rect.inflate(1),
+          Paint()..color = const Color(0x52000000),
+        );
+      }
       switch (segment.lane) {
         case OverviewLane.model:
           final firstToken = segment.firstToken;
@@ -413,19 +566,7 @@ class _TrackPainter extends CustomPainter {
           }
           canvas.restore();
       }
-    }
-    final range = this.range;
-    if (range != null) {
-      final brush = Rect.fromLTRB(x(range.$1), 0, x(range.$2), size.height);
-      canvas.drawRect(
-        brush,
-        Paint()..color = palette.accent.withValues(alpha: 0.1),
-      );
-      final edge = Paint()
-        ..color = palette.accent
-        ..strokeWidth = 2;
-      canvas.drawLine(brush.topLeft, brush.bottomLeft, edge);
-      canvas.drawLine(brush.topRight, brush.bottomRight, edge);
+      if (faint) canvas.restore();
     }
     canvas.restore();
   }
@@ -442,6 +583,6 @@ class _TrackPainter extends CustomPainter {
   bool shouldRepaint(_TrackPainter old) =>
       old.segments != segments ||
       old.visible != visible ||
-      old.range != range ||
+      old.matches != matches ||
       old.palette != palette;
 }

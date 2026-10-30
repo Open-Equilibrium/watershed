@@ -93,6 +93,7 @@ const List<_Group> _right = [
       _Entry.fixed(Fixed.previousOrNextStep),
       _Entry.fixed(Fixed.foldTurn),
       _Entry(Command.foldAll),
+      _Entry(Command.filterSteps),
       _Entry(Command.openStep),
       _Entry(Command.closeStep),
       _Entry(Command.branch),

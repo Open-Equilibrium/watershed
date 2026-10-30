@@ -13,6 +13,7 @@ import 'package:liquid/src/rust/api/session.dart';
 import 'package:liquid/src/session/session_state.dart';
 import 'package:liquid/src/theme/theme.dart';
 import 'package:liquid/src/trajectory/compare_view.dart';
+import 'package:liquid/src/trajectory/filter_bar.dart';
 import 'package:liquid/src/trajectory/overview.dart';
 import 'package:liquid/src/trajectory/tree_view.dart';
 
@@ -423,7 +424,8 @@ void main() {
     );
     expect(find.text('Overview'), findsNothing, reason: 'no header row');
     // The overview's hint is the tooltip of an icon at the end of its time axis.
-    const hint = 'drag to focus · scroll to zoom';
+    const hint =
+        'drag a handle to limit the list · click to jump · scroll to zoom';
     expect(find.text(hint), findsNothing);
     final info = tester.getRect(find.byTooltip(hint));
     final tracks = tester.getRect(find.byKey(const Key('overview-tracks')));
@@ -684,21 +686,130 @@ void main() {
     expect(tester.widget<Overview>(find.byType(Overview)).window, isNotNull);
   });
 
-  testWidgets('focusing a range dims the steps outside it', (tester) async {
-    await show(tester, historyOf(branchA));
+  /// A session of 60 steps in 20 turns, one second apart: a prompt, a response and a tool.
+  final long = [
+    for (var i = 0; i < 60; i++)
+      record(
+        's$i',
+        i ~/ 3 + 1,
+        [
+          BridgeRecordKind.user,
+          BridgeRecordKind.message,
+          BridgeRecordKind.tool,
+        ][i % 3],
+        'step $i',
+        i * 1000,
+        duration: i % 3 == 0 ? null : 500,
+      ),
+  ];
+
+  testWidgets('the range follows the list and its handles limit it', (
+    tester,
+  ) async {
+    await show(tester, historyOf(long));
+    String shown() =>
+        tester.getSemantics(find.byKey(const Key('range-brush'))).label;
+    expect(shown(), startsWith('Showing steps 1–'));
+    await tester.drag(
+      find.byKey(const ValueKey('step-s3')),
+      const Offset(0, -400),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      shown(),
+      isNot(startsWith('Showing steps 1–')),
+      reason: 'scrolling the list moves the range',
+    );
+
     final tracks = tester.getRect(find.byKey(const Key('overview-tracks')));
     await tester.dragFrom(
-      tracks.centerLeft + const Offset(1, 0),
-      Offset(tracks.width * 0.1, 0),
+      tester.getCenter(find.byKey(const Key('range-end'))),
+      Offset(
+        tracks.right - tester.getCenter(find.byKey(const Key('range-end'))).dx,
+        0,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.dragFrom(
+      tester.getCenter(find.byKey(const Key('range-start'))),
+      Offset(
+        tracks.left +
+            tracks.width * 0.9 -
+            tester.getCenter(find.byKey(const Key('range-start'))).dx,
+        0,
+      ),
     );
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('range')), findsOneWidget);
-    expect(opacity(tester, 'e2'), 1);
-    expect(opacity(tester, 'a1'), lessThan(1));
-
-    await press(tester, LogicalKeyboardKey.escape);
+    expect(
+      find.byKey(const ValueKey('step-s10')),
+      findsNothing,
+      reason: 'the handles limit the list to the steps in the range',
+    );
+    expect(find.byKey(const ValueKey('step-s58')), findsOneWidget);
+    await tester.tap(find.byTooltip('Clear the range'));
+    await tester.pumpAndSettle();
     expect(find.byKey(const Key('range')), findsNothing);
-    expect(opacity(tester, 'a1'), 1);
+  });
+
+  testWidgets('a click on the timeline jumps to the step there', (
+    tester,
+  ) async {
+    await show(tester, historyOf(long));
+    expect(find.byKey(const ValueKey('step-s50')), findsNothing);
+    final tracks = tester.getRect(find.byKey(const Key('overview-tracks')));
+    // Step 50 runs from 50 s to 50.5 s of 59.5 s.
+    await tester.tapAt(
+      Offset(tracks.left + tracks.width * 50.25 / 59.5, tracks.center.dy),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('step-s50')), findsOneWidget);
+    await press(tester, LogicalKeyboardKey.enter);
+    expect(tab('step 50'), findsOneWidget, reason: 'the step is selected');
+  });
+
+  testWidgets('filters dim what does not match and keys move between matches', (
+    tester,
+  ) async {
+    await show(tester, historyOf(branchA));
+    await tester.tap(find.text('Filter'));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.descendant(of: find.byType(FilterBar), matching: find.text('Tools')),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Filter · 1'), findsOneWidget);
+    expect(opacity(tester, 'e2'), lessThan(1), reason: 'a response');
+    expect(opacity(tester, 'e3'), 1, reason: 'a tool');
+    expect(
+      find.byKey(const ValueKey('step-e2')),
+      findsOneWidget,
+      reason: 'what does not match keeps its place',
+    );
+
+    // A click on a step gives the list the keyboard.
+    await tester.tap(find.byKey(const ValueKey('step-e1')));
+    await tester.pumpAndSettle();
+    await press(tester, LogicalKeyboardKey.arrowDown);
+    await press(tester, LogicalKeyboardKey.enter);
+    expect(tab('read'), findsOneWidget, reason: 'the first match');
+    await press(tester, LogicalKeyboardKey.escape);
+    await press(tester, LogicalKeyboardKey.arrowDown);
+    await press(tester, LogicalKeyboardKey.enter);
+    expect(tab('bash'), findsOneWidget, reason: 'the next match');
+    await press(tester, LogicalKeyboardKey.escape);
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyF);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('filter-text')), 'npm');
+    await tester.pumpAndSettle();
+    expect(opacity(tester, 'e3'), lessThan(1), reason: 'read has no npm');
+    expect(opacity(tester, 'e5'), 1);
+    await tester.tap(find.text('Clear'));
+    await tester.pumpAndSettle();
+    expect(opacity(tester, 'e2'), 1);
   });
 
   testWidgets('says why compare or branch does nothing', (tester) async {

@@ -17,6 +17,7 @@ import '../theme/tokens.g.dart';
 import 'compare_view.dart';
 import 'context_details.dart';
 import 'context_track.dart';
+import 'filter_bar.dart';
 import 'inspector.dart';
 import 'overview.dart';
 import 'step_parts.dart';
@@ -95,8 +96,22 @@ class _TrajectoryViewState extends State<TrajectoryView> {
   /// Whether the session tree is open; `null` opens it in windows at least 1280 px wide.
   bool? _treeOpen;
   bool _equalWidth = false;
+
+  /// The range the handles limit the list to.
   (double, double)? _range;
   (double, double)? _window;
+
+  /// What the filters let through, and whether their row shows.
+  StepFilter _filter = const StepFilter();
+  bool _filtering = false;
+  final _filterText = TextEditingController();
+  final _filterFocus = FocusNode(debugLabel: 'filter steps');
+
+  /// What the list shows, or the range limiting it, as the overview's brush.
+  final _brush = ValueNotifier<Brush?>(null);
+
+  /// The lines the list shows, as last built.
+  List<_Line> _shownLines = const [];
   bool _comparing = false;
   List<String> _picked = const [];
   String? _cursor;
@@ -113,6 +128,7 @@ class _TrajectoryViewState extends State<TrajectoryView> {
     super.initState();
     widget.state.stored.addListener(_reload);
     widget.state.models.addListener(_modelsChanged);
+    _scroll.addListener(_updateBrush);
     _reload();
     // Opening the tab moves the keyboard to it.
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -126,6 +142,9 @@ class _TrajectoryViewState extends State<TrajectoryView> {
     widget.state.models.removeListener(_modelsChanged);
     _details.dispose();
     _focus.dispose();
+    _filterText.dispose();
+    _filterFocus.dispose();
+    _brush.dispose();
     _scroll.dispose();
     super.dispose();
   }
@@ -205,11 +224,121 @@ class _TrajectoryViewState extends State<TrajectoryView> {
   Branch? get _shownBranch =>
       _graph.branches.where((branch) => branch.tip == _shownTip).firstOrNull;
 
-  List<int> _visibleSteps() => [
-    for (final turn in turnGroups(_records))
-      if (!_folded.contains(turn.turn))
-        for (var index = turn.first; index <= turn.last; index++) index,
-  ];
+  /// Whether step `index` lies in the range the handles limit the list to.
+  bool _inRange(int index) {
+    final range = _range;
+    if (range == null) return true;
+    final (start, end) = stepExtent(_records, index, equalWidth: _equalWidth);
+    return start <= range.$2 && end >= range.$1;
+  }
+
+  /// Which steps match the filters; `null` while none is on.
+  List<bool>? _matches() => _filter.count == 0
+      ? null
+      : [for (final record in _records) _filter.matches(record)];
+
+  /// The steps ↑ and ↓ move between: shown ones, and only matches while filtering.
+  List<int> _visibleSteps() {
+    final matches = _matches();
+    return [
+      for (final turn in turnGroups(_records))
+        if (!_folded.contains(turn.turn))
+          for (var index = turn.first; index <= turn.last; index++)
+            if (_inRange(index) && (matches?[index] ?? true)) index,
+    ];
+  }
+
+  /// Marks the steps the list shows on the overview, or the range limiting it.
+  void _updateBrush() {
+    final records = _records;
+    final range = _range;
+    if (range != null) {
+      final inside = [
+        for (var index = 0; index < records.length; index++)
+          if (_inRange(index)) index,
+      ];
+      _brush.value = Brush(
+        range.$1,
+        range.$2,
+        inside.isEmpty
+            ? 'Range: no steps'
+            : 'Range: steps ${inside.first + 1}–${inside.last + 1}',
+        range: true,
+      );
+      return;
+    }
+    if (!_scroll.hasClients) {
+      _brush.value = null;
+      return;
+    }
+    final position = _scroll.position;
+    final top = position.pixels;
+    final bottom = top + position.viewportDimension - _clearance;
+    int? first;
+    int? last;
+    var y = 0.0;
+    for (final line in _shownLines) {
+      final height = line is _InspectorLine
+          ? inspectorHeight
+          : WsMetrics.rowTable;
+      if (line is _StepLine && y + height > top && y < bottom) {
+        first ??= line.index;
+        last = line.index;
+      }
+      y += height;
+      if (y >= bottom) break;
+    }
+    if (first == null || last == null) {
+      _brush.value = null;
+      return;
+    }
+    _brush.value = Brush(
+      stepExtent(records, first, equalWidth: _equalWidth).$1,
+      stepExtent(records, last, equalWidth: _equalWidth).$2,
+      'Showing steps ${first + 1}–${last + 1}',
+    );
+  }
+
+  /// The top of line `line` in the list.
+  double _lineTop(int line) {
+    var y = 0.0;
+    for (final shown in _shownLines.take(line)) {
+      y += shown is _InspectorLine ? inspectorHeight : WsMetrics.rowTable;
+    }
+    return y;
+  }
+
+  /// Scrolls the list so the step at `at` on the axis comes first, as dragging the brush asks.
+  void _scrollTo(double at) {
+    final index = stepAt(_records, at, equalWidth: _equalWidth);
+    if (index == null || !_scroll.hasClients) return;
+    final line = _shownLines.indexWhere(
+      (line) => line is _StepLine && line.index == index,
+    );
+    if (line < 0) return;
+    _scroll.jumpTo(math.min(_lineTop(line), _scroll.position.maxScrollExtent));
+  }
+
+  /// Selects the step at `at` on the axis, expanding its turn and leaving a range that hides it.
+  void _jumpTo(double at) {
+    final index = stepAt(_records, at, equalWidth: _equalWidth);
+    if (index == null) return;
+    _focus.requestFocus();
+    setState(() {
+      if (!_inRange(index)) _range = null;
+      _folded.remove(_records[index].turn);
+      _selected = _records[index].entry;
+    });
+    _reveal();
+  }
+
+  /// Opens the filter row with its text field focused.
+  void _openFilter() {
+    setState(() => _filtering = true);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _filterFocus.requestFocus();
+    });
+  }
 
   int get _selectedIndex =>
       _records.indexWhere((record) => record.entry == _selected);
@@ -456,12 +585,19 @@ class _TrajectoryViewState extends State<TrajectoryView> {
 
   List<_Line> _lines() {
     final lines = <_Line>[
-      if (_records.any((record) => record.context != null)) _StartLine(),
+      if (_range == null && _records.any((record) => record.context != null))
+        _StartLine(),
     ];
     for (final turn in turnGroups(_records)) {
+      // A range shows only its steps and their turns.
+      final steps = [
+        for (var index = turn.first; index <= turn.last; index++)
+          if (_inRange(index)) index,
+      ];
+      if (steps.isEmpty) continue;
       lines.add(_TurnLine(turn));
       if (_folded.contains(turn.turn)) continue;
-      for (var index = turn.first; index <= turn.last; index++) {
+      for (final index in steps) {
         lines.add(_StepLine(index));
         if (_inspecting && _records[index].entry == _selected) {
           lines.add(_InspectorLine(index));
@@ -477,81 +613,117 @@ class _TrajectoryViewState extends State<TrajectoryView> {
     final comparing =
         _comparing && history != null && history.trajectories.length > 1;
     final keys = Keymap.of(context);
-    return CallbackShortcuts(
-      bindings: {
-        ...keys.bind({
-          Command.foldAll: _foldAll,
-          Command.openStep: () {
-            if (_selected == null) return;
-            setState(() => _inspecting = !_inspecting);
-            _reveal();
-          },
-          Command.branch: _branch,
-          Command.compare: _toggleCompare,
-          Command.selectBranch: () {
-            if (_comparing) _pickCursor();
-          },
-          Command.closeStep: _escape,
-        }),
-        ...Fixed.previousOrNextStep.bind([() => _move(-1), () => _move(1)]),
-        ...Fixed.foldTurn.bind([() => _fold(true), () => _fold(false)]),
-        ...Fixed.moveInTree.bind([() => _stepTree(-1), () => _stepTree(1)]),
-      },
-      child: Focus(
-        focusNode: _focus,
-        autofocus: true,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            _Toolbar(
-              equalWidth: _equalWidth,
-              comparing: _comparing,
-              summary: comparing ? _compareSummary(history) : _summary(),
-              rangeLabel: comparing ? null : _rangeLabel(),
-              onEqualWidth: (value) => setState(() {
-                _equalWidth = value;
-                _range = null;
-                _window = null;
+    final records = _records;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // The toolbar and the filter row take their own keys, so typing a filter never
+        // triggers the list's.
+        _Toolbar(
+          equalWidth: _equalWidth,
+          comparing: _comparing,
+          summary: comparing ? _compareSummary(history) : _summary(),
+          range: comparing || _range == null ? null : _axisLabel(_range!),
+          onClearRange: () => setState(() => _range = null),
+          filters: _filter.count,
+          onFilter: () =>
+              _filtering ? setState(() => _filtering = false) : _openFilter(),
+          onEqualWidth: (value) => setState(() {
+            _equalWidth = value;
+            _range = null;
+            _window = null;
+          }),
+          onCompare: _toggleCompare,
+        ),
+        if (_filtering && !comparing)
+          FilterBar(
+            filter: _filter,
+            tools: [
+              ...{
+                for (final record in records)
+                  if (record.kind == BridgeRecordKind.tool) record.label,
+              },
+            ],
+            text: _filterText,
+            textFocus: _filterFocus,
+            onChanged: (filter) => setState(() => _filter = filter),
+          ),
+        Expanded(
+          child: CallbackShortcuts(
+            bindings: {
+              ...keys.bind({
+                Command.foldAll: _foldAll,
+                Command.openStep: () {
+                  if (_selected == null) return;
+                  setState(() => _inspecting = !_inspecting);
+                  _reveal();
+                },
+                Command.branch: _branch,
+                Command.compare: _toggleCompare,
+                Command.selectBranch: () {
+                  if (_comparing) _pickCursor();
+                },
+                Command.closeStep: _escape,
+                Command.filterSteps: _openFilter,
               }),
-              onCompare: _toggleCompare,
-            ),
-            if (comparing) _compareOverview(history) else _overview(),
-            Expanded(
-              child: LayoutBuilder(
-                builder: (context, constraints) => Row(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Expanded(
-                      child: InputLane(
-                        input: widget.input,
-                        child: comparing
-                            ? CompareView(
-                                a: history.trajectories[0],
-                                b: history.trajectories[1],
-                                comparison: _comparison(history),
-                                branchA: _branchFor(_picked[0]),
-                                branchB: _branchFor(_picked[1]),
-                                bottom: _clearance,
-                              )
-                            : _ledger(),
+              ...Fixed.previousOrNextStep.bind([
+                () => _move(-1),
+                () => _move(1),
+              ]),
+              ...Fixed.foldTurn.bind([() => _fold(true), () => _fold(false)]),
+              ...Fixed.moveInTree.bind([
+                () => _stepTree(-1),
+                () => _stepTree(1),
+              ]),
+            },
+            child: Focus(
+              focusNode: _focus,
+              autofocus: true,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (comparing) _compareOverview(history) else _overview(),
+                  Expanded(
+                    child: LayoutBuilder(
+                      builder: (context, constraints) => Row(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Expanded(
+                            child: InputLane(
+                              input: widget.input,
+                              child: comparing
+                                  ? CompareView(
+                                      a: history.trajectories[0],
+                                      b: history.trajectories[1],
+                                      comparison: _comparison(history),
+                                      branchA: _branchFor(_picked[0]),
+                                      branchB: _branchFor(_picked[1]),
+                                      bottom: _clearance,
+                                    )
+                                  : _ledger(),
+                            ),
+                          ),
+                          SessionTreeView(
+                            graph: _graph,
+                            selected: _comparing ? _cursor : _selected,
+                            onRow: _onRow,
+                            shown: _comparing ? _picked.toSet() : {?_shownTip},
+                            picked: _comparing ? _picked.toSet() : null,
+                            open:
+                                _treeOpen ??
+                                constraints.maxWidth >= _treeOpenWidth,
+                            onOpen: (open) => setState(() => _treeOpen = open),
+                          ),
+                        ],
                       ),
                     ),
-                    SessionTreeView(
-                      graph: _graph,
-                      selected: _comparing ? _cursor : _selected,
-                      onRow: _onRow,
-                      shown: _comparing ? _picked.toSet() : {?_shownTip},
-                      picked: _comparing ? _picked.toSet() : null,
-                      open: _treeOpen ?? constraints.maxWidth >= _treeOpenWidth,
-                      onOpen: (open) => setState(() => _treeOpen = open),
-                    ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
-          ],
+          ),
         ),
-      ),
+      ],
     );
   }
 
@@ -560,22 +732,18 @@ class _TrajectoryViewState extends State<TrajectoryView> {
     orElse: () => Branch(tip: tip, ref: '?', name: '', lane: 0),
   );
 
-  /// The shown branch, its steps and its duration.
+  /// The shown branch, its steps, its duration and how many steps match the filters.
   String _summary() {
     final branch = _shownBranch;
+    final matches = _matches();
+    final matching = matches?.where((match) => match).length;
     return [
       branch == null ? 'new branch' : 'branch ${branch.ref}',
       '${_records.length} steps',
       formatDuration(_history?.trajectories.firstOrNull?.durationMs ?? 0),
+      if (matching != null)
+        '$matching of ${_records.length} match${matching == 1 ? 'es' : ''}',
     ].join(' · ');
-  }
-
-  /// The focused range and how many steps it holds; `null` without one.
-  String? _rangeLabel() {
-    final range = _range;
-    if (range == null) return null;
-    final focused = inRange(_records, range, equalWidth: _equalWidth);
-    return '${_axisLabel(range)} · ${focused.where((on) => on).length} steps';
   }
 
   Widget _overview() {
@@ -597,9 +765,12 @@ class _TrajectoryViewState extends State<TrajectoryView> {
       span: span(records, equalWidth: _equalWidth),
       equalWidth: _equalWidth,
       window: _window,
-      range: _range,
-      onRange: (range) => setState(() => _range = range),
       onWindow: (window) => setState(() => _window = window),
+      brush: _brush,
+      onRange: (range) => setState(() => _range = range),
+      onPan: _scrollTo,
+      onJump: _jumpTo,
+      matches: _matches(),
       mark: selected < 0
           ? null
           : _equalWidth
@@ -663,8 +834,6 @@ class _TrajectoryViewState extends State<TrajectoryView> {
             ),
       equalWidth: _equalWidth,
       window: _window,
-      range: null,
-      onRange: (_) {},
       onWindow: (window) => setState(() => _window = window),
       mark: branchPoint,
       legend: true,
@@ -690,11 +859,11 @@ class _TrajectoryViewState extends State<TrajectoryView> {
 
   Widget _ledger() {
     final records = _records;
-    final lines = _lines();
-    final range = _range;
-    final focused = range == null
-        ? null
-        : inRange(records, range, equalWidth: _equalWidth);
+    final lines = _shownLines = _lines();
+    final matches = _matches();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _updateBrush();
+    });
     final track = _track;
     final window = _contextWindow();
     final fit = _fit || window == null;
@@ -778,7 +947,7 @@ class _TrajectoryViewState extends State<TrajectoryView> {
                     onTap: () => _toggleTurn(turn.turn),
                   ),
                   _StepLine(index: final step) => Opacity(
-                    opacity: focused == null || focused[step] ? 1 : 0.4,
+                    opacity: matches?[step] ?? true ? 1 : 0.35,
                     child: _StepRow(
                       key: ValueKey('step-${records[step].entry}'),
                       number: step + 1,
@@ -864,7 +1033,10 @@ class _Toolbar extends StatelessWidget {
     required this.equalWidth,
     required this.comparing,
     required this.summary,
-    required this.rangeLabel,
+    required this.range,
+    required this.onClearRange,
+    required this.filters,
+    required this.onFilter,
     required this.onEqualWidth,
     required this.onCompare,
   });
@@ -873,8 +1045,13 @@ class _Toolbar extends StatelessWidget {
   final bool comparing;
   final String summary;
 
-  /// The focused range, while there is one.
-  final String? rangeLabel;
+  /// The range limiting the list, while there is one.
+  final String? range;
+  final VoidCallback onClearRange;
+
+  /// How many filters are on.
+  final int filters;
+  final VoidCallback onFilter;
   final ValueChanged<bool> onEqualWidth;
   final VoidCallback onCompare;
 
@@ -893,23 +1070,58 @@ class _Toolbar extends StatelessWidget {
             selected: equalWidth,
             onSelect: onEqualWidth,
           ),
+          if (!comparing) ...[
+            const SizedBox(width: WsMetrics.space3),
+            // Return and space press it rather than the view's own keys.
+            Shortcuts(
+              shortcuts: activateKeys,
+              child: GhostButton(
+                icon: LucideIcons.listFilter,
+                label: filters == 0 ? 'Filter' : 'Filter · $filters',
+                shortcut: keys.label(Command.filterSteps),
+                onPressed: onFilter,
+              ),
+            ),
+          ],
           Expanded(
             child: Row(
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
-                if (rangeLabel case final rangeLabel?) ...[
-                  Flexible(
-                    child: Text(
-                      rangeLabel,
-                      key: const Key('range'),
-                      style: small.copyWith(color: ws.accent),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                if (range case final range?) ...[
+                  Container(
+                    key: const Key('range'),
+                    padding: const EdgeInsets.only(left: WsMetrics.space3),
+                    decoration: BoxDecoration(
+                      color: ws.accentSubtle,
+                      borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
+                    ),
+                    child: Row(
+                      children: [
+                        Text(
+                          'Range $range',
+                          style: small.copyWith(color: ws.accent),
+                        ),
+                        Tooltip(
+                          message: 'Clear the range',
+                          child: InkWell(
+                            onTap: onClearRange,
+                            borderRadius: BorderRadius.circular(
+                              WsMetrics.radiusMd,
+                            ),
+                            child: Padding(
+                              padding: const EdgeInsets.all(WsMetrics.space2),
+                              child: Icon(
+                                LucideIcons.x,
+                                size: 12,
+                                color: ws.accent,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                  const SizedBox(width: WsMetrics.space2),
-                  Hint(keys.label(Command.closeStep)),
-                  const SizedBox(width: WsMetrics.space5),
+                  const SizedBox(width: WsMetrics.space4),
                 ],
                 Flexible(
                   child: Text(
