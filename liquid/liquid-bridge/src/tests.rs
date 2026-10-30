@@ -16,7 +16,8 @@ use crate::api::history::{BridgeEntryKind, BridgeRecordKind};
 use crate::api::session::{
     AgentSession, BridgeApprovalMode, BridgeModel, BridgeStoredSession, SessionConfig,
 };
-use crate::convert::{coalesce, describe, gather};
+use crate::convert::describe;
+use crate::stream::{gather, push};
 
 /// The extension path the fake agents are started with.
 const EXTENSION: &str = "/w/meta-harness/pi-extension/watershed.ts";
@@ -579,20 +580,23 @@ fn gathers_streaming_text_until_its_window_passes() {
 }
 
 #[test]
-fn coalesces_consecutive_deltas_of_one_item() {
+fn merges_consecutive_deltas_of_one_item() {
     let delta = |item: u64, text: &str| {
         bridge(AgentEvent::ContentDelta {
             item: ItemId(item),
             delta: text.to_owned(),
         })
     };
-    let merged = coalesce(vec![
+    let mut merged = Vec::new();
+    for event in [
         delta(1, "He"),
         delta(1, "llo"),
         delta(2, "Hi"),
         bridge(AgentEvent::TurnCompleted { turn: TurnId(1) }),
         delta(2, "!"),
-    ]);
+    ] {
+        push(&mut merged, event);
+    }
     let summary: Vec<_> = merged
         .iter()
         .map(|event| {

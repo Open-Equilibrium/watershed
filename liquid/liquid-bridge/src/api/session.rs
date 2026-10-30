@@ -14,9 +14,10 @@ use tokio::sync::{Mutex, mpsc};
 
 use crate::api::events::{BridgeDecision, BridgeEvent, BridgeFileChange, BridgeQueue};
 use crate::api::history::{BridgeContextDetail, BridgeHistory, BridgeTranscript};
-use crate::convert::{STREAM_WINDOW, coalesce, describe, gather, push};
+use crate::convert::describe;
 use crate::frb_generated::StreamSink;
 use crate::ready::{SHUTDOWN_GRACE, START_TIMEOUT, error_output, ready};
+use crate::stream::{STREAM_WINDOW, gather, push};
 
 static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
     tokio::runtime::Builder::new_multi_thread()
@@ -168,11 +169,11 @@ impl AgentSession {
         let early = std::mem::take(&mut *self.early.lock().unwrap_or_else(PoisonError::into_inner));
         RUNTIME.spawn(async move {
             // Events from before the start finished come first.
-            let mut batch: Vec<_> = early.into_iter().map(BridgeEvent::from).collect();
-            if !coalesce(std::mem::take(&mut batch))
-                .into_iter()
-                .all(&mut deliver)
-            {
+            let mut batch = Vec::new();
+            for event in early {
+                push(&mut batch, BridgeEvent::from(event));
+            }
+            if !std::mem::take(&mut batch).into_iter().all(&mut deliver) {
                 return;
             }
             while let Some(event) = receiver.recv().await {
@@ -182,10 +183,7 @@ impl AgentSession {
                     push(&mut batch, BridgeEvent::from(event));
                 }
                 // Dart closed the stream: stop; dropping the session ends the agent.
-                if !coalesce(std::mem::take(&mut batch))
-                    .into_iter()
-                    .all(&mut deliver)
-                {
+                if !std::mem::take(&mut batch).into_iter().all(&mut deliver) {
                     break;
                 }
             }
