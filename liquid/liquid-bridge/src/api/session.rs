@@ -14,7 +14,7 @@ use tokio::sync::{Mutex, mpsc};
 
 use crate::api::events::{BridgeDecision, BridgeEvent, BridgeFileChange, BridgeQueue};
 use crate::api::history::{BridgeContextDetail, BridgeHistory, BridgeTranscript};
-use crate::convert::{STREAM_WINDOW, coalesce, describe, gather};
+use crate::convert::{STREAM_WINDOW, coalesce, describe, gather, push};
 use crate::frb_generated::StreamSink;
 use crate::ready::{SHUTDOWN_GRACE, START_TIMEOUT, error_output, ready};
 
@@ -176,10 +176,10 @@ impl AgentSession {
                 return;
             }
             while let Some(event) = receiver.recv().await {
-                batch.push(BridgeEvent::from(event));
+                push(&mut batch, BridgeEvent::from(event));
                 gather(&mut batch, &mut receiver, tokio::time::sleep(STREAM_WINDOW)).await;
                 while let Ok(event) = receiver.try_recv() {
-                    batch.push(BridgeEvent::from(event));
+                    push(&mut batch, BridgeEvent::from(event));
                 }
                 // Dart closed the stream: stop; dropping the session ends the agent.
                 if !coalesce(std::mem::take(&mut batch))

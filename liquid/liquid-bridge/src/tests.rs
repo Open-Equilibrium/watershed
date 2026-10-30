@@ -556,6 +556,11 @@ fn gathers_streaming_text_until_its_window_passes() {
             "0123456789",
             "everything until the window passed"
         );
+        assert_eq!(
+            batch.len(),
+            1,
+            "deltas merge as they arrive, so the batch stays small"
+        );
     });
 
     // Anything but streaming text ends the gathering at once, without waiting for the window.
