@@ -222,13 +222,11 @@ class _TrajectoryViewState extends State<TrajectoryView> {
   Branch? get _shownBranch =>
       _graph.branches.where((branch) => branch.tip == _shownTip).firstOrNull;
 
-  /// Whether step `index` lies in the range the handles limit the list to.
-  bool _inRange(int index) {
-    final range = _range;
-    if (range == null) return true;
-    final (start, end) = stepExtent(_records, index, equalWidth: _equalWidth);
-    return start <= range.$2 && end >= range.$1;
-  }
+  /// Which steps lie in the range the handles limit the list to; `null` without one.
+  List<bool>? _inRange() => switch (_range) {
+    final range? => inRange(_records, range, equalWidth: _equalWidth),
+    null => null,
+  };
 
   /// Which steps match the filters; `null` while none is on.
   List<bool>? _matches() => _filter.count == 0
@@ -238,11 +236,12 @@ class _TrajectoryViewState extends State<TrajectoryView> {
   /// The steps ↑ and ↓ move between: shown ones, and only matches while filtering.
   List<int> _visibleSteps() {
     final matches = _matches();
+    final inside = _inRange();
     return [
       for (final turn in turnGroups(_records))
         if (!_folded.contains(turn.turn))
           for (var index = turn.first; index <= turn.last; index++)
-            if (_inRange(index) && (matches?[index] ?? true)) index,
+            if ((inside?[index] ?? true) && (matches?[index] ?? true)) index,
     ];
   }
 
@@ -251,9 +250,10 @@ class _TrajectoryViewState extends State<TrajectoryView> {
     final records = _records;
     final range = _range;
     if (range != null) {
+      final mask = _inRange()!;
       final inside = [
         for (var index = 0; index < records.length; index++)
-          if (_inRange(index)) index,
+          if (mask[index]) index,
       ];
       _brush.value = Brush(
         range.$1,
@@ -323,7 +323,7 @@ class _TrajectoryViewState extends State<TrajectoryView> {
     if (index == null) return;
     _focus.requestFocus();
     setState(() {
-      if (!_inRange(index)) _range = null;
+      if (!(_inRange()?[index] ?? true)) _range = null;
       _folded.remove(_records[index].turn);
       _selected = _records[index].entry;
     });
@@ -604,11 +604,12 @@ class _TrajectoryViewState extends State<TrajectoryView> {
       if (_range == null && _records.any((record) => record.context != null))
         _StartLine(),
     ];
+    final inside = _inRange();
     for (final turn in turnGroups(_records)) {
       // A range shows only its steps and their turns.
       final steps = [
         for (var index = turn.first; index <= turn.last; index++)
-          if (_inRange(index)) index,
+          if (inside?[index] ?? true) index,
       ];
       if (steps.isEmpty) continue;
       lines.add(_TurnLine(turn));
