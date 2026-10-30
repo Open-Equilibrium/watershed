@@ -16,7 +16,7 @@ use crate::api::history::{BridgeEntryKind, BridgeRecordKind};
 use crate::api::session::{
     AgentSession, BridgeApprovalMode, BridgeModel, BridgeStoredSession, SessionConfig,
 };
-use crate::convert::{coalesce, describe};
+use crate::convert::{coalesce, describe, gather};
 
 /// The extension path the fake agents are started with.
 const EXTENSION: &str = "/w/meta-harness/pi-extension/watershed.ts";
@@ -519,48 +519,58 @@ fn shuts_down_while_a_query_waits_for_a_hung_agent() {
 }
 
 #[test]
-fn gathers_a_fast_stream_into_few_updates() {
-    // Ten deltas 5 ms apart: delivered one by one they would queue in Dart (client
-    // architecture rule 4), gathered for a short window they arrive as a few updates.
-    let deltas = (0..10)
-        .map(|index| {
-            format!(
-                "printf '%s\\n' '{{\"type\":\"message_update\",\"assistantMessageEvent\":{{\"type\":\"text_delta\",\"contentIndex\":0,\"delta\":\"{index}\"}}}}'\nsleep 0.005\n"
-            )
+fn gathers_streaming_text_until_its_window_passes() {
+    let delta = |text: &str| {
+        SessionEvent::Agent(AgentEvent::ContentDelta {
+            item: ItemId(1),
+            delta: text.to_owned(),
         })
-        .collect::<String>();
-    let script = gate(2)
-        + r#"IFS= read -r line
-printf '%s\n' '{"id":"3","type":"response","command":"prompt","success":true,"data":{"disposition":"started"}}'
-printf '%s\n' '{"type":"agent_start"}' '{"type":"turn_start"}' '{"type":"message_start","message":{"role":"assistant","content":[]}}' '{"type":"message_update","assistantMessageEvent":{"type":"text_start","contentIndex":0}}'
-"# + &deltas
-        + r#"printf '%s\n' '{"type":"agent_settled","aborted":false}'
-IFS= read -r line || exit 0"#;
-    let session =
-        launch(gated(&script), std::env::temp_dir().display().to_string()).expect("agent starts");
-    let (sender, receiver) = mpsc::channel();
-    session
-        .forward(move |event| sender.send(event).is_ok())
-        .expect("first subscriber");
-    assert_eq!(
-        call(session.set_approval_mode(BridgeApprovalMode::FullAccess)),
-        Ok(())
-    );
-    assert_eq!(session.send("Count".to_owned(), false), Ok(()));
-    let mut text = String::new();
-    let mut updates = 0;
-    while text.len() < 10 {
-        let event = receiver
-            .recv_timeout(Duration::from_secs(10))
-            .expect("event arrives");
-        if event.kind == BridgeEventKind::ContentDelta {
-            updates += 1;
-            text.push_str(event.text.as_deref().unwrap_or_default());
-        }
-    }
-    assert_eq!(text, "0123456789", "nothing is lost or reordered");
-    assert!(updates <= 3, "{updates} updates for ten deltas");
-    assert!(call(session.shutdown()));
+    };
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .expect("runtime starts");
+    runtime.block_on(async {
+        let (sender, mut receiver) = tokio::sync::mpsc::channel(16);
+        let (pass, window) = tokio::sync::oneshot::channel::<()>();
+        // Deltas arrive one by one while the window is open; one more comes after it passed.
+        tokio::spawn(async move {
+            for index in 1..10 {
+                sender.send(delta(&index.to_string())).await.expect("sent");
+                tokio::task::yield_now().await;
+            }
+            pass.send(()).expect("window passes");
+            tokio::task::yield_now().await;
+            sender.send(delta("late")).await.expect("sent");
+        });
+        let mut batch = vec![BridgeEvent::from(delta("0"))];
+        gather(&mut batch, &mut receiver, async {
+            let _ = window.await;
+        })
+        .await;
+        let text: Vec<_> = batch
+            .iter()
+            .filter_map(|event| event.text.as_deref())
+            .collect();
+        assert_eq!(
+            text.concat(),
+            "0123456789",
+            "everything until the window passed"
+        );
+    });
+
+    // Anything but streaming text ends the gathering at once, without waiting for the window.
+    runtime.block_on(async {
+        let (sender, mut receiver) = tokio::sync::mpsc::channel(16);
+        sender
+            .send(SessionEvent::Agent(AgentEvent::TurnCompleted {
+                turn: TurnId(1),
+            }))
+            .await
+            .expect("sent");
+        let mut batch = vec![BridgeEvent::from(delta("0"))];
+        gather(&mut batch, &mut receiver, std::future::pending()).await;
+        assert_eq!(batch.len(), 2);
+    });
 }
 
 #[test]
