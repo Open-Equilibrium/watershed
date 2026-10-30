@@ -153,6 +153,31 @@ Liquid        = local-first workspace and App platform</code></pre>
       <pre><code>Laptop replica ──┐
 Phone replica ───┼── Sync Server
 Headless replica ┘</code></pre>
+      <h3>Accepted enterprise target</h3>
+      <svg viewBox="0 0 560 380" role="img" aria-label="Star sync target with separate agent hosts" style="width:100%;max-width:760px;height:auto;display:block">
+        <defs><marker id="sync-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#7ee0a8"/></marker></defs>
+        <g font-family="system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif" fill="#e6e8ee">
+        <rect x="200" y="8" width="160" height="40" rx="8" fill="none" stroke="#7ee0a8" stroke-dasharray="4 3"/><text x="280" y="25" text-anchor="middle" font-size="11.5" font-weight="600">Company sign-in</text><text x="280" y="40" text-anchor="middle" font-size="10" fill="#9aa3b2">passkeys · SSO · SCIM · agent grants</text>
+        <line x1="280" y1="48" x2="280" y2="150" stroke="#7ee0a8" stroke-dasharray="3 3"/>
+        <rect x="205" y="150" width="150" height="76" rx="10" fill="#7ee0a8" fill-opacity=".08" stroke="#7ee0a8"/><text x="280" y="170" text-anchor="middle" font-weight="600" font-size="13">Sync Server</text><text x="280" y="186" text-anchor="middle" font-size="10.5" fill="#9aa3b2">checks signature + Role</text><text x="280" y="200" text-anchor="middle" font-size="10.5" fill="#9aa3b2">audit log</text><text x="280" y="214" text-anchor="middle" font-size="10.5" fill="#ffcf6b">storage: D-081</text>
+        <line x1="280" y1="226" x2="280" y2="322" stroke="#7ee0a8" stroke-dasharray="3 3"/>
+        <rect x="200" y="322" width="160" height="40" rx="8" fill="none" stroke="#7ee0a8" stroke-dasharray="4 3"/><text x="280" y="339" text-anchor="middle" font-size="11.5" font-weight="600">Admin console</text><text x="280" y="354" text-anchor="middle" font-size="10" fill="#9aa3b2">revoke devices, agents, Roles</text>
+        <rect x="8" y="58" width="180" height="140" rx="10" fill="none" stroke="#9aa3b2"/><text x="98" y="75" text-anchor="middle" font-weight="600" font-size="12">Alice's laptop</text>
+        <rect x="18" y="84" width="160" height="44" rx="7" fill="none" stroke="#9aa3b2"/><text x="98" y="101" text-anchor="middle" font-size="11" font-weight="600">Liquid (Alice)</text><text x="98" y="117" text-anchor="middle" font-size="10" fill="#9aa3b2">all Alice may access</text>
+        <rect x="18" y="140" width="160" height="50" rx="7" fill="#c9a0ff" fill-opacity=".08" stroke="#c9a0ff" stroke-dasharray="4 3"/><text x="98" y="156" text-anchor="middle" font-size="11" font-weight="600">Agent host · sandbox</text><text x="98" y="170" text-anchor="middle" font-size="10" fill="#9aa3b2">Meta-Harness, agents</text><text x="98" y="183" text-anchor="middle" font-size="10" fill="#9aa3b2">only the agent Roles' areas</text>
+        <line x1="40" y1="128" x2="40" y2="140" stroke="#c9a0ff" stroke-width="2" stroke-dasharray="3 2"/>
+        <rect x="372" y="58" width="180" height="56" rx="10" fill="none" stroke="#9aa3b2"/><text x="462" y="78" text-anchor="middle" font-size="11.5" font-weight="600">Alice's phone · Liquid</text><text x="462" y="95" text-anchor="middle" font-size="10" fill="#9aa3b2">all Alice may access</text>
+        <rect x="8" y="262" width="180" height="56" rx="10" fill="none" stroke="#9aa3b2"/><text x="98" y="282" text-anchor="middle" font-size="11.5" font-weight="600">Bob's laptop · Liquid</text><text x="98" y="299" text-anchor="middle" font-size="10" fill="#9aa3b2">all Bob may access</text>
+        <rect x="372" y="250" width="180" height="68" rx="10" fill="#c9a0ff" fill-opacity=".08" stroke="#c9a0ff" stroke-dasharray="4 3"/><text x="462" y="268" text-anchor="middle" font-size="11.5" font-weight="600">Agent host · sandbox</text><text x="462" y="285" text-anchor="middle" font-size="10" fill="#9aa3b2">Meta-Harness, agents</text><text x="462" y="300" text-anchor="middle" font-size="10" fill="#9aa3b2">only the agent Roles' areas</text>
+        <g stroke="#7ee0a8" stroke-width="2" fill="none" marker-end="url(#sync-arrow)" marker-start="url(#sync-arrow)"><line x1="180" y1="106" x2="205" y2="165"/><line x1="180" y1="165" x2="205" y2="190"/><line x1="372" y1="96" x2="355" y2="160"/><line x1="188" y1="282" x2="205" y2="216"/><line x1="372" y1="268" x2="355" y2="216"/></g>
+        <line x1="540" y1="114" x2="540" y2="250" stroke="#c9a0ff" stroke-width="2" stroke-dasharray="6 4"/><text x="532" y="180" text-anchor="end" font-size="10" fill="#c9a0ff">agent control,</text><text x="532" y="193" text-anchor="end" font-size="10" fill="#c9a0ff">own channel</text>
+        </g>
+      </svg>
+      <ul>
+        <li>Accepted target (ADR-0223, ADR-0224): each device holds everything its person may access; an agent host holds only the areas its agent Roles allow. M3 starts with complete replicas on a data model divided into areas.</li>
+        <li>An agent host is a separate replica in its own sandbox, also on a person's laptop, and syncs through the Sync Server like every replica; a local relay through the device's Liquid is open in <a href="../decisions/open-decisions.html#d-082">D-082</a>, the sandbox in <a href="../decisions/open-decisions.html#d-083">D-083</a>.</li>
+        <li>Every change is signed and checked against its signer's Role by the Sync Server; storage encryption is <a href="../decisions/open-decisions.html#d-081">D-081</a>.</li>
+      </ul>
       <ul>
         <li>Every authorized M3 MVP client reads and writes a complete local Workspace replica; network loss never switches Liquid into a remote-only mode.</li>
         <li>Replicas connect to the central Sync Server, not directly to one another. The server persists and exchanges committed changes resumably.</li>

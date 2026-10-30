@@ -10,11 +10,11 @@ Linux and macOS share the same [public installation guarantee and maintenance li
 |---|---|---|
 | Flow Agent authoring, Fixture execution and provider-only Flows | Linux x86_64; macOS ARM64 | Implemented; productive provider execution is restricted to Ubuntu 24.04 and macOS 27. |
 | Flow Agent Tool execution with mandatory self-protection | Linux x86_64; macOS ARM64 | Linux Bubblewrap/seccomp and Mac Seatbelt replacements integrated; native evidence is linked above. Failed admission/readiness prevents launch without fallback. |
-| Meta-Harness CLI, service and host-local agent control | Linux x86_64; macOS ARM64 | Not implemented. |
+| Meta-Harness CLI, service and host-local agent control | Linux x86_64; macOS ARM64; Windows 11 x86_64 (ADR-0226) | Not implemented. |
 | Liquid desktop client | Linux x86_64; macOS ARM64; Windows 11 x86_64 | In development on macOS ARM64: the agent surface for one pi session, not released. Linux and Windows are not implemented. |
 | Liquid mobile client | Android ARM64 | Not implemented. |
 
-Linux ARM64 is deferred beyond Release 1. Windows on ARM64, earlier Windows versions and macOS x86_64 (Intel Macs) are unsupported by every product (ADR-0218). Flow Agent and Meta-Harness have no native Windows support or future Windows-backend commitment. Liquid's mobile and headless capabilities retain their separate contracts in its [V-Spec](docs/concept/V-Spec_Liquid.html); desktop support does not certify them.
+Linux ARM64 is deferred beyond Release 1. Windows on ARM64, earlier Windows versions and macOS x86_64 (Intel Macs) are unsupported by every product (ADR-0218). Flow Agent has no native Windows support or future Windows-backend commitment; Meta-Harness targets Windows 11 x86_64 natively (ADR-0226). Liquid's mobile and headless capabilities retain their separate contracts in its [V-Spec](docs/concept/V-Spec_Liquid.html); desktop support does not certify them.
 
 Ubuntu 24.04 x86_64 and macOS 27 ARM64 are the current concrete Flow verification targets. Other Linux distributions or OS versions do not acquire a support claim from sharing an architecture or passing compilation. Liquid and Meta-Harness must establish their own runtime evidence, not inherit Flow's verification results.
 
