@@ -254,6 +254,7 @@ liquid integration
         <tr><td>Later adapters</td><td>Meta-Harness's journal</td><td>through their hooks where they exist</td><td>through their own session resume</td><td>their reading tools</td></tr>
       </table>
       <p class="muted">Each adapter reports which levels it reaches. The harness's own session file stays authoritative on its host; the Workspace record is the portable copy (ADR-0189). Without a Git project only the conversation moves.</p>
+      <p><strong>Another harness</strong> (ADR-0231): a session moves to another harness, such as from pi to Codex, only as a handoff, as in T3 Code. The target starts a new session that receives the conversation so far as text, at most 16,000 tokens by default, marked as context, not a new request; attachments and the provider's tool and reasoning state do not move. A target that already saw part of the conversation receives only what followed; the files come from the Git checkpoint ref. Within pi, switching model or provider stays pi's own switch inside the session.</p>
     </div></section>
 
     <section id="byoa" class="section"><h2>12. BYOA / external control</h2><div class="body">
