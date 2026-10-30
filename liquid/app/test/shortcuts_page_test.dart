@@ -226,7 +226,7 @@ void main() {
       );
       expect(shortcuts.value.profile, Profile.standard);
       expect(
-        find.descendant(of: find.byType(ShortcutsPage), matching: reason),
+        find.descendant(of: find.byType(SettingsPage), matching: reason),
         findsOneWidget,
       );
 
@@ -234,7 +234,7 @@ void main() {
       await tester.tap(find.text('Custom'));
       await tester.pumpAndSettle();
       expect(
-        find.descendant(of: find.byType(ShortcutsPage), matching: reason),
+        find.descendant(of: find.byType(SettingsPage), matching: reason),
         findsNothing,
         reason: 'choosing a profile again clears the reason',
       );

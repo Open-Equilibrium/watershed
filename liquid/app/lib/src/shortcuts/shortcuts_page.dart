@@ -119,8 +119,8 @@ const List<_Group> _right = [
 /// Settings (approved mockups): Appearance with theme and text size, and Shortcuts with the
 /// profile, every action's keys and recording new ones. It replaces the main area; esc closes
 /// it.
-class ShortcutsPage extends StatefulWidget {
-  const ShortcutsPage({
+class SettingsPage extends StatefulWidget {
+  const SettingsPage({
     super.key,
     required this.shortcuts,
     required this.onClose,
@@ -134,10 +134,10 @@ class ShortcutsPage extends StatefulWidget {
   final AppearanceController? appearance;
 
   @override
-  State<ShortcutsPage> createState() => _ShortcutsPageState();
+  State<SettingsPage> createState() => _SettingsPageState();
 }
 
-class _ShortcutsPageState extends State<ShortcutsPage> {
+class _SettingsPageState extends State<SettingsPage> {
   final _keys = FocusNode(debugLabel: 'shortcuts');
 
   /// Whether Appearance shows rather than Shortcuts; it opens first.

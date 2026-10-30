@@ -264,7 +264,7 @@ class _AgentShellState extends State<AgentShell> {
                     child: ValueListenableBuilder(
                       valueListenable: _settings,
                       builder: (context, settings, main) => settings
-                          ? ShortcutsPage(
+                          ? SettingsPage(
                               shortcuts: _shortcuts,
                               appearance: widget.appearance,
                               onClose: _toggleSettings,
