@@ -19,6 +19,7 @@ abstract final class LucideIcons {
   static const hexagon = IconData(0xe0f3, fontFamily: _family);
   static const laptop = IconData(0xe1cd, fontFamily: _family);
   static const sparkles = IconData(0xe412, fontFamily: _family);
-  static const foldVertical = IconData(0xe43c, fontFamily: _family);
+  static const chevronsDownUp = IconData(0xe228, fontFamily: _family);
+  static const chevronsUpDown = IconData(0xe211, fontFamily: _family);
   static const arrowLeftRight = IconData(0xe24a, fontFamily: _family);
 }

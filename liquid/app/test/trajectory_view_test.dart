@@ -9,10 +9,12 @@ import 'package:liquid/src/agent/shell.dart';
 import 'package:liquid/src/agent/sidebar.dart';
 import 'package:liquid/src/rust/api/events.dart';
 import 'package:liquid/src/rust/api/history.dart';
+import 'package:liquid/src/rust/api/session.dart';
 import 'package:liquid/src/session/session_state.dart';
 import 'package:liquid/src/theme/theme.dart';
 import 'package:liquid/src/trajectory/compare_view.dart';
 import 'package:liquid/src/trajectory/overview.dart';
+import 'package:liquid/src/trajectory/trajectory_view.dart';
 
 import 'fake_backend.dart';
 
@@ -114,9 +116,12 @@ void main() {
     WidgetTester tester,
     BridgeHistory history, {
     Size size = const Size(1600, 900),
+    List<BridgeModel> models = const [],
   }) async {
     await tester.binding.setSurfaceSize(size);
-    backend = FakeBackend()..stored = history;
+    backend = FakeBackend()
+      ..stored = history
+      ..modelList = models;
     state = SessionState(backend);
     await tester.pumpWidget(
       MaterialApp(
@@ -151,28 +156,251 @@ void main() {
   ) async {
     await show(tester, historyOf(branchA));
     expect(find.text('branch A · 7 steps · 24.5 s'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byType(TrajectoryView),
+        matching: find.text('Start'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.text('system prompt · AGENTS.md · 2 tools · ≈2.6k'),
+      findsOneWidget,
+      reason: 'what the first request held before any message',
+    );
     expect(find.text('Turn 1'), findsWidgets);
-    expect(find.text('24.5 s · read 1 · bash 1'), findsOneWidget);
+    expect(
+      find.text('Add rate limiting · 24.5 s · +4.3k → ≈7.0k'),
+      findsOneWidget,
+      reason: 'the turn line sums what the turn added to the context',
+    );
     expect(find.text('read · src/routes/login.ts'), findsOneWidget);
     expect(find.text('bash · allowed once'), findsOneWidget);
     expect(find.text('+3.4 s'), findsOneWidget);
-    expect(find.text('6,140'), findsOneWidget);
-    expect(find.text('214'), findsOneWidget);
+    expect(find.text('6.1k'), findsOneWidget, reason: 'tokens in');
+    expect(
+      find.text('+820'),
+      findsOneWidget,
+      reason: 'a response adds its output',
+    );
+    expect(find.text('#2'), findsOneWidget, reason: 'the second request');
+    expect(
+      find.text('214'),
+      findsNothing,
+      reason: 'thinking moved to the Usage tab',
+    );
+    for (final label in [
+      'Kind',
+      'Step',
+      'Time',
+      'Adds',
+      'Context',
+      'In',
+      'Out',
+    ]) {
+      expect(find.text(label), findsWidgets, reason: label);
+    }
+    expect(find.text('Think'), findsNothing);
 
     await press(tester, LogicalKeyboardKey.arrowDown);
     await press(tester, LogicalKeyboardKey.arrowLeft);
-    expect(find.text('Done.'), findsNothing, reason: 'the turn folded');
+    expect(find.text('Done.'), findsNothing, reason: 'the turn collapsed');
+    expect(find.text('···'), findsOneWidget, reason: 'its context track');
     await press(tester, LogicalKeyboardKey.arrowRight);
     expect(find.text('Done.'), findsOneWidget);
-    // The fold button takes return from the keyboard, as a click.
-    Focus.of(tester.element(find.text('Fold turns'))).requestFocus();
-    await tester.pump();
-    await press(tester, LogicalKeyboardKey.enter);
+  });
+
+  testWidgets('collapses all turns from the header, aligned with the turns', (
+    tester,
+  ) async {
+    await show(
+      tester,
+      historyOf([
+        ...branchA,
+        record('u2', 2, BridgeRecordKind.user, 'Again', 30000),
+      ]),
+    );
+    final all = find.byTooltip('Collapse all turns');
+    double center(Finder finder) => tester.getCenter(finder).dx;
+    expect(
+      center(all),
+      closeTo(center(find.byKey(const ValueKey('chevron-1'))), 1),
+      reason: 'it sits in the column of the turns\' chevrons',
+    );
+    await tester.tap(all);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('step-e2')), findsNothing);
+    expect(find.byKey(const ValueKey('step-u2')), findsNothing);
+    await tester.tap(find.byTooltip('Expand all turns'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('step-u2')), findsOneWidget);
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.altLeft);
+    await tester.tap(find.byKey(const ValueKey('chevron-1')));
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.altLeft);
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('step-u2')),
+      findsNothing,
+      reason: '⌥-click on a chevron collapses every turn',
+    );
+    await tester.tap(find.byKey(const ValueKey('chevron-2')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('step-u2')), findsOneWidget);
     expect(
       find.byKey(const ValueKey('step-e2')),
       findsNothing,
-      reason: 'the turns folded',
+      reason: 'a plain click expands only its turn',
     );
+  });
+
+  testWidgets('draws each step\'s context against the model\'s window', (
+    tester,
+  ) async {
+    await show(tester, historyOf(branchA), models: [faux(200000)]);
+    expect(
+      find.bySemanticsLabel('Context 4.8k of 200k'),
+      findsOneWidget,
+      reason: 'the prompt takes the size its request measured',
+    );
+    expect(
+      find.bySemanticsLabel('Context ≈5.1k of 200k'),
+      findsOneWidget,
+      reason: 'the response adds its output, an estimate',
+    );
+    expect(find.bySemanticsLabel('Context 6.1k of 200k'), findsOneWidget);
+    expect(
+      tester.getSemantics(find.text('Window')),
+      isSemantics(isSelected: true),
+    );
+    await tester.tap(find.text('Fit'));
+    await tester.pumpAndSettle();
+    expect(
+      tester.getSemantics(find.text('Fit')),
+      isSemantics(isSelected: true),
+    );
+
+    await show(tester, historyOf(branchA));
+    expect(
+      find.bySemanticsLabel('Context 4.8k'),
+      findsOneWidget,
+      reason: 'without a known window the track fits the branch',
+    );
+    expect(find.text('Window'), findsNothing);
+  });
+
+  testWidgets('the inspector shows the request that read a step', (
+    tester,
+  ) async {
+    BridgeStepContext request(int messages) => BridgeStepContext(
+      promptChars: 2000,
+      sections: const ['preamble', 'project_context'],
+      tools: const ['bash'],
+      toolChars: 1600,
+      messages: 1,
+      messageChars: messages,
+      newSincePrevious: const [],
+    );
+    await show(
+      tester,
+      historyOf([
+        record('u1', 1, BridgeRecordKind.user, 'Fix it', 0, added: 400),
+        record(
+          'm1',
+          1,
+          BridgeRecordKind.message,
+          'Reading',
+          10,
+          duration: 100,
+          usage: tokens(1000, 50),
+          context: request(400),
+          added: 200,
+        ),
+        record(
+          't1',
+          1,
+          BridgeRecordKind.tool,
+          'bash',
+          200,
+          duration: 50,
+          detail: '{"command":"npm test"}',
+          target: 'npm test',
+          added: 8000,
+        ),
+        record(
+          'm2',
+          1,
+          BridgeRecordKind.message,
+          'Done',
+          300,
+          duration: 100,
+          usage: tokens(1100, 20, cached: 2000, reasoning: 7, cost: 3000),
+          context: request(8800),
+          added: 80,
+        ),
+      ]),
+      models: [faux(200000)],
+    );
+    backend.contexts['m2'] = const BridgeContextDetail(
+      sections: [
+        BridgeContextPart(name: 'preamble', chars: 1200),
+        BridgeContextPart(name: 'project_context', chars: 800),
+      ],
+      tools: [BridgeContextPart(name: 'bash', chars: 1600)],
+      messages: [
+        BridgeContextMessage(
+          entry: 'u1',
+          label: 'prompt · Fix it',
+          chars: 400,
+          inContext: true,
+          fresh: false,
+        ),
+        BridgeContextMessage(
+          entry: 't1',
+          label: 'result of bash · npm test',
+          chars: 8000,
+          inContext: true,
+          fresh: true,
+        ),
+      ],
+    );
+    for (var step = 0; step < 3; step++) {
+      await press(tester, LogicalKeyboardKey.arrowDown);
+    }
+    await press(tester, LogicalKeyboardKey.enter);
+    await tester.tap(tab('Context'));
+    await tester.pumpAndSettle();
+    expect(backend.calls, contains('context m2'));
+    expect(
+      find.text('Request #2 · the request that read this result · faux-1'),
+      findsOneWidget,
+    );
+    expect(
+      find.text('3.1k of 200k · 2 % · pi compacts at 183.6k'),
+      findsOneWidget,
+    );
+    for (final part in [
+      'System prompt ≈300',
+      'AGENTS.md ≈200',
+      'Tools ≈400',
+      'Carried over ≈200',
+      'This step ≈2.0k',
+    ]) {
+      expect(find.text(part), findsOneWidget, reason: part);
+    }
+    expect(
+      find.text(
+        'Largest in request #2: result of bash · npm test ≈2.0k · '
+        'Tools ≈400 · System prompt ≈300',
+      ),
+      findsOneWidget,
+    );
+
+    await tester.tap(tab('Usage'));
+    await tester.pumpAndSettle();
+    for (final value in ['3,100', '2,000', '20', '7', '≈ \$0.003']) {
+      expect(tab(value), findsOneWidget, reason: value);
+    }
   });
 
   testWidgets('one toolbar holds the view switch, the summary and Compare', (
@@ -181,7 +409,8 @@ void main() {
     await show(tester, historyOf(branchA));
     double row(Finder finder) => tester.getCenter(finder).dy;
     final summary = find.text('branch A · 7 steps · 24.5 s');
-    for (final control in ['Real time', 'Fold turns', 'Compare']) {
+    expect(find.text('Fold turns'), findsNothing);
+    for (final control in ['Real time', 'Compare']) {
       expect(
         row(find.text(control)),
         closeTo(row(summary), 1),
@@ -301,7 +530,7 @@ void main() {
       await press(tester, LogicalKeyboardKey.arrowDown);
     }
     await press(tester, LogicalKeyboardKey.enter);
-    await tester.tap(find.text('Context'));
+    await tester.tap(tab('Context'));
     await tester.pumpAndSettle();
     expect(
       find.text('Could not read what the model saw: the session file is gone'),
@@ -465,12 +694,12 @@ void main() {
       await press(tester, LogicalKeyboardKey.arrowDown);
     }
     await press(tester, LogicalKeyboardKey.enter);
-    Focus.of(tester.element(find.text('Context'))).requestFocus();
+    Focus.of(tester.element(tab('Context'))).requestFocus();
     await tester.pump();
     await press(tester, LogicalKeyboardKey.enter);
     expect(find.textContaining('what the model saw'), findsOneWidget);
     expect(
-      tester.getSemantics(find.text('Context')),
+      tester.getSemantics(tab('Context')),
       isSemantics(isSelected: true),
       reason: 'the open tab is told, not only drawn',
     );
@@ -658,7 +887,7 @@ void main() {
     expect(find.text('≈ 2,780'), findsOneWidget);
     expect(find.text('System prompt · AGENTS.md'), findsOneWidget);
 
-    await tester.tap(find.text('Context'));
+    await tester.tap(tab('Context'));
     await tester.pumpAndSettle();
     expect(find.text('AGENTS.md'), findsOneWidget);
     expect(find.text('1 · result of edit · src/login.ts'), findsOneWidget);
@@ -709,3 +938,16 @@ void main() {
     expect(find.text("I'll look first."), findsOneWidget);
   });
 }
+
+BridgeModel faux(int window) => BridgeModel(
+  provider: 'faux',
+  id: 'faux-1',
+  name: 'Faux One',
+  contextWindow: window,
+);
+
+/// `text` inside the open inspector, apart from the ledger's own columns.
+Finder tab(String text) => find.descendant(
+  of: find.byKey(const Key('inspector')),
+  matching: find.text(text),
+);

@@ -198,7 +198,7 @@ enum Fixed {
     Keys(LogicalKeyboardKey.arrowUp),
     Keys(LogicalKeyboardKey.arrowDown),
   ]),
-  foldTurn('Fold or unfold the turn', Area.trajectory, '←→', [
+  foldTurn('Collapse or expand the turn', Area.trajectory, '←→', [
     Keys(LogicalKeyboardKey.arrowLeft),
     Keys(LogicalKeyboardKey.arrowRight),
   ]),
@@ -319,7 +319,7 @@ enum Command {
   ),
   dismissQuestion('Dismiss', Area.question, Keys(LogicalKeyboardKey.escape)),
   foldAll(
-    'Fold all turns',
+    'Collapse all turns',
     Area.trajectory,
     Keys(LogicalKeyboardKey.arrowLeft, alt: true),
   ),

@@ -73,6 +73,8 @@ void main() {
     expect(find.text('tap ⇪'), findsOneWidget);
     expect(find.text('Trajectory'), findsWidgets);
     expect(find.text('Fold or unfold the folder'), findsOneWidget);
+    expect(find.text('Collapse or expand the turn'), findsOneWidget);
+    expect(find.text('Collapse all turns'), findsOneWidget);
 
     await press(tester, LogicalKeyboardKey.escape);
     expect(find.text('tap ⇪'), findsNothing);

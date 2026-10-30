@@ -323,12 +323,16 @@ class Segments<T> extends StatelessWidget {
     required this.options,
     required this.selected,
     required this.onSelect,
+    this.dense = false,
   });
 
   /// Each option with its label, in order.
   final List<(T, String)> options;
   final T selected;
   final ValueChanged<T> onSelect;
+
+  /// Smaller, for a table header.
+  final bool dense;
 
   @override
   Widget build(BuildContext context) {
@@ -350,6 +354,7 @@ class Segments<T> extends StatelessWidget {
               _Segment(
                 label: label,
                 selected: value == selected,
+                dense: dense,
                 onTap: () => onSelect(value),
               ),
           ],
@@ -363,11 +368,13 @@ class _Segment extends StatelessWidget {
   const _Segment({
     required this.label,
     required this.selected,
+    required this.dense,
     required this.onTap,
   });
 
   final String label;
   final bool selected;
+  final bool dense;
   final VoidCallback onTap;
 
   @override
@@ -385,8 +392,10 @@ class _Segment extends StatelessWidget {
           borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
           // Ink, so the focus highlight shows above the selected segment.
           child: Ink(
-            height: 24,
-            padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space4),
+            height: dense ? 20 : 24,
+            padding: EdgeInsets.symmetric(
+              horizontal: dense ? WsMetrics.space2 : WsMetrics.space4,
+            ),
             decoration: selected
                 ? BoxDecoration(
                     color: ws.canvas,
@@ -399,7 +408,7 @@ class _Segment extends StatelessWidget {
               child: Text(
                 label,
                 style: TextStyle(
-                  fontSize: WsMetrics.fsCompact,
+                  fontSize: dense ? WsMetrics.fsCaption : WsMetrics.fsCompact,
                   color: selected ? ws.text : ws.textMuted,
                   fontWeight: selected
                       ? WsMetrics.fwMedium

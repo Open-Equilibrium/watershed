@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../controls.dart';
 import '../format.dart';
@@ -14,16 +15,18 @@ import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'compare_view.dart';
 import 'context_details.dart';
+import 'context_track.dart';
 import 'inspector.dart';
 import 'overview.dart';
 import 'step_parts.dart';
+import 'track_cell.dart';
 import 'trajectory_model.dart';
 import 'tree_view.dart';
 
 /// Keys of the Trajectory tab, for the status bar.
 String trajectoryKeys(ShortcutSettings keys) => [
   '${Fixed.previousOrNextStep.display} step',
-  '${Fixed.foldTurn.display} fold',
+  '${Fixed.foldTurn.display} collapse',
   keys.hint(Command.openStep, 'open'),
   keys.hint(Command.branch, 'branch'),
   keys.hint(Command.compare, 'compare'),
@@ -36,8 +39,9 @@ String compareKeys(ShortcutSettings keys) => [
   keys.hint(Command.compare, 'leave compare'),
 ].where((part) => part.isNotEmpty).join(' · ');
 
-/// The Trajectory tab (approved mockups 2 and 3): one overview on a shared time axis, the
-/// steps grouped by turn with an inspector, and the session tree. It reads the session's
+/// The Trajectory tab (approved mockups 2 and 3 and the approved context track): one overview
+/// on a shared time axis, the steps grouped by turn with their context and an inspector, and
+/// the session tree. It reads the session's
 /// stored history, so it looks the same during the run, after it and after a restart.
 class TrajectoryView extends StatefulWidget {
   const TrajectoryView({
@@ -61,7 +65,6 @@ class TrajectoryView extends StatefulWidget {
 
 class _TrajectoryViewState extends State<TrajectoryView> {
   final _focus = FocusNode(debugLabel: 'trajectory');
-  final _foldFocus = FocusNode(debugLabel: 'fold turns');
   final _scroll = ScrollController();
   BridgeHistory? _history;
   SessionGraph _graph = sessionGraph(const [], null);
@@ -76,6 +79,10 @@ class _TrajectoryViewState extends State<TrajectoryView> {
   late final _details = ContextDetails(widget.state.context)
     ..addListener(() => setState(() {}));
   final _folded = <int>{};
+  ContextTrack _track = contextTrack(const []);
+
+  /// Whether the context track fits the branch instead of the model's window.
+  bool _fit = false;
   bool _equalWidth = false;
   (double, double)? _range;
   (double, double)? _window;
@@ -94,6 +101,7 @@ class _TrajectoryViewState extends State<TrajectoryView> {
   void initState() {
     super.initState();
     widget.state.stored.addListener(_reload);
+    widget.state.models.addListener(_modelsChanged);
     _reload();
     // Opening the tab moves the keyboard to it.
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -104,12 +112,15 @@ class _TrajectoryViewState extends State<TrajectoryView> {
   @override
   void dispose() {
     widget.state.stored.removeListener(_reload);
+    widget.state.models.removeListener(_modelsChanged);
     _details.dispose();
     _focus.dispose();
-    _foldFocus.dispose();
     _scroll.dispose();
     super.dispose();
   }
+
+  /// The models' context windows arrived.
+  void _modelsChanged() => setState(() {});
 
   List<String> get _leaves {
     if (_comparing) return _picked;
@@ -154,6 +165,9 @@ class _TrajectoryViewState extends State<TrajectoryView> {
         setState(() {
           _history = history;
           _graph = graph;
+          _track = contextTrack(
+            history.trajectories.firstOrNull?.records ?? const [],
+          );
           if (_shown case final shown?) _shown = grown(shown);
           _picked = [for (final tip in _picked) grown(tip)];
         });
@@ -242,6 +256,20 @@ class _TrajectoryViewState extends State<TrajectoryView> {
     if (index < 0) return;
     final turn = _records[index].turn;
     setState(() => fold ? _folded.add(turn) : _folded.remove(turn));
+  }
+
+  /// Collapses or expands one turn; with ⌥ held, every turn.
+  void _toggleTurn(int turn) {
+    if (HardwareKeyboard.instance.isAltPressed) {
+      _foldAll();
+      return;
+    }
+    setState(() => _folded.remove(turn) || _folded.add(turn));
+  }
+
+  bool get _allFolded {
+    final turns = {for (final record in _records) record.turn};
+    return turns.isNotEmpty && _folded.containsAll(turns);
   }
 
   void _foldAll() {
@@ -408,7 +436,9 @@ class _TrajectoryViewState extends State<TrajectoryView> {
   }
 
   List<_Line> _lines() {
-    final lines = <_Line>[];
+    final lines = <_Line>[
+      if (_records.any((record) => record.context != null)) _StartLine(),
+    ];
     for (final turn in turnGroups(_records)) {
       lines.add(_TurnLine(turn));
       if (_folded.contains(turn.turn)) continue;
@@ -459,13 +489,11 @@ class _TrajectoryViewState extends State<TrajectoryView> {
               comparing: _comparing,
               summary: comparing ? _compareSummary(history) : _summary(),
               rangeLabel: comparing ? null : _rangeLabel(),
-              foldFocus: _foldFocus,
               onEqualWidth: (value) => setState(() {
                 _equalWidth = value;
                 _range = null;
                 _window = null;
               }),
-              onFold: _foldAll,
               onCompare: _toggleCompare,
             ),
             if (comparing) _compareOverview(history) else _overview(),
@@ -620,6 +648,18 @@ class _TrajectoryViewState extends State<TrajectoryView> {
       : '${(range.$1 / 1000).toStringAsFixed(1)}–'
             '${(range.$2 / 1000).toStringAsFixed(1)} s';
 
+  /// The window of the latest request's model, when the agent reports it.
+  int? _contextWindow() {
+    final models = widget.state.models.value;
+    for (final record in _records.reversed) {
+      if (record.kind != BridgeRecordKind.message) continue;
+      if (contextWindowOf(record.model, models) case final window?) {
+        return window;
+      }
+    }
+    return null;
+  }
+
   Widget _ledger() {
     final records = _records;
     final lines = _lines();
@@ -627,60 +667,147 @@ class _TrajectoryViewState extends State<TrajectoryView> {
     final focused = range == null
         ? null
         : inRange(records, range, equalWidth: _equalWidth);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        const _LedgerHeader(),
-        Expanded(
-          child: ListView.builder(
-            controller: _scroll,
-            itemCount: lines.length,
-            itemBuilder: (context, index) => switch (lines[index]) {
-              _TurnLine(:final turn) => _TurnRow(
-                turn: turn,
-                folded: _folded.contains(turn.turn),
-                onTap: () => setState(
-                  () => _folded.contains(turn.turn)
-                      ? _folded.remove(turn.turn)
-                      : _folded.add(turn.turn),
-                ),
+    final track = _track;
+    final window = _contextWindow();
+    final fit = _fit || window == null;
+    final scale = fit
+        ? track.levels.fold(track.start.tokens, (most, level) {
+            return math.max(most, level.tokens);
+          })
+        : window;
+    final compaction = fit ? null : compactionPoint(window);
+    final firstContext = records
+        .where((record) => record.context != null)
+        .firstOrNull
+        ?.context;
+    // What each line's track shows; collapsed turns and the inspector break the line.
+    int? valueAt(int line) => line < 0 || line >= lines.length
+        ? null
+        : switch (lines[line]) {
+            _StartLine() => track.start.tokens,
+            _TurnLine(:final turn) =>
+              _folded.contains(turn.turn) ? null : track.before(turn).tokens,
+            _StepLine(:final index) => track.levels[index].tokens,
+            _InspectorLine() => null,
+          };
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final trackWidth = _trackWidth(constraints.maxWidth);
+        Widget cell(
+          int line,
+          ContextLevel level, {
+          bool bar = true,
+          bool collapsed = false,
+        }) => TrackCell(
+          level: level,
+          scale: math.max(scale, 1).toDouble(),
+          previous: valueAt(line - 1),
+          next: valueAt(line + 1),
+          compaction: compaction,
+          window: window,
+          bar: bar,
+          collapsed: collapsed,
+        );
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _LedgerHeader(
+              trackWidth: trackWidth,
+              allFolded: _allFolded,
+              onFoldAll: _foldAll,
+              fit: window == null ? null : _fit,
+              onFit: (value) => setState(() => _fit = value),
+            ),
+            Expanded(
+              child: ListView.builder(
+                controller: _scroll,
+                itemCount: lines.length,
+                itemBuilder: (context, index) => switch (lines[index]) {
+                  _StartLine() => _LineRow(
+                    title: 'Start',
+                    summary: [
+                      'system prompt',
+                      if (firstContext?.sections.contains('project_context') ??
+                          false)
+                        'AGENTS.md',
+                      '${firstContext?.tools.length ?? 0} tools',
+                      '≈${formatCompact(track.start.tokens)}',
+                    ].join(' · '),
+                    trackWidth: trackWidth,
+                    track: cell(index, track.start, bar: false),
+                  ),
+                  _TurnLine(:final turn) => _TurnRow(
+                    turn: turn,
+                    before: track.before(turn),
+                    after: track.levels[turn.last],
+                    folded: _folded.contains(turn.turn),
+                    trackWidth: trackWidth,
+                    track: _folded.contains(turn.turn)
+                        ? cell(index, track.levels[turn.last], collapsed: true)
+                        : cell(index, track.before(turn), bar: false),
+                    onTap: () => _toggleTurn(turn.turn),
+                  ),
+                  _StepLine(index: final step) => Opacity(
+                    opacity: focused == null || focused[step] ? 1 : 0.4,
+                    child: _StepRow(
+                      key: ValueKey('step-${records[step].entry}'),
+                      number: step + 1,
+                      record: records[step],
+                      request: records[step].kind == BridgeRecordKind.message
+                          ? requestNumber(records, step)
+                          : null,
+                      level: track.levels[step],
+                      trackWidth: trackWidth,
+                      track: cell(
+                        index,
+                        track.levels[step],
+                        bar: records[step].kind != BridgeRecordKind.approval,
+                      ),
+                      selected: records[step].entry == _selected,
+                      onTap: () {
+                        _focus.requestFocus();
+                        final entry = records[step].entry;
+                        setState(() {
+                          _inspecting = entry == _selected
+                              ? !_inspecting
+                              : false;
+                          _selected = entry;
+                        });
+                      },
+                    ),
+                  ),
+                  _InspectorLine(index: final step) => _inspector(step, window),
+                },
               ),
-              _StepLine(index: final step) => Opacity(
-                opacity: focused == null || focused[step] ? 1 : 0.4,
-                child: _StepRow(
-                  key: ValueKey('step-${records[step].entry}'),
-                  number: step + 1,
-                  record: records[step],
-                  selected: records[step].entry == _selected,
-                  onTap: () {
-                    _focus.requestFocus();
-                    final entry = records[step].entry;
-                    setState(() {
-                      _inspecting = entry == _selected ? !_inspecting : false;
-                      _selected = entry;
-                    });
-                  },
-                ),
-              ),
-              _InspectorLine(index: final step) => Inspector(
-                detail: _details.detailFor(records[step]),
-                unread: _details.unread(records[step].entry),
-                records: records,
-                index: step,
-                tab: _tab,
-                canBranch: !_busy,
-                onTab: (tab) => setState(() => _tab = tab),
-                onBranch: _branch,
-              ),
-            },
-          ),
-        ),
-      ],
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  /// The inspector of `step`, with what its request held.
+  Widget _inspector(int step, int? window) {
+    final records = _records;
+    final request = requestOf(records, step);
+    return Inspector(
+      detail: request == null ? null : _details.detailFor(records[request]),
+      unread: request == null ? null : _details.unread(records[request].entry),
+      records: records,
+      index: step,
+      window: window,
+      tab: _tab,
+      canBranch: !_busy,
+      onTab: (tab) => setState(() => _tab = tab),
+      onBranch: _branch,
     );
   }
 }
 
 sealed class _Line {}
+
+/// What the first request held before any message.
+class _StartLine extends _Line {}
 
 class _TurnLine extends _Line {
   _TurnLine(this.turn);
@@ -700,17 +827,15 @@ class _InspectorLine extends _Line {
   final int index;
 }
 
-/// One row (approved look mockup): the view switch and folding on the left, the summary and
-/// Compare on the right.
+/// One row (approved look mockup): the view switch on the left, the summary and Compare on the
+/// right.
 class _Toolbar extends StatelessWidget {
   const _Toolbar({
     required this.equalWidth,
     required this.comparing,
     required this.summary,
     required this.rangeLabel,
-    required this.foldFocus,
     required this.onEqualWidth,
-    required this.onFold,
     required this.onCompare,
   });
 
@@ -720,9 +845,7 @@ class _Toolbar extends StatelessWidget {
 
   /// The focused range, while there is one.
   final String? rangeLabel;
-  final FocusNode foldFocus;
   final ValueChanged<bool> onEqualWidth;
-  final VoidCallback onFold;
   final VoidCallback onCompare;
 
   @override
@@ -739,18 +862,6 @@ class _Toolbar extends StatelessWidget {
             options: const [(false, 'Real time'), (true, 'Equal width')],
             selected: equalWidth,
             onSelect: onEqualWidth,
-          ),
-          const SizedBox(width: WsMetrics.space3),
-          // Return and space press it rather than the view's own keys.
-          Shortcuts(
-            shortcuts: activateKeys,
-            child: GhostButton(
-              icon: LucideIcons.foldVertical,
-              label: 'Fold turns',
-              shortcut: keys.label(Command.foldAll),
-              focusNode: foldFocus,
-              onPressed: onFold,
-            ),
           ),
           Expanded(
             child: Row(
@@ -827,63 +938,183 @@ class _Toolbar extends StatelessWidget {
   }
 }
 
-/// The ledger's columns: number, kind, step, time, tokens in, out and thinking.
-Widget _columns(List<Widget> cells) => Row(
-  children: [
-    SizedBox(width: 28, child: cells[0]),
-    const SizedBox(width: WsMetrics.space3),
-    SizedBox(
-      width: 84,
-      child: Align(alignment: Alignment.centerLeft, child: cells[1]),
-    ),
-    const SizedBox(width: WsMetrics.space3),
-    Expanded(child: cells[2]),
-    for (final (index, width) in [
-      (3, 64.0),
-      (4, 60.0),
-      (5, 50.0),
-      (6, 50.0),
-    ]) ...[
-      const SizedBox(width: WsMetrics.space3),
-      SizedBox(
-        width: width,
-        child: Align(alignment: Alignment.centerRight, child: cells[index]),
-      ),
-    ],
-  ],
+/// Widths of the ledger's fixed columns: number, kind, time, adds, tokens in and out.
+const _fixed = (
+  number: 28.0,
+  kind: 72.0,
+  time: 56.0,
+  adds: 56.0,
+  tokens: 48.0,
+  out: 44.0,
 );
 
+/// The context track's width in a ledger `width` wide: up to 180, and none when the step
+/// would keep less than 160.
+double _trackWidth(double width) {
+  final rest =
+      width -
+      2 * WsMetrics.space5 -
+      _fixed.number -
+      _fixed.kind -
+      _fixed.time -
+      _fixed.adds -
+      _fixed.tokens -
+      _fixed.out -
+      7 * WsMetrics.space3 -
+      160;
+  return rest < 120 ? 0 : math.min(rest, 180);
+}
+
+/// The ledger's columns: number, kind, step, time, adds, context track, tokens in and out;
+/// a `span` widget takes kind through adds, as turn lines do.
+Widget _columns(
+  List<Widget> cells, {
+  required double trackWidth,
+  Widget? span,
+}) {
+  Widget fixed(double width, Widget child, {bool right = true}) => SizedBox(
+    width: width,
+    child: Align(
+      alignment: right ? Alignment.centerRight : Alignment.centerLeft,
+      child: child,
+    ),
+  );
+  const gap = SizedBox(width: WsMetrics.space3);
+  return Row(
+    children: [
+      SizedBox(width: _fixed.number, child: cells[0]),
+      gap,
+      if (span != null)
+        Expanded(child: span)
+      else ...[
+        fixed(_fixed.kind, cells[1], right: false),
+        gap,
+        Expanded(child: cells[2]),
+        gap,
+        fixed(_fixed.time, cells[3]),
+        gap,
+        fixed(_fixed.adds, cells[4]),
+      ],
+      if (trackWidth > 0) ...[
+        gap,
+        SizedBox(
+          width: trackWidth,
+          height: WsMetrics.rowTable,
+          child: cells[5],
+        ),
+      ],
+      gap,
+      fixed(_fixed.tokens, cells[6]),
+      gap,
+      fixed(_fixed.out, cells[7]),
+    ],
+  );
+}
+
 class _LedgerHeader extends StatelessWidget {
-  const _LedgerHeader();
+  const _LedgerHeader({
+    required this.trackWidth,
+    required this.allFolded,
+    required this.onFoldAll,
+    required this.fit,
+    required this.onFit,
+  });
+
+  final double trackWidth;
+  final bool allFolded;
+  final VoidCallback onFoldAll;
+
+  /// Whether the track fits the branch; `null` without a known window, which it then fits.
+  final bool? fit;
+  final ValueChanged<bool> onFit;
 
   @override
   Widget build(BuildContext context) {
     final ws = context.ws;
     final style = TextStyle(color: ws.textFaint, fontSize: WsMetrics.fsSmall);
+    final fit = this.fit;
     return Container(
-      height: 30,
+      height: 34,
       padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space5),
       decoration: BoxDecoration(
         border: Border(bottom: BorderSide(color: ws.border)),
       ),
       child: _columns([
-        for (final label in ['#', 'Kind', 'Step', 'Time', 'In', 'Out', 'Think'])
+        // In the column of the turns' chevrons (approved look mockup); return and space
+        // press it rather than the view's own keys.
+        Center(
+          child: Tooltip(
+            message: allFolded ? 'Expand all turns' : 'Collapse all turns',
+            child: Shortcuts(
+              shortcuts: activateKeys,
+              child: InkWell(
+                onTap: onFoldAll,
+                borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
+                child: SizedBox(
+                  width: 24,
+                  height: 24,
+                  child: Icon(
+                    allFolded
+                        ? LucideIcons.chevronsUpDown
+                        : LucideIcons.chevronsDownUp,
+                    size: 14,
+                    color: ws.textMuted,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+        for (final label in ['Kind', 'Step', 'Time', 'Adds'])
           Text(label, style: style),
-      ]),
+        Row(
+          children: [
+            Flexible(
+              child: Text(
+                'Context',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: style,
+              ),
+            ),
+            if (fit != null) ...[
+              const SizedBox(width: WsMetrics.space2),
+              Segments(
+                options: const [(false, 'Window'), (true, 'Fit')],
+                selected: fit,
+                onSelect: onFit,
+                dense: true,
+              ),
+            ],
+          ],
+        ),
+        Text('In', style: style),
+        Text('Out', style: style),
+      ], trackWidth: trackWidth),
     );
   }
 }
 
-class _TurnRow extends StatelessWidget {
-  const _TurnRow({
-    required this.turn,
-    required this.folded,
-    required this.onTap,
+/// A line with a summary on it, such as a turn's: a title, the summary and a rule up to the
+/// context track.
+class _LineRow extends StatelessWidget {
+  const _LineRow({
+    required this.title,
+    required this.summary,
+    required this.trackWidth,
+    required this.track,
+    this.lead = const SizedBox.shrink(),
+    this.onTap,
   });
 
-  final TurnGroup turn;
-  final bool folded;
-  final VoidCallback onTap;
+  final String title;
+  final String summary;
+  final double trackWidth;
+  final Widget track;
+
+  /// What the number column shows, such as a chevron.
+  final Widget lead;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -897,43 +1128,101 @@ class _TurnRow extends StatelessWidget {
         decoration: BoxDecoration(
           border: Border(bottom: BorderSide(color: ws.border)),
         ),
-        child: Row(
-          children: [
-            SizedBox(
-              width: 14,
-              child: Icon(
-                folded ? LucideIcons.chevronRight : LucideIcons.chevronDown,
-                size: 14,
-                color: ws.textFaint,
-              ),
-            ),
-            const SizedBox(width: WsMetrics.space2),
-            Text(
-              turn.turn == 0 ? 'Setup' : 'Turn ${turn.turn}',
-              style: const TextStyle(fontWeight: WsMetrics.fwSemibold),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                turn.prompt,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(color: ws.textMuted),
-              ),
-            ),
-            const SizedBox(width: WsMetrics.space4),
-            Text(
-              [
-                formatDuration(turn.durationMs),
-                for (final tool in turn.tools.entries)
-                  '${tool.key} ${tool.value}',
-              ].join(' · '),
-              style: TextStyle(
-                color: ws.textFaint,
-                fontSize: WsMetrics.fsSmall,
-                fontFeatures: const [FontFeature.tabularFigures()],
-              ),
-            ),
+        child: _columns(
+          [
+            lead,
+            for (var i = 1; i < 5; i++) const SizedBox.shrink(),
+            track,
+            const SizedBox.shrink(),
+            const SizedBox.shrink(),
           ],
+          trackWidth: trackWidth,
+          span: Row(
+            children: [
+              Text(
+                title,
+                style: const TextStyle(fontWeight: WsMetrics.fwSemibold),
+              ),
+              const SizedBox(width: WsMetrics.space3),
+              // The summary keeps its width and the rule takes the rest, at least 16.
+              Expanded(
+                child: LayoutBuilder(
+                  builder: (context, constraints) => Row(
+                    children: [
+                      ConstrainedBox(
+                        constraints: BoxConstraints(
+                          maxWidth: math.max(0, constraints.maxWidth - 24),
+                        ),
+                        child: Text(
+                          summary,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: ws.textFaint,
+                            fontSize: WsMetrics.fsSmall,
+                            fontFeatures: const [FontFeature.tabularFigures()],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: WsMetrics.space3),
+                      Expanded(
+                        child: Container(height: 1, color: ws.borderStrong),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// A turn's line (approved look mockup): its chevron, prompt, duration and what it added to
+/// the context; a click collapses or expands it, ⌥-click every turn.
+class _TurnRow extends StatelessWidget {
+  const _TurnRow({
+    required this.turn,
+    required this.before,
+    required this.after,
+    required this.folded,
+    required this.trackWidth,
+    required this.track,
+    required this.onTap,
+  });
+
+  final TurnGroup turn;
+
+  /// The context before the turn's first step and after its last.
+  final ContextLevel before;
+  final ContextLevel after;
+  final bool folded;
+  final double trackWidth;
+  final Widget track;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final added = after.tokens - before.tokens;
+    return _LineRow(
+      title: turn.turn == 0 ? 'Setup' : 'Turn ${turn.turn}',
+      summary: [
+        if (turn.prompt.isNotEmpty) turn.prompt,
+        formatDuration(turn.durationMs),
+        '${added < 0 ? '−' : '+'}${formatCompact(added.abs())} → '
+            '${after.exact ? '' : '≈'}${formatCompact(after.tokens)}',
+      ].join(' · '),
+      trackWidth: trackWidth,
+      track: track,
+      onTap: onTap,
+      lead: Center(
+        child: Icon(
+          folded ? LucideIcons.chevronRight : LucideIcons.chevronDown,
+          key: ValueKey('chevron-${turn.turn}'),
+          size: 14,
+          color: context.ws.textFaint,
         ),
       ),
     );
@@ -945,12 +1234,24 @@ class _StepRow extends StatelessWidget {
     super.key,
     required this.number,
     required this.record,
+    required this.request,
+    required this.level,
+    required this.trackWidth,
+    required this.track,
     required this.selected,
     required this.onTap,
   });
 
   final int number;
   final BridgeRecord record;
+
+  /// A response's request number on the branch.
+  final int? request;
+
+  /// The context after the step.
+  final ContextLevel level;
+  final double trackWidth;
+  final Widget track;
   final bool selected;
   final VoidCallback onTap;
 
@@ -964,6 +1265,7 @@ class _StepRow extends StatelessWidget {
     );
     final usage = record.usage;
     final duration = record.durationMs;
+    final request = this.request;
     return InkWell(
       canRequestFocus: false,
       onTap: onTap,
@@ -982,6 +1284,13 @@ class _StepRow extends StatelessWidget {
             builder: (context, constraints) => Row(
               children: [
                 Flexible(child: StepText(record)),
+                if (request != null) ...[
+                  const SizedBox(width: WsMetrics.space2),
+                  Text(
+                    '#$request',
+                    style: figures.copyWith(color: ws.textFaint),
+                  ),
+                ],
                 const SizedBox(width: WsMetrics.space3),
                 ConstrainedBox(
                   constraints: BoxConstraints(
@@ -1001,15 +1310,21 @@ class _StepRow extends StatelessWidget {
             style: figures,
           ),
           Text(
-            usage == null ? '' : formatCount(promptTokens(usage)),
+            record.kind == BridgeRecordKind.approval
+                ? ''
+                : '${level.addedExact ? '' : '≈'}+${formatCompact(level.added)}',
             style: figures,
           ),
-          Text(usage == null ? '' : formatCount(usage.output), style: figures),
+          track,
           Text(
-            usage == null ? '' : formatCount(usage.reasoning),
+            usage == null ? '' : formatCompact(promptTokens(usage)),
             style: figures,
           ),
-        ]),
+          Text(
+            usage == null ? '' : formatCompact(usage.output),
+            style: figures,
+          ),
+        ], trackWidth: trackWidth),
       ),
     );
   }
