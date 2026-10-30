@@ -26,7 +26,7 @@ Watershed development targets native Linux x86_64 and macOS ARM64. A Mac can run
 
 A Linux VM is not the macOS product execution path. Native Apple tools and Metal-based inference must remain possible without placing Flow Agent in a Linux guest; local inference still requires the separately decided trust boundary in [SECURITY.md](SECURITY.md#accepted-post-m11-target-local-inference-and-portable-continuation).
 
-On Windows 11 x86_64, users may access a supported remote host or use a Linux x86_64 environment through WSL. WSL must independently satisfy the Linux executor prerequisites; installing a distribution alone is not a readiness guarantee. This is Linux execution, not native Windows support. A Windows Liquid client does not imply a local Flow Agent or Meta-Harness process; in Release 1 it embeds no Meta-Harness core and reaches agents only through a supported remote host (ADR-0201).
+On Windows 11 x86_64, users may access a supported remote host or use a Linux x86_64 environment through WSL. WSL must independently satisfy the Linux executor prerequisites; installing a distribution alone is not a readiness guarantee. This is Linux execution, not native Windows support. A Windows Liquid client does not imply a local Flow Agent process. In Release 1 it embeds no Meta-Harness core; as T3 Code does with its server, it installs, updates and starts the Linux Meta-Harness in a WSL distribution, connects to it over a loopback port and also reaches supported remote hosts. Projects belong in the WSL file system, because Git on a Windows drive is much slower (ADR-0201).
 
 ## Installation prerequisites
 
