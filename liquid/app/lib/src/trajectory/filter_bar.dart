@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../controls.dart';
+import '../shortcuts/keymap.dart';
 import '../rust/api/history.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
@@ -16,6 +17,7 @@ class FilterBar extends StatelessWidget {
     required this.text,
     required this.textFocus,
     required this.onChanged,
+    required this.onDone,
   });
 
   final StepFilter filter;
@@ -25,6 +27,9 @@ class FilterBar extends StatelessWidget {
   final TextEditingController text;
   final FocusNode textFocus;
   final ValueChanged<StepFilter> onChanged;
+
+  /// Return or esc in the text field gives the keyboard back to the list.
+  final VoidCallback onDone;
 
   @override
   Widget build(BuildContext context) {
@@ -83,32 +88,36 @@ class FilterBar extends StatelessWidget {
                   SizedBox(
                     width: 180,
                     height: 26,
-                    child: TextField(
-                      key: const Key('filter-text'),
-                      controller: text,
-                      focusNode: textFocus,
-                      onChanged: (value) =>
-                          onChanged(filter.copyWith(text: value)),
-                      style: const TextStyle(fontSize: WsMetrics.fsSmall),
-                      decoration: InputDecoration(
-                        isDense: true,
-                        hintText: 'Filter steps…',
-                        hintStyle: faint,
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: WsMetrics.space2,
-                          vertical: 6,
-                        ),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(
-                            WsMetrics.radiusMd,
+                    child: CallbackShortcuts(
+                      bindings: {escapeKey: onDone},
+                      child: TextField(
+                        key: const Key('filter-text'),
+                        onSubmitted: (_) => onDone(),
+                        controller: text,
+                        focusNode: textFocus,
+                        onChanged: (value) =>
+                            onChanged(filter.copyWith(text: value)),
+                        style: const TextStyle(fontSize: WsMetrics.fsSmall),
+                        decoration: InputDecoration(
+                          isDense: true,
+                          hintText: 'Filter steps…',
+                          hintStyle: faint,
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: WsMetrics.space2,
+                            vertical: 6,
                           ),
-                          borderSide: BorderSide(color: ws.borderStrong),
-                        ),
-                        enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(
-                            WsMetrics.radiusMd,
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(
+                              WsMetrics.radiusMd,
+                            ),
+                            borderSide: BorderSide(color: ws.borderStrong),
                           ),
-                          borderSide: BorderSide(color: ws.borderStrong),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(
+                              WsMetrics.radiusMd,
+                            ),
+                            borderSide: BorderSide(color: ws.borderStrong),
+                          ),
                         ),
                       ),
                     ),

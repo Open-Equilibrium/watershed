@@ -73,11 +73,14 @@ class TrackCell extends StatelessWidget {
                 ),
                 child: Align(
                   alignment: Alignment.centerLeft,
-                  child: Text(
-                    '···',
-                    style: TextStyle(
-                      color: ws.textFaint,
-                      fontSize: WsMetrics.fsSmall,
+                  // The turn line already says what the turn holds.
+                  child: ExcludeSemantics(
+                    child: Text(
+                      '···',
+                      style: TextStyle(
+                        color: ws.textFaint,
+                        fontSize: WsMetrics.fsSmall,
+                      ),
                     ),
                   ),
                 ),

@@ -29,7 +29,7 @@ const _fixed = (
 );
 
 /// The context track's width in a ledger `width` wide: up to 180, and none when the step
-/// would keep less than 160.
+/// would keep less than 160 or the track less than 120.
 double ledgerTrackWidth(double width) {
   final rest =
       width -
@@ -115,7 +115,7 @@ class LedgerHeader extends StatelessWidget {
     final style = TextStyle(color: ws.textFaint, fontSize: WsMetrics.fsSmall);
     final fit = this.fit;
     return Container(
-      height: 34,
+      height: WsMetrics.rowTable,
       padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space5),
       decoration: BoxDecoration(
         border: Border(bottom: BorderSide(color: ws.border)),
@@ -315,11 +315,15 @@ class TurnRow extends StatelessWidget {
       onTap: onOpen,
       onLead: onToggle,
       lead: Center(
-        child: Icon(
-          folded ? LucideIcons.chevronRight : LucideIcons.chevronDown,
-          key: ValueKey('chevron-${turn.turn}'),
-          size: 14,
-          color: context.ws.textFaint,
+        child: Semantics(
+          button: true,
+          label: '${folded ? 'Expand' : 'Collapse'} turn ${turn.turn}',
+          child: Icon(
+            folded ? LucideIcons.chevronRight : LucideIcons.chevronDown,
+            key: ValueKey('chevron-${turn.turn}'),
+            size: 14,
+            color: context.ws.textFaint,
+          ),
         ),
       ),
     );

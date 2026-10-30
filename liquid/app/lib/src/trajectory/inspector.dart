@@ -263,7 +263,7 @@ class _SplitBar extends StatelessWidget {
                 child: Container(
                   margin: EdgeInsets.only(left: index == 0 ? 0 : 2),
                   decoration: BoxDecoration(
-                    color: [ws.data1, ws.data2, ws.data3][index],
+                    color: [ws.data2, ws.data3, ws.data1][index],
                     borderRadius: BorderRadius.circular(3),
                   ),
                 ),
@@ -413,14 +413,14 @@ class _MessageSummary extends StatelessWidget {
                   _SplitBar(split),
                   const SizedBox(height: 10),
                   _ShareRow(
-                    ws.data1,
+                    ws.data2,
                     sections == null || sections.isEmpty
                         ? 'System prompt'
                         : 'System prompt · ${_names(sections)}',
                     split[0],
                   ),
-                  _ShareRow(ws.data2, 'Tools · ${saw.tools.length}', split[1]),
-                  _ShareRow(ws.data3, 'Messages · ${saw.messages}', split[2]),
+                  _ShareRow(ws.data3, 'Tools · ${saw.tools.length}', split[1]),
+                  _ShareRow(ws.data1, 'Messages · ${saw.messages}', split[2]),
                   if (saw.newSincePrevious.isNotEmpty) ...[
                     const SizedBox(height: 10),
                     Container(
@@ -928,17 +928,17 @@ class _ContextList extends StatelessWidget {
       children: [
         group('System prompt', split[0]),
         for (final section in detail.sections)
-          part(section.name, section.chars, sectionChars, ws.data1),
+          part(section.name, section.chars, sectionChars, ws.data2),
         group('Tools · ${detail.tools.length}', split[1]),
         for (final tool in detail.tools)
-          part(tool.name, tool.chars, toolChars, ws.data2),
+          part(tool.name, tool.chars, toolChars, ws.data3),
         group('Messages · ${saw.messages}', split[2]),
         for (final (index, message) in detail.messages.indexed)
           part(
             '${index + 1} · ${message.label}',
             message.chars,
             messageChars,
-            ws.data3,
+            ws.data1,
             fresh: message.fresh,
             gone: !message.inContext,
           ),

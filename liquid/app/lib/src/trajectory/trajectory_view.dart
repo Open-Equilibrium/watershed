@@ -664,6 +664,7 @@ class _TrajectoryViewState extends State<TrajectoryView> {
             text: _filterText,
             textFocus: _filterFocus,
             onChanged: (filter) => setState(() => _filter = filter),
+            onDone: _focus.requestFocus,
           ),
         Expanded(
           child: ViewShortcuts(
@@ -857,10 +858,13 @@ class _TrajectoryViewState extends State<TrajectoryView> {
     );
   }
 
-  String _axisLabel((double, double) range) => _equalWidth
-      ? 'steps ${range.$1.floor() + 1}–${range.$2.ceil()}'
-      : '${(range.$1 / 1000).toStringAsFixed(1)}–'
-            '${(range.$2 / 1000).toStringAsFixed(1)} s';
+  /// A range of the axis in steps or seconds, whole seconds once it spans ten.
+  String _axisLabel((double, double) range) {
+    if (_equalWidth) return 'steps ${range.$1.floor() + 1}–${range.$2.ceil()}';
+    final digits = range.$2 - range.$1 >= 10000 ? 0 : 1;
+    return '${(range.$1 / 1000).toStringAsFixed(digits)}–'
+        '${(range.$2 / 1000).toStringAsFixed(digits)} s';
+  }
 
   /// The window of the latest request's model, when the agent reports it.
   int? _contextWindow() {

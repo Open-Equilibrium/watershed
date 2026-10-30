@@ -31,6 +31,17 @@ class Brush {
 
   /// Whether it is a range that limits the list rather than what the list shows.
   final bool range;
+
+  @override
+  bool operator ==(Object other) =>
+      other is Brush &&
+      other.start == start &&
+      other.end == end &&
+      other.label == label &&
+      other.range == range;
+
+  @override
+  int get hashCode => Object.hash(start, end, label, range);
 }
 
 /// The Trajectory's single top section: every step on one time axis (approved navigation
@@ -232,19 +243,25 @@ class _OverviewState extends State<Overview> {
                               ],
                             ),
                           ),
+                          // The brush moves with every scroll of the list; its own layer
+                          // keeps the tracks from being painted again each time.
                           if (brush != null)
-                            ValueListenableBuilder(
-                              valueListenable: brush,
-                              builder: (context, brush, _) => brush == null
-                                  ? const SizedBox.shrink()
-                                  : _BrushView(
-                                      brush: brush,
-                                      width: width,
-                                      visible: visible,
-                                      at: at,
-                                      onRange: widget.onRange,
-                                      onPan: widget.onPan,
-                                    ),
+                            Positioned.fill(
+                              child: RepaintBoundary(
+                                child: ValueListenableBuilder(
+                                  valueListenable: brush,
+                                  builder: (context, brush, _) => brush == null
+                                      ? const SizedBox.shrink()
+                                      : _BrushView(
+                                          brush: brush,
+                                          width: width,
+                                          visible: visible,
+                                          at: at,
+                                          onRange: widget.onRange,
+                                          onPan: widget.onPan,
+                                        ),
+                                ),
+                              ),
                             ),
                         ],
                       ),
@@ -381,50 +398,46 @@ class _BrushViewState extends State<_BrushView> {
         ),
       ),
     );
-    return Positioned.fill(
-      child: Stack(
-        children: [
-          Positioned(
-            left: left,
-            width: right - left,
-            top: 14 + WsMetrics.space2 - 3,
-            bottom: 0,
-            child: Semantics(
-              key: const Key('range-brush'),
-              container: true,
-              label: brush.label,
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onHorizontalDragStart: (details) =>
-                    _drag = (brush.start, _pointer(details.globalPosition)),
-                onHorizontalDragEnd: (_) => _drag = null,
-                onHorizontalDragUpdate: onPan == null
-                    ? null
-                    : (details) {
-                        final (start, from) = _drag ?? (brush.start, 0.0);
-                        onPan(
-                          start +
-                              (_pointer(details.globalPosition) - from) /
-                                  width *
-                                  (visible.$2 - visible.$1),
-                        );
-                      },
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: ws.accent.withValues(alpha: 0.08),
-                    border: Border.all(
-                      color: ws.accent.withValues(alpha: 0.55),
-                    ),
-                    borderRadius: BorderRadius.circular(4),
-                  ),
+    return Stack(
+      children: [
+        Positioned(
+          left: left,
+          width: right - left,
+          top: 14 + WsMetrics.space2 - 3,
+          bottom: 0,
+          child: Semantics(
+            key: const Key('range-brush'),
+            container: true,
+            label: brush.label,
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onHorizontalDragStart: (details) =>
+                  _drag = (brush.start, _pointer(details.globalPosition)),
+              onHorizontalDragEnd: (_) => _drag = null,
+              onHorizontalDragUpdate: onPan == null
+                  ? null
+                  : (details) {
+                      final (start, from) = _drag ?? (brush.start, 0.0);
+                      onPan(
+                        start +
+                            (_pointer(details.globalPosition) - from) /
+                                width *
+                                (visible.$2 - visible.$1),
+                      );
+                    },
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: ws.accent.withValues(alpha: 0.08),
+                  border: Border.all(color: ws.accent.withValues(alpha: 0.55)),
+                  borderRadius: BorderRadius.circular(4),
                 ),
               ),
             ),
           ),
-          handle(const Key('range-start'), left, true),
-          handle(const Key('range-end'), right, false),
-        ],
-      ),
+        ),
+        handle(const Key('range-start'), left, true),
+        handle(const Key('range-end'), right, false),
+      ],
     );
   }
 }

@@ -343,31 +343,35 @@ class _ShortcutsPageState extends State<ShortcutsPage> {
                       if (widget.appearance != null) ('Appearance', true),
                       ('Shortcuts', false),
                     ])
-                      Shortcuts(
-                        shortcuts: activateKeys,
-                        child: InkWell(
-                          onTap: () => setState(() => _appearance = appearance),
-                          borderRadius: BorderRadius.circular(
-                            WsMetrics.radiusMd,
-                          ),
-                          child: Container(
-                            height: WsMetrics.rowNav,
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: WsMetrics.space3,
+                      Semantics(
+                        selected: _appearance == appearance,
+                        child: Shortcuts(
+                          shortcuts: activateKeys,
+                          child: InkWell(
+                            onTap: () =>
+                                setState(() => _appearance = appearance),
+                            borderRadius: BorderRadius.circular(
+                              WsMetrics.radiusMd,
                             ),
-                            alignment: Alignment.centerLeft,
-                            decoration: BoxDecoration(
-                              color: _appearance == appearance
-                                  ? ws.selected
-                                  : null,
-                              borderRadius: BorderRadius.circular(
-                                WsMetrics.radiusMd,
+                            child: Container(
+                              height: WsMetrics.rowNav,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: WsMetrics.space3,
                               ),
-                            ),
-                            child: Text(
-                              label,
-                              style: const TextStyle(
-                                fontWeight: WsMetrics.fwMedium,
+                              alignment: Alignment.centerLeft,
+                              decoration: BoxDecoration(
+                                color: _appearance == appearance
+                                    ? ws.selected
+                                    : null,
+                                borderRadius: BorderRadius.circular(
+                                  WsMetrics.radiusMd,
+                                ),
+                              ),
+                              child: Text(
+                                label,
+                                style: const TextStyle(
+                                  fontWeight: WsMetrics.fwMedium,
+                                ),
                               ),
                             ),
                           ),

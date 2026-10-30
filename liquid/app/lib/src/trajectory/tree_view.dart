@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../controls.dart';
@@ -111,55 +112,59 @@ class SessionTreeView extends StatelessWidget {
               itemBuilder: (context, index) {
                 final row = graph.rows[index];
                 final highlighted = row.node.id == selected;
-                return InkWell(
-                  key: ValueKey('tree-${row.node.id}'),
-                  canRequestFocus: false,
-                  onTap: () => onRow(row),
-                  borderRadius: BorderRadius.circular(WsMetrics.radiusSm),
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: highlighted ? ws.selected : null,
-                      borderRadius: BorderRadius.circular(WsMetrics.radiusSm),
-                    ),
-                    child: Stack(
-                      children: [
-                        Positioned(
-                          left: 0,
-                          top: 0,
-                          bottom: 0,
-                          width: graphWidth,
-                          // The node's kind is told, not only drawn.
-                          child: Semantics(
-                            container: true,
-                            label: _kindLabel(row.node),
-                            child: CustomPaint(
-                              painter: _RowPainter(
-                                lines[index],
-                                row: index,
-                                kind: row.node.kind,
-                                failed: row.node.failed,
-                                selected: highlighted,
-                                lane: row.lane,
-                                path: path,
-                                spacing: spacing,
-                                palette: ws,
+                // Which step is selected is told, not only drawn.
+                return Semantics(
+                  selected: highlighted,
+                  child: InkWell(
+                    key: ValueKey('tree-${row.node.id}'),
+                    canRequestFocus: false,
+                    onTap: () => onRow(row),
+                    borderRadius: BorderRadius.circular(WsMetrics.radiusSm),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: highlighted ? ws.selected : null,
+                        borderRadius: BorderRadius.circular(WsMetrics.radiusSm),
+                      ),
+                      child: Stack(
+                        children: [
+                          Positioned(
+                            left: 0,
+                            top: 0,
+                            bottom: 0,
+                            width: graphWidth,
+                            // The node's kind is told, not only drawn.
+                            child: Semantics(
+                              container: true,
+                              label: _kindLabel(row.node),
+                              child: CustomPaint(
+                                painter: _RowPainter(
+                                  lines[index],
+                                  row: index,
+                                  kind: row.node.kind,
+                                  failed: row.node.failed,
+                                  selected: highlighted,
+                                  lane: row.lane,
+                                  path: path,
+                                  spacing: spacing,
+                                  palette: ws,
+                                ),
                               ),
                             ),
                           ),
-                        ),
-                        Padding(
-                          padding: EdgeInsets.only(
-                            left: graphWidth + WsMetrics.space1,
-                            right: WsMetrics.space1,
+                          Padding(
+                            padding: EdgeInsets.only(
+                              left: graphWidth + WsMetrics.space1,
+                              right: WsMetrics.space1,
+                            ),
+                            child: _RowContent(
+                              row: row,
+                              picked: picked,
+                              shown: shown,
+                              highlighted: highlighted,
+                            ),
                           ),
-                          child: _RowContent(
-                            row: row,
-                            picked: picked,
-                            shown: shown,
-                            highlighted: highlighted,
-                          ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
                 );
@@ -617,7 +622,7 @@ class _RowPainter extends CustomPainter {
       old.failed != failed ||
       old.selected != selected ||
       old.lane != lane ||
-      old.path != path ||
+      !setEquals(old.path, path) ||
       old.spacing != spacing ||
       old.palette != palette;
 }

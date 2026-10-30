@@ -698,6 +698,11 @@ void main() {
     expect(find.byKey(const ValueKey('step-e5')), findsOneWidget);
     await press(tester, LogicalKeyboardKey.enter);
     expect(tab('Tool call'), findsOneWidget, reason: 'the step is selected');
+    expect(
+      tester.getSemantics(find.byKey(const ValueKey('tree-e5'))),
+      isSemantics(isSelected: true),
+      reason: 'the tree tells which step is selected, not only draws it',
+    );
   });
 
   testWidgets('a prompt branches before itself, also when already there', (
