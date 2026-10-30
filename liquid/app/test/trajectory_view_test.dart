@@ -14,6 +14,7 @@ import 'package:liquid/src/session/session_state.dart';
 import 'package:liquid/src/theme/theme.dart';
 import 'package:liquid/src/trajectory/compare_view.dart';
 import 'package:liquid/src/trajectory/overview.dart';
+import 'package:liquid/src/trajectory/tree_view.dart';
 
 import 'fake_backend.dart';
 
@@ -535,6 +536,63 @@ void main() {
       find.text('Could not read what the model saw: the session file is gone'),
       findsOneWidget,
     );
+  });
+
+  testWidgets('the session tree is compact and collapses to a rail', (
+    tester,
+  ) async {
+    await show(tester, historyOf(branchA));
+    double width() => tester.getSize(find.byType(SessionTreeView)).width;
+    expect(width(), 200);
+    await tester.tap(find.byTooltip('Collapse the session tree'));
+    await tester.pumpAndSettle();
+    expect(width(), 24);
+
+    await show(tester, historyOf(branchA), size: narrowest);
+    expect(width(), 24, reason: 'below 1280 px it starts collapsed');
+    expect(
+      find.bySemanticsLabel(RegExp('^Context ')),
+      findsWidgets,
+      reason: 'which leaves the context track room at the smallest width',
+    );
+    await tester.tap(find.byTooltip('Expand the session tree'));
+    await tester.pumpAndSettle();
+    expect(width(), 200);
+  });
+
+  testWidgets('tree nodes show each step\'s kind, not by color alone', (
+    tester,
+  ) async {
+    await show(tester, historyOf(branchA));
+    Finder inTree(Finder finder) =>
+        find.descendant(of: find.byType(SessionTreeView), matching: finder);
+    expect(
+      inTree(find.bySemanticsLabel('tool step, failed')),
+      findsOneWidget,
+      reason: 'npm test failed',
+    );
+    expect(inTree(find.bySemanticsLabel('response step')), findsNWidgets(3));
+    expect(inTree(find.bySemanticsLabel('approval step')), findsOneWidget);
+    expect(
+      inTree(find.text("I'll look first.")),
+      findsOneWidget,
+      reason: 'a response shows its first words instead of "Message"',
+    );
+    expect(inTree(find.text('Message')), findsNothing);
+  });
+
+  testWidgets('a click on a tree node jumps to its step, expanding its turn', (
+    tester,
+  ) async {
+    await show(tester, historyOf(branchA));
+    await tester.tap(find.byTooltip('Collapse all turns'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('step-e5')), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('tree-e5')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('step-e5')), findsOneWidget);
+    await press(tester, LogicalKeyboardKey.enter);
+    expect(tab('Tool call'), findsOneWidget, reason: 'the step is selected');
   });
 
   testWidgets('a prompt branches before itself, also when already there', (

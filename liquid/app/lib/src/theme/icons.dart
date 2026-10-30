@@ -21,5 +21,8 @@ abstract final class LucideIcons {
   static const sparkles = IconData(0xe412, fontFamily: _family);
   static const chevronsDownUp = IconData(0xe228, fontFamily: _family);
   static const chevronsUpDown = IconData(0xe211, fontFamily: _family);
+  static const panelRightClose = IconData(0xe432, fontFamily: _family);
+  static const panelRightOpen = IconData(0xe434, fontFamily: _family);
+  static const listFilter = IconData(0xe460, fontFamily: _family);
   static const arrowLeftRight = IconData(0xe24a, fontFamily: _family);
 }

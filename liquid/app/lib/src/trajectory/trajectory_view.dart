@@ -24,6 +24,9 @@ import 'track_cell.dart';
 import 'trajectory_model.dart';
 import 'tree_view.dart';
 
+/// The tree starts open when the Trajectory is at least this wide, in about a 1280 px window.
+const _treeOpenWidth = 1000.0;
+
 /// Keys of the Trajectory tab, for the status bar.
 String trajectoryKeys(ShortcutSettings keys) => [
   '${Fixed.previousOrNextStep.display} step',
@@ -88,6 +91,9 @@ class _TrajectoryViewState extends State<TrajectoryView> {
 
   /// Whether the context track fits the branch instead of the model's window.
   bool _fit = false;
+
+  /// Whether the session tree is open; `null` opens it in windows at least 1280 px wide.
+  bool? _treeOpen;
   bool _equalWidth = false;
   (double, double)? _range;
   (double, double)? _window;
@@ -404,9 +410,15 @@ class _TrajectoryViewState extends State<TrajectoryView> {
     }
   }
 
-  /// Selects a tree row's step, showing its branch when the ledger shows another one.
+  /// Selects a tree row's step, expanding its turn and showing its branch when the ledger
+  /// shows another one.
   void _jump(GraphRow row) {
-    setState(() => _selected = row.node.id);
+    setState(() {
+      _selected = row.node.id;
+      for (final record in _records) {
+        if (record.entry == row.node.id) _folded.remove(record.turn);
+      }
+    });
     if (_records.any((record) => record.entry == row.node.id)) {
       _reveal();
       return;
@@ -505,31 +517,36 @@ class _TrajectoryViewState extends State<TrajectoryView> {
             ),
             if (comparing) _compareOverview(history) else _overview(),
             Expanded(
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Expanded(
-                    child: InputLane(
-                      input: widget.input,
-                      child: comparing
-                          ? CompareView(
-                              a: history.trajectories[0],
-                              b: history.trajectories[1],
-                              comparison: _comparison(history),
-                              branchA: _branchFor(_picked[0]),
-                              branchB: _branchFor(_picked[1]),
-                              bottom: _clearance,
-                            )
-                          : _ledger(),
+              child: LayoutBuilder(
+                builder: (context, constraints) => Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Expanded(
+                      child: InputLane(
+                        input: widget.input,
+                        child: comparing
+                            ? CompareView(
+                                a: history.trajectories[0],
+                                b: history.trajectories[1],
+                                comparison: _comparison(history),
+                                branchA: _branchFor(_picked[0]),
+                                branchB: _branchFor(_picked[1]),
+                                bottom: _clearance,
+                              )
+                            : _ledger(),
+                      ),
                     ),
-                  ),
-                  SessionTreeView(
-                    graph: _graph,
-                    selected: _comparing ? _cursor : _selected,
-                    onRow: _onRow,
-                    picked: _comparing ? _picked.toSet() : null,
-                  ),
-                ],
+                    SessionTreeView(
+                      graph: _graph,
+                      selected: _comparing ? _cursor : _selected,
+                      onRow: _onRow,
+                      shown: _comparing ? _picked.toSet() : {?_shownTip},
+                      picked: _comparing ? _picked.toSet() : null,
+                      open: _treeOpen ?? constraints.maxWidth >= _treeOpenWidth,
+                      onOpen: (open) => setState(() => _treeOpen = open),
+                    ),
+                  ],
+                ),
               ),
             ),
           ],
