@@ -12,7 +12,9 @@ use meta_harness_core::{
 use tokio::runtime::Runtime;
 use tokio::sync::{Mutex, mpsc};
 
-use crate::api::events::{BridgeDecision, BridgeEvent, BridgeFileChange, BridgeQueue};
+use crate::api::events::{
+    BridgeDecision, BridgeEvent, BridgeEventKind, BridgeFileChange, BridgeQueue,
+};
 use crate::api::history::{BridgeContextDetail, BridgeHistory, BridgeTranscript};
 use crate::convert::{coalesce, describe};
 use crate::frb_generated::StreamSink;
@@ -27,6 +29,9 @@ static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
 });
 
 /// How to start pi; the core adds its arguments.
+/// How long streaming text gathers before Dart gets it, as T3 Code batches its stream.
+const STREAM_WINDOW: std::time::Duration = std::time::Duration::from_millis(50);
+
 pub struct SessionConfig {
     /// The executable.
     pub program: String,
@@ -177,6 +182,18 @@ impl AgentSession {
             }
             while let Some(event) = receiver.recv().await {
                 batch.push(BridgeEvent::from(event));
+                // Streaming text gathers for one window, so Dart gets at most one update per
+                // item per window (client architecture rule 4); anything else goes at once.
+                let deadline = tokio::time::Instant::now() + STREAM_WINDOW;
+                while batch
+                    .last()
+                    .is_some_and(|event| event.kind == BridgeEventKind::ContentDelta)
+                {
+                    match tokio::time::timeout_at(deadline, receiver.recv()).await {
+                        Ok(Some(event)) => batch.push(BridgeEvent::from(event)),
+                        Ok(None) | Err(_) => break,
+                    }
+                }
                 while let Ok(event) = receiver.try_recv() {
                     batch.push(BridgeEvent::from(event));
                 }
