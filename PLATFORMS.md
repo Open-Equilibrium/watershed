@@ -10,11 +10,11 @@ Linux and macOS share the same [public installation guarantee and maintenance li
 |---|---|---|
 | Flow Agent authoring, Fixture execution and provider-only Flows | Linux x86_64; macOS ARM64 | Implemented; productive provider execution is restricted to Ubuntu 24.04 and macOS 27. |
 | Flow Agent Tool execution with mandatory self-protection | Linux x86_64; macOS ARM64 | Linux Bubblewrap/seccomp and Mac Seatbelt replacements integrated; native evidence is linked above. Failed admission/readiness prevents launch without fallback. |
-| Meta-Harness CLI, service and host-local agent control | Linux x86_64; macOS ARM64; Windows 11 x86_64 after Release 1 (ADR-0226) | Not implemented. |
+| Meta-Harness CLI, service and host-local agent control | Linux x86_64; macOS ARM64; Windows 11 x86_64 in WSL (ADR-0226) | Not implemented. |
 | Liquid desktop client | Linux x86_64; macOS ARM64; Windows 11 x86_64 | In development on macOS ARM64: the agent surface for one pi session, not released. Linux and Windows are not implemented. |
 | Liquid mobile client | Android ARM64 | Not implemented. |
 
-Linux ARM64 is deferred beyond Release 1. Windows on ARM64, earlier Windows versions and macOS x86_64 (Intel Macs) are unsupported by every product (ADR-0218). Flow Agent has no native Windows support or future Windows-backend commitment; Meta-Harness targets Windows 11 x86_64 natively after Release 1 (ADR-0226). Liquid ships native apps only, with no web client (ADR-0228). Liquid's mobile and headless capabilities retain their separate contracts in its [V-Spec](docs/concept/V-Spec_Liquid.html); desktop support does not certify them.
+Linux ARM64 is deferred beyond Release 1. Windows on ARM64, earlier Windows versions and macOS x86_64 (Intel Macs) are unsupported by every product (ADR-0218). Flow Agent has no native Windows support or future Windows-backend commitment; Meta-Harness reaches Windows 11 x86_64 only as its Linux build in WSL (ADR-0226). Liquid ships native apps only, with no web client (ADR-0228). Liquid's mobile and headless capabilities retain their separate contracts in its [V-Spec](docs/concept/V-Spec_Liquid.html); desktop support does not certify them.
 
 Ubuntu 24.04 x86_64 and macOS 27 ARM64 are the current concrete Flow verification targets. Other Linux distributions or OS versions do not acquire a support claim from sharing an architecture or passing compilation. Liquid and Meta-Harness must establish their own runtime evidence, not inherit Flow's verification results.
 
@@ -26,7 +26,9 @@ Watershed development targets native Linux x86_64 and macOS ARM64. A Mac can run
 
 A Linux VM is not the macOS product execution path. Native Apple tools and Metal-based inference must remain possible without placing Flow Agent in a Linux guest; local inference still requires the separately decided trust boundary in [SECURITY.md](SECURITY.md#accepted-post-m11-target-local-inference-and-portable-continuation).
 
-On Windows 11 x86_64, users may access a supported remote host or use a Linux x86_64 environment through WSL. WSL must independently satisfy the Linux executor prerequisites; installing a distribution alone is not a readiness guarantee. This is Linux execution, not native Windows support. A Windows Liquid client does not imply a local Flow Agent process. In Release 1 it embeds no Meta-Harness core; as T3 Code does with its server, it installs, updates and starts the Linux Meta-Harness in a WSL distribution, connects to it over a loopback port and also reaches supported remote hosts. Projects belong in the WSL file system, because Git on a Windows drive is much slower (ADR-0201).
+On Windows 11 x86_64, users may access a supported remote host or use a Linux x86_64 environment through WSL. WSL must independently satisfy the Linux executor prerequisites; installing a distribution alone is not a readiness guarantee. This is Linux execution, not native Windows support. A Windows Liquid client does not imply a local Flow Agent process. It embeds no Meta-Harness core; as T3 Code does with its server, it installs, updates and starts the Linux Meta-Harness in a WSL distribution, connects to it over a loopback port and also reaches supported remote hosts. Projects belong in the WSL file system, because Git on a Windows drive is much slower (ADR-0201).
+
+Windows is not a target runtime for agents or local inference, so Meta-Harness has no native Windows version (ADR-0226). The tradeoffs are accepted: agents work with Linux tools, so Windows-native projects such as .NET with Visual Studio, PowerShell scripts or Windows apps are reachable only in part; installing WSL needs administrator rights, and its virtual machine reserves memory; and companies that block WSL run agents on remote hosts, with their own inference server if they want one. A native version is reconsidered only through the decision flow, on shown need.
 
 ## Installation prerequisites
 
