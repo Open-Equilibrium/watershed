@@ -7,6 +7,7 @@ import '../shortcuts/keymap.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'context_track.dart';
+import 'ledger.dart';
 import 'step_parts.dart';
 import 'track_cell.dart';
 import 'trajectory_model.dart';
@@ -61,7 +62,7 @@ class Inspector extends StatelessWidget {
       key: const Key('inspector'),
       height: inspectorHeight,
       child: Container(
-        margin: const EdgeInsets.fromLTRB(52, 8, 16, 10),
+        margin: const EdgeInsets.fromLTRB(ledgerInset, 8, 16, 10),
         clipBehavior: Clip.antiAlias,
         decoration: BoxDecoration(
           color: ws.surface,
