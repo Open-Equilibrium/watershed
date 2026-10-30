@@ -993,7 +993,7 @@ class _TrajectoryViewState extends State<TrajectoryView> {
                       },
                     ),
                   ),
-                  _InspectorLine(index: final step) => _inspector(step, window),
+                  _InspectorLine(index: final step) => _inspector(step),
                 },
               ),
             ),
@@ -1004,7 +1004,7 @@ class _TrajectoryViewState extends State<TrajectoryView> {
   }
 
   /// The inspector of `step`, with what its request held.
-  Widget _inspector(int step, int? window) {
+  Widget _inspector(int step) {
     final records = _records;
     final request = requestOf(records, step);
     return Inspector(
@@ -1012,7 +1012,7 @@ class _TrajectoryViewState extends State<TrajectoryView> {
       unread: request == null ? null : _details.unread(records[request].entry),
       records: records,
       index: step,
-      window: window,
+      windowOf: (model) => contextWindowOf(model, widget.state.models.value),
       tab: _tab,
       canBranch: !_busy,
       onTab: (tab) => setState(() => _tab = tab),

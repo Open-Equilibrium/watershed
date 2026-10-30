@@ -255,6 +255,68 @@ void main() {
     );
   });
 
+  testWidgets('each request shows the window of its own model', (tester) async {
+    final second = record(
+      'm2',
+      1,
+      BridgeRecordKind.message,
+      'Done',
+      300,
+      usage: tokens(1300, 20),
+      context: saw(3, ['prompt']),
+    );
+    await show(
+      tester,
+      historyOf([
+        record('u1', 1, BridgeRecordKind.user, 'Fix it', 0),
+        record(
+          'm1',
+          1,
+          BridgeRecordKind.message,
+          'Reading',
+          10,
+          usage: tokens(1000, 50),
+          context: saw(1, ['prompt']),
+        ),
+        BridgeRecord(
+          entry: second.entry,
+          turn: second.turn,
+          kind: second.kind,
+          label: second.label,
+          detail: second.detail,
+          target: second.target,
+          startMs: second.startMs,
+          model: 'faux-2',
+          usage: second.usage,
+          stopReason: '',
+          failed: false,
+          context: second.context,
+          outcome: second.outcome,
+          addedChars: 0,
+        ),
+      ]),
+      models: [
+        faux(200000),
+        const BridgeModel(
+          provider: 'faux',
+          id: 'faux-2',
+          name: 'Faux Two',
+          contextWindow: 1000000,
+        ),
+      ],
+    );
+    await press(tester, LogicalKeyboardKey.arrowDown);
+    await press(tester, LogicalKeyboardKey.arrowDown);
+    await press(tester, LogicalKeyboardKey.enter);
+    await tester.tap(tab('Context'));
+    await tester.pumpAndSettle();
+    expect(
+      find.textContaining('1.0k of 200k'),
+      findsOneWidget,
+      reason: 'faux-1 read it, not the later faux-2',
+    );
+  });
+
   testWidgets('a click on a turn line opens its last request\'s context', (
     tester,
   ) async {
