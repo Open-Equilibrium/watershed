@@ -8,6 +8,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:liquid/src/diff/diff_view.dart';
+import 'package:liquid/src/trajectory/tree_view.dart';
+import 'package:liquid/src/trajectory/trajectory_view.dart';
 import 'package:liquid/src/agent/action_area.dart';
 import 'package:liquid/src/agent/chat_view.dart';
 import 'package:liquid/src/agent/shell.dart';
@@ -63,6 +66,53 @@ void main() {
       text: 'npm test -- login',
       item: item,
     ),
+  );
+
+  testWidgets(
+    'the input area floats at the bottom of each tab\'s main column',
+    (tester) async {
+      await show(tester);
+      await tester.pumpAndSettle();
+      Future<void> openTab(LogicalKeyboardKey digit) async {
+        await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+        await tester.sendKeyEvent(digit);
+        await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+        await tester.pumpAndSettle();
+      }
+
+      final composer = find.byKey(const Key('composer'));
+      final area = find.byType(ActionArea);
+      await tester.enterText(composer, 'draft');
+      double center(Finder finder) => tester.getCenter(finder).dx;
+      expect(
+        center(area),
+        closeTo(center(find.byType(ChatView)), 1),
+        reason: 'in the reading width with the messages',
+      );
+      expect(
+        tester.getRect(find.byType(ChatView)).bottom,
+        greaterThan(tester.getRect(area).bottom),
+        reason: 'the content runs on under the input area',
+      );
+
+      await openTab(LogicalKeyboardKey.digit2);
+      final trajectory = tester.getRect(find.byType(TrajectoryView));
+      final tree = tester.getRect(find.byType(SessionTreeView));
+      expect(
+        center(area),
+        closeTo((trajectory.left + tree.left) / 2, 1),
+        reason: 'over the column left of the session tree',
+      );
+      expect(trajectory.bottom, greaterThan(tester.getRect(area).bottom));
+      expect(
+        tester.widget<TextField>(composer).controller?.text,
+        'draft',
+        reason: 'the input area moves with the tab and keeps its text',
+      );
+
+      await openTab(LogicalKeyboardKey.digit3);
+      expect(center(area), closeTo(center(find.byType(DiffView)), 1));
+    },
   );
 
   testWidgets(

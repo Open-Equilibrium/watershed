@@ -8,6 +8,7 @@ import '../session/session_state.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
+import 'input_lane.dart';
 
 /// The device a local session runs on, as the start page's device chip names it.
 final localDevice = Platform.isMacOS ? 'This Mac' : 'This computer';
@@ -58,7 +59,7 @@ class StartPage extends StatelessWidget {
             ),
           ),
         ),
-        const SizedBox(height: WsMetrics.space4),
+        const SizedBox(height: inputClearance),
       ],
     );
   }

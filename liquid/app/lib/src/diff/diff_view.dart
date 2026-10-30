@@ -4,6 +4,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../agent/input_lane.dart';
 import '../controls.dart';
 import '../rust/api/events.dart';
 import '../session/session_state.dart';
@@ -24,12 +25,20 @@ String diffKeys() =>
 /// and the selected file's diff, unified or split. Up and Down select files, Left and Right fold
 /// and unfold the selected file's folders, ⌥Up and ⌥Down move between the file's changes.
 class DiffView extends StatefulWidget {
-  const DiffView({super.key, required this.state, required this.settings});
+  const DiffView({
+    super.key,
+    required this.state,
+    required this.settings,
+    this.input,
+  });
 
   final SessionState state;
 
   /// How the tab shows the changes, kept across restarts.
   final DiffSettingsController settings;
+
+  /// The input area, floating over the diff.
+  final Widget? input;
 
   @override
   State<DiffView> createState() => _DiffViewState();
@@ -269,10 +278,13 @@ class _DiffViewState extends State<DiffView> {
         valueListenable: widget.state.changesProblem,
         builder: (context, problem, _) => problem == null
             ? _content(context)
-            : Center(
-                child: Text(
-                  problem,
-                  style: Theme.of(context).textTheme.bodySmall,
+            : InputLane(
+                input: widget.input,
+                child: Center(
+                  child: Text(
+                    problem,
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
                 ),
               ),
       ),
@@ -281,17 +293,22 @@ class _DiffViewState extends State<DiffView> {
 
   Widget _content(BuildContext context) {
     final ws = context.ws;
-    if (!_loaded) return const SizedBox.shrink();
+    if (!_loaded) {
+      return InputLane(input: widget.input, child: const SizedBox.expand());
+    }
     if (_changes.isEmpty) {
-      return Center(
-        child: Text(
-          !widget.state.ran.value
-              ? 'No run since Liquid opened this session'
-              : widget.settings.value.hideWhitespace
-              ? 'No changes in this run with whitespace hidden; '
-                    '${Fixed.hideWhitespace.display} shows them'
-              : 'No changes in this run',
-          style: Theme.of(context).textTheme.bodySmall,
+      return InputLane(
+        input: widget.input,
+        child: Center(
+          child: Text(
+            !widget.state.ran.value
+                ? 'No run since Liquid opened this session'
+                : widget.settings.value.hideWhitespace
+                ? 'No changes in this run with whitespace hidden; '
+                      '${Fixed.hideWhitespace.display} shows them'
+                : 'No changes in this run',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
         ),
       );
     }
@@ -337,14 +354,18 @@ class _DiffViewState extends State<DiffView> {
           ),
         ),
         Expanded(
-          child: _Patch(
-            change: _selected,
-            lines: _lines,
-            note: _note,
-            settings: widget.settings.value,
-            scroll: _scroll,
-            onLayout: _showLayout,
-            onWhitespace: _switchWhitespace,
+          child: InputLane(
+            input: widget.input,
+            child: _Patch(
+              change: _selected,
+              lines: _lines,
+              note: _note,
+              settings: widget.settings.value,
+              scroll: _scroll,
+              bottom: widget.input == null ? 0 : inputClearance,
+              onLayout: _showLayout,
+              onWhitespace: _switchWhitespace,
+            ),
           ),
         ),
       ],
@@ -455,6 +476,7 @@ class _Patch extends StatelessWidget {
     required this.note,
     required this.settings,
     required this.scroll,
+    required this.bottom,
     required this.onLayout,
     required this.onWhitespace,
   });
@@ -466,6 +488,9 @@ class _Patch extends StatelessWidget {
   final String? note;
   final DiffSettings settings;
   final ScrollController scroll;
+
+  /// Room below the last line for the floating input area.
+  final double bottom;
   final ValueChanged<DiffLayout> onLayout;
   final VoidCallback onWhitespace;
 
@@ -571,6 +596,7 @@ class _Patch extends StatelessWidget {
                             height: constraints.maxHeight,
                             child: ListView.builder(
                               controller: scroll,
+                              padding: EdgeInsets.only(bottom: bottom),
                               itemExtent: _LineRow.height,
                               itemCount: split ? rows.length : lines.length,
                               itemBuilder: (context, index) => split

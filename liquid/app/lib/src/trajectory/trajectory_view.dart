@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../agent/input_lane.dart';
 import '../controls.dart';
 import '../format.dart';
 import '../rust/api/events.dart';
@@ -49,6 +50,7 @@ class TrajectoryView extends StatefulWidget {
     required this.state,
     required this.onBranched,
     required this.comparing,
+    this.input,
   });
 
   final SessionState state;
@@ -58,6 +60,9 @@ class TrajectoryView extends StatefulWidget {
 
   /// Whether two branches are compared, for the keys the status bar shows.
   final ValueNotifier<bool> comparing;
+
+  /// The input area, floating over the steps.
+  final Widget? input;
 
   @override
   State<TrajectoryView> createState() => _TrajectoryViewState();
@@ -238,14 +243,13 @@ class _TrajectoryViewState extends State<TrajectoryView> {
       final bottom =
           top + WsMetrics.rowTable + (_inspecting ? inspectorHeight : 0);
       final position = _scroll.position;
+      // The floating input area covers the bottom of the viewport.
+      final visible = position.viewportDimension - _clearance;
       if (top < position.pixels) {
         _scroll.jumpTo(top);
-      } else if (bottom > position.pixels + position.viewportDimension) {
+      } else if (bottom > position.pixels + visible) {
         _scroll.jumpTo(
-          math.min(
-            math.min(bottom - position.viewportDimension, top),
-            position.maxScrollExtent,
-          ),
+          math.min(math.min(bottom - visible, top), position.maxScrollExtent),
         );
       }
     });
@@ -282,6 +286,9 @@ class _TrajectoryViewState extends State<TrajectoryView> {
       }
     });
   }
+
+  /// Room below the last row for the floating input area.
+  double get _clearance => widget.input == null ? 0 : inputClearance;
 
   bool get _busy => switch (widget.state.status.value) {
     RunStatus.running || RunStatus.waitingForYou => true,
@@ -502,15 +509,19 @@ class _TrajectoryViewState extends State<TrajectoryView> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Expanded(
-                    child: comparing
-                        ? CompareView(
-                            a: history.trajectories[0],
-                            b: history.trajectories[1],
-                            comparison: _comparison(history),
-                            branchA: _branchFor(_picked[0]),
-                            branchB: _branchFor(_picked[1]),
-                          )
-                        : _ledger(),
+                    child: InputLane(
+                      input: widget.input,
+                      child: comparing
+                          ? CompareView(
+                              a: history.trajectories[0],
+                              b: history.trajectories[1],
+                              comparison: _comparison(history),
+                              branchA: _branchFor(_picked[0]),
+                              branchB: _branchFor(_picked[1]),
+                              bottom: _clearance,
+                            )
+                          : _ledger(),
+                    ),
                   ),
                   SessionTreeView(
                     graph: _graph,
@@ -721,9 +732,11 @@ class _TrajectoryViewState extends State<TrajectoryView> {
             Expanded(
               child: ListView.builder(
                 controller: _scroll,
+                padding: EdgeInsets.only(bottom: _clearance),
                 itemCount: lines.length,
                 itemBuilder: (context, index) => switch (lines[index]) {
                   _StartLine() => _LineRow(
+                    key: const ValueKey('start'),
                     title: 'Start',
                     summary: [
                       'system prompt',
@@ -1099,6 +1112,7 @@ class _LedgerHeader extends StatelessWidget {
 /// context track.
 class _LineRow extends StatelessWidget {
   const _LineRow({
+    super.key,
     required this.title,
     required this.summary,
     required this.trackWidth,

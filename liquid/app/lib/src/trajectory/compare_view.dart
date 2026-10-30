@@ -20,6 +20,7 @@ class CompareView extends StatelessWidget {
     required this.comparison,
     required this.branchA,
     required this.branchB,
+    this.bottom = 0,
   });
 
   final BridgeTrajectory a;
@@ -27,6 +28,9 @@ class CompareView extends StatelessWidget {
   final Comparison comparison;
   final Branch branchA;
   final Branch branchB;
+
+  /// Room below the last row for the floating input area.
+  final double bottom;
 
   @override
   Widget build(BuildContext context) {
@@ -123,7 +127,9 @@ class CompareView extends StatelessWidget {
               ],
             ),
           ),
-          const SliverToBoxAdapter(child: SizedBox(height: WsMetrics.space4)),
+          SliverToBoxAdapter(
+            child: SizedBox(height: WsMetrics.space4 + bottom),
+          ),
         ],
       ),
     );

@@ -19,6 +19,7 @@ import '../theme/tokens.g.dart';
 import '../trajectory/trajectory_view.dart';
 import 'action_area.dart';
 import 'chat_view.dart';
+import 'input_lane.dart';
 import 'sidebar.dart';
 import 'status_bar.dart';
 
@@ -51,6 +52,9 @@ class AgentShell extends StatefulWidget {
 class _AgentShellState extends State<AgentShell> {
   final _composer = TextEditingController();
   final _composerFocus = FocusNode(debugLabel: 'composer');
+
+  /// Keeps the input area's state while it moves into the open tab.
+  final _inputKey = GlobalKey(debugLabel: 'input area');
   final _tab = ValueNotifier(AgentTab.chat);
   final _comparing = ValueNotifier(false);
   final _settings = ValueNotifier(false);
@@ -264,38 +268,44 @@ class _AgentShellState extends State<AgentShell> {
                           Expanded(
                             child: ValueListenableBuilder(
                               valueListenable: _tab,
-                              builder: (context, tab, _) => switch (tab) {
-                                AgentTab.chat => ChatView(
-                                  state: widget.state,
-                                  project: widget.info.project,
-                                ),
-                                AgentTab.diff => DiffView(
-                                  state: widget.state,
-                                  settings: _diffSettings,
-                                ),
-                                AgentTab.trajectory => TrajectoryView(
-                                  state: widget.state,
-                                  onBranched: _composerFocus.requestFocus,
-                                  comparing: _comparing,
-                                ),
+                              builder: (context, tab, _) {
+                                // The input area floats over the open tab's main column.
+                                final input = KeyedSubtree(
+                                  key: _inputKey,
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.stretch,
+                                    children: [
+                                      WidgetStrip(state: widget.state),
+                                      ActionArea(
+                                        state: widget.state,
+                                        project: widget.info.project,
+                                        composer: _composer,
+                                        composerFocus: _composerFocus,
+                                      ),
+                                    ],
+                                  ),
+                                );
+                                return switch (tab) {
+                                  AgentTab.chat => ChatView(
+                                    state: widget.state,
+                                    project: widget.info.project,
+                                    input: input,
+                                  ),
+                                  AgentTab.diff => DiffView(
+                                    state: widget.state,
+                                    settings: _diffSettings,
+                                    input: input,
+                                  ),
+                                  AgentTab.trajectory => TrajectoryView(
+                                    state: widget.state,
+                                    onBranched: _composerFocus.requestFocus,
+                                    comparing: _comparing,
+                                    input: input,
+                                  ),
+                                };
                               },
-                            ),
-                          ),
-                          WidgetStrip(state: widget.state),
-                          Padding(
-                            padding: const EdgeInsets.only(
-                              bottom: WsMetrics.space4,
-                            ),
-                            child: Center(
-                              child: SizedBox(
-                                width: readingWidth,
-                                child: ActionArea(
-                                  state: widget.state,
-                                  project: widget.info.project,
-                                  composer: _composer,
-                                  composerFocus: _composerFocus,
-                                ),
-                              ),
                             ),
                           ),
                           ListenableBuilder(
@@ -483,25 +493,23 @@ class WidgetStrip extends StatelessWidget {
     return ValueListenableBuilder(
       valueListenable: state.widgets,
       builder: (context, widgets, _) => SizedBox(
-        height: 36,
-        child: Center(
-          child: SizedBox(
-            width: readingWidth,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space4),
-              child: Text(
-                [
-                  for (final entry in widgets.entries)
-                    '${entry.key}  ${entry.value.join('  ')}',
-                ].join('    '),
-                key: const Key('widgets'),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: monoStyle(
-                  context,
-                  color: context.ws.textMuted,
-                ).copyWith(fontSize: WsMetrics.fsSmall),
-              ),
+        height: widgetStripHeight,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space4),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: Text(
+              [
+                for (final entry in widgets.entries)
+                  '${entry.key}  ${entry.value.join('  ')}',
+              ].join('    '),
+              key: const Key('widgets'),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: monoStyle(
+                context,
+                color: context.ws.textMuted,
+              ).copyWith(fontSize: WsMetrics.fsSmall),
             ),
           ),
         ),

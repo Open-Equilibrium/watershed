@@ -14,7 +14,6 @@ import 'package:liquid/src/session/session_state.dart';
 import 'package:liquid/src/theme/theme.dart';
 import 'package:liquid/src/trajectory/compare_view.dart';
 import 'package:liquid/src/trajectory/overview.dart';
-import 'package:liquid/src/trajectory/trajectory_view.dart';
 
 import 'fake_backend.dart';
 
@@ -158,7 +157,7 @@ void main() {
     expect(find.text('branch A · 7 steps · 24.5 s'), findsOneWidget);
     expect(
       find.descendant(
-        of: find.byType(TrajectoryView),
+        of: find.byKey(const ValueKey('start')),
         matching: find.text('Start'),
       ),
       findsOneWidget,
