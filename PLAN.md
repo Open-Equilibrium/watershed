@@ -190,6 +190,11 @@ A macOS Liquid app, built ahead of M2 and M3a, that controls pi through an embed
 
 - Close the cheap record gaps (ADR-0222): record every approval decision, also those made without asking, with its reason, the approval mode and a hash of the approved arguments; show the nested tool calls pi records; and say in the Diff and Trajectory tabs exactly what they cover, after an approved mockup.
 - On a Mac keyboard with the Liquid key on, ⇪1, ⇪2 and ⇪3 work, but ⇪L and ⇪N do nothing and type nothing either (hardware test, 2026-10-28), while widget tests with the same keys pass. Next: run Liquid from a terminal with `LIQUID_KEY_LOG=1`, press ⇪1, ⇪L and ⇪N, and compare the native and Flutter lines for the letters ([liquid/README.md](liquid/README.md#run)).
+- Closeout review leftovers (2026-10-30), all Minor:
+  - Code: one helper for estimating tokens from characters (inspector and context track), one saved-settings controller for Appearance and Diff, one step-kind color mapping for tags, timeline and tree, one line-height helper in the Trajectory view, tokens instead of the overview's raw widths, and dropping the unused `Branch.lane` and `BranchMarker.lane`.
+  - UI: keyboard and screen-reader access to the timeline's range handles; the greeting and the mode chip name approval modes alike; mockup details still open: the Filter button's accent while filters are on, the inspector tabs' accent underline, the legend's share of the request, the collapsed tree's label.
+  - Docs: trim ADR-0218/0226/0228/0229/0232/0233 to their decisions and links, and move the three rules found only in the log (a refused change is undone on its device, the CLI/API returns a ready reference for every change, each steering input is attributed) to their canonical docs.
+  - Decision for the maintainer: the pi extension's "writes to" line checks the path text, so a symbolic link inside the project can hide a write outside it; resolve real paths or say so in SECURITY.md.
 - At the smallest window, 1050 x 640, the session tree starts collapsed, so the Trajectory's Step column keeps about 190 px and the context track shows; the comparison still shows no step rows until scrolled.
 
 #### Liquid Git integration — next slice
