@@ -2,8 +2,8 @@ use serde_json::{Map, Value};
 
 use crate::{
     AgentEvent, ChangedLines, EditChange, EditPreview, EntryKind, History, ItemDetail, ItemId,
-    ItemKind, ItemStatus, NotificationLevel, PiAdapter, RequestId, RequestKind, SessionTree,
-    TreeNode, TurnId, Usage, UserInput,
+    ItemKind, ItemStatus, NotificationLevel, PiAdapter, RecordKind, RequestId, RequestKind,
+    SessionTree, TreeNode, TurnId, Usage, UserInput,
 };
 
 const TURN: TurnId = TurnId(1);
@@ -652,25 +652,50 @@ fn names_what_a_tool_ran_on_and_whether_it_failed_in_the_tree() {
 }
 
 #[test]
-fn names_each_result_after_its_own_call_when_ids_repeat() {
-    // A server that sends no call ids leaves every call with the same empty one.
+fn matches_each_result_to_its_own_call_when_ids_repeat() {
+    // A server that sends no call ids leaves every call with the same empty one; a result
+    // answers the earliest call of the response above it that no result answered yet.
     let data: Value = serde_json::from_str(
         r#"{"entries":[
           {"type":"message","id":"a1","parentId":null,"message":{"role":"assistant","content":[{"type":"toolCall","id":"","name":"bash","arguments":{"command":"ls"}}]}},
           {"type":"message","id":"r1","parentId":"a1","message":{"role":"toolResult","toolCallId":"","toolName":"bash","content":[]}},
-          {"type":"message","id":"a2","parentId":"r1","message":{"role":"assistant","content":[{"type":"toolCall","id":"","name":"bash","arguments":{"command":"rm -rf build"}}]}},
-          {"type":"message","id":"r2","parentId":"a2","message":{"role":"toolResult","toolCallId":"","toolName":"bash","content":[]}}],
-          "leafId":"r2"}"#,
+          {"type":"message","id":"a2","parentId":"r1","message":{"role":"assistant","content":[{"type":"toolCall","id":"","name":"bash","arguments":{"command":"rm -rf build"}},{"type":"toolCall","id":"","name":"bash","arguments":{"command":"make"}}]}},
+          {"type":"message","id":"r2","parentId":"a2","message":{"role":"toolResult","toolCallId":"","toolName":"bash","content":[],"isError":true}},
+          {"type":"message","id":"r3","parentId":"r2","message":{"role":"toolResult","toolCallId":"","toolName":"bash","content":[]}}],
+          "leafId":"r3"}"#,
     )
     .expect("JSON");
-    let previews: Vec<_> = History::from_entries(&data)
+    let history = History::from_entries(&data);
+    let previews: Vec<_> = history
         .tree()
         .nodes
         .into_iter()
         .filter(|node| node.kind == EntryKind::ToolResult)
         .map(|node| node.preview)
         .collect();
-    assert_eq!(previews, ["bash ls", "bash rm -rf build"]);
+    assert_eq!(previews, ["bash ls", "bash rm -rf build", "bash make"]);
+    let steps: Vec<_> = history
+        .trajectory(None)
+        .records
+        .into_iter()
+        .filter(|record| record.kind == RecordKind::Tool)
+        .map(|record| (record.target, record.failed))
+        .collect();
+    assert_eq!(
+        steps,
+        [
+            ("ls".to_owned(), false),
+            ("rm -rf build".to_owned(), true),
+            ("make".to_owned(), false)
+        ]
+    );
+    let chat: Vec<_> = history
+        .transcript(None, 10)
+        .items
+        .into_iter()
+        .filter_map(|item| Some((item.target?, item.failed)))
+        .collect();
+    assert_eq!(chat, steps, "the chat tells the same as the Trajectory");
 }
 
 #[test]

@@ -2,11 +2,14 @@
 
 use std::collections::HashMap;
 
-use super::entry::{Body, Entry};
+use super::entry::{Body, Entry, OpenCalls};
 use super::trajectory::path;
 use super::{Transcript, TranscriptItem};
 use crate::pi::{call_target, item_kind};
 use crate::{ChangedLines, ItemKind};
+
+/// Whether a tool call failed, how long it ran and the lines it changed.
+type Ended = (bool, Option<u64>, Option<ChangedLines>);
 
 /// The items of up to `limit` entries on the branch ending at `leaf`, before `before`.
 pub(super) fn transcript(
@@ -16,11 +19,18 @@ pub(super) fn transcript(
     limit: usize,
 ) -> Transcript {
     let path = path(entries, leaf);
-    // How each tool call ended, from anywhere on the branch, so every page shows it.
-    let mut ended: HashMap<&str, (bool, Option<u64>, Option<ChangedLines>)> = HashMap::new();
+    // How each tool call ended, by its response and place there, from anywhere on the branch,
+    // so every page shows it.
+    let mut ended: HashMap<(&str, usize), Ended> = HashMap::new();
     let mut timing: HashMap<&str, Option<u64>> = HashMap::new();
+    let mut open = OpenCalls::default();
+    let mut response = "";
     for entry in &path {
         match &entry.body {
+            Body::Assistant { calls, .. } => {
+                open.respond(calls);
+                response = &entry.id;
+            }
             Body::ToolTiming { call, duration_ms } => {
                 timing.insert(call, *duration_ms);
             }
@@ -34,10 +44,12 @@ pub(super) fn transcript(
                     .added
                     .zip(outcome.removed)
                     .map(|(added, removed)| ChangedLines { added, removed });
-                ended.insert(
-                    call,
-                    (*failed, timing.get(call.as_str()).copied().flatten(), lines),
-                );
+                if let Some((place, _)) = open.answer(call) {
+                    ended.insert(
+                        (response, place),
+                        (*failed, timing.remove(call.as_str()).flatten(), lines),
+                    );
+                }
             }
             _ => {}
         }
@@ -72,10 +84,12 @@ pub(super) fn transcript(
                 if !text.trim().is_empty() {
                     items.push(item(ItemKind::AssistantMessage, text));
                 }
-                for call in calls {
-                    let (failed, duration_ms, lines) =
+                for (place, call) in calls.iter().enumerate() {
+                    let (failed, duration_ms, lines) = ended
+                        .get(&(entry.id.as_str(), place))
+                        .copied()
                         // A call without a result never finished, such as after a crash.
-                        ended.get(call.id.as_str()).copied().unwrap_or((true, None, None));
+                        .unwrap_or((true, None, None));
                     // A written file counts the lines it wrote.
                     let written = call
                         .written_lines

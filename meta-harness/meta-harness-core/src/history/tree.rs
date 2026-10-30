@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use super::entry::{Body, Entry, first_line};
+use super::entry::{Body, Entry, OpenCalls, first_line};
 use crate::{EntryKind, SessionTree, TreeNode, pi};
 
 /// Longest preview kept for a tree entry, in characters.
@@ -28,7 +28,7 @@ pub(super) fn session_tree(entries: &[Entry], leaf: Option<&str>) -> SessionTree
         .iter()
         .filter(|entry| !matches!(entry.body, Body::Label { .. }))
         .map(|entry| {
-            let (kind, preview) = summary(&entry.body, || call_target(&by_id, entry));
+            let (kind, preview) = summary(&entry.body, || result_target(&by_id, entry));
             TreeNode {
                 id: entry.id.clone(),
                 parent: resolve(&label_parents, entry.parent.as_deref()),
@@ -71,19 +71,31 @@ fn resolve<'a>(
     id.map(str::to_owned)
 }
 
-/// What the call a tool result answers works on, from the nearest response above it: call ids
-/// repeat, for example as empty ones from servers that send none.
-fn call_target(by_id: &HashMap<&str, &Entry>, result: &Entry) -> Option<String> {
-    let Body::ToolResult { call, .. } = &result.body else {
+/// What the call a tool result answers works on, from the response above it and the results
+/// in between.
+fn result_target(by_id: &HashMap<&str, &Entry>, result: &Entry) -> Option<String> {
+    if !matches!(result.body, Body::ToolResult { .. }) {
         return None;
-    };
+    }
+    let mut results = vec![result];
     let mut next = result.parent.as_deref();
     // A stored cycle ends the walk instead of the reader.
     for _ in 0..by_id.len() {
         let entry = by_id.get(next?)?;
-        if let Body::Assistant { calls, .. } = &entry.body {
-            let found = calls.iter().find(|candidate| &candidate.id == call)?;
-            return Some(pi::call_target(&found.arguments));
+        match &entry.body {
+            Body::Assistant { calls, .. } => {
+                let mut open = OpenCalls::default();
+                open.respond(calls);
+                let mut answered = None;
+                for result in results.iter().rev() {
+                    if let Body::ToolResult { call, .. } = &result.body {
+                        answered = open.answer(call);
+                    }
+                }
+                return answered.map(|(_, call)| pi::call_target(&call.arguments));
+            }
+            Body::ToolResult { .. } => results.push(entry),
+            _ => {}
         }
         next = entry.parent.as_deref();
     }

@@ -1,6 +1,8 @@
 //! A session's stored entries in the compact form the tree and Trajectory read. pi's JSON is
 //! parsed once per entry and then dropped, so a long session costs little to keep.
 
+use std::collections::{HashMap, VecDeque};
+
 use serde_json::Value;
 
 use super::outcome::{exit_code, patch_lines, test_counts};
@@ -111,6 +113,32 @@ pub(crate) struct Call {
     pub arguments: String,
     /// Lines a `write` call writes.
     pub written_lines: Option<u32>,
+}
+
+/// The calls of a branch's latest response that no result answered yet. A result answers the
+/// earliest open call with its id: ids repeat, for example as empty ones from servers that send
+/// none.
+#[derive(Default)]
+pub(crate) struct OpenCalls<'a> {
+    open: HashMap<&'a str, VecDeque<(usize, &'a Call)>>,
+}
+
+impl<'a> OpenCalls<'a> {
+    /// Starts over with a new response's calls.
+    pub fn respond(&mut self, calls: &'a [Call]) {
+        self.open.clear();
+        for (place, call) in calls.iter().enumerate() {
+            self.open
+                .entry(call.id.as_str())
+                .or_default()
+                .push_back((place, call));
+        }
+    }
+
+    /// The call a result for `id` answers, with its place in the response.
+    pub fn answer(&mut self, id: &str) -> Option<(usize, &'a Call)> {
+        self.open.get_mut(id)?.pop_front()
+    }
 }
 
 /// Changes of the system prompt's sections and tools.

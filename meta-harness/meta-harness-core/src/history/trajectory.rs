@@ -3,7 +3,7 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use super::entry::{Body, Entry, SystemChange, first_line};
+use super::entry::{Body, Entry, OpenCalls, SystemChange, first_line};
 use super::{
     ContextDetail, ContextMessage, ContextPart, RecordKind, StepContext, ToolOutcome, Trajectory,
     TrajectoryRecord,
@@ -73,7 +73,7 @@ pub(super) fn trajectory(entries: &[Entry], leaf: Option<&str>) -> Trajectory {
 
 /// State while walking one branch.
 #[derive(Default)]
-struct Projection {
+struct Projection<'a> {
     records: Vec<TrajectoryRecord>,
     turn: u64,
     sections: BTreeMap<String, usize>,
@@ -94,8 +94,7 @@ struct Projection {
     /// tools in parallel and stores their results together, so a result's own time is the end
     /// of the slowest tool.
     tool_timing: HashMap<String, (u64, Option<u64>)>,
-    /// Arguments and written lines of each tool call awaiting its result.
-    tool_calls: HashMap<String, (String, Option<u32>)>,
+    calls: OpenCalls<'a>,
 }
 
 /// One entry of a branch as the model's context sees it.
@@ -118,7 +117,7 @@ struct Logged {
     edited_out: bool,
 }
 
-impl Projection {
+impl<'a> Projection<'a> {
     /// Marks the entry just logged as a message the model sees, described by `new` and
     /// `label`.
     fn count(&mut self, new: Option<String>, label: String, chars: usize) {
@@ -208,7 +207,7 @@ impl Projection {
             .position(|logged| Some(logged.id.as_str()) == id)
     }
 
-    fn add(&mut self, entry: &Entry, at: u64) {
+    fn add(&mut self, entry: &'a Entry, at: u64) {
         let id = entry.id.as_str();
         self.log.push(Logged {
             id: id.to_owned(),
@@ -329,12 +328,7 @@ impl Projection {
             } => {
                 let (first_token_ms, duration_ms) =
                     self.request_timing.take().unwrap_or((None, None));
-                for call in calls {
-                    self.tool_calls.insert(
-                        call.id.clone(),
-                        (call.arguments.clone(), call.written_lines),
-                    );
-                }
+                self.calls.respond(calls);
                 let label = if !text.trim().is_empty() {
                     first_line(text, LABEL_CHARS)
                 } else if calls.is_empty() {
@@ -378,7 +372,11 @@ impl Projection {
                 outcome,
             } => {
                 let (ended, duration_ms) = self.tool_timing.remove(call).unwrap_or((at, None));
-                let (arguments, written) = self.tool_calls.remove(call).unwrap_or_default();
+                let (arguments, written) = self
+                    .calls
+                    .answer(call)
+                    .map(|(_, call)| (call.arguments.clone(), call.written_lines))
+                    .unwrap_or_default();
                 let label = match pi::call_argument(&arguments) {
                     Some(argument) => format!("result of {tool} · {argument}"),
                     None => format!("result of {tool}"),
