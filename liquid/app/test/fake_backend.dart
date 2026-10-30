@@ -294,6 +294,7 @@ BridgeRecord record(
   BridgeStepContext? context,
   bool failed = false,
   BridgeToolOutcome outcome = const BridgeToolOutcome(),
+  int added = 0,
 }) => BridgeRecord(
   entry: entry,
   turn: turn,
@@ -312,6 +313,7 @@ BridgeRecord record(
   failed: failed,
   context: context,
   outcome: outcome,
+  addedChars: added,
 );
 
 /// A session whose current branch is `records`, as one tree path.

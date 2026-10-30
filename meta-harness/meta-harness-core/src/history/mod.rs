@@ -148,6 +148,8 @@ pub enum RecordKind {
 pub struct StepContext {
     /// Characters of the system prompt, all sections and appended instructions.
     pub prompt_chars: usize,
+    /// The system prompt's named sections, such as `preamble` or `project_context`.
+    pub sections: Vec<String>,
     /// The tools the model could call, by name.
     pub tools: Vec<String>,
     /// Characters of the tools' declarations.
@@ -197,6 +199,9 @@ pub struct TrajectoryRecord {
     pub context: Option<StepContext>,
     /// What a tool call did.
     pub outcome: ToolOutcome,
+    /// Characters the step adds to the model's context: its prompt, response or tool result;
+    /// none for an approval.
+    pub added_chars: usize,
 }
 
 /// What a tool call did, as far as its stored result shows.

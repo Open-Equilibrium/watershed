@@ -750,7 +750,7 @@ fn switches_sessions_and_models_through_pi() {
 "#
             .to_owned(),
             expect_response(&[r#""type":"get_available_models""#, r#""id":"3""#]),
-            r#"printf '%s\n' '{"id":"3","type":"response","command":"get_available_models","success":true,"data":{"models":[{"id":"faux-1","name":"Faux One","provider":"faux"},{"id":"faux-2","provider":"faux"}]}}'
+            r#"printf '%s\n' '{"id":"3","type":"response","command":"get_available_models","success":true,"data":{"models":[{"id":"faux-1","name":"Faux One","provider":"faux","contextWindow":200000},{"id":"faux-2","provider":"faux","contextWindow":0}]}}'
 "#
             .to_owned(),
             expect_response(&[
@@ -776,14 +776,19 @@ fn switches_sessions_and_models_through_pi() {
             Ok(false),
             "an extension cancelled it"
         );
-        let model = |id: &str, name: &str| Model {
+        let model = |id: &str, name: &str, context_window| Model {
             provider: "faux".to_owned(),
             id: id.to_owned(),
             name: name.to_owned(),
+            context_window,
         };
         assert_eq!(
             session.models().await,
-            Ok(vec![model("faux-1", "Faux One"), model("faux-2", "faux-2")])
+            Ok(vec![
+                model("faux-1", "Faux One", Some(200_000)),
+                model("faux-2", "faux-2", None)
+            ]),
+            "a context window of 0 leaves it unknown"
         );
         assert_eq!(
             accepted(session.set_model("faux", "faux-2").await).await,

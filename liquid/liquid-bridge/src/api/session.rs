@@ -58,6 +58,8 @@ pub struct BridgeModel {
     pub id: String,
     /// The name to show.
     pub name: String,
+    /// Tokens the model can take in one request, when the agent knows them.
+    pub context_window: Option<i64>,
 }
 
 /// How much an agent may do without asking.

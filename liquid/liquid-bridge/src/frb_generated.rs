@@ -1808,10 +1808,12 @@ impl SseDecode for crate::api::session::BridgeModel {
         let mut var_provider = <String>::sse_decode(deserializer);
         let mut var_id = <String>::sse_decode(deserializer);
         let mut var_name = <String>::sse_decode(deserializer);
+        let mut var_contextWindow = <Option<i64>>::sse_decode(deserializer);
         return crate::api::session::BridgeModel {
             provider: var_provider,
             id: var_id,
             name: var_name,
+            context_window: var_contextWindow,
         };
     }
 }
@@ -1880,6 +1882,7 @@ impl SseDecode for crate::api::history::BridgeRecord {
         let mut var_context =
             <Option<crate::api::history::BridgeStepContext>>::sse_decode(deserializer);
         let mut var_outcome = <crate::api::history::BridgeToolOutcome>::sse_decode(deserializer);
+        let mut var_addedChars = <i64>::sse_decode(deserializer);
         return crate::api::history::BridgeRecord {
             entry: var_entry,
             turn: var_turn,
@@ -1898,6 +1901,7 @@ impl SseDecode for crate::api::history::BridgeRecord {
             failed: var_failed,
             context: var_context,
             outcome: var_outcome,
+            added_chars: var_addedChars,
         };
     }
 }
@@ -1963,6 +1967,7 @@ impl SseDecode for crate::api::history::BridgeStepContext {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut var_promptChars = <i64>::sse_decode(deserializer);
+        let mut var_sections = <Vec<String>>::sse_decode(deserializer);
         let mut var_tools = <Vec<String>>::sse_decode(deserializer);
         let mut var_toolChars = <i64>::sse_decode(deserializer);
         let mut var_messages = <i64>::sse_decode(deserializer);
@@ -1970,6 +1975,7 @@ impl SseDecode for crate::api::history::BridgeStepContext {
         let mut var_newSincePrevious = <Vec<String>>::sse_decode(deserializer);
         return crate::api::history::BridgeStepContext {
             prompt_chars: var_promptChars,
+            sections: var_sections,
             tools: var_tools,
             tool_chars: var_toolChars,
             messages: var_messages,
@@ -3144,6 +3150,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::session::BridgeModel {
             self.provider.into_into_dart().into_dart(),
             self.id.into_into_dart().into_dart(),
             self.name.into_into_dart().into_dart(),
+            self.context_window.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -3247,6 +3254,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::history::BridgeRecord {
             self.failed.into_into_dart().into_dart(),
             self.context.into_into_dart().into_dart(),
             self.outcome.into_into_dart().into_dart(),
+            self.added_chars.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -3356,6 +3364,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::history::BridgeStepContext {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
             self.prompt_chars.into_into_dart().into_dart(),
+            self.sections.into_into_dart().into_dart(),
             self.tools.into_into_dart().into_dart(),
             self.tool_chars.into_into_dart().into_dart(),
             self.messages.into_into_dart().into_dart(),
@@ -3878,6 +3887,7 @@ impl SseEncode for crate::api::session::BridgeModel {
         <String>::sse_encode(self.provider, serializer);
         <String>::sse_encode(self.id, serializer);
         <String>::sse_encode(self.name, serializer);
+        <Option<i64>>::sse_encode(self.context_window, serializer);
     }
 }
 
@@ -3937,6 +3947,7 @@ impl SseEncode for crate::api::history::BridgeRecord {
         <bool>::sse_encode(self.failed, serializer);
         <Option<crate::api::history::BridgeStepContext>>::sse_encode(self.context, serializer);
         <crate::api::history::BridgeToolOutcome>::sse_encode(self.outcome, serializer);
+        <i64>::sse_encode(self.added_chars, serializer);
     }
 }
 
@@ -3997,6 +4008,7 @@ impl SseEncode for crate::api::history::BridgeStepContext {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <i64>::sse_encode(self.prompt_chars, serializer);
+        <Vec<String>>::sse_encode(self.sections, serializer);
         <Vec<String>>::sse_encode(self.tools, serializer);
         <i64>::sse_encode(self.tool_chars, serializer);
         <i64>::sse_encode(self.messages, serializer);

@@ -129,14 +129,19 @@ class BridgeModel {
   /// The name to show.
   final String name;
 
+  /// Tokens the model can take in one request, when the agent knows them.
+  final PlatformInt64? contextWindow;
+
   const BridgeModel({
     required this.provider,
     required this.id,
     required this.name,
+    this.contextWindow,
   });
 
   @override
-  int get hashCode => provider.hashCode ^ id.hashCode ^ name.hashCode;
+  int get hashCode =>
+      provider.hashCode ^ id.hashCode ^ name.hashCode ^ contextWindow.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -145,7 +150,8 @@ class BridgeModel {
           runtimeType == other.runtimeType &&
           provider == other.provider &&
           id == other.id &&
-          name == other.name;
+          name == other.name &&
+          contextWindow == other.contextWindow;
 }
 
 /// A session pi stored, as the start page lists it.

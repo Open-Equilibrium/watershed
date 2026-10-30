@@ -40,6 +40,7 @@ BridgeUsage tokens(
 
 BridgeStepContext saw(int messages, List<String> added) => BridgeStepContext(
   promptChars: 2310,
+  sections: const ['preamble', 'project_context'],
   tools: const ['bash', 'read'],
   toolChars: 1050,
   messages: messages,
@@ -580,6 +581,7 @@ void main() {
   ) async {
     const saw = BridgeStepContext(
       promptChars: 2310,
+      sections: ['preamble'],
       tools: ['bash', 'edit'],
       toolChars: 1050,
       messages: 3,

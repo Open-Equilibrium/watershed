@@ -112,8 +112,12 @@ fn projects_the_selected_branch_with_timing_and_what_the_model_saw() {
         failed: false,
         context: None,
         outcome: ToolOutcome::default(),
+        added_chars: 0,
     };
-    let user = record("e2", 1, RecordKind::User, "Add rate limiting", 0, None);
+    let user = TrajectoryRecord {
+        added_chars: "Add rate limiting".len(),
+        ..record("e2", 1, RecordKind::User, "Add rate limiting", 0, None)
+    };
     let message = TrajectoryRecord {
         first_token_ms: Some(900),
         model: "faux-1".to_owned(),
@@ -128,12 +132,14 @@ fn projects_the_selected_branch_with_timing_and_what_the_model_saw() {
         stop_reason: "toolUse".to_owned(),
         context: Some(StepContext {
             prompt_chars: 20,
+            sections: vec!["preamble".to_owned(), "rules".to_owned()],
             tools: vec!["bash".to_owned(), "read".to_owned()],
             tool_chars: 30,
             messages: 1,
             message_chars: "Add rate limiting".len(),
             new_since_previous: vec!["prompt".to_owned()],
         }),
+        added_chars: "I'll run the tests.\nThen fix.".len() + r#"{"command":"npm test"}"#.len(),
         ..record(
             "e3",
             1,
@@ -151,6 +157,7 @@ fn projects_the_selected_branch_with_timing_and_what_the_model_saw() {
         detail: r#"{"command":"npm test"}"#.to_owned(),
         target: "npm test".to_owned(),
         failed: true,
+        added_chars: "1 failed".len(),
         ..record("e4", 1, RecordKind::Tool, "bash", 12900, Some(6800))
     };
 
@@ -165,6 +172,7 @@ fn projects_the_selected_branch_with_timing_and_what_the_model_saw() {
         stop_reason: "stop".to_owned(),
         context: Some(StepContext {
             prompt_chars: 20,
+            sections: vec!["preamble".to_owned(), "rules".to_owned()],
             tools: vec!["bash".to_owned(), "read".to_owned()],
             tool_chars: 30,
             messages: 3,
@@ -174,6 +182,7 @@ fn projects_the_selected_branch_with_timing_and_what_the_model_saw() {
                 + "1 failed".len(),
             new_since_previous: vec!["result of bash".to_owned()],
         }),
+        added_chars: "Done.".len(),
         ..record("e7", 1, RecordKind::Message, "Done.", 20900, None)
     };
     assert_eq!(
@@ -190,7 +199,10 @@ fn projects_the_selected_branch_with_timing_and_what_the_model_saw() {
         [
             user,
             message,
-            record("b1", 2, RecordKind::User, "Use a token bucket", 64900, None),
+            TrajectoryRecord {
+                added_chars: "Use a token bucket".len(),
+                ..record("b1", 2, RecordKind::User, "Use a token bucket", 64900, None)
+            },
         ]
     );
 }

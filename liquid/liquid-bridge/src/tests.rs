@@ -416,7 +416,7 @@ fn starts_and_resumes_sessions_and_picks_models() {
         respond(
             5,
             "get_available_models",
-            r#"{"models":[{"provider":"faux","id":"faux-1","name":"Faux One"}]}"#,
+            r#"{"models":[{"provider":"faux","id":"faux-1","name":"Faux One","contextWindow":200000}]}"#,
         ),
         respond(6, "get_state", &state),
         respond(7, "set_model", "{}"),
@@ -445,6 +445,7 @@ fn starts_and_resumes_sessions_and_picks_models() {
             provider: "faux".to_owned(),
             id: "faux-1".to_owned(),
             name: "Faux One".to_owned(),
+            context_window: Some(200_000),
         }])
     );
     assert_eq!(session.current_model(), Ok(Some("faux/faux-1".to_owned())));
@@ -812,14 +813,23 @@ fn reads_tool_outcomes_and_what_the_model_saw() {
     let records = &history.trajectories[0].records;
     assert_eq!(records[2].kind, BridgeRecordKind::Tool);
     assert_eq!(records[2].outcome.added, Some(2), "lines the write wrote");
+    assert_eq!(
+        records
+            .iter()
+            .map(|record| record.added_chars)
+            .collect::<Vec<_>>(),
+        [8, 34, 2, 5],
+        "what the prompt, the call, the result and the answer add to the context"
+    );
     let context = records[3].context.as_ref().expect("a2 saw context");
     assert_eq!(
         (
             context.prompt_chars,
+            context.sections.clone(),
             context.tool_chars > 0,
             context.messages
         ),
-        (11, true, 3)
+        (11, vec!["preamble".to_owned()], true, 3)
     );
     let detail = session
         .context("a2".to_owned())

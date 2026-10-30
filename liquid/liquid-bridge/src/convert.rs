@@ -131,6 +131,7 @@ impl From<TrajectoryRecord> for BridgeRecord {
             failed: record.failed,
             context: record.context.map(Into::into),
             outcome: record.outcome.into(),
+            added_chars: int(record.added_chars),
         }
     }
 }
@@ -217,6 +218,7 @@ impl From<StepContext> for BridgeStepContext {
     fn from(context: StepContext) -> Self {
         Self {
             prompt_chars: int(context.prompt_chars),
+            sections: context.sections,
             tools: context.tools,
             tool_chars: int(context.tool_chars),
             messages: int(context.messages),
@@ -548,6 +550,7 @@ impl From<Model> for BridgeModel {
             provider: model.provider,
             id: model.id,
             name: model.name,
+            context_window: model.context_window.map(int),
         }
     }
 }

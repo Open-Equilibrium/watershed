@@ -220,6 +220,10 @@ class BridgeRecord {
   /// What a tool call did.
   final BridgeToolOutcome outcome;
 
+  /// Characters the step adds to the model's context: its prompt, response or tool result;
+  /// none for an approval.
+  final PlatformInt64 addedChars;
+
   const BridgeRecord({
     required this.entry,
     required this.turn,
@@ -238,6 +242,7 @@ class BridgeRecord {
     required this.failed,
     this.context,
     required this.outcome,
+    required this.addedChars,
   });
 
   @override
@@ -258,7 +263,8 @@ class BridgeRecord {
       stopReason.hashCode ^
       failed.hashCode ^
       context.hashCode ^
-      outcome.hashCode;
+      outcome.hashCode ^
+      addedChars.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -281,7 +287,8 @@ class BridgeRecord {
           stopReason == other.stopReason &&
           failed == other.failed &&
           context == other.context &&
-          outcome == other.outcome;
+          outcome == other.outcome &&
+          addedChars == other.addedChars;
 }
 
 /// What a Trajectory row shows.
@@ -304,6 +311,9 @@ class BridgeStepContext {
   /// Characters of the system prompt.
   final PlatformInt64 promptChars;
 
+  /// The system prompt's named sections, such as `preamble` or `project_context`.
+  final List<String> sections;
+
   /// The tools the model could call.
   final List<String> tools;
 
@@ -321,6 +331,7 @@ class BridgeStepContext {
 
   const BridgeStepContext({
     required this.promptChars,
+    required this.sections,
     required this.tools,
     required this.toolChars,
     required this.messages,
@@ -331,6 +342,7 @@ class BridgeStepContext {
   @override
   int get hashCode =>
       promptChars.hashCode ^
+      sections.hashCode ^
       tools.hashCode ^
       toolChars.hashCode ^
       messages.hashCode ^
@@ -343,6 +355,7 @@ class BridgeStepContext {
       other is BridgeStepContext &&
           runtimeType == other.runtimeType &&
           promptChars == other.promptChars &&
+          sections == other.sections &&
           tools == other.tools &&
           toolChars == other.toolChars &&
           messages == other.messages &&

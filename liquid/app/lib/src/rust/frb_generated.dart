@@ -1580,12 +1580,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeModel dco_decode_bridge_model(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 3)
-      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+    if (arr.length != 4)
+      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
     return BridgeModel(
       provider: dco_decode_String(arr[0]),
       id: dco_decode_String(arr[1]),
       name: dco_decode_String(arr[2]),
+      contextWindow: dco_decode_opt_box_autoadd_i_64(arr[3]),
     );
   }
 
@@ -1625,8 +1626,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeRecord dco_decode_bridge_record(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 17)
-      throw Exception('unexpected arr length: expect 17 but see ${arr.length}');
+    if (arr.length != 18)
+      throw Exception('unexpected arr length: expect 18 but see ${arr.length}');
     return BridgeRecord(
       entry: dco_decode_String(arr[0]),
       turn: dco_decode_i_64(arr[1]),
@@ -1645,6 +1646,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       failed: dco_decode_bool(arr[14]),
       context: dco_decode_opt_box_autoadd_bridge_step_context(arr[15]),
       outcome: dco_decode_bridge_tool_outcome(arr[16]),
+      addedChars: dco_decode_i_64(arr[17]),
     );
   }
 
@@ -1690,15 +1692,16 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeStepContext dco_decode_bridge_step_context(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 6)
-      throw Exception('unexpected arr length: expect 6 but see ${arr.length}');
+    if (arr.length != 7)
+      throw Exception('unexpected arr length: expect 7 but see ${arr.length}');
     return BridgeStepContext(
       promptChars: dco_decode_i_64(arr[0]),
-      tools: dco_decode_list_String(arr[1]),
-      toolChars: dco_decode_i_64(arr[2]),
-      messages: dco_decode_i_64(arr[3]),
-      messageChars: dco_decode_i_64(arr[4]),
-      newSincePrevious: dco_decode_list_String(arr[5]),
+      sections: dco_decode_list_String(arr[1]),
+      tools: dco_decode_list_String(arr[2]),
+      toolChars: dco_decode_i_64(arr[3]),
+      messages: dco_decode_i_64(arr[4]),
+      messageChars: dco_decode_i_64(arr[5]),
+      newSincePrevious: dco_decode_list_String(arr[6]),
     );
   }
 
@@ -2490,7 +2493,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_provider = sse_decode_String(deserializer);
     var var_id = sse_decode_String(deserializer);
     var var_name = sse_decode_String(deserializer);
-    return BridgeModel(provider: var_provider, id: var_id, name: var_name);
+    var var_contextWindow = sse_decode_opt_box_autoadd_i_64(deserializer);
+    return BridgeModel(
+      provider: var_provider,
+      id: var_id,
+      name: var_name,
+      contextWindow: var_contextWindow,
+    );
   }
 
   @protected
@@ -2547,6 +2556,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       deserializer,
     );
     var var_outcome = sse_decode_bridge_tool_outcome(deserializer);
+    var var_addedChars = sse_decode_i_64(deserializer);
     return BridgeRecord(
       entry: var_entry,
       turn: var_turn,
@@ -2565,6 +2575,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       failed: var_failed,
       context: var_context,
       outcome: var_outcome,
+      addedChars: var_addedChars,
     );
   }
 
@@ -2616,6 +2627,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_promptChars = sse_decode_i_64(deserializer);
+    var var_sections = sse_decode_list_String(deserializer);
     var var_tools = sse_decode_list_String(deserializer);
     var var_toolChars = sse_decode_i_64(deserializer);
     var var_messages = sse_decode_i_64(deserializer);
@@ -2623,6 +2635,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_newSincePrevious = sse_decode_list_String(deserializer);
     return BridgeStepContext(
       promptChars: var_promptChars,
+      sections: var_sections,
       tools: var_tools,
       toolChars: var_toolChars,
       messages: var_messages,
@@ -3625,6 +3638,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.provider, serializer);
     sse_encode_String(self.id, serializer);
     sse_encode_String(self.name, serializer);
+    sse_encode_opt_box_autoadd_i_64(self.contextWindow, serializer);
   }
 
   @protected
@@ -3675,6 +3689,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_bool(self.failed, serializer);
     sse_encode_opt_box_autoadd_bridge_step_context(self.context, serializer);
     sse_encode_bridge_tool_outcome(self.outcome, serializer);
+    sse_encode_i_64(self.addedChars, serializer);
   }
 
   @protected
@@ -3718,6 +3733,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_i_64(self.promptChars, serializer);
+    sse_encode_list_String(self.sections, serializer);
     sse_encode_list_String(self.tools, serializer);
     sse_encode_i_64(self.toolChars, serializer);
     sse_encode_i_64(self.messages, serializer);

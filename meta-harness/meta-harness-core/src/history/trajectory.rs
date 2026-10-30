@@ -308,14 +308,10 @@ impl Projection {
             Body::User { text, chars } => {
                 self.turn += 1;
                 let label = first_line(text, LABEL_CHARS);
-                self.records.push(row(
-                    id,
-                    self.turn,
-                    RecordKind::User,
-                    label.clone(),
-                    at,
-                    None,
-                ));
+                self.records.push(TrajectoryRecord {
+                    added_chars: *chars,
+                    ..row(id, self.turn, RecordKind::User, label.clone(), at, None)
+                });
                 self.count(
                     Some("prompt".to_owned()),
                     format!("prompt · {label}"),
@@ -348,6 +344,7 @@ impl Projection {
                 };
                 let context = StepContext {
                     prompt_chars: self.sections.values().sum::<usize>() + self.appended_chars,
+                    sections: self.sections.keys().cloned().collect(),
                     tools: self.tools.keys().cloned().collect(),
                     tool_chars: self.tools.values().sum(),
                     messages: self.messages + usize::from(self.summary.is_some()),
@@ -361,6 +358,7 @@ impl Projection {
                     stop_reason: stop_reason.clone(),
                     failed: stop_reason == "error",
                     context: Some(context),
+                    added_chars: *chars,
                     ..row(
                         id,
                         self.turn,
@@ -397,6 +395,7 @@ impl Projection {
                         added: outcome.added.or(if *failed { None } else { written }),
                         ..*outcome
                     },
+                    added_chars: *chars,
                     ..row(
                         id,
                         self.turn,
@@ -461,5 +460,6 @@ fn row(
         failed: false,
         context: None,
         outcome: ToolOutcome::default(),
+        added_chars: 0,
     }
 }

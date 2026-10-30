@@ -153,6 +153,8 @@ pub struct Model {
     pub id: String,
     /// The name to show; the id when the agent gives none.
     pub name: String,
+    /// Tokens the model can take in one request, when the agent knows them.
+    pub context_window: Option<u64>,
 }
 
 /// What the agent reports about its session.
@@ -448,6 +450,10 @@ impl Session {
                     provider: text("provider")?.to_owned(),
                     id: id.to_owned(),
                     name: text("name").unwrap_or(id).to_owned(),
+                    context_window: model
+                        .get("contextWindow")
+                        .and_then(Value::as_u64)
+                        .filter(|tokens| *tokens > 0),
                 })
             })
             .collect())
