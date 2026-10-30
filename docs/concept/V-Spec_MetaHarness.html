@@ -247,12 +247,14 @@ liquid integration
         <li><strong>C · Move an agent:</strong> at a turn boundary another of the person's hosts takes the session over: the record from Liquid, the files from the Git checkpoint ref (ADR-0220), its own credentials and the person's grant (ADR-0223). The Sync Server gives the session to one host; two hosts continuing offline create two branches.</li>
         <li><strong>D · Several hosts:</strong> linked Meta-Harness hosts hand each other tasks and messages and return results, as T3 Code's linked environments do; approvals stay with the host that runs the work. Running single tools on another host follows later.</li>
       </ul>
+      <div style="overflow-x:auto">
       <table>
         <tr><th>Harness</th><th>Journal before display</th><th>Tool intent before it runs</th><th>Resume</th><th>Replay-safe</th></tr>
         <tr><td>pi</td><td>Meta-Harness journals each RPC event first</td><td>through Watershed's pi extension</td><td>restart with <code>--session</code>, open calls reported as interrupted</td><td>pi's own reading tools</td></tr>
         <tr><td>Flow Agent</td><td>its own journal</td><td>its own journal</td><td>Meta-Harness calls <code>flow resume</code></td><td>Tools declared replay-safe</td></tr>
         <tr><td>Later adapters</td><td>Meta-Harness's journal</td><td>through their hooks where they exist</td><td>through their own session resume</td><td>their reading tools</td></tr>
       </table>
+      </div>
       <p class="muted">Each adapter reports which levels it reaches. The harness's own session file stays authoritative on its host; the Workspace record is the portable copy (ADR-0189). Without a Git project only the conversation moves.</p>
       <p><strong>Another harness</strong> (ADR-0231): a session moves to another harness, such as from pi to Codex, only as a handoff, as in T3 Code. The target starts a new session that receives the conversation so far as text, at most 16,000 tokens by default, marked as context, not a new request; attachments and the provider's tool and reasoning state do not move. A target that already saw part of the conversation receives only what followed; the files come from the Git checkpoint ref. Within pi, switching model or provider stays pi's own switch inside the session.</p>
     </div></section>
