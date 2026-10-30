@@ -303,7 +303,7 @@ class _OverviewState extends State<Overview> {
 const _infoSize = 14.0;
 
 /// The brush over the tracks with a handle at each end (approved navigation mockup).
-class _BrushView extends StatelessWidget {
+class _BrushView extends StatefulWidget {
   const _BrushView({
     required this.brush,
     required this.width,
@@ -323,7 +323,20 @@ class _BrushView extends StatelessWidget {
   final ValueChanged<double>? onPan;
 
   @override
+  State<_BrushView> createState() => _BrushViewState();
+}
+
+class _BrushViewState extends State<_BrushView> {
+  /// Where a drag of the brush started: its start on the axis and the pointer's position, so
+  /// small moves add up instead of snapping back to the same step.
+  (double, double)? _drag;
+
+  double _pointer(Offset global) =>
+      (context.findRenderObject()! as RenderBox).globalToLocal(global).dx;
+
+  @override
   Widget build(BuildContext context) {
+    final _BrushView(:brush, :width, :visible, :at, :onRange, :onPan) = widget;
     final ws = context.ws;
     double x(double value) =>
         ((value - visible.$1) / (visible.$2 - visible.$1) * width).clamp(
@@ -343,14 +356,13 @@ class _BrushView extends StatelessWidget {
         key: key,
         behavior: HitTestBehavior.opaque,
         dragStartBehavior: DragStartBehavior.down,
-        onDoubleTap: onRange == null ? null : () => onRange!(null),
+        onDoubleTap: onRange == null ? null : () => onRange(null),
         onHorizontalDragUpdate: onRange == null
             ? null
             : (details) {
                 // The brush's own box, not the moving handle's, places the pointer.
-                final box = context.findRenderObject()! as RenderBox;
-                final value = at(box.globalToLocal(details.globalPosition).dx);
-                onRange!(
+                final value = at(_pointer(details.globalPosition));
+                onRange(
                   start
                       ? (math.min(value, brush.end - gap), brush.end)
                       : (brush.start, math.max(value, brush.start + gap)),
@@ -383,14 +395,20 @@ class _BrushView extends StatelessWidget {
               label: brush.label,
               child: GestureDetector(
                 behavior: HitTestBehavior.opaque,
+                onHorizontalDragStart: (details) =>
+                    _drag = (brush.start, _pointer(details.globalPosition)),
+                onHorizontalDragEnd: (_) => _drag = null,
                 onHorizontalDragUpdate: onPan == null
                     ? null
-                    : (details) => onPan!(
-                        brush.start +
-                            details.delta.dx /
-                                width *
-                                (visible.$2 - visible.$1),
-                      ),
+                    : (details) {
+                        final (start, from) = _drag ?? (brush.start, 0.0);
+                        onPan(
+                          start +
+                              (_pointer(details.globalPosition) - from) /
+                                  width *
+                                  (visible.$2 - visible.$1),
+                        );
+                      },
                 child: DecoratedBox(
                   decoration: BoxDecoration(
                     color: ws.accent.withValues(alpha: 0.08),

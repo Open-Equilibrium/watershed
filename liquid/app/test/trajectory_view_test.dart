@@ -793,6 +793,27 @@ void main() {
     expect(find.byKey(const Key('range')), findsNothing);
   });
 
+  testWidgets('dragging the range slowly scrolls the list', (tester) async {
+    await show(tester, historyOf(long));
+    String shown() =>
+        tester.getSemantics(find.byKey(const Key('range-brush'))).label;
+    expect(shown(), startsWith('Showing steps 1–'));
+    final drag = await tester.startGesture(
+      tester.getCenter(find.byKey(const Key('range-brush'))),
+    );
+    for (var move = 0; move < 100; move++) {
+      await drag.moveBy(const Offset(2, 0));
+      await tester.pump();
+    }
+    await drag.up();
+    await tester.pumpAndSettle();
+    expect(
+      shown(),
+      isNot(startsWith('Showing steps 1–')),
+      reason: 'small moves add up instead of snapping back to the same step',
+    );
+  });
+
   testWidgets('a click on the timeline jumps to the step there', (
     tester,
   ) async {
