@@ -128,7 +128,8 @@ summary{cursor:pointer}summary h3{display:inline;margin:0}summary:focus-visible{
           <li><strong>C: Make Meta-Harness durable around the harness.</strong> In service mode (ADR-0215) the Rust core records each command, approval and checkpoint before acting and keeps sessions running while Liquid is closed; pi stays the harness and its session file the transcript. Pro: keeps pi, its extensions and Rust; running agents and pending approvals survive Liquid closing, and several clients can follow; fits <a href="#d-024">D-024</a> and <a href="#d-074">D-074</a> B. Con: a turn cut off by a crash of pi itself still ends; the core's records must stay consistent with pi's file.</li>
           <li><strong>D: Run coding sessions as Flow Agent Runs.</strong> Pro: one durable runtime for everything. Con: Flow Agent runs predefined Flows from global Building Blocks, not open conversations with pi's tools and extensions, so both would need a large redesign.</li>
         </ul>
-        <p><strong>Recommendation:</strong> C, built with service mode; sessions then live on the agent's host as pi's session files plus the core's records. Revisit B once Pi Durable is stable, has a command or network interface and loads extensions.</p>
+        <p><strong>Maintainer preference (2026-10-30):</strong> C looks promising, but with Pi Durable's rule for an effect whose outcome is unknown: after a crash a tool declared replay-safe runs again automatically, and any other tool reports "interrupted" to the model, which continues without a restart click. For pi, its own reading tools would be the replay-safe ones (ADR-0188, ADR-0208); for Flow Agent this would change its rule never to repeat an effect automatically, but only for Tools declared replay-safe.</p>
+        <p><strong>Recommendation:</strong> C with that rule, built with service mode; sessions then live on the agent's host as pi's session files plus the core's records, and Flow Agent keeps its own effect journal, which works without Meta-Harness. Revisit B once Pi Durable is stable, has a command or network interface and loads extensions.</p>
         <p><strong>Acceptance criterion:</strong> The ADR log names the runtime for Liquid's agents and where their sessions are stored; for C, tests show a running session and a pending approval surviving a Liquid restart.</p>
       </details>
       <details id="d-078" class="decision">
@@ -145,7 +146,7 @@ summary{cursor:pointer}summary h3{display:inline;margin:0}summary:focus-visible{
       </details>
       <details id="d-079" class="decision">
         <summary><h3>D-079 - Harness Configurations Kept In Liquid</h3></summary>
-        <p><strong>Status:</strong> Open; direction raised by the maintainer on 2026-10-30: configurations are kept in Liquid per harness, and Meta-Harness materializes them on each host. The <a href="../concept/V-Spec_MetaHarness.html">Meta-Harness V-Spec</a> already makes Meta-Harness responsible for central configuration across agents and for policy-gated configuration writes with audit; <a href="#d-067">D-067</a> places the shared catalog in Liquid. Credentials and Runtime bindings never leave their host.</p>
+        <p><strong>Status:</strong> Open; direction set by the maintainer on 2026-10-30: unlike T3 Code, Watershed keeps harness configurations centrally and across devices; Liquid is where they are edited and stored, per harness, and Meta-Harness materializes them on each host. The <a href="../concept/V-Spec_MetaHarness.html">Meta-Harness V-Spec</a> already makes Meta-Harness responsible for central configuration across agents and for policy-gated configuration writes with audit; <a href="#d-067">D-067</a> places the shared catalog in Liquid. Credentials and Runtime bindings never leave their host.</p>
         <p><strong>Question:</strong> How does a configuration kept in Liquid reach a harness on a host?</p>
         <ul>
           <li><strong>A: Write the harness's own files,</strong> such as pi's <code>~/.pi/agent/settings.json</code> or Flow Agent's home. Pro: the harness behaves the same when started by hand. Con: overwrites what the user maintains there; Flow Agent's public surface only creates and never updates; drift between Liquid and the files needs its own detection.</li>
@@ -155,6 +156,19 @@ summary{cursor:pointer}summary h3{display:inline;margin:0}summary:focus-visible{
         </ul>
         <p><strong>Recommendation:</strong> B with push. Configurations in Liquid hold no secrets; editing them needs a Role the Agentic Engineer holds; sensitive changes, such as tools, permissions, network or schedules, still need approval on the host, as <a href="../../SECURITY.md">SECURITY.md</a> requires. Flow Agent then needs a public way to replace a home's configuration.</p>
         <p><strong>Acceptance criterion:</strong> The ADR log names materialization and transport; tests show a configuration edited in Liquid reaching a pi session on another host after approval, the user's own pi files unchanged and no credential leaving the host.</p>
+      </details>
+      <details id="d-080" class="decision">
+        <summary><h3>D-080 - Agents On Windows And Between Hosts</h3></summary>
+        <p><strong>Status:</strong> Open; raised by the maintainer on 2026-10-30: develop on a Mac, test on Windows, and possibly run a Windows agent that talks with the Mac agent. <a href="../../PLATFORMS.md">PLATFORMS.md</a> gives Meta-Harness no native Windows support (ADR-0163); starting pi through WSL is a later option (ADR-0201). T3 Code runs natively on Windows and in WSL, and its "linked environments" beta lets an agent on one machine start, message and wait for threads on another, without syncing code.</p>
+        <p><strong>Question:</strong> How do agents reach Windows, and how do agents on different hosts work together?</p>
+        <ul>
+          <li><strong>A: Windows only as a test target.</strong> A Mac agent runs tests on Windows through an SSH tool; Windows runs only OpenSSH and the toolchain. Pro: no Watershed component on Windows, works today. Con: no agent on Windows.</li>
+          <li><strong>B: Meta-Harness in WSL,</strong> running Windows programs through WSL's interop, such as <code>powershell.exe</code>. Pro: keeps ADR-0163, gives a real agent on the PC. Con: the agent itself lives in Linux, Windows paths and file access through <code>/mnt/c</code> are slower, and each toolchain must be checked.</li>
+          <li><strong>C: native Meta-Harness on Windows.</strong> Pro: a full Windows agent. Con: reverses ADR-0163; process control, approvals and the pi extension need Windows support and tests.</li>
+          <li><strong>Between hosts:</strong> linked Meta-Harness hosts, as in T3 Code, where an agent hands a task to another host's agent and receives its result; approvals stay with the host that runs the work.</li>
+        </ul>
+        <p><strong>Recommendation:</strong> A now; B when a Windows agent is needed, after a check with the real toolchains; C only if B fails. Linking hosts follows Meta-Harness service mode.</p>
+        <p><strong>Acceptance criterion:</strong> The ADR log names the Windows path; tests show a Mac agent running a Windows test and, for B or C, a task handed to the Windows agent with its result returned.</p>
       </details>
     </div>
   </section>
@@ -197,6 +211,19 @@ summary{cursor:pointer}summary h3{display:inline;margin:0}summary:focus-visible{
         <ul><li><strong>A:</strong> yrs, the Rust port of Yjs. Pro: very fast rich-text editing and compact updates; widely deployed, including in AppFlowy. Con: Liquid's Block and View model must be mapped onto Yjs data types; when two devices change the same field, one value silently wins and the other is dropped; its history is not attributed per actor.</li><li><strong>B:</strong> Automerge. Pro: JSON-like documents with a complete change history that maps naturally to attributed History; when two devices change the same field it keeps both values, so Liquid can show the user both instead of losing one. Con: historically higher memory and CPU use on large documents, so it must be proven against the Liquid workloads.</li></ul>
         <p><strong>Recommendation:</strong> B, because it does not silently drop a concurrent change, unless the acceptance spike shows it cannot keep typing and memory use responsive; then reconsider A. Either way every replica keeps applying received changes through its own mutation pipeline as <a href="../../SECURITY.md">SECURITY.md</a> requires.</p>
         <p><strong>Acceptance criterion:</strong> The chosen library passes convergence tests for the M3 Block Types (text, Database rows, View order, deletion cascade), retains fixed observational typing and memory evidence on the Liquid targets, and a remote change denied by Roles is rejected identically for every replica.</p>
+      </details>
+      <details id="d-081" class="decision">
+        <summary><h3>D-081 - Encryption Of Workspace Data On The Sync Server And Devices</h3></summary>
+        <p><strong>Status:</strong> Open; the only enterprise layers ADR-0224 left open. Search keeps working with any option, because each device indexes its own replica, as Anytype and Proton Mail do; what end-to-end encryption removes is everything the server would do with content.</p>
+        <p><strong>Question:</strong> How do the Sync Server and devices store Workspace data?</p>
+        <ul>
+          <li><strong>Server A: plaintext.</strong> Pro: server-side search, previews, legal hold and data-loss checks are simple. Con: a stolen disk, a backup or a breached server exposes everything.</li>
+          <li><strong>Server B: encrypted at rest with the operator's key; in Liquid Cloud with customer-managed keys,</strong> as Notion, Slack and Box offer. Pro: protects disks and backups, the customer can revoke access, and compliance features keep working. Con: the operator can still read while the key is active.</li>
+          <li><strong>Server C: end-to-end, chosen per Workspace.</strong> Pro: the operator, including us, cannot read or hand out content. Con: no server-side content features such as eDiscovery, legal hold or data-loss checks; a lost recovery key loses data; every device and agent host needs keys. Microsoft recommends its comparable option only for the most sensitive few percent of data.</li>
+          <li><strong>Device A: plaintext</strong>, relying on disk encryption. <strong>Device B: an encrypted database</strong> whose key the keychain releases only to Liquid. B protects a stolen device and, on macOS, keeps an agent's shell under the same account out; Liquid cannot use the macOS App Sandbox (ADR-0200).</li>
+        </ul>
+        <p><strong>Recommendation:</strong> Server B everywhere, with customer-managed keys in Liquid Cloud; C later as a per-Workspace option for the most sensitive data. Device B. A company that self-hosts and trusts its own server administrators needs no end-to-end encryption.</p>
+        <p><strong>Acceptance criterion:</strong> The ADR log names server and device storage; tests show search on a device, a stolen-disk copy that stays unreadable, and for C a server that stores only ciphertext.</p>
       </details>
     </div>
   </section>

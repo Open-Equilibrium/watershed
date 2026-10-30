@@ -155,7 +155,22 @@ Liquid is a standalone workspace product that external agents and tools can read
 - Sync applies received actions through that same pipeline. Sync credentials authorize Workspace exchange only; they do not authorize Meta-Harness control. Interrupted or untrusted sync never disables access to the local replica.
 - A headless Liquid replica is a separate execution boundary. It receives only Workspaces explicitly enabled for that replica, then enforces the same Roles and mutation pipeline as a UI replica.
 - External-agent writes are **attributed** (actor/origin) and **revertible**; sensitive changes require approval, and a proposed diff can be reviewed before apply.
-- Secrets/credentials stored in workspace data require special handling.
+- Secrets and credentials are never Workspace data; Workspace data holds only references to a keychain or a company secret manager (ADR-0224).
+
+Accepted target for agents (ADR-0223):
+
+- An agent acts with its own identity and a grant signed by the person it works for, naming an area, actions and an expiry. Its authority never exceeds that person's: it is the intersection of the agent's Role, the person's authority and the grant.
+- Agents change Workspace data only through the CLI/API and mutation pipeline of the replica on their own host, never in its store; that replica receives only the areas the agent Roles allow.
+- Each Role sets which changes are sensitive and wait for the person's approval, by default deletion, permission, grant and Automation changes. A grant may waive these approvals, at the discretion of the person who issues it.
+- History records the agent as actor and the person it acts for. Revoking the session or grant makes the Sync Server refuse the agent's further changes.
+
+Accepted enterprise target for sign-in and sync (ADR-0224); how the Sync Server and devices store Workspace data remains open in [D-081](docs/decisions/open-decisions.html#d-081):
+
+- Liquid accounts sign in with passkeys from M3; companies add single sign-on through OIDC or SAML, with SCIM provisioning.
+- Each device holds its own key in the Secure Enclave or TPM and connects over TLS 1.3. Every change is signed, and from M3 the Sync Server accepts a change only if its signer's Role allows it.
+- M3 starts with complete Workspace replicas, but the data model is divided into areas from the start, so that each device can later receive only what its person may access.
+- Signed changes make History tamper-evident, and the Sync Server keeps an audit log that companies can export to their security monitoring.
+- Liquid runs both as Liquid Cloud, with a chosen region and customer-managed keys, and self-hosted.
 - App execution, external MCP calls and external-agent edits are separate risk classes and keep separate capability grants.
 
 This is Liquid's **workspace** action history (over Liquid's own data), not a project-code VCS. Detail: [`docs/concept/V-Spec_Liquid.html`](docs/concept/V-Spec_Liquid.html).

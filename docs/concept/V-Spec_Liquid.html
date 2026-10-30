@@ -136,6 +136,16 @@ Liquid        = local-first workspace and App platform</code></pre>
         <li>Every Workspace write uses the same mutation pipeline and records actor, origin, permission result and reversible change in History.</li>
         <li>Visibility, View placement, Connection existence and sync access never imply execution authority.</li>
       </ul>
+      <h3>How an agent changes Workspace data</h3>
+      <div class="flow">
+        <div class="node"><strong>1 · Assignment</strong><br><span class="muted">A person starts the session and signs a grant: area, actions, expiry.</span></div><span class="arrow">→</span>
+        <div class="node"><strong>2 · Sign-in</strong><br><span class="muted"><code>liq</code> on the agent host checks the agent, its session and the person it acts for.</span></div><span class="arrow">→</span>
+        <div class="node"><strong>3 · Authority</strong><br><span class="muted">agent Role ∩ the person's authority ∩ grant ∩ App capability ∩ host boundary.</span></div><span class="arrow">→</span>
+        <div class="node"><strong>4 · Proposal</strong><br><span class="muted">The pipeline builds a diff; a sensitive change waits for the person unless the grant waives approvals.</span></div><span class="arrow">→</span>
+        <div class="node"><strong>5 · History</strong><br><span class="muted">Actor: the agent; on behalf of: the person; origin: CLI; revertible.</span></div><span class="arrow">→</span>
+        <div class="node"><strong>6 · Sync</strong><br><span class="muted">The signed change reaches other replicas; the Sync Server refuses it once the grant is revoked.</span></div>
+      </div>
+      <p class="muted">Accepted target (ADR-0223, ADR-0224). Agents write only through the CLI/API of the replica on their own host, which holds only their Roles' areas; the rules are canonical in <a href="../../SECURITY.md#liquid-workspace-access--external-agent-edits">SECURITY.md</a>.</p>
       <p>Sandbox and supply-chain requirements are canonical in <a href="../../SECURITY.md">SECURITY.md</a>.</p>
     </div></section>
 
