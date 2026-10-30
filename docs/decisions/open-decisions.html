@@ -206,7 +206,7 @@ summary{cursor:pointer}summary h3{display:inline;margin:0}summary:focus-visible{
         <p><strong>Question 1:</strong> How is an agent host on a person's device kept from reading Liquid's data?</p>
         <ul>
           <li><strong>A: a separate operating-system account.</strong> Pro: the strongest, built into the OS. Con: needs administrator rights at installation; agents lose the user's tools, credentials and projects unless granted one by one.</li>
-          <li><strong>B: a sandbox profile on each agent process</strong> that blocks Liquid's data folder: Seatbelt on macOS, Landlock on Linux, as Flow Agent's self-protection uses. Pro: no administrator rights; agents keep the user's tools and projects. Con: blocks named paths, not everything; Seatbelt's interface is deprecated; Windows has no equally light mechanism.</li>
+          <li><strong>B: a sandbox profile on each agent process</strong> that blocks Liquid's data folder: Seatbelt on macOS and Bubblewrap on Linux, as Flow Agent's self-protection uses, or Landlock on Linux. Pro: no administrator rights; agents keep the user's tools and projects. Con: blocks named paths, not everything; Seatbelt's interface is deprecated; Windows has no equally light mechanism.</li>
           <li><strong>C: a virtual machine or container.</strong> Pro: strong. Con: heavy; ADR-0163 excludes a Linux-VM path on macOS; tools differ from the host's.</li>
         </ul>
         <p><strong>Question 2:</strong> Where does Liquid AI run?</p>
