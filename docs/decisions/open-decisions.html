@@ -143,6 +143,19 @@ summary{cursor:pointer}summary h3{display:inline;margin:0}summary:focus-visible{
         <p><strong>Recommendation:</strong> A first, since remote access covers most cases; B under the same context-not-authority rule when a device must continue without the host.</p>
         <p><strong>Acceptance criterion:</strong> The ADR log states whether and how a harness session moves, and tests of the chosen path show approvals and session allowances staying behind.</p>
       </details>
+      <details id="d-079" class="decision">
+        <summary><h3>D-079 - Harness Configurations Kept In Liquid</h3></summary>
+        <p><strong>Status:</strong> Open; direction raised by the maintainer on 2026-10-30: configurations are kept in Liquid per harness, and Meta-Harness materializes them on each host. The <a href="../concept/V-Spec_MetaHarness.html">Meta-Harness V-Spec</a> already makes Meta-Harness responsible for central configuration across agents and for policy-gated configuration writes with audit; <a href="#d-067">D-067</a> places the shared catalog in Liquid. Credentials and Runtime bindings never leave their host.</p>
+        <p><strong>Question:</strong> How does a configuration kept in Liquid reach a harness on a host?</p>
+        <ul>
+          <li><strong>A: Write the harness's own files,</strong> such as pi's <code>~/.pi/agent/settings.json</code> or Flow Agent's home. Pro: the harness behaves the same when started by hand. Con: overwrites what the user maintains there; Flow Agent's public surface only creates and never updates; drift between Liquid and the files needs its own detection.</li>
+          <li><strong>B: A home owned by Meta-Harness, chosen per session,</strong> through <code>PI_CODING_AGENT_DIR</code>, <code>FLOW_AGENT_HOME</code> or <code>CODEX_HOME</code>, as T3 Code does with its Codex "shadow home", which links the user's shared files such as credentials instead of copying them. Pro: the user's own files stay untouched, and each session records which configuration it ran with. Con: a harness started by hand outside Watershed does not see it; one more home per harness and host.</li>
+          <li><strong>Transport, push:</strong> Liquid sends a configuration proposal to the host's Meta-Harness over its command connection, and the host applies it after approval with an audit record, as the planned M2 API describes. Pro: Workspace sync and agent control stay separate planes; a host needs no Liquid replica. Con: an offline host receives changes later.</li>
+          <li><strong>Transport, pull:</strong> Meta-Harness reads the wanted state from a Liquid replica on its host and reconciles. Pro: repairs drift by itself. Con: every agent host needs a Liquid replica, and sync starts to drive agent control.</li>
+        </ul>
+        <p><strong>Recommendation:</strong> B with push. Configurations in Liquid hold no secrets; editing them needs a Role the Agentic Engineer holds; sensitive changes, such as tools, permissions, network or schedules, still need approval on the host, as <a href="../../SECURITY.md">SECURITY.md</a> requires. Flow Agent then needs a public way to replace a home's configuration.</p>
+        <p><strong>Acceptance criterion:</strong> The ADR log names materialization and transport; tests show a configuration edited in Liquid reaching a pi session on another host after approval, the user's own pi files unchanged and no credential leaving the host.</p>
+      </details>
     </div>
   </section>
 
@@ -194,7 +207,7 @@ summary{cursor:pointer}summary h3{display:inline;margin:0}summary:focus-visible{
     <div class="grid">
       <details id="d-067" class="decision">
         <summary><h3>D-067 - Building Block Marketplace</h3></summary>
-        <p><strong>Status:</strong> Later-roadmap specification, not a blocker for the first Flow Agent release. No marketplace is implemented or authorized by this entry.</p>
+        <p><strong>Status:</strong> Later-roadmap specification, not a blocker for the first Flow Agent release. No marketplace is implemented or authorized by this entry. On 2026-10-30 the maintainer approved Liquid as the place where Building Blocks are shared; how configurations kept there reach each host is <a href="#d-079">D-079</a>.</p>
         <p><strong>Question:</strong> How should Engineers discover and share Building Blocks without confusing distribution checks with trust in executable code?</p>
         <ul>
           <li><strong>A - An opt-in catalog with explicit versioned installation.</strong> Pro: a smaller initial discovery/distribution surface with visible author, source, dependencies and declared behavior. Con: Engineers still assess trust and manage updates.</li>
