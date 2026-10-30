@@ -592,6 +592,7 @@ class _TrajectoryViewState extends State<TrajectoryView> {
     }
   }
 
+  /// Closes the innermost of the range, the inspector and the filter row; the filter stays.
   void _escape() {
     if (_range != null || _window != null) {
       setState(() {
@@ -600,6 +601,8 @@ class _TrajectoryViewState extends State<TrajectoryView> {
       });
     } else if (_inspecting) {
       setState(() => _inspecting = false);
+    } else if (_filtering) {
+      setState(() => _filtering = false);
     }
   }
 

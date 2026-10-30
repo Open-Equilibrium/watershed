@@ -798,6 +798,7 @@ void main() {
     );
 
     await openTab(LogicalKeyboardKey.digit3);
+    expect(find.byType(DiffView), findsOneWidget);
     await tester.tap(composer);
     await tester.pump();
     final before = diffSettings.value;

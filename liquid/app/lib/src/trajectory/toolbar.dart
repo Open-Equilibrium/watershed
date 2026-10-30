@@ -53,15 +53,11 @@ class TrajectoryToolbar extends StatelessWidget {
           ),
           if (!comparing) ...[
             const SizedBox(width: WsMetrics.space3),
-            // Return and space press it rather than the view's own keys.
-            Shortcuts(
-              shortcuts: activateKeys,
-              child: GhostButton(
-                icon: LucideIcons.listFilter,
-                label: filters == 0 ? 'Filter' : 'Filter · $filters',
-                shortcut: keys.label(Command.filterSteps),
-                onPressed: onFilter,
-              ),
+            GhostButton(
+              icon: LucideIcons.listFilter,
+              label: filters == 0 ? 'Filter' : 'Filter · $filters',
+              shortcut: keys.label(Command.filterSteps),
+              onPressed: onFilter,
             ),
           ],
           Expanded(

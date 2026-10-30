@@ -295,6 +295,7 @@ BridgeRecord record(
   bool failed = false,
   BridgeToolOutcome outcome = const BridgeToolOutcome(),
   int added = 0,
+  String? model,
 }) => BridgeRecord(
   entry: entry,
   turn: turn,
@@ -307,7 +308,7 @@ BridgeRecord record(
   startMs: start,
   durationMs: duration,
   firstTokenMs: firstToken,
-  model: kind == BridgeRecordKind.message ? 'faux-1' : '',
+  model: model ?? (kind == BridgeRecordKind.message ? 'faux-1' : ''),
   usage: usage,
   stopReason: '',
   failed: failed,

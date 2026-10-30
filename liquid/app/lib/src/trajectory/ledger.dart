@@ -12,13 +12,13 @@ import 'context_track.dart';
 import 'step_parts.dart';
 import 'trajectory_model.dart';
 
-/// Widths of the ledger's fixed columns: number, kind, time, adds, tokens in and out.
 /// Width of the number column, which also holds the turns' chevrons.
 const _number = 28.0;
 
 /// Where a row's content starts after the number column, as the inspector below a step aligns.
 const ledgerInset = WsMetrics.space5 + _number + WsMetrics.space3;
 
+/// Widths of the ledger's fixed columns: number, kind, time, adds, tokens in and out.
 const _fixed = (
   number: _number,
   kind: 72.0,
@@ -317,7 +317,8 @@ class TurnRow extends StatelessWidget {
       lead: Center(
         child: Semantics(
           button: true,
-          label: '${folded ? 'Expand' : 'Collapse'} turn ${turn.turn}',
+          label:
+              '${folded ? 'Expand' : 'Collapse'} ${turn.turn == 0 ? 'Setup' : 'turn ${turn.turn}'}',
           child: Icon(
             folded ? LucideIcons.chevronRight : LucideIcons.chevronDown,
             key: ValueKey('chevron-${turn.turn}'),
@@ -367,7 +368,7 @@ class StepRow extends StatelessWidget {
     final usage = record.usage;
     final duration = record.durationMs;
     final request = this.request;
-    return InkWell(
+    final row = InkWell(
       canRequestFocus: false,
       onTap: onTap,
       child: Container(
@@ -428,5 +429,7 @@ class StepRow extends StatelessWidget {
         ], trackWidth: trackWidth),
       ),
     );
+    // Assistive technology hears which step is selected, not only sees it drawn.
+    return Semantics(selected: selected, child: row);
   }
 }

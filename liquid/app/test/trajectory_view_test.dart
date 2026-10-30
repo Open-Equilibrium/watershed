@@ -245,6 +245,7 @@ void main() {
       findsNothing,
       reason: '⌥-click on a chevron collapses every turn',
     );
+    expect(find.bySemanticsLabel('Expand turn 1'), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('chevron-2')));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('step-u2')), findsOneWidget);
@@ -253,6 +254,18 @@ void main() {
       findsNothing,
       reason: 'a plain click expands only its turn',
     );
+  });
+
+  testWidgets('the setup\'s chevron is named as its line is', (tester) async {
+    await show(
+      tester,
+      historyOf([
+        record('s0', 0, BridgeRecordKind.message, 'Ready', 0),
+        ...branchA,
+      ]),
+    );
+    expect(find.text('Setup'), findsOneWidget);
+    expect(find.bySemanticsLabel('Collapse Setup'), findsOneWidget);
   });
 
   testWidgets('each request shows the window of its own model', (tester) async {
@@ -264,6 +277,7 @@ void main() {
       300,
       usage: tokens(1300, 20),
       context: saw(3, ['prompt']),
+      model: 'faux-2',
     );
     await show(
       tester,
@@ -278,22 +292,7 @@ void main() {
           usage: tokens(1000, 50),
           context: saw(1, ['prompt']),
         ),
-        BridgeRecord(
-          entry: second.entry,
-          turn: second.turn,
-          kind: second.kind,
-          label: second.label,
-          detail: second.detail,
-          target: second.target,
-          startMs: second.startMs,
-          model: 'faux-2',
-          usage: second.usage,
-          stopReason: '',
-          failed: false,
-          context: second.context,
-          outcome: second.outcome,
-          addedChars: 0,
-        ),
+        second,
       ]),
       models: [
         faux(200000),
@@ -703,6 +702,11 @@ void main() {
       isSemantics(isSelected: true),
       reason: 'the tree tells which step is selected, not only draws it',
     );
+    expect(
+      tester.getSemantics(find.byKey(const ValueKey('step-e5'))),
+      isSemantics(isSelected: true),
+      reason: 'and so does the list',
+    );
   });
 
   testWidgets('a prompt branches before itself, also when already there', (
@@ -958,6 +962,23 @@ void main() {
     await tester.pumpAndSettle();
     expect(opacity(tester, 'e3'), lessThan(1), reason: 'read has no npm');
     expect(opacity(tester, 'e5'), 1);
+    String? focused() => FocusManager.instance.primaryFocus?.debugLabel;
+    // The platform hands return in a text field over as its action.
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pumpAndSettle();
+    expect(focused(), 'trajectory', reason: 'return gives the list the keys');
+    await tester.tap(find.byKey(const Key('filter-text')));
+    await press(tester, LogicalKeyboardKey.escape);
+    expect(focused(), 'trajectory', reason: 'so does esc');
+    await press(tester, LogicalKeyboardKey.escape);
+    expect(
+      find.byType(FilterBar),
+      findsNothing,
+      reason: 'esc in the list closes the filter row',
+    );
+    expect(opacity(tester, 'e3'), lessThan(1), reason: 'the filter stays');
+    await tester.tap(find.text('Filter · 2'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Clear'));
     await tester.pumpAndSettle();
     expect(opacity(tester, 'e2'), 1);
