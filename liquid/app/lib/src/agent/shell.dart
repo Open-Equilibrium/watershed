@@ -4,6 +4,7 @@ import 'dart:ui';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '../appearance.dart';
 import '../controls.dart';
 import '../diff/diff_settings.dart';
 import '../diff/diff_view.dart';
@@ -34,10 +35,14 @@ class AgentShell extends StatefulWidget {
     required this.info,
     this.shortcuts,
     this.diffSettings,
+    this.appearance,
   });
 
   final SessionState state;
   final SessionInfo info;
+
+  /// Theme and text size, which Settings change; without it Settings show only shortcuts.
+  final AppearanceController? appearance;
 
   /// The shortcut settings; Standard, unsaved, without them.
   final ShortcutController? shortcuts;
@@ -250,13 +255,18 @@ class _AgentShellState extends State<AgentShell> {
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Sidebar(state: widget.state, info: widget.info),
+                  Sidebar(
+                    state: widget.state,
+                    info: widget.info,
+                    onSettings: _toggleSettings,
+                  ),
                   Expanded(
                     child: ValueListenableBuilder(
                       valueListenable: _settings,
                       builder: (context, settings, main) => settings
                           ? ShortcutsPage(
                               shortcuts: _shortcuts,
+                              appearance: widget.appearance,
                               onClose: _toggleSettings,
                             )
                           : main!,

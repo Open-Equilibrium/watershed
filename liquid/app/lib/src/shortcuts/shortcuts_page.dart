@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../appearance.dart';
 import '../controls.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
@@ -115,17 +116,22 @@ const List<_Group> _right = [
   ),
 ];
 
-/// Settings → Shortcuts (approved mockup): the profile, every action's
-/// keys and recording new ones. It replaces the main area; esc closes it.
+/// Settings (approved mockups): Appearance with theme and text size, and Shortcuts with the
+/// profile, every action's keys and recording new ones. It replaces the main area; esc closes
+/// it.
 class ShortcutsPage extends StatefulWidget {
   const ShortcutsPage({
     super.key,
     required this.shortcuts,
     required this.onClose,
+    this.appearance,
   });
 
   final ShortcutController shortcuts;
   final VoidCallback onClose;
+
+  /// Theme and text size; without them Settings show only Shortcuts.
+  final AppearanceController? appearance;
 
   @override
   State<ShortcutsPage> createState() => _ShortcutsPageState();
@@ -133,6 +139,9 @@ class ShortcutsPage extends StatefulWidget {
 
 class _ShortcutsPageState extends State<ShortcutsPage> {
   final _keys = FocusNode(debugLabel: 'shortcuts');
+
+  /// Whether Appearance shows rather than Shortcuts; it opens first.
+  late bool _appearance = widget.appearance != null;
   final _search = TextEditingController();
 
   /// The command taking new keys, the keys pressed for it and who runs them already.
@@ -330,25 +339,51 @@ class _ShortcutsPageState extends State<ShortcutsPage> {
                       ),
                     ),
                     const SizedBox(height: WsMetrics.space2),
-                    Container(
-                      height: WsMetrics.rowNav,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: WsMetrics.space3,
+                    for (final (label, appearance) in [
+                      if (widget.appearance != null) ('Appearance', true),
+                      ('Shortcuts', false),
+                    ])
+                      Shortcuts(
+                        shortcuts: activateKeys,
+                        child: InkWell(
+                          onTap: () => setState(() => _appearance = appearance),
+                          borderRadius: BorderRadius.circular(
+                            WsMetrics.radiusMd,
+                          ),
+                          child: Container(
+                            height: WsMetrics.rowNav,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: WsMetrics.space3,
+                            ),
+                            alignment: Alignment.centerLeft,
+                            decoration: BoxDecoration(
+                              color: _appearance == appearance
+                                  ? ws.selected
+                                  : null,
+                              borderRadius: BorderRadius.circular(
+                                WsMetrics.radiusMd,
+                              ),
+                            ),
+                            child: Text(
+                              label,
+                              style: const TextStyle(
+                                fontWeight: WsMetrics.fwMedium,
+                              ),
+                            ),
+                          ),
+                        ),
                       ),
-                      alignment: Alignment.centerLeft,
-                      decoration: BoxDecoration(
-                        color: ws.selected,
-                        borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
-                      ),
-                      child: const Text(
-                        'Shortcuts',
-                        style: TextStyle(fontWeight: WsMetrics.fwMedium),
-                      ),
-                    ),
                   ],
                 ),
               ),
-              Expanded(child: _main(context, settings)),
+              Expanded(
+                child: switch (widget.appearance) {
+                  final appearance? when _appearance => AppearancePane(
+                    appearance: appearance,
+                  ),
+                  _ => _main(context, settings),
+                },
+              ),
             ],
           ),
         ),

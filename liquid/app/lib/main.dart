@@ -6,6 +6,7 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated_io.dart'
     show ExternalLibrary;
 
 import 'src/app.dart';
+import 'src/appearance.dart';
 import 'src/diff/diff_settings.dart';
 import 'src/launch.dart';
 import 'src/rust/frb_generated.dart';
@@ -38,6 +39,9 @@ Future<void> main() async {
       ),
       diffSettings: await DiffSettingsController.load(
         SettingsFile(File('$settings/diff.json')),
+      ),
+      appearance: await AppearanceController.load(
+        SettingsFile(File('$settings/appearance.json')),
       ),
     ),
   );
