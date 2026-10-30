@@ -103,18 +103,18 @@ summary{cursor:pointer}summary h3{display:inline;margin:0}summary:focus-visible{
       </details>
       <details id="d-075" class="decision">
         <summary><h3>D-075 - Agent Checkpoint Details</h3></summary>
-        <p><strong>Status:</strong> Open; decide with the checkpoint slice. ADR-0220 settled that Meta-Harness, as T3 Code does, stores the agent project's files at each turn as commits under its own refs in the project repository. A ref is a named pointer inside <code>.git</code>; the commits behind these refs appear on no branch, and a normal <code>git push</code> does not send them, only a mirror push does.</p>
-        <p><strong>Question:</strong> Which details does Watershed take over from T3 Code?</p>
+        <p><strong>Status:</strong> Open; decide with the checkpoint slice. ADR-0220 settled that Meta-Harness, as T3 Code does, stores the agent project's files at each turn as commits under its own refs in the project repository. A ref is a named pointer inside <code>.git</code>; the commits behind these refs appear on no branch, and a normal <code>git push</code> does not send them, only a mirror push does. On 2026-10-30 the maintainer approved writing them off the UI path and deleting a session's checkpoints with the session.</p>
+        <p><strong>Question:</strong> Which other details does Watershed take over from T3 Code?</p>
         <ul>
           <li><strong>When:</strong> T3 Code stores one checkpoint at a turn's start and one at its end, none per tool call. Pro: one scan of the project per turn. Con: the changes of a turn's tool calls cannot be told apart. Per tool call would show each call's changes, but scans the whole project before and after every changing call.</li>
           <li><strong>What:</strong> T3 Code stores tracked and new files, not files Git ignores. Pro: secrets such as <code>.env</code> and build output such as <code>node_modules</code> stay out of the repository. Con: changes to ignored files stay invisible, as in today's Diff tab.</li>
           <li><strong>Names:</strong> T3 Code uses <code>refs/t3/orchestration-v2/checkpoints/&lt;thread&gt;/ordinal/&lt;turn&gt;</code>; Watershed would use its own namespace, such as <code>refs/watershed/checkpoints/&lt;session&gt;/&lt;turn&gt;</code>.</li>
-          <li><strong>How long:</strong> T3 Code deletes a checkpoint only when a return makes it obsolete, never with its thread, so the repository keeps growing. Alternative: delete a session's checkpoints with the session and offer one action that removes all of Watershed's; Git's own cleanup then frees the space.</li>
+          <li><strong>Removing all:</strong> T3 Code deletes a checkpoint only when a return makes it obsolete, never with its thread. Besides deleting with the session, one action could remove all of Watershed's checkpoints at once; Git's own cleanup then frees the space.</li>
           <li><strong>Returning to a turn:</strong> T3 Code restores the files below the working folder, deletes new files Git does not ignore, unstages those files and never moves the branch, so commits stay. It refuses when another running thread uses the same folder. Watershed would also list the affected files before asking, and refuse while an agent runs in the same checkout.</li>
           <li><strong>Diff tab:</strong> it would read changes from the checkpoints instead of today's temporary store, so earlier runs stay visible after a restart.</li>
           <li><strong>Without Git:</strong> T3 Code stores no checkpoints in a folder without a Git repository and says so; Watershed would do the same.</li>
         </ul>
-        <p><strong>Recommendation:</strong> Take over T3 Code's timing, content and return rules; differ in the own <code>refs/watershed/</code> namespace, in deleting a session's checkpoints with the session, and in the file list before a return.</p>
+        <p><strong>Recommendation:</strong> Take over T3 Code's timing, content and return rules; differ in the own <code>refs/watershed/</code> namespace, the action that removes all checkpoints and the file list before a return.</p>
         <p><strong>Acceptance criterion:</strong> The ADR log names these choices, and tests show a turn's checkpoints, its diff, a return to it, a refused return while an agent runs, and the removal of a session's checkpoints.</p>
       </details>
     </div>
@@ -158,19 +158,6 @@ summary{cursor:pointer}summary h3{display:inline;margin:0}summary:focus-visible{
         <ul><li><strong>A:</strong> yrs, the Rust port of Yjs. Pro: very fast rich-text editing and compact updates; widely deployed, including in AppFlowy. Con: Liquid's Block and View model must be mapped onto Yjs data types; when two devices change the same field, one value silently wins and the other is dropped; its history is not attributed per actor.</li><li><strong>B:</strong> Automerge. Pro: JSON-like documents with a complete change history that maps naturally to attributed History; when two devices change the same field it keeps both values, so Liquid can show the user both instead of losing one. Con: historically higher memory and CPU use on large documents, so it must be proven against the Liquid workloads.</li></ul>
         <p><strong>Recommendation:</strong> B, because it does not silently drop a concurrent change, unless the acceptance spike shows it cannot keep typing and memory use responsive; then reconsider A. Either way every replica keeps applying received changes through its own mutation pipeline as <a href="../../SECURITY.md">SECURITY.md</a> requires.</p>
         <p><strong>Acceptance criterion:</strong> The chosen library passes convergence tests for the M3 Block Types (text, Database rows, View order, deletion cascade), retains fixed observational typing and memory evidence on the Liquid targets, and a remote change denied by Roles is rejected identically for every replica.</p>
-      </details>
-      <details id="d-085" class="decision">
-        <summary><h3>D-085 - Liquid Content Inside Agent Chats</h3></summary>
-        <p><strong>Status:</strong> Open; idea raised by the maintainer on 2026-10-30.</p>
-        <p><strong>Question:</strong> How does an agent's reply show Liquid content, such as the shopping list it just changed, without making a second copy?</p>
-        <p><strong>Idea:</strong> the reply carries a reference to a Block or Page with a revision, "latest" or a History id. Liquid renders it in the chat from the person's own replica, with a breadcrumb of where it lives and a link that opens it there. The chat stores only the reference, so the Page stays the single source of truth, and the person sees only what they may access.</p>
-        <ul>
-          <li><strong>A: a live, read-only embed</strong> with breadcrumb, revision and link. Pro: simple and safe. Con: editing means opening the Page.</li>
-          <li><strong>B: A plus editing in place</strong> with the same Block editor and mutation pipeline. Pro: no switching. Con: an editor inside the chat's scrolling list needs its own focus and keyboard rules.</li>
-          <li><strong>C: A plus "what changed"</strong>: the agent's revision against the current state, with its edits marked. Pro: shows exactly what the agent did. Con: needs History revision ids and a diff per Block Type.</li>
-        </ul>
-        <p><strong>Recommendation:</strong> A first, C once History exists, B later. References use stable resource ids, and the CLI/API returns a ready reference for every change, so any harness can cite it.</p>
-        <p><strong>Acceptance criterion:</strong> An agent changes a list through the CLI/API; its reply renders the list live from the replica; a pinned revision shows the earlier state; a person without access sees a placeholder; the link opens the Page at the Block.</p>
       </details>
     </div>
   </section>

@@ -165,7 +165,7 @@ Accepted target for agents (ADR-0223):
 - Agents change Workspace data only through the CLI/API and mutation pipeline of the replica on their own host, never in its store; that replica receives only the areas the agent Roles allow.
 - Each Role sets which changes are sensitive and wait for the person's approval, by default deletion, permission, grant and Automation changes. A grant may waive these approvals, at the discretion of the person who issues it.
 - History records the agent as actor and the person it acts for. Revoking the session or grant makes the Sync Server refuse the agent's further changes.
-- On a person's device, agents run under a sandbox profile that blocks Liquid's data folder, Seatbelt on macOS and Bubblewrap or Landlock on Linux, and Liquid's database key is released only to Liquid; managed company devices and Windows 11 use a separate operating-system account (ADR-0229).
+- On a person's device, agents run under a sandbox profile that blocks Liquid's data folder, Seatbelt on macOS and Bubblewrap or Landlock on Linux, rechecked after operating-system updates, and Liquid's database key is released only to Liquid; managed company devices and Windows 11 use a separate operating-system account (ADR-0229).
 - Liquid AI is a built-in agent profile on a Meta-Harness host, local or remote, limited to Liquid actions (ADR-0229).
 - Agent hosts sync through the Sync Server; a later offline path through the device's Liquid is required, and the Sync Server verifies signed changes either way (ADR-0228).
 
@@ -177,7 +177,7 @@ Accepted enterprise target for sign-in, sync and storage (ADR-0224, ADR-0228):
 - Signed changes make History tamper-evident, and the Sync Server keeps an audit log that companies can export to their security monitoring.
 - Liquid runs both as Liquid Cloud, with a chosen region and customer-managed keys, and self-hosted.
 - Devices encrypt Workspace content per area from M3. Each area key is wrapped for every device and agent host allowed in the area and, unless the Workspace chooses end-to-end encryption, for the Sync Server; choosing it later removes the server's copy. A company may run a compliance replica with its own key for search, legal hold and data-loss checks.
-- A new device receives keys only after a signed-in device approves it; a second recovery method follows. Liquid ships native apps only, with no web client.
+- A new device receives keys only after a signed-in device approves it or a recovery key restores access; area keys are also wrapped for that key, which the person or their company holds. A fault in key approval, rotation, revocation or recovery loses data, so each has dedicated tests. Liquid ships native apps only, with no web client.
 - App execution, external MCP calls and external-agent edits are separate risk classes and keep separate capability grants.
 
 This is Liquid's **workspace** action history (over Liquid's own data), not a project-code VCS. Detail: [`docs/concept/V-Spec_Liquid.html`](docs/concept/V-Spec_Liquid.html).

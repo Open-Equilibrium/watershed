@@ -149,6 +149,10 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **Rust–Flutter bridge** — The asynchronous call and stream boundary between Liquid's Flutter UI and its Rust core. It carries bounded deltas, never whole Pages or Databases (ADR-0182); it uses flutter_rust_bridge v2 (ADR-0186).
 - **Liquid replica** — A complete local working copy of an authorized Workspace. Interactive reads and writes never require a remote round trip.
 - **Sync Server** — Central service in the replica star topology. It stores and exchanges committed Workspace changes resumably; it does not execute App Blocks or control agents.
+- **Area** — A part of a Workspace that Roles, replication and encryption treat as one unit. Its area key is wrapped for every device and agent host allowed in it (ADR-0224, ADR-0228).
+- **Agent host** — Where Meta-Harness runs agents with its own Liquid replica, which holds only the areas the agent Roles allow: a machine of its own, or on a person's device a sandbox profile or separate operating-system account (ADR-0223, ADR-0229).
+- **Compliance replica** — A replica a company runs with its own key for search, legal hold and data-loss checks (ADR-0228).
+- **Recovery key** — The second way to regain a Workspace's keys when no signed-in device can approve a new one. Area keys are also wrapped for it, and the person or their company holds it (ADR-0228).
 - **Headless Liquid replica** — Optional Liquid replica without a user interface. A Workspace must opt in before this replica can sync it; same-host agents then use Liquid's normal permission and action surfaces while user devices are offline.
 - **Arrange mode** — The explicit Page state that reveals the responsive grid and resize/reorder handles. Outside Arrange mode, a Page remains a content-first flow.
 - **Block SDK** — Versioned contract for reusable built-in and Block Registry Block Types: state/migrations, Views, ports/actions, permissions, lifecycle and responsive behavior. It is for product/community extension, not end-user app creation.
