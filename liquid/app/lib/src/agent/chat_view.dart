@@ -11,6 +11,7 @@ import '../trajectory/step_parts.dart';
 import '../trajectory/trajectory_model.dart';
 import '../trajectory/tree_view.dart';
 import 'input_lane.dart';
+import 'sidebar.dart';
 import 'start_page.dart';
 
 /// The chat timeline of the current branch. It builds only visible items, each item rebuilds
@@ -20,14 +21,14 @@ class ChatView extends StatelessWidget {
   const ChatView({
     super.key,
     required this.state,
-    required this.project,
+    required this.info,
     this.input,
   });
 
   final SessionState state;
 
-  /// The project's name, as the start page shows it.
-  final String project;
+  /// The session's project, harness and device, as the start page greets with them.
+  final SessionInfo info;
 
   /// The input area, floating at the bottom.
   final Widget? input;
@@ -51,34 +52,41 @@ class ChatView extends StatelessWidget {
           valueListenable: state.items,
           // A session without a conversation shows the start page.
           builder: (context, items, _) => items.isEmpty
-              ? StartPage(state: state, project: project)
-              : ListView.builder(
-                  reverse: true,
-                  padding: EdgeInsets.only(
-                    top: WsMetrics.space5,
-                    bottom:
-                        WsMetrics.space5 + (input == null ? 0 : inputClearance),
-                  ),
-                  itemCount: items.length,
-                  itemBuilder: (context, index) {
-                    final item = items[items.length - 1 - index];
-                    return Center(
-                      child: SizedBox(
-                        width: readingWidth,
-                        child: Padding(
-                          padding: const EdgeInsets.only(
-                            bottom: WsMetrics.space4,
-                          ),
-                          child: RepaintBoundary(
-                            child: switch (item.marker) {
-                              final marker? => BranchMark(marker: marker),
-                              null => ItemTile(item: item, state: state),
-                            },
+              ? StartPage(state: state, info: info)
+              // Messages start at the top and flow down (approved look mockup); a long chat
+              // still keeps its newest message above the input.
+              : Align(
+                  alignment: Alignment.topCenter,
+                  child: ListView.builder(
+                    shrinkWrap: true,
+                    reverse: true,
+                    padding: EdgeInsets.only(
+                      top: WsMetrics.space5,
+                      bottom:
+                          WsMetrics.space5 +
+                          (input == null ? 0 : inputClearance),
+                    ),
+                    itemCount: items.length,
+                    itemBuilder: (context, index) {
+                      final item = items[items.length - 1 - index];
+                      return Center(
+                        child: SizedBox(
+                          width: readingWidth,
+                          child: Padding(
+                            padding: const EdgeInsets.only(
+                              bottom: WsMetrics.space4,
+                            ),
+                            child: RepaintBoundary(
+                              child: switch (item.marker) {
+                                final marker? => BranchMark(marker: marker),
+                                null => ItemTile(item: item, state: state),
+                              },
+                            ),
                           ),
                         ),
-                      ),
-                    );
-                  },
+                      );
+                    },
+                  ),
                 ),
         ),
       ),

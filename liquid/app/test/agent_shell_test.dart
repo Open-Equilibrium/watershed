@@ -765,6 +765,49 @@ void main() {
     }
   });
 
+  testWidgets('the session header names the project and the model', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1600, 900));
+    backend = FakeBackend()..model = 'faux/faux-1';
+    state = SessionState(backend);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: liquidTheme(Brightness.light),
+        home: AgentShell(state: state, info: info),
+      ),
+    );
+    await tester.pumpAndSettle();
+    Finder inHeader(String text) => find.descendant(
+      of: find.byKey(const Key('session-header')),
+      matching: find.text(text),
+    );
+    expect(inHeader('acme-api'), findsOneWidget);
+    expect(inHeader('faux-1'), findsOneWidget);
+  });
+
+  testWidgets('messages start at the top and flow down', (tester) async {
+    await show(tester);
+    await emit(tester, event(BridgeEventKind.turnStarted));
+    await emit(
+      tester,
+      event(
+        BridgeEventKind.itemStarted,
+        item: item(1, kind: BridgeItemKind.assistantMessage),
+      ),
+    );
+    await emit(
+      tester,
+      event(BridgeEventKind.contentDelta, item: item(1), text: 'Pong!'),
+    );
+    final chat = tester.getRect(find.byType(ChatView));
+    expect(
+      tester.getRect(find.text('Pong!')).top - chat.top,
+      lessThan(80),
+      reason: 'the first message sits at the top, not above the input',
+    );
+  });
+
   testWidgets('sends, steers and queues from the composer', (tester) async {
     await show(tester);
     final composer = find.byKey(const Key('composer'));

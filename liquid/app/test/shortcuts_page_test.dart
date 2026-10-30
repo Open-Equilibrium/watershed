@@ -137,6 +137,7 @@ void main() {
     ]);
     expect(shortcuts.value.bindings(Command.newSession), isEmpty);
 
+    await tester.ensureVisible(find.text('Reset all to defaults'));
     await tester.tap(find.text('Reset all to defaults'));
     await tester.pumpAndSettle();
     expect(shortcuts.value, ShortcutSettings.standard());

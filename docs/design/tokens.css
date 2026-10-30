@@ -13,8 +13,8 @@
   --ws-lh-h3: 22px;
   --ws-fs-prose: 16px;
   --ws-lh-prose: 24px;
-  --ws-fs-ui: 14px;
-  --ws-lh-ui: 20px;
+  --ws-fs-ui: 15px;
+  --ws-lh-ui: 22px;
   --ws-fs-compact: 13px;
   --ws-lh-compact: 20px;
   --ws-fs-small: 12px;
@@ -39,7 +39,7 @@
   --ws-radius-md: 6px;
   --ws-radius-lg: 8px;
   --ws-radius-xl: 12px;
-  --ws-row-nav: 28px;
+  --ws-row-nav: 32px;
   --ws-row-table: 34px;
   --ws-motion-fast: 120ms;
   --ws-motion-panel: 200ms;

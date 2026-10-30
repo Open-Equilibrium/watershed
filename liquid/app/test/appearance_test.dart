@@ -63,6 +63,11 @@ void main() {
       await tester.pumpAndSettle();
       double sidebar() => tester.getRect(find.byType(Sidebar)).width;
       expect(sidebar(), 280, reason: 'the default size');
+      expect(
+        tester.getSize(find.byTooltip('Settings')).height,
+        32,
+        reason: 'navigation rows at the default size',
+      );
 
       await tester.tap(find.byTooltip('Settings'));
       await tester.pumpAndSettle();

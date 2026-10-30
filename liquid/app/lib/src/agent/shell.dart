@@ -273,7 +273,10 @@ class _AgentShellState extends State<AgentShell> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          _Header(state: widget.state),
+                          _Header(
+                            state: widget.state,
+                            project: widget.info.project,
+                          ),
                           _Tabs(tab: _tab, state: widget.state),
                           Expanded(
                             child: ValueListenableBuilder(
@@ -300,7 +303,7 @@ class _AgentShellState extends State<AgentShell> {
                                 return switch (tab) {
                                   AgentTab.chat => ChatView(
                                     state: widget.state,
-                                    project: widget.info.project,
+                                    info: widget.info,
                                     input: input,
                                   ),
                                   AgentTab.diff => DiffView(
@@ -346,22 +349,57 @@ class _AgentShellState extends State<AgentShell> {
   }
 }
 
+/// The session's title with its project and model as chips (approved look mockup); the
+/// branch joins them with the Git slice.
 class _Header extends StatelessWidget {
-  const _Header({required this.state});
+  const _Header({required this.state, required this.project});
 
   final SessionState state;
+  final String project;
 
   @override
-  Widget build(BuildContext context) => Container(
-    height: 44,
-    padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space7),
-    alignment: Alignment.centerLeft,
-    child: SessionTitle(
-      state: state,
-      style: Theme.of(context).textTheme.labelMedium
-          ?.copyWith(fontWeight: WsMetrics.fwSemibold),
-    ),
-  );
+  Widget build(BuildContext context) {
+    final ws = context.ws;
+    Widget chip(String text) => Container(
+      margin: const EdgeInsets.only(left: WsMetrics.space3),
+      padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space2),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(WsMetrics.radiusSm),
+        border: Border.all(color: ws.borderStrong),
+      ),
+      child: Text(
+        text,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(color: ws.textMuted, fontSize: WsMetrics.fsSmall),
+      ),
+    );
+    return Container(
+      key: const Key('session-header'),
+      height: 44,
+      padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space7),
+      child: Row(
+        children: [
+          Flexible(
+            child: SessionTitle(
+              state: state,
+              style: Theme.of(context).textTheme.labelMedium
+                  ?.copyWith(fontWeight: WsMetrics.fwSemibold),
+            ),
+          ),
+          Flexible(child: chip(project)),
+          Flexible(
+            child: ValueListenableBuilder(
+              valueListenable: state.model,
+              builder: (context, model, _) => model == null
+                  ? const SizedBox.shrink()
+                  : chip(model.substring(model.indexOf('/') + 1)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 /// How many files the latest run changed, beside the Diff tab's name (approved mockup).

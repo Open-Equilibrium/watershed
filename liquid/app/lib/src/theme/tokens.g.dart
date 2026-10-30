@@ -33,8 +33,8 @@ abstract final class WsMetrics {
   static const double lhH3 = 22;
   static const double fsProse = 16;
   static const double lhProse = 24;
-  static const double fsUi = 14;
-  static const double lhUi = 20;
+  static const double fsUi = 15;
+  static const double lhUi = 22;
   static const double fsCompact = 13;
   static const double lhCompact = 20;
   static const double fsSmall = 12;
@@ -59,7 +59,7 @@ abstract final class WsMetrics {
   static const double radiusMd = 6;
   static const double radiusLg = 8;
   static const double radiusXl = 12;
-  static const double rowNav = 28;
+  static const double rowNav = 32;
   static const double rowTable = 34;
   static const Duration motionFast = Duration(milliseconds: 120);
   static const Duration motionPanel = Duration(milliseconds: 200);

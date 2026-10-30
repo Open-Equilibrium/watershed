@@ -63,7 +63,12 @@ void main() {
         ),
       ],
     );
-    expect(find.text('New agent session'), findsOneWidget);
+    expect(
+      find.text('What should we build in acme-api?'),
+      findsOneWidget,
+      reason: 'a new session greets with its project, as in T3 Code',
+    );
+    expect(find.text('pi on MacBook · Ask before changes'), findsOneWidget);
     expect(find.text('Recent in acme-api'), findsOneWidget);
     expect(find.text('continue · 2 h'), findsOneWidget);
     expect(find.text('Start'), findsOneWidget);
