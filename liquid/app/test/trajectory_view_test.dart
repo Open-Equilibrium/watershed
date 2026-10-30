@@ -255,6 +255,47 @@ void main() {
     );
   });
 
+  testWidgets('a click on a turn line opens its last request\'s context', (
+    tester,
+  ) async {
+    await show(
+      tester,
+      historyOf([
+        record('u1', 1, BridgeRecordKind.user, 'Fix it', 0, added: 400),
+        record(
+          'm1',
+          1,
+          BridgeRecordKind.message,
+          'Reading',
+          10,
+          usage: tokens(1000, 50),
+          context: saw(1, ['prompt']),
+        ),
+        record('t1', 1, BridgeRecordKind.tool, 'bash', 200, added: 800),
+        record(
+          'm2',
+          1,
+          BridgeRecordKind.message,
+          'Done',
+          300,
+          usage: tokens(1300, 20),
+          context: saw(3, ['result of bash']),
+        ),
+      ]),
+    );
+    await tester.tap(find.text('Turn 1'));
+    await tester.pumpAndSettle();
+    expect(
+      tab('Request #2 · what this response read · faux-1'),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('step-m1')),
+      findsOneWidget,
+      reason: 'the line keeps its turn open; its chevron collapses it',
+    );
+  });
+
   testWidgets('draws each step\'s context against the model\'s window', (
     tester,
   ) async {

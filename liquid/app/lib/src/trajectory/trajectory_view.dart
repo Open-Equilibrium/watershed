@@ -332,6 +332,24 @@ class _TrajectoryViewState extends State<TrajectoryView> {
     _reveal();
   }
 
+  /// Opens the inspector on the context of `turn`'s last request (approved look mockup).
+  void _openTurn(TurnGroup turn) {
+    final records = _records;
+    final last = [
+      for (var index = turn.last; index >= turn.first; index--)
+        if (records[index].kind == BridgeRecordKind.message) index,
+    ].firstOrNull;
+    if (last == null) return _toggleTurn(turn.turn);
+    _focus.requestFocus();
+    setState(() {
+      _folded.remove(turn.turn);
+      _selected = records[last].entry;
+      _inspecting = true;
+      _tab = InspectorTab.context;
+    });
+    _reveal();
+  }
+
   /// Opens the filter row with its text field focused.
   void _openFilter() {
     setState(() => _filtering = true);
@@ -944,7 +962,8 @@ class _TrajectoryViewState extends State<TrajectoryView> {
                     track: _folded.contains(turn.turn)
                         ? cell(index, track.levels[turn.last], collapsed: true)
                         : cell(index, track.before(turn), bar: false),
-                    onTap: () => _toggleTurn(turn.turn),
+                    onToggle: () => _toggleTurn(turn.turn),
+                    onOpen: () => _openTurn(turn),
                   ),
                   _StepLine(index: final step) => Opacity(
                     opacity: matches?[step] ?? true ? 1 : 0.35,
@@ -1347,6 +1366,7 @@ class _LineRow extends StatelessWidget {
     required this.trackWidth,
     required this.track,
     this.lead = const SizedBox.shrink(),
+    this.onLead,
     this.onTap,
   });
 
@@ -1355,8 +1375,9 @@ class _LineRow extends StatelessWidget {
   final double trackWidth;
   final Widget track;
 
-  /// What the number column shows, such as a chevron.
+  /// What the number column shows, such as a chevron, and what a click on it does.
   final Widget lead;
+  final VoidCallback? onLead;
   final VoidCallback? onTap;
 
   @override
@@ -1373,7 +1394,15 @@ class _LineRow extends StatelessWidget {
         ),
         child: _columns(
           [
-            lead,
+            if (onLead case final onLead?)
+              InkWell(
+                canRequestFocus: false,
+                onTap: onLead,
+                borderRadius: BorderRadius.circular(WsMetrics.radiusSm),
+                child: SizedBox.expand(child: lead),
+              )
+            else
+              lead,
             for (var i = 1; i < 5; i++) const SizedBox.shrink(),
             track,
             const SizedBox.shrink(),
@@ -1424,7 +1453,8 @@ class _LineRow extends StatelessWidget {
 }
 
 /// A turn's line (approved look mockup): its chevron, prompt, duration and what it added to
-/// the context; a click collapses or expands it, ⌥-click every turn.
+/// the context. A click on the chevron collapses or expands it, ⌥-click every turn; a click on
+/// the line opens its last request's context.
 class _TurnRow extends StatelessWidget {
   const _TurnRow({
     required this.turn,
@@ -1433,7 +1463,8 @@ class _TurnRow extends StatelessWidget {
     required this.folded,
     required this.trackWidth,
     required this.track,
-    required this.onTap,
+    required this.onToggle,
+    required this.onOpen,
   });
 
   final TurnGroup turn;
@@ -1444,7 +1475,8 @@ class _TurnRow extends StatelessWidget {
   final bool folded;
   final double trackWidth;
   final Widget track;
-  final VoidCallback onTap;
+  final VoidCallback onToggle;
+  final VoidCallback onOpen;
 
   @override
   Widget build(BuildContext context) {
@@ -1459,7 +1491,8 @@ class _TurnRow extends StatelessWidget {
       ].join(' · '),
       trackWidth: trackWidth,
       track: track,
-      onTap: onTap,
+      onTap: onOpen,
+      onLead: onToggle,
       lead: Center(
         child: Icon(
           folded ? LucideIcons.chevronRight : LucideIcons.chevronDown,
