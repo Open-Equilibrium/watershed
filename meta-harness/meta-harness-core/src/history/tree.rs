@@ -84,7 +84,7 @@ fn result_target(by_id: &HashMap<&str, &Entry>, result: &Entry) -> Option<String
         let entry = by_id.get(next?)?;
         match &entry.body {
             Body::Assistant { calls, .. } => {
-                let mut open = OpenCalls::default();
+                let mut open: OpenCalls = OpenCalls::default();
                 open.respond(calls);
                 let mut answered = None;
                 for result in results.iter().rev() {

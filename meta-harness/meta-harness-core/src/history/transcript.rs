@@ -22,7 +22,6 @@ pub(super) fn transcript(
     // How each tool call ended, by its response and place there, from anywhere on the branch,
     // so every page shows it.
     let mut ended: HashMap<(&str, usize), Ended> = HashMap::new();
-    let mut timing: HashMap<&str, Option<u64>> = HashMap::new();
     let mut open = OpenCalls::default();
     let mut response = "";
     for entry in &path {
@@ -31,9 +30,7 @@ pub(super) fn transcript(
                 open.respond(calls);
                 response = &entry.id;
             }
-            Body::ToolTiming { call, duration_ms } => {
-                timing.insert(call, *duration_ms);
-            }
+            Body::ToolTiming { call, duration_ms } => open.ended(call, *duration_ms),
             Body::ToolResult {
                 call,
                 failed,
@@ -44,11 +41,9 @@ pub(super) fn transcript(
                     .added
                     .zip(outcome.removed)
                     .map(|(added, removed)| ChangedLines { added, removed });
+                let duration_ms = open.timing(call).flatten();
                 if let Some((place, _)) = open.answer(call) {
-                    ended.insert(
-                        (response, place),
-                        (*failed, timing.remove(call.as_str()).flatten(), lines),
-                    );
+                    ended.insert((response, place), (*failed, duration_ms, lines));
                 }
             }
             _ => {}

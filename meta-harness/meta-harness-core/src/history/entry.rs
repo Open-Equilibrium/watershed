@@ -115,18 +115,20 @@ pub(crate) struct Call {
     pub written_lines: Option<u32>,
 }
 
-/// The calls of a branch's latest response that no result answered yet. A result answers the
-/// earliest open call with its id: ids repeat, for example as empty ones from servers that send
-/// none.
+/// The calls of a branch's latest response that no result answered yet, and the `T` timing of
+/// those that ended. A result answers the earliest open call with its id: ids repeat, for
+/// example as empty ones from servers that send none.
 #[derive(Default)]
-pub(crate) struct OpenCalls<'a> {
+pub(crate) struct OpenCalls<'a, T = ()> {
     open: HashMap<&'a str, VecDeque<(usize, &'a Call)>>,
+    timing: HashMap<&'a str, Vec<T>>,
 }
 
-impl<'a> OpenCalls<'a> {
+impl<'a, T> OpenCalls<'a, T> {
     /// Starts over with a new response's calls.
     pub fn respond(&mut self, calls: &'a [Call]) {
         self.open.clear();
+        self.timing.clear();
         for (place, call) in calls.iter().enumerate() {
             self.open
                 .entry(call.id.as_str())
@@ -138,6 +140,25 @@ impl<'a> OpenCalls<'a> {
     /// The call a result for `id` answers, with its place in the response.
     pub fn answer(&mut self, id: &str) -> Option<(usize, &'a Call)> {
         self.open.get_mut(id)?.pop_front()
+    }
+
+    /// Keeps the timing entry of a call with `id` that ended, until its result.
+    pub fn ended(&mut self, id: &'a str, timing: T) {
+        self.timing.entry(id).or_default().push(timing);
+    }
+
+    /// The timing of the call a result for `id` answers. pi runs a response's tools one after
+    /// another, each followed by its result, or all at once, with the results after every
+    /// timing entry, in the calls' order rather than the order they ended. A timing entry names
+    /// only the call's id, so results whose id several entries wait for get none of them rather
+    /// than another call's.
+    pub fn timing(&mut self, id: &str) -> Option<T> {
+        let mut waiting = self.timing.remove(id)?;
+        if waiting.len() == 1 {
+            waiting.pop()
+        } else {
+            None
+        }
     }
 }
 

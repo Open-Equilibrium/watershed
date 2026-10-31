@@ -699,6 +699,91 @@ fn matches_each_result_to_its_own_call_when_ids_repeat() {
 }
 
 #[test]
+fn times_results_with_repeated_ids_only_when_their_calls_can_be_told_apart() {
+    // Timing entries name only the call id. pi runs `a1`'s tools one after another, each
+    // followed by its result, and `a2`'s at once, with both results after both timing entries;
+    // `a3`'s call never got its result.
+    let tool = |id: &str, parent: &str, millis: u64| {
+        format!(
+            r#"{{"type":"custom","id":"{id}","parentId":"{parent}","customType":"watershed.timing","data":{{"kind":"tool","toolCallId":"","durationMs":{millis}}}}}"#
+        )
+    };
+    let result = |id: &str, parent: &str| {
+        format!(
+            r#"{{"type":"message","id":"{id}","parentId":"{parent}","message":{{"role":"toolResult","toolCallId":"","toolName":"bash","content":[]}}}}"#
+        )
+    };
+    let response = |id: &str, parent: &str, commands: &[&str]| {
+        let calls: Vec<String> = commands
+            .iter()
+            .map(|command| {
+                format!(
+                    r#"{{"type":"toolCall","id":"","name":"bash","arguments":{{"command":"{command}"}}}}"#
+                )
+            })
+            .collect();
+        format!(
+            r#"{{"type":"message","id":"{id}","parentId":"{parent}","message":{{"role":"assistant","content":[{}]}}}}"#,
+            calls.join(",")
+        )
+    };
+    let entries = [
+        r#"{"type":"message","id":"u1","parentId":null,"message":{"role":"user","content":"Go"}}"#
+            .to_owned(),
+        response("a1", "u1", &["ls", "make"]),
+        tool("t1", "a1", 10),
+        result("r1", "t1"),
+        tool("t2", "r1", 20),
+        result("r2", "t2"),
+        response("a2", "r2", &["npm test", "npm run lint"]),
+        tool("t3", "a2", 30),
+        tool("t4", "t3", 40),
+        result("r3", "t4"),
+        result("r4", "r3"),
+        response("a3", "r4", &["./deploy.sh"]),
+        tool("t5", "a3", 50),
+        r#"{"type":"message","id":"u2","parentId":"t5","message":{"role":"user","content":"Again"}}"#
+            .to_owned(),
+        response("a4", "u2", &["git status"]),
+        tool("t6", "a4", 60),
+        result("r6", "t6"),
+    ];
+    let data: Value = serde_json::from_str(&format!(
+        r#"{{"entries":[{}],"leafId":"r6"}}"#,
+        entries.join(",")
+    ))
+    .expect("JSON");
+    let history = History::from_entries(&data);
+    let steps: Vec<_> = history
+        .trajectory(None)
+        .records
+        .into_iter()
+        .filter(|record| record.kind == RecordKind::Tool)
+        .map(|record| (record.target, record.duration_ms))
+        .collect();
+    let step = |target: &str, duration: Option<u64>| (target.to_owned(), duration);
+    assert_eq!(
+        steps,
+        [
+            step("ls", Some(10)),
+            step("make", Some(20)),
+            step("npm test", None),
+            step("npm run lint", None),
+            step("git status", Some(60)),
+        ],
+        "a parallel call's timing could be another's, so it is unknown"
+    );
+    let chat: Vec<_> = history
+        .transcript(None, 100)
+        .items
+        .into_iter()
+        .filter_map(|item| Some((item.target?, item.duration_ms)))
+        .filter(|(target, _)| target != "./deploy.sh")
+        .collect();
+    assert_eq!(chat, steps, "the chat tells the same as the Trajectory");
+}
+
+#[test]
 fn reports_extension_errors_as_notifications() {
     assert_eq!(
         translate(&[

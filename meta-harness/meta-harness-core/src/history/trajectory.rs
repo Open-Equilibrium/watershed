@@ -90,11 +90,10 @@ struct Projection<'a> {
     /// The `log` length at the previous model request.
     since: usize,
     request_timing: Option<(Option<u64>, Option<u64>)>,
-    /// When each tool's timing entry was stored and how long the tool ran. pi runs a response's
-    /// tools in parallel and stores their results together, so a result's own time is the end
-    /// of the slowest tool.
-    tool_timing: HashMap<String, (u64, Option<u64>)>,
-    calls: OpenCalls<'a>,
+    /// The latest response's open calls, with when each tool's timing entry was stored and how
+    /// long the tool ran. pi runs a response's tools in parallel and stores their results
+    /// together, so a result's own time is the end of the slowest tool.
+    calls: OpenCalls<'a, (u64, Option<u64>)>,
 }
 
 /// One entry of a branch as the model's context sees it.
@@ -285,9 +284,7 @@ impl<'a> Projection<'a> {
                 first_token_ms,
                 duration_ms,
             } => self.request_timing = Some((*first_token_ms, *duration_ms)),
-            Body::ToolTiming { call, duration_ms } => {
-                self.tool_timing.insert(call.clone(), (at, *duration_ms));
-            }
+            Body::ToolTiming { call, duration_ms } => self.calls.ended(call, (at, *duration_ms)),
             Body::Approval {
                 tool,
                 decision,
@@ -371,7 +368,7 @@ impl<'a> Projection<'a> {
                 chars,
                 outcome,
             } => {
-                let (ended, duration_ms) = self.tool_timing.remove(call).unwrap_or((at, None));
+                let (ended, duration_ms) = self.calls.timing(call).unwrap_or((at, None));
                 let (arguments, written) = self
                     .calls
                     .answer(call)
