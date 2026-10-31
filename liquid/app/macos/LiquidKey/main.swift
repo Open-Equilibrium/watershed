@@ -25,8 +25,7 @@ let plainID = EventHotKeyID(signature: 0x4C51_4B59, id: 1)
 let shiftedID = EventHotKeyID(signature: 0x4C51_4B59, id: 2)
 var plain: EventHotKeyRef?
 var shifted: EventHotKeyRef?
-var pressedAt: TimeInterval?
-var lastPress: TimeInterval = 0
+var press: Press?
 var shiftedDown = false
 /// Whether this user's session is in front; the remapping holds for every user's keyboards.
 var sessionActive = true
@@ -80,7 +79,7 @@ func follow(_ app: NSRunningApplication?) {
     if inLiquid, let key = plain {
         UnregisterEventHotKey(key)
         plain = nil
-        pressedAt = nil
+        press = nil
     } else if !inLiquid, plain == nil {
         register(0, plainID, &plain)
     }
@@ -99,21 +98,20 @@ InstallEventHandler(
             nil, MemoryLayout<EventHotKeyID>.size, nil, &id)
         let pressed = GetEventKind(event) == UInt32(kEventHotKeyPressed)
         let now = ProcessInfo.processInfo.systemUptime
-        // A held key may repeat its press; only the first one counts.
+        // The time since any key went down tells whether another one did after this one.
+        let lastKeyDown =
+            now - CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .keyDown)
+        // A held key may repeat its press; only the first one starts a tap or toggles.
         switch (id.id, pressed) {
         case (plainID.id, true):
-            pressedAt = pressedAt ?? now
-            lastPress = now
-        case (plainID.id, false):
-            // The time since any key went down tells whether another one did after this one.
-            let lastKeyDown =
-                now - CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .keyDown)
-            if let at = pressedAt,
-                isTap(pressed: at, released: now, lastPress: lastPress, lastKeyDown: lastKeyDown)
-            {
-                openLiquid()
+            if press == nil {
+                press = Press(at: now)
+            } else {
+                press?.repeated(at: now, lastKeyDown: lastKeyDown)
             }
-            pressedAt = nil
+        case (plainID.id, false):
+            if press?.isTap(released: now, lastKeyDown: lastKeyDown) == true { openLiquid() }
+            press = nil
         case (shiftedID.id, true):
             if !shiftedDown { toggleCapsLock() }
             shiftedDown = true

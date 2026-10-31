@@ -62,17 +62,25 @@ check(
     turnOff(refusing: nil) && keyboards.allSatisfy(\.isEmpty),
     "turning it off succeeds once every keyboard took it")
 
+/// A Liquid key press at 10 s with its own `repeats`, each with the latest key press of any key
+/// then, released at `released`.
+func tap(
+    _ repeats: [(at: TimeInterval, lastKeyDown: TimeInterval)] = [], released: TimeInterval,
+    lastKeyDown: TimeInterval
+) -> Bool {
+    var press = Press(at: 10)
+    for next in repeats { press.repeated(at: next.at, lastKeyDown: next.lastKeyDown) }
+    return press.isTap(released: released, lastKeyDown: lastKeyDown)
+}
+check(tap(released: 10.3, lastKeyDown: 10.001), "a short press is a tap")
+check(!tap(released: 10.75, lastKeyDown: 10.001), "a hold is no tap")
+check(!tap(released: 10.3, lastKeyDown: 10.15), "another key pressed meanwhile makes it no tap")
 check(
-    isTap(pressed: 10, released: 10.3, lastPress: 10, lastKeyDown: 10.001),
-    "a short press is a tap")
-check(
-    !isTap(pressed: 10, released: 10.75, lastPress: 10, lastKeyDown: 10.001), "a hold is no tap")
-check(
-    !isTap(pressed: 10, released: 10.3, lastPress: 10, lastKeyDown: 10.15),
-    "another key pressed meanwhile makes it no tap")
-check(
-    isTap(pressed: 10, released: 10.55, lastPress: 10.5, lastKeyDown: 10.501),
+    tap([(10.5, 10.001)], released: 10.55, lastKeyDown: 10.501),
     "the key's own repeat is no other key")
+check(
+    !tap([(10.5, 10.2)], released: 10.55, lastKeyDown: 10.501),
+    "another key before the key's own repeat makes it no tap")
 
 if failures > 0 { exit(1) }
 print("Liquid key helper checks passed")
