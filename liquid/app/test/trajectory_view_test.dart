@@ -1105,6 +1105,9 @@ void main() {
       others: [branchB],
     );
     expect(find.text('branch B · 5 steps · 1m 01s'), findsOneWidget);
+    await press(tester, LogicalKeyboardKey.arrowDown);
+    await press(tester, LogicalKeyboardKey.enter);
+    expect(find.byKey(const Key('inspector')), findsOneWidget);
     await tester.tap(find.text('Filter'));
     await tester.pumpAndSettle();
     await tester.testTextInput.receiveAction(TextInputAction.done);
@@ -1152,8 +1155,9 @@ void main() {
     expect(
       find.byType(FilterBar),
       findsOneWidget,
-      reason: 'esc left the filter row the comparison hides alone',
+      reason: 'esc left what the comparison hides alone',
     );
+    expect(find.byKey(const Key('inspector')), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('tree-e6')));
     await tester.pumpAndSettle();
     expect(backend.calls.last, 'history e6');

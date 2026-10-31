@@ -588,16 +588,27 @@ class _TrajectoryViewState extends State<TrajectoryView> {
     }
   }
 
-  /// Closes the innermost of the range, the inspector and the filter row; the filter stays.
+  /// The history the comparison shows in place of the list, its inspector and the filter row.
+  BridgeHistory? get _compared {
+    final history = _history;
+    return _comparing && history != null && history.trajectories.length > 1
+        ? history
+        : null;
+  }
+
+  /// Closes the innermost of the range, the inspector and the filter row; the filter stays,
+  /// and what the comparison hides waits for it to end.
   void _escape() {
     if (_range != null || _window != null) {
       setState(() {
         _range = null;
         _window = null;
       });
+    } else if (_compared != null) {
+      return;
     } else if (_inspecting) {
       setState(() => _inspecting = false);
-    } else if (_filtering && !_comparing) {
+    } else if (_filtering) {
       setState(() => _filtering = false);
     }
   }
@@ -629,9 +640,8 @@ class _TrajectoryViewState extends State<TrajectoryView> {
 
   @override
   Widget build(BuildContext context) {
-    final history = _history;
-    final comparing =
-        _comparing && history != null && history.trajectories.length > 1;
+    final compared = _compared;
+    final comparing = compared != null;
     final keys = Keymap.of(context);
     final records = _records;
     return Column(
@@ -642,7 +652,7 @@ class _TrajectoryViewState extends State<TrajectoryView> {
         TrajectoryToolbar(
           equalWidth: _equalWidth,
           comparing: _comparing,
-          summary: comparing ? _compareSummary(history) : _summary(),
+          summary: comparing ? _compareSummary(compared) : _summary(),
           range: comparing || _range == null ? null : _axisLabel(_range!),
           onClearRange: () => setState(() => _range = null),
           filters: _filter.count,
@@ -703,7 +713,7 @@ class _TrajectoryViewState extends State<TrajectoryView> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  if (comparing) _compareOverview(history) else _overview(),
+                  if (comparing) _compareOverview(compared) else _overview(),
                   Expanded(
                     child: LayoutBuilder(
                       builder: (context, constraints) => Row(
@@ -714,9 +724,9 @@ class _TrajectoryViewState extends State<TrajectoryView> {
                               input: widget.input,
                               child: comparing
                                   ? CompareView(
-                                      a: history.trajectories[0],
-                                      b: history.trajectories[1],
-                                      comparison: _comparison(history),
+                                      a: compared.trajectories[0],
+                                      b: compared.trajectories[1],
+                                      comparison: _comparison(compared),
                                       branchA: _branchFor(_picked[0]),
                                       branchB: _branchFor(_picked[1]),
                                       bottom: _clearance,
