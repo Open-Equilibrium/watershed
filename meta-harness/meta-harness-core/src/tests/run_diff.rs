@@ -424,11 +424,14 @@ fn reads_that_wait_for_each_other_count_only_their_own_git_against_the_limit() {
             RunDiff::with_timeout(repo.path(), Duration::from_millis(1500)).await,
         );
         diff.started(diff.capture().await);
-        // The file keeps changing, so every snapshot runs the filter again.
+        // The file keeps changing, so every snapshot runs the filter again. Each version replaces
+        // the last at once, as Git cannot index a file cut short while it reads it.
         let file = repo.path().join("a.txt");
+        let next = repo.path().join(".git").join("a.txt.next");
         let writing = std::thread::spawn(move || {
             for round in 0..60 {
-                std::fs::write(&file, format!("round {round}\n")).expect("file");
+                std::fs::write(&next, format!("round {round}\n")).expect("file");
+                std::fs::rename(&next, &file).expect("file");
                 std::thread::sleep(Duration::from_millis(50));
             }
         });
