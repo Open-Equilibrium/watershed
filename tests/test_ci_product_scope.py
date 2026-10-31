@@ -207,8 +207,15 @@ class CiProductScopeTest(unittest.TestCase):
             crates[package["package"]["name"]] = (member, dependencies)
 
         def dependents(name: str) -> set[str]:
-            direct = {other for other, (_, uses) in crates.items() if name in uses}
-            return direct.union(*map(dependents, direct)) if direct else set()
+            # Dev-dependencies may form cycles, so expand each crate once.
+            found, pending = set(), [name]
+            while pending:
+                current = pending.pop()
+                for other, (_, uses) in crates.items():
+                    if current in uses and other not in found:
+                        found.add(other)
+                        pending.append(other)
+            return found - {name}
 
         outputs = {}
         before = self.base
