@@ -13,18 +13,17 @@ pub(crate) use outcome::test_counts;
 
 use std::io::Read;
 use std::path::Path;
-use std::sync::Arc;
 
 use serde_json::Value;
 
 use crate::{ChangedLines, Decision, Frame, ItemKind, LineFramer, SessionTree, Usage};
 use entry::Entry;
 
-/// A snapshot of a session's stored entries. The session keeps it and reads only the entries
-/// added since, so each snapshot shares the entries read before.
-#[derive(Debug, Clone, Default)]
+/// A session's stored entries. The session keeps them and reads only the entries added since;
+/// readers borrow them, so appending never copies the entries read before.
+#[derive(Debug, Default)]
 pub struct History {
-    entries: Arc<Vec<Entry>>,
+    entries: Vec<Entry>,
     leaf: Option<String>,
     /// What every entry read so far cost.
     spent: Usage,
@@ -71,7 +70,7 @@ impl History {
             }
         }
         Ok(Self {
-            entries: Arc::new(entries),
+            entries,
             leaf: None,
             spent,
         })
@@ -88,7 +87,7 @@ impl History {
             for entry in entries {
                 add(&mut self.spent, &Entry::spent(entry));
             }
-            Arc::make_mut(&mut self.entries).extend(entries.iter().map(Entry::parse));
+            self.entries.extend(entries.iter().map(Entry::parse));
         }
         self.leaf = data
             .get("leafId")

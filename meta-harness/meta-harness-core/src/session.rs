@@ -485,8 +485,9 @@ impl Session {
     /// Reads the session's stored entries, including abandoned branches. The first read takes
     /// them from pi's session file line by line, so no single answer has to hold the whole
     /// session; later reads ask the agent only for entries added since. When the agent no
-    /// longer knows the last one, everything is read again.
-    pub async fn history(&mut self) -> Result<History, CommandError> {
+    /// longer knows the last one, everything is read again. The entries stay with the session,
+    /// so callers read them while they hold it.
+    pub async fn history(&mut self) -> Result<&History, CommandError> {
         if std::mem::take(&mut self.state.lock().switched) {
             self.history = History::default();
         }
@@ -505,7 +506,7 @@ impl Session {
             }
             result => result?,
         }
-        Ok(self.history.clone())
+        Ok(&self.history)
     }
 
     /// Reads the entries pi stored in its session file; without a file yet, the agent's answer
