@@ -1,5 +1,4 @@
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { createRequire } from "node:module";
@@ -43,16 +42,9 @@ function ensurePlaywrightChromium() {
     );
   }
 
-  const executablePath = chromium.executablePath();
-  if (existsSync(executablePath)) {
-    return;
-  }
-
+  // chromium.executablePath() names full Chromium, but headless launch() uses the
+  // headless shell. Install skips whichever of the two is already present.
   runPlaywrightCli(["install", "chromium"], "Playwright browser install");
-
-  if (!existsSync(executablePath)) {
-    throw new Error(`Playwright browser install did not create ${executablePath}`);
-  }
 }
 
 function normalizeText(value) {
