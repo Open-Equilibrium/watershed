@@ -317,16 +317,20 @@ class _TrajectoryViewState extends State<TrajectoryView> {
     _scroll.jumpTo(math.min(_lineTop(line), _scroll.position.maxScrollExtent));
   }
 
-  /// Selects the step at `at` on the axis, expanding its turn and leaving a range that hides it.
+  /// Selects step `index`, expanding its turn and leaving a range that hides it; call it in
+  /// [setState].
+  void _selectStep(int index) {
+    if (!(_inRange()?[index] ?? true)) _range = null;
+    _folded.remove(_records[index].turn);
+    _selected = _records[index].entry;
+  }
+
+  /// Selects the step at `at` on the axis.
   void _jumpTo(double at) {
     final index = stepAt(_records, at, equalWidth: _equalWidth);
     if (index == null) return;
     _focus.requestFocus();
-    setState(() {
-      if (!(_inRange()?[index] ?? true)) _range = null;
-      _folded.remove(_records[index].turn);
-      _selected = _records[index].entry;
-    });
+    setState(() => _selectStep(index));
     _reveal();
   }
 
@@ -555,23 +559,15 @@ class _TrajectoryViewState extends State<TrajectoryView> {
     }
   }
 
-  /// Selects a tree row's step, expanding its turn, leaving a range that hides it and showing
-  /// its branch when the ledger shows another one.
+  /// Selects a tree row's step, showing its branch when the ledger shows another one.
   void _jump(GraphRow row) {
-    setState(() {
-      _selected = row.node.id;
-      final index = _records.indexWhere(
-        (record) => record.entry == row.node.id,
-      );
-      if (index >= 0) {
-        if (!(_inRange()?[index] ?? true)) _range = null;
-        _folded.remove(_records[index].turn);
-      }
-    });
-    if (_records.any((record) => record.entry == row.node.id)) {
+    final index = _records.indexWhere((record) => record.entry == row.node.id);
+    if (index >= 0) {
+      setState(() => _selectStep(index));
       _reveal();
       return;
     }
+    setState(() => _selected = row.node.id);
     final tip = row.branch?.tip ?? _graph.branchOf(row.node.id)?.tip;
     if (tip != null) _show(tip).then((_) => _reveal());
   }
@@ -601,7 +597,7 @@ class _TrajectoryViewState extends State<TrajectoryView> {
       });
     } else if (_inspecting) {
       setState(() => _inspecting = false);
-    } else if (_filtering) {
+    } else if (_filtering && !_comparing) {
       setState(() => _filtering = false);
     }
   }
