@@ -1,3 +1,4 @@
+import itertools
 import json
 import os
 import re
@@ -40,6 +41,11 @@ def workflow_text() -> str:
     return WORKFLOW_PATH.read_text(encoding="utf-8")
 
 
+def field_block(lines: list[str], indent: str) -> list[str]:
+    """A field's value lines; the first nonblank line outside `indent` ends it."""
+    return list(itertools.takewhile(lambda line: not line.strip() or line.startswith(indent), lines))
+
+
 def ci_push_branches(workflow: str) -> tuple[str, ...]:
     lines = workflow.splitlines()
     try:
@@ -59,7 +65,7 @@ def ci_push_branches(workflow: str) -> tuple[str, ...]:
     except ValueError:
         raise AssertionError("CI push.branches must use the canonical block form")
     branches = []
-    for line in lines[branches_start + 1 : push_end]:
+    for line in field_block(lines[branches_start + 1 : push_end], "      "):
         item = line.strip()
         if item.startswith("- ") and not item.startswith("- #"):
             branches.append(item[2:].strip().strip('"'))
@@ -96,7 +102,7 @@ def step_run(workflow: str, name: str) -> str:
         return declaration
     return "\n".join(
         line.removeprefix("          ")
-        for line in lines[run_index + 1 :]
+        for line in field_block(lines[run_index + 1 :], "          ")
         if line.startswith("          ")
     ).rstrip()
 
@@ -268,8 +274,19 @@ class CiWorkflowContractTest(unittest.TestCase):
     branches:
       # "fix/**"
       - main
+    tags:
+      - "v*"
 """
         self.assertEqual(ci_push_branches(workflow), ("main",))
+
+    def test_ci_command_parser_stops_at_sibling_fields(self) -> None:
+        command = "        run: |\n          first\n\n          second\n"
+        environment = '        env:\n          RUST_BACKTRACE: "1"\n'
+        for step in (environment + command, command + environment):
+            with self.subTest(step=step):
+                self.assertEqual(
+                    step_run(f"      - name: Example\n{step}", "Example"), "first\nsecond"
+                )
 
     def test_feature_gated_evidence_reporters_are_registered(self) -> None:
         manifest = tomllib.loads(
