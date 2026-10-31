@@ -59,6 +59,11 @@ class DesignTokens(unittest.TestCase):
         commented = SAMPLE.replace("--ws-fs-ui: 14px;", "--ws-fs-ui: 14px; /* --ws-fs-ui: 99px; } */")
         commented += "/* .theme-dark { --ws-text-muted: #000000; } */\n"
         self.assertEqual(TOKENS.render(commented), TOKENS.render(SAMPLE))
+        unclosed = SAMPLE + "\n/* :root { --ws-fs-ui: 99px; }"
+        self.assertEqual(TOKENS.render(unclosed), TOKENS.render(SAMPLE),
+                         "a comment left open runs to the end")
+        quoted = TOKENS.render(SAMPLE.replace('"Segoe UI"', '"Segoe/*UI*/"'))
+        self.assertIn("'Segoe/*UI*/'", quoted, "a quoted name keeps what looks like a comment")
 
     def test_themes_must_define_the_same_tokens(self):
         with self.assertRaisesRegex(ValueError, "light and dark"):

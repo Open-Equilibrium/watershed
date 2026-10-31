@@ -12,7 +12,9 @@ ROOT = Path(__file__).resolve().parents[1]
 CSS = ROOT / "docs" / "design" / "tokens.css"
 DART = ROOT / "liquid" / "app" / "lib" / "src" / "theme" / "tokens.g.dart"
 
-COMMENT = re.compile(r"/\*.*?\*/", re.S)
+# A comment runs to its end or to the end of the file; quoted text is matched first, so a
+# name such as "a/*b*/" keeps what only looks like a comment.
+COMMENT = re.compile(r"\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'|/\*.*?(?:\*/|\Z)", re.S)
 BLOCK = re.compile(r"(:root|\.theme-light|\.theme-dark)\s*\{(.*?)\}", re.S)
 DECLARATION = re.compile(r"--ws-([a-z0-9-]+)\s*:\s*([^;]+);")
 COLOR = re.compile(r"#([0-9a-fA-F]{6})|rgba\(\s*(\d+),\s*(\d+),\s*(\d+),\s*([0-9.]+)\s*\)")
@@ -99,7 +101,7 @@ def metric(name, value):
 
 def blocks(css):
     """The token declarations of each selector; comments declare nothing."""
-    css = COMMENT.sub("", css)
+    css = COMMENT.sub(lambda match: "" if match[0].startswith("/*") else match[0], css)
     return {selector: dict(DECLARATION.findall(body)) for selector, body in BLOCK.findall(css)}
 
 
