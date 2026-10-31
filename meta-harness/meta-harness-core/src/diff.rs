@@ -7,6 +7,7 @@ use std::fmt;
 use std::fs::DirBuilder;
 use std::hash::{BuildHasher, RandomState};
 use std::io::ErrorKind;
+use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::os::unix::fs::DirBuilderExt;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -432,11 +433,25 @@ impl WorkingTree {
             ("GIT_OBJECT_DIRECTORY", self.store.0.join("objects").into()),
             (
                 "GIT_ALTERNATE_OBJECT_DIRECTORIES",
-                self.objects.clone().into(),
+                quoted_alternate(&self.objects),
             ),
             ("GIT_OPTIONAL_LOCKS", "0".into()),
         ]
     }
+}
+
+/// `path` as one entry of Git's colon-separated alternates list: a C-style quoted entry keeps a
+/// colon in the path.
+fn quoted_alternate(path: &Path) -> OsString {
+    let mut entry = vec![b'"'];
+    for &byte in path.as_os_str().as_bytes() {
+        if matches!(byte, b'"' | b'\\') {
+            entry.push(b'\\');
+        }
+        entry.push(byte);
+    }
+    entry.push(b'"');
+    OsString::from_vec(entry)
 }
 
 /// Runs the host's `git` in `dir` and returns at most [`MAX_OUTPUT_BYTES`] of its output.

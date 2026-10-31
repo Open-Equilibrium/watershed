@@ -305,6 +305,47 @@ fn diffs_a_project_given_by_a_relative_path() {
 }
 
 #[test]
+fn snapshots_a_project_whose_path_holds_gits_list_separator_and_quotes() {
+    run(async {
+        let repo = Repo::new("colon:\"quoted\\");
+        repo.write("a.txt", "old\n");
+        repo.write("b.txt", "kept\n");
+        repo.git(&["add", "."]);
+        repo.git(&["commit", "-q", "-m", "base"]);
+        // Clean index entries, so the snapshot reuses the repository's objects for b.txt.
+        let past = std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(1_600_000_000);
+        for name in ["a.txt", "b.txt"] {
+            std::fs::File::options()
+                .write(true)
+                .open(repo.path().join(name))
+                .and_then(|file| file.set_modified(past))
+                .expect("file time");
+        }
+        repo.git(&["update-index", "--refresh"]);
+        let tree = WorkingTree::open(repo.path())
+            .await
+            .expect("repository opens");
+        let snapshot = tree.snapshot().await.expect("snapshot");
+        repo.write("a.txt", "new\n");
+        assert_eq!(
+            tree.changes(
+                &snapshot,
+                &tree.snapshot().await.expect("snapshot"),
+                Whitespace::Shown
+            )
+            .await
+            .expect("changes"),
+            [FileChange {
+                path: "a.txt".to_owned(),
+                status: ChangeStatus::Modified,
+                added: 1,
+                removed: 1,
+            }]
+        );
+    });
+}
+
+#[test]
 fn reads_the_patch_of_a_file_whose_name_looks_like_a_pattern() {
     run(async {
         let repo = Repo::new("pathspec");
