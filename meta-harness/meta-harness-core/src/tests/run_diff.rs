@@ -370,11 +370,8 @@ fn a_submodules_diff_runs_none_of_its_commands() {
         let sub = Repo::new("submodule-inner");
         // The submodule's own textconv would write a marker when its diff runs.
         let marker = sub.path().join("ran");
-        sub.git(&[
-            "config",
-            "diff.mark.textconv",
-            &format!("touch {}; cat", marker.display()),
-        ]);
+        let textconv = format!("touch {}; cat", super::shell_word(marker.display()));
+        sub.git(&["config", "diff.mark.textconv", &textconv]);
         sub.write(".gitattributes", "*.txt diff=mark\n");
         sub.git(&["add", "."]);
         sub.git(&["commit", "-q", "-m", "attributes"]);
@@ -401,11 +398,7 @@ fn a_submodules_diff_runs_none_of_its_commands() {
                 .expect("git runs");
             assert!(status.success(), "{args:?}");
         };
-        git_in(&[
-            "config",
-            "diff.mark.textconv",
-            &format!("touch {}; cat", marker.display()),
-        ]);
+        git_in(&["config", "diff.mark.textconv", &textconv]);
         let diff = RunDiff::open(repo.path()).await;
         diff.started(diff.capture().await);
         std::fs::write(inner.join("a.txt"), "changed\n").expect("file");
@@ -415,6 +408,8 @@ fn a_submodules_diff_runs_none_of_its_commands() {
         assert_eq!(changes.len(), 1, "{changes:?}");
         let _ = diff.patch("sub", Whitespace::Shown).await.expect("patch");
         assert!(!marker.exists(), "the submodule's textconv ran");
+        git_in(&["diff", "--output=/dev/null", "HEAD~1", "HEAD"]);
+        assert!(marker.exists(), "the textconv runs where Git uses it");
     });
 }
 
@@ -587,7 +582,10 @@ fn a_git_past_its_limit_ends_with_the_programs_it_started() {
         repo.git(&[
             "config",
             "filter.slow.clean",
-            &format!("echo $$ > {}; exec sleep 30", pid.display()),
+            &format!(
+                "echo $$ > {}; exec sleep 30",
+                super::shell_word(pid.display())
+            ),
         ]);
         repo.write(".gitattributes", "*.txt filter=slow\n");
         repo.write("a.txt", "new\n");

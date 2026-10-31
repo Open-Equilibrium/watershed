@@ -233,7 +233,7 @@ fn shows_a_patch_without_running_the_projects_textconv() {
         repo.git(&[
             "config",
             "diff.evil.textconv",
-            &format!("touch '{}'; cat", ran.display()),
+            &format!("touch {}; cat", super::shell_word(ran.display())),
         ]);
         repo.write(".gitattributes", "*.txt diff=evil\n");
         let tree = WorkingTree::open(repo.path())
@@ -252,6 +252,8 @@ fn shows_a_patch_without_running_the_projects_textconv() {
             .expect("patch");
         assert!(patch.contains("+changed"), "{patch}");
         assert!(!ran.exists(), "the project's textconv did not run");
+        repo.git(&["diff", "--", "a.txt"]);
+        assert!(ran.exists(), "the textconv runs where Git uses it");
     });
 }
 

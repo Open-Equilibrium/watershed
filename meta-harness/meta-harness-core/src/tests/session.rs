@@ -166,8 +166,8 @@ fn shutdown_ends_an_agent_whose_events_nobody_reads() {
             r#"i=0
 while [ $i -lt 256 ]; do printf '%s\n' '{{"type":"queue_update","steering":[],"followUp":[]}}'; i=$((i+1)); done
 printf '%s\n' 'not json'
-trap '' TERM; : > '{}'; while :; do sleep 1; done"#,
-            written.display()
+trap '' TERM; : > {}; while :; do sleep 1; done"#,
+            super::shell_word(written.display())
         ));
         reached(&written).await;
         // Time for the core to read it all and wait for room in the full buffer.
@@ -304,10 +304,7 @@ fn reopens_a_session_larger_than_one_record_from_its_file() {
         std::fs::write(&file, stored).expect("session file");
         let script = [
             expect_response(&[r#""type":"get_state""#, r#""id":"1""#]),
-            format!(
-                "printf '%s\\n' '{{\"id\":\"1\",\"type\":\"response\",\"command\":\"get_state\",\"success\":true,\"data\":{{\"sessionId\":\"s1\",\"isStreaming\":false,\"sessionFile\":\"{}\"}}}}'\n",
-                file.display()
-            ),
+            session_file(1, &file),
             expect_response(&[r#""type":"get_entries""#, r#""id":"2""#, r#""since":"e1999""#]),
             r#"printf '%s\n' '{"id":"2","type":"response","command":"get_entries","success":true,"data":{"entries":[{"type":"message","id":"e2000","parentId":"e1999","message":{"role":"user","content":"last"}}],"leafId":"e2000"}}'
 "#
@@ -339,15 +336,9 @@ fn rereads_the_session_file_when_new_entries_exceed_one_record() {
         };
         std::fs::write(&file, format!("{header}\n{}\n", entry("e1", "null"))).expect("file");
         let huge = "head -c 17000000 /dev/zero | tr '\\0' a\n";
-        let state = |id: u32| {
-            format!(
-                "printf '%s\\n' '{{\"id\":\"{id}\",\"type\":\"response\",\"command\":\"get_state\",\"success\":true,\"data\":{{\"sessionId\":\"s1\",\"isStreaming\":false,\"sessionFile\":\"{}\"}}}}'\n",
-                file.display()
-            )
-        };
         let script = [
             expect_response(&[r#""type":"get_state""#, r#""id":"1""#]),
-            state(1),
+            session_file(1, &file),
             expect_response(&[r#""id":"2""#, r#""since":"e1""#]),
             r#"printf '%s\n' '{"id":"2","type":"response","command":"get_entries","success":true,"data":{"entries":[],"leafId":"e1"}}'
 "#
@@ -360,7 +351,7 @@ fn rereads_the_session_file_when_new_entries_exceed_one_record() {
 "#
             ),
             expect_response(&[r#""type":"get_state""#, r#""id":"4""#]),
-            state(4),
+            session_file(4, &file),
             expect_response(&[r#""id":"5""#, r#""since":"e2""#]),
             r#"printf '%s\n' '{"id":"5","type":"response","command":"get_entries","success":true,"data":{"entries":[],"leafId":"e2"}}'
 "#
@@ -593,6 +584,18 @@ fn no_session_file(id: u32) -> String {
         "{}printf '%s\\n' '{{\"id\":\"{id}\",\"type\":\"response\",\"command\":\"get_state\",\"success\":true,\"data\":{{\"sessionId\":\"s\",\"isStreaming\":false}}}}'\n",
         expect_response(&[r#""type":"get_state""#, &format!(r#""id":"{id}""#)])
     )
+}
+
+/// Answers `get_state` with request `id`: the session is stored in `file`.
+fn session_file(id: u32, file: &std::path::Path) -> String {
+    let answer = serde_json::json!({
+        "id": id.to_string(),
+        "type": "response",
+        "command": "get_state",
+        "success": true,
+        "data": { "sessionId": "s1", "isStreaming": false, "sessionFile": file },
+    });
+    format!("printf '%s\\n' {}\n", super::shell_word(answer))
 }
 
 fn approval_request(id: &str, tool: &str, read_only: bool) -> String {
@@ -1353,9 +1356,9 @@ fn reads_the_history_before_pi_wrote_the_session_file() {
         let missing =
             std::env::temp_dir().join(format!("watershed-unwritten-{}.jsonl", std::process::id()));
         let script = format!(
-            "{}printf '%s\\n' '{{\"id\":\"1\",\"type\":\"response\",\"command\":\"get_state\",\"success\":true,\"data\":{{\"sessionId\":\"s\",\"isStreaming\":false,\"sessionFile\":\"{}\"}}}}'\n{}printf '%s\\n' '{{\"id\":\"2\",\"type\":\"response\",\"command\":\"get_entries\",\"success\":true,\"data\":{{\"entries\":[{{\"type\":\"message\",\"id\":\"u1\",\"parentId\":null,\"message\":{{\"role\":\"user\",\"content\":\"Hi\"}}}}],\"leafId\":\"u1\"}}}}'\nIFS= read -r line || exit 0\n",
+            "{}{}{}printf '%s\\n' '{{\"id\":\"2\",\"type\":\"response\",\"command\":\"get_entries\",\"success\":true,\"data\":{{\"entries\":[{{\"type\":\"message\",\"id\":\"u1\",\"parentId\":null,\"message\":{{\"role\":\"user\",\"content\":\"Hi\"}}}}],\"leafId\":\"u1\"}}}}'\nIFS= read -r line || exit 0\n",
             expect_response(&[r#""type":"get_state""#]),
-            missing.display(),
+            session_file(1, &missing),
             expect_response(&[r#""type":"get_entries""#]),
         );
         let (mut session, _events) = fake_agent(&script);
