@@ -5,7 +5,7 @@ Observational evidence for the [agent-surface slice](../../PLAN.md) under the [e
 ## Environment
 
 - Apple M6, 24 GB, macOS 27.0 (26A428).
-- Rust 1.99.0, release builds; Flutter 3.47.9 `flutter test` (debug JIT).
+- Rust 1.99.0, release builds; Flutter 3.47.9 `flutter test` (debug JIT), 3.47.7 for the long approval line.
 - Token streaming observed on 2026-10-30 at commit `7781c3f`; the two long Trajectory workloads on 2026-10-31 at commit `9354dbc`; one run each. The long approval line observed on 2026-10-28 at `24af34f`, as one text, and with that commit's approval card replaced by pieces; one run each.
 
 ## Workloads
@@ -21,7 +21,7 @@ Observational evidence for the [agent-surface slice](../../PLAN.md) under the [e
 
 Token streaming: the 20,000 deltas arrive as 2 text events, 7 events in all, the larger carrying 318,000 bytes of merged text. Maximum resident set size 8.8 MB, peak memory footprint 7.3 MB. Earlier records before the 50 ms window counted 173 to 184 events and are not comparable.
 
-Long Trajectory, core: the first read from the session file takes most of each sample (10.8 ms p50); the tree and both Trajectories over the compact index take about 3.8 ms together, and the follow-up read of new entries about 0.06 ms. The tree takes 0.84 ms p50, up from 0.42 ms at an earlier commit, since each tool result now finds its own call through the entries above it. The process's peak memory footprint is 16.7 MB. `/usr/bin/time` reports 50.8 MB maximum resident set size, but that counts the waited-for writer run too, so only the footprint describes the measured process. Earlier records built the session file in the measured process and are not comparable, nor are runs that read the stored entries from one agent response.
+Long Trajectory, core: the first read from the session file takes most of each sample (10.8 ms p50); the tree and both Trajectories over the compact index take about 3.8 ms together, and the follow-up read of new entries about 0.06 ms. The tree takes 0.87 ms p50, up from 0.42 ms in the previous record of this workload, since each tool result now finds its own call through the entries above it. The process's peak memory footprint is 16.7 MB. `/usr/bin/time` reports 50.8 MB maximum resident set size, but that counts the waited-for writer run too, so only the footprint describes the measured process. Earlier records built the session file in the measured process and are not comparable, nor are runs that read the stored entries from one agent response.
 
 Long Trajectory, Dart: every operation is linear in the steps except `compareBranches`, whose alignment is capped at 250,000 step pairs; `compareBranches.early` aligns 4,445 against 50 steps.
 
