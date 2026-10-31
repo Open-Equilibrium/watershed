@@ -22,19 +22,31 @@ enum Mapping {
         return on ? kept + [[source: capsLock, destination: f18]] : kept
     }
 
-    /// Applies the Liquid key to every keyboard attached now; needs no permission.
-    static func apply(on: Bool) {
+    /// Applies the Liquid key to every keyboard attached now; needs no permission. Returns
+    /// whether macOS listed the keyboards and each one took it.
+    @discardableResult
+    static func apply(on: Bool) -> Bool {
         let key = "UserKeyMapping" as CFString
         let client = IOHIDEventSystemClientCreateSimpleClient(kCFAllocatorDefault)
         guard let services = IOHIDEventSystemClientCopyServices(client) as? [IOHIDServiceClient]
-        else { return }
-        for service in services
-        where IOHIDServiceClientConformsTo(
-            service, UInt32(kHIDPage_GenericDesktop), UInt32(kHIDUsage_GD_Keyboard)) != 0
-        {
-            let current = IOHIDServiceClientCopyProperty(service, key) as? [[String: Any]] ?? []
-            IOHIDServiceClientSetProperty(service, key, merged(current, on: on) as CFArray)
+        else { return false }
+        let keyboards = services.filter { service in
+            IOHIDServiceClientConformsTo(
+                service, UInt32(kHIDPage_GenericDesktop), UInt32(kHIDUsage_GD_Keyboard)) != 0
         }
+        return apply(
+            on: on, to: keyboards,
+            read: { IOHIDServiceClientCopyProperty($0, key) as? [[String: Any]] ?? [] },
+            write: { IOHIDServiceClientSetProperty($0, key, $1 as CFArray) })
+    }
+
+    /// Applies the Liquid key to each keyboard, also after one refuses it; returns whether all
+    /// took it.
+    static func apply<Keyboard>(
+        on: Bool, to keyboards: [Keyboard], read: (Keyboard) -> [[String: Any]],
+        write: (Keyboard, [[String: Any]]) -> Bool
+    ) -> Bool {
+        !keyboards.map { write($0, merged(read($0), on: on)) }.contains(false)
     }
 }
 

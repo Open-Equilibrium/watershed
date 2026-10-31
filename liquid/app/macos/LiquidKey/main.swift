@@ -6,12 +6,13 @@ import IOKit.hidsystem
 // The Liquid key helper: a login item inside Liquid.app. It turns Caps Lock into the
 // Liquid key on every keyboard, opens or focuses Liquid when the key is tapped in another app
 // and turns capitals on or off with Shift + Caps Lock. It needs no permission. `--remove` gives
-// the remapping back and exits. The remapping holds for the whole computer, so the helper
-// gives it back when it quits or the user switches away.
+// the remapping back and exits, with status 1 when a keyboard may keep it. The remapping holds
+// for the whole computer, so the helper gives it back when it quits or the user switches away.
 
 if CommandLine.arguments.dropFirst().first == "--remove" {
-    Mapping.apply(on: false)
-    exit(0)
+    if Mapping.apply(on: false) { exit(0) }
+    FileHandle.standardError.write(Data("Liquid Key: could not give Caps Lock back\n".utf8))
+    exit(1)
 }
 
 /// Liquid.app, four levels above Contents/Library/LoginItems/LiquidKey.app.

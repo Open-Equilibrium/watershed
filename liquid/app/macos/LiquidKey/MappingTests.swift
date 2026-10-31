@@ -45,6 +45,23 @@ check(pairs(Mapping.merged([], on: true)).count == 1, "turning it on adds the Li
 check(
     pairs(Mapping.merged(Mapping.merged([], on: true), on: true)).count == 1,
     "turning it on again keeps one mapping")
+
+var keyboards = [[entry(Mapping.capsLock, Mapping.f18)], [entry(Mapping.capsLock, Mapping.f18)]]
+func turnOff(refusing: Int?) -> Bool {
+    Mapping.apply(on: false, to: Array(keyboards.indices), read: { keyboards[$0] }) {
+        keyboard, mappings in
+        guard keyboard != refusing else { return false }
+        keyboards[keyboard] = mappings
+        return true
+    }
+}
+check(
+    !turnOff(refusing: 0) && keyboards[1].isEmpty,
+    "turning it off reports a keyboard that refuses and still turns the others off")
+check(
+    turnOff(refusing: nil) && keyboards.allSatisfy(\.isEmpty),
+    "turning it off succeeds once every keyboard took it")
+
 check(
     isTap(pressed: 10, released: 10.3, lastPress: 10, lastKeyDown: 10.001),
     "a short press is a tap")
