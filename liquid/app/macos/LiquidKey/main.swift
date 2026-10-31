@@ -148,14 +148,22 @@ IOServiceAddMatchingNotification(
 drain(attached)
 
 // The system stops a login item that the user turns off with a termination signal. Handled
-// before the first remapping, a signal during startup gives it back once the helper runs.
-signal(SIGTERM, SIG_IGN)
-let terminate = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
+// before the first remapping, a signal during startup gives it back once the helper runs: the
+// source is registered before the signal's default action is turned off, so until then a signal
+// ends the helper before it changed anything, and afterwards the source receives it.
+let terminate = DispatchSource.makeSignalSource(
+    signal: SIGTERM, queue: DispatchQueue(label: "terminate"))
 terminate.setEventHandler {
-    unmap()
-    exit(0)
+    DispatchQueue.main.async {
+        unmap()
+        exit(0)
+    }
 }
+let registered = DispatchSemaphore(value: 0)
+terminate.setRegistrationHandler { registered.signal() }
 terminate.resume()
+registered.wait()
+signal(SIGTERM, SIG_IGN)
 
 register(shiftKey, shiftedID, &shifted)
 follow(NSWorkspace.shared.frontmostApplication)
