@@ -53,7 +53,8 @@ enum Mapping {
 /// A press of the Liquid key: a tap, which opens Liquid, when released soon with no other key
 /// pressed meanwhile. Without permission macOS reports only the latest press of any key,
 /// `lastKeyDown`, so each of the key's own repeats checks for another key since the press
-/// before it, as the release does.
+/// before it, as the release does. A key pressed within 50 ms of the Liquid key's press or
+/// repeat passes for the Liquid key's own, so such a fast chord still counts as a tap.
 struct Press {
     let pressed: TimeInterval
     /// The key's latest press, its own repeats included.
@@ -76,7 +77,8 @@ struct Press {
         time - pressed < 0.6 && !otherKey && !otherKeyDown(lastKeyDown)
     }
 
-    /// The Liquid key's own press lands a moment after the hotkey reports it.
+    /// The Liquid key's own press lands a moment after the hotkey reports it; another key
+    /// within that moment cannot be told apart from it.
     private func otherKeyDown(_ lastKeyDown: TimeInterval) -> Bool {
         lastKeyDown - lastPress >= 0.05
     }
