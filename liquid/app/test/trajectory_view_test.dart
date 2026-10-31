@@ -921,6 +921,18 @@ void main() {
     expect(find.byKey(const ValueKey('step-s50')), findsOneWidget);
     await press(tester, LogicalKeyboardKey.enter);
     expect(tab('step 50'), findsOneWidget, reason: 'the step is selected');
+    await press(tester, LogicalKeyboardKey.escape);
+
+    // The list now shows step 50, so the range covers step 52 too.
+    await tester.tapAt(
+      Offset(tracks.left + tracks.width * 52.25 / 59.5, tracks.center.dy),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      tester.getSemantics(find.byKey(const ValueKey('step-s52'))),
+      isSemantics(isSelected: true),
+      reason: 'a click inside the range jumps too',
+    );
   });
 
   testWidgets('filters dim what does not match and keys move between matches', (

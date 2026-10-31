@@ -259,6 +259,7 @@ class _OverviewState extends State<Overview> {
                                           at: at,
                                           onRange: widget.onRange,
                                           onPan: widget.onPan,
+                                          onJump: onJump,
                                         ),
                                 ),
                               ),
@@ -328,6 +329,7 @@ class _BrushView extends StatefulWidget {
     required this.at,
     required this.onRange,
     required this.onPan,
+    required this.onJump,
   });
 
   final Brush brush;
@@ -338,6 +340,9 @@ class _BrushView extends StatefulWidget {
   final double Function(double x) at;
   final ValueChanged<(double, double)?>? onRange;
   final ValueChanged<double>? onPan;
+
+  /// A click on the brush jumps as one on the tracks beneath it does.
+  final ValueChanged<double>? onJump;
 
   @override
   State<_BrushView> createState() => _BrushViewState();
@@ -353,7 +358,8 @@ class _BrushViewState extends State<_BrushView> {
 
   @override
   Widget build(BuildContext context) {
-    final _BrushView(:brush, :width, :visible, :at, :onRange, :onPan) = widget;
+    final _BrushView(:brush, :width, :visible, :at, :onRange, :onPan, :onJump) =
+        widget;
     final ws = context.ws;
     double x(double value) =>
         ((value - visible.$1) / (visible.$2 - visible.$1) * width).clamp(
@@ -411,6 +417,9 @@ class _BrushViewState extends State<_BrushView> {
             label: brush.label,
             child: GestureDetector(
               behavior: HitTestBehavior.opaque,
+              onTapUp: onJump == null
+                  ? null
+                  : (details) => onJump(at(_pointer(details.globalPosition))),
               onHorizontalDragStart: (details) =>
                   _drag = (brush.start, _pointer(details.globalPosition)),
               onHorizontalDragEnd: (_) => _drag = null,
