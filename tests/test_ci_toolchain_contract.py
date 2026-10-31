@@ -311,6 +311,9 @@ class CiWorkflowContractTest(unittest.TestCase):
             workflow.replace("report --fail-under-lines 88", "report --fail-under-lines 87", 1),
             workflow.replace("cargo audit", "true", 1),
             workflow.replace("node scripts/check-html-render.mjs", "true", 1),
+            *(workflow.replace(f"      - name: {name}\n",
+                               f"      - name: {name}\n        continue-on-error: true\n", 1)
+              for name in ("Run tests", "Run Rustdoc tests")),
             workflow.replace("--example m11_budgets", "--example m12_executor_startup", 1),
             workflow.replace("--example m12_executor_startup", "--example m11_budgets", 1),
             workflow.replace('-- --executor "$M12_INSTALLED_EXECUTOR"', "--", 1),
@@ -365,6 +368,7 @@ class CiWorkflowContractTest(unittest.TestCase):
              "install.tests.test_install", "install.tests.test_readiness"],
         )
 
+        assert_step_state(self, workflow, "Run tests")
         self.assertEqual(
             folded_tokens(workflow, "Run tests"),
             [
@@ -380,6 +384,7 @@ class CiWorkflowContractTest(unittest.TestCase):
                 "--all-features",
             ],
         )
+        assert_step_state(self, workflow, "Run Rustdoc tests")
         self.assertEqual(
             folded_tokens(workflow, "Run Rustdoc tests"),
             [
