@@ -20,6 +20,7 @@ pub(super) fn session_tree(entries: &[Entry], leaf: Option<&str>) -> SessionTree
             }
         }
     }
+    let ends = label_ends(&label_parents);
     let nodes = entries
         .iter()
         .zip(result_targets(entries))
@@ -28,7 +29,7 @@ pub(super) fn session_tree(entries: &[Entry], leaf: Option<&str>) -> SessionTree
             let (kind, preview) = summary(&entry.body, target);
             TreeNode {
                 id: entry.id.clone(),
-                parent: resolve(&label_parents, entry.parent.as_deref()),
+                parent: resolve(&ends, entry.parent.as_deref()),
                 kind,
                 preview,
                 label: labels
@@ -47,25 +48,44 @@ pub(super) fn session_tree(entries: &[Entry], leaf: Option<&str>) -> SessionTree
         .collect();
     SessionTree {
         nodes,
-        leaf: resolve(&label_parents, leaf),
+        leaf: resolve(&ends, leaf),
     }
 }
 
-/// Follows label entries up to the nearest entry that is not a label; labels that lead back to
-/// each other lead nowhere.
-fn resolve<'a>(
+/// Where each label entry leads: the nearest entry above it that is not a label; labels that
+/// lead back to each other lead nowhere. Each label is followed once.
+fn label_ends<'a>(
     label_parents: &HashMap<&'a str, Option<&'a str>>,
-    mut id: Option<&'a str>,
-) -> Option<String> {
-    let mut steps = label_parents.len();
-    while let Some(parent) = id.and_then(|id| label_parents.get(id)) {
-        if steps == 0 {
-            return None;
+) -> HashMap<&'a str, Option<&'a str>> {
+    let mut ends = HashMap::with_capacity(label_parents.len());
+    for &label in label_parents.keys() {
+        let mut walked = Vec::new();
+        let mut id = Some(label);
+        let end = loop {
+            let Some(current) = id else { break None };
+            // A label walked before leads where it led; one this walk met is still `None`, so a
+            // cycle leads nowhere.
+            if let Some(&end) = ends.get(current) {
+                break end;
+            }
+            let Some(&parent) = label_parents.get(current) else {
+                break Some(current);
+            };
+            ends.insert(current, None);
+            walked.push(current);
+            id = parent;
+        };
+        for label in walked {
+            ends.insert(label, end);
         }
-        steps -= 1;
-        id = *parent;
     }
-    id.map(str::to_owned)
+    ends
+}
+
+/// The entry `id` names once labels drop out of the parent chain.
+fn resolve(ends: &HashMap<&str, Option<&str>>, id: Option<&str>) -> Option<String> {
+    let id = id?;
+    ends.get(id).copied().unwrap_or(Some(id)).map(str::to_owned)
 }
 
 /// What the call each tool result answers works on, by the result's place in `entries`. One walk

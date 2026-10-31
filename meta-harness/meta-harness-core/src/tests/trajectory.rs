@@ -659,14 +659,29 @@ fn a_parent_cycle_ends_the_branch_instead_of_hanging() {
             history.trajectory(None).records.len(),
             history.transcript(None, 10).items.len(),
             history.context("a1").is_some(),
-            history.tree().nodes.len(),
+            history
+                .tree()
+                .nodes
+                .into_iter()
+                .map(|node| (node.id, node.parent))
+                .collect::<Vec<_>>(),
         );
         let _ = done.send(read);
     });
     let read = finished
         .recv_timeout(std::time::Duration::from_secs(10))
         .expect("a stored cycle must not hang the reader");
-    assert_eq!(read.3, 3, "every entry but the labels is a node");
+    let node = |id: &str, parent: Option<&str>| (id.to_owned(), parent.map(str::to_owned));
+    assert_eq!(
+        read.3,
+        [
+            node("u1", Some("a1")),
+            node("a1", Some("u1")),
+            node("m1", None)
+        ],
+        "every entry but the labels is a node, and labels that lead back to each other lead \
+         nowhere"
+    );
 }
 
 #[test]
