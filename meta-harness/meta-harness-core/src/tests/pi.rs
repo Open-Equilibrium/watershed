@@ -652,6 +652,47 @@ fn names_what_a_tool_ran_on_and_whether_it_failed_in_the_tree() {
 }
 
 #[test]
+fn names_what_each_result_ran_on_along_its_own_branch() {
+    // `s2` continues after `r1` and `s1` after the response, so each answers the earliest call
+    // its own branch left open; `r4` finds none open.
+    let data: Value = serde_json::from_str(
+        r#"{"entries":[
+          {"type":"message","id":"a1","parentId":null,"message":{"role":"assistant","content":[{"type":"toolCall","id":"","name":"bash","arguments":{"command":"ls"}},{"type":"toolCall","id":"","name":"bash","arguments":{"command":"make"}},{"type":"toolCall","id":"c3","name":"bash","arguments":{"command":"npm test"}}]}},
+          {"type":"message","id":"r1","parentId":"a1","message":{"role":"toolResult","toolCallId":"","toolName":"bash","content":[]}},
+          {"type":"custom","id":"t1","parentId":"r1","customType":"watershed.timing","data":{"kind":"tool","toolCallId":"c3","durationMs":5}},
+          {"type":"message","id":"r2","parentId":"t1","message":{"role":"toolResult","toolCallId":"","toolName":"bash","content":[]}},
+          {"type":"message","id":"r3","parentId":"r2","message":{"role":"toolResult","toolCallId":"c3","toolName":"bash","content":[]}},
+          {"type":"message","id":"s2","parentId":"r1","message":{"role":"toolResult","toolCallId":"","toolName":"bash","content":[]}},
+          {"type":"message","id":"s1","parentId":"a1","message":{"role":"toolResult","toolCallId":"","toolName":"bash","content":[]}},
+          {"type":"message","id":"a2","parentId":"r3","message":{"role":"assistant","content":[{"type":"toolCall","id":"","name":"bash","arguments":{"command":"cargo test"}}]}},
+          {"type":"message","id":"q1","parentId":"a2","message":{"role":"toolResult","toolCallId":"","toolName":"bash","content":[]}},
+          {"type":"message","id":"r4","parentId":"r3","message":{"role":"toolResult","toolCallId":"","toolName":"bash","content":[]}}],
+          "leafId":"q1"}"#,
+    )
+    .expect("JSON");
+    let previews: Vec<_> = History::from_entries(&data)
+        .tree()
+        .nodes
+        .into_iter()
+        .filter(|node| node.kind == EntryKind::ToolResult)
+        .map(|node| (node.id, node.preview))
+        .collect();
+    let preview = |id: &str, preview: &str| (id.to_owned(), preview.to_owned());
+    assert_eq!(
+        previews,
+        [
+            preview("r1", "bash ls"),
+            preview("r2", "bash make"),
+            preview("r3", "bash npm test"),
+            preview("s2", "bash make"),
+            preview("s1", "bash ls"),
+            preview("q1", "bash cargo test"),
+            preview("r4", "bash"),
+        ]
+    );
+}
+
+#[test]
 fn matches_each_result_to_its_own_call_when_ids_repeat() {
     // A server that sends no call ids leaves every call with the same empty one; a result
     // answers the earliest call of the response above it that no result answered yet.

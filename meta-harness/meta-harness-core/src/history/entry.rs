@@ -142,6 +142,14 @@ impl<'a, T> OpenCalls<'a, T> {
         self.open.get_mut(id)?.pop_front()
     }
 
+    /// Opens the call the latest answer returned again, for another branch from before it.
+    pub fn reopen(&mut self, place: usize, call: &'a Call) {
+        self.open
+            .entry(call.id.as_str())
+            .or_default()
+            .push_front((place, call));
+    }
+
     /// Keeps the timing entry of a call with `id` that ended, until its result.
     pub fn ended(&mut self, id: &'a str, timing: T) {
         self.timing.entry(id).or_default().push(timing);
