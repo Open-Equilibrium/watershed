@@ -730,6 +730,42 @@ IFS= read -r line || exit 0"#
 }
 
 #[test]
+fn a_run_started_by_a_message_sent_while_the_previous_ran_is_not_captured() {
+    let repo = repository("uncaptured");
+    // The first run edits `a.txt` and is still running when the next message is sent; the
+    // agent settles it on reading that message, which then starts a run that adds `b.txt`.
+    let script = [
+        gate(2),
+        r#"IFS= read -r line
+printf 'first\n' > a.txt
+printf '%s\n' '{"type":"agent_start"}' '{"id":"3","type":"response","command":"prompt","success":true,"data":{"disposition":"started"}}'
+"#
+        .to_owned(),
+        gate(4),
+        r#"IFS= read -r line
+printf '%s\n' '{"type":"agent_settled","aborted":false}'
+printf 'second\n' > b.txt
+printf '%s\n' '{"type":"agent_start"}' '{"id":"5","type":"response","command":"prompt","success":true,"data":{"disposition":"started"}}'
+IFS= read -r line || exit 0"#
+            .to_owned(),
+    ]
+    .concat();
+    let session = launch(gated(&script), repo.display().to_string()).expect("agent starts");
+    assert_eq!(session.send("first".to_owned(), false), Ok(()));
+    assert_eq!(session.send("second".to_owned(), false), Ok(()));
+    // The first run's baseline would also count its edit of `a.txt` as the second run's.
+    let changes = session.changes(false);
+    assert!(
+        changes
+            .as_ref()
+            .is_err_and(|error| error.starts_with("the project could not be captured")),
+        "{changes:?}"
+    );
+    assert!(call(session.shutdown()));
+    let _ = std::fs::remove_dir_all(&repo);
+}
+
+#[test]
 fn shuts_down_while_a_slow_project_is_captured() {
     let repo = repository("slow");
     // A clean filter runs while the project is captured; this one holds the capture up.

@@ -6,7 +6,7 @@ use std::sync::{LazyLock, PoisonError};
 use std::path::{Path, PathBuf};
 
 use meta_harness_core::{
-    AgentCommand, Answer, CommandError, Delivery, DiffError, RequestId, RunDiff, Session,
+    AgentCommand, Answer, Capture, CommandError, Delivery, DiffError, RequestId, RunDiff, Session,
     SessionEvent, Whitespace, recent_sessions, session_title, visible_lines,
 };
 use tokio::runtime::Runtime;
@@ -220,9 +220,12 @@ impl AgentSession {
             // The session stays free meanwhile, so questions asked before acceptance can be
             // answered.
             let started = pending.started().await.map_err(describe)?;
-            // Only a prompt that started a run makes its capture count.
-            if let Some(capture) = capture.filter(|_| started) {
-                self.diff.started(capture);
+            // Only a prompt that started a run makes its capture count. One sent while a run
+            // was in progress has none, yet that run may have ended before the prompt arrived.
+            if started {
+                self.diff.started(capture.unwrap_or_else(|| {
+                    Capture::missed("a previous run was in progress when the message was sent")
+                }));
             }
             Ok(())
         })

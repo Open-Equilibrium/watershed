@@ -58,6 +58,14 @@ enum Unopened {
 #[derive(Debug)]
 pub struct Capture(Option<Result<Snapshot, String>>);
 
+impl Capture {
+    /// No capture was taken for a run, for `reason`, so its changes are unknown rather than
+    /// compared with the state before an earlier run.
+    pub fn missed(reason: &str) -> Self {
+        Self(Some(Err(reason.to_owned())))
+    }
+}
+
 impl RunDiff {
     /// Follows the project that contains `dir`; outside Git, reads say so.
     pub async fn open(dir: &Path) -> Self {
