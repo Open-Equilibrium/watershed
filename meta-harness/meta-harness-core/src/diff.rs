@@ -442,9 +442,11 @@ impl WorkingTree {
 /// Runs the host's `git` in `dir` and returns at most [`MAX_OUTPUT_BYTES`] of its output.
 async fn git(dir: &Path, env: &[(&str, OsString)], args: &[&str]) -> Result<String, DiffError> {
     let mut child = Git::spawn(&mut git_command(dir, env, args))?;
-    // Git's warnings drain meanwhile, so a full error pipe never blocks it.
+    // Git's warnings drain meanwhile, so a full error pipe never blocks it; dropped, the set ends
+    // the drain.
     let stderr = child.child.stderr.take().expect("stderr is piped");
-    let errors = tokio::spawn(keep_start(stderr, MAX_ERROR_BYTES));
+    let mut errors = tokio::task::JoinSet::new();
+    errors.spawn(keep_start(stderr, MAX_ERROR_BYTES));
     let mut output = Vec::new();
     // Reading one byte past the limit tells a cut-off output apart; dropping the child then
     // stops Git instead of buffering unbounded output.
@@ -457,12 +459,18 @@ async fn git(dir: &Path, env: &[(&str, OsString)], args: &[&str]) -> Result<Stri
     if output.len() as u64 > MAX_OUTPUT_BYTES {
         return Err(DiffError::TooLarge);
     }
+    // A program Git started can hold its error output after Git ended. Git is reaped only once
+    // that output ended too, so until then its time limit still ends such programs with it.
+    let errors = errors
+        .join_next()
+        .await
+        .and_then(Result::ok)
+        .unwrap_or_default();
     let status = child
         .wait()
         .await
         .map_err(|error| DiffError::Git(error.to_string()))?;
     if !status.success() {
-        let errors = errors.await.unwrap_or_default();
         return Err(DiffError::Git(
             String::from_utf8_lossy(&errors).trim().to_owned(),
         ));

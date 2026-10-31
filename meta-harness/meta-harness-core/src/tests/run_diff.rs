@@ -549,6 +549,35 @@ fn a_stalled_git_gives_up_and_leaves_later_snapshots_working() {
     });
 }
 
+/// Captures until the project's clean filter wrote a program's id to `pid`, then tells whether
+/// that program still runs after Git was stopped at its limit; one that does is killed.
+async fn outlives_its_git(diff: &RunDiff, pid: &Path) -> bool {
+    let started = std::time::Instant::now();
+    while !pid.exists() && started.elapsed() < Duration::from_secs(4) {
+        diff.started(diff.capture().await);
+    }
+    let program = std::fs::read_to_string(pid).expect("the filter ran");
+    let _ = std::fs::remove_file(pid);
+    let alive = || {
+        std::process::Command::new("kill")
+            .args(["-0", program.trim()])
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success())
+    };
+    let stopped = std::time::Instant::now();
+    while alive() && stopped.elapsed() < Duration::from_secs(2) {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let survived = alive();
+    if survived {
+        let _ = std::process::Command::new("kill")
+            .args(["-9", program.trim()])
+            .status();
+    }
+    survived
+}
+
 #[test]
 fn a_git_past_its_limit_ends_with_the_programs_it_started() {
     run(async {
@@ -563,30 +592,32 @@ fn a_git_past_its_limit_ends_with_the_programs_it_started() {
         repo.write(".gitattributes", "*.txt filter=slow\n");
         repo.write("a.txt", "new\n");
         let diff = RunDiff::with_timeout(repo.path(), Duration::from_millis(300)).await;
-        let started = std::time::Instant::now();
-        while !pid.exists() && started.elapsed() < Duration::from_secs(4) {
-            diff.started(diff.capture().await);
-        }
-        let filter = std::fs::read_to_string(&pid).expect("the filter ran");
-        let _ = std::fs::remove_file(&pid);
-        let alive = || {
-            std::process::Command::new("kill")
-                .args(["-0", filter.trim()])
-                .stderr(std::process::Stdio::null())
-                .status()
-                .is_ok_and(|status| status.success())
-        };
-        let stopped = std::time::Instant::now();
-        while alive() && stopped.elapsed() < Duration::from_secs(2) {
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
-        let survived = alive();
-        if survived {
-            let _ = std::process::Command::new("kill")
-                .args(["-9", filter.trim()])
-                .status();
-        }
-        assert!(!survived, "the filter outlived its Git");
+        assert!(
+            !outlives_its_git(&diff, &pid).await,
+            "the filter outlived its Git"
+        );
+    });
+}
+
+#[test]
+fn a_failed_git_past_its_limit_ends_the_programs_that_hold_its_errors() {
+    run(async {
+        let repo = Repo::new("error-holder");
+        // The project's required clean filter fails at once but leaves a program that holds
+        // Git's error output. Git runs it at the top of the work tree.
+        repo.git(&[
+            "config",
+            "filter.leaky.clean",
+            "sleep 30 >&2 & echo $! > .git/holder; exit 1",
+        ]);
+        repo.git(&["config", "filter.leaky.required", "true"]);
+        repo.write(".gitattributes", "*.txt filter=leaky\n");
+        repo.write("a.txt", "new\n");
+        let diff = RunDiff::with_timeout(repo.path(), Duration::from_millis(300)).await;
+        assert!(
+            !outlives_its_git(&diff, &repo.path().join(".git/holder")).await,
+            "the program holding Git's errors outlived it"
+        );
     });
 }
 
