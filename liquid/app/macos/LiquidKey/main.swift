@@ -35,6 +35,15 @@ func remap() {
     if sessionActive { Mapping.apply(on: true) }
 }
 
+/// Sets the remapping again later for what may have undone it: a keyboard's HID service
+/// appears some time after the device, a Bluetooth one later, and on a user switch the
+/// departing user's helper may give it back after this one set it.
+func remapLater() {
+    for delay in [1.0, 5.0] {
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { remap() }
+    }
+}
+
 /// Gives the remapping back if this session set it; another user's helper may hold it now.
 func unmap() {
     if sessionActive { Mapping.apply(on: false) }
@@ -134,10 +143,7 @@ IOServiceAddMatchingNotification(
     arrivals, kIOFirstMatchNotification, IOServiceMatching("IOHIDInterface"),
     { _, iterator in
         drain(iterator)
-        // A keyboard's HID service appears some time after the device, a Bluetooth one later.
-        for delay in [1.0, 5.0] {
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { remap() }
-        }
+        remapLater()
     }, nil, &attached)
 drain(attached)
 
@@ -171,6 +177,7 @@ workspace.addObserver(
 ) { _ in
     sessionActive = true
     remap()
+    remapLater()
 }
 NotificationCenter.default.addObserver(
     forName: NSApplication.willTerminateNotification, object: nil, queue: .main
