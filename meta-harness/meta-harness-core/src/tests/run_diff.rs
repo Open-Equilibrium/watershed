@@ -180,6 +180,83 @@ fn a_session_switch_ends_the_diff_unless_a_run_started_meanwhile() {
 }
 
 #[test]
+fn a_read_that_ends_after_a_session_switch_leaves_the_run_ended() {
+    run(async {
+        let repo = Repo::new("switch-during-read");
+        // The project's clean filter says when it runs and then waits for `gate`, so a read can
+        // be held inside its snapshot. Git runs it at the top of the work tree.
+        repo.git(&[
+            "config",
+            "filter.gate.clean",
+            "touch .git/waiting; until [ -e .git/gate ]; do sleep 0.01; done; cat",
+        ]);
+        repo.write(".gitattributes", "*.txt filter=gate\n");
+        let gate = repo.path().join(".git/gate");
+        let waiting = repo.path().join(".git/waiting");
+        std::fs::write(&gate, "").expect("gate opens");
+        let diff = std::sync::Arc::new(RunDiff::open(repo.path()).await);
+        diff.started(diff.capture().await);
+        repo.write("a.txt", "new\n");
+        assert_eq!(
+            diff.changes(Whitespace::Shown).await.expect("changes"),
+            [modified("a.txt")]
+        );
+
+        std::fs::remove_file(&gate).expect("gate closes");
+        let _ = std::fs::remove_file(&waiting);
+        repo.write("a.txt", "newer\n");
+        let reading = tokio::spawn({
+            let diff = diff.clone();
+            async move { diff.changes(Whitespace::Shown).await }
+        });
+        let held = async {
+            while !waiting.exists() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        };
+        tokio::time::timeout(Duration::from_secs(10), held)
+            .await
+            .expect("the read reaches its snapshot");
+        diff.switched(diff.runs());
+        std::fs::write(&gate, "").expect("gate opens");
+        let _ = reading.await.expect("the read ends");
+        assert_eq!(
+            diff.patch("a.txt", Whitespace::Shown).await.expect("patch"),
+            "",
+            "the switch ended the run, so the read that ended later keeps nothing for patches"
+        );
+    });
+}
+
+#[test]
+fn a_list_that_failed_leaves_patches_as_the_last_list_saw_them() {
+    run(async {
+        let repo = Repo::new("failed-list");
+        let diff = RunDiff::open(repo.path()).await;
+        diff.started(diff.capture().await);
+        repo.write("a.txt", "new\n");
+        assert_eq!(
+            diff.changes(Whitespace::Shown).await.expect("changes"),
+            [modified("a.txt")]
+        );
+
+        // Git still captures the project with this setting but cannot compare it.
+        repo.git(&["config", "diff.algorithm", "unknown"]);
+        repo.write("a.txt", "newer\n");
+        assert!(matches!(
+            diff.changes(Whitespace::Shown).await,
+            Err(DiffError::Git(_))
+        ));
+        repo.git(&["config", "--unset", "diff.algorithm"]);
+        let patch = diff.patch("a.txt", Whitespace::Shown).await.expect("patch");
+        assert!(
+            patch.contains("+new\n") && !patch.contains("newer"),
+            "{patch}"
+        );
+    });
+}
+
+#[test]
 fn project_settings_that_skip_files_hide_no_change() {
     run(async {
         // Files the project marks as unchanged or as outside its work, and a setting that

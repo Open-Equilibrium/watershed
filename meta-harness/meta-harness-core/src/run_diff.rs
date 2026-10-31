@@ -125,8 +125,11 @@ impl RunDiff {
             return Ok(Vec::new());
         };
         let now = self.snapshot(&tree).await?;
+        let changes = self
+            .bounded(tree.changes(&before, &now, whitespace))
+            .await?;
         self.list(runs, &before, &now);
-        self.bounded(tree.changes(&before, &now, whitespace)).await
+        Ok(changes)
     }
 
     /// The unified diff of one file between the two states the latest list of changes compared,
@@ -148,10 +151,11 @@ impl RunDiff {
             .await
     }
 
-    /// Keeps the states a list compared for later patches, unless another run started meanwhile.
+    /// Keeps the states a list compared for later patches, unless another run started or a
+    /// session switch ended the run meanwhile.
     fn list(&self, runs: u64, from: &Snapshot, now: &Snapshot) {
         let mut before = self.before();
-        if before.runs == runs {
+        if before.runs == runs && before.state.is_some() {
             before.listed = Some((from.clone(), now.clone()));
         }
     }
