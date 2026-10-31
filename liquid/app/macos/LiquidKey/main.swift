@@ -142,6 +142,16 @@ IOServiceAddMatchingNotification(
     }, nil, &attached)
 drain(attached)
 
+// The system stops a login item that the user turns off with a termination signal. Handled
+// before the first remapping, a signal during startup gives it back once the helper runs.
+signal(SIGTERM, SIG_IGN)
+let terminate = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
+terminate.setEventHandler {
+    unmap()
+    exit(0)
+}
+terminate.resume()
+
 register(shiftKey, shiftedID, &shifted)
 follow(NSWorkspace.shared.frontmostApplication)
 remap()
@@ -166,14 +176,6 @@ workspace.addObserver(
 NotificationCenter.default.addObserver(
     forName: NSApplication.willTerminateNotification, object: nil, queue: .main
 ) { _ in unmap() }
-// The system stops a login item that the user turns off with a termination signal.
-signal(SIGTERM, SIG_IGN)
-let terminate = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
-terminate.setEventHandler {
-    unmap()
-    exit(0)
-}
-terminate.resume()
 
 NSApplication.shared.setActivationPolicy(.prohibited)
 NSApplication.shared.run()
