@@ -596,6 +596,31 @@ fn reads_outcomes_from_what_tools_did_not_from_what_they_were_asked_or_printed()
 }
 
 #[test]
+fn a_large_change_keeps_the_whole_path_of_its_file() {
+    // Arguments this long are kept with shortened strings; the paths share their first 250
+    // characters.
+    let dir = format!("/project/{}", "d".repeat(250));
+    let content = "line\n".repeat(1000);
+    let data: Value = serde_json::from_str(&format!(
+        r#"{{"entries":[
+      {{"type":"message","id":"u1","parentId":null,"message":{{"role":"user","content":"Go"}}}},
+      {{"type":"message","id":"a1","parentId":"u1","message":{{"role":"assistant","content":[{{"type":"toolCall","id":"c1","name":"write","arguments":{{"path":"{dir}/a.txt","content":"{content}"}}}},{{"type":"toolCall","id":"c2","name":"write","arguments":{{"path":"{dir}/b.txt","content":"{content}"}}}}]}}}},
+      {{"type":"message","id":"r1","parentId":"a1","message":{{"role":"toolResult","toolCallId":"c1","toolName":"write","content":[]}}}},
+      {{"type":"message","id":"r2","parentId":"r1","message":{{"role":"toolResult","toolCallId":"c2","toolName":"write","content":[]}}}}
+    ],"leafId":"r2"}}"#,
+        content = content.replace('\n', "\\n")
+    ))
+    .expect("JSON");
+    let changed: Vec<_> = History::from_entries(&data)
+        .trajectory(None)
+        .records
+        .into_iter()
+        .filter_map(|record| record.changed_file)
+        .collect();
+    assert_eq!(changed, [format!("{dir}/a.txt"), format!("{dir}/b.txt")]);
+}
+
+#[test]
 fn names_a_response_that_ended_empty_apart_from_one_that_called_tools() {
     let data: Value = serde_json::from_str(
         r#"{"entries":[

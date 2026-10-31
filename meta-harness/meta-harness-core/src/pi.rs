@@ -321,13 +321,16 @@ pub(crate) fn call_text(kind: RequestKind, arguments: &str) -> String {
     )
 }
 
+/// The arguments that name the file a call of one of pi's file tools changes.
+pub(crate) const PATH_ARGUMENTS: [&str; 2] = ["path", "file_path"];
+
 /// The file a call of one of pi's file tools changes.
 pub(crate) fn changed_path(tool: &str, arguments: &str) -> Option<String> {
     if item_kind(tool) != ItemKind::FileChange {
         return None;
     }
     let arguments: Value = serde_json::from_str(arguments).ok()?;
-    ["path", "file_path"]
+    PATH_ARGUMENTS
         .iter()
         .find_map(|name| arguments.get(*name)?.as_str())
         .map(visible)

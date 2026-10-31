@@ -6,7 +6,7 @@ use std::collections::{HashMap, VecDeque};
 use serde_json::Value;
 
 use super::outcome::{exit_code, patch_lines, test_counts};
-use crate::pi::{content_text, item_kind, usage, written_lines};
+use crate::pi::{PATH_ARGUMENTS, content_text, item_kind, usage, written_lines};
 use crate::visible::visible_name;
 use crate::{ItemKind, ToolOutcome, Usage};
 
@@ -428,7 +428,8 @@ fn system(message: &Value) -> SystemChange {
     }
 }
 
-/// Tool arguments as JSON text; when too long, every string in them is shortened instead.
+/// Tool arguments as JSON text; when too long, every string in them is shortened instead, but
+/// for the path of the file a call changes, which the Trajectory reports whole.
 fn arguments(value: &Value) -> String {
     let text = value.to_string();
     if text.len() <= ARGUMENT_BYTES {
@@ -447,7 +448,13 @@ fn arguments(value: &Value) -> String {
             other => other.clone(),
         }
     }
-    shorten(value).to_string()
+    let mut short = shorten(value);
+    for name in PATH_ARGUMENTS {
+        if let (Some(path), Some(kept)) = (value.get(name), short.get_mut(name)) {
+            kept.clone_from(path);
+        }
+    }
+    short.to_string()
 }
 
 /// `text` cut to `chars` characters, with an ellipsis when cut.
