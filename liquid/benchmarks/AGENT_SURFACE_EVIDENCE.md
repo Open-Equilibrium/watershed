@@ -6,7 +6,7 @@ Observational evidence for the [agent-surface slice](../../PLAN.md) under the [e
 
 - Apple M6, 24 GB, macOS 27.0 (26A428).
 - Rust 1.99.0, release builds; Flutter 3.47.9 `flutter test` (debug JIT), 3.47.7 for the long approval line.
-- Token streaming observed on 2026-10-31 at commit `2b34840`; the two long Trajectory workloads on 2026-10-31 at commit `9354dbc`; one run each. The long approval line observed on 2026-10-28 at `24af34f`, as one text, and with that commit's approval card replaced by pieces; one run each.
+- Token streaming observed on 2026-10-31 at commit `2b34840`; the core Trajectory workload on 2026-10-31 at commit `62655d4`, the Dart one at `9354dbc`; one run each. The long approval line observed on 2026-10-28 at `24af34f`, as one text, and with that commit's approval card replaced by pieces; one run each.
 
 ## Workloads
 
@@ -21,7 +21,7 @@ Observational evidence for the [agent-surface slice](../../PLAN.md) under the [e
 
 Token streaming: the 20,000 deltas arrive as 1 text event of 320,000 bytes, 6 events in all. Maximum resident set size 9.9 MB, peak memory footprint 8.4 MB. The record at `7781c3f`, whose forwarder also drained the channel after the window, counted 2 text events; earlier records before the 50 ms window counted 173 to 184 events; neither is comparable.
 
-Long Trajectory, core: the first read from the session file takes most of each sample (10.8 ms p50); the tree and both Trajectories over the compact index take about 3.8 ms together, and the follow-up read of new entries about 0.06 ms. The tree takes 0.87 ms p50, up from 0.42 ms at `733887b` on 2026-10-26, a commit since rewritten, since each tool result now finds its own call through the entries above it. The process's peak memory footprint is 16.7 MB. `/usr/bin/time` reports 50.8 MB maximum resident set size, but that counts the waited-for writer run too, so only the footprint describes the measured process. Earlier records built the session file in the measured process and are not comparable, nor are runs that read the stored entries from one agent response.
+Long Trajectory, core: the first read from the session file takes most of each sample (11.0 ms p50); the tree and both Trajectories over the compact index take about 3.9 ms together, and the follow-up read of new entries about 0.06 ms. The tree takes 0.92 ms p50, up from 0.42 ms at `733887b` on 2026-10-26, a commit since rewritten: it now walks down every branch once to match each tool result to its call and resolves label parents once, which keeps it linear where a crafted session file made the walk quadratic. The process's peak memory footprint is 17.0 MB. `/usr/bin/time` reports 51.2 MB maximum resident set size, but that counts the waited-for writer run too, so only the footprint describes the measured process. Earlier records built the session file in the measured process and are not comparable, nor are runs that read the stored entries from one agent response.
 
 Long Trajectory, Dart: every operation is linear in the steps except `compareBranches`, whose alignment is capped at 250,000 step pairs; `compareBranches.early` aligns 4,445 against 50 steps.
 
@@ -58,27 +58,27 @@ Token streaming:
 Long Trajectory, core:
 
 ```json
-{"sample":0,"read_ms":16.617,"tree_ms":1.234,"trajectory_ms":2.323,"fork_trajectory_ms":1.915,"total_ms":22.089,"update_ms":0.070,"nodes":8640,"records":5000,"fork_records":4490}
-{"sample":1,"read_ms":12.240,"tree_ms":0.940,"trajectory_ms":1.674,"fork_trajectory_ms":1.445,"total_ms":16.299,"update_ms":0.054,"nodes":8640,"records":5000,"fork_records":4490}
-{"sample":2,"read_ms":10.844,"tree_ms":0.840,"trajectory_ms":1.518,"fork_trajectory_ms":1.386,"total_ms":14.588,"update_ms":0.059,"nodes":8640,"records":5000,"fork_records":4490}
-{"sample":3,"read_ms":10.603,"tree_ms":0.849,"trajectory_ms":1.544,"fork_trajectory_ms":1.384,"total_ms":14.380,"update_ms":0.055,"nodes":8640,"records":5000,"fork_records":4490}
-{"sample":4,"read_ms":10.779,"tree_ms":0.841,"trajectory_ms":1.517,"fork_trajectory_ms":1.396,"total_ms":14.533,"update_ms":0.054,"nodes":8640,"records":5000,"fork_records":4490}
-{"sample":5,"read_ms":10.668,"tree_ms":0.848,"trajectory_ms":1.535,"fork_trajectory_ms":1.403,"total_ms":14.454,"update_ms":0.054,"nodes":8640,"records":5000,"fork_records":4490}
-{"sample":6,"read_ms":10.572,"tree_ms":0.838,"trajectory_ms":1.529,"fork_trajectory_ms":1.388,"total_ms":14.325,"update_ms":0.055,"nodes":8640,"records":5000,"fork_records":4490}
-{"sample":7,"read_ms":10.449,"tree_ms":0.867,"trajectory_ms":1.564,"fork_trajectory_ms":1.449,"total_ms":14.330,"update_ms":0.058,"nodes":8640,"records":5000,"fork_records":4490}
-{"sample":8,"read_ms":11.485,"tree_ms":1.001,"trajectory_ms":1.671,"fork_trajectory_ms":1.546,"total_ms":15.702,"update_ms":0.063,"nodes":8640,"records":5000,"fork_records":4490}
-{"sample":9,"read_ms":11.808,"tree_ms":1.044,"trajectory_ms":1.635,"fork_trajectory_ms":1.487,"total_ms":15.974,"update_ms":0.062,"nodes":8640,"records":5000,"fork_records":4490}
-{"sample":10,"read_ms":11.604,"tree_ms":0.938,"trajectory_ms":1.643,"fork_trajectory_ms":1.542,"total_ms":15.727,"update_ms":0.072,"nodes":8640,"records":5000,"fork_records":4490}
-{"sample":11,"read_ms":14.899,"tree_ms":1.597,"trajectory_ms":2.160,"fork_trajectory_ms":1.544,"total_ms":20.199,"update_ms":0.074,"nodes":8640,"records":5000,"fork_records":4490}
-{"sample":12,"read_ms":14.885,"tree_ms":1.536,"trajectory_ms":2.452,"fork_trajectory_ms":2.130,"total_ms":21.003,"update_ms":0.077,"nodes":8640,"records":5000,"fork_records":4490}
-{"sample":13,"read_ms":11.691,"tree_ms":0.937,"trajectory_ms":1.640,"fork_trajectory_ms":1.500,"total_ms":15.768,"update_ms":0.056,"nodes":8640,"records":5000,"fork_records":4490}
-{"sample":14,"read_ms":10.956,"tree_ms":0.884,"trajectory_ms":1.539,"fork_trajectory_ms":1.419,"total_ms":14.798,"update_ms":0.060,"nodes":8640,"records":5000,"fork_records":4490}
-{"sample":15,"read_ms":10.923,"tree_ms":0.839,"trajectory_ms":1.534,"fork_trajectory_ms":1.399,"total_ms":14.695,"update_ms":0.058,"nodes":8640,"records":5000,"fork_records":4490}
-{"sample":16,"read_ms":10.703,"tree_ms":0.874,"trajectory_ms":1.555,"fork_trajectory_ms":1.405,"total_ms":14.536,"update_ms":0.061,"nodes":8640,"records":5000,"fork_records":4490}
-{"sample":17,"read_ms":10.601,"tree_ms":0.859,"trajectory_ms":1.535,"fork_trajectory_ms":1.413,"total_ms":14.409,"update_ms":0.056,"nodes":8640,"records":5000,"fork_records":4490}
-{"sample":18,"read_ms":10.611,"tree_ms":0.839,"trajectory_ms":1.541,"fork_trajectory_ms":1.430,"total_ms":14.422,"update_ms":0.060,"nodes":8640,"records":5000,"fork_records":4490}
-{"sample":19,"read_ms":10.691,"tree_ms":0.837,"trajectory_ms":1.533,"fork_trajectory_ms":1.407,"total_ms":14.469,"update_ms":0.059,"nodes":8640,"records":5000,"fork_records":4490}
-{"summary":"trajectory","file_bytes":2050826,"samples":20,"p50_ms":14.588,"p95_ms":21.003,"max_ms":22.089}
+{"sample":0,"read_ms":12.531,"tree_ms":1.031,"trajectory_ms":1.782,"fork_trajectory_ms":1.549,"total_ms":16.892,"update_ms":0.057,"nodes":8640,"records":5000,"fork_records":4490}
+{"sample":1,"read_ms":10.988,"tree_ms":0.900,"trajectory_ms":1.543,"fork_trajectory_ms":1.408,"total_ms":14.839,"update_ms":0.057,"nodes":8640,"records":5000,"fork_records":4490}
+{"sample":2,"read_ms":10.971,"tree_ms":0.910,"trajectory_ms":1.541,"fork_trajectory_ms":1.426,"total_ms":14.848,"update_ms":0.058,"nodes":8640,"records":5000,"fork_records":4490}
+{"sample":3,"read_ms":11.014,"tree_ms":0.907,"trajectory_ms":1.531,"fork_trajectory_ms":1.403,"total_ms":14.855,"update_ms":0.055,"nodes":8640,"records":5000,"fork_records":4490}
+{"sample":4,"read_ms":11.009,"tree_ms":0.911,"trajectory_ms":1.539,"fork_trajectory_ms":1.429,"total_ms":14.889,"update_ms":0.055,"nodes":8640,"records":5000,"fork_records":4490}
+{"sample":5,"read_ms":11.046,"tree_ms":0.941,"trajectory_ms":1.604,"fork_trajectory_ms":1.468,"total_ms":15.060,"update_ms":0.055,"nodes":8640,"records":5000,"fork_records":4490}
+{"sample":6,"read_ms":11.100,"tree_ms":0.905,"trajectory_ms":1.541,"fork_trajectory_ms":1.415,"total_ms":14.961,"update_ms":0.054,"nodes":8640,"records":5000,"fork_records":4490}
+{"sample":7,"read_ms":10.948,"tree_ms":0.937,"trajectory_ms":1.599,"fork_trajectory_ms":1.463,"total_ms":14.947,"update_ms":0.055,"nodes":8640,"records":5000,"fork_records":4490}
+{"sample":8,"read_ms":10.902,"tree_ms":0.917,"trajectory_ms":1.552,"fork_trajectory_ms":1.466,"total_ms":14.837,"update_ms":0.053,"nodes":8640,"records":5000,"fork_records":4490}
+{"sample":9,"read_ms":11.027,"tree_ms":0.920,"trajectory_ms":1.545,"fork_trajectory_ms":1.450,"total_ms":14.941,"update_ms":0.052,"nodes":8640,"records":5000,"fork_records":4490}
+{"sample":10,"read_ms":11.146,"tree_ms":0.911,"trajectory_ms":1.537,"fork_trajectory_ms":1.410,"total_ms":15.005,"update_ms":0.056,"nodes":8640,"records":5000,"fork_records":4490}
+{"sample":11,"read_ms":11.093,"tree_ms":0.905,"trajectory_ms":1.531,"fork_trajectory_ms":1.400,"total_ms":14.929,"update_ms":0.054,"nodes":8640,"records":5000,"fork_records":4490}
+{"sample":12,"read_ms":11.001,"tree_ms":0.925,"trajectory_ms":1.550,"fork_trajectory_ms":1.455,"total_ms":14.931,"update_ms":0.054,"nodes":8640,"records":5000,"fork_records":4490}
+{"sample":13,"read_ms":11.006,"tree_ms":0.936,"trajectory_ms":1.609,"fork_trajectory_ms":1.478,"total_ms":15.029,"update_ms":0.057,"nodes":8640,"records":5000,"fork_records":4490}
+{"sample":14,"read_ms":11.023,"tree_ms":0.941,"trajectory_ms":1.604,"fork_trajectory_ms":1.474,"total_ms":15.043,"update_ms":0.054,"nodes":8640,"records":5000,"fork_records":4490}
+{"sample":15,"read_ms":11.092,"tree_ms":0.908,"trajectory_ms":1.530,"fork_trajectory_ms":1.413,"total_ms":14.943,"update_ms":0.057,"nodes":8640,"records":5000,"fork_records":4490}
+{"sample":16,"read_ms":11.042,"tree_ms":0.955,"trajectory_ms":1.628,"fork_trajectory_ms":1.478,"total_ms":15.104,"update_ms":0.054,"nodes":8640,"records":5000,"fork_records":4490}
+{"sample":17,"read_ms":10.947,"tree_ms":0.933,"trajectory_ms":1.600,"fork_trajectory_ms":1.469,"total_ms":14.949,"update_ms":0.056,"nodes":8640,"records":5000,"fork_records":4490}
+{"sample":18,"read_ms":11.013,"tree_ms":0.948,"trajectory_ms":1.595,"fork_trajectory_ms":1.461,"total_ms":15.017,"update_ms":0.053,"nodes":8640,"records":5000,"fork_records":4490}
+{"sample":19,"read_ms":10.948,"tree_ms":0.944,"trajectory_ms":1.603,"fork_trajectory_ms":1.470,"total_ms":14.965,"update_ms":0.054,"nodes":8640,"records":5000,"fork_records":4490}
+{"summary":"trajectory","file_bytes":2050826,"samples":20,"p50_ms":14.947,"p95_ms":15.104,"max_ms":16.892}
 ```
 
 Long Trajectory, Dart:
