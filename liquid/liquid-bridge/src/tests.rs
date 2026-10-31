@@ -22,6 +22,12 @@ use crate::stream::{gather, push};
 /// The extension path the fake agents are started with.
 const EXTENSION: &str = "/w/meta-harness/pi-extension/watershed.ts";
 
+/// `text` as one word of a POSIX shell command, so spaces and quotes in a temporary directory
+/// stay part of its paths.
+fn shell_word(text: &str) -> String {
+    format!("'{}'", text.replace('\'', r"'\''"))
+}
+
 /// Answers the check before a session starts or a message may start a run: Watershed's
 /// extension is loaded.
 fn gate(id: u32) -> String {
@@ -402,8 +408,12 @@ fn starts_and_resumes_sessions_and_picks_models() {
         .expect("file time");
     let current = dir.join("current.jsonl");
     let respond = |id: u32, command: &str, data: &str| {
+        let answer = format!(
+            r#"{{"id":"{id}","type":"response","command":"{command}","success":true,"data":{data}}}"#
+        );
         format!(
-            "IFS= read -r line\ncase \"$line\" in *'\"type\":\"{command}\"'*) ;; *) exit 9 ;; esac\nprintf '%s\\n' '{{\"id\":\"{id}\",\"type\":\"response\",\"command\":\"{command}\",\"success\":true,\"data\":{data}}}'\n"
+            "IFS= read -r line\ncase \"$line\" in *'\"type\":\"{command}\"'*) ;; *) exit 9 ;; esac\nprintf '%s\\n' {}\n",
+            shell_word(&answer)
         )
     };
     let state = format!(
