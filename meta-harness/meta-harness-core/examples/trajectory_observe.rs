@@ -91,7 +91,6 @@ async fn observe() {
         let projected = started.elapsed();
         let fork = history.trajectory(Some(fork_leaf));
         let done = started.elapsed();
-        drop(history);
         let again = Instant::now();
         let update = session.history().await.expect("update");
         let updated = again.elapsed();

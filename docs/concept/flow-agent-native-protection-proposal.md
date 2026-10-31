@@ -1,6 +1,6 @@
 # Native Flow-file protection
 
-**Replacement integrated.** [SECURITY.md](../../SECURITY.md#accepted-flow-agent-security-target) owns the guarantees and exclusions. This design owns this installation's protected inventory and admission invariant for Linux Bubblewrap/seccomp and Mac Seatbelt. [PROTOCOL.md](../../PROTOCOL.md#m12-executor-protocol-adr-0146-adr-0160-adr-0161-adr-0162) owns the integrated wire/backend mechanics; [TESTING.md](../../TESTING.md#native-verification-status) owns native results and acceptance gaps. Future features belong only to the [roadmap](../../PLAN.md#later-flow-agent-roadmap).
+**Replacement integrated.** [SECURITY.md](../../SECURITY.md#accepted-flow-agent-security-target) owns the guarantees and exclusions. This design owns this installation's protected inventory and admission invariant for Linux Bubblewrap/seccomp and Mac Seatbelt. [PROTOCOL.md](../../PROTOCOL.md#m12-executor-protocol) owns the integrated wire/backend mechanics; [TESTING.md](../../TESTING.md#native-verification-status) owns native results and acceptance gaps. Future features belong only to the [roadmap](../../PLAN.md#later-flow-agent-roadmap).
 
 ## Selected mechanism and user consequences
 
@@ -12,7 +12,7 @@ Ordinary non-interactive shell commands and project builds remain the intended u
 
 ## Native App Sandbox comparison
 
-This section retains the bounded feasibility comparison that informed ADR-0172. [TESTING.md](../../TESTING.md#authorized-mac-feasibility-evaluation-adr-0167) owns reproducible commands, source revisions, counts and hosted ARM64 observations. The experiment involved no production Executor, administrator service or release-signing identity; it does not verify the integrated replacement.
+This section retains the bounded feasibility comparison that informed ADR-0172. [TESTING.md](../../TESTING.md#authorized-mac-feasibility-evaluation) owns reproducible commands, source revisions, counts and hosted ARM64 observations. The experiment involved no production Executor, administrator service or release-signing identity; it does not verify the integrated replacement.
 
 ### What Apple recommends
 
@@ -33,7 +33,7 @@ The [Apple file-access guide](https://developer.apple.com/documentation/security
 
 ### Observed security and compatibility
 
-The comparison includes the native-helper matrix and three npm workloads per configuration, including the runtime-read variant. Exact revisions and outcome counts belong to [TESTING.md](../../TESTING.md#authorized-mac-feasibility-evaluation-adr-0167). All unprotected mutation/control operations succeeded. No table entry is a general application-certification claim. Both original project-exception variants produced the same functional outcomes below.
+The comparison includes the native-helper matrix and three npm workloads per configuration, including the runtime-read variant. Exact revisions and outcome counts belong to [TESTING.md](../../TESTING.md#authorized-mac-feasibility-evaluation). All unprotected mutation/control operations succeeded. No table entry is a general application-certification claim. Both original project-exception variants produced the same functional outcomes below.
 
 | Case | Checked profile | App Sandbox with project exception |
 |---|---|---|
@@ -119,7 +119,7 @@ Resolve the following from trusted controller/installation configuration before 
 |---|---|
 | Selected `FLOW_AGENT_HOME` | Entire home: global Flow configuration, registry, runtime history, context/objects, global `AGENTS.md`, locks and staging files, including future publications. Protect directory ancestry; local instructions outside the protected store have no Flow-owned write restriction. |
 | Platform credential/selection store | Entire Flow-owned platform directory, including `credentials.json`, `executor.json`, locks and staging names. These are outside the selected home today; their locations remain canonical in [PROTOCOL.md](../../PROTOCOL.md). The inventory inspects metadata, never credential contents. |
-| Installed program objects | Under ADR-0175, always require and protect current `flow` and the selected Executor, including every covered name of the same file. Default selection requires the official sibling `flow-executor`; explicit Custom selection permits intentional omission of that sibling. An existing sibling must also pass admission and be protected, including with Custom selection; an unsafe existing sibling must never be treated as absent. Reject missing, unresolved, unsafe or replaced required programs. Custom code still belongs to the trusted installation, not third-party certification. |
+| Installed program objects | Always require and protect current `flow` and the selected Executor, including every covered name of the same file. Default selection requires the official sibling `flow-executor`; explicit Custom selection permits intentional omission of that sibling. An existing sibling must also pass admission and be protected, including with Custom selection; an unsafe existing sibling must never be treated as absent. Reject missing, unresolved, unsafe or replaced required programs. Custom code still belongs to the trusted installation, not third-party certification. |
 | Path ancestry | Prevent Tools from removing or renaming any canonical ancestor of a protected directory or program. Do not prohibit ordinary unrelated child-file edits in those ancestors. Moving a parent folder containing Flow data is consequently unavailable to Tools. |
 | Terminal access | No terminal handles are inherited. Deny direct access to the supported Mac terminal-device namespace, including later-created terminals; protect `/dev/tty` and console paths as well as the selected device. This prevents a different Run's new terminal from becoming an unguarded direct entry point. ADR-0173 does not remove this accepted restriction. |
 
@@ -140,7 +140,7 @@ The required invariant depends on all of the following; native acceptance must v
 
 Existing Flow processes must coordinate initial admission with their protected-file publication operations using an installation-owned lease and anchored identities. A scan racing a publisher is retried within a bounded admission attempt or rejected; it is not a valid snapshot. Do not serialize entire Runs or ordinary project work behind that admission lease. Do not rescan all retained history for every Tool call: retain one verified controller admission and preserve it through checked publisher operations. Retain measurements of the actual scanner and contention under [PERFORMANCE.md](../../PERFORMANCE.md); the small fixture scan supplies no large-history performance claim.
 
-The integrated incremental admission and descriptor contract are recorded in [PROTOCOL.md](../../PROTOCOL.md#m12-executor-protocol-adr-0146-adr-0160-adr-0161-adr-0162). The inventory covers the selected home, platform stores and required program images; [TESTING.md](../../TESTING.md#native-verification-status) records native verification.
+The integrated incremental admission and descriptor contract are recorded in [PROTOCOL.md](../../PROTOCOL.md#m12-executor-protocol). The inventory covers the selected home, platform stores and required program images; [TESTING.md](../../TESTING.md#native-verification-status) records native verification.
 
 Unconfined external writers, privileged actors and controller/OS compromise are the existing trust exclusions, not problems solved by the lease. Cooperative locks alone never constrain a malicious Tool. The native restriction is what preserves the established set against Tool code.
 

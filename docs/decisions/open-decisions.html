@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Watershed - Open Decisions</title>
 <style>
-:root{--bg:#101317;--panel:#171b21;--panel2:#20262e;--text:#eef1f5;--muted:#a8b1bd;--line:#303844;--accent:#6db7ff;--warn:#ffd37a;--good:#8ce8aa;--r:8px;--font:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:16px/1.55 var(--font)}a{color:var(--accent)}main{max-width:1180px;margin:0 auto;padding:28px}.hero{border-bottom:1px solid var(--line);padding-bottom:20px;margin-bottom:20px}h1{font-size:40px;line-height:1.05;margin:0 0 10px}h2{font-size:22px;margin:28px 0 12px}h3{font-size:18px;margin:0 0 8px}.muted{color:var(--muted)}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;align-items:start}.decision{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:14px}.decision p{margin:8px 0}.decision ul{margin:8px 0 0 20px;padding:0}.tag{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:2px 8px;margin:0 4px 8px 0;color:var(--muted);font-size:12px}.m1{color:var(--good)}.m2{color:var(--warn)}nav{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}nav a{border:1px solid var(--line);border-radius:999px;padding:5px 10px;text-decoration:none;color:var(--muted)}nav a:hover{background:var(--panel2);color:var(--text)}@media(max-width:820px){main{padding:18px}.grid{grid-template-columns:1fr}h1{font-size:32px}}
+:root{--bg:#101317;--panel:#171b21;--panel2:#20262e;--text:#eef1f5;--muted:#a8b1bd;--line:#303844;--accent:#6db7ff;--warn:#ffd37a;--good:#8ce8aa;--r:8px;--font:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:16px/1.55 var(--font)}a{color:var(--accent)}main{max-width:1180px;margin:0 auto;padding:28px}.hero{border-bottom:1px solid var(--line);padding-bottom:20px;margin-bottom:20px}h1{font-size:40px;line-height:1.05;margin:0 0 10px}h2{font-size:22px;margin:28px 0 12px}h3{font-size:18px;margin:0 0 8px}.muted{color:var(--muted)}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;align-items:start}.decision{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:14px}.decision p{margin:8px 0}.decision ul{margin:8px 0 0 20px;padding:0}.tag{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:2px 8px;margin:0 4px 8px 0;color:var(--muted);font-size:12px}.m1{color:var(--good)}.m2{color:var(--warn)}nav{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}nav a{border:1px solid var(--line);border-radius:999px;padding:5px 10px;text-decoration:none;color:var(--muted)}nav a:hover{background:var(--panel2);color:var(--text)}.decision code{overflow-wrap:anywhere}@media(max-width:820px){main{padding:18px}.grid{grid-template-columns:minmax(0,1fr)}h1{font-size:32px}}
 summary{cursor:pointer}summary h3{display:inline;margin:0}summary:focus-visible{outline:2px solid var(--accent);outline-offset:5px}details[open]>summary{margin-bottom:12px}
 </style>
 </head>
@@ -47,7 +47,7 @@ summary{cursor:pointer}summary h3{display:inline;margin:0}summary:focus-visible{
     <div class="grid">
       <details id="d-065" class="decision" style="grid-column:1/-1">
         <summary><h3>D-065 - Development And Release Publication Safeguards</h3></summary>
-        <p><strong>Status:</strong> Must be decided, implemented and verified before each affected product's first release: Flow Agent, Meta-Harness and Liquid. This entry records open work, not active protection. The approved download contract is canonical in <a href="../../SECURITY.md#m12-tool-execution-trust-boundary">SECURITY.md</a> (ADR-0164/ADR-0165); it does not require users to install a build-provenance verifier.</p>
+        <p><strong>Status:</strong> Must be decided, implemented and verified before each affected product's first release: Flow Agent, Meta-Harness and Liquid. This entry records open work, not active protection. The approved download contract is canonical in <a href="../../SECURITY.md#m12-tool-execution-trust-boundary">SECURITY.md</a>; it does not require users to install a build-provenance verifier.</p>
         <p><strong>Problem:</strong> A stolen publishing account or an unsafe build step could place a harmful program in the real GitHub Release, even while the visible source code remains unchanged. HTTPS and a matching checksum would still succeed. The development team must protect that trusted source without making installation harder for users.</p>
         <h4>Decisions required</h4>
         <ul>
@@ -73,9 +73,9 @@ summary{cursor:pointer}summary h3{display:inline;margin:0}summary:focus-visible{
     <div class="grid">
       <details id="d-021" class="decision">
         <summary><h3>D-021 - Meta-Harness Packaging</h3></summary>
-        <p><strong>Status:</strong> Open implementation detail before M2; ADR-0018 already requires a non-graphical controller.</p>
-        <p><strong>Question:</strong> How should that controller be packaged for its first release?</p>
-        <ul><li><strong>A:</strong> A command-line app plus a background service. Pro: useful without Liquid and easy to test. Con: no rich interface.</li><li><strong>B:</strong> Add a small status screen after the controller works. Pro: easier demonstrations. Con: another part to package and maintain.</li></ul>
+        <p><strong>Status:</strong> Open implementation detail before M2; Meta-Harness must already run headless, without Liquid (<a href="../concept/V-Spec_MetaHarness.html">Meta-Harness V-Spec</a>).</p>
+        <p><strong>Question:</strong> How should Meta-Harness be packaged for its first release?</p>
+        <ul><li><strong>A:</strong> A command-line app plus a background service. Pro: useful without Liquid and easy to test. Con: no rich interface.</li><li><strong>B:</strong> Add a small status screen once Meta-Harness itself works headless. Pro: easier demonstrations. Con: another part to package and maintain.</li></ul>
         <p><strong>Recommendation:</strong> A; no competing full standalone GUI in the MVP.</p>
       </details>
       <details id="d-024" class="decision">
@@ -100,6 +100,22 @@ summary{cursor:pointer}summary h3{display:inline;margin:0}summary:focus-visible{
         <ul><li><strong>A: Liquid starts it when needed and stops it when it quits</strong>, as T3 Code does with its server, restarting it after a crash. Pro: nothing to install or register, and no background process while Liquid is closed. Con: agents end when Liquid quits or updates, and the CLI needs its own instance or must find Liquid's.</li><li><strong>B: A login service runs it</strong> (a launchd user agent on macOS, a systemd user unit on Linux, both without administrator rights); Liquid and the CLI connect to it. Pro: agents keep running through Liquid closing, crashing or updating; one instance serves Liquid, the CLI and remote clients; the operating system restarts it. Con: installation registers the service and removal must unregister it, a process runs while nobody uses it, and updating it must not end running agents.</li><li><strong>C: Liquid starts it if none runs, and it stays while agents run.</strong> Pro: no installation step, and agents finish after Liquid closes. Con: more lifetime rules to get right, and a service nobody stops if they are wrong.</li></ul>
         <p><strong>Recommendation:</strong> B, which matches the background service <a href="#d-021">D-021</a> recommends: agents survive the window, and the operating system supervises the service instead of our own restart code.</p>
         <p><strong>Acceptance criterion:</strong> The ADR log names who starts and stops the service, and tests show Liquid connecting to a running service and reporting one it cannot reach.</p>
+      </details>
+      <details id="d-075" class="decision">
+        <summary><h3>D-075 - Agent Checkpoint Details</h3></summary>
+        <p><strong>Status:</strong> Open; decide with the checkpoint slice. ADR-0220 settled that Meta-Harness, as T3 Code does, stores the agent project's files at each turn as commits under its own refs in the project repository. A ref is a named pointer inside <code>.git</code>; the commits behind these refs appear on no branch, and a normal <code>git push</code> does not send them, only a mirror push does. On 2026-10-30 the maintainer approved writing them off the UI path and deleting a session's checkpoints with the session.</p>
+        <p><strong>Question:</strong> Which other details does Watershed take over from T3 Code?</p>
+        <ul>
+          <li><strong>When:</strong> T3 Code stores one checkpoint at a turn's start and one at its end, none per tool call. Pro: one scan of the project per turn. Con: the changes of a turn's tool calls cannot be told apart. Per tool call would show each call's changes, but scans the whole project before and after every changing call.</li>
+          <li><strong>What:</strong> T3 Code stores tracked and new files, not files Git ignores. Pro: secrets such as <code>.env</code> and build output such as <code>node_modules</code> stay out of the repository. Con: changes to ignored files stay invisible, as in today's Diff tab.</li>
+          <li><strong>Names:</strong> T3 Code uses <code>refs/t3/orchestration-v2/checkpoints/&lt;thread&gt;/ordinal/&lt;turn&gt;</code>; Watershed would use its own namespace, such as <code>refs/watershed/checkpoints/&lt;session&gt;/&lt;turn&gt;</code>.</li>
+          <li><strong>Removing all:</strong> T3 Code deletes a checkpoint only when a return makes it obsolete, never with its thread. Besides deleting with the session, one action could remove all of Watershed's checkpoints at once; Git's own cleanup then frees the space.</li>
+          <li><strong>Returning to a turn:</strong> T3 Code restores the files below the working folder, deletes new files Git does not ignore, unstages those files and never moves the branch, so commits stay. It refuses when another running thread uses the same folder. Watershed would also list the affected files before asking, and refuse while an agent runs in the same checkout.</li>
+          <li><strong>Diff tab:</strong> it would read changes from the checkpoints instead of today's temporary store, so earlier runs stay visible after a restart.</li>
+          <li><strong>Without Git:</strong> T3 Code stores no checkpoints in a folder without a Git repository and says so; Watershed would do the same.</li>
+        </ul>
+        <p><strong>Recommendation:</strong> Take over T3 Code's timing, content and return rules; differ in the own <code>refs/watershed/</code> namespace, the action that removes all checkpoints and the file list before a return.</p>
+        <p><strong>Acceptance criterion:</strong> The ADR log names these choices, and tests show a turn's checkpoints, its diff, a return to it, a refused return while an agent runs, and the removal of a session's checkpoints.</p>
       </details>
     </div>
   </section>
@@ -137,7 +153,7 @@ summary{cursor:pointer}summary h3{display:inline;margin:0}summary:focus-visible{
       </details>
       <details id="d-035" class="decision">
         <summary><h3>D-035 - Sync Conflict Semantics</h3></summary>
-        <p><strong>Status:</strong> Open before shared-workspace work. ADR-0182 already requires an established CRDT library (a data structure that lets copies edited offline merge to the same result) and forbids custom conflict-resolution logic.</p>
+        <p><strong>Status:</strong> Open until Liquid's own History is implemented: on 2026-10-29 the maintainer confirmed the CRDT approach and kept this and the related History questions (<a href="#d-028">D-028</a>, <a href="#d-029">D-029</a>, <a href="#d-031">D-031</a>) open until then. ADR-0182 already requires an established CRDT library (a data structure that lets copies edited offline merge to the same result) and forbids custom conflict-resolution logic.</p>
         <p><strong>Question:</strong> Which CRDT library should combine concurrent offline changes?</p>
         <ul><li><strong>A:</strong> yrs, the Rust port of Yjs. Pro: very fast rich-text editing and compact updates; widely deployed, including in AppFlowy. Con: Liquid's Block and View model must be mapped onto Yjs data types; when two devices change the same field, one value silently wins and the other is dropped; its history is not attributed per actor.</li><li><strong>B:</strong> Automerge. Pro: JSON-like documents with a complete change history that maps naturally to attributed History; when two devices change the same field it keeps both values, so Liquid can show the user both instead of losing one. Con: historically higher memory and CPU use on large documents, so it must be proven against the Liquid workloads.</li></ul>
         <p><strong>Recommendation:</strong> B, because it does not silently drop a concurrent change, unless the acceptance spike shows it cannot keep typing and memory use responsive; then reconsider A. Either way every replica keeps applying received changes through its own mutation pipeline as <a href="../../SECURITY.md">SECURITY.md</a> requires.</p>
@@ -152,11 +168,12 @@ summary{cursor:pointer}summary h3{display:inline;margin:0}summary:focus-visible{
     <div class="grid">
       <details id="d-067" class="decision">
         <summary><h3>D-067 - Building Block Marketplace</h3></summary>
-        <p><strong>Status:</strong> Later-roadmap specification, not a blocker for the first Flow Agent release. No marketplace is implemented or authorized by this entry.</p>
+        <p><strong>Status:</strong> Later-roadmap specification, not a blocker for the first Flow Agent release. No marketplace is implemented or authorized by this entry. On 2026-10-30 the maintainer approved Liquid as the place where Building Blocks are shared; Meta-Harness materializes configurations kept there on each host (ADR-0227).</p>
         <p><strong>Question:</strong> How should Engineers discover and share Building Blocks without confusing distribution checks with trust in executable code?</p>
         <ul>
           <li><strong>A - An opt-in catalog with explicit versioned installation.</strong> Pro: a smaller initial discovery/distribution surface with visible author, source, dependencies and declared behavior. Con: Engineers still assess trust and manage updates.</li>
           <li><strong>B - An integrated marketplace with managed updates and review services.</strong> Pro: easier discovery and lifecycle management. Con: publishing authority, moderation, dependency resolution, update consent and compromised-package response require a larger specification.</li>
+          <li><strong>Where, raised by the maintainer on 2026-10-29:</strong> sharing is a platform task, so the catalog could live in Liquid, which already syncs Workspaces with Roles and History, and also offer configurations for pi and Flow Agent. Pro: one place for teams and companies, which can curate their own catalog through Roles. Con: Flow Agent or pi users without Liquid need another way, and Liquid becomes a distribution point that must sign, version and withdraw packages.</li>
         </ul>
         <p><strong>Recommendation:</strong> Specify A first when this roadmap item is scheduled. Decide author identity, artifact integrity/version pinning, install/update consent, requested scopes, provenance, removal/revocation and incident handling. A listing or review is not a Watershed guarantee that third-party code is safe; default-Tool responsibility remains separate under <a href="#d-066">D-066</a>.</p>
         <p><strong>Acceptance criterion:</strong> Approve the specification before implementation; demonstrate discovery, explicit installation/replacement, tampered-artifact rejection, permission-changing updates and a compromised-package response under the published responsibility model. Never execute downloaded code merely to inspect a listing.</p>
@@ -173,7 +190,7 @@ summary{cursor:pointer}summary h3{display:inline;margin:0}summary:focus-visible{
         <summary><h3>D-056 - Existing Output Security-Metadata Matrix</h3></summary>
         <p><strong>Status:</strong> Open before post-M1 existing-output replacement; not an M1.1 blocker.</p>
         <p><strong>Question:</strong> Which exact security-metadata fields must atomic own-script output replacement preserve on Flow Agent's native targets in <a href="../../PLATFORMS.md">PLATFORMS.md</a>, and what happens when a required field cannot be read or applied?</p>
-        <p><strong>Decided direction:</strong> The ADR-0087/ADR-0088 create-only boundary rejects every existing output target in M1.1; replacement remains unavailable until this finite per-platform field matrix is decided and implemented.</p>
+        <p><strong>Decided direction:</strong> The create-only output boundary in <a href="../../SECURITY.md">SECURITY.md</a> rejects every existing output target in M1.1; replacement remains unavailable until this finite per-platform field matrix is decided and implemented.</p>
         <ul><li><strong>A:</strong> Preserve a maintainer-selected native field set and fail when any selected field is unavailable. Pro: explicit, testable preservation. Con: replacements can fail because of privileges or platform support.</li><li><strong>B:</strong> Preserve a smaller maintainer-selected field set and reject targets carrying selected unsupported metadata. Pro: a narrower implementation. Con: detection and rejection rules remain platform-specific.</li></ul>
         <p><strong>Recommendation:</strong> A; choose the exact fields and unavailable-field behavior only with platform evidence.</p>
         <p><strong>Acceptance criterion:</strong> Record the exact finite matrix and failure behavior, then pass native fixtures on each supported Flow Agent target for every required field before restoring existing-output replacement.</p>
@@ -219,6 +236,18 @@ summary{cursor:pointer}summary h3{display:inline;margin:0}summary:focus-visible{
         <p><strong>Recommendation:</strong> A; retain C as a clearly separate recovery path that never claims verified source history.</p>
         <p><strong>Acceptance criterion:</strong> For A/B, define canonical signed/MACed bytes, identity binding, key storage/rotation/revocation limits, replay/downgrade rules, attribution and verification errors; tampering with the authenticated root, content, branch links or version must fail before destination mutation or provider/Tool effects. For C, label every record unauthenticated, permit no Portable continuation or effects, define explicit human review and destination resealing as new local evidence, and never claim source attribution or source-history verification.</p>
       </details>
+      <details id="d-076" class="decision">
+        <summary><h3>D-076 - Private Terminal For Tools</h3></summary>
+        <p><strong>Status:</strong> Open after the first Flow Agent release. ADR-0170 denies Tools direct access to terminal devices, so a Tool cannot write over or type into the terminal where a person reviews Flow Agent's output. Programs that insist on a terminal, such as password prompts of <code>ssh</code> or <code>sudo</code>, full-screen programs and some interactive shells, then fail or behave differently; ordinary input over stdin still works.</p>
+        <p><strong>Question:</strong> Should Flow Agent give each Tool call its own private terminal?</p>
+        <ul>
+          <li><strong>A: Keep no terminal.</strong> Pro: the simplest rule, already in place. Con: those programs stay unavailable to Tools.</li>
+          <li><strong>B: A new pseudo-terminal per Tool call</strong> that Flow Agent creates and connects to nothing the user sees, as Codex's Seatbelt profile lets commands open new pseudo-terminals but not the user's. Pro: programs that need a terminal run, and the user's terminal stays protected. Con: native work per operating system and sandbox profile; a program can wait for input forever, so a time limit must end it; terminal control codes in its output must be shown safely.</li>
+          <li><strong>C: Connect the Tool's terminal to the user</strong> in the CLI or Liquid, so they can answer it. Pro: interactive Tools work fully. Con: a Tool could imitate Flow Agent's own prompts, the risk ADR-0170 removes.</li>
+        </ul>
+        <p><strong>Recommendation:</strong> B once a concrete Tool needs it; C only after a new security review.</p>
+        <p><strong>Acceptance criterion:</strong> Native tests on each supported Flow Agent target show a Tool using its own terminal, no Tool reaching the user's terminal, and a waiting Tool ending at its time limit.</p>
+      </details>
     </div>
   </section>
 
@@ -227,7 +256,7 @@ summary{cursor:pointer}summary h3{display:inline;margin:0}summary:focus-visible{
     <div class="grid">
       <details id="d-010" class="decision">
         <summary><h3>D-010 - AgentPulse v0 Formulas</h3></summary>
-        <p><strong>Status:</strong> Open; deferred with AgentPulse to the end of the roadmap (ADR-0187).</p>
+        <p><strong>Status:</strong> Open; deferred with AgentPulse to the end of the roadmap.</p>
         <p><strong>Question:</strong> Should the three scores use only facts already recorded during runs, or also an AI judgment?</p>
         <ul><li><strong>A:</strong> Use recorded run facts only. Pro: the same input always gives the same auditable score. Con: the first version captures fewer nuances.</li><li><strong>B:</strong> Add AI-assigned quality labels. Pro: captures more nuance. Con: scores become subjective and harder to test.</li></ul>
         <p><strong>Recommendation:</strong> A for the first version; reserve model-scored labels for later evaluation.</p>

@@ -6,7 +6,7 @@ use std::sync::{LazyLock, PoisonError};
 use std::path::{Path, PathBuf};
 
 use meta_harness_core::{
-    AgentCommand, Answer, CommandError, Delivery, DiffError, RequestId, RunDiff, Session,
+    AgentCommand, Answer, Capture, CommandError, Delivery, DiffError, RequestId, RunDiff, Session,
     SessionEvent, Whitespace, recent_sessions, session_title, visible_lines,
 };
 use tokio::runtime::Runtime;
@@ -14,9 +14,10 @@ use tokio::sync::{Mutex, mpsc};
 
 use crate::api::events::{BridgeDecision, BridgeEvent, BridgeFileChange, BridgeQueue};
 use crate::api::history::{BridgeContextDetail, BridgeHistory, BridgeTranscript};
-use crate::convert::{coalesce, describe};
+use crate::convert::describe;
 use crate::frb_generated::StreamSink;
 use crate::ready::{SHUTDOWN_GRACE, START_TIMEOUT, error_output, ready};
+use crate::stream::{STREAM_WINDOW, gather, push};
 
 static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
     tokio::runtime::Builder::new_multi_thread()
@@ -26,7 +27,7 @@ static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
         .expect("the bridge runtime starts")
 });
 
-/// How to start pi; the core adds its arguments (ADR-0211).
+/// How to start pi; the core adds its arguments.
 pub struct SessionConfig {
     /// The executable.
     pub program: String,
@@ -58,6 +59,8 @@ pub struct BridgeModel {
     pub id: String,
     /// The name to show.
     pub name: String,
+    /// Tokens the model can take in one request, when the agent knows them.
+    pub context_window: Option<i64>,
 }
 
 /// How much an agent may do without asking.
@@ -166,23 +169,19 @@ impl AgentSession {
         let early = std::mem::take(&mut *self.early.lock().unwrap_or_else(PoisonError::into_inner));
         RUNTIME.spawn(async move {
             // Events from before the start finished come first.
-            let mut batch: Vec<_> = early.into_iter().map(BridgeEvent::from).collect();
-            if !coalesce(std::mem::take(&mut batch))
-                .into_iter()
-                .all(&mut deliver)
-            {
+            let mut batch = Vec::new();
+            for event in early {
+                push(&mut batch, BridgeEvent::from(event));
+            }
+            if !std::mem::take(&mut batch).into_iter().all(&mut deliver) {
                 return;
             }
             while let Some(event) = receiver.recv().await {
-                batch.push(BridgeEvent::from(event));
-                while let Ok(event) = receiver.try_recv() {
-                    batch.push(BridgeEvent::from(event));
-                }
+                push(&mut batch, BridgeEvent::from(event));
+                // Bounded by the window, so a busy agent never holds delivery back.
+                gather(&mut batch, &mut receiver, tokio::time::sleep(STREAM_WINDOW)).await;
                 // Dart closed the stream: stop; dropping the session ends the agent.
-                if !coalesce(std::mem::take(&mut batch))
-                    .into_iter()
-                    .all(&mut deliver)
-                {
+                if !std::mem::take(&mut batch).into_iter().all(&mut deliver) {
                     break;
                 }
             }
@@ -221,16 +220,19 @@ impl AgentSession {
             // The session stays free meanwhile, so questions asked before acceptance can be
             // answered.
             let started = pending.started().await.map_err(describe)?;
-            // Only a prompt that started a run makes its capture count.
-            if let Some(capture) = capture.filter(|_| started) {
-                self.diff.started(capture);
+            // Only a prompt that started a run makes its capture count. One sent while a run
+            // was in progress has none, yet that run may have ended before the prompt arrived.
+            if started {
+                self.diff.started(capture.unwrap_or_else(|| {
+                    Capture::missed("a previous run was in progress when the message was sent")
+                }));
             }
             Ok(())
         })
     }
 
     /// Files the latest run changed, compared with the project before it; none outside Git.
-    /// With `hide_whitespace`, changes that are only whitespace are left out (ADR-0212).
+    /// With `hide_whitespace`, changes that are only whitespace are left out.
     pub fn changes(&self, hide_whitespace: bool) -> Result<Option<Vec<BridgeFileChange>>, String> {
         match RUNTIME.block_on(self.diff.changes(whitespace(hide_whitespace))) {
             Ok(changes) => Ok(Some(changes.into_iter().map(Into::into).collect())),

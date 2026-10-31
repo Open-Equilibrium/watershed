@@ -2,7 +2,7 @@ import Foundation
 import IOKit.hid
 import IOKit.hidsystem
 
-/// Caps Lock as the Liquid key (ADR-0205): every keyboard sends F18 for it while the key is on.
+/// Caps Lock as the Liquid key: every keyboard sends F18 for it while the key is on.
 enum Mapping {
     static let capsLock: UInt64 = 0x7_0000_0039
     static let f18: UInt64 = 0x7_0000_006D
@@ -22,29 +22,64 @@ enum Mapping {
         return on ? kept + [[source: capsLock, destination: f18]] : kept
     }
 
-    /// Applies the Liquid key to every keyboard attached now; needs no permission.
-    static func apply(on: Bool) {
+    /// Applies the Liquid key to every keyboard attached now; needs no permission. Returns
+    /// whether macOS listed the keyboards and each one took it.
+    @discardableResult
+    static func apply(on: Bool) -> Bool {
         let key = "UserKeyMapping" as CFString
         let client = IOHIDEventSystemClientCreateSimpleClient(kCFAllocatorDefault)
         guard let services = IOHIDEventSystemClientCopyServices(client) as? [IOHIDServiceClient]
-        else { return }
-        for service in services
-        where IOHIDServiceClientConformsTo(
-            service, UInt32(kHIDPage_GenericDesktop), UInt32(kHIDUsage_GD_Keyboard)) != 0
-        {
-            let current = IOHIDServiceClientCopyProperty(service, key) as? [[String: Any]] ?? []
-            IOHIDServiceClientSetProperty(service, key, merged(current, on: on) as CFArray)
+        else { return false }
+        let keyboards = services.filter { service in
+            IOHIDServiceClientConformsTo(
+                service, UInt32(kHIDPage_GenericDesktop), UInt32(kHIDUsage_GD_Keyboard)) != 0
         }
+        return apply(
+            on: on, to: keyboards,
+            read: { IOHIDServiceClientCopyProperty($0, key) as? [[String: Any]] ?? [] },
+            write: { IOHIDServiceClientSetProperty($0, key, $1 as CFArray) })
+    }
+
+    /// Applies the Liquid key to each keyboard, also after one refuses it; returns whether all
+    /// took it.
+    static func apply<Keyboard>(
+        on: Bool, to keyboards: [Keyboard], read: (Keyboard) -> [[String: Any]],
+        write: (Keyboard, [[String: Any]]) -> Bool
+    ) -> Bool {
+        !keyboards.map { write($0, merged(read($0), on: on)) }.contains(false)
     }
 }
 
-/// A press and release of the Liquid key short enough to open Liquid, with no other key
-/// pressed meanwhile. `lastPress` is the key's latest press, its own repeats included;
-/// `lastKeyDown` is the latest key press of any key, which macOS reports without permission.
-func isTap(
-    pressed: TimeInterval, released: TimeInterval, lastPress: TimeInterval,
-    lastKeyDown: TimeInterval
-) -> Bool {
-    // The Liquid key's own press lands a moment after the hotkey reports it.
-    released - pressed < 0.6 && lastKeyDown - lastPress < 0.05
+/// A press of the Liquid key: a tap, which opens Liquid, when released soon with no other key
+/// pressed meanwhile. Without permission macOS reports only the latest press of any key,
+/// `lastKeyDown`, so each of the key's own repeats checks for another key since the press
+/// before it, as the release does. A key pressed within 50 ms of the Liquid key's press or
+/// repeat passes for the Liquid key's own, so such a fast chord still counts as a tap.
+struct Press {
+    let pressed: TimeInterval
+    /// The key's latest press, its own repeats included.
+    private var lastPress: TimeInterval
+    private var otherKey = false
+
+    init(at time: TimeInterval) {
+        pressed = time
+        lastPress = time
+    }
+
+    /// The key's own repeat at `time`.
+    mutating func repeated(at time: TimeInterval, lastKeyDown: TimeInterval) {
+        otherKey = otherKey || otherKeyDown(lastKeyDown)
+        lastPress = time
+    }
+
+    /// Whether a release at `time` ends a tap.
+    func isTap(released time: TimeInterval, lastKeyDown: TimeInterval) -> Bool {
+        time - pressed < 0.6 && !otherKey && !otherKeyDown(lastKeyDown)
+    }
+
+    /// The Liquid key's own press lands a moment after the hotkey reports it; another key
+    /// within that moment cannot be told apart from it.
+    private func otherKeyDown(_ lastKeyDown: TimeInterval) -> Bool {
+        lastKeyDown - lastPress >= 0.05
+    }
 }

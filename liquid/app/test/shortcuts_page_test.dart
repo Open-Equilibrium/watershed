@@ -73,6 +73,8 @@ void main() {
     expect(find.text('tap ⇪'), findsOneWidget);
     expect(find.text('Trajectory'), findsWidgets);
     expect(find.text('Fold or unfold the folder'), findsOneWidget);
+    expect(find.text('Collapse or expand the turn'), findsOneWidget);
+    expect(find.text('Collapse all turns'), findsOneWidget);
 
     await press(tester, LogicalKeyboardKey.escape);
     expect(find.text('tap ⇪'), findsNothing);
@@ -135,6 +137,7 @@ void main() {
     ]);
     expect(shortcuts.value.bindings(Command.newSession), isEmpty);
 
+    await tester.ensureVisible(find.text('Reset all to defaults'));
     await tester.tap(find.text('Reset all to defaults'));
     await tester.pumpAndSettle();
     expect(shortcuts.value, ShortcutSettings.standard());
@@ -223,7 +226,7 @@ void main() {
       );
       expect(shortcuts.value.profile, Profile.standard);
       expect(
-        find.descendant(of: find.byType(ShortcutsPage), matching: reason),
+        find.descendant(of: find.byType(SettingsPage), matching: reason),
         findsOneWidget,
       );
 
@@ -231,7 +234,7 @@ void main() {
       await tester.tap(find.text('Custom'));
       await tester.pumpAndSettle();
       expect(
-        find.descendant(of: find.byType(ShortcutsPage), matching: reason),
+        find.descendant(of: find.byType(SettingsPage), matching: reason),
         findsNothing,
         reason: 'choosing a profile again clears the reason',
       );

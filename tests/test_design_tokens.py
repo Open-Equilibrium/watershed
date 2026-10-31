@@ -1,4 +1,4 @@
-"""Liquid's Dart design tokens must follow the canonical CSS tokens (ADR-0194)."""
+"""Liquid's Dart design tokens must follow the canonical CSS tokens."""
 
 import importlib.util
 import re
@@ -55,6 +55,16 @@ class DesignTokens(unittest.TestCase):
         self.assertIn(
             r"static const List<String> fontUi = ['Inter', 'Noto\'s Sans', 'Font\$Name'];", dart)
 
+    def test_comments_define_no_tokens(self):
+        commented = SAMPLE.replace("--ws-fs-ui: 14px;", "--ws-fs-ui: 14px; /* --ws-fs-ui: 99px; } */")
+        commented += "/* .theme-dark { --ws-text-muted: #000000; } */\n"
+        self.assertEqual(TOKENS.render(commented), TOKENS.render(SAMPLE))
+        unclosed = SAMPLE + "\n/* :root { --ws-fs-ui: 99px; }"
+        self.assertEqual(TOKENS.render(unclosed), TOKENS.render(SAMPLE),
+                         "a comment left open runs to the end")
+        quoted = TOKENS.render(SAMPLE.replace('"Segoe UI"', '"Segoe/*UI*/"'))
+        self.assertIn("'Segoe/*UI*/'", quoted, "a quoted name keeps what looks like a comment")
+
     def test_themes_must_define_the_same_tokens(self):
         with self.assertRaisesRegex(ValueError, "light and dark"):
             TOKENS.render(SAMPLE.replace("--ws-text-muted: #9b9b9b;", ""))
@@ -76,9 +86,7 @@ class DesignTokens(unittest.TestCase):
         self.assertEqual(TOKENS.main(["--check"]), 0)
 
     def test_text_tones_meet_wcag_aa_wherever_they_carry_content(self):
-        css = TOKENS.CSS.read_text()
-        blocks = {selector: dict(TOKENS.DECLARATION.findall(body))
-                  for selector, body in TOKENS.BLOCK.findall(css)}
+        blocks = TOKENS.blocks(TOKENS.CSS.read_text())
 
         def luminance(hex_color):
             channels = [int(hex_color[i:i + 2], 16) / 255 for i in (1, 3, 5)]
@@ -95,7 +103,7 @@ class DesignTokens(unittest.TestCase):
                  for background in backgrounds]
         # Diff line numbers sit on the strong diff colors in muted.
         pairs += [("text-muted", "diff-add-strong"), ("text-muted", "diff-del-strong")]
-        # Status colors are text on surfaces, hover rows and their own tints (ADR-0212).
+        # Status colors are text on surfaces, hover rows and their own tints.
         for tone, tint in [("accent", "accent-subtle"), ("success", "success-subtle"),
                            ("warning", "warning-subtle"), ("danger", "danger-subtle")]:
             pairs += [(tone, background)

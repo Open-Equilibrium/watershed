@@ -215,8 +215,9 @@ def detached(probe, root: Path, guarded: bool) -> dict:
         return {"case": "helper_after_parent_exit", "outcome": "failure", "leader": leader}
     release.write_bytes(b"parent-exited")
     deadline = time.monotonic() + 5
-    while not result.exists() and time.monotonic() < deadline: time.sleep(.01)
-    child, intact = probe.read_marker(result), probe.unchanged(data["file"])
+    # The helper creates its result before writing it; wait for a complete marker.
+    while (child := probe.read_marker(result)) is None and time.monotonic() < deadline: time.sleep(.01)
+    intact = probe.unchanged(data["file"])
     passed = child == {"state": "error", "errno": errno.EPERM} and intact if guarded else child == {"state": "ok"} and not intact
     return {"case": "helper_after_parent_exit", "outcome": "pass" if passed else "violation" if child else "failure",
             "leader_exit": leader["returncode"], "child": child, "protected_intact": intact}

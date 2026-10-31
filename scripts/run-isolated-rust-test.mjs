@@ -19,15 +19,9 @@ if (!executable) {
     stdio: "inherit",
   });
   const forwardedSignals = ["SIGINT", "SIGTERM"];
+  // Forward every signal until the child exits; kill() is a no-op once it has.
   const signalHandlers = new Map(
-    forwardedSignals.map((signal) => [
-      signal,
-      () => {
-        if (!child.killed) {
-          child.kill(signal);
-        }
-      },
-    ]),
+    forwardedSignals.map((signal) => [signal, () => child.kill(signal)]),
   );
   for (const signal of forwardedSignals) {
     process.on(signal, signalHandlers.get(signal));

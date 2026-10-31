@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Liquid: input area, timeline navigation and session tree</title>
+<style>
+body{margin:0;padding:24px;background:#fff;color:#37352f;font:14px/1.5 ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;display:flex;flex-direction:column;gap:28px}
+h1{font-size:20px;margin:0}h2{font-size:16px;margin:0 0 4px}
+p{margin:0 0 8px;color:#6b6a67;font-size:13px}
+.pc{font-size:12.5px;color:#6b6a67;margin:8px 0 0;padding-left:16px}.pc b{color:#37352f}
+.t{--c:#fff;--sb:#f7f7f5;--hv:#efefed;--sel:#dfedfc;--bd:#e9e9e7;--bs:#dcdbd8;--t:#37352f;--tm:#504f4c;--tf:#6b6a67;--ac:#0064d2;--as:#e5f0fd;--d2:#8a5fad}
+.win{background:var(--c);color:var(--t);border-radius:10px;box-shadow:0 0 0 1px var(--bs),0 3px 10px rgba(15,15,15,.06);overflow:hidden;font-size:11.5px;line-height:1.4;position:relative}
+.f{color:var(--tf)}.mono{font-family:ui-monospace,Menlo,monospace}
+.app{display:grid;grid-template-columns:150px 1fr;height:340px}
+.side{background:var(--sb);border-right:1px solid var(--bd);padding:8px;font-size:11px}.side .s{background:var(--hv);border-radius:6px;padding:3px 6px;margin-top:6px}
+.main{display:flex;flex-direction:column;min-width:0}
+.tabs{display:flex;gap:12px;padding:6px 10px 0;border-bottom:1px solid var(--bd)}.tabs span{padding:3px 0;color:var(--tm)}.tabs .on{color:var(--t);font-weight:600;box-shadow:inset 0 -2px 0 var(--ac)}
+.body{flex:1;display:grid;grid-template-columns:1fr 150px;min-height:0}
+.ledger{min-width:0;position:relative;overflow:hidden}
+.row{display:grid;grid-template-columns:18px 56px 1fr 44px 52px 46px;gap:6px;align-items:center;height:22px;padding:0 10px;border-bottom:1px solid var(--bd);white-space:nowrap}
+.row.h{color:var(--tf);font-size:10.5px}.row.sel{background:var(--sel)}.row .n{text-align:right}
+.tg{display:inline-block;font-size:10px;padding:0 4px;border-radius:3px;background:var(--hv);color:var(--tm)}.tg.m{background:var(--as);color:var(--ac)}.tg.tl{background:#f1e9f8;color:var(--d2)}.tg.ap{background:#fbecdd;color:#9a4f00}
+.dim{opacity:.32}
+.comp{border-radius:12px;background:var(--c);box-shadow:0 0 0 1px var(--bs),0 6px 18px rgba(15,15,15,.10);padding:8px 10px}
+.comp .ph{color:var(--tf);height:28px}.comp .bar{display:flex;gap:5px;align-items:center}
+.chip{border-radius:6px;box-shadow:inset 0 0 0 1px var(--bs);padding:0 6px;font-size:10.5px;background:var(--c);white-space:nowrap}
+.go{margin-left:auto;background:var(--ac);color:#fff;border-radius:6px;padding:1px 9px;font-size:10.5px}
+.fade{position:absolute;left:0;right:0;bottom:0;height:80px;background:linear-gradient(transparent,var(--c) 60%)}
+.tree{border-left:1px solid var(--bd);padding:6px 8px;font-size:10px;color:var(--tm);overflow:hidden}
+.ov{background:var(--sb);padding:6px 10px 8px;border-bottom:1px solid var(--bd);position:relative}
+.lane{display:flex;align-items:center;gap:6px;font-size:10px;color:var(--tf);height:14px}.lane>span{width:34px}
+.tr{flex:1;height:5px;border-radius:3px;background:var(--hv);position:relative}.tr i{position:absolute;height:5px;border-radius:3px}
+.brush{position:absolute;top:4px;bottom:4px;background:rgba(0,100,210,.08);border:1px solid rgba(0,100,210,.55);border-radius:4px}
+.hd{position:absolute;top:50%;width:7px;height:18px;margin-top:-9px;background:#fff;border:1px solid var(--ac);border-radius:3px}
+.tb{display:flex;align-items:center;gap:6px;padding:5px 10px;border-bottom:1px solid var(--bd);font-size:10.5px;white-space:nowrap}
+.seg{display:inline-flex;border-radius:6px;box-shadow:inset 0 0 0 1px var(--bs);padding:1px;background:var(--sb)}.seg span{padding:0 6px;border-radius:5px;color:var(--tm)}.seg .on{background:var(--c);box-shadow:0 0 0 1px var(--bs);color:var(--t)}
+.fc{border-radius:10px;padding:0 7px;box-shadow:inset 0 0 0 1px var(--bs);color:var(--tm)}.fc.on{background:var(--as);color:var(--ac);box-shadow:inset 0 0 0 1px #9cc3f0}
+.search{border-radius:6px;box-shadow:inset 0 0 0 1px var(--bs);padding:0 6px;color:var(--tf);min-width:100px}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.rail{border-left:1px solid var(--bd);display:flex;flex-direction:column;align-items:center;gap:6px;padding-top:8px}
+.rail i{width:7px;height:7px;border-radius:50%;border:1.5px solid #6b6a67;display:block}.rail i.on{border-color:var(--ac);background:var(--ac)}
+</style></head><body><div class="wrap t">
+<h1>Liquid: input area, timeline navigation and session tree</h1>
+<p>Variants the maintainer approved on 2026-10-30. <a href="../tokens.css">tokens.css</a> stays canonical for colors; <a href="liquid-look.html">liquid-look.html</a> holds the Trajectory's other approved parts.</p>
+
+<section>
+<h2>Input area: floating, as in T3 Code</h2>
+<div class="win"><div class="app"><div class="side">Liquid<div class="s">New session</div></div><div class="main"><div class="tabs"><span>Chat</span><span class="on">Trajectory</span><span>Diff</span></div>
+<div class="body"><div class="ledger">
+<div class="row h"><span></span><span>Kind</span><span>Step</span><span>Time</span><span>Adds</span><span class="n">In</span></div>
+<div class="row"><span class="f">6</span><span><span class="tg m">Message</span></span><span>Added a test for the login route. <span class="f">#3</span></span><span>+7.6 s</span><span>+410</span><span class="n">18.3k</span></div>
+<div class="row"><span class="f">7</span><span><span class="tg">User</span></span><span>run the tests</span><span>+0 s</span><span>≈+14</span><span></span></div>
+<div class="row"><span class="f">8</span><span><span class="tg m">Message</span></span><span>Running npm test … <span class="f">#4</span></span><span>+1.9 s</span><span>+64</span><span class="n">18.8k</span></div>
+<div class="row sel"><span class="f">9</span><span><span class="tg tl">Tool</span></span><span class="mono">bash · npm test</span><span>+21 s</span><span>≈+40.2k</span><span></span></div>
+<div class="row"><span class="f">10</span><span><span class="tg m">Message</span></span><span>All 42 tests pass. <span class="f">#5</span></span><span>+6.0 s</span><span>+380</span><span class="n">58.1k</span></div>
+<div class="row"><span class="f">11</span><span><span class="tg">User</span></span><span>commit it</span><span>+0 s</span><span>≈+4</span><span></span></div>
+<div class="row"><span class="f">12</span><span><span class="tg m">Message</span></span><span>Committed. <span class="f">#6</span></span><span>+2.0 s</span><span>+40</span><span class="n">59.0k</span></div>
+<div class="fade"></div>
+<div style="position:absolute;left:14px;right:14px;bottom:10px"><div class="comp"><div class="ph">Describe the task…</div><div class="bar"><span class="chip">acme-api</span><span class="chip">This Mac</span><span class="chip">Model</span><span class="go">Start</span></div></div></div>
+</div><div class="tree">Session tree</div></div></div></div></div>
+<ul class="pc"><li>The input area floats at the bottom over the tab's main column, as T3 Code's composer does: in Chat centered in the reading width with the messages, in Trajectory and Diff over the column left of the session tree, at most 740 px wide. Content keeps room below its last row and fades under the input area. Approvals and questions appear in the same place.</li></ul>
+</section>
+
+<section>
+<h2>Timeline: range handles, jump and filters</h2>
+<div class="win">
+<div class="tb"><span class="seg"><span class="on">Real time</span><span>Equal width</span></span><span class="fc on">Filter · 2</span><span style="flex:1"></span><span class="chip" style="color:var(--ac)">Range 52–84 s ✕</span><span class="f">steps 7–10 · 1 of 11 matches</span><span class="chip">⇆ Compare</span></div>
+<div class="tb" style="background:var(--sb)"><span class="f">Show</span><span class="fc">Model</span><span class="fc on">Tools</span><span class="fc">You</span><span class="fc">Approvals</span><span class="f">·</span><span class="fc on">bash</span><span class="fc">read</span><span class="fc">edit</span><span class="f">·</span><span class="fc">Failed</span><span class="search">Filter steps… ⌘F</span><span style="flex:1"></span><span class="f">Clear</span></div>
+<div class="ov">
+<div class="lane"><span>Model</span><div class="tr"><i style="left:2%;width:5%;background:#0064d2" class="dim"></i><i style="left:30%;width:8%;background:#0064d2" class="dim"></i><i style="left:40%;width:5%;background:#0064d2" class="dim"></i><i style="left:62%;width:4%;background:#0064d2" class="dim"></i><i style="left:90%;width:6%;background:#0064d2" class="dim"></i></div></div>
+<div class="lane"><span>Tools</span><div class="tr"><i style="left:46%;width:1%;background:#8a5fad" class="dim"></i><i style="left:68%;width:21%;background:#8a5fad"></i></div></div>
+<div class="lane"><span>You</span><div class="tr"><i style="left:58%;width:2%;background:#9a4f00" class="dim"></i></div></div>
+<div class="brush" style="left:calc(40px + 58%);width:33%"></div><div class="hd" style="left:calc(36px + 58%)"></div><div class="hd" style="left:calc(40px + 91% - 3px)"></div>
+</div>
+<div class="row h"><span></span><span>Kind</span><span>Step</span><span>Time</span><span>Adds</span><span class="n">In</span></div>
+<div class="row dim"><span class="f">7</span><span><span class="tg">User</span></span><span>run the tests</span><span>+0 s</span><span>≈+14</span><span></span></div>
+<div class="row dim"><span class="f">8</span><span><span class="tg m">Message</span></span><span>Running npm test …</span><span>+1.9 s</span><span>+64</span><span class="n">18.8k</span></div>
+<div class="row dim"><span class="f">9</span><span><span class="tg ap">Approval</span></span><span class="mono">bash · allowed once</span><span>+1.2 s</span><span></span><span></span></div>
+<div class="row sel"><span class="f">10</span><span><span class="tg tl">Tool</span></span><span class="mono">bash · npm test <span style="color:#2e8b57">exit 0 · 42 ✓</span></span><span>+21 s</span><span>≈+40.2k</span><span></span></div>
+</div>
+<ul class="pc">
+<li><b>The range follows the list:</b> its two handles mark the steps the list shows and move as it scrolls; dragging the range scrolls the list. Dragging a handle limits the list to the steps in the range, named by the "Range" chip; its ✕, a double-click on a handle or <kbd>Esc</kbd> clears it. The handles replace "drag to focus"; scrolling still zooms.</li>
+<li><b>Jump:</b> a click on the timeline outside the range jumps to the step at that point, selects it and moves the range there. A click on a node in the session tree jumps to its step too, expanding its turn.</li>
+<li><b>Filters:</b> the Filter button or <kbd>⌘F</kbd> opens a row: kind of step, the session's tool names, failed only, and text. Steps that do not match draw faint in the list and the timeline but keep their place; <kbd>↑</kbd><kbd>↓</kbd> then move between matches only.</li>
+</ul>
+</section>
+
+<section>
+<h2>Session tree: compact, collapsible, nodes by kind</h2>
+<div class="g2">
+<div class="win" style="display:grid;grid-template-columns:1fr 200px;height:230px"><div style="padding:8px" class="f">List …</div>
+<div class="tree" style="font-size:11px"><div class="f" style="font-size:10px;margin-bottom:4px">Session tree</div>
+<svg width="186" height="196" font-family="system-ui" font-size="10.5">
+<line x1="10" y1="10" x2="10" y2="186" stroke="#0064d2" stroke-width="1.5"/><path d="M10 92 C10 104 26 100 26 112 L26 150" stroke="#c9c8c4" stroke-width="1.5" fill="none"/>
+<circle cx="10" cy="10" r="5.5" fill="#fff" stroke="#6b6a67" stroke-width="1.5"/><circle cx="10" cy="32" r="3.5" fill="#0064d2"/><circle cx="10" cy="54" r="5.5" fill="#fff" stroke="#6b6a67" stroke-width="1.5"/><circle cx="10" cy="76" r="3.5" fill="#0064d2"/><rect x="7" y="95" width="6" height="6" fill="#8a5fad"/><circle cx="10" cy="120" r="3.5" fill="#0064d2"/><rect x="7" y="139" width="6" height="6" fill="#fff" stroke="#c0392b" stroke-width="1.5"/><path d="M10 160 L14 164 L10 168 L6 164 Z" fill="#9a4f00"/><rect x="6" y="182" width="8" height="8" fill="#8a5fad" stroke="#0064d2" stroke-width="1.5"/>
+<circle cx="26" cy="128" r="5.5" fill="#fff" stroke="#6b6a67" stroke-width="1.5"/><circle cx="26" cy="150" r="3.5" fill="#0064d2"/>
+<g fill="#37352f"><text x="40" y="14"><tspan font-weight="600">T1</tspan> ping</text><text x="40" y="36" fill="#504f4c">2 pong</text><text x="40" y="58"><tspan font-weight="600">T2</tspan> add a test</text><text x="40" y="80" fill="#504f4c">4 I'll read the tests…</text><text x="40" y="102" font-family="ui-monospace,Menlo" font-size="10">5 read tests/</text><text x="40" y="124" fill="#504f4c">6 Added a test…</text><text x="40" y="146" font-family="ui-monospace,Menlo" font-size="10">7 bash npm test</text><text x="40" y="168">8 allowed once</text><text x="40" y="190" font-family="ui-monospace,Menlo" font-size="10">9 bash npm test</text></g>
+<rect x="160" y="180" width="14" height="13" rx="3" fill="#0064d2"/><text x="167" y="190" text-anchor="middle" fill="#fff" font-size="9.5" font-weight="600">A</text><rect x="160" y="144" width="14" height="13" rx="3" fill="#efefed"/><text x="167" y="154" text-anchor="middle" fill="#504f4c" font-size="9.5" font-weight="600">B</text></svg></div></div>
+<div class="win" style="display:grid;grid-template-columns:1fr 24px;height:230px"><div style="padding:8px" class="f">List … (collapsed tree: +176 px)</div>
+<div class="rail"><i></i><i></i><i class="on"></i><span class="f" style="font-size:9.5px;writing-mode:vertical-rl;margin-top:6px">Tree ‹</span></div></div>
+</div>
+<ul class="pc">
+<li><b>Compact:</b> 200 instead of 300 px wide, 22 px rows, turns as "T1", a response's first words instead of "Message", long text shortened with a tooltip.</li>
+<li><b>Collapsible:</b> a button collapses the tree to a rail with one dot per turn; below a 1280 px window it starts collapsed, which leaves the context track room at 1050 px.</li>
+<li><b>Nodes by kind:</b> shape and color match the list's Kind tags: a ring for a prompt (larger, so turns stand out), a dot for a response, a square for a tool, a diamond for an approval. A failed tool has a red outline and the selected step a blue one. Shape carries the kind, so it never depends on color alone.</li>
+<li><b>Branches without colors:</b> lines are gray and only the shown branch is blue; the branch letters in the tree, the chat and Compare are gray, the shown one blue.</li>
+</ul>
+</section>
+</div></body></html>

@@ -8,7 +8,7 @@ import 'theme/tokens.g.dart';
 /// Width of the reading column in the chat and the input area.
 const double readingWidth = 740;
 
-/// A contextual shortcut hint, shown only while the reveal key is held (ADR-0204). It takes no space, so
+/// A contextual shortcut hint, shown only while the reveal key is held. It takes no space, so
 /// nothing moves when it appears.
 class Hint extends StatelessWidget {
   const Hint(this.text, {super.key});
@@ -100,6 +100,7 @@ class _Button extends StatelessWidget {
     required this.foreground,
     required this.background,
     this.outline,
+    this.icon,
     this.shortcut,
     this.focusNode,
   });
@@ -110,6 +111,9 @@ class _Button extends StatelessWidget {
   final Color foreground;
   final Color background;
   final Color? outline;
+
+  /// A Lucide icon before the label.
+  final IconData? icon;
 
   /// Makes the button take the keyboard focus; others leave it where it is.
   final FocusNode? focusNode;
@@ -135,6 +139,10 @@ class _Button extends StatelessWidget {
             // Centered when a layout stretches the button.
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
+              if (icon case final icon?) ...[
+                Icon(icon, size: 16, color: foreground),
+                const SizedBox(width: WsMetrics.space2),
+              ],
               // Cut short only where a layout leaves the button too little room.
               Flexible(
                 child: Text(
@@ -208,12 +216,14 @@ class SecondaryButton extends StatelessWidget {
     super.key,
     required this.label,
     required this.onPressed,
+    this.icon,
     this.shortcut,
     this.color,
     this.focusNode,
   });
 
   final String label;
+  final IconData? icon;
   final String? shortcut;
   final Color? color;
   final VoidCallback onPressed;
@@ -222,12 +232,42 @@ class SecondaryButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) => _Button(
     label: label,
+    icon: icon,
     shortcut: shortcut,
     onPressed: onPressed,
     focusNode: focusNode,
     foreground: color ?? context.ws.text,
     background: context.ws.canvas,
     outline: context.ws.borderStrong,
+  );
+}
+
+/// A quiet button without a frame, for view options beside the main actions.
+class GhostButton extends StatelessWidget {
+  const GhostButton({
+    super.key,
+    required this.label,
+    required this.onPressed,
+    this.icon,
+    this.shortcut,
+    this.focusNode,
+  });
+
+  final String label;
+  final IconData? icon;
+  final String? shortcut;
+  final VoidCallback onPressed;
+  final FocusNode? focusNode;
+
+  @override
+  Widget build(BuildContext context) => _Button(
+    label: label,
+    icon: icon,
+    shortcut: shortcut,
+    onPressed: onPressed,
+    focusNode: focusNode,
+    foreground: context.ws.textMuted,
+    background: Colors.transparent,
   );
 }
 
@@ -283,12 +323,16 @@ class Segments<T> extends StatelessWidget {
     required this.options,
     required this.selected,
     required this.onSelect,
+    this.dense = false,
   });
 
   /// Each option with its label, in order.
   final List<(T, String)> options;
   final T selected;
   final ValueChanged<T> onSelect;
+
+  /// Smaller, for a table header.
+  final bool dense;
 
   @override
   Widget build(BuildContext context) {
@@ -310,6 +354,7 @@ class Segments<T> extends StatelessWidget {
               _Segment(
                 label: label,
                 selected: value == selected,
+                dense: dense,
                 onTap: () => onSelect(value),
               ),
           ],
@@ -323,11 +368,13 @@ class _Segment extends StatelessWidget {
   const _Segment({
     required this.label,
     required this.selected,
+    required this.dense,
     required this.onTap,
   });
 
   final String label;
   final bool selected;
+  final bool dense;
   final VoidCallback onTap;
 
   @override
@@ -345,8 +392,10 @@ class _Segment extends StatelessWidget {
           borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
           // Ink, so the focus highlight shows above the selected segment.
           child: Ink(
-            height: 24,
-            padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space4),
+            height: dense ? 20 : 24,
+            padding: EdgeInsets.symmetric(
+              horizontal: dense ? WsMetrics.space2 : WsMetrics.space4,
+            ),
             decoration: selected
                 ? BoxDecoration(
                     color: ws.canvas,
@@ -359,7 +408,7 @@ class _Segment extends StatelessWidget {
               child: Text(
                 label,
                 style: TextStyle(
-                  fontSize: WsMetrics.fsCompact,
+                  fontSize: dense ? WsMetrics.fsCaption : WsMetrics.fsCompact,
                   color: selected ? ws.text : ws.textMuted,
                   fontWeight: selected
                       ? WsMetrics.fwMedium

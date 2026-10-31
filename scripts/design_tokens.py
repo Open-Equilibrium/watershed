@@ -1,4 +1,4 @@
-"""Generates Liquid's Dart design tokens from the canonical docs/design/tokens.css (ADR-0194).
+"""Generates Liquid's Dart design tokens from the canonical docs/design/tokens.css.
 
 Run without arguments to rewrite the Dart file; `--check` fails when it is out of date.
 """
@@ -12,6 +12,9 @@ ROOT = Path(__file__).resolve().parents[1]
 CSS = ROOT / "docs" / "design" / "tokens.css"
 DART = ROOT / "liquid" / "app" / "lib" / "src" / "theme" / "tokens.g.dart"
 
+# A comment runs to its end or to the end of the file; quoted text is matched first, so a
+# name such as "a/*b*/" keeps what only looks like a comment.
+COMMENT = re.compile(r"\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'|/\*.*?(?:\*/|\Z)", re.S)
 BLOCK = re.compile(r"(:root|\.theme-light|\.theme-dark)\s*\{(.*?)\}", re.S)
 DECLARATION = re.compile(r"--ws-([a-z0-9-]+)\s*:\s*([^;]+);")
 COLOR = re.compile(r"#([0-9a-fA-F]{6})|rgba\(\s*(\d+),\s*(\d+),\s*(\d+),\s*([0-9.]+)\s*\)")
@@ -96,9 +99,15 @@ def metric(name, value):
     raise ValueError(f"--ws-{name}: unsupported value {value!r}")
 
 
+def blocks(css):
+    """The token declarations of each selector; comments declare nothing."""
+    css = COMMENT.sub(lambda match: "" if match[0].startswith("/*") else match[0], css)
+    return {selector: dict(DECLARATION.findall(body)) for selector, body in BLOCK.findall(css)}
+
+
 def render(css):
-    blocks = {selector: dict(DECLARATION.findall(body)) for selector, body in BLOCK.findall(css)}
-    root, light, dark = (blocks.get(key, {}) for key in (":root", ".theme-light", ".theme-dark"))
+    selectors = blocks(css)
+    root, light, dark = (selectors.get(key, {}) for key in (":root", ".theme-light", ".theme-dark"))
     if light.keys() != dark.keys():
         raise ValueError("light and dark themes must define the same tokens")
     lines = [

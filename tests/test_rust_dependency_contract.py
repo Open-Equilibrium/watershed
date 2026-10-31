@@ -13,6 +13,11 @@ ROOT = Path(__file__).resolve().parents[1]
 FORBIDDEN_NODE_RUNTIME_DEPENDENCY = re.compile(
     r"^(?:node|nodejs|node-api|napi|neon)(?:[-_].*)?$"
 )
+EXACT_VERSION = re.compile(r"=\d+\.\d+\.\d+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?")
+
+
+def exactly_pinned(version: object) -> bool:
+    return isinstance(version, str) and EXACT_VERSION.fullmatch(version) is not None
 
 
 def forbidden_dependency_names(table: dict[str, object]) -> list[str]:
@@ -75,6 +80,12 @@ def rust_product_manifest_paths(repo: Path) -> list[Path]:
 
 class RustDependencyContractTest(unittest.TestCase):
     def test_workspace_registry_dependencies_are_exactly_pinned(self) -> None:
+        # Cargo reads "=1.2" as any 1.2.x release, so only complete versions are exact.
+        for version in ("=1.2.3", "=1.0.0-rc.1"):
+            self.assertTrue(exactly_pinned(version), version)
+        for version in ("=1", "=1.2", "^1.2.3", "=1.2.3, <1.3"):
+            self.assertFalse(exactly_pinned(version), version)
+
         with (ROOT / "Cargo.toml").open("rb") as manifest_file:
             manifest = tomllib.load(manifest_file)
 
@@ -86,7 +97,7 @@ class RustDependencyContractTest(unittest.TestCase):
                 version = specification.get("version")
             else:
                 version = specification
-            if not isinstance(version, str) or not version.startswith("="):
+            if not exactly_pinned(version):
                 violations.append(dependency)
 
         self.assertEqual(violations, [])

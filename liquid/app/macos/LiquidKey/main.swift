@@ -3,15 +3,16 @@ import Carbon.HIToolbox
 import IOKit
 import IOKit.hidsystem
 
-// The Liquid key helper (ADR-0205): a login item inside Liquid.app. It turns Caps Lock into the
+// The Liquid key helper: a login item inside Liquid.app. It turns Caps Lock into the
 // Liquid key on every keyboard, opens or focuses Liquid when the key is tapped in another app
 // and turns capitals on or off with Shift + Caps Lock. It needs no permission. `--remove` gives
-// the remapping back and exits. The remapping holds for the whole computer, so the helper
-// gives it back when it quits or the user switches away.
+// the remapping back and exits, with status 1 when a keyboard may keep it. The remapping holds
+// for the whole computer, so the helper gives it back when it quits or the user switches away.
 
 if CommandLine.arguments.dropFirst().first == "--remove" {
-    Mapping.apply(on: false)
-    exit(0)
+    if Mapping.apply(on: false) { exit(0) }
+    FileHandle.standardError.write(Data("Liquid Key: could not give Caps Lock back\n".utf8))
+    exit(1)
 }
 
 /// Liquid.app, four levels above Contents/Library/LoginItems/LiquidKey.app.
@@ -24,8 +25,7 @@ let plainID = EventHotKeyID(signature: 0x4C51_4B59, id: 1)
 let shiftedID = EventHotKeyID(signature: 0x4C51_4B59, id: 2)
 var plain: EventHotKeyRef?
 var shifted: EventHotKeyRef?
-var pressedAt: TimeInterval?
-var lastPress: TimeInterval = 0
+var press: Press?
 var shiftedDown = false
 /// Whether this user's session is in front; the remapping holds for every user's keyboards.
 var sessionActive = true
@@ -33,6 +33,15 @@ var sessionActive = true
 /// Sets the remapping while this session is in front.
 func remap() {
     if sessionActive { Mapping.apply(on: true) }
+}
+
+/// Sets the remapping again later for what may have undone it: a keyboard's HID service
+/// appears some time after the device, a Bluetooth one later, and on a user switch the
+/// departing user's helper may give it back after this one set it.
+func remapLater() {
+    for delay in [1.0, 5.0] {
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { remap() }
+    }
 }
 
 /// Gives the remapping back if this session set it; another user's helper may hold it now.
@@ -79,7 +88,7 @@ func follow(_ app: NSRunningApplication?) {
     if inLiquid, let key = plain {
         UnregisterEventHotKey(key)
         plain = nil
-        pressedAt = nil
+        press = nil
     } else if !inLiquid, plain == nil {
         register(0, plainID, &plain)
     }
@@ -98,21 +107,20 @@ InstallEventHandler(
             nil, MemoryLayout<EventHotKeyID>.size, nil, &id)
         let pressed = GetEventKind(event) == UInt32(kEventHotKeyPressed)
         let now = ProcessInfo.processInfo.systemUptime
-        // A held key may repeat its press; only the first one counts.
+        // The time since any key went down tells whether another one did after this one.
+        let lastKeyDown =
+            now - CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .keyDown)
+        // A held key may repeat its press; only the first one starts a tap or toggles.
         switch (id.id, pressed) {
         case (plainID.id, true):
-            pressedAt = pressedAt ?? now
-            lastPress = now
-        case (plainID.id, false):
-            // The time since any key went down tells whether another one did after this one.
-            let lastKeyDown =
-                now - CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .keyDown)
-            if let at = pressedAt,
-                isTap(pressed: at, released: now, lastPress: lastPress, lastKeyDown: lastKeyDown)
-            {
-                openLiquid()
+            if press == nil {
+                press = Press(at: now)
+            } else {
+                press?.repeated(at: now, lastKeyDown: lastKeyDown)
             }
-            pressedAt = nil
+        case (plainID.id, false):
+            if press?.isTap(released: now, lastKeyDown: lastKeyDown) == true { openLiquid() }
+            press = nil
         case (shiftedID.id, true):
             if !shiftedDown { toggleCapsLock() }
             shiftedDown = true
@@ -135,12 +143,27 @@ IOServiceAddMatchingNotification(
     arrivals, kIOFirstMatchNotification, IOServiceMatching("IOHIDInterface"),
     { _, iterator in
         drain(iterator)
-        // A keyboard's HID service appears some time after the device, a Bluetooth one later.
-        for delay in [1.0, 5.0] {
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { remap() }
-        }
+        remapLater()
     }, nil, &attached)
 drain(attached)
+
+// The system stops a login item that the user turns off with a termination signal. Handled
+// before the first remapping, a signal during startup gives it back once the helper runs: the
+// source is registered before the signal's default action is turned off, so until then a signal
+// ends the helper before it changed anything, and afterwards the source receives it.
+let terminate = DispatchSource.makeSignalSource(
+    signal: SIGTERM, queue: DispatchQueue(label: "terminate"))
+terminate.setEventHandler {
+    DispatchQueue.main.async {
+        unmap()
+        exit(0)
+    }
+}
+let registered = DispatchSemaphore(value: 0)
+terminate.setRegistrationHandler { registered.signal() }
+terminate.resume()
+registered.wait()
+signal(SIGTERM, SIG_IGN)
 
 register(shiftKey, shiftedID, &shifted)
 follow(NSWorkspace.shared.frontmostApplication)
@@ -162,18 +185,11 @@ workspace.addObserver(
 ) { _ in
     sessionActive = true
     remap()
+    remapLater()
 }
 NotificationCenter.default.addObserver(
     forName: NSApplication.willTerminateNotification, object: nil, queue: .main
 ) { _ in unmap() }
-// The system stops a login item that the user turns off with a termination signal.
-signal(SIGTERM, SIG_IGN)
-let terminate = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
-terminate.setEventHandler {
-    unmap()
-    exit(0)
-}
-terminate.resume()
 
 NSApplication.shared.setActivationPolicy(.prohibited)
 NSApplication.shared.run()

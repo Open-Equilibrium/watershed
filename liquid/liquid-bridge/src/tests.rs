@@ -16,10 +16,17 @@ use crate::api::history::{BridgeEntryKind, BridgeRecordKind};
 use crate::api::session::{
     AgentSession, BridgeApprovalMode, BridgeModel, BridgeStoredSession, SessionConfig,
 };
-use crate::convert::{coalesce, describe};
+use crate::convert::describe;
+use crate::stream::{gather, push};
 
 /// The extension path the fake agents are started with.
 const EXTENSION: &str = "/w/meta-harness/pi-extension/watershed.ts";
+
+/// `text` as one word of a POSIX shell command, so spaces and quotes in a temporary directory
+/// stay part of its paths.
+fn shell_word(text: &str) -> String {
+    format!("'{}'", text.replace('\'', r"'\''"))
+}
 
 /// Answers the check before a session starts or a message may start a run: Watershed's
 /// extension is loaded.
@@ -178,6 +185,7 @@ fn requests_and_questions_reach_dart_with_their_answers() {
         item: Some(ItemId(7)),
         edit: Some(EditPreview {
             path: "a.ts".to_owned(),
+            writes_to: Some("/work/a.ts".to_owned()),
             changes: vec![EditChange {
                 removed: String::new(),
                 added: "one".to_owned(),
@@ -196,6 +204,7 @@ fn requests_and_questions_reach_dart_with_their_answers() {
             item: Some(7),
             edit: Some(BridgeEdit {
                 path: "a.ts".to_owned(),
+                writes_to: Some("/work/a.ts".to_owned()),
                 changes: vec![BridgeEditChange {
                     removed: String::new(),
                     added: "one".to_owned(),
@@ -399,8 +408,12 @@ fn starts_and_resumes_sessions_and_picks_models() {
         .expect("file time");
     let current = dir.join("current.jsonl");
     let respond = |id: u32, command: &str, data: &str| {
+        let answer = format!(
+            r#"{{"id":"{id}","type":"response","command":"{command}","success":true,"data":{data}}}"#
+        );
         format!(
-            "IFS= read -r line\ncase \"$line\" in *'\"type\":\"{command}\"'*) ;; *) exit 9 ;; esac\nprintf '%s\\n' '{{\"id\":\"{id}\",\"type\":\"response\",\"command\":\"{command}\",\"success\":true,\"data\":{data}}}'\n"
+            "IFS= read -r line\ncase \"$line\" in *'\"type\":\"{command}\"'*) ;; *) exit 9 ;; esac\nprintf '%s\\n' {}\n",
+            shell_word(&answer)
         )
     };
     let state = format!(
@@ -414,7 +427,7 @@ fn starts_and_resumes_sessions_and_picks_models() {
         respond(
             5,
             "get_available_models",
-            r#"{"models":[{"provider":"faux","id":"faux-1","name":"Faux One"}]}"#,
+            r#"{"models":[{"provider":"faux","id":"faux-1","name":"Faux One","contextWindow":200000}]}"#,
         ),
         respond(6, "get_state", &state),
         respond(7, "set_model", "{}"),
@@ -443,6 +456,7 @@ fn starts_and_resumes_sessions_and_picks_models() {
             provider: "faux".to_owned(),
             id: "faux-1".to_owned(),
             name: "Faux One".to_owned(),
+            context_window: Some(200_000),
         }])
     );
     assert_eq!(session.current_model(), Ok(Some("faux/faux-1".to_owned())));
@@ -516,20 +530,83 @@ fn shuts_down_while_a_query_waits_for_a_hung_agent() {
 }
 
 #[test]
-fn coalesces_consecutive_deltas_of_one_item() {
+fn gathers_streaming_text_until_its_window_passes() {
+    let delta = |text: &str| {
+        SessionEvent::Agent(AgentEvent::ContentDelta {
+            item: ItemId(1),
+            delta: text.to_owned(),
+        })
+    };
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .expect("runtime starts");
+    runtime.block_on(async {
+        let (sender, mut receiver) = tokio::sync::mpsc::channel(16);
+        let (pass, window) = tokio::sync::oneshot::channel::<()>();
+        // Deltas arrive one by one while the window is open; one more comes after it passed.
+        tokio::spawn(async move {
+            for index in 1..10 {
+                sender.send(delta(&index.to_string())).await.expect("sent");
+                tokio::task::yield_now().await;
+            }
+            pass.send(()).expect("window passes");
+            tokio::task::yield_now().await;
+            sender.send(delta("late")).await.expect("sent");
+        });
+        let mut batch = vec![BridgeEvent::from(delta("0"))];
+        gather(&mut batch, &mut receiver, async {
+            let _ = window.await;
+        })
+        .await;
+        let text: Vec<_> = batch
+            .iter()
+            .filter_map(|event| event.text.as_deref())
+            .collect();
+        assert_eq!(
+            text.concat(),
+            "0123456789",
+            "everything until the window passed"
+        );
+        assert_eq!(
+            batch.len(),
+            1,
+            "deltas merge as they arrive, so the batch stays small"
+        );
+    });
+
+    // Anything but streaming text ends the gathering at once, without waiting for the window.
+    runtime.block_on(async {
+        let (sender, mut receiver) = tokio::sync::mpsc::channel(16);
+        sender
+            .send(SessionEvent::Agent(AgentEvent::TurnCompleted {
+                turn: TurnId(1),
+            }))
+            .await
+            .expect("sent");
+        let mut batch = vec![BridgeEvent::from(delta("0"))];
+        gather(&mut batch, &mut receiver, std::future::pending()).await;
+        assert_eq!(batch.len(), 2);
+    });
+}
+
+#[test]
+fn merges_consecutive_deltas_of_one_item() {
     let delta = |item: u64, text: &str| {
         bridge(AgentEvent::ContentDelta {
             item: ItemId(item),
             delta: text.to_owned(),
         })
     };
-    let merged = coalesce(vec![
+    let mut merged = Vec::new();
+    for event in [
         delta(1, "He"),
         delta(1, "llo"),
         delta(2, "Hi"),
         bridge(AgentEvent::TurnCompleted { turn: TurnId(1) }),
         delta(2, "!"),
-    ]);
+    ] {
+        push(&mut merged, event);
+    }
     let summary: Vec<_> = merged
         .iter()
         .map(|event| {
@@ -649,6 +726,42 @@ IFS= read -r line || exit 0"#
         Ok(Some(Vec::new())),
         "shutting down removes the snapshots"
     );
+    let _ = std::fs::remove_dir_all(&repo);
+}
+
+#[test]
+fn a_run_started_by_a_message_sent_while_the_previous_ran_is_not_captured() {
+    let repo = repository("uncaptured");
+    // The first run edits `a.txt` and is still running when the next message is sent; the
+    // agent settles it on reading that message, which then starts a run that adds `b.txt`.
+    let script = [
+        gate(2),
+        r#"IFS= read -r line
+printf 'first\n' > a.txt
+printf '%s\n' '{"type":"agent_start"}' '{"id":"3","type":"response","command":"prompt","success":true,"data":{"disposition":"started"}}'
+"#
+        .to_owned(),
+        gate(4),
+        r#"IFS= read -r line
+printf '%s\n' '{"type":"agent_settled","aborted":false}'
+printf 'second\n' > b.txt
+printf '%s\n' '{"type":"agent_start"}' '{"id":"5","type":"response","command":"prompt","success":true,"data":{"disposition":"started"}}'
+IFS= read -r line || exit 0"#
+            .to_owned(),
+    ]
+    .concat();
+    let session = launch(gated(&script), repo.display().to_string()).expect("agent starts");
+    assert_eq!(session.send("first".to_owned(), false), Ok(()));
+    assert_eq!(session.send("second".to_owned(), false), Ok(()));
+    // The first run's baseline would also count its edit of `a.txt` as the second run's.
+    let changes = session.changes(false);
+    assert!(
+        changes
+            .as_ref()
+            .is_err_and(|error| error.starts_with("the project could not be captured")),
+        "{changes:?}"
+    );
+    assert!(call(session.shutdown()));
     let _ = std::fs::remove_dir_all(&repo);
 }
 
@@ -810,14 +923,29 @@ fn reads_tool_outcomes_and_what_the_model_saw() {
     let records = &history.trajectories[0].records;
     assert_eq!(records[2].kind, BridgeRecordKind::Tool);
     assert_eq!(records[2].outcome.added, Some(2), "lines the write wrote");
+    let result = history.tree.iter().find(|node| node.id == "r1");
+    assert_eq!(
+        result.map(|node| (node.preview.as_str(), node.failed)),
+        Some(("write a.ts", false)),
+        "the tree names what the write wrote to"
+    );
+    assert_eq!(
+        records
+            .iter()
+            .map(|record| record.added_chars)
+            .collect::<Vec<_>>(),
+        [8, 34, 2, 5],
+        "what the prompt, the call, the result and the answer add to the context"
+    );
     let context = records[3].context.as_ref().expect("a2 saw context");
     assert_eq!(
         (
             context.prompt_chars,
+            context.sections.clone(),
             context.tool_chars > 0,
             context.messages
         ),
-        (11, true, 3)
+        (11, vec!["preamble".to_owned()], true, 3)
     );
     let detail = session
         .context("a2".to_owned())

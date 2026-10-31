@@ -5,8 +5,8 @@ version: 0.0.0
 
 environment:
   sdk: ^3.13.5
-  # The exact Flutter release; CI reads it from here (ADR-0193).
-  flutter: 3.47.7
+  # The exact Flutter release; CI reads it from here.
+  flutter: 3.47.9
 
 dependencies:
   flutter:

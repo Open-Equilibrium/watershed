@@ -2,8 +2,8 @@ use serde_json::{Map, Value};
 
 use crate::{
     AgentEvent, ChangedLines, EditChange, EditPreview, EntryKind, History, ItemDetail, ItemId,
-    ItemKind, ItemStatus, NotificationLevel, PiAdapter, RequestId, RequestKind, SessionTree,
-    TreeNode, TurnId, Usage, UserInput,
+    ItemKind, ItemStatus, NotificationLevel, PiAdapter, RecordKind, RequestId, RequestKind,
+    SessionTree, TreeNode, TurnId, Usage, UserInput,
 };
 
 const TURN: TurnId = TurnId(1);
@@ -129,6 +129,55 @@ fn keeps_retries_in_one_turn_and_reports_aborts() {
                 lines: None,
             },
         ]
+    );
+}
+
+#[test]
+fn ends_a_failed_responses_open_text_before_its_retry_reuses_the_index() {
+    let events = translate(&[
+        r#"{"type":"agent_start"}"#,
+        r#"{"type":"message_start","message":{"role":"assistant","content":[]}}"#,
+        r#"{"type":"message_update","assistantMessageEvent":{"type":"text_start","contentIndex":0}}"#,
+        r#"{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"Partial"}}"#,
+        r#"{"type":"message_end","message":{"role":"assistant","content":[],"stopReason":"error","errorMessage":"connection reset"}}"#,
+        r#"{"type":"agent_end","messages":[],"willRetry":true}"#,
+        r#"{"type":"agent_start"}"#,
+        r#"{"type":"message_start","message":{"role":"assistant","content":[]}}"#,
+        r#"{"type":"message_update","assistantMessageEvent":{"type":"text_start","contentIndex":0}}"#,
+        r#"{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"Hi"}}"#,
+        r#"{"type":"message_update","assistantMessageEvent":{"type":"text_end","contentIndex":0,"content":"Hi"}}"#,
+        r#"{"type":"message_end","message":{"role":"assistant","content":[],"stopReason":"stop"}}"#,
+        r#"{"type":"agent_settled","aborted":false}"#,
+    ]);
+    let request = |stop_reason: &str, error: Option<&str>| AgentEvent::ModelRequestCompleted {
+        turn: TURN,
+        usage: Usage::default(),
+        stop_reason: stop_reason.to_owned(),
+        error: error.map(str::to_owned),
+    };
+    assert_eq!(
+        events,
+        [
+            AgentEvent::TurnStarted { turn: TURN },
+            started(1, ItemKind::AssistantMessage),
+            delta(1, "Partial"),
+            AgentEvent::ItemCompleted {
+                turn: TURN,
+                item: ItemId(1),
+                kind: ItemKind::AssistantMessage,
+                text: "Partial".to_owned(),
+                status: ItemStatus::Failed,
+                duration_ms: None,
+                lines: None,
+            },
+            request("error", Some("connection reset")),
+            started(2, ItemKind::AssistantMessage),
+            delta(2, "Hi"),
+            completed(2, ItemKind::AssistantMessage, "Hi"),
+            request("stop", None),
+            AgentEvent::TurnCompleted { turn: TURN },
+        ],
+        "the failed response keeps its partial text and the retry's text is its own item"
     );
 }
 
@@ -286,7 +335,7 @@ fn translates_extension_questions_and_display_updates() {
                 key: "todo".to_owned(),
                 lines: None,
             },
-            // A title an extension sets is dropped (ADR-0211).
+            // A title an extension sets is dropped.
             AgentEvent::InputTextSet {
                 text: "draft".to_owned(),
             },
@@ -414,6 +463,7 @@ fn shows_an_edit_as_its_path_and_its_removed_and_added_lines() {
         [
             Some(EditPreview {
                 path: "src/a.ts".to_owned(),
+                writes_to: None,
                 changes: vec![change("a\nb", "c"), change("x", "y<U+202E>")],
                 whole_file: false,
             }),
@@ -423,10 +473,88 @@ fn shows_an_edit_as_its_path_and_its_removed_and_added_lines() {
             // A write replaces whatever the file held.
             Some(EditPreview {
                 path: "new<U+202E>.ts".to_owned(),
+                writes_to: None,
                 changes: vec![change("", "one\ntwo")],
                 whole_file: true,
             }),
             None,
+        ]
+    );
+}
+
+#[test]
+fn shows_an_edit_s_carriage_returns_as_the_line_breaks_pi_writes() {
+    let ask = |id: &str, tool: &str, arguments: &str| {
+        format!(
+            r#"{{"type":"extension_ui_request","id":"{id}","method":"select","title":"watershed.approval {{\"tool\":\"{tool}\",\"arguments\":{arguments},\"readOnly\":false,\"builtin\":true}}","options":[]}}"#
+        )
+    };
+    let records = [
+        ask(
+            "e1",
+            "edit",
+            r#"{\"path\":\"p\",\"edits\":[{\"oldText\":\"a\\r\\nb\\rc\",\"newText\":\"d\\r\"}]}"#,
+        ),
+        // pi's write keeps them, so they stay written out.
+        ask(
+            "e2",
+            "write",
+            r#"{\"path\":\"p\",\"content\":\"one\\r\\ntwo\\r\"}"#,
+        ),
+    ];
+    let events = translate(&records.iter().map(String::as_str).collect::<Vec<_>>());
+    let changes: Vec<_> = events
+        .iter()
+        .map(|event| match event {
+            AgentEvent::RequestOpened {
+                edit: Some(edit), ..
+            } => edit.changes.clone(),
+            other => panic!("an approval opens a request with its edit: {other:?}"),
+        })
+        .collect();
+    let change = |removed: &str, added: &str| EditChange {
+        removed: removed.to_owned(),
+        added: added.to_owned(),
+    };
+    assert_eq!(
+        changes,
+        [
+            vec![change("a\nb\nc", "d\n")],
+            vec![change("", "one<U+000D>\ntwo<U+000D>")],
+        ]
+    );
+}
+
+#[test]
+fn names_the_file_a_change_writes_to_as_the_extension_resolved_it() {
+    let ask = |id: &str, writes_to: &str| {
+        format!(
+            r#"{{"type":"extension_ui_request","id":"{id}","method":"select","title":"watershed.approval {{\"tool\":\"write\",\"arguments\":{{\"path\":\"@~/.zshrc\",\"content\":\"\"}},\"readOnly\":false,\"builtin\":true{writes_to}}}","options":[]}}"#
+        )
+    };
+    let records = [
+        ask("w1", r#",\"writesTo\":\"/Users/me/.zshrc\""#),
+        // A character that could reorder the line is written out, as in the path.
+        ask("w2", r#",\"writesTo\":\"/Users/me/\\u202e.zshrc\""#),
+        // The extension names no file for a plain path inside the project.
+        ask("w3", ""),
+    ];
+    let events = translate(&records.iter().map(String::as_str).collect::<Vec<_>>());
+    let written: Vec<_> = events
+        .iter()
+        .map(|event| match event {
+            AgentEvent::RequestOpened {
+                edit: Some(edit), ..
+            } => edit.writes_to.clone(),
+            other => panic!("an approval opens a request with its edit: {other:?}"),
+        })
+        .collect();
+    assert_eq!(
+        written,
+        [
+            Some("/Users/me/.zshrc".to_owned()),
+            Some("/Users/me/<U+202E>.zshrc".to_owned()),
+            None
         ]
     );
 }
@@ -513,6 +641,7 @@ fn builds_the_session_tree_from_flat_entries() {
             preview: preview.to_owned(),
             label: label.map(str::to_owned),
             at_ms: None,
+            failed: false,
         };
     assert_eq!(
         History::from_entries(&data).tree(),
@@ -542,6 +671,206 @@ fn builds_the_session_tree_from_flat_entries() {
             leaf: Some("e4".to_owned()),
         }
     );
+}
+
+#[test]
+fn names_what_a_tool_ran_on_and_whether_it_failed_in_the_tree() {
+    let data: Value = serde_json::from_str(
+        r#"{"entries":[
+          {"type":"message","id":"a1","parentId":null,"message":{"role":"assistant","content":[{"type":"toolCall","id":"c1","name":"bash","arguments":{"command":"npm test"}},{"type":"toolCall","id":"c2","name":"read","arguments":{"path":"a.ts"}}]}},
+          {"type":"message","id":"r1","parentId":"a1","message":{"role":"toolResult","toolCallId":"c1","toolName":"bash","isError":true,"content":[]}},
+          {"type":"message","id":"r2","parentId":"r1","message":{"role":"toolResult","toolCallId":"c2","toolName":"read","content":[]}},
+          {"type":"message","id":"a2","parentId":"r2","message":{"role":"assistant","stopReason":"error","content":[]}}],
+          "leafId":"a2"}"#,
+    )
+    .expect("JSON");
+    let nodes = History::from_entries(&data).tree().nodes;
+    assert_eq!(
+        nodes
+            .iter()
+            .map(|node| (node.id.as_str(), node.preview.as_str(), node.failed))
+            .collect::<Vec<_>>(),
+        [
+            ("a1", "", false),
+            ("r1", "bash npm test", true),
+            ("r2", "read a.ts", false),
+            ("a2", "", true),
+        ],
+        "a tool result names what its call ran on; a failed tool or response is marked"
+    );
+}
+
+#[test]
+fn names_what_each_result_ran_on_along_its_own_branch() {
+    // `s2` continues after `r1` and `s1` after the response, so each answers the earliest call
+    // its own branch left open; `r4` finds none open.
+    let data: Value = serde_json::from_str(
+        r#"{"entries":[
+          {"type":"message","id":"a1","parentId":null,"message":{"role":"assistant","content":[{"type":"toolCall","id":"","name":"bash","arguments":{"command":"ls"}},{"type":"toolCall","id":"","name":"bash","arguments":{"command":"make"}},{"type":"toolCall","id":"c3","name":"bash","arguments":{"command":"npm test"}}]}},
+          {"type":"message","id":"r1","parentId":"a1","message":{"role":"toolResult","toolCallId":"","toolName":"bash","content":[]}},
+          {"type":"custom","id":"t1","parentId":"r1","customType":"watershed.timing","data":{"kind":"tool","toolCallId":"c3","durationMs":5}},
+          {"type":"message","id":"r2","parentId":"t1","message":{"role":"toolResult","toolCallId":"","toolName":"bash","content":[]}},
+          {"type":"message","id":"r3","parentId":"r2","message":{"role":"toolResult","toolCallId":"c3","toolName":"bash","content":[]}},
+          {"type":"message","id":"s2","parentId":"r1","message":{"role":"toolResult","toolCallId":"","toolName":"bash","content":[]}},
+          {"type":"message","id":"s1","parentId":"a1","message":{"role":"toolResult","toolCallId":"","toolName":"bash","content":[]}},
+          {"type":"message","id":"a2","parentId":"r3","message":{"role":"assistant","content":[{"type":"toolCall","id":"","name":"bash","arguments":{"command":"cargo test"}}]}},
+          {"type":"message","id":"q1","parentId":"a2","message":{"role":"toolResult","toolCallId":"","toolName":"bash","content":[]}},
+          {"type":"message","id":"r4","parentId":"r3","message":{"role":"toolResult","toolCallId":"","toolName":"bash","content":[]}}],
+          "leafId":"q1"}"#,
+    )
+    .expect("JSON");
+    let previews: Vec<_> = History::from_entries(&data)
+        .tree()
+        .nodes
+        .into_iter()
+        .filter(|node| node.kind == EntryKind::ToolResult)
+        .map(|node| (node.id, node.preview))
+        .collect();
+    let preview = |id: &str, preview: &str| (id.to_owned(), preview.to_owned());
+    assert_eq!(
+        previews,
+        [
+            preview("r1", "bash ls"),
+            preview("r2", "bash make"),
+            preview("r3", "bash npm test"),
+            preview("s2", "bash make"),
+            preview("s1", "bash ls"),
+            preview("q1", "bash cargo test"),
+            preview("r4", "bash"),
+        ]
+    );
+}
+
+#[test]
+fn matches_each_result_to_its_own_call_when_ids_repeat() {
+    // A server that sends no call ids leaves every call with the same empty one; a result
+    // answers the earliest call of the response above it that no result answered yet.
+    let data: Value = serde_json::from_str(
+        r#"{"entries":[
+          {"type":"message","id":"a1","parentId":null,"message":{"role":"assistant","content":[{"type":"toolCall","id":"","name":"bash","arguments":{"command":"ls"}}]}},
+          {"type":"message","id":"r1","parentId":"a1","message":{"role":"toolResult","toolCallId":"","toolName":"bash","content":[]}},
+          {"type":"message","id":"a2","parentId":"r1","message":{"role":"assistant","content":[{"type":"toolCall","id":"","name":"bash","arguments":{"command":"rm -rf build"}},{"type":"toolCall","id":"","name":"bash","arguments":{"command":"make"}}]}},
+          {"type":"message","id":"r2","parentId":"a2","message":{"role":"toolResult","toolCallId":"","toolName":"bash","content":[],"isError":true}},
+          {"type":"message","id":"r3","parentId":"r2","message":{"role":"toolResult","toolCallId":"","toolName":"bash","content":[]}}],
+          "leafId":"r3"}"#,
+    )
+    .expect("JSON");
+    let history = History::from_entries(&data);
+    let previews: Vec<_> = history
+        .tree()
+        .nodes
+        .into_iter()
+        .filter(|node| node.kind == EntryKind::ToolResult)
+        .map(|node| node.preview)
+        .collect();
+    assert_eq!(previews, ["bash ls", "bash rm -rf build", "bash make"]);
+    let steps: Vec<_> = history
+        .trajectory(None)
+        .records
+        .into_iter()
+        .filter(|record| record.kind == RecordKind::Tool)
+        .map(|record| (record.target, record.failed))
+        .collect();
+    assert_eq!(
+        steps,
+        [
+            ("ls".to_owned(), false),
+            ("rm -rf build".to_owned(), true),
+            ("make".to_owned(), false)
+        ]
+    );
+    let chat: Vec<_> = history
+        .transcript(None, 10)
+        .items
+        .into_iter()
+        .filter_map(|item| Some((item.target?, item.failed)))
+        .collect();
+    assert_eq!(chat, steps, "the chat tells the same as the Trajectory");
+}
+
+#[test]
+fn times_results_with_repeated_ids_only_when_their_calls_can_be_told_apart() {
+    // Timing entries name only the call id. pi runs `a1`'s tools one after another, each
+    // followed by its result, and `a2`'s at once, with both results after both timing entries;
+    // `a3`'s call never got its result.
+    let tool = |id: &str, parent: &str, millis: u64| {
+        format!(
+            r#"{{"type":"custom","id":"{id}","parentId":"{parent}","customType":"watershed.timing","data":{{"kind":"tool","toolCallId":"","durationMs":{millis}}}}}"#
+        )
+    };
+    let result = |id: &str, parent: &str| {
+        format!(
+            r#"{{"type":"message","id":"{id}","parentId":"{parent}","message":{{"role":"toolResult","toolCallId":"","toolName":"bash","content":[]}}}}"#
+        )
+    };
+    let response = |id: &str, parent: &str, commands: &[&str]| {
+        let calls: Vec<String> = commands
+            .iter()
+            .map(|command| {
+                format!(
+                    r#"{{"type":"toolCall","id":"","name":"bash","arguments":{{"command":"{command}"}}}}"#
+                )
+            })
+            .collect();
+        format!(
+            r#"{{"type":"message","id":"{id}","parentId":"{parent}","message":{{"role":"assistant","content":[{}]}}}}"#,
+            calls.join(",")
+        )
+    };
+    let entries = [
+        r#"{"type":"message","id":"u1","parentId":null,"message":{"role":"user","content":"Go"}}"#
+            .to_owned(),
+        response("a1", "u1", &["ls", "make"]),
+        tool("t1", "a1", 10),
+        result("r1", "t1"),
+        tool("t2", "r1", 20),
+        result("r2", "t2"),
+        response("a2", "r2", &["npm test", "npm run lint"]),
+        tool("t3", "a2", 30),
+        tool("t4", "t3", 40),
+        result("r3", "t4"),
+        result("r4", "r3"),
+        response("a3", "r4", &["./deploy.sh"]),
+        tool("t5", "a3", 50),
+        r#"{"type":"message","id":"u2","parentId":"t5","message":{"role":"user","content":"Again"}}"#
+            .to_owned(),
+        response("a4", "u2", &["git status"]),
+        tool("t6", "a4", 60),
+        result("r6", "t6"),
+    ];
+    let data: Value = serde_json::from_str(&format!(
+        r#"{{"entries":[{}],"leafId":"r6"}}"#,
+        entries.join(",")
+    ))
+    .expect("JSON");
+    let history = History::from_entries(&data);
+    let steps: Vec<_> = history
+        .trajectory(None)
+        .records
+        .into_iter()
+        .filter(|record| record.kind == RecordKind::Tool)
+        .map(|record| (record.target, record.duration_ms))
+        .collect();
+    let step = |target: &str, duration: Option<u64>| (target.to_owned(), duration);
+    assert_eq!(
+        steps,
+        [
+            step("ls", Some(10)),
+            step("make", Some(20)),
+            step("npm test", None),
+            step("npm run lint", None),
+            step("git status", Some(60)),
+        ],
+        "a parallel call's timing could be another's, so it is unknown"
+    );
+    let chat: Vec<_> = history
+        .transcript(None, 100)
+        .items
+        .into_iter()
+        .filter_map(|item| Some((item.target?, item.duration_ms)))
+        .filter(|(target, _)| target != "./deploy.sh")
+        .collect();
+    assert_eq!(chat, steps, "the chat tells the same as the Trajectory");
 }
 
 #[test]

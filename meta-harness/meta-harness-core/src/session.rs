@@ -26,7 +26,7 @@ const EVENT_BUFFER: usize = 256;
 /// Records buffered for the agent's input.
 const WRITE_BUFFER: usize = 64;
 
-/// How to start pi in RPC mode; the session adds pi's own arguments (ADR-0211).
+/// How to start pi in RPC mode; the session adds pi's own arguments.
 #[derive(Debug, Clone)]
 pub struct AgentCommand {
     /// The executable.
@@ -35,7 +35,8 @@ pub struct AgentCommand {
     /// options.
     pub args: Vec<OsString>,
     /// Watershed's pi extension, which makes pi ask before tool calls; the session checks that
-    /// pi loaded this file.
+    /// pi loaded this file. It must be absolute: pi would read a relative path inside the
+    /// project, which could supply its own copy.
     pub extension: PathBuf,
     /// A session file pi reopens instead of starting a new session.
     pub session: Option<PathBuf>,
@@ -153,6 +154,8 @@ pub struct Model {
     pub id: String,
     /// The name to show; the id when the agent gives none.
     pub name: String,
+    /// Tokens the model can take in one request, when the agent knows them.
+    pub context_window: Option<u64>,
 }
 
 /// What the agent reports about its session.
@@ -273,8 +276,18 @@ pub struct Session {
 }
 
 impl Session {
-    /// Starts the agent and returns the session with its event stream.
+    /// Starts the agent and returns the session with its event stream; a relative extension
+    /// path is refused before the agent starts.
     pub fn start(command: &AgentCommand) -> std::io::Result<(Self, mpsc::Receiver<SessionEvent>)> {
+        if !command.extension.is_absolute() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!(
+                    "the extension path must be absolute: {}",
+                    command.extension.display()
+                ),
+            ));
+        }
         let mut child = crate::spawn(
             Command::new(&command.program)
                 .args(&command.args)
@@ -409,7 +422,7 @@ impl Session {
     /// pi shows by listing its `watershed-branch` command with that path: without it the agent
     /// would run tools without asking, so a session must not start, and every message that may
     /// start a run checks again: pi loads extensions anew for each session, and an extension can
-    /// switch sessions unseen (ADR-0188, ADR-0209, ADR-0211).
+    /// switch sessions unseen (ADR-0188).
     pub async fn require_gate(&mut self) -> Result<(), CommandError> {
         let data = self.command(json!({ "type": "get_commands" })).await?;
         let gated = data
@@ -448,6 +461,10 @@ impl Session {
                     provider: text("provider")?.to_owned(),
                     id: id.to_owned(),
                     name: text("name").unwrap_or(id).to_owned(),
+                    context_window: model
+                        .get("contextWindow")
+                        .and_then(Value::as_u64)
+                        .filter(|tokens| *tokens > 0),
                 })
             })
             .collect())
@@ -479,8 +496,9 @@ impl Session {
     /// Reads the session's stored entries, including abandoned branches. The first read takes
     /// them from pi's session file line by line, so no single answer has to hold the whole
     /// session; later reads ask the agent only for entries added since. When the agent no
-    /// longer knows the last one, everything is read again.
-    pub async fn history(&mut self) -> Result<History, CommandError> {
+    /// longer knows the last one, everything is read again. The entries stay with the session,
+    /// so callers read them while they hold it.
+    pub async fn history(&mut self) -> Result<&History, CommandError> {
         if std::mem::take(&mut self.state.lock().switched) {
             self.history = History::default();
         }
@@ -499,7 +517,7 @@ impl Session {
             }
             result => result?,
         }
-        Ok(self.history.clone())
+        Ok(&self.history)
     }
 
     /// Reads the entries pi stored in its session file; without a file yet, the agent's answer

@@ -170,7 +170,7 @@ class _StatusBarState extends State<StatusBar> {
                 ),
               ],
               const Spacer(),
-              // The view's keys show only while the reveal key is held (ADR-0204).
+              // The view's keys show only while the reveal key is held.
               if (ShortcutReveal.shown(context))
                 Text(widget.keys, style: text.copyWith(color: ws.textFaint)),
             ],

@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Liquid: approved look mockups</title>
+<style>
+body{margin:0;padding:24px;background:#fff;color:#37352f;font:14px/1.5 ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:980px;margin:0 auto;display:flex;flex-direction:column;gap:28px}
+h1{font-size:20px;margin:0}h2{font-size:16px;margin:0 0 4px}
+p{margin:0 0 8px;color:#6b6a67;font-size:13px}
+code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
+.opts{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,var(--min,300px)),1fr));gap:12px}
+.pc{font-size:12px;color:#6b6a67;margin:8px 0 0;padding-left:16px}
+.icons{display:flex;align-items:flex-end;gap:14px;flex-wrap:wrap}
+.w{--c:#fff;--sb:#f7f7f5;--sf:#fff;--hv:#efefed;--sel:#dfedfc;--bd:#e9e9e7;--bs:#dcdbd8;--t:#37352f;--tm:#504f4c;--tf:#6b6a67;--ac:#0064d2;--oa:#fff;--as:#e5f0fd;--d1:#0064d2;
+ background:var(--c);color:var(--t);border-radius:8px;box-shadow:0 0 0 1px var(--bs);font-size:12.5px;line-height:1.45;overflow:hidden;min-width:0}
+.w.dark{--c:#191919;--sb:#202020;--sf:#252525;--hv:#2c2c2c;--sel:#1b3556;--bd:#2f2f2f;--bs:#3a3a3a;--t:#d4d4d4;--tm:#b7b7b7;--tf:#9d9d9d;--ac:#3d9bff;--oa:#0b1626;--as:#182c44;--d1:#3d9bff}
+.row{display:flex;align-items:center;gap:8px;white-space:nowrap;overflow:hidden;min-width:0}
+.sp{flex:1}.f{color:var(--tf)}.s{font-size:12px}
+.tabs{display:flex;gap:14px;padding:8px 14px 0;border-bottom:1px solid var(--bd)}.tabs span{padding:4px 0;color:var(--tm)}.tabs .on{color:var(--t);font-weight:600;box-shadow:inset 0 -2px 0 var(--ac)}
+.body{padding:12px 14px}
+.btn{display:inline-flex;align-items:center;gap:5px;border-radius:6px;padding:2px 10px;box-shadow:inset 0 0 0 1px var(--bs);font-size:12px;white-space:nowrap;color:var(--t);background:var(--sf)}
+.pri{background:var(--ac);color:var(--oa);box-shadow:none;font-weight:500}
+.ghost{box-shadow:none;background:transparent;color:var(--tm)}
+.tag{display:inline-block;font-size:11px;line-height:16px;padding:0 5px;border-radius:4px;background:var(--as);color:var(--ac)}
+.sel{background:var(--sel);border-radius:6px;padding:1px 8px}
+.seg{display:inline-flex;border-radius:7px;box-shadow:inset 0 0 0 1px var(--bs);padding:2px;gap:2px;background:var(--sb)}
+.seg span{display:inline-flex;align-items:center;padding:1px 10px;border-radius:5px;color:var(--tm);font-size:12px}
+.seg .on{background:var(--c);color:var(--t);font-weight:500;box-shadow:0 0 0 1px var(--bs),0 1px 2px rgba(15,15,15,.08)}
+.ov{padding:6px 14px 8px;background:var(--sb);display:flex;flex-direction:column;gap:5px}
+.lane{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--tf)}.lane>span{width:44px}
+.tr{flex:1;height:6px;border-radius:3px;background:var(--hv);position:relative}.tr i{position:absolute;left:0;height:6px;border-radius:3px;background:var(--d1);opacity:.7}
+.g{display:grid;grid-template-columns:20px 64px minmax(0,1fr) 44px 52px 150px 44px 32px;gap:0 7px;align-items:center;height:26px;padding:0 10px}
+.g.h{height:28px;border-bottom:1px solid var(--bd);color:var(--tf);font-size:11px}.g.selr{background:var(--sel)}.g .st{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.n{text-align:right;font-variant-numeric:tabular-nums}.trk{height:26px;display:block}.trk svg{display:block}
+.tlt{display:flex;align-items:center;gap:5px;white-space:nowrap;overflow:hidden}.tlt .rule{flex:1;height:1px;background:#d3d2ce;min-width:10px}
+.chev{display:inline-block;width:12px;color:var(--tm);text-align:center}.ic{width:12px;height:12px;display:inline-block;vertical-align:-2px}
+.tg{display:inline-block;font-size:10.5px;padding:0 5px;border-radius:4px;background:var(--hv);color:var(--tm)}.tg.msg{background:var(--as);color:var(--ac)}
+.segs{display:inline-flex;border-radius:6px;box-shadow:inset 0 0 0 1px var(--bs);padding:1px;gap:1px;font-size:10.5px}.segs span{padding:0 6px;border-radius:5px}.segs .on{background:var(--c);box-shadow:0 0 0 1px var(--bs);color:var(--t)}
+.bar{display:flex;align-items:center;gap:8px}
+.insp{background:var(--sb);border-top:1px solid var(--bd);border-bottom:1px solid var(--bd)}.itabs{display:flex;gap:14px;padding:6px 14px 0;border-bottom:1px solid var(--bd)}.itabs span{padding:3px 0;color:var(--tm)}.itabs .on{color:var(--t);font-weight:600;box-shadow:inset 0 -2px 0 var(--ac)}
+.ib{padding:10px 14px;display:flex;flex-direction:column;gap:6px}
+.gauge{position:relative;height:14px;border-radius:4px;box-shadow:inset 0 0 0 1px var(--bs);background:var(--c);overflow:hidden;display:flex;max-width:640px}.gauge>i{display:block;height:100%}.gauge .mark{position:absolute;top:-2px;bottom:-2px;width:2px;background:#9a4f00}
+.gauge .hl{background:repeating-linear-gradient(45deg,#0064d2 0 3px,#7fb0e8 3px 6px);box-shadow:inset 0 0 0 1.5px #0064d2}.hlk{color:#0064d2}
+.legend{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:11.5px;color:var(--tm)}.legend b{font-weight:600;color:var(--t);font-variant-numeric:tabular-nums}.big{font-size:11.5px;color:var(--tm)}
+.cm{padding:10px 14px;display:flex;flex-direction:column;gap:8px}.bub{align-self:flex-end;background:var(--hv);border-radius:12px;padding:6px 11px;max-width:80%}
+.emb{border:1px solid var(--bs);border-radius:10px;overflow:hidden;max-width:520px}.eh{display:flex;align-items:center;gap:6px;padding:6px 10px;background:var(--sb);border-bottom:1px solid var(--bd);font-size:11.5px;color:var(--tm)}
+.chip{border-radius:6px;box-shadow:inset 0 0 0 1px var(--bs);padding:0 6px;background:var(--c);white-space:nowrap}.lnk{color:var(--ac);white-space:nowrap}
+.eb{padding:8px 12px;display:flex;flex-direction:column;gap:3px}.it{display:flex;gap:8px;align-items:center}.box{width:13px;height:13px;border-radius:3px;box-shadow:inset 0 0 0 1.5px #a5a4a0;flex:none}.box.on{background:var(--ac);box-shadow:none}
+.add{background:#e6ffec;border-radius:4px;padding:0 4px}.del{background:#ffebe9;border-radius:4px;padding:0 4px;text-decoration:line-through;color:#8a3b34}
+.ef{padding:5px 10px;border-top:1px solid var(--bd);font-size:11px;color:var(--tf)}.ph{padding:14px;color:var(--tf);font-size:12px;text-align:center}
+.sb{background:var(--sb);border-right:1px solid var(--bd);padding:10px 8px;display:flex;flex-direction:column;gap:4px}.srow{border-radius:6px;padding:4px 8px;background:var(--hv)}
+.lk{display:grid;grid-template-columns:150px 1fr;min-height:250px}.lk .mn{display:flex;flex-direction:column;min-width:0}.hdr{display:flex;align-items:center;gap:6px;padding:8px 14px 0}.hchip{border-radius:4px;box-shadow:inset 0 0 0 1px var(--bs);padding:0 6px;font-size:11px;color:var(--tm)}
+.greet{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;padding-top:28px;gap:4px}.greet b{font-size:15px}
+.cmp{margin:0 14px 10px;border-radius:12px;box-shadow:0 0 0 1px var(--bs),0 6px 18px rgba(15,15,15,.08);padding:8px 10px;color:var(--tf)}
+</style></head><body>
+<div class="wrap">
+<h1>Liquid: approved look mockups</h1>
+<p>Variants the maintainer approved on 2026-10-29 and 2026-10-30. <a href="../tokens.css">tokens.css</a> stays canonical for colors; the input area, timeline navigation and session tree are in <a href="liquid-trajectory-navigation.html">liquid-trajectory-navigation.html</a>.</p>
+
+<section>
+<h2>Logo: Ripple</h2>
+<div class="icons">
+<svg width="128" height="128" viewBox="0 0 100 100" role="img" aria-label="Liquid logo, 128 px"><defs><linearGradient id="az" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#3d9bff"/><stop offset="1" stop-color="#0057c2"/></linearGradient></defs><rect width="100" height="100" rx="23" fill="url(#az)"/><ellipse cx="47" cy="75" rx="35" ry="8" fill="none" stroke="#fff" stroke-opacity=".35" stroke-width="2.5"/><ellipse cx="47" cy="75" rx="22" ry="5" fill="none" stroke="#fff" stroke-opacity=".65" stroke-width="2.5"/><path d="M40 18V66H64" stroke="#fff" stroke-width="13" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+<svg width="64" height="64" viewBox="0 0 100 100" role="img" aria-label="64 px"><rect width="100" height="100" rx="23" fill="url(#az)"/><ellipse cx="47" cy="75" rx="35" ry="8" fill="none" stroke="#fff" stroke-opacity=".35" stroke-width="2.5"/><ellipse cx="47" cy="75" rx="22" ry="5" fill="none" stroke="#fff" stroke-opacity=".65" stroke-width="2.5"/><path d="M40 18V66H64" stroke="#fff" stroke-width="13" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+<svg width="32" height="32" viewBox="0 0 100 100" role="img" aria-label="32 px"><rect width="100" height="100" rx="23" fill="url(#az)"/><ellipse cx="47" cy="75" rx="35" ry="8" fill="none" stroke="#fff" stroke-opacity=".35" stroke-width="2.5"/><ellipse cx="47" cy="75" rx="22" ry="5" fill="none" stroke="#fff" stroke-opacity=".65" stroke-width="2.5"/><path d="M40 18V66H64" stroke="#fff" stroke-width="13" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+<svg width="16" height="16" viewBox="0 0 100 100" role="img" aria-label="16 px"><rect width="100" height="100" rx="23" fill="url(#az)"/><ellipse cx="47" cy="75" rx="35" ry="8" fill="none" stroke="#fff" stroke-opacity=".35" stroke-width="2.5"/><ellipse cx="47" cy="75" rx="22" ry="5" fill="none" stroke="#fff" stroke-opacity=".65" stroke-width="2.5"/><path d="M40 18V66H64" stroke="#fff" stroke-width="13" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+</div>
+<ul class="pc"><li>An L standing in water, with two ripples around its foot, white on an azure gradient; shown at 128, 64, 32 and 16 px.</li>
+<li>It replaces Flutter's default macOS app icon on Apple's icon grid, and as an 18 px mark with the name "Liquid" heads the sidebar.</li></ul>
+</section>
+
+<section>
+<h2>Accent: Liquid azure <span class="mono" style="font-weight:400;color:#6b6a67">#0064d2 / #3d9bff</span></h2>
+<div class="opts" style="--min:340px">
+<div class="w"><div class="tabs"><span class="on">Chat</span><span>Trajectory</span><span>Diff</span></div><div class="body row"><span class="btn pri">Send</span><span class="tag">Message</span><span class="sel">ping · selected</span><span style="color:var(--ac)">link</span></div></div>
+<div class="w dark"><div class="tabs"><span class="on">Chat</span><span>Trajectory</span><span>Diff</span></div><div class="body row"><span class="btn pri">Send</span><span class="tag">Message</span><span class="sel">ping · selected</span><span style="color:var(--ac)">link</span></div></div>
+</div>
+<ul class="pc"><li>The logo's blue, still the one accent. The active tab takes an accent underline, and the data series (Trajectory lanes) take the accent as their first color.</li>
+<li>WCAG AA: accent text reaches 4.86:1 on the light surfaces and 4.88:1 on the dark ones; labels on the accent reach 5.59:1 (light) and 6.34:1 (dark).</li></ul>
+</section>
+
+<section>
+<h2>Trajectory: one toolbar, hints on hover</h2>
+<div class="w dark" style="max-width:720px">
+ <div class="row" style="padding:8px 14px"><span class="seg"><span class="on">Real time</span><span>Equal width</span></span><span class="sp"></span><span class="f s">branch A · 2 steps · 3.5 s</span><span class="btn">⇄ Compare</span></div>
+ <div class="ov"><div class="row f s"><span>0 s</span><span class="sp"></span><span>1 s</span><span class="sp"></span><span>2 s</span><span class="sp"></span><span>3 s</span><span title="drag to focus · scroll to zoom">ⓘ</span></div>
+ <div class="lane"><span>Model</span><div class="tr"><i style="width:90%"></i></div></div><div class="lane"><span>Tools</span><div class="tr"></div></div><div class="lane"><span>You</span><div class="tr"></div></div></div>
+</div>
+<ul class="pc"><li>One 40 px row: the view segments, then the branch summary and "Compare" together on the right; every button has the shared size and style. "Collapse all turns" lives in the table header (below).</li>
+<li>The overview loses its header row; its hint "drag to focus · scroll to zoom" moves into the tooltip of ⓘ at the right end of the time axis. This replaces the Trajectory toolbar and overview header of the <a href="liquid-agent-surface.html">agent-surface mockups</a>.</li></ul>
+</section>
+<section>
+<h2>Trajectory: context track, turn lines and detail in the inspector</h2>
+<div class="w" style="max-width:860px">
+<div class="tabs"><span>Chat</span><span class="on">Trajectory</span><span>Diff</span></div>
+<div class="bar" style="padding:7px 14px;border-bottom:1px solid var(--bd)"><span class="seg"><span class="on">Real time</span><span>Equal width</span></span><span style="flex:1"></span><span class="f">branch A · 3 turns · 64 s</span><span class="btn"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8 3 4 7l4 4M4 7h16M16 21l4-4-4-4M20 17H4"/></svg>Compare</span></div>
+<div class="ov"><div class="lane"><span style="width:40px">Model</span><div class="tr"><i style="left:2%;width:6%;background:#0064d2;opacity:.7"></i><i style="left:14%;width:9%;background:#0064d2;opacity:.7"></i><i style="left:30%;width:12%;background:#0064d2;opacity:.7"></i><i style="left:52%;width:6%;background:#0064d2;opacity:.7"></i><i style="left:82%;width:14%;background:#0064d2;opacity:.7"></i></div></div><div class="lane"><span style="width:40px">Tools</span><div class="tr"><i style="left:24%;width:5%;background:#3d7a58;opacity:.8"></i><i style="left:59%;width:22%;background:#3d7a58;opacity:.8"></i></div></div><div class="lane"><span style="width:40px">You</span><div class="tr"></div></div></div>
+<div class="g h"><span class="chev"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="m7 20 5-5 5 5M7 4l5 5 5-5"/></svg></span><span>Kind</span><span>Step</span><span class="n">Time</span><span class="n">Adds</span><span class="bar" style="gap:5px">Context <span class="segs"><span class="on">Window</span><span>Fit</span></span></span><span class="n">In</span><span class="n">Out</span></div>
+<div class="g tlr"><span class="chev">›</span><span class="tlt" style="grid-column:2 / 6"><b>Start</b> <span class="f">· system prompt · AGENTS.md · 4 tools · ≈3.2k</span><span class="rule"></span></span><span class="trk"><svg width="150" height="26" viewBox="0 0 150 26"><line x1="137.7" x2="137.7" y1="0" y2="26" stroke="#9a4f00" stroke-width="1" stroke-dasharray="3 2"/></svg></span><span></span><span></span></div>
+<div class="g tlr"><span class="chev">›</span><span class="tlt" style="grid-column:2 / 6"><b>Turn 1</b> <span class="f">· ping · 3.5 s · +0.2k → ≈3.4k</span><span class="rule"></span></span><span class="trk"><svg width="150" height="26" viewBox="0 0 150 26"><line x1="137.7" x2="137.7" y1="0" y2="26" stroke="#9a4f00" stroke-width="1" stroke-dasharray="3 2"/><text x="4.5" y="17" font-size="12" fill="#6b6a67" letter-spacing="1">···</text></svg></span><span></span><span></span></div>
+<div class="g tlr"><span class="chev">⌄</span><span class="tlt" style="grid-column:2 / 6"><b>Turn 2</b> <span class="f">· add a test for login · 12 s · +15.3k → ≈18.7k</span><span class="rule"></span></span><span class="trk"><svg width="150" height="26" viewBox="0 0 150 26"><line x1="137.7" x2="137.7" y1="0" y2="26" stroke="#9a4f00" stroke-width="1" stroke-dasharray="3 2"/><line x1="2.5" y1="13" x2="2.6" y2="26" stroke="#0064d2" stroke-width="1.5"/></svg></span><span></span><span></span></div>
+<div class="g"><span class="f">3</span><span><span class="tg">User</span></span><span class="st">add a test for login</span><span class="n">+40 s</span><span class="n">+0.2k</span><span class="trk"><svg width="150" height="26" viewBox="0 0 150 26"><line x1="137.7" x2="137.7" y1="0" y2="26" stroke="#9a4f00" stroke-width="1" stroke-dasharray="3 2"/><rect x="0" y="9" width="2.7" height="8" rx="2" fill="#0064d2" fill-opacity="1"/><line x1="2.6" y1="0" x2="2.7" y2="13" stroke="#0064d2" stroke-width="1.5"/><line x1="2.7" y1="13" x2="2.7" y2="26" stroke="#0064d2" stroke-width="1.5"/></svg></span><span class="n"></span><span class="n"></span></div>
+<div class="g"><span class="f">4</span><span><span class="tg msg">Message</span></span><span class="st">I'll read the tests … <span class="f">#2</span></span><span class="n">+44 s</span><span class="n">+0.1k</span><span class="trk"><svg width="150" height="26" viewBox="0 0 150 26"><line x1="137.7" x2="137.7" y1="0" y2="26" stroke="#9a4f00" stroke-width="1" stroke-dasharray="3 2"/><rect x="0" y="9" width="2.8" height="8" rx="2" fill="#0064d2" fill-opacity=".38"/><line x1="2.7" y1="0" x2="2.8" y2="13" stroke="#0064d2" stroke-width="1.5"/><line x1="2.8" y1="13" x2="8.2" y2="26" stroke="#0064d2" stroke-width="1.5"/></svg></span><span class="n">3.6k</span><span class="n">96</span></div>
+<div class="g"><span class="f">5</span><span><span class="tg">Tool</span></span><span class="st">read tests/ (12 files)</span><span class="n">+45 s</span><span class="n">≈+14.6k</span><span class="trk"><svg width="150" height="26" viewBox="0 0 150 26"><line x1="137.7" x2="137.7" y1="0" y2="26" stroke="#9a4f00" stroke-width="1" stroke-dasharray="3 2"/><rect x="0" y="9" width="13.7" height="8" rx="2" fill="#0064d2" fill-opacity="1"/><line x1="8.2" y1="0" x2="13.7" y2="13" stroke="#0064d2" stroke-width="1.5"/><line x1="13.7" y1="13" x2="13.9" y2="26" stroke="#0064d2" stroke-width="1.5"/><text x="18.7" y="17" font-size="9" fill="#9a4f00">▲</text></svg></span><span class="n"></span><span class="n"></span></div>
+<div class="g"><span class="f">6</span><span><span class="tg msg">Message</span></span><span class="st">Added a test … <span class="f">#3</span></span><span class="n">+52 s</span><span class="n">+0.4k</span><span class="trk"><svg width="150" height="26" viewBox="0 0 150 26"><line x1="137.7" x2="137.7" y1="0" y2="26" stroke="#9a4f00" stroke-width="1" stroke-dasharray="3 2"/><rect x="0" y="9" width="14.0" height="8" rx="2" fill="#0064d2" fill-opacity=".38"/><line x1="13.9" y1="0" x2="14.0" y2="13" stroke="#0064d2" stroke-width="1.5"/><line x1="14.0" y1="13" x2="14.0" y2="26" stroke="#0064d2" stroke-width="1.5"/></svg></span><span class="n">18.3k</span><span class="n">410</span></div>
+<div class="g tlr"><span class="chev">⌄</span><span class="tlt" style="grid-column:2 / 6"><b>Turn 3</b> <span class="f">· run the tests · 31 s · +39.8k → ≈58.5k</span><span class="rule"></span></span><span class="trk"><svg width="150" height="26" viewBox="0 0 150 26"><line x1="137.7" x2="137.7" y1="0" y2="26" stroke="#9a4f00" stroke-width="1" stroke-dasharray="3 2"/><line x1="14.0" y1="0" x2="14.0" y2="13" stroke="#0064d2" stroke-width="1.5"/><line x1="14.0" y1="13" x2="14.1" y2="26" stroke="#0064d2" stroke-width="1.5"/></svg></span><span></span><span></span></div>
+<div class="g"><span class="f">7</span><span><span class="tg">User</span></span><span class="st">run the tests</span><span class="n">+33 s</span><span class="n">+0.1k</span><span class="trk"><svg width="150" height="26" viewBox="0 0 150 26"><line x1="137.7" x2="137.7" y1="0" y2="26" stroke="#9a4f00" stroke-width="1" stroke-dasharray="3 2"/><rect x="0" y="9" width="14.1" height="8" rx="2" fill="#0064d2" fill-opacity="1"/><line x1="14.1" y1="0" x2="14.1" y2="13" stroke="#0064d2" stroke-width="1.5"/><line x1="14.1" y1="13" x2="14.1" y2="26" stroke="#0064d2" stroke-width="1.5"/></svg></span><span class="n"></span><span class="n"></span></div>
+<div class="g"><span class="f">8</span><span><span class="tg msg">Message</span></span><span class="st">Running npm test … <span class="f">#4</span></span><span class="n">+35 s</span><span class="n">+0.1k</span><span class="trk"><svg width="150" height="26" viewBox="0 0 150 26"><line x1="137.7" x2="137.7" y1="0" y2="26" stroke="#9a4f00" stroke-width="1" stroke-dasharray="3 2"/><rect x="0" y="9" width="14.2" height="8" rx="2" fill="#0064d2" fill-opacity=".38"/><line x1="14.1" y1="0" x2="14.2" y2="13" stroke="#0064d2" stroke-width="1.5"/><line x1="14.2" y1="13" x2="28.9" y2="26" stroke="#0064d2" stroke-width="1.5"/></svg></span><span class="n">18.8k</span><span class="n">64</span></div>
+<div class="g selr"><span class="f">9</span><span><span class="tg">Tool</span></span><span class="st">bash npm test</span><span class="n">+36 s</span><span class="n">≈+39.2k</span><span class="trk"><svg width="150" height="26" viewBox="0 0 150 26"><line x1="137.7" x2="137.7" y1="0" y2="26" stroke="#9a4f00" stroke-width="1" stroke-dasharray="3 2"/><rect x="0" y="9" width="43.6" height="8" rx="2" fill="#0064d2" fill-opacity="1"/><line x1="28.9" y1="0" x2="43.6" y2="13" stroke="#0064d2" stroke-width="1.5"/><line x1="43.6" y1="13" x2="43.7" y2="26" stroke="#0064d2" stroke-width="1.5"/><text x="48.6" y="17" font-size="9" fill="#9a4f00">▲</text></svg></span><span class="n"></span><span class="n"></span></div>
+<div class="insp">
+<div class="itabs"><span>Summary</span><span class="on">Context</span><span>Usage</span><span>Raw</span><span style="flex:1"></span><span class="f">step 9 · bash npm test</span></div>
+<div class="ib"><div class="bar"><b>Request #5</b><span class="f">· the request that read this result · claude-opus-5-5</span><span style="flex:1"></span><span class="n"><b>58.1k</b> <span class="f">of 200k · 29 % · pi compacts at 183.6k</span></span></div>
+<div class="gauge"><i style="width:.7%;background:#8a5fad"></i><i style="width:.45%;background:#b8860b"></i><i style="width:.45%;background:#3d7a58"></i><i style="width:7.8%;background:#0064d2"></i><i style="width:.05%;background:#0064d2;opacity:.4"></i><i class="hl" style="width:19.6%"></i><span class="mark" style="left:91.8%"></span></div>
+<div class="legend"><span><span style="color:#8a5fad">■</span> System prompt <b>≈1.4k</b></span><span><span style="color:#b8860b">■</span> AGENTS.md <b>≈0.9k</b></span><span><span style="color:#3d7a58">■</span> Tools <b>≈0.9k</b></span><span><span style="color:#0064d2">■</span> Carried over <b>15.6k</b></span><span><span class="hlk">▨</span> This step <b>≈39.2k</b> <span class="f">(67 % of the request)</span></span><span><span style="color:#0064d2;opacity:.4">■</span> Other new <b>0.1k</b></span></div>
+<div class="big"><span class="f">Largest in request #5:</span> <b>bash npm test</b> ≈39.2k · read tests/ ≈14.6k · System prompt ≈1.4k</div></div></div>
+<div class="g"><span class="f">10</span><span><span class="tg msg">Message</span></span><span class="st">All 42 tests pass … <span class="f">#5</span></span><span class="n">+58 s</span><span class="n">+0.4k</span><span class="trk"><svg width="150" height="26" viewBox="0 0 150 26"><line x1="137.7" x2="137.7" y1="0" y2="26" stroke="#9a4f00" stroke-width="1" stroke-dasharray="3 2"/><rect x="0" y="9" width="43.9" height="8" rx="2" fill="#0064d2" fill-opacity=".38"/><line x1="43.7" y1="0" x2="43.9" y2="13" stroke="#0064d2" stroke-width="1.5"/></svg></span><span class="n">58.1k</span><span class="n">380</span></div></div>
+<ul class="pc">
+<li><b>Context</b> tab: the gauge, its parts and the largest items of the element's request. <b>Usage</b> tab: In, Out, cached and written tokens, thinking tokens (the former Think column) and cost of that request. <b>Summary</b> and <b>Raw</b> stay as today.</li>
+<li>For a user prompt the gauge hatches the prompt in the request it went into, and the turn lines open the gauge of the turn's last request.</li>
+<li>Without the gauge above, the view gains about 70 px of height, which helps the smallest window (1050 × 640).</li>
+</ul>
+<ul class="pc"><li>Turns are lines with their summary on the line; "Collapse all turns" / "Expand all turns" sits in the header's first cell, aligned with the turns' chevrons, and <kbd>⌥</kbd>-click on a chevron toggles all.</li><li>The Context column draws each step's context against the model's window, a line through the bars, pi's compaction point as a dashed line and ··· for a collapsed turn; solid bars are exact, light ones estimates (≈). Window/Fit switches the scale. Indicator panes and alert rules are later steps.</li></ul>
+</section>
+<section>
+<h2>Settings: Appearance and the sidebar's gear (3A)</h2>
+<div class="w" style="max-width:760px"><div class="lk">
+<div class="sb"><b>Liquid</b><span class="f s">Agent sessions</span><div class="srow">● New session <span class="f">idle</span></div><span style="flex:1"></span><span class="f">⚙ Settings</span></div>
+<div class="mn" style="flex-direction:row">
+<div style="width:150px;background:var(--sb);border-right:1px solid var(--bd);padding:10px 8px;display:flex;flex-direction:column;gap:4px"><span class="f s">Settings</span><span class="sel" style="font-weight:500">Appearance</span><span style="padding:1px 8px">Shortcuts</span></div>
+<div style="padding:14px 18px;display:flex;flex-direction:column;gap:12px"><b style="font-size:14px">Appearance</b>
+<div class="row"><span class="f" style="width:90px">Theme</span><span class="seg"><span class="on">System</span><span>Light</span><span>Dark</span></span></div>
+<div class="row"><span class="f" style="width:90px">Text size</span><span class="seg"><span>Compact</span><span class="on">Default</span><span>Large</span></span></div></div>
+</div></div></div>
+<ul class="pc"><li>A gear row in the sidebar footer opens Settings, as in T3 Code; ⌘, still does, and its hint shows while the reveal key is held, as every shortcut hint does (guidelines principle 6). Settings open on Appearance; Shortcuts is the existing page.</li><li>Theme follows the system by default. Text size scales text and rows together: Compact (UI text 13 px), Default (15 px) and Large (17 px). Both apply at once and are kept across restarts.</li></ul>
+</section>
+<section>
+<h2>Larger, with a header and a start (4B)</h2>
+<div class="w" style="max-width:760px"><div class="lk">
+<div class="sb"><b>Liquid</b><span class="f s">Agent sessions</span><span class="f">acme-api</span><div class="srow">● New session <span class="f">idle</span><br><span class="f s">pi · MacBook</span></div></div>
+<div class="mn"><div class="hdr"><b>New session</b><span class="hchip">acme-api</span><span class="hchip">claude-opus-5-5</span></div>
+<div class="tabs"><span class="on">Chat</span><span>Trajectory</span><span>Diff</span></div>
+<div class="greet"><b>What should we build in acme-api?</b><span class="f s">pi on MacBook · Ask before changes</span></div>
+<div class="cmp">Describe the task…</div></div>
+</div></div>
+<ul class="pc"><li>UI text 15/22 px instead of 14/20, navigation rows 32 px instead of 28, the sidebar 280 px instead of 264; the reading width stays 740 px.</li><li>The session header names the project and the model as chips; the branch joins them with the Git slice. Each session in the sidebar shows its status. Chat messages start at the top and flow down.</li><li>A new session greets with its project, harness, device and approval mode instead of an empty area, as in T3 Code.</li></ul>
+</section>
+<section>
+<h2>Agent chat: Liquid content as a live reference</h2>
+<p>The reply carries a reference, not a copy: a Page or Block with a revision, "latest" or a History id. Liquid renders it from the person's own replica with the Page's own Block View (ADR-0230).</p>
+<div class="w" style="max-width:620px"><div class="cm">
+<div class="bub">Add oat milk to my shopping list and take bread off.</div>
+<div>Done, two changes:</div>
+<div class="emb">
+<div class="eh"><span>Home › Household › <b style="color:var(--t)">Shopping list</b></span><span class="sp"></span><span class="chip">latest ▾</span><span class="lnk">Open ↗</span></div>
+<div class="eb">
+<div class="it"><span class="box"></span>Eggs</div>
+<div class="it"><span class="box on"></span><span class="f" style="text-decoration:line-through">Tomatoes</span></div>
+<div class="it"><span class="box"></span><span class="add">Oat milk</span></div>
+<div class="it"><span class="box"></span><span class="del">Bread</span></div>
+<div class="it"><span class="box"></span>Coffee</div>
+</div>
+<div class="ef">Changed by Liquid AI on your behalf · 14:02 · revertible in History · <span class="lnk">Show only my changes</span></div>
+</div>
+<div class="emb">
+<div class="eh"><span>Finance › <b style="color:var(--t)">Salaries</b></span><span class="sp"></span><span class="chip">rev 7f3a</span></div>
+<div class="ph">You don't have access to this page.</div>
+</div>
+</div></div>
+<ul class="pc"><li>Breadcrumb, revision and "Open", which opens the Page at the Block. A person without access sees only a placeholder.</li><li>Shown with step C, the agent's edits marked against the current state; step A renders the same embed without marks, and step B adds editing in place.</li></ul>
+</section>
+</div>
+</body></html>

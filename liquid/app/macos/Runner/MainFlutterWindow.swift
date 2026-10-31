@@ -1,3 +1,4 @@
+import Carbon.HIToolbox
 import Cocoa
 import FlutterMacOS
 import ServiceManagement
@@ -16,12 +17,46 @@ class MainFlutterWindow: NSWindow {
     FlutterMethodChannel(
       name: "liquid/liquid_key", binaryMessenger: flutterViewController.engine.binaryMessenger
     ).setMethodCallHandler(liquidKey)
+    logKeysIfAsked()
 
     super.awakeFromNib()
   }
 }
 
-/// Turns the Liquid key on or off (ADR-0205): the login item inside the app bundle remaps
+/// With LIQUID_KEY_LOG=1, writes the key events macOS hands the window with the Liquid key
+/// (F18), or with ⌘ or ⌃ but not ⌥, to stderr, beside Flutter's own log of them, to find why
+/// some Liquid key shortcuts do nothing (PLAN.md). Plain typing stays out of the log: ⌥ types
+/// characters such as @ on many layouts, and only Caps Lock of the modifier keys is logged.
+private func logKeysIfAsked() {
+  guard ProcessInfo.processInfo.environment["LIQUID_KEY_LOG"] == "1" else { return }
+  let f18 = UInt16(kVK_F18)
+  var liquidKeyDown = false
+  // A Liquid key let go in another app never reaches this window.
+  NotificationCenter.default.addObserver(
+    forName: NSApplication.didResignActiveNotification, object: nil, queue: .main
+  ) { _ in liquidKeyDown = false }
+  NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp, .flagsChanged]) { event in
+    if event.type != .flagsChanged && event.keyCode == f18 {
+      liquidKeyDown = event.type == .keyDown
+    }
+    let chord =
+      !event.modifierFlags.intersection([.command, .control]).isEmpty
+      && !event.modifierFlags.contains(.option)
+    let capsLock = event.type == .flagsChanged && event.keyCode == UInt16(kVK_CapsLock)
+    guard liquidKeyDown || event.keyCode == f18 || capsLock || (chord && event.type != .flagsChanged)
+    else { return event }
+    let characters = event.type == .flagsChanged ? "-" : (event.characters ?? "-")
+    let plain = event.type == .flagsChanged ? "-" : (event.charactersIgnoringModifiers ?? "-")
+    FileHandle.standardError.write(
+      Data(
+        ("native key: \(event.type.rawValue) code \(event.keyCode) chars \"\(characters)\" "
+          + "plain \"\(plain)\" flags 0x\(String(event.modifierFlags.rawValue, radix: 16)) "
+          + "liquid \(liquidKeyDown) repeat \(event.type == .keyDown && event.isARepeat)\n").utf8))
+    return event
+  }
+}
+
+/// Turns the Liquid key on or off: the login item inside the app bundle remaps
 /// Caps Lock and listens for it, also after a restart or for keyboards attached later;
 /// `--remove` gives Caps Lock back. The work runs off the main thread, so a slow helper never
 /// stalls the window.

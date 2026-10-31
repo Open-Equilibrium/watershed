@@ -1,3 +1,4 @@
+import itertools
 import json
 import os
 import re
@@ -40,6 +41,11 @@ def workflow_text() -> str:
     return WORKFLOW_PATH.read_text(encoding="utf-8")
 
 
+def field_block(lines: list[str], indent: str) -> list[str]:
+    """A field's value lines; the first nonblank line outside `indent` ends it."""
+    return list(itertools.takewhile(lambda line: not line.strip() or line.startswith(indent), lines))
+
+
 def ci_push_branches(workflow: str) -> tuple[str, ...]:
     lines = workflow.splitlines()
     try:
@@ -59,7 +65,7 @@ def ci_push_branches(workflow: str) -> tuple[str, ...]:
     except ValueError:
         raise AssertionError("CI push.branches must use the canonical block form")
     branches = []
-    for line in lines[branches_start + 1 : push_end]:
+    for line in field_block(lines[branches_start + 1 : push_end], "      "):
         item = line.strip()
         if item.startswith("- ") and not item.startswith("- #"):
             branches.append(item[2:].strip().strip('"'))
@@ -96,7 +102,7 @@ def step_run(workflow: str, name: str) -> str:
         return declaration
     return "\n".join(
         line.removeprefix("          ")
-        for line in lines[run_index + 1 :]
+        for line in field_block(lines[run_index + 1 :], "          ")
         if line.startswith("          ")
     ).rstrip()
 
@@ -113,6 +119,7 @@ def assert_step_state(
     *,
     condition: str | None = None,
     continue_on_error: bool = False,
+    scope: str = "product",
 ) -> list[str]:
     lines = step_lines(workflow, name)
     conditions = [
@@ -120,8 +127,10 @@ def assert_step_state(
         for line in lines
         if line.startswith("        if:")
     ]
-    product = "steps.scope.outputs.product == 'true'"
-    case.assertEqual(conditions, [product if condition is None else f"{product} && ({condition})"])
+    selected = f"steps.scope.outputs.{scope} == 'true'"
+    case.assertEqual(
+        conditions, [selected if condition is None else f"{selected} && ({condition})"]
+    )
     case.assertEqual(
         [line for line in lines if line.startswith("        continue-on-error:")],
         ["        continue-on-error: true"] if continue_on_error else [],
@@ -214,7 +223,7 @@ class CiWorkflowContractTest(unittest.TestCase):
 
     def test_corepack_is_explicitly_provisioned_before_use(self) -> None:
         workflow = workflow_text()
-        assert_step_state(self, workflow, "Install pinned Corepack")
+        assert_step_state(self, workflow, "Install pinned Corepack", scope="docs")
         provision = step_run(workflow, "Install pinned Corepack")
         self.assertIn("Join-Path $env:RUNNER_TEMP watershed-node-tools", provision)
         self.assertRegex(
@@ -242,6 +251,15 @@ class CiWorkflowContractTest(unittest.TestCase):
             seen.add(action)
         self.assertEqual(seen, set(ACTION_PINS))
 
+    def test_a_newer_run_supersedes_its_branch_or_pull_request_but_not_main(self) -> None:
+        lines = workflow_text().splitlines()
+        start = lines.index("concurrency:")
+        self.assertEqual(lines[start + 1 : start + 3], [
+            "  group: ci-${{ github.event_name }}-"
+            "${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}",
+            "  cancel-in-progress: true",
+        ])
+
     def test_ci_runs_on_every_permitted_topic_branch(self) -> None:
         self.assertEqual(
             ci_push_branches(workflow_text()),
@@ -256,8 +274,19 @@ class CiWorkflowContractTest(unittest.TestCase):
     branches:
       # "fix/**"
       - main
+    tags:
+      - "v*"
 """
         self.assertEqual(ci_push_branches(workflow), ("main",))
+
+    def test_ci_command_parser_stops_at_sibling_fields(self) -> None:
+        command = "        run: |\n          first\n\n          second\n"
+        environment = '        env:\n          RUST_BACKTRACE: "1"\n'
+        for step in (environment + command, command + environment):
+            with self.subTest(step=step):
+                self.assertEqual(
+                    step_run(f"      - name: Example\n{step}", "Example"), "first\nsecond"
+                )
 
     def test_feature_gated_evidence_reporters_are_registered(self) -> None:
         manifest = tomllib.loads(
@@ -282,6 +311,9 @@ class CiWorkflowContractTest(unittest.TestCase):
             workflow.replace("report --fail-under-lines 88", "report --fail-under-lines 87", 1),
             workflow.replace("cargo audit", "true", 1),
             workflow.replace("node scripts/check-html-render.mjs", "true", 1),
+            *(workflow.replace(f"      - name: {name}\n",
+                               f"      - name: {name}\n        continue-on-error: true\n", 1)
+              for name in ("Run tests", "Run Rustdoc tests")),
             workflow.replace("--example m11_budgets", "--example m12_executor_startup", 1),
             workflow.replace("--example m12_executor_startup", "--example m11_budgets", 1),
             workflow.replace('-- --executor "$M12_INSTALLED_EXECUTOR"', "--", 1),
@@ -320,11 +352,14 @@ class CiWorkflowContractTest(unittest.TestCase):
             "Check RustSec advisories": "cargo audit",
             "Check dependency policy": "cargo deny check",
             "Check Node advisories": "pnpm audit",
-            "Render HTML docs": "node scripts/check-html-render.mjs",
         }
         for name, command in commands.items():
             assert_step_state(self, workflow, name)
             self.assertEqual(step_run(workflow, name), command)
+        assert_step_state(self, workflow, "Render HTML docs", scope="docs")
+        self.assertEqual(
+            step_run(workflow, "Render HTML docs"), "node scripts/check-html-render.mjs"
+        )
 
         assert_step_state(self, workflow, "Run M1.2 installer contract tests")
         self.assertEqual(
@@ -333,6 +368,7 @@ class CiWorkflowContractTest(unittest.TestCase):
              "install.tests.test_install", "install.tests.test_readiness"],
         )
 
+        assert_step_state(self, workflow, "Run tests")
         self.assertEqual(
             folded_tokens(workflow, "Run tests"),
             [
@@ -348,6 +384,7 @@ class CiWorkflowContractTest(unittest.TestCase):
                 "--all-features",
             ],
         )
+        assert_step_state(self, workflow, "Run Rustdoc tests")
         self.assertEqual(
             folded_tokens(workflow, "Run Rustdoc tests"),
             [

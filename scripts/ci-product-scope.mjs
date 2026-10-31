@@ -10,7 +10,20 @@ function git(...args) {
   return result;
 }
 
+// Repository agent setup runs no gates and documentation only the documentation gates.
+const SETUP = [":(top,exclude)AGENTS.md", ":(top,exclude).agents/**", ":(top,exclude).codex/**"];
+const DOCUMENTATION = [":(top,exclude,glob)**/*.md", ":(top,exclude,glob)**/*.html"];
+
+function changed(base, exclusions) {
+  const diff = git("diff", "--quiet", base, "HEAD", "--", ".", ...exclusions);
+  if (diff.status !== 0 && diff.status !== 1) {
+    throw new Error("Cannot compare CI product changes");
+  }
+  return diff.status === 1;
+}
+
 let product = true;
+let docs = true;
 if (process.env.GITHUB_EVENT_NAME !== "workflow_dispatch") {
   const event = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, "utf8"));
   let base;
@@ -32,13 +45,7 @@ if (process.env.GITHUB_EVENT_NAME !== "workflow_dispatch") {
   if (typeof base !== "string" || !/^[a-f0-9]{40}$/i.test(base)) {
     throw new Error("CI comparison requires a commit SHA");
   }
-  const diff = git(
-    "diff", "--quiet", base, "HEAD", "--", ".",
-    ":(top,exclude)AGENTS.md", ":(top,exclude).agents/**", ":(top,exclude).codex/**",
-  );
-  if (diff.status !== 0 && diff.status !== 1) {
-    throw new Error("Cannot compare CI product changes");
-  }
-  product = diff.status === 1;
+  docs = changed(base, SETUP);
+  product = changed(base, [...SETUP, ...DOCUMENTATION]);
 }
-appendFileSync(process.env.GITHUB_OUTPUT, `product=${product}\n`);
+appendFileSync(process.env.GITHUB_OUTPUT, `product=${product}\ndocs=${docs}\n`);

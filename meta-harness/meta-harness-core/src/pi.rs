@@ -71,28 +71,12 @@ impl PiAdapter {
             Some("agent_settled") => {
                 self.turn = None;
                 // Items still open, such as after an abort, end as failed, so none stays running.
-                let mut open: Vec<_> = self
-                    .blocks
-                    .drain()
-                    .map(|(_, block)| block)
-                    .chain(
-                        self.tools
-                            .drain()
-                            .map(|(_, tool)| (tool.item, tool.kind, String::new())),
-                    )
-                    .collect();
-                open.sort_by_key(|(item, ..)| item.0);
-                for (item, kind, text) in open {
-                    events.push(AgentEvent::ItemCompleted {
-                        turn,
-                        item,
-                        kind,
-                        text,
-                        status: ItemStatus::Failed,
-                        duration_ms: None,
-                        lines: None,
-                    });
-                }
+                let open = self.blocks.drain().map(|(_, block)| block).chain(
+                    self.tools
+                        .drain()
+                        .map(|(_, tool)| (tool.item, tool.kind, String::new())),
+                );
+                fail(turn, open, &mut events);
                 events.push(
                     if record.get("aborted").and_then(Value::as_bool) == Some(true) {
                         AgentEvent::TurnAborted { turn }
@@ -103,7 +87,16 @@ impl PiAdapter {
             }
             Some("message_end") => match role(record) {
                 Some("user") => self.user_message(turn, record, &mut events),
-                Some("assistant") => model_response(turn, record, &mut events),
+                Some("assistant") => {
+                    // A response that ended without ending its blocks, such as on an error, ends
+                    // them as failed, before a retry's response reuses their indexes.
+                    fail(
+                        turn,
+                        self.blocks.drain().map(|(_, block)| block),
+                        &mut events,
+                    );
+                    model_response(turn, record, &mut events);
+                }
                 _ => {}
             },
             Some("message_update") => {
@@ -255,6 +248,27 @@ impl PiAdapter {
     }
 }
 
+/// Ends `open` items as failed, in the order they started.
+fn fail(
+    turn: TurnId,
+    open: impl Iterator<Item = (ItemId, ItemKind, String)>,
+    events: &mut Vec<AgentEvent>,
+) {
+    let mut open: Vec<_> = open.collect();
+    open.sort_by_key(|(item, ..)| item.0);
+    for (item, kind, text) in open {
+        events.push(AgentEvent::ItemCompleted {
+            turn,
+            item,
+            kind,
+            text,
+            status: ItemStatus::Failed,
+            duration_ms: None,
+            lines: None,
+        });
+    }
+}
+
 fn started(turn: TurnId, item: ItemId, kind: ItemKind, detail: ItemDetail) -> AgentEvent {
     AgentEvent::ItemStarted {
         turn,
@@ -321,13 +335,16 @@ pub(crate) fn call_text(kind: RequestKind, arguments: &str) -> String {
     )
 }
 
+/// The arguments that name the file a call of one of pi's file tools changes.
+pub(crate) const PATH_ARGUMENTS: [&str; 2] = ["path", "file_path"];
+
 /// The file a call of one of pi's file tools changes.
 pub(crate) fn changed_path(tool: &str, arguments: &str) -> Option<String> {
     if item_kind(tool) != ItemKind::FileChange {
         return None;
     }
     let arguments: Value = serde_json::from_str(arguments).ok()?;
-    ["path", "file_path"]
+    PATH_ARGUMENTS
         .iter()
         .find_map(|name| arguments.get(*name)?.as_str())
         .map(visible)
@@ -474,17 +491,28 @@ fn approval(request: RequestId, payload: &str, tools: &HashMap<String, OpenTool>
             .get(str_field(&payload, "toolCallId"))
             .map(|tool| tool.item),
         edit: (kind == RequestKind::FileChangeApproval)
-            .then(|| edit_preview(tool, call?))
+            .then(|| {
+                let writes_to = payload.get("writesTo").and_then(Value::as_str);
+                Some(EditPreview {
+                    writes_to: writes_to.map(visible_name),
+                    ..edit_preview(tool, call?)?
+                })
+            })
             .flatten(),
     }
 }
 
-/// What a call of pi's own `edit` or `write` changes (ADR-0212): its file and each
+/// What a call of pi's own `edit` or `write` changes: its file and each
 /// replacement, as pi hands them to its tool once it brought every form it accepts into one
-/// `edits` array. `None` for any other shape, which the approval then shows as it is.
+/// `edits` array. An edit's carriage returns show as the line breaks pi's tool turns them
+/// into. `None` for any other shape, which the approval then shows as it is.
 fn edit_preview(tool: &str, arguments: &Value) -> Option<EditPreview> {
     let path = arguments.get("path")?.as_str()?;
     let text = |value: &Value, field| value.get(field)?.as_str().map(visible);
+    let edited = |value: &Value, field| {
+        let text = value.get(field)?.as_str()?;
+        Some(visible(&text.replace("\r\n", "\n").replace('\r', "\n")))
+    };
     let changes = match tool {
         "write" => vec![EditChange {
             removed: String::new(),
@@ -496,8 +524,8 @@ fn edit_preview(tool: &str, arguments: &Value) -> Option<EditPreview> {
             .iter()
             .map(|edit| {
                 Some(EditChange {
-                    removed: text(edit, "oldText")?,
-                    added: text(edit, "newText")?,
+                    removed: edited(edit, "oldText")?,
+                    added: edited(edit, "newText")?,
                 })
             })
             .collect::<Option<Vec<_>>>()
@@ -506,6 +534,7 @@ fn edit_preview(tool: &str, arguments: &Value) -> Option<EditPreview> {
     };
     Some(EditPreview {
         path: visible_name(path),
+        writes_to: None,
         changes,
         whole_file: tool == "write",
     })

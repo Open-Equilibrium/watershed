@@ -99,6 +99,8 @@ pub struct TreeNode {
     pub label: Option<String>,
     /// Unix milliseconds when the entry was stored, if known.
     pub at_ms: Option<u64>,
+    /// Whether a tool call or model response failed.
+    pub failed: bool,
 }
 
 /// A session's entries as a tree, in append order.
@@ -129,8 +131,11 @@ pub enum RequestKind {
 /// the characters that could hide or reorder them written out.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EditPreview {
-    /// The file, on one line.
+    /// The file, on one line, as the agent gave it.
     pub path: String,
+    /// The file pi changes, on one line, when the path does not say so plainly: Watershed's
+    /// pi extension resolves it as pi does.
+    pub writes_to: Option<String>,
     /// The replacements in order; a write is one change that adds its whole content.
     pub changes: Vec<EditChange>,
     /// Whether the change replaces whatever the file holds, as a write does.
@@ -151,7 +156,7 @@ pub struct EditChange {
 pub enum Decision {
     /// Allow this call only.
     AllowOnce,
-    /// Allow this shell command, or this tool, for the rest of the session (ADR-0209).
+    /// Allow this shell command, or this tool, for the rest of the session.
     AllowSession,
     /// Block this call.
     Reject,
@@ -310,7 +315,7 @@ pub enum AgentEvent {
         session: Option<String>,
         /// The call's item, when the agent says which call it asks about.
         item: Option<ItemId>,
-        /// What a file change does, when pi's own `edit` or `write` asks (ADR-0212).
+        /// What a file change does, when pi's own `edit` or `write` asks.
         edit: Option<EditPreview>,
     },
     /// An approval request ended, answered or withdrawn.

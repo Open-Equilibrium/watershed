@@ -32,7 +32,7 @@ abstract class AgentSession implements RustOpaqueInterface {
   Future<void> branch({required String entry});
 
   /// Files the latest run changed, compared with the project before it; none outside Git.
-  /// With `hide_whitespace`, changes that are only whitespace are left out (ADR-0212).
+  /// With `hide_whitespace`, changes that are only whitespace are left out.
   Future<List<BridgeFileChange>?> changes({required bool hideWhitespace});
 
   /// Removes the messages waiting for the running agent and returns them.
@@ -129,14 +129,19 @@ class BridgeModel {
   /// The name to show.
   final String name;
 
+  /// Tokens the model can take in one request, when the agent knows them.
+  final PlatformInt64? contextWindow;
+
   const BridgeModel({
     required this.provider,
     required this.id,
     required this.name,
+    this.contextWindow,
   });
 
   @override
-  int get hashCode => provider.hashCode ^ id.hashCode ^ name.hashCode;
+  int get hashCode =>
+      provider.hashCode ^ id.hashCode ^ name.hashCode ^ contextWindow.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -145,7 +150,8 @@ class BridgeModel {
           runtimeType == other.runtimeType &&
           provider == other.provider &&
           id == other.id &&
-          name == other.name;
+          name == other.name &&
+          contextWindow == other.contextWindow;
 }
 
 /// A session pi stored, as the start page lists it.
@@ -178,7 +184,7 @@ class BridgeStoredSession {
           modifiedMs == other.modifiedMs;
 }
 
-/// How to start pi; the core adds its arguments (ADR-0211).
+/// How to start pi; the core adds its arguments.
 class SessionConfig {
   /// The executable.
   final String program;

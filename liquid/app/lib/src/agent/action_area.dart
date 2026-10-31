@@ -138,7 +138,7 @@ class Composer extends StatelessWidget {
         listenable: Listenable.merge([state.status, state.items]),
         builder: (context, _) {
           final running = state.status.value == RunStatus.running;
-          // Without a conversation yet, the input area starts a new session (ADR-0203).
+          // Without a conversation yet, the input area starts a new session.
           final starting = !running && state.items.value.isEmpty;
           final keys = Keymap.of(context);
           return Column(

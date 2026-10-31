@@ -233,7 +233,7 @@ fn shows_a_patch_without_running_the_projects_textconv() {
         repo.git(&[
             "config",
             "diff.evil.textconv",
-            &format!("touch '{}'; cat", ran.display()),
+            &format!("touch {}; cat", super::shell_word(ran.display())),
         ]);
         repo.write(".gitattributes", "*.txt diff=evil\n");
         let tree = WorkingTree::open(repo.path())
@@ -252,6 +252,8 @@ fn shows_a_patch_without_running_the_projects_textconv() {
             .expect("patch");
         assert!(patch.contains("+changed"), "{patch}");
         assert!(!ran.exists(), "the project's textconv did not run");
+        repo.git(&["diff", "--", "a.txt"]);
+        assert!(ran.exists(), "the textconv runs where Git uses it");
     });
 }
 
@@ -280,6 +282,47 @@ fn diffs_a_project_given_by_a_relative_path() {
         }
         repo.git(&["update-index", "--refresh"]);
         let tree = WorkingTree::open(&relative)
+            .await
+            .expect("repository opens");
+        let snapshot = tree.snapshot().await.expect("snapshot");
+        repo.write("a.txt", "new\n");
+        assert_eq!(
+            tree.changes(
+                &snapshot,
+                &tree.snapshot().await.expect("snapshot"),
+                Whitespace::Shown
+            )
+            .await
+            .expect("changes"),
+            [FileChange {
+                path: "a.txt".to_owned(),
+                status: ChangeStatus::Modified,
+                added: 1,
+                removed: 1,
+            }]
+        );
+    });
+}
+
+#[test]
+fn snapshots_a_project_whose_path_holds_gits_list_separator_and_quotes() {
+    run(async {
+        let repo = Repo::new("colon:\"quoted\\");
+        repo.write("a.txt", "old\n");
+        repo.write("b.txt", "kept\n");
+        repo.git(&["add", "."]);
+        repo.git(&["commit", "-q", "-m", "base"]);
+        // Clean index entries, so the snapshot reuses the repository's objects for b.txt.
+        let past = std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(1_600_000_000);
+        for name in ["a.txt", "b.txt"] {
+            std::fs::File::options()
+                .write(true)
+                .open(repo.path().join(name))
+                .and_then(|file| file.set_modified(past))
+                .expect("file time");
+        }
+        repo.git(&["update-index", "--refresh"]);
+        let tree = WorkingTree::open(repo.path())
             .await
             .expect("repository opens");
         let snapshot = tree.snapshot().await.expect("snapshot");

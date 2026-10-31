@@ -1,6 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/format.dart';
 import 'package:liquid/src/rust/api/history.dart';
+import 'package:liquid/src/rust/api/session.dart';
+import 'package:liquid/src/trajectory/context_track.dart';
 import 'package:liquid/src/trajectory/trajectory_model.dart';
 
 import 'fake_backend.dart';
@@ -139,6 +141,195 @@ void main() {
       [(1, 'Add rate limiting', 0, 4, 2409), (2, 'Again', 5, 5, 0)],
     );
     expect(turnGroups(records).first.tools, {'read': 2, 'edit': 1});
+  });
+
+  group('context track', () {
+    BridgeStepContext request(int prompt, int tools, int messages) =>
+        BridgeStepContext(
+          promptChars: prompt,
+          sections: const ['preamble', 'project_context'],
+          tools: const ['bash'],
+          toolChars: tools,
+          messages: 1,
+          messageChars: messages,
+          newSincePrevious: const [],
+        );
+    // A prompt, request 1 (1000 tokens for 4000 characters), an approval, a tool result,
+    // request 2 (3100 tokens for 12400 characters) and a prompt no request read yet.
+    final records = [
+      record('u1', 1, BridgeRecordKind.user, 'Fix it', 0, added: 400),
+      record(
+        'm1',
+        1,
+        BridgeRecordKind.message,
+        'Reading',
+        10,
+        usage: usage(1000, 50, 0),
+        context: request(2000, 1600, 400),
+        added: 200,
+      ),
+      record('p1', 1, BridgeRecordKind.approval, 'bash', 20),
+      record('t1', 1, BridgeRecordKind.tool, 'bash', 30, added: 8000),
+      record(
+        'm2',
+        1,
+        BridgeRecordKind.message,
+        'Done',
+        40,
+        usage: usage(3100, 20, 0),
+        context: request(2000, 1600, 8800),
+        added: 80,
+      ),
+      record('u2', 2, BridgeRecordKind.user, 'Again', 50, added: 40),
+    ];
+
+    test('measures the context at each request and estimates between', () {
+      final track = contextTrack(records);
+      expect(
+        (track.start.tokens, track.start.exact),
+        (900, false),
+        reason: 'the system prompt and tools of the first request',
+      );
+      expect(
+        [
+          for (final level in track.levels)
+            (level.tokens, level.exact, level.added, level.addedExact),
+        ],
+        [
+          // The last step before a request takes the request's measured size.
+          (1000, true, 100, false),
+          // A response adds its output to the request it answered.
+          (1050, false, 50, true),
+          (1050, false, 0, true),
+          (3100, true, 2000, false),
+          (3120, false, 20, true),
+          (3130, false, 10, false),
+        ],
+      );
+      expect(
+        [
+          for (final turn in turnGroups(records))
+            (track.before(turn).tokens, track.levels[turn.last].tokens),
+        ],
+        [(900, 3120), (3120, 3130)],
+      );
+    });
+
+    test('estimates a step at the ratio of the request that read it', () {
+      // Request 1 reads 1 token per 4 characters, request 2 1 per 2; the tool result between
+      // them is estimated as request 2 reads it, as the inspector splits that request.
+      final track = contextTrack([
+        record('u1', 1, BridgeRecordKind.user, 'Fix it', 0, added: 400),
+        record(
+          'm1',
+          1,
+          BridgeRecordKind.message,
+          'Reading',
+          10,
+          usage: usage(1000, 50, 0),
+          context: request(2000, 1600, 400),
+        ),
+        record('t1', 1, BridgeRecordKind.tool, 'bash', 30, added: 8000),
+        record('t2', 1, BridgeRecordKind.tool, 'read', 40, added: 2000),
+        record(
+          'm2',
+          1,
+          BridgeRecordKind.message,
+          'Done',
+          50,
+          usage: usage(6200, 20, 0),
+          context: request(2000, 1600, 8800),
+        ),
+      ]);
+      expect(
+        [for (final level in track.levels) (level.tokens, level.added)],
+        [(1000, 100), (1050, 50), (5050, 4000), (6200, 1000), (6220, 20)],
+      );
+    });
+
+    test('names the request that read each step', () {
+      expect(
+        [for (var i = 0; i < records.length; i++) requestOf(records, i)],
+        [1, 1, 4, 4, 4, null],
+        reason:
+            'a response is its own request; other steps go into the next one',
+      );
+      expect(requestNumber(records, 4), 2);
+    });
+
+    test('splits a request into its parts', () {
+      final parts = requestParts(
+        records[4],
+        detail: const BridgeContextDetail(
+          sections: [
+            BridgeContextPart(name: 'preamble', chars: 1200),
+            BridgeContextPart(name: 'project_context', chars: 800),
+          ],
+          tools: [BridgeContextPart(name: 'bash', chars: 1600)],
+          messages: [
+            BridgeContextMessage(
+              entry: 'u1',
+              label: 'prompt · Fix it',
+              chars: 400,
+              inContext: true,
+              fresh: false,
+            ),
+            BridgeContextMessage(
+              entry: 'old',
+              label: 'response · summarized',
+              chars: 9000,
+              inContext: false,
+              fresh: false,
+            ),
+            BridgeContextMessage(
+              entry: 't1',
+              label: 'result of bash',
+              chars: 8000,
+              inContext: true,
+              fresh: true,
+            ),
+          ],
+        ),
+        stepChars: 8000,
+      );
+      expect(
+        (
+          parts.system,
+          parts.projectContext,
+          parts.tools,
+          parts.step,
+          parts.carried,
+        ),
+        (300, 200, 400, 2000, 200),
+        reason: 'shares of the measured 3100 tokens; the rest was carried over',
+      );
+      expect(parts.largest, [
+        ('result of bash', 2000),
+        ('Tools', 400),
+        ('System prompt', 300),
+      ], reason: 'a message the model no longer saw does not count');
+      expect(
+        requestParts(records[4], stepChars: 8000).projectContext,
+        0,
+        reason:
+            'without the detail the system prompt keeps its project context',
+      );
+    });
+
+    test('finds the window and where pi compacts', () {
+      const models = [
+        BridgeModel(
+          provider: 'faux',
+          id: 'faux-1',
+          name: 'Faux One',
+          contextWindow: 200000,
+        ),
+      ];
+      expect(contextWindowOf('faux-1', models), 200000);
+      expect(contextWindowOf('faux-9', models), isNull);
+      expect(compactionPoint(200000), 183616);
+      expect(compactionPoint(16000), isNull);
+    });
   });
 
   group('overview', () {
@@ -354,6 +545,7 @@ BridgeTreeNode node(
   String? label,
   int? at,
 }) => BridgeTreeNode(
+  failed: false,
   id: id,
   parent: parent,
   kind: kind,

@@ -15,7 +15,7 @@ pub enum ApprovalMode {
 }
 
 /// What a session-wide allowance covers: the exact command shown for shell tools, whose calls are
-/// the most dangerous, and the whole tool otherwise (ADR-0209). The kind keeps pi's own tool
+/// the most dangerous, and the whole tool otherwise. The kind keeps pi's own tool
 /// apart from an extension's tool of the same name, which asks as a tool call (ADR-0208).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum Allowance {

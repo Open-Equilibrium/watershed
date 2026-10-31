@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'tokens.g.dart';
 
-/// Watershed's design tokens for the current brightness (ADR-0194).
+/// Watershed's design tokens for the current brightness.
 @immutable
 class WsTheme extends ThemeExtension<WsTheme> {
   const WsTheme(this.palette);

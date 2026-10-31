@@ -4,7 +4,7 @@ import '../settings_file.dart';
 
 enum DiffLayout { unified, split }
 
-/// How the Diff tab shows a run's changes; kept across restarts (ADR-0212).
+/// How the Diff tab shows a run's changes; kept across restarts.
 @immutable
 class DiffSettings {
   const DiffSettings({

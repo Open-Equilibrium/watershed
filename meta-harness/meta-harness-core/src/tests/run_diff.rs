@@ -180,6 +180,83 @@ fn a_session_switch_ends_the_diff_unless_a_run_started_meanwhile() {
 }
 
 #[test]
+fn a_read_that_ends_after_a_session_switch_leaves_the_run_ended() {
+    run(async {
+        let repo = Repo::new("switch-during-read");
+        // The project's clean filter says when it runs and then waits for `gate`, so a read can
+        // be held inside its snapshot. Git runs it at the top of the work tree.
+        repo.git(&[
+            "config",
+            "filter.gate.clean",
+            "touch .git/waiting; until [ -e .git/gate ]; do sleep 0.01; done; cat",
+        ]);
+        repo.write(".gitattributes", "*.txt filter=gate\n");
+        let gate = repo.path().join(".git/gate");
+        let waiting = repo.path().join(".git/waiting");
+        std::fs::write(&gate, "").expect("gate opens");
+        let diff = std::sync::Arc::new(RunDiff::open(repo.path()).await);
+        diff.started(diff.capture().await);
+        repo.write("a.txt", "new\n");
+        assert_eq!(
+            diff.changes(Whitespace::Shown).await.expect("changes"),
+            [modified("a.txt")]
+        );
+
+        std::fs::remove_file(&gate).expect("gate closes");
+        let _ = std::fs::remove_file(&waiting);
+        repo.write("a.txt", "newer\n");
+        let reading = tokio::spawn({
+            let diff = diff.clone();
+            async move { diff.changes(Whitespace::Shown).await }
+        });
+        let held = async {
+            while !waiting.exists() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        };
+        tokio::time::timeout(Duration::from_secs(10), held)
+            .await
+            .expect("the read reaches its snapshot");
+        diff.switched(diff.runs());
+        std::fs::write(&gate, "").expect("gate opens");
+        let _ = reading.await.expect("the read ends");
+        assert_eq!(
+            diff.patch("a.txt", Whitespace::Shown).await.expect("patch"),
+            "",
+            "the switch ended the run, so the read that ended later keeps nothing for patches"
+        );
+    });
+}
+
+#[test]
+fn a_list_that_failed_leaves_patches_as_the_last_list_saw_them() {
+    run(async {
+        let repo = Repo::new("failed-list");
+        let diff = RunDiff::open(repo.path()).await;
+        diff.started(diff.capture().await);
+        repo.write("a.txt", "new\n");
+        assert_eq!(
+            diff.changes(Whitespace::Shown).await.expect("changes"),
+            [modified("a.txt")]
+        );
+
+        // Git still captures the project with this setting but cannot compare it.
+        repo.git(&["config", "diff.algorithm", "unknown"]);
+        repo.write("a.txt", "newer\n");
+        assert!(matches!(
+            diff.changes(Whitespace::Shown).await,
+            Err(DiffError::Git(_))
+        ));
+        repo.git(&["config", "--unset", "diff.algorithm"]);
+        let patch = diff.patch("a.txt", Whitespace::Shown).await.expect("patch");
+        assert!(
+            patch.contains("+new\n") && !patch.contains("newer"),
+            "{patch}"
+        );
+    });
+}
+
+#[test]
 fn project_settings_that_skip_files_hide_no_change() {
     run(async {
         // Files the project marks as unchanged or as outside its work, and a setting that
@@ -293,11 +370,8 @@ fn a_submodules_diff_runs_none_of_its_commands() {
         let sub = Repo::new("submodule-inner");
         // The submodule's own textconv would write a marker when its diff runs.
         let marker = sub.path().join("ran");
-        sub.git(&[
-            "config",
-            "diff.mark.textconv",
-            &format!("touch {}; cat", marker.display()),
-        ]);
+        let textconv = format!("touch {}; cat", super::shell_word(marker.display()));
+        sub.git(&["config", "diff.mark.textconv", &textconv]);
         sub.write(".gitattributes", "*.txt diff=mark\n");
         sub.git(&["add", "."]);
         sub.git(&["commit", "-q", "-m", "attributes"]);
@@ -324,11 +398,7 @@ fn a_submodules_diff_runs_none_of_its_commands() {
                 .expect("git runs");
             assert!(status.success(), "{args:?}");
         };
-        git_in(&[
-            "config",
-            "diff.mark.textconv",
-            &format!("touch {}; cat", marker.display()),
-        ]);
+        git_in(&["config", "diff.mark.textconv", &textconv]);
         let diff = RunDiff::open(repo.path()).await;
         diff.started(diff.capture().await);
         std::fs::write(inner.join("a.txt"), "changed\n").expect("file");
@@ -338,6 +408,8 @@ fn a_submodules_diff_runs_none_of_its_commands() {
         assert_eq!(changes.len(), 1, "{changes:?}");
         let _ = diff.patch("sub", Whitespace::Shown).await.expect("patch");
         assert!(!marker.exists(), "the submodule's textconv ran");
+        git_in(&["diff", "--output=/dev/null", "HEAD~1", "HEAD"]);
+        assert!(marker.exists(), "the textconv runs where Git uses it");
     });
 }
 
@@ -352,11 +424,14 @@ fn reads_that_wait_for_each_other_count_only_their_own_git_against_the_limit() {
             RunDiff::with_timeout(repo.path(), Duration::from_millis(1500)).await,
         );
         diff.started(diff.capture().await);
-        // The file keeps changing, so every snapshot runs the filter again.
+        // The file keeps changing, so every snapshot runs the filter again. Each version replaces
+        // the last at once, as Git cannot index a file cut short while it reads it.
         let file = repo.path().join("a.txt");
+        let next = repo.path().join(".git").join("a.txt.next");
         let writing = std::thread::spawn(move || {
             for round in 0..60 {
-                std::fs::write(&file, format!("round {round}\n")).expect("file");
+                std::fs::write(&next, format!("round {round}\n")).expect("file");
+                std::fs::rename(&next, &file).expect("file");
                 std::thread::sleep(Duration::from_millis(50));
             }
         });
@@ -472,6 +547,35 @@ fn a_stalled_git_gives_up_and_leaves_later_snapshots_working() {
     });
 }
 
+/// Captures until the project's clean filter wrote a program's id to `pid`, then tells whether
+/// that program still runs after Git was stopped at its limit; one that does is killed.
+async fn outlives_its_git(diff: &RunDiff, pid: &Path) -> bool {
+    let started = std::time::Instant::now();
+    while !pid.exists() && started.elapsed() < Duration::from_secs(4) {
+        diff.started(diff.capture().await);
+    }
+    let program = std::fs::read_to_string(pid).expect("the filter ran");
+    let _ = std::fs::remove_file(pid);
+    let alive = || {
+        std::process::Command::new("kill")
+            .args(["-0", program.trim()])
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success())
+    };
+    let stopped = std::time::Instant::now();
+    while alive() && stopped.elapsed() < Duration::from_secs(2) {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let survived = alive();
+    if survived {
+        let _ = std::process::Command::new("kill")
+            .args(["-9", program.trim()])
+            .status();
+    }
+    survived
+}
+
 #[test]
 fn a_git_past_its_limit_ends_with_the_programs_it_started() {
     run(async {
@@ -481,35 +585,40 @@ fn a_git_past_its_limit_ends_with_the_programs_it_started() {
         repo.git(&[
             "config",
             "filter.slow.clean",
-            &format!("echo $$ > {}; exec sleep 30", pid.display()),
+            &format!(
+                "echo $$ > {}; exec sleep 30",
+                super::shell_word(pid.display())
+            ),
         ]);
         repo.write(".gitattributes", "*.txt filter=slow\n");
         repo.write("a.txt", "new\n");
         let diff = RunDiff::with_timeout(repo.path(), Duration::from_millis(300)).await;
-        let started = std::time::Instant::now();
-        while !pid.exists() && started.elapsed() < Duration::from_secs(4) {
-            diff.started(diff.capture().await);
-        }
-        let filter = std::fs::read_to_string(&pid).expect("the filter ran");
-        let _ = std::fs::remove_file(&pid);
-        let alive = || {
-            std::process::Command::new("kill")
-                .args(["-0", filter.trim()])
-                .stderr(std::process::Stdio::null())
-                .status()
-                .is_ok_and(|status| status.success())
-        };
-        let stopped = std::time::Instant::now();
-        while alive() && stopped.elapsed() < Duration::from_secs(2) {
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
-        let survived = alive();
-        if survived {
-            let _ = std::process::Command::new("kill")
-                .args(["-9", filter.trim()])
-                .status();
-        }
-        assert!(!survived, "the filter outlived its Git");
+        assert!(
+            !outlives_its_git(&diff, &pid).await,
+            "the filter outlived its Git"
+        );
+    });
+}
+
+#[test]
+fn a_failed_git_past_its_limit_ends_the_programs_that_hold_its_errors() {
+    run(async {
+        let repo = Repo::new("error-holder");
+        // The project's required clean filter fails at once but leaves a program that holds
+        // Git's error output. Git runs it at the top of the work tree.
+        repo.git(&[
+            "config",
+            "filter.leaky.clean",
+            "sleep 30 >&2 & echo $! > .git/holder; exit 1",
+        ]);
+        repo.git(&["config", "filter.leaky.required", "true"]);
+        repo.write(".gitattributes", "*.txt filter=leaky\n");
+        repo.write("a.txt", "new\n");
+        let diff = RunDiff::with_timeout(repo.path(), Duration::from_millis(300)).await;
+        assert!(
+            !outlives_its_git(&diff, &repo.path().join(".git/holder")).await,
+            "the program holding Git's errors outlived it"
+        );
     });
 }
 

@@ -6,7 +6,7 @@ Created: 2026-06-05
 
 ## MVP boundary
 
-The first MVP is **Flow Agent as a CLI-only harness**. It runs inside normal Git projects but does not own project history, auto-commit, branch management or any Watershed-specific **project-code** VCS engine. This is distinct from Liquid's internal **workspace** action history/VCS (over Liquid's own workspace data), which is in scope for the Liquid MVP (M3), and from the Git integration for agent projects, which Meta-Harness runs and Liquid presents (ADR-0190).
+The first MVP is **Flow Agent as a CLI-only harness**. It runs inside normal Git projects but does not own project history, auto-commit, branch management or any Watershed-specific **project-code** VCS engine. This is distinct from Liquid's internal **workspace** action history/VCS (over Liquid's own workspace data), which is in scope for the Liquid MVP (M3), and from the Git integration for agent projects, which Meta-Harness runs and Liquid presents (ADR-0190), including its per-turn checkpoints (ADR-0220).
 
 ## Sequencing and adoption
 
@@ -26,7 +26,7 @@ The initial adoption wedge is technical teams that need reusable, measurable, an
 
 - Rust workspace and the `core`, `proto`, `flow-agent`, `meta-harness`, and `liquid` scaffold.
 - Versioned building-block, event, runtime, session, policy, and sandbox contracts. Canonical owners: `PROTOCOL.md`, `SECURITY.md`, and the Flow Agent V-Spec.
-- Deterministic fixtures and expected streams per `TESTING.md` (ADR-0034).
+- Deterministic fixtures and expected streams per `TESTING.md`.
 - Cross-platform CI, dependency, coverage, link, and render gates per `TESTING.md`, `SECURITY.md`, and `.github/workflows/ci.yml`.
 
 **Decision state:** M0 and M1 are unblocked; accepted decisions are in [`ADR-LOG.md`](docs/adr/ADR-LOG.md).
@@ -59,7 +59,7 @@ M1 does not provide a real provider adapter, general external process execution,
 
 #### M1.1 entry criteria — architecture hardening
 
-The M1 deterministic runtime foundation satisfies the following criteria. They remain mandatory boundaries before real provider integration or general subprocess execution begins (ADR-0079):
+The M1 deterministic runtime foundation satisfies the following criteria. They remain mandatory boundaries before real provider integration or general subprocess execution begins:
 
 1. **Protocol validation ownership:** `proto` alone owns Event-envelope and Event-payload structure validation; `flow-agent-core` delegates it. Runtime retains only stream, sequence, budget and lifecycle invariants, without parallel payload schemas or duplicated `EventType` matches.
 2. **Real `core-script` modules:** production uses real Rust modules with explicit visibility/imports, no `include!` assembly and a minimal public API.
@@ -97,7 +97,7 @@ The M1 deterministic runtime foundation satisfies the following criteria. They r
 **DoD:**
 
 - A non-fixture workspace runs a real Flow through a real provider adapter.
-- Init, Validate and Create for Tool, Instruction, Phase and Flow satisfy the exact long-flag and delimited-group grammar in `PROTOCOL.md` plus the identity-bound transaction contract (ADR-0104); valid output round-trips through registry validation, while failure preserves existing bytes and publishes no partial output.
+- Init, Validate and Create for Tool, Instruction, Phase and Flow satisfy the exact long-flag and delimited-group grammar in `PROTOCOL.md` plus the identity-bound transaction contract; valid output round-trips through registry validation, while failure preserves existing bytes and publishes no partial output.
 - Recursive composite/leaf execution, typed Instruction binding, output contracts, whole-result handoff, ordered forward Transitions and both loop bounds are enforced before or during deterministic orchestration.
 - At least one predefined command and one own-script Tool use the bounded runner.
 - Root input, Phase results, Instruction parameters and provider-requested Tool parameters are typed and validated. Tool declarations make capabilities available but cause no automatic execution.
@@ -121,9 +121,9 @@ No implementation or release claim follows from a documentation decision alone. 
 
 ### M1.2 — Flow Agent OS isolation
 
-**Status:** The native self-protection replacement and version/platform download packaging are implemented; [TESTING.md](TESTING.md#native-verification-status) owns native and downloaded-bundle acceptance results and their limits, while [PERFORMANCE.md](PERFORMANCE.md#flow-agent) links native measurements. ADR-0166–ADR-0176 own the approved security and installation decisions. Configuration administration remains manual for the first Flow Agent release; deferred work and discussion context belong to the [later roadmap](#later-flow-agent-roadmap). The final native gate and [repository review and closeout](AGENTS.md#session-workflow) remain incomplete. This entry updates status, not the separate three-workstream development plan.
+**Status:** The native self-protection replacement and version/platform download packaging are implemented; [TESTING.md](TESTING.md#native-verification-status) owns native and downloaded-bundle acceptance results and their limits, while [PERFORMANCE.md](PERFORMANCE.md#flow-agent) links native measurements. [SECURITY.md](SECURITY.md#accepted-flow-agent-security-target) owns the approved security and installation decisions. Configuration administration remains manual for the first Flow Agent release; deferred work and discussion context belong to the [later roadmap](#later-flow-agent-roadmap). The final native gate and [repository review and closeout](AGENTS.md#session-workflow) remain incomplete. This entry updates status, not the separate three-workstream development plan.
 
-**Current implementation:** One shared one-shot lifecycle uses Linux Bubblewrap/seccomp or macOS Seatbelt to protect this installation's Flow-owned objects. Tool commands and typed parameters, Ready/Start, durable intent, bounded results and self-protection receipts replace broad mount/profile/network/process-capacity policy. Schemas reject removed requirements rather than ignoring them. The wire contract is canonical in [PROTOCOL.md](PROTOCOL.md#m12-executor-protocol-adr-0146-adr-0160-adr-0161-adr-0162); [TESTING.md](TESTING.md#m12-transition-and-executor-evidence) owns executable evidence.
+**Current implementation:** One shared one-shot lifecycle uses Linux Bubblewrap/seccomp or macOS Seatbelt to protect this installation's Flow-owned objects. Tool commands and typed parameters, Ready/Start, durable intent, bounded results and self-protection receipts replace broad mount/profile/network/process-capacity policy. Schemas reject removed requirements rather than ignoring them. The wire contract is canonical in [PROTOCOL.md](PROTOCOL.md#m12-executor-protocol); [TESTING.md](TESTING.md#m12-transition-and-executor-evidence) owns executable evidence.
 
 **Contract:** The [security contract](SECURITY.md#accepted-flow-agent-security-target) and [execution/security architecture](docs/concept/flow-agent-executor-architecture.md) define guarantees and Engineer responsibilities. The unreleased migration adds no compatibility aliases.
 
@@ -142,6 +142,7 @@ M2 delivers Meta-Harness as a **self-contained, host-scoped headless control pla
 - API/protocol surface for Liquid and BYOA: session registry, live event and transcript streams, artifact/log/handoff queries, config read/write proposals, agent schedule/trigger control, approval/reject/revert.
 - Central configuration model that resolves shared Watershed building blocks to each target's documented config surface. Flow Agent receives only its global authority and explicit Flows rather than a project-local config layer; device-local Runtime bindings remain owned by the execution host.
 - Control plane: session registry, routing, task state, attention state and agent schedule/trigger skeleton.
+- Reference scenario for schedules: a scheduled agent keeps a news feed as a database page in Liquid and changes it only with the configured approval, as `disler/pi-durable-news-agent` does with its own app.
 - Host-local Meta-Harness agent executor that rejects cross-host agent-process control and never manages a Flow Executor or Tool Sandbox (backend integration: [D-048](docs/decisions/open-decisions.html#d-048)).
 - Adapters: Flow Agent (via its public runtime surfaces) + at least one external CLI adapter.
 - Event/transcript ingestion from agents; artifact/log/handoff indexing (logs, structured summaries, host-provided diffs, handoff packs, checkpoints).
@@ -165,8 +166,8 @@ A macOS Liquid app, built ahead of M2 and M3a, that controls pi through an embed
 - Agent view: send a prompt, follow the response live, steer and abort; pi dialogs, status and widgets.
 - Tool approvals in three modes (ADR-0188).
 - Trajectory tab, live and retrospective: steps, tokens, timing and what the model saw; branch from a step and compare both branches side by side.
-- Diff view of a run's changes in the agent's Git project, unified or split and with whitespace changes hidden on request (ADR-0190, ADR-0212).
-- Shared [design guidelines](docs/design/guidelines.md) and tokens, plus approved mockups of the agent view, Trajectory tab and Diff tab before their implementation (ADR-0194).
+- Diff view of a run's changes in the agent's Git project, unified or split and with whitespace changes hidden on request (ADR-0190).
+- Shared [design guidelines](docs/design/guidelines.md) and tokens, plus approved mockups of the agent view, Trajectory tab and Diff tab before their implementation.
 - CI: `flutter analyze` and `flutter test` on Linux as required checks; a macOS app build on a macOS runner becomes required once it runs reliably.
 - Out of scope: Trajectory search and attribution of entries to the extension that produced them. The agent-surface mockup's Git branch in the sidebar and its context-window display follow in a later step.
 
@@ -183,23 +184,32 @@ A macOS Liquid app, built ahead of M2 and M3a, that controls pi through an embed
 9. Quitting the app ends every pi process; a crashed pi process shows an error instead of hanging.
 10. Comparable observations for token streaming and long Trajectories are recorded under [PERFORMANCE.md](PERFORMANCE.md#liquid), without thresholds.
 
-**Closeout:** green CI plus one final round of the five KPI reviews on the final candidate, instead of Autoreview, Clawpatch and doc_sync. A review is clean without Blocker or Major findings; Minor findings are fixed when trivial and otherwise listed under the follow-ups below.
+**Closeout:** green CI plus one final round of the five KPI reviews on the final candidate, then Autoreview, Clawpatch and doc_sync as AGENTS.md orders them. A review is clean without Blocker or Major findings; Minor findings are fixed when trivial and otherwise listed under the follow-ups below.
 
 **Follow-ups:**
 
-- The agent surface does not yet meet [client architecture](docs/concept/liquid-client-architecture.md) rule 4: the bridge sends every event without waiting for Dart, so a fast stream queues in Dart. Proposed: Rust coalesces running items in short windows, keeping each item's latest state, with a bounded number of pending updates, as T3 Code does with 50 ms windows; alternative: flow control that Dart acknowledges.
-- A file-change approval shows the path as pi was given it; pi resolves a leading `@`, `~` and `file://` URLs before it writes, so the card could also show the resolved absolute path.
-- An approval draws a call's line without spaces as one text, whose layout grows with the square of its length: in the closeout review a 1 MB line kept Liquid from responding for about 20 s, while the card took no keys. Proposed: draw such a line in bounded pieces. No test yet drives the read delay with a slow first frame.
-- At the smallest window, 1050 x 640, the Trajectory fits but its Step column is about 70 px wide, so step names and results show only their first letters, and the comparison shows no step rows until scrolled. Proposed: narrow the session tree or leave out the token columns below a width, after an approved mockup.
+- Close the cheap record gaps (ADR-0222): record every approval decision, also those made without asking, with its reason, the approval mode and a hash of the approved arguments; show the nested tool calls pi records; and say in the Diff and Trajectory tabs exactly what they cover, after an approved mockup.
+- On a Mac keyboard with the Liquid key on, ⇪1, ⇪2 and ⇪3 work, but ⇪L and ⇪N do nothing and type nothing either (hardware test, 2026-10-28), while widget tests with the same keys pass. Next: run Liquid from a terminal with `LIQUID_KEY_LOG=1`, press ⇪1, ⇪L and ⇪N, and compare the native and Flutter lines for the letters ([liquid/README.md](liquid/README.md#run)).
+- Closeout review leftovers (2026-10-30, delta review 2026-10-31), Minor findings and decided follow-ups:
+  - Code: one helper for estimating tokens from characters (inspector and context track), one saved-settings controller with one way to report a failed save for Appearance, Diff and Shortcuts, one step-kind color mapping for tags, timeline and tree, one line-height helper in the Trajectory view, compare mode's segment shifting beside `compareBranches`, `SettingsPage` in its own file apart from the shortcut recorder, tokens instead of the overview's raw widths, and dropping the unused `Branch.lane` and `BranchMarker.lane`.
+  - Robustness and tests: coalescing the agent stream while the UI falls behind (client architecture rule 4); a paused-time test of the forwarder's 50 ms window end to end; both key logs can miss a Liquid key release that another app, hotkey or panel takes, and then log typing until the next press.
+  - UI: keyboard and screen-reader access to the timeline's range handles; while comparing, return, ⌘F and the Filter button still change the hidden inspector and filter row; the greeting and the mode chip name approval modes alike; mockup details still open: esc in the list closing the filter row after the range and the inspector, under the label "Close the step"; a jump outside a limiting range clearing it rather than moving it there; the Filter button's accent while filters are on, the inspector tabs' accent underline, the legend's share of the request, the collapsed tree's label.
+  - Docs: trim ADR-0218/0226/0228/0229/0232/0233 to their decisions and links, and move the three rules found only in the log (a refused change is undone on its device, the CLI/API returns a ready reference for every change, each steering input is attributed) to their canonical docs.
+  - CI, decided 2026-10-31, in its own PR after this one: gates per product (Flow Agent, Meta-Harness, Liquid) instead of one product flag, and the gates split into parallel jobs, aiming at about 10 minutes for Liquid changes.
+  - WSL profile, decided 2026-10-31 (ADR-0201, ADR-0229): implementing it must keep Windows programs out even where Landlock alone cannot hide WSL's interop socket.
+  - Implement the agent sandbox's write boundary: the project and temporary folders only, unless the person allows more (ADR-0229).
+  - Final delta review (2026-10-31), Minor: keep `path`/`file_path` whole only as a bounded string for file-changing tools; two messages sent at once can mix their runs in the Diff of a large project; trajectory.rs's comment on parallel tools, the duplicate path argument names in pi.rs and the session test's unquoted fixture path; the navigation mockup's "outside the range" for timeline clicks; a refused Liquid key removal tells the user only an exit status.
+  - Review decisions taken 2026-10-31, follow-up: the pi extension holds a run's start until the core captured the project, so a message sent while the previous run settles gets an exact diff instead of "not captured".
+- At the smallest window, 1050 x 640, the session tree starts collapsed, so the Trajectory's Step column keeps about 190 px and the context track shows; the comparison still shows no step rows until scrolled.
 
 #### Liquid Git integration — next slice
 
-Completes the Git integration for the agent's Git project (ADR-0190, ADR-0191): branches, commits, push, pull requests and worktrees. Meta-Harness runs the host's `git` and `gh`; Liquid provides the UI.
+Completes the Git integration for the agent's Git project (ADR-0190, ADR-0191): branches, commits, push, pull requests and worktrees, plus per-turn checkpoints that the Diff tab shows and a user can return the files to (ADR-0220, details in [D-075](docs/decisions/open-decisions.html#d-075)). Meta-Harness runs the host's `git` and `gh`; Liquid provides the UI.
 
 #### M3a — Local Workspace foundation
 
 - Local replica as the only interactive store; storage choice remains D-029.
-- Flutter clients over the Rust core follow the [client architecture](docs/concept/liquid-client-architecture.md) invariants (ADR-0181, ADR-0182).
+- Flutter clients over the Rust core follow the [client architecture](docs/concept/liquid-client-architecture.md) invariants (ADR-0182).
 - Pages, Blocks, Views, Sources, Connections, Automations, Roles, History and settings.
 - Explorer with Pages and Sources as peer navigation entries; Page templates create use-case compositions rather than new Page Types.
 - PowerBar for finding Workspace objects, creating Blocks and invoking permitted Workspace actions.
@@ -251,7 +261,7 @@ These entries retain scope and decision context, not detailed future-feature spe
 
 **Deferred until after the first Flow Agent release (ADR-0173).** The purpose is to let Tools request limited configuration changes without direct access to Flow files. Manual administration is sufficient initially and avoids building a proposal protocol and approval UI before the core execution boundary is ready.
 
-**Prior discussion (ADR-0167/ADR-0168):** The approved direction was Flow-applied, scope-limited proposals with default denial, optional local-owner approval or preconfigured limited permission. The initial scope was model/context-budget settings, not credentials, executable selection or Tool permissions. Review after Tool completion, bounded waiting, exact non-reusable consent and changes affecting future Runs were intended to avoid self-escalation and accidental repeated changes. Revisit the useful scope, unattended operation, review experience and conflict/recovery handling when scheduling this feature; retain no detailed protocol or diagram in advance.
+**Prior discussion:** The approved direction was Flow-applied, scope-limited proposals with default denial, optional local-owner approval or preconfigured limited permission. The initial scope was model/context-budget settings, not credentials, executable selection or Tool permissions. Review after Tool completion, bounded waiting, exact non-reusable consent and changes affecting future Runs were intended to avoid self-escalation and accidental repeated changes. Revisit the useful scope, unattended operation, review experience and conflict/recovery handling when scheduling this feature; retain no detailed protocol or diagram in advance.
 
 ### Protection of other independent Flow installations
 
@@ -259,4 +269,4 @@ These entries retain scope and decision context, not detailed future-feature spe
 
 ## AgentPulse — last roadmap item
 
-Low priority; scheduled after every other roadmap entry (ADR-0187). Meta-Harness computes and stores AgentPulse v0 metrics — rework ratio, first-attempt success and cost-per-productive-outcome — and exposes them through its CLI/API. The formulas remain [D-010](docs/decisions/open-decisions.html#d-010).
+Low priority; scheduled after every other roadmap entry. Meta-Harness computes and stores AgentPulse v0 metrics — rework ratio, first-attempt success and cost-per-productive-outcome — and exposes them through its CLI/API. The formulas remain [D-010](docs/decisions/open-decisions.html#d-010).

@@ -326,6 +326,82 @@ double span(List<BridgeRecord> records, {required bool equalWidth}) =>
     ? records.length.toDouble()
     : records.map(_end).fold(0, math.max).toDouble();
 
+/// Where record `index` lies on the axis: milliseconds, or one slot per record with
+/// `equalWidth`.
+(double, double) stepExtent(
+  List<BridgeRecord> records,
+  int index, {
+  required bool equalWidth,
+}) => _extent(records, index, equalWidth: equalWidth);
+
+/// The record at `at` on the axis, or the nearest one; none without records.
+int? stepAt(List<BridgeRecord> records, double at, {required bool equalWidth}) {
+  int? nearest;
+  var distance = double.infinity;
+  for (var index = 0; index < records.length; index++) {
+    final (start, end) = _extent(records, index, equalWidth: equalWidth);
+    final away = at < start
+        ? start - at
+        : at > end
+        ? at - end
+        : 0.0;
+    if (away < distance) {
+      nearest = index;
+      distance = away;
+    }
+  }
+  return nearest;
+}
+
+/// What the Trajectory's filters let through (approved navigation mockup): kinds of step, tool
+/// names, failed steps only and text; empty lets everything through.
+@immutable
+class StepFilter {
+  const StepFilter({
+    this.kinds = const {},
+    this.tools = const {},
+    this.failed = false,
+    this.text = '',
+  });
+
+  final Set<BridgeRecordKind> kinds;
+  final Set<String> tools;
+  final bool failed;
+  final String text;
+
+  /// How many filters are on.
+  int get count =>
+      kinds.length +
+      tools.length +
+      (failed ? 1 : 0) +
+      (text.trim().isEmpty ? 0 : 1);
+
+  bool matches(BridgeRecord record) {
+    final text = this.text.trim().toLowerCase();
+    return (kinds.isEmpty || kinds.contains(record.kind)) &&
+        (tools.isEmpty ||
+            record.kind == BridgeRecordKind.tool &&
+                tools.contains(record.label)) &&
+        (!failed || record.failed) &&
+        (text.isEmpty ||
+            '${record.label} ${record.target} ${record.detail}'
+                .toLowerCase()
+                .contains(text));
+  }
+
+  StepFilter copyWith({
+    Set<BridgeRecordKind>? kinds,
+    Set<String>? tools,
+    bool? failed,
+    String? text,
+  }) => StepFilter(
+    kinds: kinds ?? this.kinds,
+    tools: tools ?? this.tools,
+    failed: failed ?? this.failed,
+    text: text ?? this.text,
+  );
+}
+
 /// Whether each record overlaps the focused `range` of the axis.
 List<bool> inRange(
   List<BridgeRecord> records,

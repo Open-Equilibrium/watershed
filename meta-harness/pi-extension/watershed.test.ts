@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 
 import { APPROVAL_PREFIX, watershedWith } from "./watershed.ts";
@@ -17,6 +19,8 @@ function load(clock: () => number = () => 0) {
     { name: "grep", sourceInfo: builtin },
     { name: "tool_search", sourceInfo: builtin },
     { name: "bash", sourceInfo: builtin },
+    { name: "edit", sourceInfo: builtin },
+    { name: "write", sourceInfo: builtin },
     { name: "lookup", annotations: { readOnlyHint: true }, sourceInfo: extension },
     { name: "find", sourceInfo: extension },
   ];
@@ -43,6 +47,7 @@ function context(
   const drafts: string[] = [];
   const ctx = {
     mode,
+    cwd: "/work/acme",
     ui: {
       select: async (title: string, options: string[]) => {
         questions.push({ title, options });
@@ -125,6 +130,49 @@ test("reports read-only tools and stays out of other modes", async () => {
   const tui = context("reject", "tui");
   assert.equal(await handlers.get("tool_call")!(read, tui.ctx), undefined);
   assert.equal(tui.questions.length, 0);
+});
+
+test("names the file pi's edit or write changes when its path does not say so plainly", async () => {
+  const { handlers } = load();
+  const writesTo = async (toolName: string, path: unknown) => {
+    const rpc = context("allow-auto");
+    await handlers.get("tool_call")!({ type: "tool_call", toolCallId: "c", toolName, input: { path } }, rpc.ctx);
+    return JSON.parse(rpc.questions[0].title.slice(APPROVAL_PREFIX.length)).writesTo;
+  };
+  assert.deepEqual(
+    [
+      await writesTo("edit", "@~/.zshrc"),
+      await writesTo("write", "~/notes.md"),
+      await writesTo("edit", "file:///tmp/a%20b.txt"),
+      await writesTo("edit", "src/../../other/a.ts"),
+      await writesTo("edit", "src/../a.ts"),
+      await writesTo("write", "/etc/hosts"),
+      await writesTo("edit", "src/a\u00A0b.ts"),
+      await writesTo("edit", "@src/a.ts"),
+    ],
+    [
+      join(homedir(), ".zshrc"),
+      join(homedir(), "notes.md"),
+      "/tmp/a b.txt",
+      "/work/other/a.ts",
+      "/work/acme/a.ts",
+      "/etc/hosts",
+      "/work/acme/src/a b.ts",
+      "/work/acme/src/a.ts",
+    ],
+    "as pi 1.3.0 resolves them: a leading @, ~, a file URL, .., a path outside the project and Unicode spaces",
+  );
+  assert.deepEqual(
+    [
+      await writesTo("edit", "src/a.ts"),
+      await writesTo("write", "/work/acme/src/a.ts"),
+      await writesTo("read", "~/a.ts"),
+      await writesTo("edit", 7),
+      await writesTo("edit", "file://host/a.ts"),
+    ],
+    [undefined, undefined, undefined, undefined, undefined],
+    "plain paths inside the project, a tool that changes no file, a path that is no text and one pi cannot resolve",
+  );
 });
 
 test("branches the session at an entry", async () => {

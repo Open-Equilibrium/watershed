@@ -1,6 +1,6 @@
 import 'package:flutter/widgets.dart';
 
-/// Lucide icons (ISC, ADR-0198) from the vendored font `assets/fonts/lucide.ttf` of
+/// Lucide icons (ISC) from the vendored font `assets/fonts/lucide.ttf` of
 /// lucide-static 1.61.0; the codepoints come from its `font/codepoints.json`. Release builds
 /// keep only the glyphs used here.
 abstract final class LucideIcons {
@@ -19,4 +19,11 @@ abstract final class LucideIcons {
   static const hexagon = IconData(0xe0f3, fontFamily: _family);
   static const laptop = IconData(0xe1cd, fontFamily: _family);
   static const sparkles = IconData(0xe412, fontFamily: _family);
+  static const chevronsDownUp = IconData(0xe228, fontFamily: _family);
+  static const chevronsUpDown = IconData(0xe211, fontFamily: _family);
+  static const panelRightClose = IconData(0xe432, fontFamily: _family);
+  static const panelRightOpen = IconData(0xe434, fontFamily: _family);
+  static const listFilter = IconData(0xe460, fontFamily: _family);
+  static const settings = IconData(0xe154, fontFamily: _family);
+  static const arrowLeftRight = IconData(0xe24a, fontFamily: _family);
 }

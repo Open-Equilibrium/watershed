@@ -92,6 +92,25 @@ Liquid        = local-first workspace and App platform</code></pre>
         <li>That deletion also removes its Connections and owned Automations. Independent Workspace Automations that reference it are disabled and surfaced as <em>Needs attention</em>; deletion shows this impact when dependencies exist.</li>
         <li>A full-page representation counts as a View. Deleting its Explorer entry therefore follows the same last-View rule.</li>
       </ul>
+      <h3>One store, three views</h3>
+      <svg viewBox="0 0 640 300" role="img" aria-label="One store with three views" style="width:100%;max-width:760px;height:auto;display:block">
+        <g font-family="system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif" font-size="11" fill="#e6e8ee">
+        <rect x="10" y="10" width="200" height="50" rx="8" fill="none" stroke="#4ea1ff"/><text x="110" y="31" text-anchor="middle" font-weight="600">Pages and Blocks</text><text x="110" y="47" text-anchor="middle" font-size="10" fill="#9aa3b2">M3</text>
+        <rect x="220" y="10" width="200" height="50" rx="8" fill="none" stroke="#4ea1ff" stroke-dasharray="4 3"/><text x="320" y="31" text-anchor="middle" font-weight="600">Files</text><text x="320" y="47" text-anchor="middle" font-size="10" fill="#9aa3b2">like a drive · later</text>
+        <rect x="430" y="10" width="200" height="50" rx="8" fill="none" stroke="#4ea1ff" stroke-dasharray="4 3"/><text x="530" y="31" text-anchor="middle" font-weight="600">Media</text><text x="530" y="47" text-anchor="middle" font-size="10" fill="#9aa3b2">like a photo library · later</text>
+        <rect x="10" y="84" width="620" height="62" rx="8" fill="#7ee0a8" fill-opacity=".07" stroke="#7ee0a8"/><text x="320" y="104" text-anchor="middle" font-weight="600">Metadata in the CRDT · one document per Page, areas for Roles, replication and keys</text><text x="320" y="122" text-anchor="middle" font-size="10">Blocks, text with formatting, Database rows · folders, names, tags, versions, Roles</text><text x="320" y="137" text-anchor="middle" font-size="10" fill="#9aa3b2">synced per area, with History and signatures</text>
+        <rect x="10" y="166" width="620" height="54" rx="8" fill="#ffcf6b" fill-opacity=".06" stroke="#ffcf6b"/><text x="320" y="186" text-anchor="middle" font-weight="600">Contents as blobs · content-addressed, chunked, encrypted</text><text x="320" y="204" text-anchor="middle" font-size="10">stored once · loaded on demand · resumable transfer of large files</text>
+        <rect x="10" y="240" width="300" height="50" rx="8" fill="none" stroke="#9aa3b2"/><text x="160" y="261" text-anchor="middle" font-weight="600">Blob storage at the Sync Server</text><text x="160" y="277" text-anchor="middle" font-size="10" fill="#9aa3b2">S3-compatible, self-hosted or cloud</text>
+        <rect x="330" y="240" width="300" height="50" rx="8" fill="none" stroke="#9aa3b2" stroke-dasharray="4 3"/><text x="480" y="261" text-anchor="middle" font-weight="600">Device: OS integration and media</text><text x="480" y="277" text-anchor="middle" font-size="10" fill="#9aa3b2">Finder, Explorer, file managers · previews, index</text>
+        <g stroke="#9aa3b2" stroke-width="1.2"><line x1="110" y1="60" x2="110" y2="84"/><line x1="320" y1="60" x2="320" y2="84"/><line x1="530" y1="60" x2="530" y2="84"/><line x1="320" y1="146" x2="320" y2="166"/><line x1="160" y1="220" x2="160" y2="240"/><line x1="480" y1="220" x2="480" y2="240"/></g>
+        </g>
+      </svg>
+      <ul>
+        <li>Accepted target (ADR-0228): Pages and Blocks in M3; files like a drive and media like a photo library later, as views on the same store. M3 builds attachments only.</li>
+        <li>Metadata lives in one CRDT document per Page; Pages group into areas, the unit for Roles, replication and keys.</li>
+        <li>Contents are content-addressed, chunked, encrypted blobs outside the CRDT, loaded on demand; a device indexes a file for search when it first loads it. Binary files cannot merge, so concurrent edits keep both versions.</li>
+        <li>Rich text is text with formatting marks, Databases are typed fields and rows, and Markdown and HTML serve only import and export. Later drive and media views add OS integration (macOS File Provider, Windows Cloud Files, Linux FUSE) and on-device previews and indexing.</li>
+      </ul>
     </div></section>
 
     <section id="logic" class="section"><h2>4. Connections, formulas and Automations</h2><div class="body">
@@ -136,6 +155,16 @@ Liquid        = local-first workspace and App platform</code></pre>
         <li>Every Workspace write uses the same mutation pipeline and records actor, origin, permission result and reversible change in History.</li>
         <li>Visibility, View placement, Connection existence and sync access never imply execution authority.</li>
       </ul>
+      <h3>How an agent changes Workspace data</h3>
+      <div class="flow">
+        <div class="node"><strong>1 · Assignment</strong><br><span class="muted">A person starts the session and signs a grant: area, actions, expiry.</span></div><span class="arrow">→</span>
+        <div class="node"><strong>2 · Sign-in</strong><br><span class="muted"><code>liq</code> on the agent host checks the agent, its session and the person it acts for.</span></div><span class="arrow">→</span>
+        <div class="node"><strong>3 · Authority</strong><br><span class="muted">agent Role ∩ the person's authority ∩ grant ∩ App capability ∩ host boundary.</span></div><span class="arrow">→</span>
+        <div class="node"><strong>4 · Proposal</strong><br><span class="muted">The pipeline builds a diff; a sensitive change waits for the person unless the grant waives approvals.</span></div><span class="arrow">→</span>
+        <div class="node"><strong>5 · History</strong><br><span class="muted">Actor: the agent; on behalf of: the person; origin: CLI; revertible.</span></div><span class="arrow">→</span>
+        <div class="node"><strong>6 · Sync</strong><br><span class="muted">The signed change reaches other replicas; the Sync Server refuses it once the grant is revoked.</span></div>
+      </div>
+      <p class="muted">Accepted target (ADR-0223, ADR-0224). Agents write only through the CLI/API of the replica on their own host, which holds only their Roles' areas once selective replication follows the complete M3 replicas; the rules are canonical in <a href="../../SECURITY.md#liquid-workspace-access--external-agent-edits">SECURITY.md</a>.</p>
       <p>Sandbox and supply-chain requirements are canonical in <a href="../../SECURITY.md">SECURITY.md</a>.</p>
     </div></section>
 
@@ -143,6 +172,31 @@ Liquid        = local-first workspace and App platform</code></pre>
       <pre><code>Laptop replica ──┐
 Phone replica ───┼── Sync Server
 Headless replica ┘</code></pre>
+      <h3>Accepted enterprise target</h3>
+      <svg viewBox="0 0 560 380" role="img" aria-label="Star sync target with separate agent hosts" style="width:100%;max-width:760px;height:auto;display:block">
+        <defs><marker id="sync-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#7ee0a8"/></marker></defs>
+        <g font-family="system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif" fill="#e6e8ee">
+        <rect x="200" y="8" width="160" height="40" rx="8" fill="none" stroke="#7ee0a8" stroke-dasharray="4 3"/><text x="280" y="25" text-anchor="middle" font-size="11.5" font-weight="600">Company sign-in</text><text x="280" y="40" text-anchor="middle" font-size="10" fill="#9aa3b2">passkeys · SSO · SCIM · agent grants</text>
+        <line x1="280" y1="48" x2="280" y2="150" stroke="#7ee0a8" stroke-dasharray="3 3"/>
+        <rect x="205" y="150" width="150" height="76" rx="10" fill="#7ee0a8" fill-opacity=".08" stroke="#7ee0a8"/><text x="280" y="170" text-anchor="middle" font-weight="600" font-size="13">Sync Server</text><text x="280" y="186" text-anchor="middle" font-size="10.5" fill="#9aa3b2">checks signature + Role</text><text x="280" y="200" text-anchor="middle" font-size="10.5" fill="#9aa3b2">audit log</text><text x="280" y="214" text-anchor="middle" font-size="10.5" fill="#ffcf6b">area keys</text>
+        <line x1="280" y1="226" x2="280" y2="322" stroke="#7ee0a8" stroke-dasharray="3 3"/>
+        <rect x="200" y="322" width="160" height="40" rx="8" fill="none" stroke="#7ee0a8" stroke-dasharray="4 3"/><text x="280" y="339" text-anchor="middle" font-size="11.5" font-weight="600">Admin console</text><text x="280" y="354" text-anchor="middle" font-size="10" fill="#9aa3b2">revoke devices, agents, Roles</text>
+        <rect x="8" y="58" width="180" height="140" rx="10" fill="none" stroke="#9aa3b2"/><text x="98" y="75" text-anchor="middle" font-weight="600" font-size="12">Alice's laptop</text>
+        <rect x="18" y="84" width="160" height="44" rx="7" fill="none" stroke="#9aa3b2"/><text x="98" y="101" text-anchor="middle" font-size="11" font-weight="600">Liquid (Alice)</text><text x="98" y="117" text-anchor="middle" font-size="10" fill="#9aa3b2">all Alice may access</text>
+        <rect x="18" y="140" width="160" height="50" rx="7" fill="#c9a0ff" fill-opacity=".08" stroke="#c9a0ff" stroke-dasharray="4 3"/><text x="98" y="156" text-anchor="middle" font-size="11" font-weight="600">Agent host · sandbox</text><text x="98" y="170" text-anchor="middle" font-size="10" fill="#9aa3b2">Meta-Harness, agents</text><text x="98" y="183" text-anchor="middle" font-size="10" fill="#9aa3b2">only the agent Roles' areas</text>
+        <line x1="40" y1="128" x2="40" y2="140" stroke="#c9a0ff" stroke-width="2" stroke-dasharray="3 2"/>
+        <rect x="372" y="58" width="180" height="56" rx="10" fill="none" stroke="#9aa3b2"/><text x="462" y="78" text-anchor="middle" font-size="11.5" font-weight="600">Alice's phone · Liquid</text><text x="462" y="95" text-anchor="middle" font-size="10" fill="#9aa3b2">all Alice may access</text>
+        <rect x="8" y="262" width="180" height="56" rx="10" fill="none" stroke="#9aa3b2"/><text x="98" y="282" text-anchor="middle" font-size="11.5" font-weight="600">Bob's laptop · Liquid</text><text x="98" y="299" text-anchor="middle" font-size="10" fill="#9aa3b2">all Bob may access</text>
+        <rect x="372" y="250" width="180" height="68" rx="10" fill="#c9a0ff" fill-opacity=".08" stroke="#c9a0ff" stroke-dasharray="4 3"/><text x="462" y="268" text-anchor="middle" font-size="11.5" font-weight="600">Agent host · sandbox</text><text x="462" y="285" text-anchor="middle" font-size="10" fill="#9aa3b2">Meta-Harness, agents</text><text x="462" y="300" text-anchor="middle" font-size="10" fill="#9aa3b2">only the agent Roles' areas</text>
+        <g stroke="#7ee0a8" stroke-width="2" fill="none" marker-end="url(#sync-arrow)" marker-start="url(#sync-arrow)"><line x1="180" y1="106" x2="205" y2="165"/><line x1="180" y1="165" x2="205" y2="190"/><line x1="372" y1="96" x2="355" y2="160"/><line x1="188" y1="282" x2="205" y2="216"/><line x1="372" y1="268" x2="355" y2="216"/></g>
+        <line x1="540" y1="114" x2="540" y2="250" stroke="#c9a0ff" stroke-width="2" stroke-dasharray="6 4"/><text x="532" y="180" text-anchor="end" font-size="10" fill="#c9a0ff">agent control,</text><text x="532" y="193" text-anchor="end" font-size="10" fill="#c9a0ff">own channel</text>
+        </g>
+      </svg>
+      <ul>
+        <li>Accepted target (ADR-0223, ADR-0224): each device holds everything its person may access; an agent host holds only the areas its agent Roles allow. M3 starts with complete replicas on a data model divided into areas.</li>
+        <li>An agent host is a separate replica in its own sandbox, also on a person's laptop, and syncs through the Sync Server like every replica; a later offline path through the device's Liquid is required, and its sandbox blocks Liquid's data (ADR-0228, ADR-0229).</li>
+        <li>Every change is signed and checked against its signer's Role by the Sync Server; devices encrypt content per area (ADR-0228).</li>
+      </ul>
       <ul>
         <li>Every authorized M3 MVP client reads and writes a complete local Workspace replica; network loss never switches Liquid into a remote-only mode.</li>
         <li>Replicas connect to the central Sync Server, not directly to one another. The server persists and exchanges committed changes resumably.</li>
@@ -167,6 +221,8 @@ Headless replica ┘</code></pre>
         <li>When a verified terminal checkpoint is available on another device, the user may continue it at a new execution location as a child Run. Liquid renders the resulting Conversation branch and rechecks destination authority rather than presenting a runtime transfer as the same live Run.</li>
       </ol>
       <p>Liquid may combine several Meta-Harness projections visually, but every live command returns to the owning instance and unreachable state is clearly offline/stale. A provisioned same-host stack may execute locally without Internet; remote sessions remain stale while unreachable. Portable continuation transfers no credential-store records/references, Roles, approvals or live process ownership, but its recorded content remains sensitive; disconnected continuations from one checkpoint appear as separate branches.</p>
+      <p>Accepted target (ADR-0232, ADR-0233): a session can be shared live; others who may access it watch and propose prompts that its owner sends, as T3 Code's guest share works, and team agents steered by several people follow later. A company can keep agents off its laptops, which then only attach to allowed agent hosts.</p>
+      <p>Accepted target (ADR-0230): a reply that cites Liquid content carries a reference, a Page or Block with a revision, never a copy. Liquid renders it from the person's replica with the Page's Block View, a breadcrumb, the revision and a link to the Block, or a placeholder without access; see the <a href="../design/mockups/liquid-look.html">approved mockup</a>. The live read-only embed comes first, the agent's marked edits once History has revision ids, editing in place later.</p>
     </div></section>
 
     <section id="mobile" class="section"><h2>9. Responsive layout, mobile and widgets</h2><div class="body">
@@ -201,7 +257,7 @@ liquid-ui (Flutter)
 
 integrations
   Meta-Harness projection clients and MCP adapters</code></pre>
-      <p>Package names are design targets, not frozen implementation names. Interactive clients use Flutter over the Rust core (ADR-0181); thread, bridge, rendering, durability and resource rules live in the <a href="liquid-client-architecture.md">Liquid client architecture</a>. The storage engine remains open. All cross-product access uses public IDs and protocol surfaces; no product reads another product's private store.</p>
+      <p>Package names are design targets, not frozen implementation names. Interactive clients use Flutter over the Rust core; thread, bridge, rendering, durability and resource rules live in the <a href="liquid-client-architecture.md">Liquid client architecture</a>. The storage engine remains open. All cross-product access uses public IDs and protocol surfaces; no product reads another product's private store.</p>
     </div></section>
 
     <section id="history" class="section"><h2>11. History and Workspace CLI/API</h2><div class="body">

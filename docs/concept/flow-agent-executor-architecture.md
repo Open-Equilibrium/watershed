@@ -15,7 +15,7 @@ Flow Agent controls the workflow; the Executor starts and supervises a Tool; the
 | Tool and dependency chain | Implement the admitted action correctly even for hostile inputs. | Rely on Flow to repair unsafe path handling, shell construction or delegated authority. |
 
 
-The `flow` / `flow-executor` separation remains. Flow admits the protected inventory once under publication leases and validates each invocation; the short-lived companion receives the exact resolved policy and establishes protection before the first Tool instruction. [PROTOCOL.md](../../PROTOCOL.md#m12-executor-protocol-adr-0146-adr-0160-adr-0161-adr-0162) owns descriptor, digest and receipt details. Configuration administration is manual. Administrator-selected Custom Executors remain trusted installation code and cannot serve as an automatic protection bypass; only explicit Custom selection permits an absent official sibling (ADR-0175).
+The `flow` / `flow-executor` separation remains. Flow admits the protected inventory once under publication leases and validates each invocation; the short-lived companion receives the exact resolved policy and establishes protection before the first Tool instruction. [PROTOCOL.md](../../PROTOCOL.md#m12-executor-protocol) owns descriptor, digest and receipt details. Configuration administration is manual. Administrator-selected Custom Executors remain trusted installation code and cannot serve as an automatic protection bypass; only explicit Custom selection permits an absent official sibling.
 
 ## Security case matrix
 

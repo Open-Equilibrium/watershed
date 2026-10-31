@@ -2,7 +2,7 @@
 **/target/
 
 flow-agent/fixtures/**/out/
-# Node artifacts; Watershed has no Node product-runtime dependency (ADR-0001).
+# Node artifacts; Watershed has no Node product-runtime dependency.
 node_modules/
 .pnpm-store/
 .clawpatch/

@@ -112,8 +112,12 @@ fn projects_the_selected_branch_with_timing_and_what_the_model_saw() {
         failed: false,
         context: None,
         outcome: ToolOutcome::default(),
+        added_chars: 0,
     };
-    let user = record("e2", 1, RecordKind::User, "Add rate limiting", 0, None);
+    let user = TrajectoryRecord {
+        added_chars: "Add rate limiting".len(),
+        ..record("e2", 1, RecordKind::User, "Add rate limiting", 0, None)
+    };
     let message = TrajectoryRecord {
         first_token_ms: Some(900),
         model: "faux-1".to_owned(),
@@ -128,12 +132,14 @@ fn projects_the_selected_branch_with_timing_and_what_the_model_saw() {
         stop_reason: "toolUse".to_owned(),
         context: Some(StepContext {
             prompt_chars: 20,
+            sections: vec!["preamble".to_owned(), "rules".to_owned()],
             tools: vec!["bash".to_owned(), "read".to_owned()],
             tool_chars: 30,
             messages: 1,
             message_chars: "Add rate limiting".len(),
             new_since_previous: vec!["prompt".to_owned()],
         }),
+        added_chars: "I'll run the tests.\nThen fix.".len() + r#"{"command":"npm test"}"#.len(),
         ..record(
             "e3",
             1,
@@ -151,6 +157,7 @@ fn projects_the_selected_branch_with_timing_and_what_the_model_saw() {
         detail: r#"{"command":"npm test"}"#.to_owned(),
         target: "npm test".to_owned(),
         failed: true,
+        added_chars: "1 failed".len(),
         ..record("e4", 1, RecordKind::Tool, "bash", 12900, Some(6800))
     };
 
@@ -165,6 +172,7 @@ fn projects_the_selected_branch_with_timing_and_what_the_model_saw() {
         stop_reason: "stop".to_owned(),
         context: Some(StepContext {
             prompt_chars: 20,
+            sections: vec!["preamble".to_owned(), "rules".to_owned()],
             tools: vec!["bash".to_owned(), "read".to_owned()],
             tool_chars: 30,
             messages: 3,
@@ -174,6 +182,7 @@ fn projects_the_selected_branch_with_timing_and_what_the_model_saw() {
                 + "1 failed".len(),
             new_since_previous: vec!["result of bash".to_owned()],
         }),
+        added_chars: "Done.".len(),
         ..record("e7", 1, RecordKind::Message, "Done.", 20900, None)
     };
     assert_eq!(
@@ -190,7 +199,10 @@ fn projects_the_selected_branch_with_timing_and_what_the_model_saw() {
         [
             user,
             message,
-            record("b1", 2, RecordKind::User, "Use a token bucket", 64900, None),
+            TrajectoryRecord {
+                added_chars: "Use a token bucket".len(),
+                ..record("b1", 2, RecordKind::User, "Use a token bucket", 64900, None)
+            },
         ]
     );
 }
@@ -584,6 +596,31 @@ fn reads_outcomes_from_what_tools_did_not_from_what_they_were_asked_or_printed()
 }
 
 #[test]
+fn a_large_change_keeps_the_whole_path_of_its_file() {
+    // Arguments this long are kept with shortened strings; the paths share their first 250
+    // characters.
+    let dir = format!("/project/{}", "d".repeat(250));
+    let content = "line\n".repeat(1000);
+    let data: Value = serde_json::from_str(&format!(
+        r#"{{"entries":[
+      {{"type":"message","id":"u1","parentId":null,"message":{{"role":"user","content":"Go"}}}},
+      {{"type":"message","id":"a1","parentId":"u1","message":{{"role":"assistant","content":[{{"type":"toolCall","id":"c1","name":"write","arguments":{{"path":"{dir}/a.txt","content":"{content}"}}}},{{"type":"toolCall","id":"c2","name":"write","arguments":{{"path":"{dir}/b.txt","content":"{content}"}}}}]}}}},
+      {{"type":"message","id":"r1","parentId":"a1","message":{{"role":"toolResult","toolCallId":"c1","toolName":"write","content":[]}}}},
+      {{"type":"message","id":"r2","parentId":"r1","message":{{"role":"toolResult","toolCallId":"c2","toolName":"write","content":[]}}}}
+    ],"leafId":"r2"}}"#,
+        content = content.replace('\n', "\\n")
+    ))
+    .expect("JSON");
+    let changed: Vec<_> = History::from_entries(&data)
+        .trajectory(None)
+        .records
+        .into_iter()
+        .filter_map(|record| record.changed_file)
+        .collect();
+    assert_eq!(changed, [format!("{dir}/a.txt"), format!("{dir}/b.txt")]);
+}
+
+#[test]
 fn names_a_response_that_ended_empty_apart_from_one_that_called_tools() {
     let data: Value = serde_json::from_str(
         r#"{"entries":[
@@ -622,14 +659,29 @@ fn a_parent_cycle_ends_the_branch_instead_of_hanging() {
             history.trajectory(None).records.len(),
             history.transcript(None, 10).items.len(),
             history.context("a1").is_some(),
-            history.tree().nodes.len(),
+            history
+                .tree()
+                .nodes
+                .into_iter()
+                .map(|node| (node.id, node.parent))
+                .collect::<Vec<_>>(),
         );
         let _ = done.send(read);
     });
     let read = finished
         .recv_timeout(std::time::Duration::from_secs(10))
         .expect("a stored cycle must not hang the reader");
-    assert_eq!(read.3, 3, "every entry but the labels is a node");
+    let node = |id: &str, parent: Option<&str>| (id.to_owned(), parent.map(str::to_owned));
+    assert_eq!(
+        read.3,
+        [
+            node("u1", Some("a1")),
+            node("a1", Some("u1")),
+            node("m1", None)
+        ],
+        "every entry but the labels is a node, and labels that lead back to each other lead \
+         nowhere"
+    );
 }
 
 #[test]

@@ -28,7 +28,7 @@ CI may fail when the workload, lifecycle, schema, measurement integrity, report 
 
 Flow Agent should add little overhead around provider and Tool work, remain responsive under useful concurrency and stream histories and artifacts without retaining complete data unnecessarily. Roots and Subflows share the hard process-wide capacity limit below; provider and Tool processes, network latency and caller-owned buffers are outside Flow Agent performance evidence.
 
-### ADR-0068 safety envelope
+### Safety envelope
 
 These hard capacity and liveness limits are not performance thresholds and are not multiplied into one promised maximum workload:
 
@@ -53,9 +53,11 @@ The [M1.2 startup evidence](flow-agent/benchmarks/M1_2_STARTUP_EVIDENCE.md) owns
 
 Control and monitoring should feel immediate when they are not waiting on a model, Tool or network. Keep configuration resolution incremental, event normalization bounded and AgentPulse ingestion proportional to active sessions. Add fixed observational workloads with each implemented surface that introduces a meaningful cost center.
 
+The durability journal writes in short group commits, never once per token, and per-turn checkpoints run off the UI path (ADR-0220, ADR-0229). Each gets a fixed observational workload when implemented: token streaming with the journal on, and checkpoint time in a large repository.
+
 ## Liquid
 
-Local interaction should feel immediate, shared workspaces should remain responsive under useful human and agent concurrency, and organization scale should come from workspace sharding and scope-filtered subscriptions rather than global fan-out. Rendering, mutation, history, query, sync and App Runtime paths should avoid whole-workspace recomputation and unbounded retained state. Add representative fixed observational workloads as those surfaces are implemented; select a hard SLO only through the evidence rule above.
+Local interaction should feel immediate, shared workspaces should remain responsive under useful human and agent concurrency, and organization scale should come from workspace sharding and scope-filtered subscriptions rather than global fan-out. Rendering, mutation, history, query, sync and App Runtime paths should avoid whole-workspace recomputation and unbounded retained state. A device loads only the per-Page CRDT documents and content blobs it opens, and agent session records enter the Workspace as blobs with only metadata in the CRDT (ADR-0228, ADR-0229); encryption, signing and Role checks get per-change observations with sync. Add representative fixed observational workloads as those surfaces are implemented; select a hard SLO only through the evidence rule above.
 
 The [client architecture](docs/concept/liquid-client-architecture.md) makes responsiveness structural: typing renders without waiting for Rust, disk or network, and Pages build only viewport Views. Its first workloads cover input-to-presented-frame latency while typing in a long Page, scrolling across many Views, paging a large Database View, applying a sync burst and memory returned after closing Pages, on each Liquid target in [`PLATFORMS.md`](PLATFORMS.md), including Linux Wayland sessions and Android. Next-frame typing is the design goal; it becomes a binding SLO only through that rule.
 

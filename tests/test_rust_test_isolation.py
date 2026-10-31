@@ -1,5 +1,6 @@
 import json
 import os
+import signal
 import subprocess
 import tomllib
 import unittest
@@ -63,6 +64,35 @@ class RustTestIsolationRunnerTest(unittest.TestCase):
 
         self.assertEqual(result.returncode, 23, result.stderr)
         child_home = Path(result.stdout.strip())
+        self.assertTrue(child_home.is_absolute())
+        self.assertFalse(child_home.parent.exists())
+
+    @unittest.skipIf(os.name == "nt", "requires POSIX signals")
+    def test_runner_forwards_every_signal_until_the_child_exits(self) -> None:
+        # The child survives SIGINT and exits on SIGTERM; 99 means SIGTERM never arrived.
+        child = (
+            "process.on('SIGINT',()=>console.log('SIGINT'));"
+            "process.on('SIGTERM',()=>process.exit(0));"
+            "setTimeout(()=>process.exit(99),10000);"
+            "console.log(process.env.FLOW_AGENT_HOME)"
+        )
+        runner = subprocess.Popen(
+            ["node", str(RUNNER), "node", "-e", child],
+            cwd=ROOT,
+            stdout=subprocess.PIPE,
+            text=True,
+        )
+        try:
+            child_home = Path(runner.stdout.readline().strip())
+            runner.send_signal(signal.SIGINT)
+            self.assertEqual(runner.stdout.readline().strip(), "SIGINT")
+            runner.send_signal(signal.SIGTERM)
+            self.assertEqual(runner.wait(timeout=30), 0)
+        finally:
+            if runner.poll() is None:
+                runner.kill()
+                runner.wait()
+            runner.stdout.close()
         self.assertTrue(child_home.is_absolute())
         self.assertFalse(child_home.parent.exists())
 

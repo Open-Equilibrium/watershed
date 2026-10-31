@@ -30,6 +30,8 @@ pub struct BridgeTreeNode {
     pub label: Option<String>,
     /// Unix milliseconds when the entry was stored, if known.
     pub at_ms: Option<i64>,
+    /// Whether a tool call or model response failed.
+    pub failed: bool,
 }
 
 /// What a tree entry holds.
@@ -97,6 +99,9 @@ pub struct BridgeRecord {
     pub context: Option<BridgeStepContext>,
     /// What a tool call did.
     pub outcome: BridgeToolOutcome,
+    /// Characters the step adds to the model's context: its prompt, response or tool result;
+    /// none for an approval.
+    pub added_chars: i64,
 }
 
 /// What a tool call did, as far as its stored result shows.
@@ -132,6 +137,8 @@ pub enum BridgeRecordKind {
 pub struct BridgeStepContext {
     /// Characters of the system prompt.
     pub prompt_chars: i64,
+    /// The system prompt's named sections, such as `preamble` or `project_context`.
+    pub sections: Vec<String>,
     /// The tools the model could call.
     pub tools: Vec<String>,
     /// Characters of the tools' declarations.

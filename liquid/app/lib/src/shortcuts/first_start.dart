@@ -5,7 +5,7 @@ import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'keymap.dart';
 
-/// Asks once which profile to start with (approved mockup, ADR-0205). Nothing is preselected;
+/// Asks once which profile to start with (approved mockup). Nothing is preselected;
 /// esc keeps Standard. None when something else closed the question before a choice.
 Future<Profile?> askProfile(BuildContext context) => showDialog<Profile>(
   context: context,

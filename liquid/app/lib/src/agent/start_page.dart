@@ -8,17 +8,26 @@ import '../session/session_state.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
+import 'input_lane.dart';
+import 'sidebar.dart';
 
 /// The device a local session runs on, as the start page's device chip names it.
 final localDevice = Platform.isMacOS ? 'This Mac' : 'This computer';
 
-/// The main area of a session without a conversation yet (approved start page mockup,
-/// ADR-0203): the project's recent sessions to continue; the input area below starts a new one.
+/// The main area of a session without a conversation yet (approved start page mockup):
+/// the project's recent sessions to continue; the input area below starts a new one.
 class StartPage extends StatelessWidget {
-  const StartPage({super.key, required this.state, required this.project});
+  const StartPage({super.key, required this.state, required this.info});
 
   final SessionState state;
-  final String project;
+  final SessionInfo info;
+
+  /// What each approval mode means, as the greeting says it.
+  static const _modes = {
+    BridgeApprovalMode.ask: 'Ask before changes',
+    BridgeApprovalMode.allowEdits: 'Edits without asking',
+    BridgeApprovalMode.fullAccess: 'Full access',
+  };
 
   @override
   Widget build(BuildContext context) {
@@ -26,8 +35,22 @@ class StartPage extends StatelessWidget {
     final faint = TextStyle(color: ws.textFaint, fontSize: WsMetrics.fsSmall);
     return Column(
       children: [
-        const SizedBox(height: WsMetrics.space6),
-        Text('New agent session', style: faint),
+        const SizedBox(height: WsMetrics.space8),
+        // A new session greets with its project, as in T3 Code (approved look mockup).
+        Text(
+          'What should we build in ${info.project}?',
+          textAlign: TextAlign.center,
+          style: Theme.of(context).textTheme.titleLarge
+              ?.copyWith(fontWeight: WsMetrics.fwSemibold),
+        ),
+        const SizedBox(height: WsMetrics.space2),
+        ValueListenableBuilder(
+          valueListenable: state.mode,
+          builder: (context, mode, _) => Text(
+            '${info.harness} on ${info.device} · ${_modes[mode]}',
+            style: faint,
+          ),
+        ),
         // The list sits above the input area and scrolls when the window is short.
         Expanded(
           child: Align(
@@ -47,7 +70,10 @@ class StartPage extends StatelessWidget {
                                 horizontal: WsMetrics.space3,
                                 vertical: WsMetrics.space2,
                               ),
-                              child: Text('Recent in $project', style: faint),
+                              child: Text(
+                                'Recent in ${info.project}',
+                                style: faint,
+                              ),
                             ),
                             for (final session in recent)
                               _RecentRow(session: session, state: state),
@@ -58,7 +84,7 @@ class StartPage extends StatelessWidget {
             ),
           ),
         ),
-        const SizedBox(height: WsMetrics.space4),
+        const SizedBox(height: inputClearance),
       ],
     );
   }

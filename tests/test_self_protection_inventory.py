@@ -3,15 +3,22 @@
 import importlib.util
 import os
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 
-SPEC = importlib.util.spec_from_file_location(
-    "native_cases", Path(__file__).resolve().parents[1] / "scripts" / "macos-self-protection-cases.py"
-)
-CASES = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(CASES)
+def load(name, file):
+    spec = importlib.util.spec_from_file_location(name, Path(__file__).resolve().parents[1] / "scripts" / file)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+CASES = load("native_cases", "macos-self-protection-cases.py")
+PROBE = load("native_probe", "probe-macos-self-protection.py")
 
 
 class ProtectedInventory(unittest.TestCase):
@@ -48,6 +55,33 @@ class ProtectedInventory(unittest.TestCase):
             self.assertEqual(CASES.admit([root, nested], [record]), 1)
             with self.assertRaisesRegex(ValueError, "inventory limit"):
                 CASES.admit([root], [], limit=0)
+
+
+class DetachedHelperResult(unittest.TestCase):
+    def test_result_is_read_only_after_the_helper_finishes_writing_it(self):
+        helpers = []
+
+        def invoke(command, cwd, log):
+            # Stands in for the detached helper: the leader exits at once, then the
+            # helper writes and publishes its result with a pause after creating it.
+            target, release, result = map(Path, command[-3:])
+
+            def helper():
+                while not release.exists(): time.sleep(.01)
+                target.write_bytes(PROBE.CHANGED)
+                with result.open("w") as stream:
+                    time.sleep(.2)
+                    stream.write('{"state": "ok"}')
+
+            helpers.append(threading.Thread(target=helper)); helpers[0].start()
+            return {"launched": True, "returncode": 0, "timeout": False}
+
+        probe = SimpleNamespace(fixture=PROBE.fixture, invoke=invoke,
+                                read_marker=PROBE.read_marker, unchanged=PROBE.unchanged)
+        with tempfile.TemporaryDirectory() as temporary:
+            row = CASES.detached(probe, Path(temporary), False)
+            helpers[0].join()
+        self.assertEqual((row["outcome"], row["child"]), ("pass", {"state": "ok"}))
 
 
 if __name__ == "__main__": unittest.main()

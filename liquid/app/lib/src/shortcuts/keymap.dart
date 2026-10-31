@@ -2,8 +2,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
-/// The key Liquid sees for the Liquid key: macOS turns Caps Lock into F18 while it is on
-/// (ADR-0205).
+/// The key Liquid sees for the Liquid key: macOS turns Caps Lock into F18 while it is
+/// on.
 const liquidKey = LogicalKeyboardKey.f18;
 
 /// Esc pressed afresh and alone, which closes what is open.
@@ -198,7 +198,7 @@ enum Fixed {
     Keys(LogicalKeyboardKey.arrowUp),
     Keys(LogicalKeyboardKey.arrowDown),
   ]),
-  foldTurn('Fold or unfold the turn', Area.trajectory, '←→', [
+  foldTurn('Collapse or expand the turn', Area.trajectory, '←→', [
     Keys(LogicalKeyboardKey.arrowLeft),
     Keys(LogicalKeyboardKey.arrowRight),
   ]),
@@ -319,11 +319,16 @@ enum Command {
   ),
   dismissQuestion('Dismiss', Area.question, Keys(LogicalKeyboardKey.escape)),
   foldAll(
-    'Fold all turns',
+    'Collapse all turns',
     Area.trajectory,
     Keys(LogicalKeyboardKey.arrowLeft, alt: true),
   ),
   openStep('Open the step', Area.trajectory, Keys(LogicalKeyboardKey.enter)),
+  filterSteps(
+    'Filter steps',
+    Area.trajectory,
+    Keys(LogicalKeyboardKey.keyF, meta: true),
+  ),
   closeStep('Close the step', Area.trajectory, Keys(LogicalKeyboardKey.escape)),
   branch(
     'Branch from the step',
@@ -346,7 +351,7 @@ enum Command {
   final Keys keys;
 
   /// Whether the Liquid key profile adds ⇪ + the same key; platform standards such as
-  /// Settings… keep ⌘ only (ADR-0205).
+  /// Settings… keep ⌘ only.
   final bool liquid;
 }
 
@@ -436,7 +441,7 @@ class CustomProfile {
 }
 
 /// The active profile, and the Custom profile kept while another one is active, so choosing
-/// Custom again brings it back (ADR-0204, ADR-0205).
+/// Custom again brings it back.
 @immutable
 class ShortcutSettings {
   const ShortcutSettings._(this.profile, this.custom);

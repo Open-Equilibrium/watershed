@@ -15,6 +15,11 @@ void main() {
       expect(theme.colorScheme.primary, palette.accent);
       expect(theme.textTheme.bodyMedium!.fontSize, WsMetrics.fsUi);
       expect(
+        theme.textTheme.bodyMedium!.fontSize,
+        15,
+        reason: 'the approved default UI text size',
+      );
+      expect(
         theme.textTheme.bodyLarge!.height,
         WsMetrics.lhProse / WsMetrics.fsProse,
       );

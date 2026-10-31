@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 
+import '../controls.dart';
 import '../session/session_state.dart';
+import '../shortcuts/keymap.dart';
+import '../theme/icons.dart';
+import '../theme/logo.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 
@@ -37,12 +41,22 @@ class SessionTitle extends StatelessWidget {
   );
 }
 
-/// Session navigation with project, harness and device per session.
+/// Width of the sidebar at the default text size (approved look mockup).
+const sidebarWidth = 280.0;
+
+/// Session navigation with project, harness and device per session, and Settings in its
+/// footer (approved look mockup).
 class Sidebar extends StatelessWidget {
-  const Sidebar({super.key, required this.state, required this.info});
+  const Sidebar({
+    super.key,
+    required this.state,
+    required this.info,
+    this.onSettings,
+  });
 
   final SessionState state;
   final SessionInfo info;
+  final VoidCallback? onSettings;
 
   @override
   Widget build(BuildContext context) {
@@ -53,7 +67,7 @@ class Sidebar extends StatelessWidget {
       height: WsMetrics.lhSmall / WsMetrics.fsSmall,
     );
     return Container(
-      width: 264,
+      width: sidebarWidth,
       decoration: BoxDecoration(
         color: ws.subtle,
         border: Border(right: BorderSide(color: ws.border)),
@@ -67,6 +81,21 @@ class Sidebar extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space3),
+            child: Row(
+              children: [
+                const LiquidMark(),
+                const SizedBox(width: WsMetrics.space3),
+                Text(
+                  'Liquid',
+                  style: Theme.of(context).textTheme.labelMedium
+                      ?.copyWith(fontWeight: WsMetrics.fwSemibold),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: WsMetrics.space5),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space3),
             child: Row(children: [Text('Agent sessions', style: small)]),
@@ -137,6 +166,41 @@ class Sidebar extends StatelessWidget {
               },
             ),
           ),
+          const Spacer(),
+          if (onSettings case final onSettings?)
+            Tooltip(
+              message: 'Settings',
+              child: Shortcuts(
+                shortcuts: activateKeys,
+                child: InkWell(
+                  onTap: onSettings,
+                  borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
+                  child: Container(
+                    height: WsMetrics.rowNav,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: WsMetrics.space3,
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          LucideIcons.settings,
+                          size: 14,
+                          color: ws.textMuted,
+                        ),
+                        const SizedBox(width: WsMetrics.space3),
+                        Expanded(
+                          child: Text(
+                            'Settings',
+                            style: TextStyle(color: ws.textMuted),
+                          ),
+                        ),
+                        Hint(Keymap.of(context).label(Command.settings)),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
         ],
       ),
     );

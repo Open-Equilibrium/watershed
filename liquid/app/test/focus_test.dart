@@ -81,7 +81,7 @@ void main() {
     ),
   );
 
-  /// Lets an approval take keys (ADR-0207).
+  /// Lets an approval take keys.
   Future<void> read(WidgetTester tester) =>
       tester.pump(const Duration(milliseconds: 500));
 
@@ -385,7 +385,7 @@ void main() {
     );
     await tabTo(tester, standard);
     expect(
-      find.byType(ShortcutsPage),
+      find.byType(SettingsPage),
       paintsAbove(context.ws.canvas, focus),
       reason: 'the highlight is painted above the selected profile',
     );
@@ -401,7 +401,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(link, findsOneWidget);
     expect(
-      find.byType(ShortcutsPage),
+      find.byType(SettingsPage),
       paintsAbove(context.ws.warningSubtle, focus),
       reason: 'the highlight is painted above the notice',
     );

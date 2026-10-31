@@ -1,4 +1,4 @@
-//! pi's stored session files, read only as far as a listing needs (ADR-0203).
+//! pi's stored session files, read only as far as a listing needs.
 
 use std::io::Read;
 use std::path::{Path, PathBuf};

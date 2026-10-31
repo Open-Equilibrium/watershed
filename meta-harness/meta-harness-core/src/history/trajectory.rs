@@ -3,7 +3,7 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use super::entry::{Body, Entry, SystemChange, first_line};
+use super::entry::{Body, Entry, OpenCalls, SystemChange, first_line};
 use super::{
     ContextDetail, ContextMessage, ContextPart, RecordKind, StepContext, ToolOutcome, Trajectory,
     TrajectoryRecord,
@@ -73,7 +73,7 @@ pub(super) fn trajectory(entries: &[Entry], leaf: Option<&str>) -> Trajectory {
 
 /// State while walking one branch.
 #[derive(Default)]
-struct Projection {
+struct Projection<'a> {
     records: Vec<TrajectoryRecord>,
     turn: u64,
     sections: BTreeMap<String, usize>,
@@ -90,12 +90,10 @@ struct Projection {
     /// The `log` length at the previous model request.
     since: usize,
     request_timing: Option<(Option<u64>, Option<u64>)>,
-    /// When each tool's timing entry was stored and how long the tool ran. pi runs a response's
-    /// tools in parallel and stores their results together, so a result's own time is the end
-    /// of the slowest tool.
-    tool_timing: HashMap<String, (u64, Option<u64>)>,
-    /// Arguments and written lines of each tool call awaiting its result.
-    tool_calls: HashMap<String, (String, Option<u32>)>,
+    /// The latest response's open calls, with when each tool's timing entry was stored and how
+    /// long the tool ran. pi runs a response's tools in parallel and stores their results
+    /// together, so a result's own time is the end of the slowest tool.
+    calls: OpenCalls<'a, (u64, Option<u64>)>,
 }
 
 /// One entry of a branch as the model's context sees it.
@@ -118,7 +116,7 @@ struct Logged {
     edited_out: bool,
 }
 
-impl Projection {
+impl<'a> Projection<'a> {
     /// Marks the entry just logged as a message the model sees, described by `new` and
     /// `label`.
     fn count(&mut self, new: Option<String>, label: String, chars: usize) {
@@ -208,7 +206,7 @@ impl Projection {
             .position(|logged| Some(logged.id.as_str()) == id)
     }
 
-    fn add(&mut self, entry: &Entry, at: u64) {
+    fn add(&mut self, entry: &'a Entry, at: u64) {
         let id = entry.id.as_str();
         self.log.push(Logged {
             id: id.to_owned(),
@@ -286,9 +284,7 @@ impl Projection {
                 first_token_ms,
                 duration_ms,
             } => self.request_timing = Some((*first_token_ms, *duration_ms)),
-            Body::ToolTiming { call, duration_ms } => {
-                self.tool_timing.insert(call.clone(), (at, *duration_ms));
-            }
+            Body::ToolTiming { call, duration_ms } => self.calls.ended(call, (at, *duration_ms)),
             Body::Approval {
                 tool,
                 decision,
@@ -308,14 +304,10 @@ impl Projection {
             Body::User { text, chars } => {
                 self.turn += 1;
                 let label = first_line(text, LABEL_CHARS);
-                self.records.push(row(
-                    id,
-                    self.turn,
-                    RecordKind::User,
-                    label.clone(),
-                    at,
-                    None,
-                ));
+                self.records.push(TrajectoryRecord {
+                    added_chars: *chars,
+                    ..row(id, self.turn, RecordKind::User, label.clone(), at, None)
+                });
                 self.count(
                     Some("prompt".to_owned()),
                     format!("prompt · {label}"),
@@ -333,12 +325,7 @@ impl Projection {
             } => {
                 let (first_token_ms, duration_ms) =
                     self.request_timing.take().unwrap_or((None, None));
-                for call in calls {
-                    self.tool_calls.insert(
-                        call.id.clone(),
-                        (call.arguments.clone(), call.written_lines),
-                    );
-                }
+                self.calls.respond(calls);
                 let label = if !text.trim().is_empty() {
                     first_line(text, LABEL_CHARS)
                 } else if calls.is_empty() {
@@ -348,6 +335,7 @@ impl Projection {
                 };
                 let context = StepContext {
                     prompt_chars: self.sections.values().sum::<usize>() + self.appended_chars,
+                    sections: self.sections.keys().cloned().collect(),
                     tools: self.tools.keys().cloned().collect(),
                     tool_chars: self.tools.values().sum(),
                     messages: self.messages + usize::from(self.summary.is_some()),
@@ -361,6 +349,7 @@ impl Projection {
                     stop_reason: stop_reason.clone(),
                     failed: stop_reason == "error",
                     context: Some(context),
+                    added_chars: *chars,
                     ..row(
                         id,
                         self.turn,
@@ -379,8 +368,12 @@ impl Projection {
                 chars,
                 outcome,
             } => {
-                let (ended, duration_ms) = self.tool_timing.remove(call).unwrap_or((at, None));
-                let (arguments, written) = self.tool_calls.remove(call).unwrap_or_default();
+                let (ended, duration_ms) = self.calls.timing(call).unwrap_or((at, None));
+                let (arguments, written) = self
+                    .calls
+                    .answer(call)
+                    .map(|(_, call)| (call.arguments.clone(), call.written_lines))
+                    .unwrap_or_default();
                 let label = match pi::call_argument(&arguments) {
                     Some(argument) => format!("result of {tool} · {argument}"),
                     None => format!("result of {tool}"),
@@ -397,6 +390,7 @@ impl Projection {
                         added: outcome.added.or(if *failed { None } else { written }),
                         ..*outcome
                     },
+                    added_chars: *chars,
                     ..row(
                         id,
                         self.turn,
@@ -461,5 +455,6 @@ fn row(
         failed: false,
         context: None,
         outcome: ToolOutcome::default(),
+        added_chars: 0,
     }
 }

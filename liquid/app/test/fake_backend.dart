@@ -294,6 +294,8 @@ BridgeRecord record(
   BridgeStepContext? context,
   bool failed = false,
   BridgeToolOutcome outcome = const BridgeToolOutcome(),
+  int added = 0,
+  String? model,
 }) => BridgeRecord(
   entry: entry,
   turn: turn,
@@ -306,12 +308,13 @@ BridgeRecord record(
   startMs: start,
   durationMs: duration,
   firstTokenMs: firstToken,
-  model: kind == BridgeRecordKind.message ? 'faux-1' : '',
+  model: model ?? (kind == BridgeRecordKind.message ? 'faux-1' : ''),
   usage: usage,
   stopReason: '',
   failed: failed,
   context: context,
   outcome: outcome,
+  addedChars: added,
 );
 
 /// A session whose current branch is `records`, as one tree path.
@@ -334,12 +337,14 @@ BridgeHistory historyOf(
       tree ??
       [
         const BridgeTreeNode(
+          failed: false,
           id: 'root',
           kind: BridgeEntryKind.other,
           preview: '',
         ),
         for (final (index, record) in records.indexed)
           BridgeTreeNode(
+            failed: record.failed,
             id: record.entry,
             parent: index == 0 ? 'root' : records[index - 1].entry,
             kind: switch (record.kind) {

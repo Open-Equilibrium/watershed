@@ -10,61 +10,85 @@ import '../theme/tokens.g.dart';
 import '../trajectory/step_parts.dart';
 import '../trajectory/trajectory_model.dart';
 import '../trajectory/tree_view.dart';
+import 'input_lane.dart';
+import 'sidebar.dart';
 import 'start_page.dart';
 
 /// The chat timeline of the current branch. It builds only visible items, each item rebuilds
 /// alone while its text streams (client architecture rules 5 and 6), and scrolling to the top
 /// reads earlier stored entries.
 class ChatView extends StatelessWidget {
-  const ChatView({super.key, required this.state, required this.project});
+  const ChatView({
+    super.key,
+    required this.state,
+    required this.info,
+    this.input,
+  });
 
   final SessionState state;
 
-  /// The project's name, as the start page shows it.
-  final String project;
+  /// The session's project, harness and device, as the start page greets with them.
+  final SessionInfo info;
+
+  /// The input area, floating at the bottom.
+  final Widget? input;
 
   /// How close to the oldest item reading earlier entries starts, in pixels.
   static const _readAhead = 600.0;
 
   @override
   Widget build(BuildContext context) {
-    return NotificationListener<ScrollNotification>(
-      onNotification: (notification) {
-        final metrics = notification.metrics;
-        if (metrics.pixels >= metrics.maxScrollExtent - _readAhead) {
-          state.loadEarlier();
-        }
-        return false;
-      },
-      child: ValueListenableBuilder(
-        valueListenable: state.items,
-        // A session without a conversation shows the start page (ADR-0203).
-        builder: (context, items, _) => items.isEmpty
-            ? StartPage(state: state, project: project)
-            : ListView.builder(
-                reverse: true,
-                padding: const EdgeInsets.symmetric(vertical: WsMetrics.space5),
-                itemCount: items.length,
-                itemBuilder: (context, index) {
-                  final item = items[items.length - 1 - index];
-                  return Center(
-                    child: SizedBox(
-                      width: readingWidth,
-                      child: Padding(
-                        padding: const EdgeInsets.only(
-                          bottom: WsMetrics.space4,
-                        ),
-                        child: RepaintBoundary(
-                          child: switch (item.marker) {
-                            final marker? => BranchMark(marker: marker),
-                            null => ItemTile(item: item, state: state),
-                          },
-                        ),
-                      ),
+    return InputLane(
+      input: input,
+      child: NotificationListener<ScrollNotification>(
+        onNotification: (notification) {
+          final metrics = notification.metrics;
+          if (metrics.pixels >= metrics.maxScrollExtent - _readAhead) {
+            state.loadEarlier();
+          }
+          return false;
+        },
+        child: ValueListenableBuilder(
+          valueListenable: state.items,
+          // A session without a conversation shows the start page.
+          builder: (context, items, _) => items.isEmpty
+              ? StartPage(state: state, info: info)
+              // Messages start at the top and flow down (approved look mockup); a long chat
+              // still keeps its newest message above the input.
+              : Align(
+                  alignment: Alignment.topCenter,
+                  child: ListView.builder(
+                    shrinkWrap: true,
+                    reverse: true,
+                    padding: EdgeInsets.only(
+                      top: WsMetrics.space5,
+                      bottom:
+                          WsMetrics.space5 +
+                          (input == null ? 0 : inputClearance),
                     ),
-                  );
-                },
-              ),
+                    itemCount: items.length,
+                    itemBuilder: (context, index) {
+                      final item = items[items.length - 1 - index];
+                      return Center(
+                        child: SizedBox(
+                          width: readingWidth,
+                          child: Padding(
+                            padding: const EdgeInsets.only(
+                              bottom: WsMetrics.space4,
+                            ),
+                            child: RepaintBoundary(
+                              child: switch (item.marker) {
+                                final marker? => BranchMark(marker: marker),
+                                null => ItemTile(item: item, state: state),
+                              },
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+        ),
       ),
     );
   }
@@ -93,7 +117,7 @@ class BranchMark extends StatelessWidget {
           Icon(LucideIcons.gitBranch, size: 13, color: ws.accent),
           const SizedBox(width: WsMetrics.space2),
           if (ref != null) ...[
-            RefBadge(ref: ref, lane: marker.lane),
+            RefBadge(ref: ref, shown: true),
             const SizedBox(width: WsMetrics.space2),
           ] else ...[
             Text('New branch', style: style),

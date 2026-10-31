@@ -166,8 +166,8 @@ fn shutdown_ends_an_agent_whose_events_nobody_reads() {
             r#"i=0
 while [ $i -lt 256 ]; do printf '%s\n' '{{"type":"queue_update","steering":[],"followUp":[]}}'; i=$((i+1)); done
 printf '%s\n' 'not json'
-trap '' TERM; : > '{}'; while :; do sleep 1; done"#,
-            written.display()
+trap '' TERM; : > {}; while :; do sleep 1; done"#,
+            super::shell_word(written.display())
         ));
         reached(&written).await;
         // Time for the core to read it all and wait for room in the full buffer.
@@ -304,10 +304,7 @@ fn reopens_a_session_larger_than_one_record_from_its_file() {
         std::fs::write(&file, stored).expect("session file");
         let script = [
             expect_response(&[r#""type":"get_state""#, r#""id":"1""#]),
-            format!(
-                "printf '%s\\n' '{{\"id\":\"1\",\"type\":\"response\",\"command\":\"get_state\",\"success\":true,\"data\":{{\"sessionId\":\"s1\",\"isStreaming\":false,\"sessionFile\":\"{}\"}}}}'\n",
-                file.display()
-            ),
+            session_file(1, &file),
             expect_response(&[r#""type":"get_entries""#, r#""id":"2""#, r#""since":"e1999""#]),
             r#"printf '%s\n' '{"id":"2","type":"response","command":"get_entries","success":true,"data":{"entries":[{"type":"message","id":"e2000","parentId":"e1999","message":{"role":"user","content":"last"}}],"leafId":"e2000"}}'
 "#
@@ -339,15 +336,9 @@ fn rereads_the_session_file_when_new_entries_exceed_one_record() {
         };
         std::fs::write(&file, format!("{header}\n{}\n", entry("e1", "null"))).expect("file");
         let huge = "head -c 17000000 /dev/zero | tr '\\0' a\n";
-        let state = |id: u32| {
-            format!(
-                "printf '%s\\n' '{{\"id\":\"{id}\",\"type\":\"response\",\"command\":\"get_state\",\"success\":true,\"data\":{{\"sessionId\":\"s1\",\"isStreaming\":false,\"sessionFile\":\"{}\"}}}}'\n",
-                file.display()
-            )
-        };
         let script = [
             expect_response(&[r#""type":"get_state""#, r#""id":"1""#]),
-            state(1),
+            session_file(1, &file),
             expect_response(&[r#""id":"2""#, r#""since":"e1""#]),
             r#"printf '%s\n' '{"id":"2","type":"response","command":"get_entries","success":true,"data":{"entries":[],"leafId":"e1"}}'
 "#
@@ -360,7 +351,7 @@ fn rereads_the_session_file_when_new_entries_exceed_one_record() {
 "#
             ),
             expect_response(&[r#""type":"get_state""#, r#""id":"4""#]),
-            state(4),
+            session_file(4, &file),
             expect_response(&[r#""id":"5""#, r#""since":"e2""#]),
             r#"printf '%s\n' '{"id":"5","type":"response","command":"get_entries","success":true,"data":{"entries":[],"leafId":"e2"}}'
 "#
@@ -595,6 +586,18 @@ fn no_session_file(id: u32) -> String {
     )
 }
 
+/// Answers `get_state` with request `id`: the session is stored in `file`.
+fn session_file(id: u32, file: &std::path::Path) -> String {
+    let answer = serde_json::json!({
+        "id": id.to_string(),
+        "type": "response",
+        "command": "get_state",
+        "success": true,
+        "data": { "sessionId": "s1", "isStreaming": false, "sessionFile": file },
+    });
+    format!("printf '%s\\n' {}\n", super::shell_word(answer))
+}
+
 fn approval_request(id: &str, tool: &str, read_only: bool) -> String {
     approval_in("s1", id, tool, read_only)
 }
@@ -750,7 +753,7 @@ fn switches_sessions_and_models_through_pi() {
 "#
             .to_owned(),
             expect_response(&[r#""type":"get_available_models""#, r#""id":"3""#]),
-            r#"printf '%s\n' '{"id":"3","type":"response","command":"get_available_models","success":true,"data":{"models":[{"id":"faux-1","name":"Faux One","provider":"faux"},{"id":"faux-2","provider":"faux"}]}}'
+            r#"printf '%s\n' '{"id":"3","type":"response","command":"get_available_models","success":true,"data":{"models":[{"id":"faux-1","name":"Faux One","provider":"faux","contextWindow":200000},{"id":"faux-2","provider":"faux","contextWindow":0}]}}'
 "#
             .to_owned(),
             expect_response(&[
@@ -776,14 +779,19 @@ fn switches_sessions_and_models_through_pi() {
             Ok(false),
             "an extension cancelled it"
         );
-        let model = |id: &str, name: &str| Model {
+        let model = |id: &str, name: &str, context_window| Model {
             provider: "faux".to_owned(),
             id: id.to_owned(),
             name: name.to_owned(),
+            context_window,
         };
         assert_eq!(
             session.models().await,
-            Ok(vec![model("faux-1", "Faux One"), model("faux-2", "faux-2")])
+            Ok(vec![
+                model("faux-1", "Faux One", Some(200_000)),
+                model("faux-2", "faux-2", None)
+            ]),
+            "a context window of 0 leaves it unknown"
         );
         assert_eq!(
             accepted(session.set_model("faux", "faux-2").await).await,
@@ -1109,6 +1117,7 @@ fn reads_state_and_tree_and_branches_through_the_extension() {
                     preview: "hi".to_owned(),
                     label: None,
                     at_ms: None,
+                    failed: false,
                 }],
                 leaf: Some("e1".to_owned()),
             }
@@ -1193,6 +1202,28 @@ fn names_the_extension_as_pi_reports_it_when_its_path_has_dot_dot() {
         };
         let (mut session, _events) = Session::start(&command).expect("fake agent starts");
         assert_eq!(session.require_gate().await, Ok(()));
+    });
+}
+
+#[test]
+fn refuses_an_extension_path_relative_to_the_agents_directory() {
+    run(async {
+        // pi would read the file inside the project, which could supply its own copy.
+        let started = marker("relative-extension");
+        let command = AgentCommand {
+            program: "/bin/sh".into(),
+            args: vec!["-c".into(), format!("touch '{}'", started.display()).into()],
+            extension: "pi-extension/watershed.ts".into(),
+            session: None,
+            cwd: std::env::temp_dir(),
+        };
+        let Err(error) = Session::start(&command) else {
+            panic!("the session is refused");
+        };
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+        assert!(error.to_string().contains("absolute"), "{error}");
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(!started.exists(), "the agent never starts");
     });
 }
 
@@ -1347,9 +1378,9 @@ fn reads_the_history_before_pi_wrote_the_session_file() {
         let missing =
             std::env::temp_dir().join(format!("watershed-unwritten-{}.jsonl", std::process::id()));
         let script = format!(
-            "{}printf '%s\\n' '{{\"id\":\"1\",\"type\":\"response\",\"command\":\"get_state\",\"success\":true,\"data\":{{\"sessionId\":\"s\",\"isStreaming\":false,\"sessionFile\":\"{}\"}}}}'\n{}printf '%s\\n' '{{\"id\":\"2\",\"type\":\"response\",\"command\":\"get_entries\",\"success\":true,\"data\":{{\"entries\":[{{\"type\":\"message\",\"id\":\"u1\",\"parentId\":null,\"message\":{{\"role\":\"user\",\"content\":\"Hi\"}}}}],\"leafId\":\"u1\"}}}}'\nIFS= read -r line || exit 0\n",
+            "{}{}{}printf '%s\\n' '{{\"id\":\"2\",\"type\":\"response\",\"command\":\"get_entries\",\"success\":true,\"data\":{{\"entries\":[{{\"type\":\"message\",\"id\":\"u1\",\"parentId\":null,\"message\":{{\"role\":\"user\",\"content\":\"Hi\"}}}}],\"leafId\":\"u1\"}}}}'\nIFS= read -r line || exit 0\n",
             expect_response(&[r#""type":"get_state""#]),
-            missing.display(),
+            session_file(1, &missing),
             expect_response(&[r#""type":"get_entries""#]),
         );
         let (mut session, _events) = fake_agent(&script);

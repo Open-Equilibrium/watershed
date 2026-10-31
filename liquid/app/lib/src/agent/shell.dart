@@ -4,6 +4,7 @@ import 'dart:ui';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '../appearance.dart';
 import '../controls.dart';
 import '../diff/diff_settings.dart';
 import '../diff/diff_view.dart';
@@ -19,6 +20,7 @@ import '../theme/tokens.g.dart';
 import '../trajectory/trajectory_view.dart';
 import 'action_area.dart';
 import 'chat_view.dart';
+import 'input_lane.dart';
 import 'sidebar.dart';
 import 'status_bar.dart';
 
@@ -33,10 +35,14 @@ class AgentShell extends StatefulWidget {
     required this.info,
     this.shortcuts,
     this.diffSettings,
+    this.appearance,
   });
 
   final SessionState state;
   final SessionInfo info;
+
+  /// Theme and text size, which Settings change; without it Settings show only shortcuts.
+  final AppearanceController? appearance;
 
   /// The shortcut settings; Standard, unsaved, without them.
   final ShortcutController? shortcuts;
@@ -51,6 +57,9 @@ class AgentShell extends StatefulWidget {
 class _AgentShellState extends State<AgentShell> {
   final _composer = TextEditingController();
   final _composerFocus = FocusNode(debugLabel: 'composer');
+
+  /// Keeps the input area's state while it moves into the open tab.
+  final _inputKey = GlobalKey(debugLabel: 'input area');
   final _tab = ValueNotifier(AgentTab.chat);
   final _comparing = ValueNotifier(false);
   final _settings = ValueNotifier(false);
@@ -124,7 +133,7 @@ class _AgentShellState extends State<AgentShell> {
     widget.state.draft.value = null;
   }
 
-  /// Reads the changes as the Diff settings say, which own the choice (ADR-0212).
+  /// Reads the changes as the Diff settings say, which own the choice.
   void _hideWhitespace() =>
       widget.state.hideWhitespace.value = _diffSettings.value.hideWhitespace;
 
@@ -146,7 +155,7 @@ class _AgentShellState extends State<AgentShell> {
     super.dispose();
   }
 
-  /// Starts a new session in the chat, ready to describe the task (ADR-0203).
+  /// Starts a new session in the chat, ready to describe the task.
   void _newSession() {
     _tab.value = AgentTab.chat;
     _composerFocus.requestFocus();
@@ -164,7 +173,7 @@ class _AgentShellState extends State<AgentShell> {
     Command.settings: _toggleSettings,
   };
 
-  /// App-wide shortcuts in the macOS menu bar, where they stay out of the GUI (ADR-0204);
+  /// App-wide shortcuts in the macOS menu bar, where they stay out of the GUI;
   /// the menu shows ⌘ keys, the bindings below handle every key on every platform.
   Widget _menus(ShortcutSettings keys, Widget child) {
     if (defaultTargetPlatform != TargetPlatform.macOS) return child;
@@ -246,56 +255,70 @@ class _AgentShellState extends State<AgentShell> {
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Sidebar(state: widget.state, info: widget.info),
+                  Sidebar(
+                    state: widget.state,
+                    info: widget.info,
+                    onSettings: _toggleSettings,
+                  ),
                   Expanded(
                     child: ValueListenableBuilder(
                       valueListenable: _settings,
                       builder: (context, settings, main) => settings
-                          ? ShortcutsPage(
+                          ? SettingsPage(
                               shortcuts: _shortcuts,
+                              appearance: widget.appearance,
                               onClose: _toggleSettings,
                             )
                           : main!,
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          _Header(state: widget.state),
+                          _Header(
+                            state: widget.state,
+                            project: widget.info.project,
+                          ),
                           _Tabs(tab: _tab, state: widget.state),
                           Expanded(
                             child: ValueListenableBuilder(
                               valueListenable: _tab,
-                              builder: (context, tab, _) => switch (tab) {
-                                AgentTab.chat => ChatView(
-                                  state: widget.state,
-                                  project: widget.info.project,
-                                ),
-                                AgentTab.diff => DiffView(
-                                  state: widget.state,
-                                  settings: _diffSettings,
-                                ),
-                                AgentTab.trajectory => TrajectoryView(
-                                  state: widget.state,
-                                  onBranched: _composerFocus.requestFocus,
-                                  comparing: _comparing,
-                                ),
+                              builder: (context, tab, _) {
+                                // The input area floats over the open tab's main column.
+                                final input = KeyedSubtree(
+                                  key: _inputKey,
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.stretch,
+                                    children: [
+                                      WidgetStrip(state: widget.state),
+                                      ActionArea(
+                                        state: widget.state,
+                                        project: widget.info.project,
+                                        composer: _composer,
+                                        composerFocus: _composerFocus,
+                                      ),
+                                    ],
+                                  ),
+                                );
+                                return switch (tab) {
+                                  AgentTab.chat => ChatView(
+                                    state: widget.state,
+                                    info: widget.info,
+                                    input: input,
+                                  ),
+                                  AgentTab.diff => DiffView(
+                                    state: widget.state,
+                                    settings: _diffSettings,
+                                    input: input,
+                                  ),
+                                  AgentTab.trajectory => TrajectoryView(
+                                    state: widget.state,
+                                    onBranched: _composerFocus.requestFocus,
+                                    comparing: _comparing,
+                                    input: input,
+                                  ),
+                                };
                               },
-                            ),
-                          ),
-                          WidgetStrip(state: widget.state),
-                          Padding(
-                            padding: const EdgeInsets.only(
-                              bottom: WsMetrics.space4,
-                            ),
-                            child: Center(
-                              child: SizedBox(
-                                width: readingWidth,
-                                child: ActionArea(
-                                  state: widget.state,
-                                  project: widget.info.project,
-                                  composer: _composer,
-                                  composerFocus: _composerFocus,
-                                ),
-                              ),
                             ),
                           ),
                           ListenableBuilder(
@@ -326,22 +349,57 @@ class _AgentShellState extends State<AgentShell> {
   }
 }
 
+/// The session's title with its project and model as chips (approved look mockup); the
+/// branch joins them with the Git slice.
 class _Header extends StatelessWidget {
-  const _Header({required this.state});
+  const _Header({required this.state, required this.project});
 
   final SessionState state;
+  final String project;
 
   @override
-  Widget build(BuildContext context) => Container(
-    height: 44,
-    padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space7),
-    alignment: Alignment.centerLeft,
-    child: SessionTitle(
-      state: state,
-      style: Theme.of(context).textTheme.labelMedium
-          ?.copyWith(fontWeight: WsMetrics.fwSemibold),
-    ),
-  );
+  Widget build(BuildContext context) {
+    final ws = context.ws;
+    Widget chip(String text) => Container(
+      margin: const EdgeInsets.only(left: WsMetrics.space3),
+      padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space2),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(WsMetrics.radiusSm),
+        border: Border.all(color: ws.borderStrong),
+      ),
+      child: Text(
+        text,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(color: ws.textMuted, fontSize: WsMetrics.fsSmall),
+      ),
+    );
+    return Container(
+      key: const Key('session-header'),
+      height: 44,
+      padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space7),
+      child: Row(
+        children: [
+          Flexible(
+            child: SessionTitle(
+              state: state,
+              style: Theme.of(context).textTheme.labelMedium
+                  ?.copyWith(fontWeight: WsMetrics.fwSemibold),
+            ),
+          ),
+          Flexible(child: chip(project)),
+          Flexible(
+            child: ValueListenableBuilder(
+              valueListenable: state.model,
+              builder: (context, model, _) => model == null
+                  ? const SizedBox.shrink()
+                  : chip(model.substring(model.indexOf('/') + 1)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 /// How many files the latest run changed, beside the Diff tab's name (approved mockup).
@@ -420,7 +478,7 @@ class _Tabs extends StatelessWidget {
                       border: Border(
                         bottom: BorderSide(
                           color: entry.key == active
-                              ? ws.text
+                              ? ws.accent
                               : Colors.transparent,
                           width: 2,
                         ),
@@ -449,8 +507,8 @@ class _Tabs extends StatelessWidget {
                               _ChangedFiles(state: state),
                           ],
                         ),
-                        // Keys the menu bar shows stay out of the GUI (ADR-0204); the Liquid
-                        // key, which it cannot show, gets a hint (ADR-0205).
+                        // Keys the menu bar shows stay out of the GUI; the Liquid key,
+                        // which it cannot show, gets a hint.
                         if (shown &&
                             keys.label(entry.value).isNotEmpty &&
                             keys.label(entry.value) !=
@@ -483,25 +541,23 @@ class WidgetStrip extends StatelessWidget {
     return ValueListenableBuilder(
       valueListenable: state.widgets,
       builder: (context, widgets, _) => SizedBox(
-        height: 36,
-        child: Center(
-          child: SizedBox(
-            width: readingWidth,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space4),
-              child: Text(
-                [
-                  for (final entry in widgets.entries)
-                    '${entry.key}  ${entry.value.join('  ')}',
-                ].join('    '),
-                key: const Key('widgets'),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: monoStyle(
-                  context,
-                  color: context.ws.textMuted,
-                ).copyWith(fontSize: WsMetrics.fsSmall),
-              ),
+        height: widgetStripHeight,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space4),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: Text(
+              [
+                for (final entry in widgets.entries)
+                  '${entry.key}  ${entry.value.join('  ')}',
+              ].join('    '),
+              key: const Key('widgets'),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: monoStyle(
+                context,
+                color: context.ws.textMuted,
+              ).copyWith(fontSize: WsMetrics.fsSmall),
             ),
           ),
         ),

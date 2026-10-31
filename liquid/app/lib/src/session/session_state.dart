@@ -134,13 +134,13 @@ class SessionState {
     }
   }
 
-  /// Starts a new session in the same agent; the current one stays available (ADR-0203).
+  /// Starts a new session in the same agent; the current one stays available.
   Future<void> newSession() => _switch(
     _backend.newSession,
     busy: 'Stop the agent before starting a new session.',
   );
 
-  /// Continues a stored session in the same agent (ADR-0203).
+  /// Continues a stored session in the same agent.
   Future<void> continueSession(String path) => _switch(
     () => _backend.switchSession(path),
     busy: 'Stop the agent before continuing another session.',
@@ -358,8 +358,8 @@ class SessionState {
   /// such a run with the project before it.
   final ran = ValueNotifier(false);
 
-  /// Whether the changes leave out what is only whitespace; a change reads them again
-  /// (ADR-0212).
+  /// Whether the changes leave out what is only whitespace; a change reads them
+  /// again.
   final hideWhitespace = ValueNotifier(false);
 
   /// Reads what the latest run changed. A failed read is reported once, and the Diff tab says

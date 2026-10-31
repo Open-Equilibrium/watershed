@@ -2,6 +2,10 @@
 // tool call until the core decides (ADR-0188), lets the core branch a session at any entry and
 // records timing as session entries, so the Trajectory reads everything from the session file
 // (ADR-0189).
+import { homedir } from "node:os";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
+
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 /** Title prefix of the select dialog the core answers instead of the user. */
@@ -12,6 +16,9 @@ export const APPROVAL_PREFIX = "watershed.approval ";
  * read-only: another tool's own `readOnlyHint` is a claim nobody checks (ADR-0208).
  */
 const READING_BUILTINS = new Set(["read", "grep", "find", "ls", "tool_search"]);
+
+/** pi's built-in tools that change the file their `path` names. */
+const FILE_CHANGES = new Set(["edit", "write"]);
 
 /** Answers the core may give; only the first three are user decisions. */
 const DECISIONS = ["allow-once", "allow-session", "reject", "allow-auto"];
@@ -43,6 +50,10 @@ function watershed(pi: ExtensionAPI, clock: Clock): void {
       session: ctx.sessionManager.getSessionId(),
       // The call the user decides on, among a response's calls that pi started.
       toolCallId: event.toolCallId,
+      writesTo:
+        tool?.sourceInfo?.source === "builtin" && FILE_CHANGES.has(tool.name)
+          ? writesTo((event.input as { path?: unknown }).path, ctx.cwd)
+          : undefined,
     };
     const asked = clock();
     const decision = await ctx.ui.select(APPROVAL_PREFIX + JSON.stringify(payload), DECISIONS);
@@ -148,4 +159,40 @@ function promptText(content: string | readonly { type: string; text?: string }[]
     .filter((part) => part.type === "text")
     .map((part) => part.text ?? "")
     .join("");
+}
+
+/**
+ * The file pi's `edit` or `write` changes for `path`, resolved against the project `cwd` as
+ * pi 1.3.0's `resolveToCwd` does, when the path does not say so plainly: pi rewrites it (Unicode
+ * spaces, a leading `@`, `~` or a `file://` URL), it holds a `..` segment, or it leaves the
+ * project. A path pi cannot resolve names nothing, since the tool then fails.
+ */
+function writesTo(path: unknown, cwd: string): string | undefined {
+  if (typeof path !== "string") {
+    return undefined;
+  }
+  let given = path.replace(/[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g, " ");
+  if (given.startsWith("@")) {
+    given = given.slice(1);
+  }
+  try {
+    if (given === "~") {
+      given = homedir();
+    } else if (given.startsWith("~/")) {
+      given = join(homedir(), given.slice(2));
+    } else if (/^file:\/\//.test(given)) {
+      given = fileURLToPath(given);
+    }
+  } catch {
+    return undefined;
+  }
+  const file = resolve(cwd, given);
+  const inProject = relative(cwd, file);
+  const plain =
+    given === path &&
+    !path.split("/").includes("..") &&
+    inProject !== ".." &&
+    !inProject.startsWith(`..${sep}`) &&
+    !isAbsolute(inProject);
+  return plain ? undefined : file;
 }

@@ -33,8 +33,8 @@ abstract final class WsMetrics {
   static const double lhH3 = 22;
   static const double fsProse = 16;
   static const double lhProse = 24;
-  static const double fsUi = 14;
-  static const double lhUi = 20;
+  static const double fsUi = 15;
+  static const double lhUi = 22;
   static const double fsCompact = 13;
   static const double lhCompact = 20;
   static const double fsSmall = 12;
@@ -59,7 +59,7 @@ abstract final class WsMetrics {
   static const double radiusMd = 6;
   static const double radiusLg = 8;
   static const double radiusXl = 12;
-  static const double rowNav = 28;
+  static const double rowNav = 32;
   static const double rowTable = 34;
   static const Duration motionFast = Duration(milliseconds: 120);
   static const Duration motionPanel = Duration(milliseconds: 200);
@@ -147,16 +147,16 @@ final class WsPalette {
     subtle: Color(0xFFF7F7F5),
     surface: Color(0xFFFFFFFF),
     hover: Color(0xFFEFEFED),
-    selected: Color(0xFFE3EEFB),
+    selected: Color(0xFFDFEDFC),
     titlebar: Color(0xFFF7F7F5),
     border: Color(0xFFE9E9E7),
     borderStrong: Color(0xFFDCDBD8),
     text: Color(0xFF37352F),
     textMuted: Color(0xFF504F4C),
     textFaint: Color(0xFF6B6A67),
-    accent: Color(0xFF1B63B7),
+    accent: Color(0xFF0064D2),
     onAccent: Color(0xFFFFFFFF),
-    accentSubtle: Color(0xFFE7F0FB),
+    accentSubtle: Color(0xFFE5F0FD),
     success: Color(0xFF376E4F),
     successSubtle: Color(0xFFEDF3EC),
     warning: Color(0xFF9A4F00),
@@ -173,7 +173,7 @@ final class WsPalette {
     synStr: Color(0xFF0A3069),
     synCom: Color(0xFF5F6873),
     synNum: Color(0xFF0550AE),
-    data1: Color(0xFF2075D8),
+    data1: Color(0xFF0064D2),
     data2: Color(0xFF8A5FAD),
     data3: Color(0xFF3D7A58),
     onData: Color(0xFFFFFFFF),
@@ -204,16 +204,16 @@ final class WsPalette {
     subtle: Color(0xFF202020),
     surface: Color(0xFF252525),
     hover: Color(0xFF2C2C2C),
-    selected: Color(0xFF1F3550),
+    selected: Color(0xFF1B3556),
     titlebar: Color(0xFF202020),
     border: Color(0xFF2F2F2F),
     borderStrong: Color(0xFF3A3A3A),
     text: Color(0xFFD4D4D4),
     textMuted: Color(0xFFB7B7B7),
     textFaint: Color(0xFF9D9D9D),
-    accent: Color(0xFF4C9BEA),
+    accent: Color(0xFF3D9BFF),
     onAccent: Color(0xFF0B1626),
-    accentSubtle: Color(0xFF1D2C3D),
+    accentSubtle: Color(0xFF182C44),
     success: Color(0xFF4DAB9A),
     successSubtle: Color(0xFF1C302B),
     warning: Color(0xFFFFA344),
@@ -230,7 +230,7 @@ final class WsPalette {
     synStr: Color(0xFFA5D6FF),
     synCom: Color(0xFF8B949E),
     synNum: Color(0xFF79C0FF),
-    data1: Color(0xFF4C9BEA),
+    data1: Color(0xFF3D9BFF),
     data2: Color(0xFFB48CE6),
     data3: Color(0xFF4DAB9A),
     onData: Color(0xFF191919),

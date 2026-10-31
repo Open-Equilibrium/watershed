@@ -19,7 +19,7 @@ String settingsDirectory(
     '${environment['XDG_CONFIG_HOME'] ?? '${environment['HOME']}/.config'}/liquid',
 };
 
-/// Shortcut settings as a JSON file (ADR-0205).
+/// Shortcut settings as a JSON file.
 class ShortcutStore {
   ShortcutStore(File file) : _file = SettingsFile(file);
 
@@ -40,7 +40,7 @@ class ShortcutStore {
   Future<void> save(ShortcutSettings settings) => _file.save(settings.toJson());
 }
 
-/// Turns the Liquid key on or off on this computer (ADR-0205).
+/// Turns the Liquid key on or off on this computer.
 abstract interface class LiquidKeyHost {
   /// Whether this computer can have the Liquid key.
   bool get available;

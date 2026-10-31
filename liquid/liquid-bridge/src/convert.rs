@@ -21,27 +21,6 @@ use crate::api::history::{
 };
 use crate::api::session::{BridgeApprovalMode, BridgeModel, BridgeStoredSession};
 
-/// Merges consecutive content deltas of the same item that piled up while the forwarder was
-/// busy, so fewer events cross to Dart. flutter_rust_bridge's sink does not wait for Dart, so a
-/// stalled Dart isolate still queues what was sent; flow control that coalesces while the UI
-/// falls behind (client architecture rule 4) is not built for the agent stream.
-pub(crate) fn coalesce(events: Vec<BridgeEvent>) -> Vec<BridgeEvent> {
-    let mut merged: Vec<BridgeEvent> = Vec::with_capacity(events.len());
-    for event in events {
-        if let Some(last) = merged.last_mut()
-            && last.kind == BridgeEventKind::ContentDelta
-            && event.kind == BridgeEventKind::ContentDelta
-            && last.item.as_ref().map(|item| item.id) == event.item.as_ref().map(|item| item.id)
-            && let (Some(text), Some(more)) = (last.text.as_mut(), event.text.as_deref())
-        {
-            text.push_str(more);
-            continue;
-        }
-        merged.push(event);
-    }
-    merged
-}
-
 /// Describes a failed command for Dart.
 pub(crate) fn describe(error: CommandError) -> String {
     match error {
@@ -93,6 +72,7 @@ impl From<TreeNode> for BridgeTreeNode {
             preview: node.preview,
             label: node.label,
             at_ms: node.at_ms.map(int),
+            failed: node.failed,
         }
     }
 }
@@ -131,6 +111,7 @@ impl From<TrajectoryRecord> for BridgeRecord {
             failed: record.failed,
             context: record.context.map(Into::into),
             outcome: record.outcome.into(),
+            added_chars: int(record.added_chars),
         }
     }
 }
@@ -217,6 +198,7 @@ impl From<StepContext> for BridgeStepContext {
     fn from(context: StepContext) -> Self {
         Self {
             prompt_chars: int(context.prompt_chars),
+            sections: context.sections,
             tools: context.tools,
             tool_chars: int(context.tool_chars),
             messages: int(context.messages),
@@ -444,6 +426,7 @@ impl From<AgentEvent> for BridgeEvent {
                         item: item.map(|item| int(item.0)),
                         edit: edit.map(|edit| BridgeEdit {
                             path: edit.path,
+                            writes_to: edit.writes_to,
                             changes: edit
                                 .changes
                                 .into_iter()
@@ -547,6 +530,7 @@ impl From<Model> for BridgeModel {
             provider: model.provider,
             id: model.id,
             name: model.name,
+            context_window: model.context_window.map(int),
         }
     }
 }

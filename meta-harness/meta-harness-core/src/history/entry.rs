@@ -1,10 +1,12 @@
 //! A session's stored entries in the compact form the tree and Trajectory read. pi's JSON is
 //! parsed once per entry and then dropped, so a long session costs little to keep.
 
+use std::collections::{HashMap, VecDeque};
+
 use serde_json::Value;
 
 use super::outcome::{exit_code, patch_lines, test_counts};
-use crate::pi::{content_text, item_kind, usage, written_lines};
+use crate::pi::{PATH_ARGUMENTS, content_text, item_kind, usage, written_lines};
 use crate::visible::visible_name;
 use crate::{ItemKind, ToolOutcome, Usage};
 
@@ -111,6 +113,61 @@ pub(crate) struct Call {
     pub arguments: String,
     /// Lines a `write` call writes.
     pub written_lines: Option<u32>,
+}
+
+/// The calls of a branch's latest response that no result answered yet, and the `T` timing of
+/// those that ended. A result answers the earliest open call with its id: ids repeat, for
+/// example as empty ones from servers that send none.
+#[derive(Default)]
+pub(crate) struct OpenCalls<'a, T = ()> {
+    open: HashMap<&'a str, VecDeque<(usize, &'a Call)>>,
+    timing: HashMap<&'a str, Vec<T>>,
+}
+
+impl<'a, T> OpenCalls<'a, T> {
+    /// Starts over with a new response's calls.
+    pub fn respond(&mut self, calls: &'a [Call]) {
+        self.open.clear();
+        self.timing.clear();
+        for (place, call) in calls.iter().enumerate() {
+            self.open
+                .entry(call.id.as_str())
+                .or_default()
+                .push_back((place, call));
+        }
+    }
+
+    /// The call a result for `id` answers, with its place in the response.
+    pub fn answer(&mut self, id: &str) -> Option<(usize, &'a Call)> {
+        self.open.get_mut(id)?.pop_front()
+    }
+
+    /// Opens the call the latest answer returned again, for another branch from before it.
+    pub fn reopen(&mut self, place: usize, call: &'a Call) {
+        self.open
+            .entry(call.id.as_str())
+            .or_default()
+            .push_front((place, call));
+    }
+
+    /// Keeps the timing entry of a call with `id` that ended, until its result.
+    pub fn ended(&mut self, id: &'a str, timing: T) {
+        self.timing.entry(id).or_default().push(timing);
+    }
+
+    /// The timing of the call a result for `id` answers. pi runs a response's tools one after
+    /// another, each followed by its result, or all at once, with the results after every
+    /// timing entry, in the calls' order rather than the order they ended. A timing entry names
+    /// only the call's id, so results whose id several entries wait for get none of them rather
+    /// than another call's.
+    pub fn timing(&mut self, id: &str) -> Option<T> {
+        let mut waiting = self.timing.remove(id)?;
+        if waiting.len() == 1 {
+            waiting.pop()
+        } else {
+            None
+        }
+    }
 }
 
 /// Changes of the system prompt's sections and tools.
@@ -379,7 +436,8 @@ fn system(message: &Value) -> SystemChange {
     }
 }
 
-/// Tool arguments as JSON text; when too long, every string in them is shortened instead.
+/// Tool arguments as JSON text; when too long, every string in them is shortened instead, but
+/// for the path of the file a call changes, which the Trajectory reports whole.
 fn arguments(value: &Value) -> String {
     let text = value.to_string();
     if text.len() <= ARGUMENT_BYTES {
@@ -398,7 +456,13 @@ fn arguments(value: &Value) -> String {
             other => other.clone(),
         }
     }
-    shorten(value).to_string()
+    let mut short = shorten(value);
+    for name in PATH_ARGUMENTS {
+        if let (Some(path), Some(kept)) = (value.get(name), short.get_mut(name)) {
+            kept.clone_from(path);
+        }
+    }
+    short.to_string()
 }
 
 /// `text` cut to `chars` characters, with an ellipsis when cut.

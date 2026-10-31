@@ -39,6 +39,7 @@ void main() {
         clock += 500;
         tree.add(
           BridgeTreeNode(
+            failed: false,
             id: '$id$suffix',
             parent: parent,
             kind: kind,

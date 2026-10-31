@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:collection';
+import 'dart:math' as math;
 import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
@@ -6,6 +8,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:liquid/src/diff/diff_view.dart';
+import 'package:liquid/src/trajectory/tree_view.dart';
+import 'package:liquid/src/trajectory/trajectory_view.dart';
 import 'package:liquid/src/agent/action_area.dart';
 import 'package:liquid/src/agent/chat_view.dart';
 import 'package:liquid/src/agent/shell.dart';
@@ -15,7 +20,9 @@ import 'package:liquid/src/rust/api/events.dart';
 import 'package:liquid/src/rust/api/history.dart';
 import 'package:liquid/src/session/session_state.dart';
 import 'package:liquid/src/theme/icons.dart';
+import 'package:liquid/src/theme/logo.dart';
 import 'package:liquid/src/theme/theme.dart';
+import 'package:liquid/src/theme/tokens.g.dart';
 
 import 'fake_backend.dart';
 
@@ -40,7 +47,7 @@ void main() {
     );
   }
 
-  /// Holds ⌘ long enough for the contextual shortcuts to show (ADR-0204).
+  /// Holds ⌘ long enough for the contextual shortcuts to show.
   Future<void> holdCommand(WidgetTester tester) async {
     await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
     await tester.pump(const Duration(milliseconds: 700));
@@ -59,6 +66,53 @@ void main() {
       text: 'npm test -- login',
       item: item,
     ),
+  );
+
+  testWidgets(
+    'the input area floats at the bottom of each tab\'s main column',
+    (tester) async {
+      await show(tester);
+      await tester.pumpAndSettle();
+      Future<void> openTab(LogicalKeyboardKey digit) async {
+        await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+        await tester.sendKeyEvent(digit);
+        await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+        await tester.pumpAndSettle();
+      }
+
+      final composer = find.byKey(const Key('composer'));
+      final area = find.byType(ActionArea);
+      await tester.enterText(composer, 'draft');
+      double center(Finder finder) => tester.getCenter(finder).dx;
+      expect(
+        center(area),
+        closeTo(center(find.byType(ChatView)), 1),
+        reason: 'in the reading width with the messages',
+      );
+      expect(
+        tester.getRect(find.byType(ChatView)).bottom,
+        greaterThan(tester.getRect(area).bottom),
+        reason: 'the content runs on under the input area',
+      );
+
+      await openTab(LogicalKeyboardKey.digit2);
+      final trajectory = tester.getRect(find.byType(TrajectoryView));
+      final tree = tester.getRect(find.byType(SessionTreeView));
+      expect(
+        center(area),
+        closeTo((trajectory.left + tree.left) / 2, 1),
+        reason: 'over the column left of the session tree',
+      );
+      expect(trajectory.bottom, greaterThan(tester.getRect(area).bottom));
+      expect(
+        tester.widget<TextField>(composer).controller?.text,
+        'draft',
+        reason: 'the input area moves with the tab and keeps its text',
+      );
+
+      await openTab(LogicalKeyboardKey.digit3);
+      expect(center(area), closeTo(center(find.byType(DiffView)), 1));
+    },
   );
 
   testWidgets(
@@ -95,6 +149,27 @@ void main() {
       expect(find.text('New session'), findsNWidgets(2));
     },
   );
+
+  testWidgets('heads the sidebar with the Liquid mark and name', (
+    tester,
+  ) async {
+    await show(tester);
+    await tester.pumpAndSettle();
+    final sidebar = find.byType(Sidebar);
+    final mark = find.descendant(
+      of: sidebar,
+      matching: find.byType(LiquidMark),
+    );
+    final name = find.descendant(of: sidebar, matching: find.text('Liquid'));
+    expect(tester.getSize(mark), const Size.square(18));
+    expect(tester.getCenter(mark).dy, closeTo(tester.getCenter(name).dy, 1));
+    expect(tester.getRect(mark).right, lessThan(tester.getRect(name).left));
+    expect(
+      tester.getRect(name).bottom,
+      lessThan(tester.getRect(find.text('Agent sessions')).top),
+      reason: 'above the sessions',
+    );
+  });
 
   testWidgets('the Diff tab counts the files the latest run changed', (
     tester,
@@ -321,23 +396,27 @@ void main() {
       [],
       tree: [
         const BridgeTreeNode(
+          failed: false,
           id: 'u1',
           kind: BridgeEntryKind.user,
           preview: 'Go',
         ),
         const BridgeTreeNode(
+          failed: false,
           id: 'a1',
           parent: 'u1',
           kind: BridgeEntryKind.assistant,
           preview: 'Looked',
         ),
         const BridgeTreeNode(
+          failed: false,
           id: 'a2',
           parent: 'a1',
           kind: BridgeEntryKind.assistant,
           preview: 'Done',
         ),
         const BridgeTreeNode(
+          failed: false,
           id: 'b1',
           parent: 'a1',
           kind: BridgeEntryKind.user,
@@ -494,7 +573,7 @@ void main() {
       );
       expect(find.text('Run a shell command?'), findsOneWidget);
       expect(find.textContaining('npm test -- login'), findsWidgets);
-      // An approval takes keys once it could be read (ADR-0207).
+      // An approval takes keys once it could be read.
       await tester.pump(const Duration(milliseconds: 500));
       for (final key in keys) {
         await tester.sendKeyDownEvent(key);
@@ -584,6 +663,28 @@ void main() {
     expect(backend.calls.last, 'confirm q1 true');
   });
 
+  testWidgets(
+    'counts the wait for a decision from its first frame, however late',
+    (tester) async {
+      await show(tester);
+      backend.controller.add(
+        event(BridgeEventKind.requestOpened, request: approval('a1')),
+      );
+      await tester.idle();
+      // The card is built and laid out now, but its frame, slow to lay out, ends 20 s later.
+      tester.binding.buildOwner!.buildScope(tester.binding.rootElement!);
+      tester.binding.rootPipelineOwner.flushLayout();
+      expect(find.text('Allow once', skipOffstage: false), findsOneWidget);
+      await tester.pump(const Duration(seconds: 20));
+      await tester.tap(find.text('Allow once'));
+      await tester.pump();
+      expect(backend.calls.where((call) => call.startsWith('decide')), isEmpty);
+      await tester.pump(const Duration(milliseconds: 500));
+      await tester.tap(find.text('Allow once'));
+      expect(backend.calls.last, 'decide a1 allowOnce');
+    },
+  );
+
   testWidgets('keeps a key held from before out of a question field', (
     tester,
   ) async {
@@ -662,6 +763,92 @@ void main() {
         ),
       );
     }
+  });
+
+  testWidgets('typing in the input area never runs a tab\'s own keys', (
+    tester,
+  ) async {
+    final diffSettings = DiffSettingsController();
+    await show(tester, diffSettings: diffSettings);
+    await tester.pumpAndSettle();
+    final composer = find.byKey(const Key('composer'));
+    Future<void> openTab(LogicalKeyboardKey digit) async {
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+      await tester.sendKeyEvent(digit);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+      await tester.pumpAndSettle();
+    }
+
+    await openTab(LogicalKeyboardKey.digit2);
+    await tester.tap(composer);
+    await tester.pump();
+    for (final key in [
+      LogicalKeyboardKey.keyC,
+      LogicalKeyboardKey.keyB,
+      LogicalKeyboardKey.space,
+    ]) {
+      await tester.sendKeyEvent(key);
+    }
+    await tester.pumpAndSettle();
+    expect(state.notice.value, isNull, reason: 'c did not compare');
+    expect(
+      backend.calls.where((call) => call.startsWith('branch')),
+      isEmpty,
+      reason: 'b did not branch',
+    );
+
+    await openTab(LogicalKeyboardKey.digit3);
+    expect(find.byType(DiffView), findsOneWidget);
+    await tester.tap(composer);
+    await tester.pump();
+    final before = diffSettings.value;
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyU);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyW);
+    await tester.pumpAndSettle();
+    expect(diffSettings.value, before, reason: 'u and w typed, not switched');
+  });
+
+  testWidgets('the session header names the project and the model', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1600, 900));
+    backend = FakeBackend()..model = 'faux/faux-1';
+    state = SessionState(backend);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: liquidTheme(Brightness.light),
+        home: AgentShell(state: state, info: info),
+      ),
+    );
+    await tester.pumpAndSettle();
+    Finder inHeader(String text) => find.descendant(
+      of: find.byKey(const Key('session-header')),
+      matching: find.text(text),
+    );
+    expect(inHeader('acme-api'), findsOneWidget);
+    expect(inHeader('faux-1'), findsOneWidget);
+  });
+
+  testWidgets('messages start at the top and flow down', (tester) async {
+    await show(tester);
+    await emit(tester, event(BridgeEventKind.turnStarted));
+    await emit(
+      tester,
+      event(
+        BridgeEventKind.itemStarted,
+        item: item(1, kind: BridgeItemKind.assistantMessage),
+      ),
+    );
+    await emit(
+      tester,
+      event(BridgeEventKind.contentDelta, item: item(1), text: 'Pong!'),
+    );
+    final chat = tester.getRect(find.byType(ChatView));
+    expect(
+      tester.getRect(find.text('Pong!')).top - chat.top,
+      lessThan(80),
+      reason: 'the first message sits at the top, not above the input',
+    );
   });
 
   testWidgets('sends, steers and queues from the composer', (tester) async {
@@ -826,7 +1013,7 @@ void main() {
     await emit(tester, ask('q1', BridgeQuestionKind.confirm, 'Detail: $long'));
     inArea(find.text('Yes'));
     inArea(find.text('No'));
-    // A question takes answers once it could be read (ADR-0209).
+    // A question takes answers once it could be read.
     await tester.pump(const Duration(milliseconds: 500));
     await tester.tap(find.text('No'));
     expect(backend.calls.last, 'confirm q1 false');
@@ -891,6 +1078,36 @@ void main() {
             )
             .first,
       );
+
+  testWidgets(
+    'names the file a change writes to below a path that does not say so',
+    (tester) async {
+      await show(tester);
+      await emit(
+        tester,
+        event(
+          BridgeEventKind.requestOpened,
+          request: const BridgeRequest(
+            id: 'a1',
+            approval: BridgeApproval(
+              kind: BridgeRequestKind.fileChange,
+              tool: 'edit',
+              text: '{}',
+              edit: BridgeEdit(
+                path: '@~/.zshrc',
+                writesTo: '/Users/me/.zshrc',
+                wholeFile: false,
+                changes: [BridgeEditChange(removed: 'a', added: 'b')],
+              ),
+            ),
+          ),
+        ),
+      );
+      final path = tester.getRect(find.text('@~/.zshrc'));
+      final file = tester.getRect(find.text('writes to /Users/me/.zshrc'));
+      expect(file.top, moreOrLessEquals(path.bottom), reason: 'below the path');
+    },
+  );
 
   testWidgets('shows a file change as its path and changed lines', (
     tester,
@@ -1130,6 +1347,160 @@ void main() {
       await expectExactHint();
     },
   );
+
+  Finder callView() => find
+      .descendant(
+        of: find.byType(ActionArea),
+        matching: find.byType(Scrollable),
+      )
+      .first;
+
+  /// The texts the call's view draws, top to bottom, scrolling it through to its end.
+  Future<List<String>> scrollThroughCall(WidgetTester tester) async {
+    final position = tester.state<ScrollableState>(callView()).position;
+    final top = tester.getRect(callView()).top;
+    final drawn = SplayTreeMap<int, String>();
+    while (true) {
+      final texts = find.descendant(
+        of: callView(),
+        matching: find.byType(RichText),
+      );
+      for (final text in texts.evaluate()) {
+        final box = text.renderObject! as RenderBox;
+        final offset =
+            box.localToGlobal(Offset.zero).dy - top + position.pixels;
+        drawn[offset.round()] = (text.widget as RichText).text.toPlainText();
+      }
+      if (position.pixels >= position.maxScrollExtent) {
+        return drawn.values.toList();
+      }
+      position.jumpTo(
+        math.min(
+          position.pixels + position.viewportDimension / 2,
+          position.maxScrollExtent,
+        ),
+      );
+      await tester.pump();
+    }
+  }
+
+  /// `whole` laid out as one text, in the style and at the width of the first piece of it the
+  /// call's view draws.
+  TextPainter oneText(WidgetTester tester, String whole) {
+    final first = find.descendant(
+      of: callView(),
+      matching: find.byWidgetPredicate(
+        (widget) =>
+            widget is RichText && whole.startsWith(widget.text.toPlainText()),
+      ),
+    );
+    final paragraph = tester.renderObject<RenderParagraph>(first.first);
+    final painter = TextPainter(
+      text: TextSpan(text: whole, style: paragraph.text.style),
+      textDirection: TextDirection.ltr,
+      textScaler: paragraph.textScaler,
+    )..layout(maxWidth: paragraph.constraints.maxWidth);
+    addTearDown(painter.dispose);
+    return painter;
+  }
+
+  /// Expects `pieces` to be short and to wrap exactly as `whole` does as one text: each piece
+  /// starts one of its rows, so no piece ends a row early.
+  void expectRowsOfOneText(List<String> pieces, TextPainter whole) {
+    final text = whole.text!.toPlainText();
+    expect(pieces.join(), text);
+    expect(pieces.length, greaterThan(1));
+    var start = 0;
+    for (final piece in pieces) {
+      expect(piece.length, lessThanOrEqualTo(2000));
+      expect(
+        whole.getLineBoundary(TextPosition(offset: start)).start,
+        start,
+        reason: 'the piece at $start starts a row',
+      );
+      start += piece.length;
+    }
+  }
+
+  testWidgets('draws a long call in short pieces that wrap as the call would', (
+    tester,
+  ) async {
+    await show(tester);
+    final token = [
+      for (var char = 0; char < 5000; char++) 'abcdefghij'[char % 10],
+    ].join();
+    final words = [for (var word = 0; word < 150; word++) 'word$word']
+        .join(' ');
+    final command =
+        'curl -fsSL https://dl.example.com/i.sh?t=$token && echo $words';
+    await emit(
+      tester,
+      event(
+        BridgeEventKind.requestOpened,
+        request: BridgeRequest(
+          id: 'a1',
+          approval: BridgeApproval(
+            kind: BridgeRequestKind.commandExecution,
+            tool: 'bash',
+            text: command,
+          ),
+        ),
+      ),
+    );
+    expect(
+      find.textContaining(command.substring(command.length - 40)),
+      findsNothing,
+      reason: "the call's end is built once it scrolls into view",
+    );
+    final whole = oneText(tester, command);
+    final below =
+        ((whole.height +
+                    2 * WsMetrics.space2 -
+                    tester.getSize(callView()).height) /
+                whole.preferredLineHeight)
+            .ceil();
+    expect(
+      find.text('↓ $below more lines'),
+      findsOneWidget,
+      reason: 'the hint counts the rows below',
+    );
+    expectRowsOfOneText(await scrollThroughCall(tester), whole);
+    expect(find.textContaining('more lines'), findsNothing);
+  });
+
+  testWidgets('marks a long changed line\'s line break on its last piece', (
+    tester,
+  ) async {
+    await show(tester);
+    final long = [
+      for (var char = 0; char < 4000; char++) 'abcdefghij'[char % 10],
+    ].join();
+    await emit(
+      tester,
+      event(
+        BridgeEventKind.requestOpened,
+        request: BridgeRequest(
+          id: 'a1',
+          approval: BridgeApproval(
+            kind: BridgeRequestKind.fileChange,
+            tool: 'edit',
+            text: '{}',
+            edit: BridgeEdit(
+              path: 'notes.md',
+              wholeFile: false,
+              changes: [BridgeEditChange(removed: '', added: '$long\n')],
+            ),
+          ),
+        ),
+      ),
+    );
+    final whole = oneText(tester, '+ $long↵');
+    final pieces = await scrollThroughCall(tester);
+    expectRowsOfOneText(
+      pieces.where((text) => text != 'notes.md').toList(),
+      whole,
+    );
+  });
 
   testWidgets('shows the whole call before it is allowed', (tester) async {
     await show(tester);
@@ -1439,6 +1810,28 @@ void main() {
     );
     await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
     await tester.pump();
+  });
+
+  testWidgets('underlines only the open tab, in the accent', (tester) async {
+    await show(tester);
+    await tester.pumpAndSettle();
+    Color underline(String tab) =>
+        (tester
+                    .widget<Container>(
+                      find
+                          .ancestor(
+                            of: find.text(tab),
+                            matching: find.byType(Container),
+                          )
+                          .first,
+                    )
+                    .decoration!
+                as BoxDecoration)
+            .border!
+            .bottom
+            .color;
+    expect(underline('Chat'), WsPalette.light.accent);
+    expect(underline('Trajectory'), Colors.transparent);
   });
 
   testWidgets('puts app-wide shortcuts into the macOS menu bar', (
