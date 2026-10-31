@@ -11,7 +11,7 @@ This skill is the procedural home for the clawpatch sequence only.
 
 Run in the project root without interleaving unrelated commands.
 
-For the single Watershed Clawpatch stage, every model-invoking `review` or `revalidate` command runs Claude Code with Opus 5.5 at xhigh effort in standard mode, not fast mode: `--provider claude --model claude-opus-5-5 --reasoning-effort xhigh`.
+For the single Watershed Clawpatch stage, read `model` and `model_reasoning_effort` from [.codex/agents/worker.toml](../../../.codex/agents/worker.toml). Every model-invoking `review` or `revalidate` command must include `--provider codex --model <model> --reasoning-effort <model_reasoning_effort>` using those values.
 
 1. Once per checkout: `pnpm install`, then `pnpm exec clawpatch doctor`.
 2. First run per repo: `pnpm exec clawpatch init`, then `pnpm exec clawpatch map`; rerun `map` after structural changes.
