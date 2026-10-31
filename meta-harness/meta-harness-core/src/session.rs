@@ -35,7 +35,8 @@ pub struct AgentCommand {
     /// options.
     pub args: Vec<OsString>,
     /// Watershed's pi extension, which makes pi ask before tool calls; the session checks that
-    /// pi loaded this file.
+    /// pi loaded this file. It must be absolute: pi would read a relative path inside the
+    /// project, which could supply its own copy.
     pub extension: PathBuf,
     /// A session file pi reopens instead of starting a new session.
     pub session: Option<PathBuf>,
@@ -275,8 +276,18 @@ pub struct Session {
 }
 
 impl Session {
-    /// Starts the agent and returns the session with its event stream.
+    /// Starts the agent and returns the session with its event stream; a relative extension
+    /// path is refused before the agent starts.
     pub fn start(command: &AgentCommand) -> std::io::Result<(Self, mpsc::Receiver<SessionEvent>)> {
+        if !command.extension.is_absolute() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!(
+                    "the extension path must be absolute: {}",
+                    command.extension.display()
+                ),
+            ));
+        }
         let mut child = crate::spawn(
             Command::new(&command.program)
                 .args(&command.args)

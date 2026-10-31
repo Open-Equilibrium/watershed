@@ -1206,6 +1206,28 @@ fn names_the_extension_as_pi_reports_it_when_its_path_has_dot_dot() {
 }
 
 #[test]
+fn refuses_an_extension_path_relative_to_the_agents_directory() {
+    run(async {
+        // pi would read the file inside the project, which could supply its own copy.
+        let started = marker("relative-extension");
+        let command = AgentCommand {
+            program: "/bin/sh".into(),
+            args: vec!["-c".into(), format!("touch '{}'", started.display()).into()],
+            extension: "pi-extension/watershed.ts".into(),
+            session: None,
+            cwd: std::env::temp_dir(),
+        };
+        let Err(error) = Session::start(&command) else {
+            panic!("the session is refused");
+        };
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+        assert!(error.to_string().contains("absolute"), "{error}");
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(!started.exists(), "the agent never starts");
+    });
+}
+
+#[test]
 fn checks_the_extension_before_every_message_that_starts_a_run() {
     run(async {
         let commands = |id: u32, names: &str| {
