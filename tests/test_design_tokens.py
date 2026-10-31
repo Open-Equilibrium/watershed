@@ -55,6 +55,11 @@ class DesignTokens(unittest.TestCase):
         self.assertIn(
             r"static const List<String> fontUi = ['Inter', 'Noto\'s Sans', 'Font\$Name'];", dart)
 
+    def test_comments_define_no_tokens(self):
+        commented = SAMPLE.replace("--ws-fs-ui: 14px;", "--ws-fs-ui: 14px; /* --ws-fs-ui: 99px; } */")
+        commented += "/* .theme-dark { --ws-text-muted: #000000; } */\n"
+        self.assertEqual(TOKENS.render(commented), TOKENS.render(SAMPLE))
+
     def test_themes_must_define_the_same_tokens(self):
         with self.assertRaisesRegex(ValueError, "light and dark"):
             TOKENS.render(SAMPLE.replace("--ws-text-muted: #9b9b9b;", ""))
@@ -76,9 +81,7 @@ class DesignTokens(unittest.TestCase):
         self.assertEqual(TOKENS.main(["--check"]), 0)
 
     def test_text_tones_meet_wcag_aa_wherever_they_carry_content(self):
-        css = TOKENS.CSS.read_text()
-        blocks = {selector: dict(TOKENS.DECLARATION.findall(body))
-                  for selector, body in TOKENS.BLOCK.findall(css)}
+        blocks = TOKENS.blocks(TOKENS.CSS.read_text())
 
         def luminance(hex_color):
             channels = [int(hex_color[i:i + 2], 16) / 255 for i in (1, 3, 5)]
