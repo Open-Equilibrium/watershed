@@ -178,10 +178,8 @@ impl AgentSession {
             }
             while let Some(event) = receiver.recv().await {
                 push(&mut batch, BridgeEvent::from(event));
+                // Bounded by the window, so a busy agent never holds delivery back.
                 gather(&mut batch, &mut receiver, tokio::time::sleep(STREAM_WINDOW)).await;
-                while let Ok(event) = receiver.try_recv() {
-                    push(&mut batch, BridgeEvent::from(event));
-                }
                 // Dart closed the stream: stop; dropping the session ends the agent.
                 if !std::mem::take(&mut batch).into_iter().all(&mut deliver) {
                     break;
