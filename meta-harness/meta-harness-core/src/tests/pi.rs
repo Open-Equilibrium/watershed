@@ -133,6 +133,55 @@ fn keeps_retries_in_one_turn_and_reports_aborts() {
 }
 
 #[test]
+fn ends_a_failed_responses_open_text_before_its_retry_reuses_the_index() {
+    let events = translate(&[
+        r#"{"type":"agent_start"}"#,
+        r#"{"type":"message_start","message":{"role":"assistant","content":[]}}"#,
+        r#"{"type":"message_update","assistantMessageEvent":{"type":"text_start","contentIndex":0}}"#,
+        r#"{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"Partial"}}"#,
+        r#"{"type":"message_end","message":{"role":"assistant","content":[],"stopReason":"error","errorMessage":"connection reset"}}"#,
+        r#"{"type":"agent_end","messages":[],"willRetry":true}"#,
+        r#"{"type":"agent_start"}"#,
+        r#"{"type":"message_start","message":{"role":"assistant","content":[]}}"#,
+        r#"{"type":"message_update","assistantMessageEvent":{"type":"text_start","contentIndex":0}}"#,
+        r#"{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"Hi"}}"#,
+        r#"{"type":"message_update","assistantMessageEvent":{"type":"text_end","contentIndex":0,"content":"Hi"}}"#,
+        r#"{"type":"message_end","message":{"role":"assistant","content":[],"stopReason":"stop"}}"#,
+        r#"{"type":"agent_settled","aborted":false}"#,
+    ]);
+    let request = |stop_reason: &str, error: Option<&str>| AgentEvent::ModelRequestCompleted {
+        turn: TURN,
+        usage: Usage::default(),
+        stop_reason: stop_reason.to_owned(),
+        error: error.map(str::to_owned),
+    };
+    assert_eq!(
+        events,
+        [
+            AgentEvent::TurnStarted { turn: TURN },
+            started(1, ItemKind::AssistantMessage),
+            delta(1, "Partial"),
+            AgentEvent::ItemCompleted {
+                turn: TURN,
+                item: ItemId(1),
+                kind: ItemKind::AssistantMessage,
+                text: "Partial".to_owned(),
+                status: ItemStatus::Failed,
+                duration_ms: None,
+                lines: None,
+            },
+            request("error", Some("connection reset")),
+            started(2, ItemKind::AssistantMessage),
+            delta(2, "Hi"),
+            completed(2, ItemKind::AssistantMessage, "Hi"),
+            request("stop", None),
+            AgentEvent::TurnCompleted { turn: TURN },
+        ],
+        "the failed response keeps its partial text and the retry's text is its own item"
+    );
+}
+
+#[test]
 fn classifies_tool_calls_and_reports_their_outcome() {
     let events = translate(&[
         r#"{"type":"agent_start"}"#,

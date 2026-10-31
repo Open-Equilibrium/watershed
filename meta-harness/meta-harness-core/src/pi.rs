@@ -71,28 +71,12 @@ impl PiAdapter {
             Some("agent_settled") => {
                 self.turn = None;
                 // Items still open, such as after an abort, end as failed, so none stays running.
-                let mut open: Vec<_> = self
-                    .blocks
-                    .drain()
-                    .map(|(_, block)| block)
-                    .chain(
-                        self.tools
-                            .drain()
-                            .map(|(_, tool)| (tool.item, tool.kind, String::new())),
-                    )
-                    .collect();
-                open.sort_by_key(|(item, ..)| item.0);
-                for (item, kind, text) in open {
-                    events.push(AgentEvent::ItemCompleted {
-                        turn,
-                        item,
-                        kind,
-                        text,
-                        status: ItemStatus::Failed,
-                        duration_ms: None,
-                        lines: None,
-                    });
-                }
+                let open = self.blocks.drain().map(|(_, block)| block).chain(
+                    self.tools
+                        .drain()
+                        .map(|(_, tool)| (tool.item, tool.kind, String::new())),
+                );
+                fail(turn, open, &mut events);
                 events.push(
                     if record.get("aborted").and_then(Value::as_bool) == Some(true) {
                         AgentEvent::TurnAborted { turn }
@@ -103,7 +87,16 @@ impl PiAdapter {
             }
             Some("message_end") => match role(record) {
                 Some("user") => self.user_message(turn, record, &mut events),
-                Some("assistant") => model_response(turn, record, &mut events),
+                Some("assistant") => {
+                    // A response that ended without ending its blocks, such as on an error, ends
+                    // them as failed, before a retry's response reuses their indexes.
+                    fail(
+                        turn,
+                        self.blocks.drain().map(|(_, block)| block),
+                        &mut events,
+                    );
+                    model_response(turn, record, &mut events);
+                }
                 _ => {}
             },
             Some("message_update") => {
@@ -252,6 +245,27 @@ impl PiAdapter {
     fn next_item(&mut self) -> ItemId {
         self.items += 1;
         ItemId(self.items)
+    }
+}
+
+/// Ends `open` items as failed, in the order they started.
+fn fail(
+    turn: TurnId,
+    open: impl Iterator<Item = (ItemId, ItemKind, String)>,
+    events: &mut Vec<AgentEvent>,
+) {
+    let mut open: Vec<_> = open.collect();
+    open.sort_by_key(|(item, ..)| item.0);
+    for (item, kind, text) in open {
+        events.push(AgentEvent::ItemCompleted {
+            turn,
+            item,
+            kind,
+            text,
+            status: ItemStatus::Failed,
+            duration_ms: None,
+            lines: None,
+        });
     }
 }
 
