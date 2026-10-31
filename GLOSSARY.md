@@ -157,6 +157,7 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **Replay-safe** — A tool that may run again after a crash without a second effect, such as pi's own reading tools or a Flow Agent Tool declared so; other tools report "interrupted" instead (ADR-0229).
 - **Checkpoint ref** — A Git ref under Meta-Harness's own namespace that points at a commit of the agent project's files at a turn, to show the turn's changes and to return to it (ADR-0220).
 - **Team agent** — A planned agent whose grant comes from a Role instead of one person; only people who hold that grant's rights themselves may steer it (ADR-0232).
+- **Context track** — The Trajectory's column that draws each step's context against the model's window: exact at each request's prompt tokens, estimated between them, with pi's compaction point.
 - **Compliance replica** — A replica a company runs with its own key for search, legal hold and data-loss checks (ADR-0228).
 - **Recovery key** — The second way to regain a Workspace's keys when no signed-in device can approve a new one. Area keys are also wrapped for it, and the person or their company holds it (ADR-0228).
 - **Headless Liquid replica** — Optional Liquid replica without a user interface. A Workspace must opt in before this replica can sync it; same-host agents then use Liquid's normal permission and action surfaces while user devices are offline.
