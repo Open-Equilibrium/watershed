@@ -144,10 +144,12 @@ impl WorkingTree {
     /// Pops the stash commit `id`, wherever it now is in the list.
     pub(super) async fn pop(&self, id: &str) -> Result<(), DiffError> {
         let place = self.place_of(id).await?;
-        let error = match user_git(&self.root, &["stash", "pop", "--quiet", &place]).await {
-            Ok(_) => return Ok(()),
-            Err(error) => error,
-        };
+        // The index can hold content absent from the working tree; dropping it would lose it.
+        let error =
+            match user_git(&self.root, &["stash", "pop", "--quiet", "--index", &place]).await {
+                Ok(_) => return Ok(()),
+                Err(error) => error,
+            };
         let conflicts = git(
             &self.root,
             &[],

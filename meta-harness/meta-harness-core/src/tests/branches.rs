@@ -444,6 +444,46 @@ fn leaving_changes_stashes_them_on_the_branch_and_restoring_brings_them_back() {
 }
 
 #[test]
+fn restoring_or_rolling_back_a_stash_preserves_the_saved_index() {
+    run(async {
+        for target in ["other", "missing"] {
+            let repo = Repo::new(&format!("stash-index-{target}"));
+            let main = repo.git(&["branch", "--show-current"]).trim().to_owned();
+            repo.git(&["branch", "other"]);
+            repo.write("a.txt", "staged\n");
+            repo.write("new.txt", "only in the index\n");
+            repo.git(&["add", "."]);
+            let index = repo.git(&["write-tree"]);
+            repo.write("a.txt", "old\n");
+            let checkpoints = Checkpoints::new(repo.path());
+
+            let switched = checkpoints
+                .switch_branch(&local(target), Changes::Leave)
+                .await;
+            if target == "other" {
+                switched.expect("switched");
+                checkpoints
+                    .switch_branch(&local(&main), Changes::Bring)
+                    .await
+                    .expect("back");
+                checkpoints
+                    .restore_stash(&stash_of(&checkpoints).await)
+                    .await
+                    .expect("restored");
+            } else {
+                assert!(switched.is_err(), "the missing branch refuses the switch");
+            }
+
+            assert_eq!(repo.git(&["write-tree"]), index, "{target}");
+            assert_eq!(read(&repo, "a.txt"), "old\n");
+            assert_eq!(read(&repo, "new.txt"), "only in the index\n");
+            assert_eq!(repo.git(&["stash", "list"]), "");
+            assert_eq!(repo.git(&["branch", "--show-current"]), format!("{main}\n"));
+        }
+    });
+}
+
+#[test]
 fn a_branch_keeps_one_stash_and_other_stashes_stay_untouched() {
     run(async {
         let repo = Repo::new("stash-one");
