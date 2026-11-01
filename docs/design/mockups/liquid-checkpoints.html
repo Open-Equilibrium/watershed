@@ -237,7 +237,7 @@ i.kw{font-style:normal;color:var(--ws-syn-kw)}i.st{font-style:normal;color:var(-
   </section>
   <section>
     <h3 class="sec">4 · Refused while an agent runs in the checkout</h3>
-    <p class="sub">Another session runs in the same folder, so the revert would change files under it. The dialog still lists the files, names the running session and keeps the action disabled until it stops. T3 Code refuses every file revert outside its own worktree; Watershed refuses only while an agent runs there.</p>
+    <p class="sub">Another session runs in the same folder, so the revert would change files under it. The dialog still lists the files, names the running session and keeps the action disabled until it stops; a session in another Liquid window is named but cannot be shown from here. T3 Code refuses every file revert outside its own worktree; Watershed refuses only while an agent runs there.</p>
     <div class="stage"><div class="scaler"><div class="win" id="w-refused"></div></div></div>
   </section>
   <section>
@@ -321,7 +321,7 @@ document.getElementById('d-b').innerHTML=dlg('Revert to before turn 3?','These 4
 
 const refused=`<div class="scrim"><div class="dlg"><h4>Revert to before turn 3?</h4><p>These 4 files revert to how they were when turn 3 started.</p>${files}
 <div class="notice">“Fix flaky sync test” is running in this checkout. Stop it or wait until it finishes, then revert the files.</div>
-<div class="acts"><span class="btn dngp off">Revert and branch</span><span class="btn">Show the running session</span><span class="sp"></span><span class="btn">Cancel <kbd>esc</kbd></span></div></div></div>`;
+<div class="acts"><span class="btn dngp off">Revert and branch</span><span class="sp"></span><span class="btn">Cancel <kbd>esc</kbd></span></div></div></div>`;
 frame('w-refused','diff',diffBody(retBtn),560,{running:true,keys:'',over:refused});
 
 document.getElementById('empties').innerHTML=[
