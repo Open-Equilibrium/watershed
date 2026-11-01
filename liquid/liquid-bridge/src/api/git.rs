@@ -55,6 +55,8 @@ pub struct BridgeBranches {
 /// A branch's stashed changes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BridgeStash {
+    /// The stash commit, which names it to restore or discard it.
+    pub id: String,
     /// When they were left, in Unix milliseconds.
     pub created_ms: i64,
     /// The stashed files, untracked ones as added.
@@ -72,6 +74,10 @@ pub enum BridgeGitOutcomeKind {
     Conflicts,
     /// The agents in `running` run in the checkout, so nothing changed.
     AgentRunning,
+    /// `files` have unresolved conflicts, so nothing was restored.
+    Unresolved,
+    /// Git switched, but a hook it ran after failed with `detail`.
+    HookFailed,
 }
 
 /// How a Git write the user asked for ended.
@@ -82,6 +88,8 @@ pub struct BridgeGitOutcome {
     pub files: Vec<String>,
     /// The agents running in the checkout.
     pub running: Vec<BridgeRunningAgent>,
+    /// What Git said, written out as file names are; empty unless a hook failed.
+    pub detail: String,
 }
 
 impl AgentSession {
@@ -167,37 +175,44 @@ impl AgentSession {
                 .await
                 .map_err(shown)?
                 .map(|stash| BridgeStash {
+                    id: stash.id,
                     created_ms: stash.created_ms,
                     files: stash.files.into_iter().map(Into::into).collect(),
                 }))
         })
     }
 
-    /// The unified diff of the stashed file `path`, its lines written out as a turn's are.
-    pub fn stash_patch(&self, path: String, hide_whitespace: bool) -> Result<String, String> {
+    /// The unified diff of the file `path` of the stash `id`, its lines written out as a
+    /// turn's are.
+    pub fn stash_patch(
+        &self,
+        id: String,
+        path: String,
+        hide_whitespace: bool,
+    ) -> Result<String, String> {
         RUNTIME.block_on(async {
-            let stash = self
-                .checkpoints
-                .stash()
-                .await
-                .map_err(shown)?
-                .ok_or_else(|| shown(DiffError::NoStash))?;
             self.checkpoints
-                .stash_patch(&stash, &path, whitespace(hide_whitespace))
+                .stash_patch(&id, &path, whitespace(hide_whitespace))
                 .await
                 .map(|patch| visible_lines(&patch))
                 .map_err(shown)
         })
     }
 
-    /// Moves the branch's stashed changes back into the checkout.
-    pub fn restore_stash(&self) -> Result<BridgeGitOutcome, String> {
-        RUNTIME.block_on(async { self.outcome(self.checkpoints.restore_stash().await).await })
+    /// Moves the stashed changes `id` back into the checkout.
+    pub fn restore_stash(&self, id: String) -> Result<BridgeGitOutcome, String> {
+        RUNTIME.block_on(async {
+            self.outcome(self.checkpoints.restore_stash(&id).await)
+                .await
+        })
     }
 
-    /// Deletes the branch's stashed changes.
-    pub fn discard_stash(&self) -> Result<BridgeGitOutcome, String> {
-        RUNTIME.block_on(async { self.outcome(self.checkpoints.discard_stash().await).await })
+    /// Deletes the stashed changes `id`.
+    pub fn discard_stash(&self, id: String) -> Result<BridgeGitOutcome, String> {
+        RUNTIME.block_on(async {
+            self.outcome(self.checkpoints.discard_stash(&id).await)
+                .await
+        })
     }
 
     /// Fetches the remote of the branch's upstream, without credential prompts; returns whether
@@ -212,6 +227,7 @@ impl AgentSession {
             kind,
             files: files.iter().map(|path| visible_name(path)).collect(),
             running: Vec::new(),
+            detail: String::new(),
         };
         match result {
             Ok(()) => Ok(outcome(BridgeGitOutcomeKind::Done, Vec::new())),
@@ -221,6 +237,13 @@ impl AgentSession {
             Err(DiffError::RestoredWithConflicts(files)) => {
                 Ok(outcome(BridgeGitOutcomeKind::Conflicts, files))
             }
+            Err(DiffError::Unresolved(files)) => {
+                Ok(outcome(BridgeGitOutcomeKind::Unresolved, files))
+            }
+            Err(DiffError::HookFailed(output)) => Ok(BridgeGitOutcome {
+                detail: visible_lines(&output),
+                ..outcome(BridgeGitOutcomeKind::HookFailed, Vec::new())
+            }),
             Err(DiffError::AgentRunning(sessions)) => Ok(BridgeGitOutcome {
                 running: self.running_agents(&sessions).await,
                 ..outcome(BridgeGitOutcomeKind::AgentRunning, Vec::new())

@@ -41,9 +41,15 @@ void main() {
     expect(fetches(), 2);
     await tester.pump(const Duration(seconds: 1));
     expect(fetches(), 3);
+    final reads = backend.statusReads;
     await tester.pump(const Duration(seconds: 60));
     expect(fetches(), 4);
     expect(notices, hasLength(1));
+    expect(
+      backend.statusReads - reads,
+      4,
+      reason: 'the state is read every 15 seconds while fetching waits',
+    );
 
     backend.fetchError = null;
     await tester.pump(const Duration(seconds: 120));
@@ -67,6 +73,38 @@ void main() {
     git.stop();
   });
 
+  test('the same stash keeps its value across reads', () async {
+    backend.stashed = BridgeStash(
+      id: 's1',
+      createdMs: 0,
+      files: [change('a.txt')],
+    );
+    await git.refresh();
+    final first = git.stash.value;
+    backend.stashed = BridgeStash(
+      id: 's1',
+      createdMs: 0,
+      files: [change('a.txt')],
+    );
+    await git.refresh();
+    expect(identical(git.stash.value, first), isTrue);
+  });
+
+  test('a hook failing after the switch is a warning, not a failure', () async {
+    await git.refresh();
+    backend.git = gitStatusOf(branch: 'other');
+    backend.outcome = outcomeOf(
+      BridgeGitOutcomeKind.hookFailed,
+      detail: 'git-lfs was not found on your path',
+    );
+    await git.switchTo(branchOf('other'), leaveChanges: false);
+    expect(notices.single, (
+      BridgeLevel.warning,
+      'Switched to other. A hook failed after: git-lfs was not found on your path',
+    ));
+    expect(git.status.value?.branch, 'other');
+  });
+
   test('says when the checkout switched outside Liquid', () async {
     await git.refresh();
     backend.git = gitStatusOf(branch: 'feature');
@@ -82,6 +120,7 @@ void main() {
     await git.refresh();
     backend.git = gitStatusOf();
     backend.stashed = BridgeStash(
+      id: 's1',
       createdMs: DateTime(2026, 11, 1, 10, 41).millisecondsSinceEpoch,
       files: [change('a.txt')],
     );
@@ -120,7 +159,7 @@ void main() {
         ],
       );
 
-      await git.restoreStash();
+      await git.restoreStash(stashOf());
 
       expect(notices.single, (
         BridgeLevel.warning,
@@ -133,18 +172,22 @@ void main() {
   test(
     'a restore that conflicts or that Git refuses keeps the stash',
     () async {
-      backend.stashed = BridgeStash(createdMs: 0, files: [change('a.txt')]);
+      backend.stashed = BridgeStash(
+        id: 's1',
+        createdMs: 0,
+        files: [change('a.txt')],
+      );
       await git.refresh();
       backend.outcome = outcomeOf(
         BridgeGitOutcomeKind.conflicts,
         files: ['src/routes/login.ts'],
       );
-      await git.restoreStash();
+      await git.restoreStash(stashOf());
       backend.outcome = outcomeOf(
         BridgeGitOutcomeKind.wouldOverwrite,
         files: ['src/routes/login.ts'],
       );
-      await git.restoreStash();
+      await git.restoreStash(stashOf());
 
       expect(notices.map((notice) => notice.$2), [
         'Restored with conflicts in src/routes/login.ts; Git kept the stash. Resolve them in '
@@ -159,13 +202,15 @@ void main() {
 
   test('restoring reports its files and reads the stash again', () async {
     backend.stashed = BridgeStash(
+      id: 's1',
       createdMs: 0,
       files: [change('a.txt'), change('b.txt')],
     );
     await git.refresh();
+    final stashed = git.stash.value!;
     backend.stashed = null;
 
-    await git.restoreStash();
+    await git.restoreStash(stashed);
 
     expect(notices.single, (
       BridgeLevel.info,
@@ -206,6 +251,8 @@ void main() {
     );
   });
 }
+
+BridgeStash stashOf() => const BridgeStash(id: 's1', createdMs: 0, files: []);
 
 BridgeFileChange change(String path) => BridgeFileChange(
   path: path,

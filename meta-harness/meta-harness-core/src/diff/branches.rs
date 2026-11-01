@@ -176,23 +176,26 @@ impl WorkingTree {
             BranchTarget::Local(name) => ["switch", "--no-guess", branch_name(name)?],
             BranchTarget::Remote(name) => ["switch", "--track", branch_name(name)?],
         };
+        let start = self.head().await?;
         let mut earlier = None;
-        let mut stashed = false;
+        let mut left = None;
         if changes == Changes::Leave {
             earlier = self.stash_entry().await?.map(|entry| entry.id);
-            stashed = self.push_stash().await?;
+            left = self.push_stash().await?;
         }
-        if let Err(error) = self.switching(&args).await {
-            // The changes go back where they were.
-            if stashed {
-                self.pop("stash@{0}").await?;
-            }
-            return Err(error);
+        let switched = self.switching(&args, &start).await;
+        let moved =
+            !matches!(switched, Err(ref error) if !matches!(error, DiffError::HookFailed(_)));
+        if let (false, Some(left)) = (moved, &left) {
+            // Git did not switch, so the changes go back where they were.
+            self.pop(left).await?;
+            return switched;
         }
-        if let (true, Some(earlier)) = (stashed, earlier) {
+        if let (Some(_), Some(earlier)) = (left, earlier) {
             self.drop_stash(&earlier).await?;
         }
-        Ok(())
+        // Git switched, also when a hook failed after.
+        switched
     }
 
     /// Creates the branch `name` at the current commit and switches to it, unless Git refuses
@@ -202,19 +205,45 @@ impl WorkingTree {
         git(&self.root, &[], &["check-ref-format", "--branch", name])
             .await
             .map_err(|_| DiffError::InvalidBranch(name.to_owned()))?;
-        self.switching(&["switch", "-c", name]).await
+        let start = self.head().await?;
+        self.switching(&["switch", "-c", name], &start).await
     }
 
-    async fn switching(&self, args: &[&str]) -> Result<(), DiffError> {
-        user_git(&self.root, args)
-            .await
-            .map(drop)
-            .map_err(|error| match error {
-                DiffError::Git(reason) if reason.contains("would be overwritten by checkout") => {
-                    DiffError::WouldOverwrite(listed_files(&reason))
-                }
-                error => error,
-            })
+    /// Runs the switch `args` from HEAD `start`. Git exits with a failing `post-checkout` hook's
+    /// status after it switched, so a failure counts as one only while HEAD stays at `start`.
+    async fn switching(
+        &self,
+        args: &[&str],
+        start: &(String, Option<String>),
+    ) -> Result<(), DiffError> {
+        let Err(error) = user_git(&self.root, args).await else {
+            return Ok(());
+        };
+        if self.head().await? != *start {
+            return Err(DiffError::HookFailed(match error {
+                DiffError::Git(reason) => reason,
+                error => error.to_string(),
+            }));
+        }
+        Err(match error {
+            DiffError::Git(reason) if reason.contains("would be overwritten by checkout") => {
+                DiffError::WouldOverwrite(listed_files(&reason))
+            }
+            error => error,
+        })
+    }
+
+    /// What HEAD names, a branch or `HEAD` itself, and the commit it is at.
+    async fn head(&self) -> Result<(String, Option<String>), DiffError> {
+        let name = git(
+            &self.root,
+            &[],
+            &["rev-parse", "--symbolic-full-name", "HEAD"],
+        )
+        .await;
+        // Before the first commit HEAD names a branch that does not exist yet.
+        let name = name.unwrap_or_default();
+        Ok((name, self.resolve("HEAD").await?))
     }
 
     /// Fetches the remote of the branch's upstream into its remote-tracking branches, without
@@ -239,6 +268,20 @@ impl WorkingTree {
         // A branch tracking another local branch names the repository itself.
         if remote.is_empty() || remote == "." {
             return Ok(false);
+        }
+        // A fetch writes where the remote's refspecs say, which can be a local branch.
+        let key = format!("remote.{remote}.fetch");
+        let specs = git(&self.root, &[], &["config", "--get-all", &key])
+            .await
+            .unwrap_or_default();
+        for spec in specs.lines() {
+            let destination = spec.split_once(':').map_or("", |(_, to)| to);
+            if !spec.starts_with('^')
+                && !destination.is_empty()
+                && !destination.starts_with("refs/remotes/")
+            {
+                return Err(DiffError::FetchOutsideRemotes(spec.to_owned()));
+            }
         }
         let env: Vec<(&str, OsString)> = NO_PROMPTS
             .iter()

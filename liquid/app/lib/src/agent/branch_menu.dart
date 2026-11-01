@@ -132,6 +132,8 @@ class _Create extends _Chosen {
 /// uncommitted changes go, as GitHub Desktop does.
 Future<void> showBranchMenu(BuildContext context, SessionState state) async {
   final git = state.git;
+  // Fresh, so a change made since the last read is asked about.
+  await git.refresh();
   final BridgeBranches branches;
   try {
     branches = await git.branches();

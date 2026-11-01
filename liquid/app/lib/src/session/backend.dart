@@ -98,10 +98,14 @@ abstract interface class SessionBackend {
   /// The stashed changes of the branch checked out, if any.
   Future<BridgeStash?> gitStash();
 
-  /// One stashed file's unified diff.
-  Future<String> stashPatch(String path, {required bool hideWhitespace});
-  Future<BridgeGitOutcome> restoreStash();
-  Future<BridgeGitOutcome> discardStash();
+  /// One file's unified diff in the stash `id`.
+  Future<String> stashPatch(
+    String id,
+    String path, {
+    required bool hideWhitespace,
+  });
+  Future<BridgeGitOutcome> restoreStash(String id);
+  Future<BridgeGitOutcome> discardStash(String id);
 
   /// Fetches the upstream's remote; whether there was one.
   Future<bool> fetch();
@@ -223,12 +227,17 @@ class RustSessionBackend implements SessionBackend {
   @override
   Future<BridgeStash?> gitStash() => _session.gitStash();
   @override
-  Future<String> stashPatch(String path, {required bool hideWhitespace}) =>
-      _session.stashPatch(path: path, hideWhitespace: hideWhitespace);
+  Future<String> stashPatch(
+    String id,
+    String path, {
+    required bool hideWhitespace,
+  }) => _session.stashPatch(id: id, path: path, hideWhitespace: hideWhitespace);
   @override
-  Future<BridgeGitOutcome> restoreStash() => _session.restoreStash();
+  Future<BridgeGitOutcome> restoreStash(String id) =>
+      _session.restoreStash(id: id);
   @override
-  Future<BridgeGitOutcome> discardStash() => _session.discardStash();
+  Future<BridgeGitOutcome> discardStash(String id) =>
+      _session.discardStash(id: id);
   @override
   Future<bool> fetch() => _session.fetch();
   @override

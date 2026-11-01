@@ -514,7 +514,13 @@ class SessionState {
   /// One file's unified diff between the shown checkpoints.
   Future<String> patch(String path) {
     if (shownScope.value is StashedChanges) {
-      return _backend.stashPatch(path, hideWhitespace: hideWhitespace.value);
+      final id = git.stash.value?.id;
+      if (id == null) return Future.value('');
+      return _backend.stashPatch(
+        id,
+        path,
+        hideWhitespace: hideWhitespace.value,
+      );
     }
     final pair = shown.value;
     if (pair == null) return Future.value('');

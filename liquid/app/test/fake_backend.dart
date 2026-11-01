@@ -277,8 +277,11 @@ class FakeBackend implements SessionBackend {
   /// What fetching fails with.
   Object? fetchError;
 
+  int statusReads = 0;
+
   @override
   Future<BridgeGitStatus?> gitStatus() async {
+    statusReads++;
     if (gitError case final error?) throw error;
     return git;
   }
@@ -305,20 +308,24 @@ class FakeBackend implements SessionBackend {
   Future<BridgeStash?> gitStash() async => stashed;
 
   @override
-  Future<String> stashPatch(String path, {required bool hideWhitespace}) async {
+  Future<String> stashPatch(
+    String id,
+    String path, {
+    required bool hideWhitespace,
+  }) async {
     calls.add('stash patch $path');
     return patches[path] ?? '';
   }
 
   @override
-  Future<BridgeGitOutcome> restoreStash() async {
-    calls.add('restore stash');
+  Future<BridgeGitOutcome> restoreStash(String id) async {
+    calls.add('restore stash $id');
     return outcome;
   }
 
   @override
-  Future<BridgeGitOutcome> discardStash() async {
-    calls.add('discard stash');
+  Future<BridgeGitOutcome> discardStash(String id) async {
+    calls.add('discard stash $id');
     return outcome;
   }
 
@@ -651,4 +658,10 @@ BridgeGitOutcome outcomeOf(
   BridgeGitOutcomeKind kind, {
   List<String> files = const [],
   List<BridgeRunningAgent> running = const [],
-}) => BridgeGitOutcome(kind: kind, files: files, running: running);
+  String detail = '',
+}) => BridgeGitOutcome(
+  kind: kind,
+  files: files,
+  running: running,
+  detail: detail,
+);

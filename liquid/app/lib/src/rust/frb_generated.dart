@@ -135,6 +135,7 @@ abstract class RustLibApi extends BaseApi {
 
   Future<BridgeGitOutcome> crateApiSessionAgentSessionDiscardStash({
     required AgentSession that,
+    required String id,
   });
 
   Future<void> crateApiSessionAgentSessionDismiss({
@@ -188,6 +189,7 @@ abstract class RustLibApi extends BaseApi {
 
   Future<BridgeGitOutcome> crateApiSessionAgentSessionRestoreStash({
     required AgentSession that,
+    required String id,
   });
 
   Future<BridgeRevertPlan> crateApiSessionAgentSessionRevertPlan({
@@ -231,6 +233,7 @@ abstract class RustLibApi extends BaseApi {
 
   Future<String> crateApiSessionAgentSessionStashPatch({
     required AgentSession that,
+    required String id,
     required String path,
     required bool hideWhitespace,
   });
@@ -717,6 +720,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   @override
   Future<BridgeGitOutcome> crateApiSessionAgentSessionDiscardStash({
     required AgentSession that,
+    required String id,
   }) {
     return handler.executeNormal(
       NormalTask(
@@ -726,6 +730,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             that,
             serializer,
           );
+          sse_encode_String(id, serializer);
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
@@ -738,7 +743,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeErrorData: sse_decode_String,
         ),
         constMeta: kCrateApiSessionAgentSessionDiscardStashConstMeta,
-        argValues: [that],
+        argValues: [that, id],
         apiImpl: this,
       ),
     );
@@ -747,7 +752,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   TaskConstMeta get kCrateApiSessionAgentSessionDiscardStashConstMeta =>
       const TaskConstMeta(
         debugName: "AgentSession_discard_stash",
-        argNames: ["that"],
+        argNames: ["that", "id"],
       );
 
   @override
@@ -1188,6 +1193,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   @override
   Future<BridgeGitOutcome> crateApiSessionAgentSessionRestoreStash({
     required AgentSession that,
+    required String id,
   }) {
     return handler.executeNormal(
       NormalTask(
@@ -1197,6 +1203,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             that,
             serializer,
           );
+          sse_encode_String(id, serializer);
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
@@ -1209,7 +1216,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeErrorData: sse_decode_String,
         ),
         constMeta: kCrateApiSessionAgentSessionRestoreStashConstMeta,
-        argValues: [that],
+        argValues: [that, id],
         apiImpl: this,
       ),
     );
@@ -1218,7 +1225,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   TaskConstMeta get kCrateApiSessionAgentSessionRestoreStashConstMeta =>
       const TaskConstMeta(
         debugName: "AgentSession_restore_stash",
-        argNames: ["that"],
+        argNames: ["that", "id"],
       );
 
   @override
@@ -1524,6 +1531,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   @override
   Future<String> crateApiSessionAgentSessionStashPatch({
     required AgentSession that,
+    required String id,
     required String path,
     required bool hideWhitespace,
   }) {
@@ -1535,6 +1543,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             that,
             serializer,
           );
+          sse_encode_String(id, serializer);
           sse_encode_String(path, serializer);
           sse_encode_bool(hideWhitespace, serializer);
           pdeCallFfi(
@@ -1549,7 +1558,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeErrorData: sse_decode_String,
         ),
         constMeta: kCrateApiSessionAgentSessionStashPatchConstMeta,
-        argValues: [that, path, hideWhitespace],
+        argValues: [that, id, path, hideWhitespace],
         apiImpl: this,
       ),
     );
@@ -1558,7 +1567,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   TaskConstMeta get kCrateApiSessionAgentSessionStashPatchConstMeta =>
       const TaskConstMeta(
         debugName: "AgentSession_stash_patch",
-        argNames: ["that", "path", "hideWhitespace"],
+        argNames: ["that", "id", "path", "hideWhitespace"],
       );
 
   @override
@@ -2345,12 +2354,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeGitOutcome dco_decode_bridge_git_outcome(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 3)
-      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+    if (arr.length != 4)
+      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
     return BridgeGitOutcome(
       kind: dco_decode_bridge_git_outcome_kind(arr[0]),
       files: dco_decode_list_String(arr[1]),
       running: dco_decode_list_bridge_running_agent(arr[2]),
+      detail: dco_decode_String(arr[3]),
     );
   }
 
@@ -2566,11 +2576,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeStash dco_decode_bridge_stash(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 2)
-      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    if (arr.length != 3)
+      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
     return BridgeStash(
-      createdMs: dco_decode_i_64(arr[0]),
-      files: dco_decode_list_bridge_file_change(arr[1]),
+      id: dco_decode_String(arr[0]),
+      createdMs: dco_decode_i_64(arr[1]),
+      files: dco_decode_list_bridge_file_change(arr[2]),
     );
   }
 
@@ -3478,10 +3489,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_kind = sse_decode_bridge_git_outcome_kind(deserializer);
     var var_files = sse_decode_list_String(deserializer);
     var var_running = sse_decode_list_bridge_running_agent(deserializer);
+    var var_detail = sse_decode_String(deserializer);
     return BridgeGitOutcome(
       kind: var_kind,
       files: var_files,
       running: var_running,
+      detail: var_detail,
     );
   }
 
@@ -3735,9 +3748,10 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   @protected
   BridgeStash sse_decode_bridge_stash(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_id = sse_decode_String(deserializer);
     var var_createdMs = sse_decode_i_64(deserializer);
     var var_files = sse_decode_list_bridge_file_change(deserializer);
-    return BridgeStash(createdMs: var_createdMs, files: var_files);
+    return BridgeStash(id: var_id, createdMs: var_createdMs, files: var_files);
   }
 
   @protected
@@ -4920,6 +4934,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_bridge_git_outcome_kind(self.kind, serializer);
     sse_encode_list_String(self.files, serializer);
     sse_encode_list_bridge_running_agent(self.running, serializer);
+    sse_encode_String(self.detail, serializer);
   }
 
   @protected
@@ -5108,6 +5123,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   @protected
   void sse_encode_bridge_stash(BridgeStash self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.id, serializer);
     sse_encode_i_64(self.createdMs, serializer);
     sse_encode_list_bridge_file_change(self.files, serializer);
   }
@@ -5849,9 +5865,11 @@ class AgentSessionImpl extends RustOpaque implements AgentSession {
   Future<void> deleteSession({required String path}) => RustLib.instance.api
       .crateApiSessionAgentSessionDeleteSession(that: this, path: path);
 
-  /// Deletes the branch's stashed changes.
-  Future<BridgeGitOutcome> discardStash() =>
-      RustLib.instance.api.crateApiSessionAgentSessionDiscardStash(that: this);
+  /// Deletes the stashed changes `id`.
+  Future<BridgeGitOutcome> discardStash({required String id}) => RustLib
+      .instance
+      .api
+      .crateApiSessionAgentSessionDiscardStash(that: this, id: id);
 
   /// Dismisses a question.
   Future<void> dismiss({required String request}) => RustLib.instance.api
@@ -5909,9 +5927,11 @@ class AgentSessionImpl extends RustOpaque implements AgentSession {
   Future<void> removeAllCheckpoints() => RustLib.instance.api
       .crateApiSessionAgentSessionRemoveAllCheckpoints(that: this);
 
-  /// Moves the branch's stashed changes back into the checkout.
-  Future<BridgeGitOutcome> restoreStash() =>
-      RustLib.instance.api.crateApiSessionAgentSessionRestoreStash(that: this);
+  /// Moves the stashed changes `id` back into the checkout.
+  Future<BridgeGitOutcome> restoreStash({required String id}) => RustLib
+      .instance
+      .api
+      .crateApiSessionAgentSessionRestoreStash(that: this, id: id);
 
   /// What reverting the files to before turn `turn` of the current branch would change;
   /// files changed after the branch's last turn ended are marked.
@@ -5960,12 +5980,15 @@ class AgentSessionImpl extends RustOpaque implements AgentSession {
   Future<bool> shutdown() =>
       RustLib.instance.api.crateApiSessionAgentSessionShutdown(that: this);
 
-  /// The unified diff of the stashed file `path`, its lines written out as a turn's are.
+  /// The unified diff of the file `path` of the stash `id`, its lines written out as a
+  /// turn's are.
   Future<String> stashPatch({
+    required String id,
     required String path,
     required bool hideWhitespace,
   }) => RustLib.instance.api.crateApiSessionAgentSessionStashPatch(
     that: this,
+    id: id,
     path: path,
     hideWhitespace: hideWhitespace,
   );

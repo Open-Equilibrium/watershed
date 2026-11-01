@@ -38,6 +38,26 @@ impl Clone {
     }
 }
 
+/// The id of the stash of the branch checked out; one naming nothing when it has none.
+async fn stash_of(checkpoints: &Checkpoints) -> String {
+    match checkpoints.stash().await.expect("stash read") {
+        Some(stash) => stash.id,
+        None => "0000000000000000000000000000000000000000".to_owned(),
+    }
+}
+
+/// Makes the hook `name` of `repo` exit with `status`.
+fn hook(repo: &Repo, name: &str, status: u8) {
+    use std::os::unix::fs::PermissionsExt;
+    let path = repo.path().join(".git/hooks").join(name);
+    std::fs::write(
+        &path,
+        format!("#!/bin/sh\necho 'hook failed' >&2\nexit {status}\n"),
+    )
+    .expect("hook");
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).expect("executable");
+}
+
 fn local(name: &str) -> BranchTarget {
     BranchTarget::Local(name.to_owned())
 }
@@ -231,11 +251,11 @@ fn no_branch_is_switched_or_created_while_an_agent_runs_in_the_checkout() {
             Err(DiffError::AgentRunning(running)) if running == ["s1"]
         ));
         assert!(matches!(
-            checkpoints.restore_stash().await,
+            checkpoints.restore_stash(&stash_of(&checkpoints).await).await,
             Err(DiffError::AgentRunning(running)) if running == ["s1"]
         ));
         assert!(matches!(
-            checkpoints.discard_stash().await,
+            checkpoints.discard_stash(&stash_of(&checkpoints).await).await,
             Err(DiffError::AgentRunning(running)) if running == ["s1"]
         ));
         assert_eq!(repo.git(&["stash", "list"]), "");
@@ -389,7 +409,10 @@ fn leaving_changes_stashes_them_on_the_branch_and_restoring_brings_them_back() {
         assert_eq!(files, ["a.txt", "new.txt"]);
         assert!(stash.created_ms > 0);
 
-        checkpoints.restore_stash().await.expect("restored");
+        checkpoints
+            .restore_stash(&stash_of(&checkpoints).await)
+            .await
+            .expect("restored");
         assert_eq!(read(&repo, "a.txt"), "edited\n");
         assert_eq!(read(&repo, "new.txt"), "new\n");
         assert_eq!(checkpoints.stash().await.expect("read"), None);
@@ -424,7 +447,10 @@ fn a_branch_keeps_one_stash_and_other_stashes_stay_untouched() {
             subjects,
             format!("On {main}: Liquid: changes left on {main}\nOn {main}: the user's own\n")
         );
-        checkpoints.restore_stash().await.expect("restored");
+        checkpoints
+            .restore_stash(&stash_of(&checkpoints).await)
+            .await
+            .expect("restored");
         assert_eq!(read(&repo, "a.txt"), "second\n");
 
         repo.write("a.txt", "third\n");
@@ -436,7 +462,10 @@ fn a_branch_keeps_one_stash_and_other_stashes_stay_untouched() {
             .switch_branch(&local(&main), Changes::Bring)
             .await
             .expect("back");
-        checkpoints.discard_stash().await.expect("discarded");
+        checkpoints
+            .discard_stash(&stash_of(&checkpoints).await)
+            .await
+            .expect("discarded");
         assert_eq!(read(&repo, "a.txt"), "old\n");
         assert_eq!(
             repo.git(&["stash", "list", "--format=%s"]),
@@ -464,14 +493,14 @@ fn a_restore_git_refuses_or_that_conflicts_keeps_the_stash() {
 
         repo.write("a.txt", "edited meanwhile\n");
         assert!(matches!(
-            checkpoints.restore_stash().await,
+            checkpoints.restore_stash(&stash_of(&checkpoints).await).await,
             Err(DiffError::WouldOverwrite(paths)) if paths == ["a.txt"]
         ));
         assert_eq!(read(&repo, "a.txt"), "edited meanwhile\n");
 
         repo.git(&["commit", "-q", "-am", "committed meanwhile"]);
         assert!(matches!(
-            checkpoints.restore_stash().await,
+            checkpoints.restore_stash(&stash_of(&checkpoints).await).await,
             Err(DiffError::RestoredWithConflicts(paths)) if paths == ["a.txt"]
         ));
         assert!(
@@ -498,5 +527,180 @@ fn a_detached_head_cannot_leave_changes_on_a_branch() {
         ));
         assert_eq!(repo.git(&["stash", "list"]), "");
         assert_eq!(read(&repo, "a.txt"), "edited\n");
+    });
+}
+
+#[test]
+fn a_hook_failing_after_git_switched_keeps_the_changes_left_on_the_branch() {
+    run(async {
+        let repo = Repo::new("switch-hook");
+        let main = repo.git(&["branch", "--show-current"]).trim().to_owned();
+        repo.git(&["branch", "other"]);
+        repo.write("a.txt", "edited\n");
+        hook(&repo, "post-checkout", 1);
+        let checkpoints = Checkpoints::new(repo.path());
+
+        let switched = checkpoints
+            .switch_branch(&local("other"), Changes::Leave)
+            .await;
+
+        assert!(
+            matches!(&switched, Err(DiffError::HookFailed(reason)) if reason.contains("hook failed")),
+            "{switched:?}"
+        );
+        assert_eq!(repo.git(&["branch", "--show-current"]), "other\n");
+        assert_eq!(read(&repo, "a.txt"), "old\n", "the changes stay on {main}");
+        assert_eq!(
+            repo.git(&["stash", "list", "--format=%s"]),
+            format!("On {main}: Liquid: changes left on {main}\n")
+        );
+        assert!(matches!(
+            checkpoints.create_branch("new").await,
+            Err(DiffError::HookFailed(_))
+        ));
+        assert_eq!(repo.git(&["branch", "--show-current"]), "new\n");
+    });
+}
+
+#[test]
+fn no_restore_runs_over_unresolved_conflicts_or_untracked_files_in_the_way() {
+    run(async {
+        let repo = Repo::new("stash-unmerged");
+        let main = repo.git(&["branch", "--show-current"]).trim().to_owned();
+        repo.git(&["branch", "other"]);
+        repo.write("a.txt", "stashed\n");
+        repo.write("u.txt", "untracked\n");
+        let checkpoints = Checkpoints::new(repo.path());
+        checkpoints
+            .switch_branch(&local("other"), Changes::Leave)
+            .await
+            .expect("left");
+        checkpoints
+            .switch_branch(&local(&main), Changes::Bring)
+            .await
+            .expect("back");
+
+        repo.write("u.txt", "in the way\n");
+        assert!(matches!(
+            checkpoints.restore_stash(&stash_of(&checkpoints).await).await,
+            Err(DiffError::WouldOverwrite(paths)) if paths == ["u.txt"]
+        ));
+        assert_eq!(read(&repo, "a.txt"), "old\n", "nothing was restored");
+        std::fs::remove_file(repo.path().join("u.txt")).expect("removed");
+
+        // A merge the user stopped with a conflict.
+        repo.git(&["switch", "-q", "other"]);
+        repo.write("a.txt", "theirs\n");
+        repo.git(&["commit", "-q", "-am", "theirs"]);
+        repo.git(&["switch", "-q", &main]);
+        repo.write("a.txt", "ours\n");
+        repo.git(&["commit", "-q", "-am", "ours"]);
+        let merged = Command::new("git")
+            .args([
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=test@example.com",
+                "merge",
+                "-q",
+                "other",
+            ])
+            .current_dir(repo.path())
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .output()
+            .expect("git runs");
+        assert!(!merged.status.success(), "the merge stops at its conflict");
+
+        assert!(matches!(
+            checkpoints.restore_stash(&stash_of(&checkpoints).await).await,
+            Err(DiffError::Unresolved(paths)) if paths == ["a.txt"]
+        ));
+        assert!(checkpoints.stash().await.expect("read").is_some());
+    });
+}
+
+#[test]
+fn a_stashed_files_patch_shows_tracked_and_untracked_changes() {
+    run(async {
+        let repo = Repo::new("stash-patch");
+        let main = repo.git(&["branch", "--show-current"]).trim().to_owned();
+        repo.git(&["branch", "other"]);
+        repo.write("a.txt", "stashed\n");
+        repo.write("u.txt", "untracked\n");
+        let checkpoints = Checkpoints::new(repo.path());
+        checkpoints
+            .switch_branch(&local("other"), Changes::Leave)
+            .await
+            .expect("left");
+        checkpoints
+            .switch_branch(&local(&main), Changes::Bring)
+            .await
+            .expect("back");
+        let stash = stash_of(&checkpoints).await;
+
+        let tracked = checkpoints
+            .stash_patch(&stash, "a.txt", crate::Whitespace::Shown)
+            .await
+            .expect("patch");
+        let untracked = checkpoints
+            .stash_patch(&stash, "u.txt", crate::Whitespace::Shown)
+            .await
+            .expect("patch");
+
+        assert!(tracked.contains("-old\n+stashed\n"), "{tracked}");
+        assert!(untracked.contains("+untracked\n"), "{untracked}");
+    });
+}
+
+#[test]
+fn a_tag_named_like_the_branch_changes_nothing() {
+    run(async {
+        let clone = Clone::new("tag-name");
+        let repo = &clone.repo;
+        repo.git(&["branch", "other"]);
+        repo.git(&["tag", "main"]);
+        clone.commit_upstream("theirs\n");
+        let checkpoints = Checkpoints::new(repo.path());
+
+        assert!(checkpoints.fetch().await.expect("fetched"));
+        repo.write("a.txt", "edited\n");
+        checkpoints
+            .switch_branch(&local("other"), Changes::Leave)
+            .await
+            .expect("left");
+        let branches = checkpoints.branches().await.expect("branches");
+        assert!(
+            branches
+                .branches
+                .iter()
+                .any(|branch| branch.name == "main" && branch.stashed)
+        );
+    });
+}
+
+#[test]
+fn no_background_fetch_writes_outside_remote_tracking_branches() {
+    run(async {
+        let clone = Clone::new("fetch-refspec");
+        let repo = &clone.repo;
+        clone.origin.git(&["branch", "feature"]);
+        repo.git(&["fetch", "-q"]);
+        repo.git(&["branch", "feature", "origin/feature"]);
+        repo.git(&[
+            "config",
+            "--add",
+            "remote.origin.fetch",
+            "+refs/heads/feature:refs/heads/feature",
+        ]);
+        let before = repo.git(&["rev-parse", "feature"]);
+        clone.origin.git(&["switch", "-q", "feature"]);
+        clone.commit_upstream("theirs\n");
+        let checkpoints = Checkpoints::new(repo.path());
+
+        assert!(matches!(
+            checkpoints.fetch().await,
+            Err(DiffError::FetchOutsideRemotes(_))
+        ));
+        assert_eq!(repo.git(&["rev-parse", "feature"]), before);
     });
 }

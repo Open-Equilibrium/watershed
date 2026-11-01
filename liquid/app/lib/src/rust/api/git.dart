@@ -95,14 +95,19 @@ class BridgeGitOutcome {
   /// The agents running in the checkout.
   final List<BridgeRunningAgent> running;
 
+  /// What Git said, written out as file names are; empty unless a hook failed.
+  final String detail;
+
   const BridgeGitOutcome({
     required this.kind,
     required this.files,
     required this.running,
+    required this.detail,
   });
 
   @override
-  int get hashCode => kind.hashCode ^ files.hashCode ^ running.hashCode;
+  int get hashCode =>
+      kind.hashCode ^ files.hashCode ^ running.hashCode ^ detail.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -111,7 +116,8 @@ class BridgeGitOutcome {
           runtimeType == other.runtimeType &&
           kind == other.kind &&
           files == other.files &&
-          running == other.running;
+          running == other.running &&
+          detail == other.detail;
 }
 
 /// How a Git write the user asked for ended, when not with an error to show as it is.
@@ -127,6 +133,12 @@ enum BridgeGitOutcomeKind {
 
   /// The agents in `running` run in the checkout, so nothing changed.
   agentRunning,
+
+  /// `files` have unresolved conflicts, so nothing was restored.
+  unresolved,
+
+  /// Git switched, but a hook it ran after failed with `detail`.
+  hookFailed,
 }
 
 /// The checkout's branch and how it stands against its upstream.
@@ -182,22 +194,30 @@ class BridgeGitStatus {
 
 /// A branch's stashed changes.
 class BridgeStash {
+  /// The stash commit, which names it to restore or discard it.
+  final String id;
+
   /// When they were left, in Unix milliseconds.
   final PlatformInt64 createdMs;
 
   /// The stashed files, untracked ones as added.
   final List<BridgeFileChange> files;
 
-  const BridgeStash({required this.createdMs, required this.files});
+  const BridgeStash({
+    required this.id,
+    required this.createdMs,
+    required this.files,
+  });
 
   @override
-  int get hashCode => createdMs.hashCode ^ files.hashCode;
+  int get hashCode => id.hashCode ^ createdMs.hashCode ^ files.hashCode;
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       other is BridgeStash &&
           runtimeType == other.runtimeType &&
+          id == other.id &&
           createdMs == other.createdMs &&
           files == other.files;
 }

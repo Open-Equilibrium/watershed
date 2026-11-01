@@ -680,6 +680,7 @@ fn wire__crate__api__session__AgentSession_discard_stash_impl(
             let api_that = <RustOpaqueMoi<
                 flutter_rust_bridge::for_generated::RustAutoOpaqueInner<AgentSession>,
             >>::sse_decode(&mut deserializer);
+            let api_id = <String>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, String>((move || {
@@ -698,7 +699,7 @@ fn wire__crate__api__session__AgentSession_discard_stash_impl(
                     }
                     let api_that_guard = api_that_guard.unwrap();
                     let output_ok =
-                        crate::api::session::AgentSession::discard_stash(&*api_that_guard)?;
+                        crate::api::session::AgentSession::discard_stash(&*api_that_guard, api_id)?;
                     std::result::Result::Ok(output_ok)
                 })())
             }
@@ -1346,6 +1347,7 @@ fn wire__crate__api__session__AgentSession_restore_stash_impl(
             let api_that = <RustOpaqueMoi<
                 flutter_rust_bridge::for_generated::RustAutoOpaqueInner<AgentSession>,
             >>::sse_decode(&mut deserializer);
+            let api_id = <String>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, String>((move || {
@@ -1364,7 +1366,7 @@ fn wire__crate__api__session__AgentSession_restore_stash_impl(
                     }
                     let api_that_guard = api_that_guard.unwrap();
                     let output_ok =
-                        crate::api::session::AgentSession::restore_stash(&*api_that_guard)?;
+                        crate::api::session::AgentSession::restore_stash(&*api_that_guard, api_id)?;
                     std::result::Result::Ok(output_ok)
                 })())
             }
@@ -1810,6 +1812,7 @@ fn wire__crate__api__session__AgentSession_stash_patch_impl(
             let api_that = <RustOpaqueMoi<
                 flutter_rust_bridge::for_generated::RustAutoOpaqueInner<AgentSession>,
             >>::sse_decode(&mut deserializer);
+            let api_id = <String>::sse_decode(&mut deserializer);
             let api_path = <String>::sse_decode(&mut deserializer);
             let api_hide_whitespace = <bool>::sse_decode(&mut deserializer);
             deserializer.end();
@@ -1831,6 +1834,7 @@ fn wire__crate__api__session__AgentSession_stash_patch_impl(
                     let api_that_guard = api_that_guard.unwrap();
                     let output_ok = crate::api::session::AgentSession::stash_patch(
                         &*api_that_guard,
+                        api_id,
                         api_path,
                         api_hide_whitespace,
                     )?;
@@ -2728,10 +2732,12 @@ impl SseDecode for crate::api::git::BridgeGitOutcome {
         let mut var_files = <Vec<String>>::sse_decode(deserializer);
         let mut var_running =
             <Vec<crate::api::history::BridgeRunningAgent>>::sse_decode(deserializer);
+        let mut var_detail = <String>::sse_decode(deserializer);
         return crate::api::git::BridgeGitOutcome {
             kind: var_kind,
             files: var_files,
             running: var_running,
+            detail: var_detail,
         };
     }
 }
@@ -2745,6 +2751,8 @@ impl SseDecode for crate::api::git::BridgeGitOutcomeKind {
             1 => crate::api::git::BridgeGitOutcomeKind::WouldOverwrite,
             2 => crate::api::git::BridgeGitOutcomeKind::Conflicts,
             3 => crate::api::git::BridgeGitOutcomeKind::AgentRunning,
+            4 => crate::api::git::BridgeGitOutcomeKind::Unresolved,
+            5 => crate::api::git::BridgeGitOutcomeKind::HookFailed,
             _ => unreachable!("Invalid variant for BridgeGitOutcomeKind: {}", inner),
         };
     }
@@ -3041,9 +3049,11 @@ impl SseDecode for crate::api::history::BridgeRunningAgent {
 impl SseDecode for crate::api::git::BridgeStash {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_id = <String>::sse_decode(deserializer);
         let mut var_createdMs = <i64>::sse_decode(deserializer);
         let mut var_files = <Vec<crate::api::events::BridgeFileChange>>::sse_decode(deserializer);
         return crate::api::git::BridgeStash {
+            id: var_id,
             created_ms: var_createdMs,
             files: var_files,
         };
@@ -4471,6 +4481,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::git::BridgeGitOutcome {
             self.kind.into_into_dart().into_dart(),
             self.files.into_into_dart().into_dart(),
             self.running.into_into_dart().into_dart(),
+            self.detail.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -4494,6 +4505,8 @@ impl flutter_rust_bridge::IntoDart for crate::api::git::BridgeGitOutcomeKind {
             Self::WouldOverwrite => 1.into_dart(),
             Self::Conflicts => 2.into_dart(),
             Self::AgentRunning => 3.into_dart(),
+            Self::Unresolved => 4.into_dart(),
+            Self::HookFailed => 5.into_dart(),
             _ => unreachable!(),
         }
     }
@@ -4899,6 +4912,7 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::history::BridgeRunningAgent>
 impl flutter_rust_bridge::IntoDart for crate::api::git::BridgeStash {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
+            self.id.into_into_dart().into_dart(),
             self.created_ms.into_into_dart().into_dart(),
             self.files.into_into_dart().into_dart(),
         ]
@@ -5501,6 +5515,7 @@ impl SseEncode for crate::api::git::BridgeGitOutcome {
         <crate::api::git::BridgeGitOutcomeKind>::sse_encode(self.kind, serializer);
         <Vec<String>>::sse_encode(self.files, serializer);
         <Vec<crate::api::history::BridgeRunningAgent>>::sse_encode(self.running, serializer);
+        <String>::sse_encode(self.detail, serializer);
     }
 }
 
@@ -5513,6 +5528,8 @@ impl SseEncode for crate::api::git::BridgeGitOutcomeKind {
                 crate::api::git::BridgeGitOutcomeKind::WouldOverwrite => 1,
                 crate::api::git::BridgeGitOutcomeKind::Conflicts => 2,
                 crate::api::git::BridgeGitOutcomeKind::AgentRunning => 3,
+                crate::api::git::BridgeGitOutcomeKind::Unresolved => 4,
+                crate::api::git::BridgeGitOutcomeKind::HookFailed => 5,
                 _ => {
                     unimplemented!("");
                 }
@@ -5743,6 +5760,7 @@ impl SseEncode for crate::api::history::BridgeRunningAgent {
 impl SseEncode for crate::api::git::BridgeStash {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.id, serializer);
         <i64>::sse_encode(self.created_ms, serializer);
         <Vec<crate::api::events::BridgeFileChange>>::sse_encode(self.files, serializer);
     }

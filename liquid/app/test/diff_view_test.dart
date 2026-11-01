@@ -1066,6 +1066,7 @@ void main() {
     final left = DateTime(2026, 11, 1, 10, 41).millisecondsSinceEpoch;
     final backend = FakeBackend()
       ..stashed = BridgeStash(
+        id: 's1',
         createdMs: left,
         files: [
           BridgeFileChange(
@@ -1103,11 +1104,11 @@ void main() {
     );
     await tester.tap(find.text('Discard'));
     await tester.pumpAndSettle();
-    expect(backend.calls, contains('discard stash'));
+    expect(backend.calls, contains('discard stash s1'));
 
     await tester.tap(find.text('Restore'));
     await tester.pumpAndSettle();
-    expect(backend.calls.last, 'restore stash');
+    expect(backend.calls.last, 'restore stash s1');
     await tester.pump(const Duration(seconds: 7));
   });
 }

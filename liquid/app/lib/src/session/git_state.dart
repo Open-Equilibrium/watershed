@@ -37,9 +37,19 @@ class GitState {
   final stash = ValueNotifier<BridgeStash?>(null);
 
   Timer? _next;
+
+  /// Counts [watch] and [stop], so a tick of an earlier watch never schedules another.
+  int _watches = 0;
   bool _watching = false;
   int _failures = 0;
   DateTime? _fetched;
+
+  /// Reads of the state left until the next fetch; the state is read every [fetchEvery]
+  /// regardless.
+  int _untilFetch = 1;
+
+  /// Counts the reads started, so only the latest one sets the state.
+  int _reads = 0;
 
   /// Whether a Git write of this window is running, so its own switch is not reported as one
   /// outside Liquid.
@@ -49,21 +59,25 @@ class GitState {
   /// switched to.
   String? _arrived;
 
-  /// Reads the state now and fetches every [fetchEvery] until [stop].
+  /// Reads the state now and every [fetchEvery], fetching when due, until [stop].
   void watch() {
     if (_watching) return;
     _watching = true;
+    final watch = ++_watches;
+    _untilFetch = 1;
     unawaited(refresh());
-    _next = Timer(fetchEvery, _tick);
+    _next = Timer(fetchEvery, () => _tick(watch));
   }
 
   void stop() {
     _watching = false;
+    _watches++;
     _next?.cancel();
   }
 
-  Future<void> _tick() async {
-    if (status.value?.upstream case final upstream?) {
+  Future<void> _tick(int watch) async {
+    final upstream = status.value?.upstream;
+    if (upstream != null && --_untilFetch <= 0) {
       try {
         await _backend.fetch();
         _failures = 0;
@@ -83,20 +97,26 @@ class GitState {
           );
         }
       }
+      _untilFetch = fetchWait(_failures).inSeconds ~/ fetchEvery.inSeconds;
     }
     await refresh();
-    if (_watching) _next = Timer(fetchWait(_failures), _tick);
+    if (watch == _watches) _next = Timer(fetchEvery, () => _tick(watch));
   }
 
   /// Reads the branch, its counts and its stash again.
   Future<void> refresh() async {
+    final read = ++_reads;
     final before = status.value?.branch;
     try {
-      final read = await _backend.gitStatus();
+      final now = await _backend.gitStatus();
+      final stashed = now == null ? null : await _backend.gitStash();
+      // A later read, such as one after a write, wins.
+      if (read != _reads) return;
       problem.value = null;
-      status.value = read;
-      stash.value = read == null ? null : await _backend.gitStash();
-      final after = read?.branch;
+      status.value = now;
+      // The same stash keeps its value, so the Diff tab keeps its place in it.
+      if (stashed?.id != stash.value?.id) stash.value = stashed;
+      final after = now?.branch;
       if (before == null || after == null || after == before) return;
       if (!_writing) {
         notify(
@@ -104,7 +124,7 @@ class GitState {
           'The checkout switched to $after outside Liquid.',
         );
       }
-      if (stash.value case final stashed?) {
+      if (stashed != null) {
         final text =
             '$after has stashed changes from ${formatClockMs(stashed.createdMs)}; the Diff '
             'tab shows them.';
@@ -116,7 +136,7 @@ class GitState {
         }
       }
     } on Object catch (error) {
-      problem.value = '$error';
+      if (read == _reads) problem.value = '$error';
     }
   }
 
@@ -136,8 +156,9 @@ class GitState {
       done: (now) {
         final name = now?.branch ?? branch.shown;
         final changes = left?.changed ?? 0;
+        final count = changes == 1 ? '1 change is' : '$changes changes are';
         return leaveChanges && changes > 0 && left?.branch != null
-            ? 'Switched to $name. Your ${changes == 1 ? '1 change is' : '$changes changes are'} stashed on ${left!.branch}.'
+            ? 'Switched to $name. Your $count stashed on ${left!.branch}.'
             : 'Switched to $name.';
       },
     );
@@ -150,20 +171,22 @@ class GitState {
     done: (_) => 'Created and switched to $name.',
   );
 
-  Future<void> restoreStash() async {
-    final files = stash.value?.files.length ?? 0;
+  /// Moves the stashed changes `stashed` back into the checkout.
+  Future<void> restoreStash(BridgeStash stashed) async {
+    final files = stashed.files.length;
     final branch = status.value?.branch;
     await _write(
       'restore',
-      _backend.restoreStash,
+      () => _backend.restoreStash(stashed.id),
       done: (_) =>
           'Restored $files stashed ${files == 1 ? 'file' : 'files'} on $branch',
     );
   }
 
-  Future<void> discardStash() => _write(
+  /// Deletes the stashed changes `stashed`.
+  Future<void> discardStash(BridgeStash stashed) => _write(
     'discard',
-    _backend.discardStash,
+    () => _backend.discardStash(stashed.id),
     done: (_) => 'Discarded the stashed changes.',
   );
 
@@ -181,6 +204,8 @@ class GitState {
         outcome = await run();
       } on Object catch (error) {
         notify(BridgeLevel.error, 'Could not $action: $error');
+        // Git may have changed something before it failed.
+        await refresh();
         return null;
       }
       await refresh();
@@ -188,6 +213,11 @@ class GitState {
       switch (outcome.kind) {
         case BridgeGitOutcomeKind.done:
           notify(BridgeLevel.info, done(status.value));
+        case BridgeGitOutcomeKind.hookFailed:
+          notify(
+            BridgeLevel.warning,
+            '${done(status.value)} A hook failed after: ${outcome.detail}',
+          );
         case BridgeGitOutcomeKind.agentRunning:
           notify(
             BridgeLevel.warning,
@@ -198,6 +228,12 @@ class GitState {
             BridgeLevel.warning,
             'Restored with conflicts in $files; Git kept the stash. Resolve them in an '
             'editor, then discard the stash.',
+          );
+        case BridgeGitOutcomeKind.unresolved:
+          notify(
+            BridgeLevel.warning,
+            'Could not $action: $files ${outcome.files.length == 1 ? 'has' : 'have'} '
+            'unresolved conflicts. Resolve them, then restore; the stash stays.',
           );
         // A switch Git refuses asks in a dialog what to do.
         case BridgeGitOutcomeKind.wouldOverwrite when action == 'restore':

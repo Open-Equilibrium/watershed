@@ -14,8 +14,8 @@ pub struct Stash {
     pub created_ms: i64,
     /// The stashed files, untracked ones as added.
     pub files: Vec<FileChange>,
-    /// The stash commit.
-    id: String,
+    /// The stash commit, which names it to restore or discard it.
+    pub id: String,
 }
 
 /// An entry of Git's stash list.
@@ -60,14 +60,14 @@ impl WorkingTree {
         }))
     }
 
-    /// The patch of the stashed file `path` of `stash`.
+    /// The patch of the stashed file `path` of the stash `id`.
     pub async fn stash_patch(
         &self,
-        stash: &Stash,
+        id: &str,
         path: &str,
         whitespace: Whitespace,
     ) -> Result<String, DiffError> {
-        let (base, tracked, untracked) = self.stash_trees(&stash.id).await?;
+        let (base, tracked, untracked) = self.stash_trees(id).await?;
         if let Some(untracked) = untracked {
             let empty = self.empty_tree().await?;
             let patch = self.patch(&empty, &untracked, path, whitespace).await?;
@@ -79,8 +79,8 @@ impl WorkingTree {
     }
 
     /// Stashes the uncommitted changes, untracked files included, for the branch checked out;
-    /// returns whether there were any.
-    pub(super) async fn push_stash(&self) -> Result<bool, DiffError> {
+    /// returns the new stash, none when there was nothing to stash.
+    pub(super) async fn push_stash(&self) -> Result<Option<String>, DiffError> {
         let branch = self.branch().await?.ok_or(DiffError::NoBranch)?;
         let message = format!("{MESSAGE}{branch}");
         let before = self.resolve("refs/stash").await?;
@@ -96,7 +96,8 @@ impl WorkingTree {
             ],
         )
         .await?;
-        Ok(self.resolve("refs/stash").await? != before)
+        let after = self.resolve("refs/stash").await?;
+        Ok(after.filter(|after| Some(after) != before.as_ref()))
     }
 
     /// Drops the stash commit `id`, wherever it now is in the list.
@@ -107,16 +108,43 @@ impl WorkingTree {
             .map(drop)
     }
 
-    /// Moves the branch's stashed changes back into the checkout and drops the stash, unless
-    /// Git refuses or they conflict, which keeps it.
-    pub async fn restore_stash(&self) -> Result<(), DiffError> {
-        let entry = self.stash_entry().await?.ok_or(DiffError::NoStash)?;
-        self.pop(&entry.place).await
+    /// Moves the stashed changes `id` left on a branch back into the checkout and drops the
+    /// stash, unless Git refuses or they conflict, which keeps it. Nothing is restored over
+    /// unresolved conflicts or untracked files in the way, which Git would restore only in part.
+    pub async fn restore_stash(&self, id: &str) -> Result<(), DiffError> {
+        self.liquid_stash(id).await?;
+        let unresolved = git(
+            &self.root,
+            &[],
+            &["diff", "--name-only", "-z", "--diff-filter=U"],
+        )
+        .await?;
+        let unresolved = paths(&unresolved);
+        if !unresolved.is_empty() {
+            return Err(DiffError::Unresolved(unresolved));
+        }
+        if self.resolve(&format!("{id}^3")).await?.is_some() {
+            let untracked = git(
+                &self.root,
+                &[],
+                &["ls-tree", "-r", "-z", "--name-only", &format!("{id}^3")],
+            )
+            .await?;
+            let in_the_way: Vec<String> = paths(&untracked)
+                .into_iter()
+                .filter(|path| std::fs::symlink_metadata(self.file(path)).is_ok())
+                .collect();
+            if !in_the_way.is_empty() {
+                return Err(DiffError::WouldOverwrite(in_the_way));
+            }
+        }
+        self.pop(id).await
     }
 
-    /// Pops the stash at `place`.
-    pub(super) async fn pop(&self, place: &str) -> Result<(), DiffError> {
-        let error = match user_git(&self.root, &["stash", "pop", "--quiet", place]).await {
+    /// Pops the stash commit `id`, wherever it now is in the list.
+    pub(super) async fn pop(&self, id: &str) -> Result<(), DiffError> {
+        let place = self.place_of(id).await?;
+        let error = match user_git(&self.root, &["stash", "pop", "--quiet", &place]).await {
             Ok(_) => return Ok(()),
             Err(error) => error,
         };
@@ -126,11 +154,8 @@ impl WorkingTree {
             &["diff", "--name-only", "-z", "--diff-filter=U"],
         )
         .await?;
-        let conflicts: Vec<String> = conflicts
-            .split('\0')
-            .filter(|path| !path.is_empty())
-            .map(str::to_owned)
-            .collect();
+        // None were unresolved before, so each conflict is the stash's.
+        let conflicts = paths(&conflicts);
         if !conflicts.is_empty() {
             return Err(DiffError::RestoredWithConflicts(conflicts));
         }
@@ -138,23 +163,25 @@ impl WorkingTree {
             DiffError::Git(reason) if reason.contains("would be overwritten") => {
                 DiffError::WouldOverwrite(listed_files(&reason))
             }
-            DiffError::Git(reason) if reason.contains("already exists, no checkout") => {
-                DiffError::WouldOverwrite(
-                    reason
-                        .lines()
-                        .filter_map(|line| line.strip_suffix(" already exists, no checkout"))
-                        .map(str::to_owned)
-                        .collect(),
-                )
-            }
             error => error,
         })
     }
 
-    /// Deletes the branch's stashed changes.
-    pub async fn discard_stash(&self) -> Result<(), DiffError> {
-        let entry = self.stash_entry().await?.ok_or(DiffError::NoStash)?;
-        self.drop_stash(&entry.id).await
+    /// Deletes the stashed changes `id` left on a branch.
+    pub async fn discard_stash(&self, id: &str) -> Result<(), DiffError> {
+        self.liquid_stash(id).await?;
+        self.drop_stash(id).await
+    }
+
+    /// Refuses `id` unless it names changes Liquid left on a branch, so no stash of the user's
+    /// own is popped or dropped.
+    async fn liquid_stash(&self, id: &str) -> Result<(), DiffError> {
+        self.stashes()
+            .await?
+            .into_iter()
+            .any(|entry| entry.id == id && entry.branch.is_some())
+            .then_some(())
+            .ok_or(DiffError::NoStash)
     }
 
     /// The entry Liquid left for the branch checked out.
@@ -246,6 +273,12 @@ impl WorkingTree {
             .to_owned(),
         ))
     }
+}
+
+/// The paths of NUL-separated output, each once.
+fn paths(output: &str) -> Vec<String> {
+    let unique: BTreeSet<&str> = output.split('\0').filter(|path| !path.is_empty()).collect();
+    unique.into_iter().map(str::to_owned).collect()
 }
 
 /// The tab-indented file names in Git's error `reason`.

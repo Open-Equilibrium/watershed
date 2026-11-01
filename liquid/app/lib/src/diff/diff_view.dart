@@ -345,7 +345,9 @@ class _DiffViewState extends State<DiffView> {
         ),
         _ => null,
       },
-      onRestore: () => unawaited(widget.state.git.restoreStash()),
+      onRestore: () {
+        if (stash != null) unawaited(widget.state.git.restoreStash(stash));
+      },
       onDiscard: () => unawaited(_confirmDiscard(stash)),
     );
   }
@@ -370,7 +372,7 @@ class _DiffViewState extends State<DiffView> {
         ],
       ),
     );
-    if (confirmed == true) await widget.state.git.discardStash();
+    if (confirmed == true) await widget.state.git.discardStash(stash);
   }
 
   /// Says why nothing is shown, below the turn menu when a turn ended.

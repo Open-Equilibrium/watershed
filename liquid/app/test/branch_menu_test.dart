@@ -111,6 +111,7 @@ void main() {
   ) async {
     await show(tester);
     backend.stashed = BridgeStash(
+      id: 's1',
       createdMs: DateTime(2026, 11, 1, 10, 12).millisecondsSinceEpoch,
       files: [
         BridgeFileChange(

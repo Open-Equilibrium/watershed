@@ -61,8 +61,8 @@ abstract class AgentSession implements RustOpaqueInterface {
   /// leaves nothing to delete.
   Future<void> deleteSession({required String path});
 
-  /// Deletes the branch's stashed changes.
-  Future<BridgeGitOutcome> discardStash();
+  /// Deletes the stashed changes `id`.
+  Future<BridgeGitOutcome> discardStash({required String id});
 
   /// Dismisses a question.
   Future<void> dismiss({required String request});
@@ -103,8 +103,8 @@ abstract class AgentSession implements RustOpaqueInterface {
   /// of its worktrees. Outside Git there is nothing to remove.
   Future<void> removeAllCheckpoints();
 
-  /// Moves the branch's stashed changes back into the checkout.
-  Future<BridgeGitOutcome> restoreStash();
+  /// Moves the stashed changes `id` back into the checkout.
+  Future<BridgeGitOutcome> restoreStash({required String id});
 
   /// What reverting the files to before turn `turn` of the current branch would change;
   /// files changed after the branch's last turn ended are marked.
@@ -138,8 +138,10 @@ abstract class AgentSession implements RustOpaqueInterface {
   static Future<AgentSession> start({required SessionConfig config}) =>
       RustLib.instance.api.crateApiSessionAgentSessionStart(config: config);
 
-  /// The unified diff of the stashed file `path`, its lines written out as a turn's are.
+  /// The unified diff of the file `path` of the stash `id`, its lines written out as a
+  /// turn's are.
   Future<String> stashPatch({
+    required String id,
     required String path,
     required bool hideWhitespace,
   });

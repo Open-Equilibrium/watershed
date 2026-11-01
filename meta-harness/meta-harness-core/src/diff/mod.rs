@@ -131,6 +131,13 @@ pub enum DiffError {
     NoStash,
     /// The stashed changes were restored, but these files conflict; Git kept the stash.
     RestoredWithConflicts(Vec<String>),
+    /// These files have unresolved conflicts, so nothing was restored.
+    Unresolved(Vec<String>),
+    /// Git switched, but a hook it ran after failed with this output.
+    HookFailed(String),
+    /// The remote's fetch refspec writes outside its remote-tracking branches, so Liquid does
+    /// not fetch it in the background.
+    FetchOutsideRemotes(String),
 }
 
 impl fmt::Display for DiffError {
@@ -169,6 +176,15 @@ impl fmt::Display for DiffError {
             Self::RestoredWithConflicts(paths) => {
                 write!(f, "restored with conflicts in {}", paths.join(", "))
             }
+            Self::Unresolved(paths) => {
+                write!(f, "{} have unresolved conflicts", paths.join(", "))
+            }
+            Self::HookFailed(output) => write!(f, "Git switched, but a hook failed: {output}"),
+            Self::FetchOutsideRemotes(spec) => write!(
+                f,
+                "the remote's fetch refspec {spec} writes outside its remote-tracking branches, \
+                 so Liquid does not fetch it in the background"
+            ),
         }
     }
 }
@@ -332,14 +348,14 @@ impl WorkingTree {
 
     /// The branch checked out, or none when HEAD names a commit.
     pub async fn branch(&self) -> Result<Option<String>, DiffError> {
-        match git(
-            &self.root,
-            &[],
-            &["symbolic-ref", "--quiet", "--short", "HEAD"],
-        )
-        .await
-        {
-            Ok(name) => Ok(Some(name.trim_end_matches('\n').to_owned())),
+        // The full name, as `--short` prints `heads/main` beside a tag `main`.
+        match git(&self.root, &[], &["symbolic-ref", "--quiet", "HEAD"]).await {
+            Ok(name) => {
+                let name = name.trim_end_matches('\n');
+                Ok(Some(
+                    name.strip_prefix("refs/heads/").unwrap_or(name).to_owned(),
+                ))
+            }
             // `--quiet` fails silently only when HEAD names no branch.
             Err(DiffError::Git(reason)) if reason.is_empty() => Ok(None),
             Err(error) => Err(error),

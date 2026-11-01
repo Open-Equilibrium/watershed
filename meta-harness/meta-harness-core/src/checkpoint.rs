@@ -23,6 +23,10 @@ use crate::diff::{
 /// started that stay in its process group.
 const GIT_TIMEOUT: Duration = Duration::from_secs(60);
 
+/// The time limit of a Git write the user asked for, which runs the project's hooks and filters,
+/// such as a `post-checkout` hook installing dependencies.
+const USER_GIT_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+
 /// Longest deleting a session or removing all checkpoints waits for a turn that is ending.
 const ENDING_WAIT: Duration = Duration::from_secs(2);
 
@@ -334,7 +338,8 @@ impl Checkpoints {
     ) -> Result<(), DiffError> {
         let tree = self.tree().await?;
         let _alone = tree.checkout().alone().await?;
-        self.bounded(tree.switch(to, changes)).await
+        self.bounded_by(USER_GIT_TIMEOUT, tree.switch(to, changes))
+            .await
     }
 
     /// Creates the branch `name` at the current commit and switches to it; uncommitted changes
@@ -342,7 +347,7 @@ impl Checkpoints {
     pub async fn create_branch(&self, name: &str) -> Result<(), DiffError> {
         let tree = self.tree().await?;
         let _alone = tree.checkout().alone().await?;
-        self.bounded(tree.create(name)).await
+        self.bounded_by(USER_GIT_TIMEOUT, tree.create(name)).await
     }
 
     /// The stashed changes of the branch checked out, if any.
@@ -351,31 +356,31 @@ impl Checkpoints {
         self.bounded(tree.stash()).await
     }
 
-    /// The patch of the stashed file `path` of `stash`.
+    /// The patch of the stashed file `path` of the stash `id`.
     pub async fn stash_patch(
         &self,
-        stash: &Stash,
+        id: &str,
         path: &str,
         whitespace: Whitespace,
     ) -> Result<String, DiffError> {
         let tree = self.tree().await?;
-        self.bounded(tree.stash_patch(stash, path, whitespace))
+        self.bounded(tree.stash_patch(id, path, whitespace)).await
+    }
+
+    /// Moves the stashed changes `id` back into the checkout. Refused while an agent runs in
+    /// the checkout.
+    pub async fn restore_stash(&self, id: &str) -> Result<(), DiffError> {
+        let tree = self.tree().await?;
+        let _alone = tree.checkout().alone().await?;
+        self.bounded_by(USER_GIT_TIMEOUT, tree.restore_stash(id))
             .await
     }
 
-    /// Moves the branch's stashed changes back into the checkout. Refused while an agent runs
-    /// in the checkout.
-    pub async fn restore_stash(&self) -> Result<(), DiffError> {
+    /// Deletes the stashed changes `id`. Refused while an agent runs in the checkout.
+    pub async fn discard_stash(&self, id: &str) -> Result<(), DiffError> {
         let tree = self.tree().await?;
         let _alone = tree.checkout().alone().await?;
-        self.bounded(tree.restore_stash()).await
-    }
-
-    /// Deletes the branch's stashed changes. Refused while an agent runs in the checkout.
-    pub async fn discard_stash(&self) -> Result<(), DiffError> {
-        let tree = self.tree().await?;
-        let _alone = tree.checkout().alone().await?;
-        self.bounded(tree.discard_stash()).await
+        self.bounded(tree.discard_stash(id)).await
     }
 
     /// Fetches the remote of the branch's upstream, as Liquid does in the background; returns
@@ -562,10 +567,19 @@ impl Checkpoints {
         &self,
         command: impl Future<Output = Result<T, DiffError>>,
     ) -> Result<T, DiffError> {
+        self.bounded_by(self.timeout, command).await
+    }
+
+    /// Runs `command` until `limit` or until the checkpoints close.
+    async fn bounded_by<T>(
+        &self,
+        limit: Duration,
+        command: impl Future<Output = Result<T, DiffError>>,
+    ) -> Result<T, DiffError> {
         self.until_closed(async {
-            tokio::time::timeout(self.timeout, command)
+            tokio::time::timeout(limit, command)
                 .await
-                .unwrap_or(Err(DiffError::TimedOut(self.timeout)))
+                .unwrap_or(Err(DiffError::TimedOut(limit)))
         })
         .await
     }
