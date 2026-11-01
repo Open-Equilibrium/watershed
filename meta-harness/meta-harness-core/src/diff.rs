@@ -295,9 +295,10 @@ impl WorkingTree {
     /// The path a revert must leave alone so it writes nothing into a repository near the
     /// repository path `path`: the outermost folder above it that is one of `known` or has
     /// `.git` on disk, or `path` itself when one of `known` or a `.git` on disk is at or below
-    /// it. The disk is read as `git restore` writes it: from the top and without following
-    /// links, so below a link or a file in place of a folder no repository counts, as Git
-    /// replaces it. Searches below `path` share `budget`, in entries read.
+    /// it. A repository either state records always counts. The disk is read as
+    /// `git restore` writes it: from the top and without following links, so below a link or a
+    /// file in place of a folder no repository on disk counts, as Git replaces it. Searches
+    /// below `path` share `budget`, in entries read.
     fn repository_near(
         &self,
         path: &str,
