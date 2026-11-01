@@ -67,6 +67,7 @@ Liquid        = local-first workspace and App platform</code></pre>
         <li>Typing creates a Text Block; <code>/</code> opens the Block chooser; paste/drop/drawing create the deterministic matching Block.</li>
         <li>Text shortcuts format the current Text Block. For example, <code>&gt;</code> plus space applies toggle formatting; a toggle is not a Block.</li>
         <li>Blocks begin in one ordered vertical flow. Arrange mode reveals a responsive grid with move/resize handles, like placing mobile widgets without a separate container.</li>
+        <li>A Text Block is one paragraph, heading or item; ⏎ ends it. Consecutive Text Blocks form a <strong>Section</strong>, which <code>---</code> or a Block of another type ends; Arrange mode places each Section and each other Block as one tile. A Section is layout only and owns no content (ADR-0235).</li>
         <li>Page templates create useful starting compositions, such as an AI Project with Agent Session, Database and App Blocks. A template is not a Page Type.</li>
         <li>The Explorer shows Pages and Sources as peer entries. Opening either follows one navigation model; the internal object types remain distinct.</li>
         <li>The Explorer shows areas as sections, as Notion shows teamspaces; each holds a tree of nested Pages with Sources among them (ADR-0235).</li>

@@ -197,9 +197,9 @@ h4.qh{margin:14px 0 6px;font-size:13px}
     <p class="sub">The same input always creates the same Block, so nobody has to choose a type first. Pasting a URL offers Notion's choice afterwards: keep the bookmark or turn it into an embed.</p>
     <div class="wrapx"><table class="maps">
       <tr><th>Action</th><th>Creates</th><th>Detail</th></tr>
-      <tr><td>Type</td><td>Text Block</td><td>Typing goes on in the same Text Block across paragraphs, headings, lists and toggles. A new Text Block starts only below a Block of another type.</td></tr>
+      <tr><td>Type</td><td>Text Block</td><td>A Text Block is one paragraph, heading, list item or to-do; ⏎ ends it and starts the next, as in Notion. Consecutive Text Blocks form a Section, which <code>---</code> or a Block of another type ends (<a href="liquid-workspace-text-sections.html">Section mockups</a>).</td></tr>
       <tr><td><code>/</code></td><td>Block chooser</td><td>Lists the built-in Blocks, an existing Block to add as a View, and Page templates (state 4). Typing filters it.</td></tr>
-      <tr><td>Paste text or Markdown</td><td>Text Block</td><td>Markdown becomes formatting; Markdown and HTML only serve import and export.</td></tr>
+      <tr><td>Paste text or Markdown</td><td>Text Blocks</td><td>Each paragraph becomes a Text Block and <code>---</code> a Section boundary; Markdown becomes formatting. Markdown and HTML only serve import and export.</td></tr>
       <tr><td>Paste a table (tab- or comma-separated)</td><td>Database Block</td><td>Columns become fields; their types are guessed and can be changed.</td></tr>
       <tr><td>Paste code from an editor</td><td>Code Block</td><td>When the clipboard marks it as code, with its language.</td></tr>
       <tr><td>Paste an image, or drop a file</td><td>Media Block</td><td>The file becomes an attachment of the Workspace (ADR-0228). A dropped CSV becomes a Database Block instead, as a copy; a file that stays outside is added as a Source from the Explorer.</td></tr>
@@ -215,7 +215,7 @@ h4.qh{margin:14px 0 6px;font-size:13px}
   </section>
   <section>
     <h3 class="sec">6 · Text shortcuts</h3>
-    <p class="sub">Inside a Text Block, Notion's Markdown shortcuts format the current line: <code>#</code>, <code>##</code>, <code>###</code> headings, <code>-</code> bullets, <code>1.</code> numbers, <code>[]</code> to-dos, <code>&gt;</code> a toggle, <code>"</code> a quote, <code>**bold**</code>, <code>*italic*</code>, <code>`code`</code> and <code>@</code> a link to a Page or Block. A toggle is formatting, not a Block. Two shortcuts end the Text Block instead: <code>---</code> starts a new Text Block below a divider (see the <a href="liquid-workspace-text-sections.html">divider mockups</a>), and <code>```</code> starts a Code Block.</p>
+    <p class="sub">Notion's Markdown shortcuts set the current Text Block's formatting: <code>#</code>, <code>##</code>, <code>###</code> headings, <code>-</code> bullets, <code>1.</code> numbers, <code>[]</code> to-dos, <code>&gt;</code> a toggle, <code>"</code> a quote, <code>**bold**</code>, <code>*italic*</code>, <code>`code`</code> and <code>@</code> a link to a Page or Block. A toggle is formatting, not a Block. Two shortcuts end the Section instead: <code>---</code> starts a new Section below a divider (see the <a href="liquid-workspace-text-sections.html">Section mockups</a>), and <code>```</code> starts a Code Block, which ends the Section like any other Block type.</p>
     <div class="stage"><div class="scaler"><div class="win" id="w-text" data-w="900"></div></div></div>
   </section>
   <section>
@@ -225,7 +225,7 @@ h4.qh{margin:14px 0 6px;font-size:13px}
   </section>
   <section>
     <h3 class="sec">8 · Arrange mode</h3>
-    <p class="sub">"Arrange" in the Page header, or the PowerBar, switches the Page into Arrange mode. A 12-column grid appears; each Block becomes a tile that moves by its top handle and resizes by its right edge in whole columns, and the selected tile shows its width. Arrow keys move the selected tile, ⌥ and the arrow keys resize it. Done or esc ends it. An arranged Page uses the main column's width, up to 1120 px; text inside a tile keeps the reading width.</p>
+    <p class="sub">"Arrange" in the Page header, or the PowerBar, switches the Page into Arrange mode. A 12-column grid appears; each Section of text and each other Block becomes a tile that moves by its top handle and resizes by its right edge in whole columns, and the selected tile shows its width. Arrow keys move the selected tile, ⌥ and the arrow keys resize it. Done or esc ends it. An arranged Page uses the main column's width, up to 1120 px; text inside a tile keeps the reading width.</p>
     <div class="stage"><div class="scaler"><div class="win" id="w-arr" data-w="1240"></div></div></div>
   </section>
   <section>
@@ -257,7 +257,7 @@ h4.qh{margin:14px 0 6px;font-size:13px}
     <ol class="qs">
       <li>The deterministic mapping of section 4, including a dropped CSV becoming a Database copy and ``` starting a Code Block.</li>
       <li>Database Views are Table, Board and Calendar; the Code Block shows code and never runs it.</li>
-      <li>Arrange mode uses 12 columns; narrow windows use half or full width; phones stack in Page order. An arranged Page widens to at most 1120 px.</li>
+      <li>Arrange mode arranges Sections and other Blocks on 12 columns; narrow windows use half or full width; phones stack in Page order. An arranged Page widens to at most 1120 px.</li>
       <li>⇧⌘N creates a new Page in the current area; ⌘N stays with agent sessions.</li>
     </ol>
     <h4 class="qh">Added on request, approved the same day</h4>
@@ -355,7 +355,7 @@ frame('w-icon',{h:520,head:head('Private <span>›</span> <b>💰 Household budg
 // 4 · Slash
 const chooser=`<div class="pop" style="left:394px;top:200px;width:360px">
 <div class="lbl">Blocks</div>
-${[['text','Text','Paragraphs, headings, lists and toggles',1],['db','Database','Rows with typed fields; Table, Board or Calendar'],['chart','Chart','Draws data from a Database or Source'],['fx','Formula','One value calculated from other Blocks'],['code','Code','Code with highlighting'],['img','Media','Image, video, file, bookmark or embed'],['pen','Whiteboard','Draw and place shapes freely']].map(([i,n,d,on])=>`<div class="it ${on?'on':''}"><span class="bi">${I[i]}</span><span class="tx"><span>${n}</span><span class="d">${d}</span></span></div>`).join('')}
+${[['text','Text','A paragraph, heading, list item or to-do',1],['db','Database','Rows with typed fields; Table, Board or Calendar'],['chart','Chart','Draws data from a Database or Source'],['fx','Formula','One value calculated from other Blocks'],['code','Code','Code with highlighting'],['img','Media','Image, video, file, bookmark or embed'],['pen','Whiteboard','Draw and place shapes freely']].map(([i,n,d,on])=>`<div class="it ${on?'on':''}"><span class="bi">${I[i]}</span><span class="tx"><span>${n}</span><span class="d">${d}</span></span></div>`).join('')}
 <hr><div class="lbl">Reuse</div><div class="it"><span class="bi">${I.link}</span><span class="tx"><span>Existing Block…</span><span class="d">Add a View of a Block from any Page</span></span></div>
 <hr><div class="lbl">Templates</div><div class="it"><span class="bi">${I.tpl}</span><span>Budget</span><span class="r">Text, Database, Chart, Formula</span></div></div>`;
 frame('w-slash',{h:760,side:{sel:'new',newp:'Weekly plan'},head:head('Private <span>›</span> <b>🗓️ Weekly plan</b>'),main:`<div class="pg"><div class="col">
@@ -373,12 +373,12 @@ frame('w-text',{h:560,side:{sel:'trip'},head:head('Private <span>›</span> <b>�
 <div class="quote" style="margin:8px 0">“Bring shoes for the hills.” Ana</div>
 <p>See also <span style="color:var(--ws-text-muted);text-decoration:underline">@Household budget</span> for what is left.</p>
 <p style="margin:0">&gt; <span class="caret"></span><span style="color:var(--ws-text-faint)">Toggle: press space</span></p>
-</div><div class="cap" style="margin-top:12px">One Text Block: heading, to-dos, a toggle, a quote and a link. The last line shows a shortcut about to apply.</div>
+</div><div class="cap" style="margin-top:12px">Seven Text Blocks in one Section: a heading, two to-dos, a toggle, a quote and two paragraphs. The last line shows a shortcut about to apply.</div>
 </div></div>`});
 
 // 6 · Gallery
 const G=[
-['text','Text','one Block for all prose',`<div class="prose" style="font-size:15px;line-height:22px"><b>Monday</b><br>Call the landlord about the heating.<div class="todo" style="margin-top:4px"><span class="cb"></span>Pay the electricity bill</div></div>`,'Formatting inside: headings, lists, to-dos, toggles, quotes.'],
+['text','Text','one paragraph, heading or item',`<div class="prose" style="font-size:15px;line-height:22px"><b>Monday</b><br>Call the landlord about the heating.<div class="todo" style="margin-top:4px"><span class="cb"></span>Pay the electricity bill</div></div>`,'⏎ starts the next Text Block; consecutive ones form a Section, one tile in Arrange mode.'],
 ['db','Database','Table · Board · Calendar',`${dbTable({n:3})}`,'Typed fields: text, number, select, date, checkbox, file, link to a row, formula and button.'],
 ['chart','Chart','bar, line or pie',chart(100),'Its data comes through a Connection from a Database or a Source.'],
 ['fx','Formula','one value',fxBlk(),'Excel function names; references are chips bound to stable IDs, so renaming breaks nothing.'],

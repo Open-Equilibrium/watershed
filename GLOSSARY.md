@@ -162,6 +162,7 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **Compliance replica** — A replica a company runs with its own key for search, legal hold and data-loss checks (ADR-0228).
 - **Recovery key** — The second way to regain a Workspace's keys when no signed-in device can approve a new one. Area keys are also wrapped for it, and the person or their company holds it (ADR-0228).
 - **Headless Liquid replica** — Optional Liquid replica without a user interface. A Workspace must opt in before this replica can sync it; same-host agents then use Liquid's normal permission and action surfaces while user devices are offline.
+- **Section** — Consecutive Text Blocks up to `---`, a Block of another type or the Page's edge; Arrange mode places it as one tile. It is layout only and owns no content, rights or Views (ADR-0235).
 - **Arrange mode** — The explicit Page state that reveals the responsive grid and resize/reorder handles. Outside Arrange mode, a Page remains a content-first flow.
 - **Block SDK** — Versioned contract for reusable built-in and Block Registry Block Types: state/migrations, Views, ports/actions, permissions, lifecycle and responsive behavior. It is for product/community extension, not end-user app creation.
 - **Block Registry** — Official distribution catalog for reusable Block Types. Community packages are signed, sandboxed and capability-scoped; the initial model loads no arbitrary third-party native code.

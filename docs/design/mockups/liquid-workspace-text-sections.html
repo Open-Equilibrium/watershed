@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en"><head><title>Liquid: dividers between Text Blocks mockups</title>
+<html lang="en"><head><title>Liquid: Sections mockups</title>
 <link rel="stylesheet" href="../tokens.css"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
 .chrome{--foreground:var(--ws-text);--muted-foreground:var(--ws-text-muted);--muted:var(--ws-subtle);--border:var(--ws-border-strong);--secondary:var(--ws-hover);--radius:8px;background:var(--ws-canvas);padding:24px}
@@ -199,6 +199,17 @@ h4.qh{margin:14px 0 6px;font-size:13px}
 .bk .lab{position:absolute;left:-118px;top:2px;width:104px;text-align:right;font-size:12px;color:var(--ws-accent)}
 .cmp2{display:grid;grid-template-columns:1fr 1fr;gap:24px}
 .cmp2 h5{margin:0 0 8px;font-size:12px;font-weight:500;color:var(--ws-text-faint)}
+.secb{position:relative;border-radius:8px;box-shadow:0 0 0 1.5px var(--ws-accent);padding:8px 10px;background:color-mix(in srgb,var(--ws-accent) 4%,transparent)}
+.secb .lab,.othb .lab{position:absolute;left:-150px;top:6px;width:136px;text-align:right;font-size:12px;line-height:16px;color:var(--ws-accent)}
+.othb{position:relative}
+.othb .lab{color:var(--ws-text-faint)}
+.tb{border-radius:4px;box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--ws-accent) 25%,transparent);padding:1px 6px;margin:2px 0}
+.tb h4{margin:0;font-size:16px;line-height:24px;font-weight:600}
+.slab{position:absolute;left:10px;top:-10px;font-size:11px;line-height:18px;padding:0 6px;border-radius:4px;background:var(--ws-surface);box-shadow:0 0 0 1px var(--ws-border-strong);color:var(--ws-text-muted)}
+.t.sel .slab{background:var(--ws-accent);color:var(--ws-on-accent);box-shadow:none}
+.toast{position:absolute;left:50%;bottom:20px;transform:translateX(-50%);display:flex;gap:14px;align-items:center;padding:8px 10px 8px 14px;border-radius:8px;background:var(--ws-text);color:var(--ws-canvas);font-size:13px;box-shadow:var(--ws-shadow);white-space:nowrap;z-index:3}
+.toast b{font-weight:600}
+.toast .u{color:var(--ws-canvas);opacity:.75}
 </style></head><body class="theme-light chrome">
 <div class="page">
   <div class="toolbar">
@@ -206,33 +217,33 @@ h4.qh{margin:14px 0 6px;font-size:13px}
     <div>Size <span class="seg" id="size"><button data-v="fit" class="on">Fit</button><button data-v="full">100 %</button></span></div>
   </div>
   <section>
-    <h1>Liquid Workspace: dividers between Text Blocks</h1>
-    <p class="sub">Mockups for review, replacing the dropped groups idea of 2026-11-01. Blocks of different types never form a group: each is its own tile in Arrange mode. Text is the one case where a Page needs more than one tile of the same kind, so a divider splits text into separate Text Blocks, which the maintainer called sections. A divider is only this boundary; there is no decorative divider any more. Shell and wording follow the <a href="liquid-workspace-pages.html">Pages mockups</a>.</p>
+    <h1>Liquid Workspace: Sections</h1>
+    <p class="sub">Mockups for review, replacing the dropped groups idea of 2026-11-01, as the maintainer defined it. A Text Block is one paragraph, heading, list item or to-do; ⏎ ends it and starts the next, as in Notion. Consecutive Text Blocks form a Section, which <code>---</code> or a Block of another type ends. In Arrange mode a Section is one tile, so text is arranged as a whole, while every other Block is its own tile. Shell and wording follow the <a href="liquid-workspace-pages.html">Pages mockups</a>.</p>
   </section>
   <section>
-    <h3 class="sec">1 · <code>---</code> ends a Text Block</h3>
-    <p class="sub">Typing <code>---</code> and ⏎ inside text ends the Text Block there; the text below becomes a new Text Block, and a thin line marks the boundary. Hovering shows each Text Block's outline. Without a divider, all consecutive text stays one Text Block, however many paragraphs, headings or lists it holds.</p>
-    <div class="stage"><div class="scaler"><div class="win bare" id="w-t1" data-w="1240"></div></div></div>
+    <h3 class="sec">1 · How Sections form</h3>
+    <p class="sub">Hovering over text shows the Section's outline and, faintly, its Text Blocks. Here the first Section holds five Text Blocks and ends at <code>---</code>; the second ends at the photo; the text after the photo starts a third. Nobody creates a Section: it follows from the Page's order.</p>
+    <div class="stage"><div class="scaler"><div class="win" id="w-t1" data-w="1240"></div></div></div>
   </section>
   <section>
-    <h3 class="sec">2 · Arrange mode: one tile per Block</h3>
-    <p class="sub">Each Text Block, the photo and the route are tiles of their own; nothing groups them. The divider is not drawn in Arrange mode, where the tile edges show the same boundary.</p>
+    <h3 class="sec">2 · Arrange mode: one tile per Section</h3>
+    <p class="sub">Each Section is a tile, named by its first line, beside the photo and the route. The Text Blocks inside keep their order; they move in the flow with their handle, while Arrange mode moves and resizes the whole Section. The divider is not drawn in Arrange mode, where tile edges show the boundary.</p>
     <div class="stage"><div class="scaler"><div class="win" id="w-t2" data-w="1240"></div></div></div>
   </section>
   <section>
-    <h3 class="sec">3 · Removing a divider joins the text</h3>
-    <p class="sub">⌫ at the start of the Text Block below a divider removes the divider and joins both into the Text Block above, as ⌫ joins two paragraphs. When the lower Text Block also appears on another Page or feeds a Connection, joining deletes it like its last View, so the dialog lists what changes first.</p>
-    <div class="stage"><div class="scaler"><div class="win" id="w-t3" data-w="1240"></div></div></div>
+    <h3 class="sec">3 · Splitting and joining Sections</h3>
+    <p class="sub"><code>---</code> and ⏎ between two Text Blocks splits their Section. ⌫ at the start of the Text Block below a divider removes the divider and joins both Sections. This changes only the layout, so it needs no dialog and Undo reverts it. Inserting a Block of another type between Text Blocks also splits a Section, and deleting it joins them again.</p>
+    <div class="stage"><div class="scaler"><div class="win bare" id="w-t3" data-w="1240"></div></div></div>
   </section>
   <section>
     <h3 class="sec">Assumptions for review</h3>
     <ol class="qs">
-      <li><b>No groups.</b> Every Block is its own tile; the groups mockup is dropped, and the V-Spec's "no separate container" stays as it is.</li>
-      <li><b>A divider is a Text Block boundary.</b> <code>---</code> and ⏎ inside a Text Block splits it in two; between other Block types a divider has no use, so <code>---</code> right after a Table or an image stays plain text.</li>
-      <li><b>Each part is a full Text Block.</b> It has its own History, rights, Connections and Views, so "section" needs no new object; the UI says Text Block. If you prefer the word section in the UI, it would name exactly this.</li>
-      <li><b>Joining.</b> ⌫ at the start of the lower Text Block joins it into the upper one; the lower one is deleted under the last-View rule, with the impact dialog when something depends on it. Undo restores both.</li>
-      <li><b>Import and export.</b> Markdown <code>---</code> splits imported text into Text Blocks, and export writes <code>---</code> between consecutive Text Blocks, so a round trip keeps them.</li>
-      <li><b>Display.</b> The line shows only in the flow and only between two Text Blocks that follow each other; in Arrange mode and between other Blocks the tile edge or the Block itself marks the boundary.</li>
+      <li><b>Text Block.</b> One paragraph, heading, list item, to-do or quote; ⏎ ends it, as in Notion. A toggle stays formatting: the Text Blocks indented below it fold with it.</li>
+      <li><b>Section is layout only.</b> It holds no content and has no rights, Connections or Views of its own; it follows from the order of Text Blocks and their boundaries, like a column in Notion. Each Text Block stays a full Block with History, rights and Views; a View of one Text Block on another Page joins the Section it lands in there.</li>
+      <li><b>Boundaries.</b> A Section ends at <code>---</code>, at any Block of another type and at the Page's start and end. <code>---</code> right after a Block of another type stays plain text, since a boundary already exists. There is no decorative divider.</li>
+      <li><b>Tiles.</b> When two Sections join, the joined one keeps the upper Section's place and width; when one splits, the new lower Section starts below it at the same width.</li>
+      <li><b>Import and export.</b> Markdown paragraphs become Text Blocks and <code>---</code> a Section boundary; export writes <code>---</code> between two Sections that follow each other directly.</li>
+      <li><b>Phone and narrow windows.</b> A Section is one tile for the half-or-full rule; on a phone everything stacks in Page order.</li>
     </ol>
   </section>
 </div>
@@ -298,26 +309,29 @@ const chart=(h=120)=>`<div class="bars" style="height:${h}px">${[['Home',1046],[
 const chartBlk=`<div class="bh"><span class="ico">${I.chart}</span><b>Spending by category</b><span class="chip">Bar ⌄</span><span class="end"><span class="cap">from Expenses</span></span></div>${chart()}`;
 const fxBlk=(o={})=>`<div class="card"><div class="cap">Left this month</div><div class="big">€ 715.50</div>${o.f!==false?`<div class="fx" style="margin-top:4px">= 2000 − SUM(<span class="ref">${I.db} Expenses › Amount</span>)</div>`:''}</div>`;
 
-const T1=`<div class="mini"><b>Plan</b>Five days in Lisbon, one in Porto. We fly on 12 November and come back on the 18th.</div><div class="mini" style="margin-top:8px"><b>Before we go</b><div class="todo"><span class="cb on">✓</span><span style="color:var(--ws-text-faint);text-decoration:line-through">Book the flat in Alfama</span></div><div class="todo"><span class="cb"></span>Renew the passport</div></div>`;
-const T2=`<div class="mini"><b>Notes</b>Tram 28 is crowded before ten; buy the Viva Viagem card at the airport.</div>`;
-const IMG=`<div class="img" style="height:180px"></div>`;
-const WB=`<div class="wb" style="height:130px"><svg viewBox="0 0 400 130"><rect x="30" y="34" width="110" height="48" rx="8" fill="none" stroke="var(--ws-data-1)" stroke-width="2"/><text x="85" y="63" text-anchor="middle" font-size="13" fill="var(--ws-text)">Lisbon</text><rect x="260" y="50" width="110" height="48" rx="8" fill="none" stroke="var(--ws-data-2)" stroke-width="2"/><text x="315" y="79" text-anchor="middle" font-size="13" fill="var(--ws-text)">Porto</text><path d="M142 58 C 200 56, 200 76, 256 74" fill="none" stroke="var(--ws-text-muted)" stroke-width="1.6"/></svg></div>`;
-const tl=(span,body,o={})=>`<div class="t ${o.sel?'sel':''}" style="grid-column:span ${span};${o.style||''}">${o.h?'<span class="mv">• • •</span><span class="rs"></span>':''}${o.sp?`<span class="span">${o.sp}</span>`:''}${body}</div>`;
+const tb=h=>`<div class="tb">${h}</div>`;
+const S1=`${tb('<h4>Plan</h4>')}${tb('Five days in Lisbon, one in Porto. We fly on 12 November.')}${tb('<h4>Before we go</h4>')}${tb('<div class="todo"><span class="cb on">✓</span><span style="color:var(--ws-text-faint);text-decoration:line-through">Book the flat in Alfama</span></div>')}${tb('<div class="todo"><span class="cb"></span>Renew the passport</div>')}`;
+const S2=`${tb('<h4>Notes</h4>')}${tb('Tram 28 is crowded before ten; buy the Viva Viagem card at the airport.')}`;
+const S3=`${tb('<h4>Ideas</h4>')}${tb('Day trip to Sintra if the weather holds.')}`;
+const IMG=`<div class="img" style="height:150px"></div>`;
+const WB=`<div class="wb" style="height:120px"><svg viewBox="0 0 400 120"><rect x="30" y="30" width="110" height="48" rx="8" fill="none" stroke="var(--ws-data-1)" stroke-width="2"/><text x="85" y="59" text-anchor="middle" font-size="13" fill="var(--ws-text)">Lisbon</text><rect x="260" y="46" width="110" height="48" rx="8" fill="none" stroke="var(--ws-data-2)" stroke-width="2"/><text x="315" y="75" text-anchor="middle" font-size="13" fill="var(--ws-text)">Porto</text><path d="M142 54 C 200 52, 200 72, 256 70" fill="none" stroke="var(--ws-text-muted)" stroke-width="1.6"/></svg></div>`;
+const plain=h=>h.replace(/class="tb"/g,'class="tb" style="box-shadow:none"');
+frame('w-t1',{h:880,side:{sel:'trip'},head:head('Private <span>›</span> <b>🧳 Trip to Lisbon</b>'),main:`<div class="pg"><div class="col" style="gap:10px;font-size:15px;line-height:22px">
+<div class="ttl"><span class="tic">🧳</span>Trip to Lisbon</div>
+<div class="secb"><span class="lab">Section 1<br>5 Text Blocks</span>${S1}</div>
+<div class="dv"></div>
+<div class="secb"><span class="lab">Section 2<br>2 Text Blocks</span>${S2}</div>
+<div class="othb"><span class="lab">Media Block<br>ends Section 2</span>${IMG}</div>
+<div class="secb"><span class="lab">Section 3<br>2 Text Blocks</span>${S3}</div>
+<div class="othb"><span class="lab">Whiteboard</span>${WB}</div></div></div>`});
+const tl=(span,body,o={})=>`<div class="t ${o.sel?'sel':''}" style="grid-column:span ${span};${o.style||''}">${o.lab?`<span class="slab">${o.lab}</span>`:''}${o.h?'<span class="mv">• • •</span><span class="rs"></span>':''}${o.sp?`<span class="span">${o.sp}</span>`:''}${body}</div>`;
 const bar=(left,right)=>`<div class="armode"><b>${I.grid}</b>${left}<span class="end">${right||''}<span class="sg2"><span class="on">Desktop</span><span>Narrow</span><span>Phone</span></span><span class="btn pri">Done <kbd>esc</kbd></span></span></div>`;
-const card=(label,inner)=>`<div class="win" style="width:600px;flex:none;padding:18px 24px 22px;box-sizing:border-box"><div class="cap" style="margin-bottom:10px">${label}</div><div class="ttl" style="font-size:24px;line-height:32px"><span class="tic" style="font-size:22px">🧳</span>Trip to Lisbon</div>${inner}</div>`;
-const before=card('Before: one Text Block, <code>---</code> typed after the to-dos',`<div class="bk hl" style="padding:6px 8px;margin-top:8px">${T1}<div class="mini" style="margin-top:8px">---<span class="caret" style="margin-left:2px"></span></div><div class="mini"><b>Notes</b>Tram 28 is crowded before ten; buy the Viva Viagem card at the airport.</div></div>`);
-const after=card('After ⏎: two Text Blocks with a divider between them',`<div class="bk hl" style="padding:6px 8px;margin-top:8px">${T1}</div><div class="dv"></div><div class="bk hl" style="padding:6px 8px">${T2}</div><div style="margin-top:12px">${IMG.replace('180px','110px')}</div>`);
-document.getElementById('w-t1').innerHTML=`<div style="display:flex;gap:40px;align-items:flex-start">${before}${after}</div>`;
-frame('w-t2',{h:600,side:{sel:'trip'},head:bar('<b>Arranging Trip to Lisbon</b><span>Every Block is its own tile</span>'),main:`<div class="pg" style="padding:28px 32px 0"><div style="max-width:1120px;margin:0 auto"><div class="ttl" style="font-size:24px;line-height:32px"><span class="tic" style="font-size:22px">🧳</span>Trip to Lisbon</div><div class="ga lines" style="margin-top:18px">
-${tl(5,T1,{style:'grid-column:1/6;grid-row:1'})}${tl(7,IMG,{style:'grid-column:6/13;grid-row:1/3'})}${tl(5,T2,{sel:1,h:1,sp:'5 of 12',style:'grid-column:1/6;grid-row:2'})}${tl(7,WB,{style:'grid-column:6/13;grid-row:3'})}</div></div></div>`});
-const joinDlg=`<div class="scrim"></div><div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:4"><div class="dlg" style="width:520px;box-sizing:border-box;border-radius:12px;background:var(--ws-surface);box-shadow:var(--ws-shadow);padding:16px;display:flex;flex-direction:column;gap:12px;font-size:13px;line-height:20px">
-<h4 style="margin:0;font-size:16px;line-height:22px;font-weight:600">Join “Notes” into the Text Block above?</h4>
-<p style="margin:0;color:var(--ws-text-muted)">Its text moves up and the divider goes. “Notes” itself is deleted, so these change:</p>
-<div style="border-radius:8px;background:var(--ws-subtle);padding:6px;display:flex;flex-direction:column;gap:1px">
-<div style="display:flex;gap:8px;align-items:center;min-height:28px;padding:0 6px">${em(E.review)} View on Monthly review<span style="margin-left:auto;font-size:12px;color:var(--ws-text-faint)">removed</span></div></div>
-<p style="margin:0;color:var(--ws-text-muted)">One Action in History; Undo restores both Text Blocks.</p>
-<div style="display:flex;gap:8px;align-items:center"><span class="btn pri">Join <kbd>⏎</kbd></span><span style="flex:1"></span><span class="btn">Cancel <kbd>esc</kbd></span></div></div></div>`;
-frame('w-t3',{h:520,side:{sel:'trip'},head:head('Private <span>›</span> <b>🧳 Trip to Lisbon</b>'),main:`<div class="pg"><div class="col"><div class="ttl"><span class="tic">🧳</span>Trip to Lisbon</div>${T1}<div class="dv"></div><div class="mini"><span class="caret" style="margin-right:2px"></span><b style="display:inline">Notes</b><br>Tram 28 is crowded before ten; buy the Viva Viagem card at the airport.</div></div></div>`,over:joinDlg});
+frame('w-t2',{h:640,side:{sel:'trip'},head:bar('<b>Arranging Trip to Lisbon</b><span>Each Section and each other Block is a tile</span>'),main:`<div class="pg" style="padding:28px 32px 0"><div style="max-width:1120px;margin:0 auto"><div class="ttl" style="font-size:24px;line-height:32px"><span class="tic" style="font-size:22px">🧳</span>Trip to Lisbon</div><div class="ga lines" style="margin-top:18px;font-size:15px;line-height:22px">
+${tl(5,plain(S1),{sel:1,h:1,sp:'5 of 12',lab:'Section · Plan',style:'grid-column:1/6;grid-row:1/3'})}${tl(7,IMG,{style:'grid-column:6/13;grid-row:1'})}${tl(7,plain(S2),{lab:'Section · Notes',style:'grid-column:6/13;grid-row:2'})}${tl(5,plain(S3),{lab:'Section · Ideas',style:'grid-column:1/6;grid-row:3'})}${tl(7,WB,{style:'grid-column:6/13;grid-row:3'})}</div></div></div>`});
+const card=(label,inner)=>`<div class="win" style="width:600px;flex:none;padding:18px 24px 22px;box-sizing:border-box;font-size:15px;line-height:22px"><div class="cap" style="margin-bottom:10px">${label}</div>${inner}</div>`;
+const split=card('Typing <code>---</code> and ⏎ after “Book the flat”: one Section becomes two',`<div class="secb">${tb('<h4>Plan</h4>')}${tb('Five days in Lisbon, one in Porto.')}${tb('<h4>Before we go</h4>')}${tb('<div class="todo"><span class="cb on">✓</span>Book the flat in Alfama</div>')}</div><div class="dv"></div><div class="secb">${tb('<div class="todo"><span class="cb"></span>Renew the passport</div>')}</div>`);
+const join=card('⌫ at the start of “Renew the passport”: the divider goes, both Sections join',`<div class="secb">${tb('<h4>Plan</h4>')}${tb('Five days in Lisbon, one in Porto.')}${tb('<h4>Before we go</h4>')}${tb('<div class="todo"><span class="cb on">✓</span>Book the flat in Alfama</div>')}${tb('<div class="todo"><span class="cb"></span><span class="caret" style="margin-right:2px"></span>Renew the passport</div>')}</div><div style="margin-top:14px;display:flex;justify-content:center"><span class="toast" style="position:static;transform:none">Joined Sections<span class="u">Undo ⌘Z</span></span></div>`);
+document.getElementById('w-t3').innerHTML=`<div style="display:flex;gap:40px;align-items:flex-start">${split}${join}</div>`;
 
 let mode='system',fit=true;const mq=matchMedia('(prefers-color-scheme: dark)');
 function hostDark(){const v=getComputedStyle(document.documentElement).getPropertyValue('--background').trim();if(!v)return mq.matches;const c=document.createElement('canvas');c.width=c.height=1;const x=c.getContext('2d');x.fillStyle='#808080';x.fillStyle=v;x.fillRect(0,0,1,1);const d=x.getImageData(0,0,1,1).data;return .2126*d[0]+.7152*d[1]+.0722*d[2]<128}
