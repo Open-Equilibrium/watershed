@@ -138,7 +138,11 @@ async fn observe(dir: &Path) {
             .await
             .expect("reverted");
         let revert_ms = ms(started);
-        assert_eq!(plan.files.len(), changes.len(), "the revert undoes the turn");
+        assert_eq!(
+            plan.files.len(),
+            changes.len(),
+            "the revert undoes the turn"
+        );
         println!(
             "{}",
             json!({
