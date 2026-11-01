@@ -17,8 +17,13 @@ use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWriteExt, BufRead
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 
+mod branches;
 mod process;
 mod revert;
+mod stash;
+
+pub use branches::{Branch, BranchTarget, Changes, GitStatus};
+pub use stash::Stash;
 
 use process::{Git, git, git_command, git_path, unreadable};
 #[cfg(test)]
@@ -113,6 +118,17 @@ pub enum DiffError {
     NotReverted(Vec<String>),
     /// Git failed or was stopped while it wrote the files back, so some may be reverted.
     PartlyReverted(Box<DiffError>),
+    /// Git refused, as it would overwrite the uncommitted changes in these files; nothing
+    /// changed.
+    WouldOverwrite(Vec<String>),
+    /// Git refuses this branch name.
+    InvalidBranch(String),
+    /// HEAD names no branch, which changes could be left on.
+    NoBranch,
+    /// The branch has no stashed changes.
+    NoStash,
+    /// The stashed changes were restored, but these files conflict; Git kept the stash.
+    RestoredWithConflicts(Vec<String>),
 }
 
 impl fmt::Display for DiffError {
@@ -140,6 +156,17 @@ impl fmt::Display for DiffError {
             Self::AgentRunning(_) => f.write_str("an agent runs in this checkout"),
             Self::NotReverted(paths) => write!(f, "Git could not revert {}", paths.join(", ")),
             Self::PartlyReverted(error) => write!(f, "the files may be partly reverted: {error}"),
+            Self::WouldOverwrite(paths) => write!(
+                f,
+                "Git would overwrite your uncommitted changes in {}",
+                paths.join(", ")
+            ),
+            Self::InvalidBranch(name) => write!(f, "Git does not allow {name:?} as a branch name"),
+            Self::NoBranch => f.write_str("the checkout is on no branch"),
+            Self::NoStash => f.write_str("the branch has no stashed changes"),
+            Self::RestoredWithConflicts(paths) => {
+                write!(f, "restored with conflicts in {}", paths.join(", "))
+            }
         }
     }
 }

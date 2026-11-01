@@ -25,7 +25,30 @@ pub(super) async fn git(
     env: &[(&str, OsString)],
     args: &[&str],
 ) -> Result<String, DiffError> {
-    let mut child = Git::spawn(&mut git_command(dir, env, args))?;
+    output(git_command(dir, env, args)).await
+}
+
+/// Runs the host's `git` in `dir` as the user's own would run, with the project's hooks and
+/// settings, for a Git write the user asked for; it never asks for credentials.
+pub(super) async fn user_git(dir: &Path, args: &[&str]) -> Result<String, DiffError> {
+    let mut command = Command::new("git");
+    command.args(args).current_dir(dir);
+    output(piped(command, &NO_PROMPTS)).await
+}
+
+/// Keeps Git and its credential helpers from asking on a terminal or in a window, as T3 Code
+/// does.
+pub(super) const NO_PROMPTS: [(&str, &str); 5] = [
+    ("GIT_TERMINAL_PROMPT", "0"),
+    ("GIT_ASKPASS", ""),
+    ("SSH_ASKPASS", ""),
+    ("SSH_ASKPASS_REQUIRE", "never"),
+    ("GCM_INTERACTIVE", "never"),
+];
+
+/// Runs `command` and returns at most [`MAX_OUTPUT_BYTES`] of its output.
+async fn output(mut command: Command) -> Result<String, DiffError> {
+    let mut child = Git::spawn(&mut command)?;
     // Git's warnings drain meanwhile, so a full error pipe never blocks it; dropped, the set ends
     // the drain.
     let stderr = child.child.stderr.take().expect("stderr is piped");
@@ -95,7 +118,13 @@ pub(super) fn git_command(dir: &Path, env: &[(&str, OsString)], args: &[&str]) -
             "diff.suppressBlankEmpty=false",
         ])
         .args(args)
-        .current_dir(dir)
+        .current_dir(dir);
+    piped(command, env)
+}
+
+/// `command` with its output piped, in a process group of its own.
+fn piped(mut command: Command, env: &[(&str, impl AsRef<std::ffi::OsStr>)]) -> Command {
+    command
         // A group of its own, so Git ends with the programs it starts (see [`Git`]).
         .process_group(0)
         // Git's messages in English, as Liquid shows them and reads one.

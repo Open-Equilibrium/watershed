@@ -1,0 +1,296 @@
+//! The checkout's branch and its upstream, listing, switching and creating branches, and
+//! fetching the upstream's remote ([mockups](../../../../docs/design/mockups/liquid-git-branches.html)).
+
+use super::process::{NO_PROMPTS, user_git};
+use super::stash::listed_files;
+use super::*;
+
+/// The checkout's branch and how it stands against its upstream.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GitStatus {
+    /// The branch checked out, or none when HEAD names a commit.
+    pub branch: Option<String>,
+    /// The commit HEAD names, or none before the first commit.
+    pub commit: Option<String>,
+    /// The upstream the branch tracks, such as `origin/main`.
+    pub upstream: Option<String>,
+    /// Commits the branch has that its upstream lacks.
+    pub ahead: u64,
+    /// Commits the upstream has that the branch lacks, as last fetched.
+    pub behind: u64,
+    /// Files that differ from the last commit, untracked ones Git does not ignore included.
+    pub changed: u64,
+}
+
+/// A local or remote branch.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Branch {
+    /// Its name, such as `main` or `origin/release`.
+    pub name: String,
+    /// Whether it is a remote-tracking branch.
+    pub remote: bool,
+    /// When its last commit was made, in Unix milliseconds.
+    pub committed_ms: i64,
+    /// Whether it is checked out.
+    pub current: bool,
+    /// Whether changes were left on it in a stash.
+    pub stashed: bool,
+}
+
+/// The branch to switch to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BranchTarget {
+    /// A local branch.
+    Local(String),
+    /// A remote branch, such as `origin/release`, which gets a local branch tracking it.
+    Remote(String),
+}
+
+/// What happens to uncommitted changes when switching, as GitHub Desktop asks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Changes {
+    /// They come along, as `git switch` does, unless Git refuses to overwrite them.
+    Bring,
+    /// They are stashed on the branch left, replacing its earlier stash.
+    Leave,
+}
+
+/// Most branches listed; the most recently committed ones are kept.
+const MAX_BRANCHES: usize = 1000;
+
+impl WorkingTree {
+    /// The checkout's branch, upstream and uncommitted files. Reading takes no lock and writes
+    /// nothing, so it can run beside the user's own Git.
+    pub async fn status(&self) -> Result<GitStatus, DiffError> {
+        let output = git(
+            &self.root,
+            &[("GIT_OPTIONAL_LOCKS", "0".into())],
+            &[
+                "status",
+                "--porcelain=v2",
+                "--branch",
+                "-z",
+                "--untracked-files=all",
+                // A submodule counts once its commit changed, as only that can be committed.
+                "--ignore-submodules=dirty",
+            ],
+        )
+        .await?;
+        let mut status = GitStatus {
+            branch: None,
+            commit: None,
+            upstream: None,
+            ahead: 0,
+            behind: 0,
+            changed: 0,
+        };
+        let mut records = output.split('\0').filter(|record| !record.is_empty());
+        while let Some(record) = records.next() {
+            if let Some(header) = record.strip_prefix("# ") {
+                let (key, value) = header.split_once(' ').unwrap_or((header, ""));
+                match key {
+                    "branch.oid" if value != "(initial)" => status.commit = Some(value.to_owned()),
+                    "branch.head" if value != "(detached)" => {
+                        status.branch = Some(value.to_owned());
+                    }
+                    "branch.upstream" => status.upstream = Some(value.to_owned()),
+                    "branch.ab" => {
+                        let mut counts = value.split(' ').map(|count| {
+                            count
+                                .trim_start_matches(['+', '-'])
+                                .parse::<u64>()
+                                .unwrap_or_default()
+                        });
+                        status.ahead = counts.next().unwrap_or_default();
+                        status.behind = counts.next().unwrap_or_default();
+                    }
+                    _ => {}
+                }
+                continue;
+            }
+            // A renamed file's record is followed by its old path.
+            if record.starts_with("2 ") {
+                records.next();
+            }
+            if !record.starts_with("! ") {
+                status.changed += 1;
+            }
+        }
+        Ok(status)
+    }
+
+    /// The local branches, then the remote ones no local branch tracks, each group most
+    /// recently committed first.
+    pub async fn branches(&self) -> Result<Vec<Branch>, DiffError> {
+        let count = format!("--count={MAX_BRANCHES}");
+        let listed = git(
+            &self.root,
+            &[],
+            &[
+                "for-each-ref",
+                "--sort=-committerdate",
+                &count,
+                "--format=%(refname)%00%(committerdate:unix)%00%(upstream)%00%(symref)%00%(HEAD)",
+                "refs/heads",
+                "refs/remotes",
+            ],
+        )
+        .await?;
+        let stashed = self.stashed_branches().await?;
+        let rows: Vec<Vec<&str>> = listed
+            .lines()
+            .map(|line| line.split('\0').collect())
+            .collect();
+        let tracked: HashSet<&str> = rows
+            .iter()
+            .filter(|row| row[0].starts_with("refs/heads/"))
+            .map(|row| row[2])
+            .collect();
+        let mut branches: Vec<Branch> = rows
+            .iter()
+            // A symbolic ref, such as `origin/HEAD`, names another branch.
+            .filter(|row| row.len() == 5 && row[3].is_empty() && !tracked.contains(row[0]))
+            .filter_map(|row| {
+                let (name, remote) = match row[0].strip_prefix("refs/heads/") {
+                    Some(name) => (name, false),
+                    None => (row[0].strip_prefix("refs/remotes/")?, true),
+                };
+                Some(Branch {
+                    name: name.to_owned(),
+                    remote,
+                    committed_ms: row[1].parse::<i64>().unwrap_or_default() * 1000,
+                    current: row[4] == "*",
+                    stashed: !remote && stashed.contains(name),
+                })
+            })
+            .collect();
+        // Stable, so each group stays most recent first.
+        branches.sort_by_key(|branch| branch.remote);
+        Ok(branches)
+    }
+
+    /// Switches to `to`; a remote branch gets a local branch that tracks it. Uncommitted changes
+    /// come along or stay in the branch's stash, which replaces its earlier one once switched.
+    pub async fn switch(&self, to: &BranchTarget, changes: Changes) -> Result<(), DiffError> {
+        let args = match to {
+            BranchTarget::Local(name) => ["switch", "--no-guess", branch_name(name)?],
+            BranchTarget::Remote(name) => ["switch", "--track", branch_name(name)?],
+        };
+        let mut earlier = None;
+        let mut stashed = false;
+        if changes == Changes::Leave {
+            earlier = self.stash_entry().await?.map(|entry| entry.id);
+            stashed = self.push_stash().await?;
+        }
+        if let Err(error) = self.switching(&args).await {
+            // The changes go back where they were.
+            if stashed {
+                self.pop("stash@{0}").await?;
+            }
+            return Err(error);
+        }
+        if let (true, Some(earlier)) = (stashed, earlier) {
+            self.drop_stash(&earlier).await?;
+        }
+        Ok(())
+    }
+
+    /// Creates the branch `name` at the current commit and switches to it, unless Git refuses
+    /// the name.
+    pub async fn create(&self, name: &str) -> Result<(), DiffError> {
+        let name = branch_name(name)?;
+        git(&self.root, &[], &["check-ref-format", "--branch", name])
+            .await
+            .map_err(|_| DiffError::InvalidBranch(name.to_owned()))?;
+        self.switching(&["switch", "-c", name]).await
+    }
+
+    async fn switching(&self, args: &[&str]) -> Result<(), DiffError> {
+        user_git(&self.root, args)
+            .await
+            .map(drop)
+            .map_err(|error| match error {
+                DiffError::Git(reason) if reason.contains("would be overwritten by checkout") => {
+                    DiffError::WouldOverwrite(listed_files(&reason))
+                }
+                error => error,
+            })
+    }
+
+    /// Fetches the remote of the branch's upstream into its remote-tracking branches, without
+    /// tags, maintenance or credential prompts, as T3 Code's background fetch does; returns
+    /// whether there was one to fetch.
+    pub async fn fetch(&self) -> Result<bool, DiffError> {
+        let Some(branch) = self.branch().await? else {
+            return Ok(false);
+        };
+        let reference = format!("refs/heads/{branch}");
+        let remote = git(
+            &self.root,
+            &[],
+            &[
+                "for-each-ref",
+                "--format=%(upstream:remotename)",
+                &reference,
+            ],
+        )
+        .await?;
+        let remote = remote.trim_end_matches('\n');
+        // A branch tracking another local branch names the repository itself.
+        if remote.is_empty() || remote == "." {
+            return Ok(false);
+        }
+        let env: Vec<(&str, OsString)> = NO_PROMPTS
+            .iter()
+            .map(|(name, value)| (*name, OsString::from(value)))
+            .collect();
+        git(
+            &self.root,
+            &env,
+            &[
+                "fetch",
+                "--quiet",
+                "--no-tags",
+                "--no-auto-gc",
+                "--no-write-fetch-head",
+                "--no-recurse-submodules",
+                "--",
+                remote,
+            ],
+        )
+        .await
+        .map_err(|error| match error {
+            DiffError::Git(reason) => DiffError::Git(without_credentials(&reason)),
+            error => error,
+        })?;
+        Ok(true)
+    }
+}
+
+/// `name`, unless it could be read as an option or names nothing.
+fn branch_name(name: &str) -> Result<&str, DiffError> {
+    if name.is_empty() || name.starts_with('-') {
+        return Err(DiffError::InvalidBranch(name.to_owned()));
+    }
+    Ok(name)
+}
+
+/// `text` with the user name and password of each URL taken out, as a remote's URL may hold
+/// them.
+fn without_credentials(text: &str) -> String {
+    let mut kept = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(at) = rest.find("://") {
+        let (before, after) = rest.split_at(at + 3);
+        kept.push_str(before);
+        let host_end = after
+            .find(|c: char| c == '/' || c.is_whitespace() || c == '\'' || c == '"')
+            .unwrap_or(after.len());
+        rest = match after[..host_end].rfind('@') {
+            Some(credentials) => &after[credentials + 1..],
+            None => after,
+        };
+    }
+    kept.push_str(rest);
+    kept
+}

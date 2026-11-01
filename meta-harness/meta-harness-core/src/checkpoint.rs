@@ -12,7 +12,10 @@ use std::time::{Duration, Instant};
 use tokio::sync::watch;
 
 use crate::checkout::{Alone, RETRY, Running};
-use crate::diff::{ChangeStatus, DiffError, FileChange, Whitespace, WorkingTree};
+use crate::diff::{
+    Branch, BranchTarget, ChangeStatus, Changes, DiffError, FileChange, GitStatus, Stash,
+    Whitespace, WorkingTree,
+};
 
 /// Longest one Git command on the project may take; Git is then stopped with the programs it
 /// started that stay in its process group.
@@ -109,6 +112,16 @@ pub struct RevertFile {
     /// Whether the revert leaves it alone because it is inside, at or above a submodule or
     /// nested repository, whose files are their own.
     pub kept: bool,
+}
+
+/// The branches of a checkout.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Branches {
+    /// The local branches, then the remote ones no local branch tracks, each most recently
+    /// committed first.
+    pub branches: Vec<Branch>,
+    /// The sessions whose agents run in the checkout, sorted.
+    pub running: Vec<String>,
 }
 
 /// A session's checkpoints in its project.
@@ -293,6 +306,81 @@ impl Checkpoints {
             }
             result => result,
         }
+    }
+
+    /// The checkout's branch, upstream and uncommitted files.
+    pub async fn status(&self) -> Result<GitStatus, DiffError> {
+        let tree = self.tree().await?;
+        self.bounded(tree.status()).await
+    }
+
+    /// The branches, and the sessions whose agents run in the checkout, which allow no switch.
+    pub async fn branches(&self) -> Result<Branches, DiffError> {
+        let tree = self.tree().await?;
+        Ok(Branches {
+            branches: self.bounded(tree.branches()).await?,
+            running: tree.checkout().running(),
+        })
+    }
+
+    /// Switches to `to`, bringing uncommitted changes along or leaving them in the branch's
+    /// stash. Refused while an agent runs in the checkout, as a revert is.
+    pub async fn switch_branch(
+        &self,
+        to: &BranchTarget,
+        changes: Changes,
+    ) -> Result<(), DiffError> {
+        let tree = self.tree().await?;
+        let _alone = tree.checkout().alone().await?;
+        self.bounded(tree.switch(to, changes)).await
+    }
+
+    /// Creates the branch `name` at the current commit and switches to it; uncommitted changes
+    /// come along. Refused while an agent runs in the checkout.
+    pub async fn create_branch(&self, name: &str) -> Result<(), DiffError> {
+        let tree = self.tree().await?;
+        let _alone = tree.checkout().alone().await?;
+        self.bounded(tree.create(name)).await
+    }
+
+    /// The stashed changes of the branch checked out, if any.
+    pub async fn stash(&self) -> Result<Option<Stash>, DiffError> {
+        let tree = self.tree().await?;
+        self.bounded(tree.stash()).await
+    }
+
+    /// The patch of the stashed file `path` of `stash`.
+    pub async fn stash_patch(
+        &self,
+        stash: &Stash,
+        path: &str,
+        whitespace: Whitespace,
+    ) -> Result<String, DiffError> {
+        let tree = self.tree().await?;
+        self.bounded(tree.stash_patch(stash, path, whitespace))
+            .await
+    }
+
+    /// Moves the branch's stashed changes back into the checkout. Refused while an agent runs
+    /// in the checkout.
+    pub async fn restore_stash(&self) -> Result<(), DiffError> {
+        let tree = self.tree().await?;
+        let _alone = tree.checkout().alone().await?;
+        self.bounded(tree.restore_stash()).await
+    }
+
+    /// Deletes the branch's stashed changes. Refused while an agent runs in the checkout.
+    pub async fn discard_stash(&self) -> Result<(), DiffError> {
+        let tree = self.tree().await?;
+        let _alone = tree.checkout().alone().await?;
+        self.bounded(tree.discard_stash()).await
+    }
+
+    /// Fetches the remote of the branch's upstream, as Liquid does in the background; returns
+    /// whether there was one.
+    pub async fn fetch(&self) -> Result<bool, DiffError> {
+        let tree = self.tree().await?;
+        self.bounded(tree.fetch()).await
     }
 
     /// The files that changed from checkpoint `from` to `to`.
