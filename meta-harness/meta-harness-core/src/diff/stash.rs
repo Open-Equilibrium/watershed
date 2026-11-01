@@ -146,10 +146,12 @@ impl WorkingTree {
                 &["ls-tree", "-r", "-z", "--name-only", &format!("{id}^3")],
             )
             .await?;
-            let in_the_way: Vec<String> = paths(&untracked)
-                .into_iter()
-                .filter(|path| std::fs::symlink_metadata(self.file(path)).is_ok())
-                .collect();
+            let mut in_the_way = Vec::new();
+            for path in paths(&untracked) {
+                if obstructed(&self.root, &path).map_err(DiffError::Io)? {
+                    in_the_way.push(path);
+                }
+            }
             if !in_the_way.is_empty() {
                 return Err(DiffError::WouldOverwrite(in_the_way));
             }
@@ -293,6 +295,23 @@ impl WorkingTree {
             .to_owned(),
         ))
     }
+}
+
+/// An existing destination, or a non-directory ancestor, would prevent untracked restoration.
+/// Inspect each component without following links before Git can apply tracked changes.
+fn obstructed(root: &Path, path: &str) -> std::io::Result<bool> {
+    let mut file = root.to_owned();
+    let mut components = Path::new(path).components().peekable();
+    while let Some(component) = components.next() {
+        file.push(component);
+        match std::fs::symlink_metadata(&file) {
+            Ok(metadata) if components.peek().is_none() || !metadata.is_dir() => return Ok(true),
+            Ok(_) => {}
+            Err(error) if error.kind() == ErrorKind::NotFound => return Ok(false),
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(false)
 }
 
 /// The paths of NUL-separated output, each once.

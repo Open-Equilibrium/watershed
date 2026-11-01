@@ -683,6 +683,44 @@ fn no_restore_runs_over_unresolved_conflicts_or_untracked_files_in_the_way() {
 }
 
 #[test]
+fn no_restore_applies_tracked_changes_when_an_untracked_parent_is_obstructed() {
+    run(async {
+        for obstruction in ["file", "symlink"] {
+            let repo = Repo::new(&format!("stash-parent-{obstruction}"));
+            let main = repo.git(&["branch", "--show-current"]).trim().to_owned();
+            repo.git(&["branch", "other"]);
+            repo.write("a.txt", "stashed\n");
+            std::fs::create_dir_all(repo.path().join("dir/nested")).expect("folders");
+            repo.write("dir/nested/new.txt", "untracked\n");
+            let checkpoints = Checkpoints::new(repo.path());
+            checkpoints
+                .switch_branch(&local("other"), Changes::Leave)
+                .await
+                .expect("left");
+            checkpoints
+                .switch_branch(&local(&main), Changes::Bring)
+                .await
+                .expect("back");
+            match obstruction {
+                "file" => repo.write("dir", "in the way\n"),
+                _ => std::os::unix::fs::symlink("absent", repo.path().join("dir"))
+                    .expect("dangling link"),
+            }
+            let index = repo.git(&["write-tree"]);
+            let saved = stash_of(&checkpoints).await;
+
+            let restored = checkpoints.restore_stash(&saved).await;
+
+            assert_eq!(read(&repo, "a.txt"), "old\n", "{obstruction}: {restored:?}");
+            assert_eq!(repo.git(&["write-tree"]), index);
+            assert!(matches!(restored, Err(DiffError::WouldOverwrite(paths))
+                if paths == ["dir/nested/new.txt"]));
+            assert_eq!(stash_of(&checkpoints).await, saved);
+        }
+    });
+}
+
+#[test]
 fn a_stash_preview_includes_changes_saved_only_in_the_index() {
     run(async {
         let repo = Repo::new("stash-index-preview");
