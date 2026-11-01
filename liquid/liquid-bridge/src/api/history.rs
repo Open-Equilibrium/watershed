@@ -300,9 +300,12 @@ pub struct BridgeRevertFile {
     pub edited: bool,
     /// Unix milliseconds when it was last written, if it exists.
     pub modified_ms: Option<i64>,
-    /// Whether Git ignores it and the revert deletes it only because a restored file needs its
-    /// place; such a folder's path ends in `/`.
+    /// Whether the revert deletes or overwrites something Git ignores, only because a restored
+    /// file needs its place; such a folder's path ends in `/`.
     pub ignored: bool,
+    /// Whether the revert leaves it as it is, as it is inside, at or above a submodule or
+    /// nested repository.
+    pub kept: bool,
 }
 
 /// An agent that runs a turn in the checkout.

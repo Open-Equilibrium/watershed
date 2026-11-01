@@ -866,11 +866,20 @@ void main() {
           ),
           revertedFile('src/limits.json', BridgeChangeStatus.deleted),
           const BridgeRevertFile(
+            path: 'vendor/lib',
+            shown: 'vendor/lib',
+            status: BridgeChangeStatus.modified,
+            edited: false,
+            ignored: false,
+            kept: true,
+          ),
+          const BridgeRevertFile(
             path: 'config.local',
             shown: 'config.local',
             status: BridgeChangeStatus.added,
             edited: false,
             ignored: true,
+            kept: false,
           ),
           const BridgeRevertFile(
             path: 'tmp/',
@@ -878,6 +887,7 @@ void main() {
             status: BridgeChangeStatus.deleted,
             edited: false,
             ignored: true,
+            kept: false,
           ),
         ],
       );
@@ -913,6 +923,7 @@ void main() {
         findsOneWidget,
       );
       expect(find.text('restored over a file Git ignores'), findsOneWidget);
+      expect(find.text('a repository is here, left alone'), findsOneWidget);
       expect(
         find.text(
           'Commits, the branch main and other files Git ignores stay as they are.',
@@ -993,6 +1004,33 @@ void main() {
         ),
         findsOneWidget,
       );
+    });
+
+    testWidgets('says when only files near a repository differ', (
+      tester,
+    ) async {
+      final backend = turns()
+        ..revertPlanned = revertPlanOf(
+          files: [
+            const BridgeRevertFile(
+              path: 'vendor/lib',
+              shown: 'vendor/lib',
+              status: BridgeChangeStatus.modified,
+              edited: true,
+              ignored: false,
+              kept: true,
+            ),
+          ],
+        );
+      await show(tester, backend);
+      await open(tester);
+      expect(
+        find.text(
+          'No file reverts: a revert leaves repositories inside the project alone.',
+        ),
+        findsOneWidget,
+      );
+      expect(find.text('a repository is here, left alone'), findsOneWidget);
     });
 
     testWidgets('reports a revert that failed', (tester) async {

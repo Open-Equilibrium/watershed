@@ -336,9 +336,13 @@ class BridgeRevertFile {
   /// Unix milliseconds when it was last written, if it exists.
   final PlatformInt64? modifiedMs;
 
-  /// Whether Git ignores it and the revert deletes it only because a restored file needs its
-  /// place; such a folder's path ends in `/`.
+  /// Whether the revert deletes or overwrites something Git ignores, only because a restored
+  /// file needs its place; such a folder's path ends in `/`.
   final bool ignored;
+
+  /// Whether the revert leaves it as it is, as it is inside, at or above a submodule or
+  /// nested repository.
+  final bool kept;
 
   const BridgeRevertFile({
     required this.path,
@@ -347,6 +351,7 @@ class BridgeRevertFile {
     required this.edited,
     this.modifiedMs,
     required this.ignored,
+    required this.kept,
   });
 
   @override
@@ -356,7 +361,8 @@ class BridgeRevertFile {
       status.hashCode ^
       edited.hashCode ^
       modifiedMs.hashCode ^
-      ignored.hashCode;
+      ignored.hashCode ^
+      kept.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -368,7 +374,8 @@ class BridgeRevertFile {
           status == other.status &&
           edited == other.edited &&
           modifiedMs == other.modifiedMs &&
-          ignored == other.ignored;
+          ignored == other.ignored &&
+          kept == other.kept;
 }
 
 /// What reverting the files to before a turn would change.

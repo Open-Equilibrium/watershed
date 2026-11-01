@@ -674,6 +674,7 @@ fn unread(error: DiffError) -> Result<BridgeChangesState, String> {
     match error {
         DiffError::NotARepository => Ok(BridgeChangesState::OutsideGit),
         DiffError::NoCheckpoint => Ok(BridgeChangesState::Removed),
-        error => Err(error.to_string()),
+        // Git's messages name files, written out as Liquid shows file names.
+        error => Err(visible_name(&error.to_string())),
     }
 }

@@ -1860,8 +1860,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeRevertFile dco_decode_bridge_revert_file(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 6)
-      throw Exception('unexpected arr length: expect 6 but see ${arr.length}');
+    if (arr.length != 7)
+      throw Exception('unexpected arr length: expect 7 but see ${arr.length}');
     return BridgeRevertFile(
       path: dco_decode_String(arr[0]),
       shown: dco_decode_String(arr[1]),
@@ -1869,6 +1869,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       edited: dco_decode_bool(arr[3]),
       modifiedMs: dco_decode_opt_box_autoadd_i_64(arr[4]),
       ignored: dco_decode_bool(arr[5]),
+      kept: dco_decode_bool(arr[6]),
     );
   }
 
@@ -2897,6 +2898,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_edited = sse_decode_bool(deserializer);
     var var_modifiedMs = sse_decode_opt_box_autoadd_i_64(deserializer);
     var var_ignored = sse_decode_bool(deserializer);
+    var var_kept = sse_decode_bool(deserializer);
     return BridgeRevertFile(
       path: var_path,
       shown: var_shown,
@@ -2904,6 +2906,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       edited: var_edited,
       modifiedMs: var_modifiedMs,
       ignored: var_ignored,
+      kept: var_kept,
     );
   }
 
@@ -4135,6 +4138,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_bool(self.edited, serializer);
     sse_encode_opt_box_autoadd_i_64(self.modifiedMs, serializer);
     sse_encode_bool(self.ignored, serializer);
+    sse_encode_bool(self.kept, serializer);
   }
 
   @protected

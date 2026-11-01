@@ -262,6 +262,7 @@ impl From<RevertFile> for BridgeRevertFile {
             edited: file.edited,
             modified_ms: file.modified_ms.map(int),
             ignored: file.ignored,
+            kept: file.kept,
         }
     }
 }

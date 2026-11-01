@@ -824,6 +824,7 @@ IFS= read -r line || exit 0"#
             edited: false,
             modified_ms: plan.files[0].modified_ms,
             ignored: false,
+            kept: false,
         }]
     );
     assert!(plan.files[0].modified_ms.is_some());

@@ -55,6 +55,7 @@ class _RevertDialog extends StatelessWidget {
       height: WsMetrics.lhCompact / WsMetrics.fsCompact,
     );
     final files = plan.files;
+    final reverted = files.where((file) => !file.kept).toList();
     final shown = plan.state == BridgeChangesState.shown;
     final allowed = shown && plan.running.isEmpty;
     void revert() => Navigator.of(context).pop(true);
@@ -63,12 +64,13 @@ class _RevertDialog extends StatelessWidget {
       BridgeChangesState.removed =>
         'This turn’s checkpoint was removed, so its files cannot be reverted.',
       // A folder is listed only beside the file that needs its place, so never alone.
-      BridgeChangesState.shown => switch (files.length) {
+      BridgeChangesState.shown => switch (reverted.length) {
+        0 when files.isNotEmpty => 'No file reverts: a revert leaves repositories inside the project alone.',
         0 => 'No file differs from how it was when $name started.',
         1 => 'This file reverts to how it was when $name started.',
         final count =>
-          'These $count ${files.any(_isFolder) ? 'files and folders' : 'files'} revert to how '
-              'they were when $name started.',
+          'These $count ${reverted.any(_isFolder) ? 'files and folders' : 'files'} revert to '
+              'how they were when $name started.',
       },
     };
     // A file Git ignores in a restored file's place does not stay.
@@ -174,26 +176,29 @@ class _Files extends StatelessWidget {
     final back = started == null ? 'back' : 'back to ${formatClockMs(started)}';
     final faint = TextStyle(color: ws.textFaint, fontSize: WsMetrics.fsSmall);
     Widget row(BridgeRevertFile file) {
-      final (letter, color, outcome) = switch (file.status) {
-        BridgeChangeStatus.modified => ('M', ws.warning, back),
-        BridgeChangeStatus.added => (
-          'A',
-          ws.success,
-          file.ignored
-              ? 'restored over a file Git ignores'
-              : 'deleted since then, restored',
-        ),
-        BridgeChangeStatus.deleted => (
-          'D',
-          ws.danger,
-          switch ((file.ignored, _isFolder(file))) {
-            (false, _) => 'new since then, deleted',
-            (true, true) => 'holds files Git ignores, in the way, deleted',
-            (true, false) => 'a file Git ignores, in the way, deleted',
-          },
-        ),
-      };
-      final edit = switch ((file.edited, file.modifiedMs)) {
+      final (letter, color, outcome) = file.kept
+          ? ('–', ws.textFaint, 'a repository is here, left alone')
+          : switch (file.status) {
+              BridgeChangeStatus.modified => ('M', ws.warning, back),
+              BridgeChangeStatus.added => (
+                'A',
+                ws.success,
+                file.ignored
+                    ? 'restored over a file Git ignores'
+                    : 'deleted since then, restored',
+              ),
+              BridgeChangeStatus.deleted => (
+                'D',
+                ws.danger,
+                switch ((file.ignored, _isFolder(file))) {
+                  (false, _) => 'new since then, deleted',
+                  (true, true) =>
+                    'holds files Git ignores, in the way, deleted',
+                  (true, false) => 'a file Git ignores, in the way, deleted',
+                },
+              ),
+            };
+      final edit = switch ((file.edited && !file.kept, file.modifiedMs)) {
         (false, _) => null,
         (true, final at?) => 'also your edit at ${formatClockMs(at)}',
         (true, null) => 'also your edit',
