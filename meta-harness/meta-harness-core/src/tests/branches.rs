@@ -859,6 +859,66 @@ fn no_restore_runs_over_uncommitted_changes_or_ignored_files_in_the_way() {
 }
 
 #[test]
+fn no_restore_overwrites_ignored_paths_from_the_stashed_index_or_working_tree() {
+    run(async {
+        for saved in ["staged", "index-only", "deleted-since-stash"] {
+            for obstruction in ["file", "parent"] {
+                let repo = Repo::new(&format!("stash-ignored-{saved}-{obstruction}"));
+                let main = repo.git(&["branch", "--show-current"]).trim().to_owned();
+                std::fs::create_dir(repo.path().join("dir")).expect("folder");
+                repo.write("dir/saved.txt", "saved\n");
+                repo.git(&["add", "dir/saved.txt"]);
+                if saved == "deleted-since-stash" {
+                    repo.git(&["commit", "-q", "-m", "tracked"]);
+                    repo.write("dir/saved.txt", "changed\n");
+                } else if saved == "index-only" {
+                    std::fs::remove_file(repo.path().join("dir/saved.txt")).expect("removed");
+                }
+                repo.git(&["branch", "other"]);
+                repo.write("a.txt", "stashed\n");
+                let checkpoints = Checkpoints::new(repo.path());
+                checkpoints
+                    .switch_branch(&local("other"), leave_on(&checkpoints).await)
+                    .await
+                    .expect("left");
+                checkpoints
+                    .switch_branch(&local(&main), Changes::Bring)
+                    .await
+                    .expect("back");
+                if saved == "deleted-since-stash" {
+                    repo.git(&["rm", "-q", "dir/saved.txt"]);
+                    repo.git(&["commit", "-q", "-m", "removed"]);
+                }
+                let path = if obstruction == "file" {
+                    std::fs::create_dir_all(repo.path().join("dir")).expect("folder");
+                    "dir/saved.txt"
+                } else {
+                    let _ = std::fs::remove_dir(repo.path().join("dir"));
+                    "dir"
+                };
+                std::fs::write(repo.path().join(".git/info/exclude"), "dir\n").expect("excluded");
+                repo.write(path, "keep ignored contents\n");
+                assert_eq!(checkpoints.status().await.expect("status").changed, 0);
+                let index = repo.git(&["write-tree"]);
+                let stash = stash_of(&checkpoints).await;
+
+                let restored = checkpoints.restore_stash(&stash).await;
+
+                assert!(
+                    matches!(&restored, Err(DiffError::WouldOverwrite(paths))
+                        if paths == &[path]),
+                    "{saved}/{obstruction}: {restored:?}"
+                );
+                assert_eq!(read(&repo, path), "keep ignored contents\n");
+                assert_eq!(read(&repo, "a.txt"), "old\n", "nothing was restored");
+                assert_eq!(repo.git(&["write-tree"]), index);
+                assert_eq!(stash_of(&checkpoints).await, stash);
+            }
+        }
+    });
+}
+
+#[test]
 fn no_restore_applies_tracked_changes_when_an_untracked_parent_is_obstructed() {
     run(async {
         for obstruction in ["file", "symlink"] {

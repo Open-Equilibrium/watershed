@@ -136,6 +136,20 @@ impl WorkingTree {
         if changed > 0 {
             return Err(DiffError::Uncommitted(changed));
         }
+        let current = match self.checkpointed("HEAD").await? {
+            Some(tree) => tree,
+            None => self.empty_tree().await?,
+        };
+        let (_, index, tracked, _) = self.stash_trees(id).await?;
+        let mut in_the_way = BTreeSet::new();
+        // A staged addition, or a tracked file deleted since the stash, can replace ignored
+        // contents too. Check both trees because --index restores saved index-only changes.
+        for tree in [&index, &tracked] {
+            let changes = self.changes(&current, tree, Whitespace::Shown).await?;
+            let (replaced, removed) = self.in_the_way(&changes).await?;
+            in_the_way.extend(replaced);
+            in_the_way.extend(removed);
+        }
         if self.resolve(&format!("{id}^3")).await?.is_some() {
             let untracked = git(
                 &self.root,
@@ -143,15 +157,14 @@ impl WorkingTree {
                 &["ls-tree", "-r", "-z", "--name-only", &format!("{id}^3")],
             )
             .await?;
-            let mut in_the_way = Vec::new();
             for path in paths(&untracked) {
                 if obstructed(&self.root, &path).map_err(DiffError::Io)? {
-                    in_the_way.push(path);
+                    in_the_way.insert(path);
                 }
             }
-            if !in_the_way.is_empty() {
-                return Err(DiffError::WouldOverwrite(in_the_way));
-            }
+        }
+        if !in_the_way.is_empty() {
+            return Err(DiffError::WouldOverwrite(in_the_way.into_iter().collect()));
         }
         self.pop(id).await
     }
