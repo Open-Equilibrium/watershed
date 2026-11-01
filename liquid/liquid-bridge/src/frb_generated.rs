@@ -2755,7 +2755,7 @@ impl SseDecode for crate::api::git::BridgeGitOutcomeKind {
             1 => crate::api::git::BridgeGitOutcomeKind::WouldOverwrite,
             2 => crate::api::git::BridgeGitOutcomeKind::Conflicts,
             3 => crate::api::git::BridgeGitOutcomeKind::AgentRunning,
-            4 => crate::api::git::BridgeGitOutcomeKind::Unresolved,
+            4 => crate::api::git::BridgeGitOutcomeKind::Uncommitted,
             5 => crate::api::git::BridgeGitOutcomeKind::HookFailed,
             _ => unreachable!("Invalid variant for BridgeGitOutcomeKind: {}", inner),
         };
@@ -4509,7 +4509,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::git::BridgeGitOutcomeKind {
             Self::WouldOverwrite => 1.into_dart(),
             Self::Conflicts => 2.into_dart(),
             Self::AgentRunning => 3.into_dart(),
-            Self::Unresolved => 4.into_dart(),
+            Self::Uncommitted => 4.into_dart(),
             Self::HookFailed => 5.into_dart(),
             _ => unreachable!(),
         }
@@ -5532,7 +5532,7 @@ impl SseEncode for crate::api::git::BridgeGitOutcomeKind {
                 crate::api::git::BridgeGitOutcomeKind::WouldOverwrite => 1,
                 crate::api::git::BridgeGitOutcomeKind::Conflicts => 2,
                 crate::api::git::BridgeGitOutcomeKind::AgentRunning => 3,
-                crate::api::git::BridgeGitOutcomeKind::Unresolved => 4,
+                crate::api::git::BridgeGitOutcomeKind::Uncommitted => 4,
                 crate::api::git::BridgeGitOutcomeKind::HookFailed => 5,
                 _ => {
                     unimplemented!("");

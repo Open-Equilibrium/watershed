@@ -1148,6 +1148,17 @@ void main() {
     await tester.pumpAndSettle();
     expect(backend.calls, contains('discard stash s1'));
 
+    // As GitHub Desktop, no restore into a checkout with changes.
+    backend.git = gitStatusOf(changed: 2);
+    await state.git.refresh();
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Restore'));
+    await tester.pumpAndSettle();
+    expect(backend.calls, isNot(contains('restore stash s1')));
+
+    backend.git = gitStatusOf();
+    await state.git.refresh();
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Restore'));
     await tester.pumpAndSettle();
     expect(backend.calls.last, 'restore stash s1');

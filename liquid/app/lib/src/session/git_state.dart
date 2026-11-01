@@ -236,11 +236,15 @@ class GitState {
             'Restored with conflicts in $files; Git kept the stash. Resolve them in an '
             'editor, then discard the stash.',
           );
-        case BridgeGitOutcomeKind.unresolved:
+        case BridgeGitOutcomeKind.uncommitted:
+          final changed = status.value?.changed ?? 0;
+          final changes = changed == 1
+              ? '1 uncommitted change'
+              : '$changed uncommitted changes';
           notify(
             BridgeLevel.warning,
-            'Could not $action: $files ${outcome.files.length == 1 ? 'has' : 'have'} '
-            'unresolved conflicts. Resolve them, then restore; the stash stays.',
+            'Could not $action: the checkout has $changes. Commit or discard them, then '
+            'restore; the stash stays.',
           );
         // A switch Git refuses asks in a dialog what to do.
         case BridgeGitOutcomeKind.wouldOverwrite when action == 'restore':

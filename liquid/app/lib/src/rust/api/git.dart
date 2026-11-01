@@ -134,8 +134,8 @@ enum BridgeGitOutcomeKind {
   /// The agents in `running` run in the checkout, so nothing changed.
   agentRunning,
 
-  /// `files` have unresolved conflicts, so nothing was restored.
-  unresolved,
+  /// The checkout has uncommitted changes, so nothing was restored.
+  uncommitted,
 
   /// Git switched, but a hook it ran after failed with `detail`.
   hookFailed,

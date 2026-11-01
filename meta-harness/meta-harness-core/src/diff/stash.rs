@@ -124,20 +124,17 @@ impl WorkingTree {
     }
 
     /// Moves the stashed changes `id` left on a branch back into the checkout and drops the
-    /// stash, unless Git refuses or they conflict, which keeps it. Nothing is restored over
-    /// unresolved conflicts or untracked files in the way, which Git would restore only in part.
+    /// stash, unless Git refuses or they conflict, which keeps it. Nothing is restored into a
+    /// checkout with changes or over ignored files in the way, which Git would restore only in
+    /// part.
     pub async fn restore_stash(&self, id: &str) -> Result<(), DiffError> {
         let _stash = self.checkout().stash_alone().await?;
         self.liquid_stash(id).await?;
-        let unresolved = git(
-            &self.root,
-            &[],
-            &["diff", "--name-only", "-z", "--diff-filter=U"],
-        )
-        .await?;
-        let unresolved = paths(&unresolved);
-        if !unresolved.is_empty() {
-            return Err(DiffError::Unresolved(unresolved));
+        // As GitHub Desktop, only into a checkout without changes: Git restores a stash only in
+        // part when one of its files changed meanwhile, and keeps it.
+        let changed = self.status().await?.changed;
+        if changed > 0 {
+            return Err(DiffError::Uncommitted(changed));
         }
         if self.resolve(&format!("{id}^3")).await?.is_some() {
             let untracked = git(
@@ -183,6 +180,10 @@ impl WorkingTree {
             DiffError::Git(reason) if reason.contains("would be overwritten") => {
                 DiffError::WouldOverwrite(listed_files(&reason))
             }
+            // Git may have restored some files before it failed.
+            DiffError::Git(reason) => DiffError::Git(format!(
+                "{reason}; Git kept the stash, and some of its files may already be restored"
+            )),
             error => error,
         })
     }

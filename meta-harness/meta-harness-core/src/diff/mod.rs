@@ -131,8 +131,8 @@ pub enum DiffError {
     NoStash,
     /// The stashed changes were restored, but these files conflict; Git kept the stash.
     RestoredWithConflicts(Vec<String>),
-    /// These files have unresolved conflicts, so nothing was restored.
-    Unresolved(Vec<String>),
+    /// The checkout has this many uncommitted changes, so nothing was restored.
+    Uncommitted(u64),
     /// Git switched, but a hook it ran after failed with this output.
     HookFailed(String),
     /// The remote's fetch refspec writes outside its remote-tracking branches, so Liquid does
@@ -176,9 +176,11 @@ impl fmt::Display for DiffError {
             Self::RestoredWithConflicts(paths) => {
                 write!(f, "restored with conflicts in {}", paths.join(", "))
             }
-            Self::Unresolved(paths) => {
-                write!(f, "{} have unresolved conflicts", paths.join(", "))
-            }
+            Self::Uncommitted(count) => write!(
+                f,
+                "the checkout has {count} uncommitted change{}",
+                if *count == 1 { "" } else { "s" }
+            ),
             Self::HookFailed(output) => write!(f, "Git switched, but a hook failed: {output}"),
             Self::FetchOutsideRemotes(spec) => write!(
                 f,

@@ -707,8 +707,10 @@ fn a_restore_git_refuses_or_that_conflicts_keeps_the_stash() {
 
         repo.write("a.txt", "edited meanwhile\n");
         assert!(matches!(
-            checkpoints.restore_stash(&stash_of(&checkpoints).await).await,
-            Err(DiffError::WouldOverwrite(paths)) if paths == ["a.txt"]
+            checkpoints
+                .restore_stash(&stash_of(&checkpoints).await)
+                .await,
+            Err(DiffError::Uncommitted(1))
         ));
         assert_eq!(read(&repo, "a.txt"), "edited meanwhile\n");
 
@@ -777,7 +779,7 @@ fn a_hook_failing_after_git_switched_keeps_the_changes_left_on_the_branch() {
 }
 
 #[test]
-fn no_restore_runs_over_unresolved_conflicts_or_untracked_files_in_the_way() {
+fn no_restore_runs_over_uncommitted_changes_or_ignored_files_in_the_way() {
     run(async {
         let repo = Repo::new("stash-unmerged");
         let main = repo.git(&["branch", "--show-current"]).trim().to_owned();
@@ -794,13 +796,34 @@ fn no_restore_runs_over_unresolved_conflicts_or_untracked_files_in_the_way() {
             .await
             .expect("back");
 
+        // As GitHub Desktop, a restore needs a checkout without changes; Git would restore part
+        // of a stash whose tracked file was edited meanwhile and keep it.
+        repo.write("a.txt", "edited meanwhile\n");
+        assert!(matches!(
+            checkpoints
+                .restore_stash(&stash_of(&checkpoints).await)
+                .await,
+            Err(DiffError::Uncommitted(1))
+        ));
+        assert!(!repo.path().join("u.txt").exists(), "nothing was restored");
+        repo.git(&["checkout", "--", "a.txt"]);
+
         repo.write("u.txt", "in the way\n");
+        assert!(matches!(
+            checkpoints
+                .restore_stash(&stash_of(&checkpoints).await)
+                .await,
+            Err(DiffError::Uncommitted(1))
+        ));
+        // An ignored file counts as no change, but is in the way.
+        std::fs::write(repo.path().join(".git/info/exclude"), "u.txt\n").expect("excluded");
         assert!(matches!(
             checkpoints.restore_stash(&stash_of(&checkpoints).await).await,
             Err(DiffError::WouldOverwrite(paths)) if paths == ["u.txt"]
         ));
         assert_eq!(read(&repo, "a.txt"), "old\n", "nothing was restored");
         std::fs::remove_file(repo.path().join("u.txt")).expect("removed");
+        std::fs::remove_file(repo.path().join(".git/info/exclude")).expect("included");
 
         // A merge the user stopped with a conflict.
         repo.git(&["switch", "-q", "other"]);
@@ -826,8 +849,10 @@ fn no_restore_runs_over_unresolved_conflicts_or_untracked_files_in_the_way() {
         assert!(!merged.status.success(), "the merge stops at its conflict");
 
         assert!(matches!(
-            checkpoints.restore_stash(&stash_of(&checkpoints).await).await,
-            Err(DiffError::Unresolved(paths)) if paths == ["a.txt"]
+            checkpoints
+                .restore_stash(&stash_of(&checkpoints).await)
+                .await,
+            Err(DiffError::Uncommitted(_))
         ));
         assert!(checkpoints.stash().await.expect("read").is_some());
     });
@@ -852,6 +877,8 @@ fn no_restore_applies_tracked_changes_when_an_untracked_parent_is_obstructed() {
                 .switch_branch(&local(&main), Changes::Bring)
                 .await
                 .expect("back");
+            // Ignored, so the checkout has no changes and only the obstruction stops it.
+            std::fs::write(repo.path().join(".git/info/exclude"), "dir\n").expect("excluded");
             match obstruction {
                 "file" => repo.write("dir", "in the way\n"),
                 _ => std::os::unix::fs::symlink("absent", repo.path().join("dir"))

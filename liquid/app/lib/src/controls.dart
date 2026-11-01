@@ -201,7 +201,9 @@ class PrimaryButton extends StatelessWidget {
 
   final String label;
   final String? shortcut;
-  final VoidCallback onPressed;
+
+  /// None shows the button disabled.
+  final VoidCallback? onPressed;
   final FocusNode? focusNode;
 
   @override

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../agent/input_lane.dart';
@@ -340,6 +341,7 @@ class _DiffViewState extends State<DiffView> {
       shown: shown,
       stash: stash,
       branch: widget.state.git.status.value?.branch,
+      git: widget.state.git.status,
       onSelect: (scope) => unawaited(widget.state.showTurns(scope)),
       // Reverting applies to the turn shown, not to all turns.
       onRevert: switch ((scope, shown)) {
@@ -992,6 +994,7 @@ class _TurnHeader extends StatelessWidget {
     required this.shown,
     required this.stash,
     required this.branch,
+    required this.git,
     required this.onSelect,
     required this.onRevert,
     required this.onRestore,
@@ -1009,6 +1012,9 @@ class _TurnHeader extends StatelessWidget {
   final Compared? shown;
   final BridgeStash? stash;
   final String? branch;
+
+  /// The checkout's Git state, whose uncommitted changes allow no restore.
+  final ValueListenable<BridgeGitStatus?> git;
   final ValueChanged<DiffScope> onSelect;
 
   /// Asks to revert the files to before the shown turn; none unless one turn is shown.
@@ -1143,7 +1149,25 @@ class _TurnHeader extends StatelessWidget {
                   mainAxisAlignment: MainAxisAlignment.end,
                   spacing: WsMetrics.space3,
                   children: [
-                    PrimaryButton(label: 'Restore', onPressed: onRestore),
+                    // As GitHub Desktop, only into a checkout without changes.
+                    ValueListenableBuilder(
+                      valueListenable: git,
+                      builder: (context, status, _) =>
+                          (status?.changed ?? 0) == 0
+                          ? PrimaryButton(
+                              label: 'Restore',
+                              onPressed: onRestore,
+                            )
+                          : const Tooltip(
+                              message:
+                                  'Unable to restore stash when changes are present on '
+                                  'your branch.',
+                              child: PrimaryButton(
+                                label: 'Restore',
+                                onPressed: null,
+                              ),
+                            ),
+                    ),
                     SecondaryButton(label: 'Discard…', onPressed: onDiscard),
                   ],
                 ),

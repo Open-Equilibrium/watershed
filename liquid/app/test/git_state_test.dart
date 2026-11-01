@@ -215,6 +215,20 @@ void main() {
     },
   );
 
+  test('a restore into a checkout with changes says what to do', () async {
+    backend.git = gitStatusOf(changed: 2);
+    await git.refresh();
+    backend.outcome = outcomeOf(BridgeGitOutcomeKind.uncommitted);
+
+    await git.restoreStash(stashOf());
+
+    expect(notices.single, (
+      BridgeLevel.warning,
+      'Could not restore: the checkout has 2 uncommitted changes. Commit or discard them, '
+          'then restore; the stash stays.',
+    ));
+  });
+
   test('restoring reports its files and reads the stash again', () async {
     backend.stashed = BridgeStash(
       id: 's1',

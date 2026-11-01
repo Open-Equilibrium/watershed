@@ -74,8 +74,8 @@ pub enum BridgeGitOutcomeKind {
     Conflicts,
     /// The agents in `running` run in the checkout, so nothing changed.
     AgentRunning,
-    /// `files` have unresolved conflicts, so nothing was restored.
-    Unresolved,
+    /// The checkout has uncommitted changes, so nothing was restored.
+    Uncommitted,
     /// Git switched, but a hook it ran after failed with `detail`.
     HookFailed,
 }
@@ -243,8 +243,8 @@ impl AgentSession {
             Err(DiffError::RestoredWithConflicts(files)) => {
                 Ok(outcome(BridgeGitOutcomeKind::Conflicts, files))
             }
-            Err(DiffError::Unresolved(files)) => {
-                Ok(outcome(BridgeGitOutcomeKind::Unresolved, files))
+            Err(DiffError::Uncommitted(_)) => {
+                Ok(outcome(BridgeGitOutcomeKind::Uncommitted, Vec::new()))
             }
             Err(DiffError::HookFailed(output)) => Ok(BridgeGitOutcome {
                 detail: visible_lines(&output),
