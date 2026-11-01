@@ -255,6 +255,18 @@ i.kw{font-style:normal;color:var(--ws-syn-kw)}i.st{font-style:normal;color:var(-
     </div>
   </section>
   <section>
+    <h3 class="sec">7 · States added in review, awaiting approval</h3>
+    <p class="sub">The reviews of the revert found cases the sections above do not show. Files Git ignores are listed where a restored file needs their place, so "files Git ignores stay" becomes "other files Git ignores stay"; repositories inside the project are left alone and never listed. Several running agents are counted. A turn that waits for another window's revert says so in the status bar, through the status entry extensions already use. Errors after the dialog say whether the files changed.</p>
+    <div class="win mini"><div class="dlg"><h4>Revert to before turn 3?</h4><p>These 4 files and folders revert to how they were when turn 3 started.</p><div class="flist"><div class="frow"><span class="st A">A</span><code>config.local</code><span class="r">restored over a file Git ignores</span></div><div class="frow"><span class="st A">A</span><code>data</code><span class="r">deleted since then, restored</span></div><div class="frow"><span class="st D">D</span><code>data/</code><span class="r">ignored folder, in the way, deleted</span></div><div class="frow"><span class="st D">D</span><code>src/limits.json</code><span class="r">new since then, deleted</span></div></div><p>Commits, the branch <code>main</code> and other files Git ignores stay as they are.</p><div class="notice">“Fix flaky sync test” and 1 more are running in this checkout. Stop them or wait until they finish, then revert the files.</div><div class="acts"><span class="btn dngp off">Revert and branch</span><span class="sp"></span><span class="btn">Cancel <kbd>esc</kbd></span></div></div></div>
+    <div class="flist" style="margin-top:16px">
+      <div class="frow">Status bar while a turn waits<span class="r">Waiting for a revert in this checkout to finish</span></div>
+      <div class="frow">Agent started meanwhile<span class="r">Could not revert and branch: the files were not reverted: an agent runs in this checkout</span></div>
+      <div class="frow">Git left files<span class="r">Could not revert and branch: the other files were reverted and the session stays on its branch; Git could not revert ro/new.txt</span></div>
+      <div class="frow">Git failed midway<span class="r">Could not revert and branch: the files may be partly reverted (…); reverting again finishes it</span></div>
+      <div class="frow">Branch failed<span class="r">Could not revert and branch: the files were reverted, but the session could not continue from before the turn: …</span></div>
+    </div>
+  </section>
+  <section>
     <h3 class="sec">Decisions</h3>
     <ol class="qs">
       <li>A revert starts a new branch from before the turn and puts that turn's prompt back into the input area; the undone turns stay on their branch, rather than only reverting the files and telling the agent.</li>
