@@ -908,6 +908,45 @@ fn leaving_changes_never_cleans_up_unsaved_ignored_contents() {
 }
 
 #[test]
+fn no_restore_exempts_a_tracked_parent_committed_after_the_stash() {
+    run(async {
+        let repo = Repo::new("stash-later-parent");
+        let main = repo.git(&["branch", "--show-current"]).trim().to_owned();
+        repo.git(&["branch", "other"]);
+        repo.write("a.txt", "stashed\n");
+        std::fs::create_dir(repo.path().join("dir")).expect("folder");
+        repo.write("dir/new.txt", "untracked\n");
+        let checkpoints = Checkpoints::new(repo.path());
+        checkpoints
+            .switch_branch(&local("other"), leave_on(&checkpoints).await)
+            .await
+            .expect("left");
+        checkpoints
+            .switch_branch(&local(&main), Changes::Bring)
+            .await
+            .expect("back");
+        repo.write("dir", "later commit\n");
+        repo.git(&["add", "dir"]);
+        repo.git(&["commit", "-qm", "add parent"]);
+        let stash = stash_of(&checkpoints).await;
+        let index = std::fs::read(repo.path().join(".git/index")).expect("index");
+
+        let restored = checkpoints.restore_stash(&stash).await;
+
+        assert_eq!(read(&repo, "a.txt"), "old\n", "{restored:?}");
+        assert!(
+            matches!(restored, Err(DiffError::WouldOverwrite(paths)) if paths == ["dir/new.txt"])
+        );
+        assert_eq!(read(&repo, "dir"), "later commit\n");
+        assert_eq!(stash_of(&checkpoints).await, stash);
+        assert_eq!(
+            std::fs::read(repo.path().join(".git/index")).expect("index"),
+            index
+        );
+    });
+}
+
+#[test]
 fn a_stashed_file_can_return_as_a_directory() {
     run(async {
         for staged in [false, true] {
