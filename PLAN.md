@@ -202,7 +202,7 @@ A macOS Liquid app, built ahead of M2 and M3a, that controls pi through an embed
 
 #### Liquid Git integration — next slice
 
-Completes the Git integration for the agent's Git project (ADR-0190, ADR-0191): branches, commits, push, pull requests and worktrees, plus per-turn checkpoints that the Diff tab shows and a user can revert the files to (ADR-0220, ADR-0234). Meta-Harness runs the host's `git` and `gh`; Liquid provides the UI. Moving the Diff tab onto the checkpoints also settles three follow-ups of the agent-surface slice: runs of two messages sent at once no longer mix, a message sent while the previous run settles gets an exact diff, and the timing-dependent `run_diff::reads_that_wait_for_each_other_count_only_their_own_git_against_the_limit` test is rewritten without fixed waits.
+Completes the Git integration for the agent's Git project (ADR-0190, ADR-0191): branches, commits, push, pull requests and worktrees, plus per-turn checkpoints that the Diff tab shows and a user can revert the files to (ADR-0220, ADR-0234; [mockups](docs/design/mockups/liquid-checkpoints.html)). Meta-Harness runs the host's `git` and `gh`; Liquid provides the UI. Pull requests in order: checkpoints and the Diff tab on them (done), revert to a turn, deleting a session and removing all checkpoints, then branches and commits, pull requests and worktrees.
 
 #### Agent sandbox write boundary — slice after Git
 
