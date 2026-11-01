@@ -859,6 +859,67 @@ fn no_restore_runs_over_uncommitted_changes_or_ignored_files_in_the_way() {
 }
 
 #[test]
+fn leaving_changes_never_loses_edits_hidden_from_native_git() {
+    use std::os::unix::fs::PermissionsExt;
+
+    run(async {
+        for mark in ["--assume-unchanged", "--skip-worktree", "file-mode"] {
+            let repo = Repo::new(&format!("leave-hidden-{mark}"));
+            repo.write("b.txt", "old b\n");
+            repo.git(&["add", "b.txt"]);
+            repo.git(&["commit", "-q", "-m", "add b"]);
+            let main = repo.git(&["branch", "--show-current"]).trim().to_owned();
+            repo.git(&["branch", "other"]);
+            let expected = if mark == "file-mode" {
+                repo.git(&["config", "core.fileMode", "false"]);
+                std::fs::set_permissions(
+                    repo.path().join("a.txt"),
+                    std::fs::Permissions::from_mode(0o755),
+                )
+                .expect("executable");
+                "old\n"
+            } else {
+                repo.git(&["update-index", mark, "a.txt"]);
+                repo.write("a.txt", "hidden edit\n");
+                "hidden edit\n"
+            };
+            repo.write("b.txt", "visible edit\n");
+            let mode = std::fs::metadata(repo.path().join("a.txt"))
+                .expect("a metadata")
+                .permissions()
+                .mode();
+            let index = std::fs::read(repo.path().join(".git/index")).expect("index");
+            let checkpoints = Checkpoints::new(repo.path());
+
+            let switched = checkpoints
+                .switch_branch(&local("other"), leave_on(&checkpoints).await)
+                .await;
+
+            assert_eq!(read(&repo, "a.txt"), expected, "{mark}: {switched:?}");
+            assert_eq!(
+                std::fs::metadata(repo.path().join("a.txt"))
+                    .expect("a metadata")
+                    .permissions()
+                    .mode(),
+                mode,
+                "{mark}: {switched:?}"
+            );
+            assert_eq!(read(&repo, "b.txt"), "visible edit\n");
+            assert!(
+                matches!(switched, Err(DiffError::Git(reason)) if reason.contains("Git would skip")),
+                "{mark}: leaving must refuse before stashing"
+            );
+            assert_eq!(repo.git(&["branch", "--show-current"]).trim(), main);
+            assert!(repo.git(&["stash", "list"]).is_empty());
+            assert_eq!(
+                std::fs::read(repo.path().join(".git/index")).expect("index"),
+                index
+            );
+        }
+    });
+}
+
+#[test]
 fn no_restore_partly_applies_a_stash_over_hidden_tracked_edits() {
     run(async {
         for mark in ["--assume-unchanged", "--skip-worktree"] {

@@ -96,6 +96,30 @@ impl WorkingTree {
     /// Stashes the uncommitted changes, untracked files included, for the branch checked out;
     /// returns the new stash, none when there was nothing to stash.
     pub(super) async fn push_stash(&self) -> Result<Option<String>, DiffError> {
+        // Native stash resets tracked files after saving them. Refuse if its index flags or
+        // settings hide any edits that Liquid reports, rather than losing those unsaved edits.
+        {
+            let _busy = self.busy.lock().await;
+            let index = self.copy_index().await?;
+            let args = [
+                "diff-files",
+                "--raw",
+                "-z",
+                "--no-abbrev",
+                "--no-ext-diff",
+                "--no-textconv",
+                "--ignore-submodules=dirty",
+                "--",
+            ];
+            let changes = git(&self.root, &self.env(&index), &args).await?;
+            if changes != user_git(&self.root, &args).await? {
+                return Err(DiffError::Git(
+                    "Git would skip some changed files. Clear the index skip marks or settings \
+                     hiding changes before leaving them on this branch."
+                        .to_owned(),
+                ));
+            }
+        }
         let branch = self.branch().await?.ok_or(DiffError::NoBranch)?;
         let message = format!("{MESSAGE}{branch}");
         let before = self.resolve("refs/stash").await?;
