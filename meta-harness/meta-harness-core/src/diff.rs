@@ -1,5 +1,6 @@
-//! Changes a run made to its Git project, read without touching the repository (ADR-0190,
-//! ADR-0191).
+//! States of an agent's Git project and their changes (ADR-0190, ADR-0191). Trees and checkpoint
+//! commits go into the project's object database, refs only under Watershed's own namespace
+//! (ADR-0220); the project's index, HEAD and branches stay untouched.
 
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
@@ -7,7 +8,6 @@ use std::fmt;
 use std::fs::DirBuilder;
 use std::hash::{BuildHasher, RandomState};
 use std::io::ErrorKind;
-use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::os::unix::fs::DirBuilderExt;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -25,7 +25,10 @@ const MAX_ERROR_BYTES: usize = 64 * 1024;
 
 static STORES: AtomicU64 = AtomicU64::new(0);
 
-/// A project state captured as a Git tree in a private object store.
+/// The e-mail address checkpoint commits carry.
+const CHECKPOINT_EMAIL: &str = "checkpoints@watershed.invalid";
+
+/// A project state captured as a Git tree in the project's object database.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Snapshot(String);
 
@@ -81,14 +84,18 @@ pub enum DiffError {
     Git(String),
     /// Git could not be started, for example because it is not installed.
     GitStart(std::io::Error),
-    /// The private object store could not be prepared.
+    /// The private index could not be prepared.
     Io(std::io::Error),
     /// Git's output exceeded the limit, so only part of it could be read.
     TooLarge,
     /// Git did not finish within the time limit.
     TimedOut(std::time::Duration),
-    /// The project could not be captured before the run, so its changes are unknown.
+    /// The project could not be captured, so its changes are unknown.
     NotCaptured(String),
+    /// The checkpoint was removed or never taken.
+    NoCheckpoint,
+    /// The agent named a checkpoint with an id that cannot name a ref.
+    InvalidCheckpoint(String),
     /// The session ended while Git read the project.
     Closed,
 }
@@ -99,7 +106,7 @@ impl fmt::Display for DiffError {
             Self::NotARepository => f.write_str("not inside a Git working tree"),
             Self::Git(error) => write!(f, "git failed: {error}"),
             Self::GitStart(error) => write!(f, "git could not start: {error}"),
-            Self::Io(error) => write!(f, "snapshot store failed: {error}"),
+            Self::Io(error) => write!(f, "snapshot index failed: {error}"),
             Self::TooLarge => write!(
                 f,
                 "the diff is larger than {} MiB",
@@ -108,10 +115,9 @@ impl fmt::Display for DiffError {
             Self::TimedOut(limit) => {
                 write!(f, "git did not finish within {} s", limit.as_secs())
             }
-            Self::NotCaptured(reason) => write!(
-                f,
-                "the project could not be captured before the run: {reason}"
-            ),
+            Self::NotCaptured(reason) => write!(f, "the project could not be captured: {reason}"),
+            Self::NoCheckpoint => f.write_str("the checkpoint no longer exists"),
+            Self::InvalidCheckpoint(id) => write!(f, "{id:?} cannot name a checkpoint"),
             Self::Closed => f.write_str("the session ended"),
         }
     }
@@ -119,13 +125,12 @@ impl fmt::Display for DiffError {
 
 impl std::error::Error for DiffError {}
 
-/// A Git working tree whose states can be captured and compared. Snapshots use a private index
-/// and object store, so the repository's own index and objects stay untouched.
+/// A Git working tree whose states can be captured and compared. Snapshots use a private index,
+/// so the project's own index stays untouched.
 #[derive(Debug)]
 pub struct WorkingTree {
     root: PathBuf,
     index: PathBuf,
-    objects: PathBuf,
     store: Store,
     /// Serializes use of the private index.
     busy: Mutex<()>,
@@ -171,14 +176,7 @@ impl WorkingTree {
         let lines = git(
             dir,
             &[],
-            &[
-                "rev-parse",
-                "--show-toplevel",
-                "--git-path",
-                "index",
-                "--git-path",
-                "objects",
-            ],
+            &["rev-parse", "--show-toplevel", "--git-path", "index"],
         )
         .await
         .map_err(|error| match error {
@@ -188,8 +186,7 @@ impl WorkingTree {
             error => error,
         })?;
         let mut lines = lines.lines();
-        let (Some(root), Some(index), Some(objects)) = (lines.next(), lines.next(), lines.next())
-        else {
+        let (Some(root), Some(index)) = (lines.next(), lines.next()) else {
             return Err(DiffError::NotARepository);
         };
         let absolute = |path: &str| {
@@ -201,19 +198,79 @@ impl WorkingTree {
             }
         };
         let store = Store(private_dir().map_err(DiffError::Io)?);
-        std::fs::create_dir(store.0.join("objects")).map_err(DiffError::Io)?;
         Ok(Self {
             root: PathBuf::from(root),
             index: absolute(index),
-            objects: absolute(objects),
             store,
             busy: Mutex::new(()),
         })
     }
 
-    /// Captures the current state, including untracked files that are not ignored.
+    /// Captures the current state, including untracked files that are not ignored, without a
+    /// ref; tests compare such states directly.
+    #[cfg(test)]
     pub async fn snapshot(&self) -> Result<Snapshot, DiffError> {
         Ok(Snapshot(self.write_tree().await?))
+    }
+
+    /// Captures the current state as a commit under `reference`, with the project's HEAD as its
+    /// parent when it has one, as T3 Code's checkpoints do.
+    pub async fn checkpoint(&self, reference: &str) -> Result<Snapshot, DiffError> {
+        let tree = self.write_tree().await?;
+        let head = self.resolve("HEAD^{commit}").await?;
+        let mut args = vec![
+            "commit-tree",
+            "--no-gpg-sign",
+            "-m",
+            "Watershed checkpoint",
+            tree.as_str(),
+        ];
+        if let Some(head) = &head {
+            args.extend(["-p", head.as_str()]);
+        }
+        // A fixed identity, so a checkpoint needs no Git identity of the user.
+        let identity: Vec<(&str, OsString)> = [
+            "GIT_AUTHOR_NAME",
+            "GIT_AUTHOR_EMAIL",
+            "GIT_COMMITTER_NAME",
+            "GIT_COMMITTER_EMAIL",
+        ]
+        .into_iter()
+        .map(|name| {
+            let value = if name.ends_with("EMAIL") {
+                CHECKPOINT_EMAIL
+            } else {
+                "Watershed"
+            };
+            (name, value.into())
+        })
+        .collect();
+        let commit = git(&self.root, &identity, &args).await?;
+        git(
+            &self.root,
+            &[],
+            &["update-ref", "--no-deref", reference, commit.trim()],
+        )
+        .await?;
+        Ok(Snapshot(tree))
+    }
+
+    /// The tree of the checkpoint `reference` names, or none when it names nothing.
+    pub async fn checkpointed(&self, reference: &str) -> Result<Option<Snapshot>, DiffError> {
+        Ok(self
+            .resolve(&format!("{reference}^{{tree}}"))
+            .await?
+            .map(Snapshot))
+    }
+
+    /// The object `name` names, or none when it names nothing.
+    async fn resolve(&self, name: &str) -> Result<Option<String>, DiffError> {
+        match git(&self.root, &[], &["rev-parse", "--verify", "--quiet", name]).await {
+            Ok(id) => Ok(Some(id.trim().to_owned())),
+            // `--quiet` fails silently only when the name names nothing.
+            Err(DiffError::Git(reason)) if reason.is_empty() => Ok(None),
+            Err(error) => Err(error),
+        }
     }
 
     /// Lists the files that changed from `from` to `to`.
@@ -430,28 +487,9 @@ impl WorkingTree {
     fn env(&self, index: &Path) -> Vec<(&'static str, OsString)> {
         vec![
             ("GIT_INDEX_FILE", index.into()),
-            ("GIT_OBJECT_DIRECTORY", self.store.0.join("objects").into()),
-            (
-                "GIT_ALTERNATE_OBJECT_DIRECTORIES",
-                quoted_alternate(&self.objects),
-            ),
             ("GIT_OPTIONAL_LOCKS", "0".into()),
         ]
     }
-}
-
-/// `path` as one entry of Git's colon-separated alternates list: a C-style quoted entry keeps a
-/// colon in the path.
-fn quoted_alternate(path: &Path) -> OsString {
-    let mut entry = vec![b'"'];
-    for &byte in path.as_os_str().as_bytes() {
-        if matches!(byte, b'"' | b'\\') {
-            entry.push(b'\\');
-        }
-        entry.push(byte);
-    }
-    entry.push(b'"');
-    OsString::from_vec(entry)
 }
 
 /// Runs the host's `git` in `dir` and returns at most [`MAX_OUTPUT_BYTES`] of its output.
@@ -515,8 +553,8 @@ fn git_command(dir: &Path, env: &[(&str, OsString)], args: &[&str]) -> Command {
             "core.fileMode=true",
             "-c",
             "core.sparseCheckout=false",
-            // Nothing lands in the project's Git directory, and a submodule's diff runs none
-            // of its commands.
+            // No split index lands in the project's Git directory, and a submodule's diff runs
+            // none of its commands.
             "-c",
             "core.splitIndex=false",
             "-c",

@@ -5,7 +5,7 @@ use meta_harness_core::{
     ContextPart, Decision, EntryKind, FileChange, ItemDetail, ItemKind, ItemStatus,
     MAX_RECORD_BYTES, Model, NotificationLevel, Queue, RecordKind, RequestKind, SessionEvent,
     StepContext, StoredSession, ToolOutcome, Trajectory, TrajectoryRecord, Transcript,
-    TranscriptItem, TreeNode, Usage, UserInput, visible_name,
+    TranscriptItem, TreeNode, TurnCheckpoints, Usage, UserInput, visible_name,
 };
 
 use crate::api::events::{
@@ -17,7 +17,7 @@ use crate::api::events::{
 use crate::api::history::{
     BridgeContextDetail, BridgeContextMessage, BridgeContextPart, BridgeEntryKind, BridgeRecord,
     BridgeRecordKind, BridgeStepContext, BridgeToolOutcome, BridgeTrajectory, BridgeTranscript,
-    BridgeTranscriptItem, BridgeTreeNode,
+    BridgeTranscriptItem, BridgeTreeNode, BridgeTurn,
 };
 use crate::api::session::{BridgeApprovalMode, BridgeModel, BridgeStoredSession};
 
@@ -204,6 +204,28 @@ impl From<StepContext> for BridgeStepContext {
             messages: int(context.messages),
             message_chars: int(context.message_chars),
             new_since_previous: context.new_since_previous,
+        }
+    }
+}
+
+impl From<TurnCheckpoints> for BridgeTurn {
+    fn from(turn: TurnCheckpoints) -> Self {
+        let counted = |count: fn(&meta_harness_core::ChangeCount) -> u64| {
+            turn.changed.as_ref().map(|changed| int(count(changed)))
+        };
+        Self {
+            files: counted(|changed| changed.files),
+            added: counted(|changed| changed.added),
+            removed: counted(|changed| changed.removed),
+            id: turn.turn,
+            start_entry: turn.start_entry,
+            end_entry: turn.end_entry,
+            number: int(turn.number),
+            prompt: turn.prompt,
+            started_ms: turn.started_ms.map(int),
+            ended_ms: turn.ended_ms.map(int),
+            ended: turn.ended,
+            failure: turn.failure,
         }
     }
 }

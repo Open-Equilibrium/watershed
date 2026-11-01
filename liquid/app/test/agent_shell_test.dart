@@ -1804,7 +1804,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 700));
     expect(
       find.text(
-        '↑↓ file · ←→ folder · ⌥↑↓ hunk · U unified/split · W whitespace',
+        'T turn · ↑↓ file · ←→ folder · ⌥↑↓ hunk · U unified/split · W whitespace',
       ),
       findsOneWidget,
     );

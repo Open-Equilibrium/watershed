@@ -4,17 +4,18 @@
 #![deny(missing_docs)]
 
 mod approval;
+mod checkpoint;
 mod diff;
 mod event;
 mod framing;
 mod history;
 mod pi;
-mod run_diff;
 mod session;
 mod stored;
 mod visible;
 
 pub use approval::ApprovalMode;
+pub use checkpoint::{Checkpoint, Checkpoints, Phase};
 pub use diff::{ChangeStatus, DiffError, FileChange, Whitespace};
 pub use event::{
     AgentEvent, Answer, ChangedLines, Decision, Delivery, EditChange, EditPreview, EntryKind,
@@ -23,11 +24,11 @@ pub use event::{
 };
 pub(crate) use framing::{Frame, LineFramer};
 pub use history::{
-    ContextDetail, ContextMessage, ContextPart, History, RecordKind, StepContext, TestCount,
-    ToolOutcome, Trajectory, TrajectoryRecord, Transcript, TranscriptItem,
+    ChangeCount, ContextDetail, ContextMessage, ContextPart, History, RecordKind, StepContext,
+    TestCount, ToolOutcome, Trajectory, TrajectoryRecord, Transcript, TranscriptItem,
+    TurnCheckpoints,
 };
 pub(crate) use pi::PiAdapter;
-pub use run_diff::{Capture, RunDiff};
 pub use session::{
     AgentCommand, CommandError, MAX_RECORD_BYTES, Model, Pending, Session, SessionEvent,
     SessionState, Stopper,

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import '../diff/turn_scope.dart';
 import '../rust/api/events.dart';
 import '../rust/api/history.dart';
 import '../rust/api/session.dart';
@@ -193,8 +194,10 @@ class SessionState {
     _generation++;
     _failing.clear();
     sessionTitle.value = null;
-    // The previous session's run no longer applies.
-    ran.value = false;
+    // The previous session's turns no longer apply.
+    turns.value = const [];
+    diffScope.value = const LatestTurn();
+    shown.value = null;
     changed.value = const [];
     changesProblem.value = null;
     _byId.clear();
@@ -347,26 +350,36 @@ class SessionState {
     }
   }
 
-  /// The files the latest run changed, as last read; null before the first read. The Diff tab
+  /// The turns of the current branch, oldest first, with what each changed.
+  final turns = ValueNotifier<List<BridgeTurn>>(const []);
+
+  /// Which turns the Diff tab compares.
+  final diffScope = ValueNotifier<DiffScope>(const LatestTurn());
+
+  /// The checkpoints the Diff tab compares, as last read; null while no turn ended.
+  final shown = ValueNotifier<Compared?>(null);
+
+  /// The files the shown turns changed, as last read; null before the first read. The Diff tab
   /// and its count show them.
   final changed = ValueNotifier<List<BridgeFileChange>?>(null);
 
-  /// Why the latest read of the changes failed; null after one that worked.
-  final changesProblem = ValueNotifier<String?>(null);
-
-  /// Whether a run started in this session since Liquid opened it; the Diff tab compares only
-  /// such a run with the project before it.
-  final ran = ValueNotifier(false);
+  /// Why the Diff tab shows no files, with its heading; null while it shows a list.
+  final changesProblem = ValueNotifier<({String title, String text})?>(null);
 
   /// Whether the changes leave out what is only whitespace; a change reads them
   /// again.
   final hideWhitespace = ValueNotifier(false);
 
-  /// Reads what the latest run changed. A failed read is reported once, and the Diff tab says
-  /// so instead of showing an earlier run's changes.
+  /// Shows `scope` in the Diff tab.
+  Future<void> showTurns(DiffScope scope) {
+    diffScope.value = scope;
+    return readChanges();
+  }
+
+  /// Reads the branch's turns and what the shown ones changed between their checkpoints. A
+  /// failed read is reported once, and the Diff tab says so instead of showing earlier changes.
   Future<void> readChanges() {
-    // Each read takes a snapshot of the project, so a read asked for meanwhile runs once after
-    // the current one instead of queueing.
+    // A read asked for meanwhile runs once after the current one instead of queueing.
     if (_readingChanges case final reading?) {
       _changesAgain = true;
       return reading;
@@ -391,25 +404,77 @@ class SessionState {
   Future<void> _readChangesOnce() async {
     final generation = _generation;
     try {
-      final read = await _backend.changes(hideWhitespace: hideWhitespace.value);
+      final read = await _backend.turns();
+      if (generation != _generation) return;
+      turns.value = read;
+      final pair = compared(read, diffScope.value);
+      shown.value = pair;
+      if (pair == null) {
+        reportRead('changes', null);
+        changesProblem.value = switch (read.lastOrNull?.failure) {
+          final failure? => (
+            title: 'No checkpoint',
+            text: 'Liquid could not capture the project: $failure',
+          ),
+          null => (
+            title: 'No finished turn yet',
+            text: 'A turn’s changes appear here when it ends.',
+          ),
+        };
+        changed.value = const [];
+        return;
+      }
+      final changes = await _backend.turnChanges(
+        pair.from.id,
+        pair.to.id,
+        hideWhitespace: hideWhitespace.value,
+      );
       if (generation != _generation) return;
       reportRead('changes', null);
-      changesProblem.value = read == null
-          ? 'This project is not in Git, so Liquid cannot show what a run changed.'
-          : null;
-      changed.value = read;
+      changesProblem.value = switch (changes.state) {
+        BridgeChangesState.shown => null,
+        BridgeChangesState.outsideGit => (
+          title: 'Not a Git repository',
+          text:
+              'This project has no Git repository, so Liquid keeps no checkpoints '
+              'and shows no turn changes.',
+        ),
+        BridgeChangesState.removed => (
+          title: 'Checkpoints removed',
+          text:
+              'This session’s checkpoints were removed, so these turns show no '
+              'changes.',
+        ),
+      };
+      changed.value = changes.files;
     } on Object catch (error) {
       if (generation != _generation) return;
       final problem = 'Could not show the changes: $error';
       reportRead('changes', problem);
-      changesProblem.value = problem;
+      changesProblem.value = (title: 'No changes shown', text: problem);
       changed.value = null;
     }
   }
 
-  /// One file's unified diff as the latest list of changes compared it.
-  Future<String> patch(String path) =>
-      _backend.patch(path, hideWhitespace: hideWhitespace.value);
+  /// Reads the turn that ended and adds what it changed below it in the chat.
+  Future<void> _endTurn() async {
+    final generation = _generation;
+    await readChanges();
+    if (generation != _generation) return;
+    if (turns.value.lastOrNull case final turn?) _chat.endTurn(turn);
+  }
+
+  /// One file's unified diff between the shown checkpoints.
+  Future<String> patch(String path) {
+    final pair = shown.value;
+    if (pair == null) return Future.value('');
+    return _backend.turnPatch(
+      pair.from.id,
+      pair.to.id,
+      path,
+      hideWhitespace: hideWhitespace.value,
+    );
+  }
 
   /// The branch tree and the Trajectory of each branch ending at an entry in `leaves`, or of
   /// the current branch.
@@ -521,14 +586,13 @@ class SessionState {
     switch (event.kind) {
       case BridgeEventKind.turnStarted:
         _turnActive = true;
-        ran.value = true;
         _stopping = false;
       case BridgeEventKind.turnCompleted || BridgeEventKind.turnAborted:
         _turnActive = false;
         _stopping = false;
         stored.value++;
         unawaited(loadTitle());
-        unawaited(readChanges());
+        unawaited(_endTurn());
       case BridgeEventKind.itemStarted:
         final started = event.item!;
         final view = ItemView(

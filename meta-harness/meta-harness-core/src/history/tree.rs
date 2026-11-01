@@ -172,9 +172,10 @@ fn summary(body: &Body, target: Option<String>) -> (EntryKind, String) {
         }
         Body::System(_) => (EntryKind::System, String::new()),
         Body::Approval { tool, .. } => (EntryKind::Approval, line(tool)),
-        Body::RequestTiming { .. } | Body::ToolTiming { .. } | Body::Custom => {
-            (EntryKind::Custom, String::new())
-        }
+        Body::RequestTiming { .. }
+        | Body::ToolTiming { .. }
+        | Body::Checkpoint { .. }
+        | Body::Custom => (EntryKind::Custom, String::new()),
         Body::Message { .. }
         | Body::CustomMessage { .. }
         | Body::BranchSummary { .. }

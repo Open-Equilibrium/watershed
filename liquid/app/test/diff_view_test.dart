@@ -104,21 +104,109 @@ void main() {
     },
   );
 
-  testWidgets('says when no run started yet and when a run changed nothing', (
+  testWidgets('says when no turn ended yet and when a turn changed nothing', (
     tester,
   ) async {
-    final backend = FakeBackend();
+    final backend = FakeBackend()
+      ..turnList = [turnOf('T1', number: 1, ended: false)];
     await show(tester, backend);
+    expect(find.text('No finished turn yet'), findsOneWidget);
     expect(
-      find.text('No run since Liquid opened this session'),
+      find.text('A turn’s changes appear here when it ends.'),
       findsOneWidget,
-      reason: 'a continued session\'s earlier runs are not compared',
     );
 
+    backend.turnList = [turnOf('T1', number: 1)];
     backend.controller.add(event(BridgeEventKind.turnStarted));
     backend.controller.add(event(BridgeEventKind.turnCompleted));
     await tester.pumpAndSettle();
-    expect(find.text('No changes in this run'), findsOneWidget);
+    expect(find.text('No changes in this turn'), findsOneWidget);
+    expect(find.text('Turn 1'), findsOneWidget, reason: 'the turn menu stays');
+  });
+
+  testWidgets('says why a turn has no checkpoint', (tester) async {
+    final backend = FakeBackend()
+      ..turnList = [
+        turnOf('T1', number: 1, failure: 'git did not finish within 60 s'),
+      ];
+    await show(tester, backend);
+    expect(find.text('No checkpoint'), findsOneWidget);
+    expect(
+      find.text(
+        'Liquid could not capture the project: git did not finish within 60 s',
+      ),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('chooses a turn or all turns from the turn menu and with T', (
+    tester,
+  ) async {
+    final backend = FakeBackend()
+      ..changed = [
+        BridgeFileChange(
+          path: 'a.ts',
+          shown: 'a.ts',
+          status: BridgeChangeStatus.modified,
+          added: 1,
+          removed: 0,
+        ),
+      ]
+      ..turnList = [
+        turnOf(
+          'T1',
+          number: 1,
+          prompt: 'Add rate limiting',
+          added: 59,
+          removed: 5,
+        ),
+        turnOf(
+          'T2',
+          number: 3,
+          prompt: 'Return 429',
+          startedMs: 1793527800000,
+          added: 12,
+          removed: 1,
+        ),
+        // Still running: its changes are not shown yet.
+        turnOf('T3', number: 4, ended: false, startedMs: 1793528400000),
+      ];
+    await show(tester, backend);
+    expect(
+      backend.compared.last,
+      'T2..T2',
+      reason: 'the latest turn that ended',
+    );
+    expect(find.text('Turn 3'), findsOneWidget);
+    expect(find.textContaining('“Return 429”'), findsOneWidget);
+
+    await press(tester, LogicalKeyboardKey.keyT);
+    expect(find.text('Latest turn · Turn 3'), findsOneWidget);
+    expect(
+      find.text('Turn 4'),
+      findsNothing,
+      reason: 'a running turn is not offered',
+    );
+    await tester.tap(find.text('Turn 1'));
+    await tester.pumpAndSettle();
+    expect(backend.compared.last, 'T1..T1');
+    expect(find.textContaining('“Add rate limiting”'), findsOneWidget);
+
+    await press(tester, LogicalKeyboardKey.keyT);
+    await tester.tap(find.text('All turns'));
+    await tester.pumpAndSettle();
+    expect(
+      backend.compared.last,
+      'T1..T2',
+      reason: 'the first turn\'s start to the last end',
+    );
+    expect(find.textContaining('All turns of this branch'), findsOneWidget);
+  });
+
+  testWidgets('says when the checkpoints were removed', (tester) async {
+    final backend = FakeBackend()..checkpointsRemoved = true;
+    await show(tester, backend);
+    expect(find.text('Checkpoints removed'), findsOneWidget);
   });
 
   testWidgets('shows a file\'s name with hiding characters written out', (
@@ -301,9 +389,11 @@ void main() {
   testWidgets('says when the project is not in Git', (tester) async {
     final backend = FakeBackend()..changed = null;
     final state = await show(tester, backend);
+    expect(find.text('Not a Git repository'), findsOneWidget);
     expect(
       find.text(
-        'This project is not in Git, so Liquid cannot show what a run changed.',
+        'This project has no Git repository, so Liquid keeps no checkpoints and shows no '
+        'turn changes.',
       ),
       findsOneWidget,
     );

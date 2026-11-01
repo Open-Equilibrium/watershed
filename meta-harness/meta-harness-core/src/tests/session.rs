@@ -624,6 +624,91 @@ fn approval_with(id: &str, tool: &str, arguments: &str) -> String {
     )
 }
 
+/// A throwaway Git project with one commit, for an agent that works in it.
+fn git_project(name: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("meta-harness-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("project");
+    std::fs::write(dir.join("a.txt"), "a\n").expect("file");
+    for args in [
+        &["init", "-q"][..],
+        &["add", "."],
+        &[
+            "-c",
+            "user.name=T",
+            "-c",
+            "user.email=t@t",
+            "commit",
+            "-q",
+            "-m",
+            "base",
+        ],
+    ] {
+        let status = std::process::Command::new("git")
+            .args(args)
+            .current_dir(&dir)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .status()
+            .expect("git runs");
+        assert!(status.success(), "git {args:?}");
+    }
+    dir
+}
+
+#[test]
+fn takes_the_checkpoints_the_extension_asks_for_without_asking_the_user() {
+    run(async {
+        let project = git_project("checkpoints");
+        let request = |id: &str, turn: &str, phase: &str| {
+            format!(
+                r#"printf '%s\n' '{{"type":"extension_ui_request","id":"{id}","method":"input","title":"watershed.checkpoint {{\"session\":\"s1\",\"turn\":\"{turn}\",\"phase\":\"{phase}\"}}","placeholder":""}}'
+"#
+            )
+        };
+        let script = [
+            request("c1", "t1", "start"),
+            expect_response(&[r#""id":"c1""#, r#"\"ok\":true"#]),
+            // The turn changed one file between its checkpoints.
+            "printf 'b\\n' > a.txt\n".to_owned(),
+            request("c2", "t1", "end"),
+            expect_response(&[
+                r#""id":"c2""#,
+                r#"\"ok\":true"#,
+                r#"\"files\":1"#,
+                r#"\"added\":1"#,
+                r#"\"removed\":1"#,
+            ]),
+            // An id that could leave Watershed's refs is refused, and pi learns why.
+            request("c3", "../x", "start"),
+            expect_response(&[r#""id":"c3""#, "cannot name a checkpoint"]),
+        ]
+        .concat();
+        let command = AgentCommand {
+            program: "/bin/sh".into(),
+            args: vec!["-c".into(), script.into()],
+            extension: EXTENSION.into(),
+            session: None,
+            cwd: project.clone(),
+        };
+        let (_session, mut events) = Session::start(&command).expect("fake agent starts");
+        assert_eq!(
+            next(&mut events).await,
+            exited(true),
+            "no question reached the user"
+        );
+        let refs = std::process::Command::new("git")
+            .args(["for-each-ref", "--format=%(refname)", "refs/watershed"])
+            .current_dir(&project)
+            .output()
+            .expect("git runs");
+        assert_eq!(
+            String::from_utf8_lossy(&refs.stdout),
+            "refs/watershed/checkpoints/s1/t1/end\nrefs/watershed/checkpoints/s1/t1/start\n"
+        );
+        let _ = std::fs::remove_dir_all(&project);
+    });
+}
+
 #[test]
 fn answers_extension_questions() {
     run(async {

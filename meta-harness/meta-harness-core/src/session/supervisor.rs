@@ -15,7 +15,8 @@ use tokio::sync::{mpsc, oneshot};
 use super::{CommandError, MAX_RECORD_BYTES, SessionEvent, State, Write, switched, ui_response};
 use crate::approval::{Allowance, needs_user};
 use crate::framing::keep_end;
-use crate::{AgentEvent, Frame, LineFramer, NotificationLevel, PiAdapter, RequestId};
+use crate::pi::checkpoint_request;
+use crate::{AgentEvent, Checkpoint, Frame, LineFramer, NotificationLevel, PiAdapter, RequestId};
 
 const READ_BUFFER: usize = 64 * 1024;
 
@@ -39,7 +40,12 @@ pub(super) struct Supervisor {
     /// The end of the agent's error output so far, and the task that reads it.
     pub(super) error_output: Arc<Mutex<Vec<u8>>>,
     pub(super) error_reader: tokio::task::JoinHandle<()>,
+    /// Checkpoint requests, taken one after another in the order the agent asked.
+    pub(super) captures: mpsc::Sender<CheckpointRequest>,
 }
+
+/// A checkpoint the agent asked for, or why its request is unreadable.
+pub(super) type CheckpointRequest = (RequestId, Result<Checkpoint, String>);
 
 impl Supervisor {
     pub(super) async fn run(
@@ -136,6 +142,11 @@ impl Supervisor {
         if record.get("type").and_then(Value::as_str) == Some("response") {
             self.answer_command(record);
             return true;
+        }
+        // The core answers checkpoint requests itself; the user never sees them.
+        if let Some(request) = checkpoint_request(&record) {
+            let captures = self.captures.clone();
+            return self.unless_killed(captures.send(request)).await.is_some();
         }
         for event in self.adapter.translate(&record) {
             let mut expiry = None;

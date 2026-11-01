@@ -14,7 +14,10 @@ use tokio::sync::{mpsc, oneshot};
 
 use crate::approval::{Allowance, ApprovalMode};
 use crate::pi::queue;
-use crate::{AgentEvent, Answer, Decision, Delivery, History, PiAdapter, Queue, RequestId};
+use crate::{
+    AgentEvent, Answer, Checkpoint, Checkpoints, Decision, Delivery, History, Phase, PiAdapter,
+    Queue, RequestId, Whitespace,
+};
 use supervisor::{Supervisor, read_end};
 
 mod supervisor;
@@ -25,6 +28,9 @@ pub const MAX_RECORD_BYTES: usize = 16 * 1024 * 1024;
 const EVENT_BUFFER: usize = 256;
 /// Records buffered for the agent's input.
 const WRITE_BUFFER: usize = 64;
+
+/// Checkpoint requests waiting for their capture; pi waits for each, so few ever wait.
+const CAPTURE_BUFFER: usize = 8;
 
 /// How to start pi in RPC mode; the session adds pi's own arguments.
 #[derive(Debug, Clone)]
@@ -273,6 +279,8 @@ pub struct Session {
     cwd: PathBuf,
     /// The extension file pi was told to load.
     extension: PathBuf,
+    /// The project's checkpoints at each turn's start and end.
+    checkpoints: Arc<Checkpoints>,
 }
 
 impl Session {
@@ -315,6 +323,9 @@ impl Session {
             ..Shared::default()
         })));
         tokio::spawn(write(stdin, writes));
+        let checkpoints = Arc::new(Checkpoints::new(&command.cwd));
+        let (captures, requests) = mpsc::channel(CAPTURE_BUFFER);
+        tokio::spawn(capture(checkpoints.clone(), writer.clone(), requests));
         let ended = Arc::new(tokio::sync::Mutex::new(false));
         let supervisor = Supervisor {
             events: events.clone(),
@@ -326,6 +337,7 @@ impl Session {
             kill_requested: false,
             error_output,
             error_reader,
+            captures,
         };
         tokio::spawn(supervisor.run(child, stdout, exit));
         let writer_for_stop = writer.clone();
@@ -343,8 +355,15 @@ impl Session {
             history: History::default(),
             cwd: command.cwd.clone(),
             extension: by_name(&command.extension),
+            checkpoints,
         };
         Ok((session, receiver))
+    }
+
+    /// The project's checkpoints, which the Diff tab compares; reading them never holds the
+    /// session.
+    pub fn checkpoints(&self) -> Arc<Checkpoints> {
+        self.checkpoints.clone()
     }
 
     /// Sends a prompt that starts a turn.
@@ -697,6 +716,52 @@ impl Session {
             .send(ui_response(request, answer))
             .await
             .map_err(|_| CommandError::Closed)
+    }
+}
+
+/// Takes the checkpoints the agent asks for, in order, and tells it whether each was taken; a
+/// capture in a large project never holds up the agent's other records.
+async fn capture(
+    checkpoints: Arc<Checkpoints>,
+    writer: mpsc::Sender<Write>,
+    mut requests: mpsc::Receiver<supervisor::CheckpointRequest>,
+) {
+    while let Some((request, checkpoint)) = requests.recv().await {
+        let outcome = match checkpoint {
+            Ok(checkpoint) => match checkpoints.capture(&checkpoint).await {
+                Ok(()) => taken(&checkpoints, &checkpoint).await,
+                Err(error) => json!({ "error": error.to_string() }),
+            },
+            Err(reason) => json!({ "error": reason }),
+        };
+        let answer = json!({ "value": outcome.to_string() });
+        if writer.send(ui_response(&request, answer)).await.is_err() {
+            break;
+        }
+    }
+}
+
+/// The answer to a checkpoint that was taken; a turn's end also counts what the turn changed,
+/// so listing turns needs no Git.
+async fn taken(checkpoints: &Checkpoints, checkpoint: &Checkpoint) -> Value {
+    if checkpoint.phase == Phase::Start {
+        return json!({ "ok": true });
+    }
+    let start = Checkpoint {
+        phase: Phase::Start,
+        ..checkpoint.clone()
+    };
+    match checkpoints
+        .changes(&start, checkpoint, Whitespace::Shown)
+        .await
+    {
+        Ok(changes) => json!({
+            "ok": true,
+            "files": changes.len(),
+            "added": changes.iter().map(|change| change.added).sum::<u64>(),
+            "removed": changes.iter().map(|change| change.removed).sum::<u64>(),
+        }),
+        Err(_) => json!({ "ok": true }),
     }
 }
 

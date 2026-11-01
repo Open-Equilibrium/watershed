@@ -88,14 +88,39 @@ class FakeBackend implements SessionBackend {
   /// The changes once whitespace is hidden; [changed] when null.
   List<BridgeFileChange>? changedWithoutWhitespace;
 
+  /// The turns of the current branch; by default one that ended.
+  List<BridgeTurn> turnList = [turnOf('T1', number: 1)];
+
+  /// Whether the compared checkpoints were removed.
+  bool checkpointsRemoved = false;
+
+  /// The checkpoints each read compared, as `from..to`.
+  final compared = <String>[];
+
   @override
-  Future<List<BridgeFileChange>?> changes({
+  Future<List<BridgeTurn>> turns() async => turnList;
+
+  @override
+  Future<BridgeTurnChanges> turnChanges(
+    String from,
+    String to, {
     required bool hideWhitespace,
   }) async {
     changeReads++;
+    compared.add('$from..$to');
     await changesGate?.future;
     if (changesError case final error?) throw error;
-    return hideWhitespace ? changedWithoutWhitespace ?? changed : changed;
+    final files = hideWhitespace
+        ? changedWithoutWhitespace ?? changed
+        : changed;
+    return BridgeTurnChanges(
+      state: files == null
+          ? BridgeChangesState.outsideGit
+          : checkpointsRemoved
+          ? BridgeChangesState.removed
+          : BridgeChangesState.shown,
+      files: checkpointsRemoved ? const [] : files ?? const [],
+    );
   }
 
   /// What reading a patch fails with, like the bridge does.
@@ -108,7 +133,12 @@ class FakeBackend implements SessionBackend {
   final patchReads = <String>[];
 
   @override
-  Future<String> patch(String path, {required bool hideWhitespace}) async {
+  Future<String> turnPatch(
+    String from,
+    String to,
+    String path, {
+    required bool hideWhitespace,
+  }) async {
     patchReads.add(hideWhitespace ? '$path without whitespace' : path);
     await patchGate?.future;
     if (patchError case final error?) throw error;
@@ -381,4 +411,32 @@ BridgeTranscriptItem chatItem(
   text: text,
   tool: tool,
   failed: false,
+);
+
+/// A turn of the current branch; it ended unless `ended` says otherwise.
+BridgeTurn turnOf(
+  String id, {
+  required int number,
+  String prompt = 'Add rate limiting',
+  bool ended = true,
+  int startedMs = 1793527200000,
+  String? failure,
+  int? files,
+  int? added,
+  int? removed,
+  String? startEntry,
+  String? endEntry,
+}) => BridgeTurn(
+  id: id,
+  startEntry: startEntry ?? '$id-start',
+  endEntry: ended ? endEntry ?? '$id-end' : null,
+  number: number,
+  prompt: prompt,
+  startedMs: startedMs,
+  endedMs: ended ? startedMs + 120000 : null,
+  ended: ended && failure == null,
+  failure: failure,
+  files: files ?? (added == null ? null : 1),
+  added: added,
+  removed: removed,
 );

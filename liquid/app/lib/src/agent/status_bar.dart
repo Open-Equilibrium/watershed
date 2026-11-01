@@ -312,8 +312,7 @@ class _NoticeListState extends State<_NoticeList> {
                                           ),
                                         ),
                                         Text(
-                                          '${notice.at.hour.toString().padLeft(2, '0')}:'
-                                          '${notice.at.minute.toString().padLeft(2, '0')}',
+                                          formatClock(notice.at),
                                           style: small,
                                         ),
                                         const SizedBox(width: WsMetrics.space2),

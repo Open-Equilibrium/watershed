@@ -1,13 +1,14 @@
 mod approval;
+mod checkpoint;
 mod diff;
 mod framing;
 mod outcome;
 mod pi;
-mod run_diff;
 mod session;
 mod stored;
 mod trajectory;
 mod transcript;
+mod turns;
 mod visible;
 
 /// `text` as one word of a POSIX shell command, so spaces and quotes in a temporary directory

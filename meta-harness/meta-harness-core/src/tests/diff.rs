@@ -61,21 +61,6 @@ impl Drop for Repo {
     }
 }
 
-fn count_files(dir: &Path) -> usize {
-    std::fs::read_dir(dir).map_or(0, |entries| {
-        entries
-            .flatten()
-            .map(|entry| {
-                if entry.path().is_dir() {
-                    count_files(&entry.path())
-                } else {
-                    1
-                }
-            })
-            .sum()
-    })
-}
-
 fn run<F: std::future::Future>(test: F) -> F::Output {
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -85,7 +70,7 @@ fn run<F: std::future::Future>(test: F) -> F::Output {
 }
 
 #[test]
-fn diffs_a_run_against_its_snapshot_without_touching_the_repository() {
+fn diffs_a_run_against_its_snapshot_without_touching_the_projects_index() {
     run(async {
         let repo = Repo::new("run");
         repo.write("a.txt", "old\nsame\n");
@@ -99,7 +84,6 @@ fn diffs_a_run_against_its_snapshot_without_touching_the_repository() {
             .await
             .expect("repository opens");
         let index_before = std::fs::read(repo.path().join(".git/index")).expect("index");
-        let objects_before = count_files(&repo.path().join(".git/objects"));
         let snapshot = tree.snapshot().await.expect("snapshot");
 
         repo.write("a.txt", "new\nsame\n");
@@ -147,10 +131,6 @@ fn diffs_a_run_against_its_snapshot_without_touching_the_repository() {
         assert_eq!(
             std::fs::read(repo.path().join(".git/index")).expect("index"),
             index_before
-        );
-        assert_eq!(
-            count_files(&repo.path().join(".git/objects")),
-            objects_before
         );
         assert_ne!(
             repo.git(&["status", "--porcelain"]),

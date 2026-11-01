@@ -8,6 +8,7 @@ import '../appearance.dart';
 import '../controls.dart';
 import '../diff/diff_settings.dart';
 import '../diff/diff_view.dart';
+import '../diff/turn_scope.dart';
 import '../rust/api/events.dart';
 import '../session/session_state.dart';
 import '../shortcuts/first_start.dart';
@@ -305,6 +306,12 @@ class _AgentShellState extends State<AgentShell> {
                                     state: widget.state,
                                     info: widget.info,
                                     input: input,
+                                    onOpenDiff: (turn) {
+                                      widget.state.diffScope.value = OneTurn(
+                                        turn,
+                                      );
+                                      _tab.value = AgentTab.diff;
+                                    },
                                   ),
                                   AgentTab.diff => DiffView(
                                     state: widget.state,

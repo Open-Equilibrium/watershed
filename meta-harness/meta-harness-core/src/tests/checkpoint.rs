@@ -1,0 +1,729 @@
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::time::Duration;
+
+use crate::{ChangeStatus, Checkpoint, Checkpoints, DiffError, FileChange, Phase, Whitespace};
+
+/// A throwaway Git repository with one committed file, `a.txt`.
+struct Repo(PathBuf);
+
+impl Repo {
+    fn new(name: &str) -> Self {
+        let dir = std::env::temp_dir().join(format!(
+            "watershed-checkpoint-{name}-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("repository directory");
+        let repo = Self(dir);
+        repo.git(&["init", "-q"]);
+        repo.write("a.txt", "old\n");
+        repo.git(&["add", "."]);
+        repo.git(&["commit", "-q", "-m", "base"]);
+        repo
+    }
+
+    fn git(&self, args: &[&str]) -> String {
+        let output = Command::new("git")
+            .args([
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=test@example.com",
+                "-c",
+                "commit.gpgsign=false",
+            ])
+            .args(args)
+            .current_dir(&self.0)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .output()
+            .expect("git runs");
+        assert!(
+            output.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout).expect("UTF-8 output")
+    }
+
+    fn write(&self, path: &str, text: &str) {
+        std::fs::write(self.0.join(path), text).expect("file written");
+    }
+
+    fn path(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for Repo {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+fn run<F: std::future::Future>(test: F) -> F::Output {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("test runtime starts")
+        .block_on(test)
+}
+
+fn modified(path: &str) -> FileChange {
+    FileChange {
+        path: path.to_owned(),
+        status: ChangeStatus::Modified,
+        added: 1,
+        removed: 1,
+    }
+}
+
+/// Turn `turn`'s checkpoint at `phase` in the session `s1`.
+fn at(turn: &str, phase: Phase) -> Checkpoint {
+    Checkpoint {
+        session: "s1".to_owned(),
+        turn: turn.to_owned(),
+        phase,
+    }
+}
+
+/// Takes turn `turn`'s start checkpoint, lets `work` change the project and takes its end.
+async fn turn(checkpoints: &Checkpoints, turn: &str, work: impl FnOnce()) {
+    checkpoints
+        .capture(&at(turn, Phase::Start))
+        .await
+        .expect("start captured");
+    work();
+    checkpoints
+        .capture(&at(turn, Phase::End))
+        .await
+        .expect("end captured");
+}
+
+async fn changes_of(checkpoints: &Checkpoints, id: &str) -> Result<Vec<FileChange>, DiffError> {
+    checkpoints
+        .changes(
+            &at(id, Phase::Start),
+            &at(id, Phase::End),
+            Whitespace::Shown,
+        )
+        .await
+}
+
+#[test]
+fn a_turn_compares_its_end_with_its_start() {
+    run(async {
+        let repo = Repo::new("turns");
+        let checkpoints = Checkpoints::new(repo.path());
+        turn(&checkpoints, "t1", || repo.write("a.txt", "new\n")).await;
+        // Later changes belong to no turn yet.
+        repo.write("a.txt", "newer\n");
+        assert_eq!(
+            changes_of(&checkpoints, "t1").await.expect("changes"),
+            [modified("a.txt")]
+        );
+        let patch = checkpoints
+            .patch(
+                &at("t1", Phase::Start),
+                &at("t1", Phase::End),
+                "a.txt",
+                Whitespace::Shown,
+            )
+            .await
+            .expect("patch");
+        assert!(patch.contains("-old\n+new\n"), "{patch}");
+
+        // Changes between turns, such as the user's own edits, belong to neither.
+        turn(&checkpoints, "t2", || repo.write("a.txt", "newest\n")).await;
+        let patch = checkpoints
+            .patch(
+                &at("t2", Phase::Start),
+                &at("t2", Phase::End),
+                "a.txt",
+                Whitespace::Shown,
+            )
+            .await
+            .expect("patch");
+        assert!(patch.contains("-newer\n+newest\n"), "{patch}");
+        // All turns: the first turn's start against the last turn's end.
+        let all = checkpoints
+            .patch(
+                &at("t1", Phase::Start),
+                &at("t2", Phase::End),
+                "a.txt",
+                Whitespace::Shown,
+            )
+            .await
+            .expect("patch");
+        assert!(all.contains("-old\n+newest\n"), "{all}");
+    });
+}
+
+#[test]
+fn checkpoints_are_commits_under_watershed_refs_that_leave_the_project_alone() {
+    run(async {
+        let repo = Repo::new("refs");
+        repo.write(".gitignore", "secret.env\n");
+        repo.git(&["add", ".gitignore"]);
+        repo.git(&["commit", "-q", "-m", "ignore"]);
+        repo.write("secret.env", "TOKEN=1\n");
+        repo.write("b.txt", "untracked\n");
+        repo.git(&["branch", "feature"]);
+        let index = std::fs::read(repo.path().join(".git/index")).expect("index");
+        let (head, status) = (
+            repo.git(&["rev-parse", "HEAD"]),
+            repo.git(&["status", "--porcelain"]),
+        );
+        let branches = repo.git(&["for-each-ref", "refs/heads", "refs/tags"]);
+
+        let checkpoints = Checkpoints::new(repo.path());
+        checkpoints
+            .capture(&at("t1", Phase::Start))
+            .await
+            .expect("captured");
+
+        let reference = "refs/watershed/checkpoints/s1/t1/start";
+        assert_eq!(repo.git(&["rev-parse", &format!("{reference}^")]), head);
+        let files = repo.git(&["ls-tree", "-r", "--name-only", reference]);
+        assert_eq!(
+            files.lines().collect::<Vec<_>>(),
+            [".gitignore", "a.txt", "b.txt"],
+            "new files count, ignored ones stay out"
+        );
+        assert_eq!(
+            std::fs::read(repo.path().join(".git/index")).expect("index"),
+            index
+        );
+        assert_eq!(repo.git(&["rev-parse", "HEAD"]), head);
+        assert_eq!(repo.git(&["status", "--porcelain"]), status);
+        assert_eq!(
+            repo.git(&["for-each-ref", "refs/heads", "refs/tags"]),
+            branches
+        );
+        assert!(
+            repo.git(&["log", "--all", "--oneline"])
+                .contains("Watershed checkpoint"),
+            "the commit exists"
+        );
+        assert!(
+            !repo
+                .git(&["log", "--oneline", "feature"])
+                .contains("Watershed checkpoint"),
+            "it sits on no branch"
+        );
+    });
+}
+
+#[test]
+fn checkpoints_run_none_of_the_projects_hooks() {
+    use std::os::unix::fs::PermissionsExt;
+    run(async {
+        let repo = Repo::new("hooks");
+        for hook in ["reference-transaction", "post-index-change", "post-commit"] {
+            let path = repo.path().join(".git/hooks").join(hook);
+            std::fs::write(&path, format!("#!/bin/sh\ntouch ran-{hook}\n")).expect("hook");
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).expect("mode");
+        }
+        let checkpoints = Checkpoints::new(repo.path());
+        turn(&checkpoints, "t1", || repo.write("a.txt", "new\n")).await;
+        let ran: Vec<_> = std::fs::read_dir(repo.path())
+            .expect("project")
+            .flatten()
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .filter(|name| name.starts_with("ran-"))
+            .collect();
+        assert!(ran.is_empty(), "{ran:?}");
+    });
+}
+
+#[test]
+fn a_project_without_commits_gets_checkpoints_without_a_parent() {
+    run(async {
+        let dir =
+            std::env::temp_dir().join(format!("watershed-checkpoint-empty-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("directory");
+        let repo = Repo(dir);
+        repo.git(&["init", "-q"]);
+        let checkpoints = Checkpoints::new(repo.path());
+        turn(&checkpoints, "t1", || repo.write("a.txt", "new\n")).await;
+        assert_eq!(
+            changes_of(&checkpoints, "t1").await.expect("changes"),
+            [FileChange {
+                path: "a.txt".to_owned(),
+                status: ChangeStatus::Added,
+                added: 1,
+                removed: 0,
+            }]
+        );
+    });
+}
+
+#[test]
+fn ids_that_cannot_name_a_ref_are_refused() {
+    run(async {
+        let repo = Repo::new("ids");
+        let checkpoints = Checkpoints::new(repo.path());
+        let long = "x".repeat(129);
+        for (session, turn) in [
+            ("..", "t"),
+            ("s/../x", "t"),
+            ("s", "a/b"),
+            ("s", ""),
+            ("s", "t.lock"),
+            ("s", "t\n"),
+            ("s", "@{1}"),
+            ("s", long.as_str()),
+        ] {
+            let checkpoint = Checkpoint {
+                session: session.to_owned(),
+                turn: turn.to_owned(),
+                phase: Phase::Start,
+            };
+            let refused = checkpoints.capture(&checkpoint).await;
+            assert!(
+                matches!(refused, Err(DiffError::InvalidCheckpoint(_))),
+                "{session:?} {turn:?}: {refused:?}"
+            );
+        }
+        assert_eq!(repo.git(&["for-each-ref", "refs/watershed"]), "");
+    });
+}
+
+#[test]
+fn a_missing_checkpoint_is_reported_instead_of_unchanged() {
+    run(async {
+        let repo = Repo::new("missing");
+        let checkpoints = Checkpoints::new(repo.path());
+        checkpoints
+            .capture(&at("t1", Phase::Start))
+            .await
+            .expect("start captured");
+        assert!(matches!(
+            changes_of(&checkpoints, "t1").await,
+            Err(DiffError::NoCheckpoint)
+        ));
+    });
+}
+
+#[test]
+fn a_git_that_does_not_answer_at_open_is_reported() {
+    run(async {
+        let repo = Repo::new("open-limit");
+        // No time for Git to answer, as a hung Git would not.
+        let checkpoints = Checkpoints::with_timeout(repo.path(), Duration::ZERO);
+        assert!(matches!(
+            checkpoints.capture(&at("t1", Phase::Start)).await,
+            Err(DiffError::NotCaptured(_))
+        ));
+    });
+}
+
+#[test]
+fn project_settings_that_skip_files_hide_no_change() {
+    run(async {
+        // Files the project marks as unchanged or as outside its work, and a setting that
+        // trusts the index over the files; either way Git would skip the file.
+        let marked = Repo::new("assume-unchanged");
+        marked.git(&["update-index", "--assume-unchanged", "a.txt"]);
+        let skipped = Repo::new("skip-worktree");
+        skipped.write("b.txt", "other\n");
+        skipped.git(&["add", "b.txt"]);
+        skipped.git(&["commit", "-q", "-m", "b"]);
+        skipped.git(&["update-index", "--skip-worktree", "a.txt"]);
+        let trusting = Repo::new("ignore-stat");
+        trusting.git(&["config", "core.ignoreStat", "true"]);
+        for repo in [marked, skipped, trusting] {
+            let checkpoints = Checkpoints::new(repo.path());
+            turn(&checkpoints, "t1", || repo.write("a.txt", "new\n")).await;
+            repo.write("a.txt", "newer\n");
+            turn(&checkpoints, "t2", || repo.write("a.txt", "newest\n")).await;
+            for id in ["t1", "t2"] {
+                assert_eq!(
+                    changes_of(&checkpoints, id).await.expect("changes"),
+                    [modified("a.txt")],
+                    "{id} in {}",
+                    repo.path().display()
+                );
+            }
+        }
+    });
+}
+
+#[test]
+fn a_file_made_executable_shows_although_the_project_ignores_modes() {
+    use std::os::unix::fs::PermissionsExt;
+    run(async {
+        let repo = Repo::new("file-mode");
+        repo.git(&["config", "core.fileMode", "false"]);
+        let checkpoints = Checkpoints::new(repo.path());
+        let file = repo.path().join("a.txt");
+        turn(&checkpoints, "t1", || {
+            std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o755)).expect("mode")
+        })
+        .await;
+        assert_eq!(
+            changes_of(&checkpoints, "t1").await.expect("changes"),
+            [FileChange {
+                added: 0,
+                removed: 0,
+                ..modified("a.txt")
+            }]
+        );
+    });
+}
+
+#[test]
+fn a_first_capture_that_failed_still_clears_the_projects_marks() {
+    run(async {
+        let repo = Repo::new("unmark-retry");
+        repo.git(&["update-index", "--assume-unchanged", "a.txt"]);
+        let mut checkpoints = Checkpoints::new(repo.path());
+        // Opened in time; then the first capture runs out of time while it clears the marks.
+        let _ = checkpoints.store().await;
+        checkpoints.set_timeout(Duration::ZERO);
+        assert!(checkpoints.capture(&at("t0", Phase::Start)).await.is_err());
+
+        checkpoints.set_timeout(Duration::from_secs(60));
+        turn(&checkpoints, "t1", || repo.write("a.txt", "new\n")).await;
+        assert_eq!(
+            changes_of(&checkpoints, "t1").await.expect("changes"),
+            [modified("a.txt")],
+            "the marks are cleared on the next capture"
+        );
+    });
+}
+
+#[test]
+fn checkpoints_add_only_objects_and_refs_to_the_projects_git_directory() {
+    run(async {
+        let repo = Repo::new("split-index");
+        repo.git(&["config", "core.splitIndex", "true"]);
+        let listing = || {
+            let mut names: Vec<_> = std::fs::read_dir(repo.path().join(".git"))
+                .expect(".git")
+                .map(|entry| entry.expect("entry").file_name())
+                .collect();
+            names.sort();
+            names
+        };
+        let before = listing();
+        let checkpoints = Checkpoints::new(repo.path());
+        turn(&checkpoints, "t1", || repo.write("a.txt", "new\n")).await;
+        assert_eq!(
+            changes_of(&checkpoints, "t1").await.expect("changes"),
+            [modified("a.txt")]
+        );
+        assert_eq!(listing(), before);
+    });
+}
+
+#[test]
+fn a_submodules_diff_runs_none_of_its_commands() {
+    run(async {
+        let sub = Repo::new("submodule-inner");
+        // The submodule's own textconv would write a marker when its diff runs.
+        let marker = sub.path().join("ran");
+        let textconv = format!("touch {}; cat", super::shell_word(marker.display()));
+        sub.git(&["config", "diff.mark.textconv", &textconv]);
+        sub.write(".gitattributes", "*.txt diff=mark\n");
+        sub.git(&["add", "."]);
+        sub.git(&["commit", "-q", "-m", "attributes"]);
+        let repo = Repo::new("submodule-outer");
+        repo.git(&["config", "diff.submodule", "diff"]);
+        repo.git(&[
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            "-q",
+            &sub.path().display().to_string(),
+            "sub",
+        ]);
+        repo.git(&["commit", "-q", "-m", "submodule"]);
+        let inner = repo.path().join("sub");
+        let git_in = |args: &[&str]| {
+            let status = Command::new("git")
+                .args(["-c", "user.name=Test", "-c", "user.email=test@example.com"])
+                .args(args)
+                .current_dir(&inner)
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .status()
+                .expect("git runs");
+            assert!(status.success(), "{args:?}");
+        };
+        git_in(&["config", "diff.mark.textconv", &textconv]);
+        let checkpoints = Checkpoints::new(repo.path());
+        turn(&checkpoints, "t1", || {
+            std::fs::write(inner.join("a.txt"), "changed\n").expect("file");
+            git_in(&["commit", "-q", "-am", "inner change"]);
+        })
+        .await;
+
+        let changes = changes_of(&checkpoints, "t1").await.expect("changes");
+        assert_eq!(changes.len(), 1, "{changes:?}");
+        let _ = checkpoints
+            .patch(
+                &at("t1", Phase::Start),
+                &at("t1", Phase::End),
+                "sub",
+                Whitespace::Shown,
+            )
+            .await
+            .expect("patch");
+        assert!(!marker.exists(), "the submodule's textconv ran");
+        git_in(&["diff", "--output=/dev/null", "HEAD~1", "HEAD"]);
+        assert!(marker.exists(), "the textconv runs where Git uses it");
+    });
+}
+
+#[test]
+fn captures_that_wait_for_each_other_count_only_their_own_git_against_the_limit() {
+    run(async {
+        let repo = Repo::new("queued");
+        let limit = Duration::from_secs(2);
+        let checkpoints = std::sync::Arc::new(Checkpoints::with_timeout(repo.path(), limit));
+        let _ = checkpoints.store().await;
+        // Another capture holds the turn for longer than one capture's limit.
+        let held = checkpoints.hold().await;
+        let waiting = tokio::spawn({
+            let checkpoints = checkpoints.clone();
+            async move { checkpoints.capture(&at("t1", Phase::Start)).await }
+        });
+        tokio::time::sleep(limit + Duration::from_millis(500)).await;
+        assert!(!waiting.is_finished(), "the capture waits for its turn");
+        drop(held);
+        assert!(
+            matches!(waiting.await.expect("capture ends"), Ok(())),
+            "waiting did not count against the capture's limit"
+        );
+    });
+}
+
+#[test]
+fn a_project_outside_git_says_so_instead_of_showing_no_changes() {
+    run(async {
+        let dir = std::env::temp_dir().join(format!(
+            "watershed-checkpoint-no-git-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).expect("directory");
+        let checkpoints = Checkpoints::new(&dir);
+        assert!(matches!(
+            checkpoints.capture(&at("t1", Phase::Start)).await,
+            Err(DiffError::NotARepository)
+        ));
+        assert!(matches!(
+            changes_of(&checkpoints, "t1").await,
+            Err(DiffError::NotARepository)
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+    });
+}
+
+#[test]
+fn a_git_that_cannot_read_the_project_is_reported_instead_of_outside_git() {
+    run(async {
+        let repo = Repo::new("broken-config");
+        let config = repo.path().join(".git/config");
+        let mut text = std::fs::read_to_string(&config).expect("config");
+        text.push_str("[broken\n");
+        std::fs::write(&config, text).expect("config");
+        let checkpoints = Checkpoints::new(repo.path());
+        let error = checkpoints
+            .capture(&at("t1", Phase::Start))
+            .await
+            .expect_err("Git cannot read the project");
+        assert!(
+            error.to_string().contains("bad config"),
+            "Git's own reason: {error}"
+        );
+    });
+}
+
+#[test]
+fn a_project_that_could_not_be_captured_is_reported_instead_of_unchanged() {
+    use std::os::unix::fs::PermissionsExt;
+    run(async {
+        let repo = Repo::new("unreadable");
+        let secret = repo.path().join("secret.txt");
+        std::fs::write(&secret, "x\n").expect("file");
+        std::fs::set_permissions(&secret, std::fs::Permissions::from_mode(0o000)).expect("mode");
+        let checkpoints = Checkpoints::new(repo.path());
+        let error = checkpoints
+            .capture(&at("t1", Phase::Start))
+            .await
+            .expect_err("Git cannot read the file");
+        std::fs::set_permissions(&secret, std::fs::Permissions::from_mode(0o600)).expect("mode");
+        assert!(matches!(error, DiffError::Git(_)), "{error}");
+        assert_eq!(repo.git(&["for-each-ref", "refs/watershed"]), "");
+    });
+}
+
+#[test]
+fn a_stalled_git_gives_up_and_leaves_later_captures_working() {
+    run(async {
+        let repo = Repo::new("stalled");
+        // A clean filter runs during `git add`; this one takes far longer than the limit.
+        repo.git(&["config", "filter.slow.clean", "sleep 5; cat"]);
+        repo.write(".gitattributes", "*.txt filter=slow\n");
+        let checkpoints = Checkpoints::with_timeout(repo.path(), Duration::from_millis(300));
+        repo.write("a.txt", "new\n");
+
+        let capture = tokio::time::timeout(
+            Duration::from_secs(4),
+            checkpoints.capture(&at("t0", Phase::Start)),
+        )
+        .await
+        .expect("the capture gives up within its limit");
+        assert!(
+            matches!(capture, Err(DiffError::TimedOut(_))),
+            "{capture:?}"
+        );
+
+        repo.git(&["config", "--unset", "filter.slow.clean"]);
+        turn(&checkpoints, "t1", || repo.write("a.txt", "newer\n")).await;
+        assert_eq!(
+            changes_of(&checkpoints, "t1")
+                .await
+                .expect("a later capture works"),
+            [modified("a.txt")]
+        );
+    });
+}
+
+/// Captures until the project's clean filter wrote a program's id to `pid`, then tells whether
+/// that program still runs after Git was stopped at its limit; one that does is killed.
+async fn outlives_its_git(checkpoints: &Checkpoints, pid: &Path) -> bool {
+    let started = std::time::Instant::now();
+    while !pid.exists() && started.elapsed() < Duration::from_secs(4) {
+        let _ = checkpoints.capture(&at("t1", Phase::Start)).await;
+    }
+    let program = std::fs::read_to_string(pid).expect("the filter ran");
+    let _ = std::fs::remove_file(pid);
+    let alive = || {
+        std::process::Command::new("kill")
+            .args(["-0", program.trim()])
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success())
+    };
+    let stopped = std::time::Instant::now();
+    while alive() && stopped.elapsed() < Duration::from_secs(2) {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let survived = alive();
+    if survived {
+        let _ = std::process::Command::new("kill")
+            .args(["-9", program.trim()])
+            .status();
+    }
+    survived
+}
+
+#[test]
+fn a_git_past_its_limit_ends_with_the_programs_it_started() {
+    run(async {
+        let repo = Repo::new("group");
+        let pid = std::env::temp_dir().join(format!("watershed-filter-{}", std::process::id()));
+        // The project's clean filter starts a program that would outlive Git.
+        repo.git(&[
+            "config",
+            "filter.slow.clean",
+            &format!(
+                "echo $$ > {}; exec sleep 30",
+                super::shell_word(pid.display())
+            ),
+        ]);
+        repo.write(".gitattributes", "*.txt filter=slow\n");
+        repo.write("a.txt", "new\n");
+        let checkpoints = Checkpoints::with_timeout(repo.path(), Duration::from_millis(300));
+        assert!(
+            !outlives_its_git(&checkpoints, &pid).await,
+            "the filter outlived its Git"
+        );
+    });
+}
+
+#[test]
+fn a_failed_git_past_its_limit_ends_the_programs_that_hold_its_errors() {
+    run(async {
+        let repo = Repo::new("error-holder");
+        // The project's required clean filter fails at once but leaves a program that holds
+        // Git's error output. Git runs it at the top of the work tree.
+        repo.git(&[
+            "config",
+            "filter.leaky.clean",
+            "sleep 30 >&2 & echo $! > .git/holder; exit 1",
+        ]);
+        repo.git(&["config", "filter.leaky.required", "true"]);
+        repo.write(".gitattributes", "*.txt filter=leaky\n");
+        repo.write("a.txt", "new\n");
+        let checkpoints = Checkpoints::with_timeout(repo.path(), Duration::from_millis(300));
+        assert!(
+            !outlives_its_git(&checkpoints, &repo.path().join(".git/holder")).await,
+            "the program holding Git's errors outlived it"
+        );
+    });
+}
+
+#[test]
+fn closing_removes_the_private_index() {
+    run(async {
+        let repo = Repo::new("close");
+        let checkpoints = Checkpoints::new(repo.path());
+        turn(&checkpoints, "t1", || repo.write("a.txt", "new\n")).await;
+        let store = checkpoints
+            .store()
+            .await
+            .expect("a Git project has a store");
+        assert!(store.exists());
+
+        checkpoints.close().await;
+        assert!(!store.exists(), "{}", store.display());
+        assert!(changes_of(&checkpoints, "t1").await.is_err(), "closed");
+    });
+}
+
+#[test]
+fn closing_stops_a_capture_in_progress_and_removes_its_index() {
+    run(async {
+        let repo = Repo::new("close-slow");
+        let checkpoints = std::sync::Arc::new(Checkpoints::new(repo.path()));
+        let store = checkpoints
+            .store()
+            .await
+            .expect("a Git project has a store");
+        // The project's clean filter says when it runs and then waits, so the capture is held
+        // inside Git when closing starts.
+        repo.git(&[
+            "config",
+            "filter.gate.clean",
+            "touch .git/waiting; sleep 30; cat",
+        ]);
+        repo.write(".gitattributes", "*.txt filter=gate\n");
+        repo.write("a.txt", "new\n");
+        let capturing = tokio::spawn({
+            let checkpoints = checkpoints.clone();
+            async move { checkpoints.capture(&at("t1", Phase::Start)).await }
+        });
+        let waiting = repo.path().join(".git/waiting");
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while !waiting.exists() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("the capture reaches its Git");
+
+        tokio::time::timeout(Duration::from_secs(2), checkpoints.close())
+            .await
+            .expect("closing does not wait for the slow capture");
+        assert!(!store.exists(), "{}", store.display());
+        assert!(matches!(
+            capturing.await.expect("the capture ends"),
+            Err(DiffError::Closed)
+        ));
+    });
+}

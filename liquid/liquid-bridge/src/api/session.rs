@@ -1,19 +1,22 @@
 //! Agent sessions for the Liquid app. Calls run on flutter_rust_bridge's worker threads, never on
 //! the Dart main isolate, and events stream to Dart as they arrive (ADR-0182).
 
-use std::sync::{LazyLock, PoisonError};
+use std::sync::{Arc, LazyLock, PoisonError};
 
 use std::path::{Path, PathBuf};
 
 use meta_harness_core::{
-    AgentCommand, Answer, Capture, CommandError, Delivery, DiffError, RequestId, RunDiff, Session,
-    SessionEvent, Whitespace, recent_sessions, session_title, visible_lines,
+    AgentCommand, Answer, Checkpoint, Checkpoints, CommandError, Delivery, DiffError, Phase,
+    RequestId, Session, SessionEvent, Whitespace, recent_sessions, session_title, visible_lines,
 };
 use tokio::runtime::Runtime;
 use tokio::sync::{Mutex, mpsc};
 
-use crate::api::events::{BridgeDecision, BridgeEvent, BridgeFileChange, BridgeQueue};
-use crate::api::history::{BridgeContextDetail, BridgeHistory, BridgeTranscript};
+use crate::api::events::{BridgeDecision, BridgeEvent, BridgeQueue};
+use crate::api::history::{
+    BridgeChangesState, BridgeContextDetail, BridgeHistory, BridgeTranscript, BridgeTurn,
+    BridgeTurnChanges,
+};
 use crate::convert::describe;
 use crate::frb_generated::StreamSink;
 use crate::ready::{SHUTDOWN_GRACE, START_TIMEOUT, error_output, ready};
@@ -83,8 +86,8 @@ pub struct AgentSession {
     receiver: std::sync::Mutex<Option<mpsc::Receiver<SessionEvent>>>,
     /// Events that arrived while the agent started.
     early: std::sync::Mutex<Vec<SessionEvent>>,
-    /// What the latest run changed in the project.
-    diff: RunDiff,
+    /// The project's checkpoints at each turn's start and end.
+    checkpoints: Arc<Checkpoints>,
     /// The directory the agent works in.
     cwd: PathBuf,
     /// Stops the agent even while a request holds the session.
@@ -107,7 +110,6 @@ impl AgentSession {
     #[flutter_rust_bridge::frb(ignore)]
     pub fn launch(command: AgentCommand) -> Result<Self, String> {
         let _runtime = RUNTIME.enter();
-        let diff = RUNTIME.block_on(RunDiff::open(&command.cwd));
         let (mut session, mut receiver) = Session::start(&command)
             .map_err(|error| format!("could not run {}: {error}", command.program.display()))?;
         // Without the extension pi runs tool calls without asking, so the agent must confirm
@@ -138,12 +140,13 @@ impl AgentSession {
         }
         early.shrink_to_fit();
         let stopper = session.stopper();
+        let checkpoints = session.checkpoints();
         Ok(Self {
             stopper: std::sync::Mutex::new(stopper),
             session: Mutex::new(Some(session)),
             receiver: std::sync::Mutex::new(Some(receiver)),
             early: std::sync::Mutex::new(early),
-            diff,
+            checkpoints,
             cwd: command.cwd,
         })
     }
@@ -190,65 +193,112 @@ impl AgentSession {
     }
 
     /// Sends a message: an idle agent starts a run with it, a running one takes it before its
-    /// next model request or, with `follow_up`, once it is done. A new run first captures the
-    /// project, so the diff view shows what the run changes.
+    /// next model request or, with `follow_up`, once it is done. Each run's start and end are
+    /// checkpointed, so the Diff tab shows what it changed.
     pub fn send(&self, message: String, follow_up: bool) -> Result<(), String> {
         RUNTIME.block_on(async {
-            // Captured without holding the session, so a slow project never holds up the
-            // agent or shutdown.
-            let idle = !open(&mut *self.session.lock().await)?.running();
-            let capture = if idle {
-                Some(self.diff.capture().await)
-            } else {
-                None
-            };
-            let (pending, capture) = {
+            let pending = {
                 let mut session = self.session.lock().await;
-                let session = open(&mut session)?;
-                // A run that started meanwhile takes this message instead of starting one.
-                let capture = capture.filter(|_| !session.running());
                 let delivery = if follow_up {
                     Delivery::FollowUp
                 } else {
                     Delivery::Steer
                 };
-                (
-                    session.send(&message, delivery).await.map_err(describe)?,
-                    capture,
-                )
+                open(&mut session)?
+                    .send(&message, delivery)
+                    .await
+                    .map_err(describe)?
             };
             // The session stays free meanwhile, so questions asked before acceptance can be
             // answered.
-            let started = pending.started().await.map_err(describe)?;
-            // Only a prompt that started a run makes its capture count. One sent while a run
-            // was in progress has none, yet that run may have ended before the prompt arrived.
-            if started {
-                self.diff.started(capture.unwrap_or_else(|| {
-                    Capture::missed("a previous run was in progress when the message was sent")
-                }));
-            }
-            Ok(())
+            pending.started().await.map_err(describe).map(drop)
         })
     }
 
-    /// Files the latest run changed, compared with the project before it; none outside Git.
-    /// With `hide_whitespace`, changes that are only whitespace are left out.
-    pub fn changes(&self, hide_whitespace: bool) -> Result<Option<Vec<BridgeFileChange>>, String> {
-        match RUNTIME.block_on(self.diff.changes(whitespace(hide_whitespace))) {
-            Ok(changes) => Ok(Some(changes.into_iter().map(Into::into).collect())),
-            Err(DiffError::NotARepository) => Ok(None),
-            Err(error) => Err(error.to_string()),
-        }
+    /// The turns of the current branch, oldest first, with what each changed.
+    pub fn turns(&self) -> Result<Vec<BridgeTurn>, String> {
+        RUNTIME.block_on(async {
+            let mut session = self.session.lock().await;
+            let history = open(&mut session)?.history().await.map_err(describe)?;
+            Ok(history.turns(None).into_iter().map(Into::into).collect())
+        })
     }
 
-    /// The unified diff of one file as the latest list of changes compared it; characters
-    /// that could hide or reorder its lines are written out, as in the file's shown name, but
-    /// for the carriage returns of Windows line ends, which the Diff tab marks.
-    pub fn patch(&self, path: String, hide_whitespace: bool) -> Result<String, String> {
-        RUNTIME
-            .block_on(self.diff.patch(&path, whitespace(hide_whitespace)))
-            .map(|patch| visible_lines(&patch))
-            .map_err(|error| error.to_string())
+    /// The files that changed from the start of turn `from` to the end of turn `to`, both on
+    /// the current branch; with `hide_whitespace`, changes that are only whitespace are left
+    /// out.
+    pub fn turn_changes(
+        &self,
+        from: String,
+        to: String,
+        hide_whitespace: bool,
+    ) -> Result<BridgeTurnChanges, String> {
+        RUNTIME.block_on(async {
+            let (from, to) = self.checkpoints_of(&from, &to).await?;
+            let read = self
+                .checkpoints
+                .changes(&from, &to, whitespace(hide_whitespace))
+                .await;
+            let (state, files) = match read {
+                Ok(changes) => (
+                    BridgeChangesState::Shown,
+                    changes.into_iter().map(Into::into).collect(),
+                ),
+                Err(DiffError::NotARepository) => (BridgeChangesState::OutsideGit, Vec::new()),
+                Err(DiffError::NoCheckpoint) => (BridgeChangesState::Removed, Vec::new()),
+                Err(error) => return Err(error.to_string()),
+            };
+            Ok(BridgeTurnChanges { state, files })
+        })
+    }
+
+    /// The unified diff of one file from the start of turn `from` to the end of turn `to`;
+    /// characters that could hide or reorder its lines are written out, as in the file's shown
+    /// name, but for the carriage returns of Windows line ends, which the Diff tab marks.
+    pub fn turn_patch(
+        &self,
+        from: String,
+        to: String,
+        path: String,
+        hide_whitespace: bool,
+    ) -> Result<String, String> {
+        RUNTIME.block_on(async {
+            let (from, to) = self.checkpoints_of(&from, &to).await?;
+            self.checkpoints
+                .patch(&from, &to, &path, whitespace(hide_whitespace))
+                .await
+                .map(|patch| visible_lines(&patch))
+                .map_err(|error| error.to_string())
+        })
+    }
+
+    /// The start checkpoint of turn `from` and the end checkpoint of turn `to`, which must be
+    /// turns of the current branch, so Dart never names a checkpoint itself.
+    async fn checkpoints_of(
+        &self,
+        from: &str,
+        to: &str,
+    ) -> Result<(Checkpoint, Checkpoint), String> {
+        let turns = {
+            let mut session = self.session.lock().await;
+            open(&mut session)?
+                .history()
+                .await
+                .map_err(describe)?
+                .turns(None)
+        };
+        let point = |id: &str, phase| {
+            turns
+                .iter()
+                .find(|turn| turn.turn == id)
+                .map(|turn| Checkpoint {
+                    session: turn.session.clone(),
+                    turn: turn.turn.clone(),
+                    phase,
+                })
+                .ok_or_else(|| format!("no turn {id} on the current branch"))
+        };
+        Ok((point(from, Phase::Start)?, point(to, Phase::End)?))
     }
 
     /// Reads the session's branch tree and the Trajectory of each branch ending at an entry in
@@ -343,39 +393,24 @@ impl AgentSession {
     /// Starts a new session in the same agent; `false` when an extension cancelled it.
     pub fn new_session(&self) -> Result<bool, String> {
         RUNTIME.block_on(async {
-            let runs = self.diff.runs();
             let pending = open(&mut *self.session.lock().await)?
                 .new_session()
                 .await
                 .map_err(describe)?;
-            self.switched(pending, runs).await
+            // Waits without holding the session.
+            pending.switched().await.map_err(describe)
         })
     }
 
     /// Continues the session stored in `path`; `false` when an extension cancelled it.
     pub fn switch_session(&self, path: String) -> Result<bool, String> {
         RUNTIME.block_on(async {
-            let runs = self.diff.runs();
             let pending = open(&mut *self.session.lock().await)?
                 .switch_session(Path::new(&path))
                 .await
                 .map_err(describe)?;
-            self.switched(pending, runs).await
+            pending.switched().await.map_err(describe)
         })
-    }
-
-    /// Waits for a session switch without holding the session; the diff of the previous
-    /// session's run no longer applies after it, unless a run started since `runs`.
-    async fn switched(
-        &self,
-        pending: meta_harness_core::Pending,
-        runs: u64,
-    ) -> Result<bool, String> {
-        let switched = pending.switched().await.map_err(describe)?;
-        if switched {
-            self.diff.switched(runs);
-        }
-        Ok(switched)
     }
 
     /// The models the agent can use.
@@ -479,7 +514,7 @@ impl AgentSession {
         };
         // Requests still waiting end with the agent, so the session is free to drop.
         self.session.lock().await.take();
-        self.diff.close().await;
+        self.checkpoints.close().await;
         stopped
     }
 

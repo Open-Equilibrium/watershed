@@ -63,9 +63,11 @@ class ChatHistory {
     final before = items.value;
     final BridgeTranscript page;
     final BridgeHistory history;
+    final List<BridgeTurn> turns;
     try {
       page = await _backend.transcript(null);
       history = await _backend.history(const []);
+      turns = await _backend.turns();
     } on Object catch (error) {
       notify(BridgeLevel.error, 'Could not restore the chat: $error');
       return;
@@ -75,15 +77,24 @@ class ChatHistory {
     totals.value = const SessionTotals().add(history.usage);
     final rebuilt = _stored(page.items);
     _pendingMark = null;
+    _path = _pathIndex(history.tree, history.leaf);
+    _turns = turns;
     if (branchMarker(history.tree, history.leaf) case final marker?) {
-      final path = _pathIndex(history.tree, history.leaf);
-      final mark = (marker: marker, path: path, fork: path[marker.fork] ?? -1);
+      final mark = (
+        marker: marker,
+        path: _path,
+        fork: _path[marker.fork] ?? -1,
+      );
       if (!_placeMark(rebuilt, mark, complete: !page.more)) _pendingMark = mark;
     }
+    _placeTurnEnds(rebuilt);
     // Only live items arrived meanwhile; items another restore rebuilt are replaced.
     final arrived = items.value.where(
       (view) =>
-          !before.contains(view) && view.entry == null && view.marker == null,
+          !before.contains(view) &&
+          view.entry == null &&
+          view.marker == null &&
+          view.turnEnd == null,
     );
     items.value = [...rebuilt, ...arrived];
     _start = page.start;
@@ -93,6 +104,58 @@ class ChatHistory {
 
   /// The branch mark until the chat shows where the branch leaves the others.
   _Mark? _pendingMark;
+
+  /// Each entry's position on the current branch, and the branch's turns, as last restored.
+  Map<String, int> _path = const {};
+  List<BridgeTurn> _turns = const [];
+
+  /// Puts a row after each turn that changed files, below the turn's last item `views` show;
+  /// returns `views`.
+  List<ItemView> _placeTurnEnds(List<ItemView> views) {
+    views.removeWhere((view) => view.turnEnd != null);
+    int position(ItemView view) => _path[view.entry] ?? -1;
+    final places = <(int, BridgeTurn)>[];
+    for (final turn in _turns) {
+      final (start, end) = (_path[turn.startEntry], _path[turn.endEntry]);
+      if (!turn.ended ||
+          (turn.files ?? 0) == 0 ||
+          start == null ||
+          end == null) {
+        continue;
+      }
+      final last = views.lastIndexWhere((view) {
+        final at = position(view);
+        return at > start && at < end;
+      });
+      if (last >= 0) places.add((last + 1, turn));
+    }
+    for (final (at, turn) in places.reversed) {
+      views.insert(
+        at,
+        ItemView(
+          id: _nextId--,
+          kind: BridgeItemKind.dynamicToolCall,
+          turnEnd: turn,
+        ),
+      );
+    }
+    return views;
+  }
+
+  /// Adds the row that says what `turn` changed after the items that arrived live, unless
+  /// the chat shows it already.
+  void endTurn(BridgeTurn turn) {
+    if (!turn.ended || (turn.files ?? 0) == 0) return;
+    if (items.value.any((view) => view.turnEnd?.id == turn.id)) return;
+    items.value = [
+      ...items.value,
+      ItemView(
+        id: _nextId--,
+        kind: BridgeItemKind.dynamicToolCall,
+        turnEnd: turn,
+      ),
+    ];
+  }
 
   /// Counts restores and session changes; reads for a replaced chat are dropped.
   int _version = 0;
@@ -133,7 +196,10 @@ class ChatHistory {
         // A page that does not move back ends the reading, so it cannot repeat forever.
         more.value = page.more && page.start != before;
         if (page.items.isNotEmpty) {
-          final shown = [..._stored(page.items), ...items.value];
+          final shown = _placeTurnEnds([
+            ..._stored(page.items),
+            ...items.value,
+          ]);
           if (_pendingMark case final mark?
               when _placeMark(shown, mark, complete: !more.value)) {
             _pendingMark = null;

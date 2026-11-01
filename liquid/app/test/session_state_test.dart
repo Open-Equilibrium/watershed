@@ -301,6 +301,96 @@ void main() {
     },
   );
 
+  test('says below each turn what it changed, restored and live', () async {
+    BridgeTreeNode node(String id, String? parent, BridgeEntryKind kind) =>
+        BridgeTreeNode(
+          failed: false,
+          id: id,
+          parent: parent,
+          kind: kind,
+          preview: id,
+        );
+    backend.stored = historyOf(
+      [],
+      tree: [
+        node('c1', null, BridgeEntryKind.custom),
+        node('u1', 'c1', BridgeEntryKind.user),
+        node('a1', 'u1', BridgeEntryKind.assistant),
+        node('c2', 'a1', BridgeEntryKind.custom),
+        node('c3', 'c2', BridgeEntryKind.custom),
+        node('u2', 'c3', BridgeEntryKind.user),
+        node('a2', 'u2', BridgeEntryKind.assistant),
+      ],
+      leaf: 'a2',
+    );
+    backend.transcripts[''] = BridgeTranscript(
+      items: [
+        chatItem('u1', BridgeItemKind.userMessage, text: 'Go'),
+        chatItem('a1', BridgeItemKind.assistantMessage, text: 'Looked'),
+        chatItem('u2', BridgeItemKind.userMessage, text: 'Again'),
+        chatItem('a2', BridgeItemKind.assistantMessage, text: 'Running'),
+      ],
+      more: false,
+    );
+    final first = turnOf(
+      'T1',
+      number: 1,
+      startEntry: 'c1',
+      endEntry: 'c2',
+      files: 3,
+      added: 12,
+      removed: 1,
+    );
+    backend.turnList = [
+      first,
+      turnOf('T2', number: 2, ended: false, startEntry: 'c3'),
+    ];
+    await state.loadChat();
+    String describe(ItemView view) => switch (view.turnEnd) {
+      final turn? => '${turn.id}: ${turn.files} files',
+      null => view.text.value,
+    };
+    expect(state.items.value.map(describe), [
+      'Go',
+      'Looked',
+      'T1: 3 files',
+      'Again',
+      'Running',
+    ]);
+
+    // The running turn ends; what it changed follows its live items.
+    backend.turnList = [
+      first,
+      turnOf(
+        'T2',
+        number: 2,
+        startEntry: 'c3',
+        endEntry: 'c4',
+        added: 1,
+        removed: 0,
+      ),
+    ];
+    backend.controller.add(event(BridgeEventKind.turnCompleted));
+    await pumpEventQueue();
+    expect(state.items.value.map(describe).last, 'T2: 1 files');
+    // Ending it again, as after a second read, adds nothing.
+    backend.controller.add(event(BridgeEventKind.turnCompleted));
+    await pumpEventQueue();
+    expect(
+      state.items.value.where((view) => view.turnEnd != null),
+      hasLength(2),
+    );
+  });
+
+  test('says nothing below a turn that changed no file', () async {
+    backend.turnList = [
+      turnOf('T1', number: 1, files: 0, added: 0, removed: 0),
+    ];
+    backend.controller.add(event(BridgeEventKind.turnCompleted));
+    await pumpEventQueue();
+    expect(state.items.value.where((view) => view.turnEnd != null), isEmpty);
+  });
+
   group('the rebuilt chat', () {
     const tree = [
       BridgeTreeNode(
