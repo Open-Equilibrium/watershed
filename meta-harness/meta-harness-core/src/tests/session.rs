@@ -809,6 +809,59 @@ until [ -e .git/filter-pid ]; do sleep 0.05; done"#;
 }
 
 #[test]
+fn an_agent_that_exits_stops_its_checkpoint_while_its_events_wait() {
+    run(async {
+        let project = git_project("checkpoint-backpressure");
+        let config = project.join(".git/config");
+        let mut text = std::fs::read_to_string(&config).expect("config");
+        text.push_str(
+            "[filter \"slow\"]\n\tclean = \"echo $$ > .git/filter-pid; sleep 30; cat\"\n",
+        );
+        std::fs::write(&config, text).expect("config");
+        std::fs::write(project.join(".gitattributes"), "*.txt filter=slow\n").expect("attributes");
+        std::fs::write(project.join("a.txt"), "changed\n").expect("file");
+        // More events than the session buffers, which nobody reads, then the agent exits.
+        let script = r#"printf '%s\n' '{"type":"extension_ui_request","id":"c1","method":"input","title":"watershed.checkpoint {\"session\":\"s1\",\"turn\":\"t1\",\"phase\":\"start\"}","placeholder":""}'
+until [ -e .git/filter-pid ]; do sleep 0.05; done
+i=0; while [ $i -lt 300 ]; do printf '%s\n' '{"type":"queue_update","steering":[],"followUp":[]}'; i=$((i+1)); done"#;
+        let command = AgentCommand {
+            program: "/bin/sh".into(),
+            args: vec!["-c".into(), script.into()],
+            extension: EXTENSION.into(),
+            session: None,
+            cwd: project.clone(),
+        };
+        let (_session, _events) = Session::start(&command).expect("fake agent starts");
+        let filter = project.join(".git/filter-pid");
+        timeout(WAIT, async {
+            while !filter.exists() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("the filter runs");
+        let pid = std::fs::read_to_string(&filter).expect("the filter's id");
+        let alive = || {
+            std::process::Command::new("kill")
+                .args(["-0", pid.trim()])
+                .stderr(std::process::Stdio::null())
+                .status()
+                .is_ok_and(|status| status.success())
+        };
+        let started = std::time::Instant::now();
+        while alive() && started.elapsed() < Duration::from_secs(3) {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        let survived = alive();
+        let _ = std::process::Command::new("kill")
+            .args(["-9", pid.trim()])
+            .status();
+        assert!(!survived, "the capture's Git outlived the agent");
+        let _ = std::fs::remove_dir_all(&project);
+    });
+}
+
+#[test]
 fn answers_extension_questions() {
     run(async {
         let script = [

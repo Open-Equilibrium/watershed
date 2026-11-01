@@ -311,7 +311,7 @@ class _DiffViewState extends State<DiffView> {
     return _TurnHeader(
       menuKey: _turnMenu,
       turns: widget.state.turns.value,
-      scope: widget.state.diffScope.value,
+      scope: widget.state.shownScope.value,
       shown: shown,
       onSelect: (scope) => unawaited(widget.state.showTurns(scope)),
     );
@@ -369,7 +369,7 @@ class _DiffViewState extends State<DiffView> {
       return InputLane(input: widget.input, child: const SizedBox.expand());
     }
     if (_changes.isEmpty) {
-      final all = widget.state.diffScope.value is AllTurns;
+      final all = widget.state.shownScope.value is AllTurns;
       final turns = all ? 'these turns' : 'this turn';
       return widget.settings.value.hideWhitespace
           ? _empty(

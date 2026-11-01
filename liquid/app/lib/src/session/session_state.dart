@@ -197,6 +197,7 @@ class SessionState {
     // The previous session's turns no longer apply.
     turns.value = const [];
     diffScope.value = const LatestTurn();
+    shownScope.value = const LatestTurn();
     shown.value = null;
     changed.value = const [];
     changesProblem.value = null;
@@ -359,6 +360,10 @@ class SessionState {
   /// The checkpoints the Diff tab compares, as last read; null while no turn ended.
   final shown = ValueNotifier<Compared?>(null);
 
+  /// The turns the Diff tab shows, set with [shown] and their files; [diffScope] holds the
+  /// choice still being read.
+  final shownScope = ValueNotifier<DiffScope>(const LatestTurn());
+
   /// The files the shown turns changed, as last read; null before the first read. The Diff tab
   /// and its count show them.
   final changed = ValueNotifier<List<BridgeFileChange>?>(null);
@@ -407,8 +412,10 @@ class SessionState {
       final read = await _backend.turns();
       if (generation != _generation) return;
       turns.value = read;
-      final pair = compared(read, diffScope.value);
+      final scope = diffScope.value;
+      final pair = compared(read, scope);
       if (pair == null) {
+        shownScope.value = scope;
         shown.value = null;
         reportRead('changes', null);
         changesProblem.value = switch (read.lastOrNull?.failure) {
@@ -432,6 +439,7 @@ class SessionState {
       if (generation != _generation) return;
       reportRead('changes', null);
       // The heading changes only with its files, so no patch stands under another turn.
+      shownScope.value = scope;
       shown.value = pair;
       // A missing checkpoint of a turn that failed says why; outside Git every checkpoint
       // fails, and the project's own state says so first.

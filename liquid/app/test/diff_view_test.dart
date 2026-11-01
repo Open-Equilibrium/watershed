@@ -282,6 +282,35 @@ void main() {
     expect(find.text('Turn 1'), findsOneWidget);
   });
 
+  testWidgets('names all turns only once their files arrived', (tester) async {
+    final backend = FakeBackend()
+      ..changed = [
+        BridgeFileChange(
+          path: 'a.ts',
+          shown: 'a.ts',
+          status: BridgeChangeStatus.modified,
+          added: 1,
+          removed: 1,
+        ),
+      ]
+      ..turnList = [
+        turnOf('T1', number: 1, added: 1, removed: 1),
+        turnOf('T2', number: 2, startedMs: 1793527800000, added: 1, removed: 1),
+      ];
+    await show(tester, backend);
+    backend.changesGate = Completer();
+    await press(tester, LogicalKeyboardKey.keyT);
+    await tester.tap(find.text('All turns'));
+    await tester.pumpAndSettle();
+    // Another layout rebuilds the tab while all turns' files still load.
+    await press(tester, LogicalKeyboardKey.keyU);
+    expect(find.text('All turns'), findsNothing);
+    expect(find.text('Turn 2'), findsOneWidget);
+    backend.changesGate!.complete();
+    await tester.pumpAndSettle();
+    expect(find.text('All turns'), findsOneWidget);
+  });
+
   testWidgets('compares all turns although the first turn\'s end failed', (
     tester,
   ) async {

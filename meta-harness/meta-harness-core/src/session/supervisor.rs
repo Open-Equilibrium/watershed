@@ -61,32 +61,15 @@ impl Supervisor {
         let mut framer = LineFramer::new(MAX_RECORD_BYTES);
         let mut buffer = vec![0; READ_BUFFER];
         let mut exited = false;
+        let checkpoints = self.checkpoints.clone();
         let failure = 'read: loop {
-            let read = if exited {
-                self.unless_killed(stdout.read(&mut buffer)).await
-            } else {
-                // A program the agent left behind can hold its output open after it exited;
-                // no capture outlives the agent either way.
-                let mut reading = pin!(stdout.read(&mut buffer));
-                let mut waiting = pin!(child.wait());
-                let first = self
-                    .unless_killed(poll_fn(|context| {
-                        if let Poll::Ready(read) = reading.as_mut().poll(context) {
-                            return Poll::Ready(Some(read));
-                        }
-                        waiting.as_mut().poll(context).map(|_| None)
-                    }))
-                    .await;
-                match first {
-                    Some(None) => {
-                        exited = true;
-                        self.checkpoints.close().await;
-                        continue;
-                    }
-                    Some(Some(read)) => Some(read),
-                    None => None,
-                }
-            };
+            let read = watching(
+                self.unless_killed(stdout.read(&mut buffer)),
+                &mut child,
+                &mut exited,
+                &checkpoints,
+            )
+            .await;
             let Some(read) = read else {
                 break None;
             };
@@ -98,7 +81,9 @@ impl Supervisor {
                 let record = match frame {
                     Frame::Record(record) => record,
                     Frame::Oversized { start, .. } => {
-                        if !self.skip(&start).await {
+                        let skipped =
+                            watching(self.skip(&start), &mut child, &mut exited, &checkpoints);
+                        if !skipped.await {
                             break 'read None;
                         }
                         continue;
@@ -107,7 +92,7 @@ impl Supervisor {
                 let Ok(Value::Object(record)) = serde_json::from_slice::<Value>(&record) else {
                     break 'read Some("agent wrote a record that is not a JSON object".to_owned());
                 };
-                if !self.handle(record).await {
+                if !watching(self.handle(record), &mut child, &mut exited, &checkpoints).await {
                     break 'read None;
                 }
             }
@@ -412,6 +397,36 @@ impl Supervisor {
         self.kill_requested = outcome.is_none();
         outcome
     }
+}
+
+/// Runs `work` while watching for the agent's exit. Once the agent exited, the checkpoints close
+/// at once, so no capture outlives it, and `work` goes on: reading output a program the agent
+/// left behind still holds, or handing an event to a full buffer.
+async fn watching<F: Future>(
+    work: F,
+    child: &mut Child,
+    exited: &mut bool,
+    checkpoints: &Checkpoints,
+) -> F::Output {
+    let mut work = pin!(work);
+    if !*exited {
+        let done = {
+            let mut waiting = pin!(child.wait());
+            poll_fn(|context| {
+                if let Poll::Ready(output) = work.as_mut().poll(context) {
+                    return Poll::Ready(Some(output));
+                }
+                waiting.as_mut().poll(context).map(|_| None)
+            })
+            .await
+        };
+        if let Some(output) = done {
+            return output;
+        }
+        *exited = true;
+        checkpoints.close().await;
+    }
+    work.await
 }
 
 /// Reads `reader` to its end and keeps the last [`MAX_ERROR_OUTPUT`] bytes in `kept`.
