@@ -130,13 +130,6 @@ summary{cursor:pointer}summary h3{display:inline;margin:0}summary:focus-visible{
         <ul><li><strong>A:</strong> A small set of resource-specific commands and action schemas. Pro: compact for agents, easy to test and restrict. Con: new capabilities need explicit additions.</li><li><strong>B:</strong> One broad document interface. Pro: flexible. Con: harder to secure, discover efficiently and change safely.</li></ul>
         <p><strong>Recommendation:</strong> A.</p>
       </details>
-      <details id="d-028" class="decision">
-        <summary><h3>D-028 - Liquid Action History Model</h3></summary>
-        <p><strong>Status:</strong> Open before M3 storage work.</p>
-        <p><strong>Question:</strong> How should Liquid remember changes so users can inspect and undo them? Because sync uses a CRDT library (ADR-0182), this also decides whether History is derived from that library's own change history or stored separately.</p>
-        <ul><li><strong>A:</strong> Keep an unchangeable sequence of actions plus occasional full save points. Pro: auditable and reversible. Con: old entries must be combined or archived later.</li><li><strong>B:</strong> Keep only the current state plus periodic backups. Pro: simpler storage. Con: weak audit and undo.</li></ul>
-        <p><strong>Recommendation:</strong> A, stored separately from the CRDT library's internal history unless the library chosen in <a href="#d-035">D-035</a> already records actor-attributed, revertible changes.</p>
-      </details>
       <details id="d-029" class="decision">
         <summary><h3>D-029 - Liquid Storage Model</h3></summary>
         <p><strong>Status:</strong> Open before M3 storage work.</p>
@@ -144,19 +137,12 @@ summary{cursor:pointer}summary h3{display:inline;margin:0}summary:focus-visible{
         <ul><li><strong>A:</strong> SQLite in write-ahead-log mode. Pro: proven crash safety on every target, indexes, SQL queries and full-text search for the PowerBar. Con: a bundled C library and careful schema upgrades.</li><li><strong>B:</strong> redb, an embedded transactional key-value store written in Rust. Pro: no C dependency, simple cross-compilation. Con: indexes, sorting, filtering and search must be built by hand.</li></ul>
         <p><strong>Recommendation:</strong> A unless sync requirements force a different engine.</p>
       </details>
-      <details id="d-031" class="decision">
-        <summary><h3>D-031 - Revert Semantics</h3></summary>
-        <p><strong>Status:</strong> Open before action-history implementation.</p>
-        <p><strong>Question:</strong> How should Liquid undo a faulty or unwanted change?</p>
-        <ul><li><strong>A:</strong> Record a new action that reverses the earlier one, or restore a save point when changes conflict. Pro: preserves history. Con: conflicts need clear handling.</li><li><strong>B:</strong> Replace history with the earlier state. Pro: simple. Con: weakens the audit trail.</li></ul>
-        <p><strong>Recommendation:</strong> A.</p>
-      </details>
       <details id="d-035" class="decision">
         <summary><h3>D-035 - Sync Conflict Semantics</h3></summary>
-        <p><strong>Status:</strong> Open until Liquid's own History is implemented: on 2026-10-29 the maintainer confirmed the CRDT approach and kept this and the related History questions (<a href="#d-028">D-028</a>, <a href="#d-029">D-029</a>, <a href="#d-031">D-031</a>) open until then. ADR-0182 already requires an established CRDT library (a data structure that lets copies edited offline merge to the same result) and forbids custom conflict-resolution logic.</p>
-        <p><strong>Question:</strong> Which CRDT library should combine concurrent offline changes?</p>
+        <p><strong>Status:</strong> Open before M3a storage work: on 2026-10-29 the maintainer confirmed the CRDT approach and kept this and storage (<a href="#d-029">D-029</a>) open until Liquid's own History is built; the History model and revert were decided on 2026-11-01 (ADR-0235). ADR-0182 already requires an established CRDT library (a data structure that lets copies edited offline merge to the same result) and forbids custom conflict-resolution logic.</p>
+        <p><strong>Question:</strong> Which CRDT library should combine concurrent offline changes? This also decides whether History is derived from that library's own change history or stored separately.</p>
         <ul><li><strong>A:</strong> yrs, the Rust port of Yjs. Pro: very fast rich-text editing and compact updates; widely deployed, including in AppFlowy. Con: Liquid's Block and View model must be mapped onto Yjs data types; when two devices change the same field, one value silently wins and the other is dropped; its history is not attributed per actor.</li><li><strong>B:</strong> Automerge. Pro: JSON-like documents with a complete change history that maps naturally to attributed History; when two devices change the same field it keeps both values, so Liquid can show the user both instead of losing one. Con: historically higher memory and CPU use on large documents, so it must be proven against the Liquid workloads.</li></ul>
-        <p><strong>Recommendation:</strong> B, because it does not silently drop a concurrent change, unless the acceptance spike shows it cannot keep typing and memory use responsive; then reconsider A. Either way every replica keeps applying received changes through its own mutation pipeline as <a href="../../SECURITY.md">SECURITY.md</a> requires.</p>
+        <p><strong>Recommendation:</strong> B, because it does not silently drop a concurrent change, unless the acceptance spike shows it cannot keep typing and memory use responsive; then reconsider A. History is stored separately from the library's change history unless the chosen library already records actor-attributed, revertible changes. Either way every replica keeps applying received changes through its own mutation pipeline as <a href="../../SECURITY.md">SECURITY.md</a> requires.</p>
         <p><strong>Acceptance criterion:</strong> The chosen library passes convergence tests for the M3 Block Types (text, Database rows, View order, deletion cascade), retains fixed observational typing and memory evidence on the Liquid targets, and a remote change denied by Roles is rejected identically for every replica.</p>
       </details>
     </div>

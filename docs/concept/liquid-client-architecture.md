@@ -1,6 +1,6 @@
 # Liquid client architecture
 
-This document turns the accepted Liquid client stack (Flutter UI over a Rust Liquid core) and its performance and stability invariants (ADR-0182) into implementation rules. Product behavior is canonical in the [Liquid V-Spec](V-Spec_Liquid.html), targets in [`PLATFORMS.md`](../../PLATFORMS.md), performance evidence in [`PERFORMANCE.md`](../../PERFORMANCE.md#liquid), security in [`SECURITY.md`](../../SECURITY.md) and pass/fail evidence in [`TESTING.md`](../../TESTING.md). The bridge is flutter_rust_bridge v2 (ADR-0186); the History model, storage engine and CRDT library remain [D-028](../decisions/open-decisions.html#d-028), [D-029](../decisions/open-decisions.html#d-029) and [D-035](../decisions/open-decisions.html#d-035).
+This document turns the accepted Liquid client stack (Flutter UI over a Rust Liquid core) and its performance and stability invariants (ADR-0182) into implementation rules. Product behavior is canonical in the [Liquid V-Spec](V-Spec_Liquid.html), targets in [`PLATFORMS.md`](../../PLATFORMS.md), performance evidence in [`PERFORMANCE.md`](../../PERFORMANCE.md#liquid), security in [`SECURITY.md`](../../SECURITY.md) and pass/fail evidence in [`TESTING.md`](../../TESTING.md). The bridge is flutter_rust_bridge v2 (ADR-0186); the History model is ADR-0235, and the storage engine and CRDT library remain [D-029](../decisions/open-decisions.html#d-029) and [D-035](../decisions/open-decisions.html#d-035).
 
 ## Priority
 
@@ -53,5 +53,5 @@ flowchart TD
 ## Risks against the current V-Spec
 
 - **CRDT merge versus Roles:** every replica applies received changes through its own mutation pipeline ([`SECURITY.md`](../../SECURITY.md)), so a change one replica rejects and another accepts breaks convergence. D-035 requires proof that Roles reject such a change identically on every replica.
-- **CRDT history versus Liquid History:** CRDT libraries keep their own change history; D-028 decides whether Liquid History derives from it or is stored separately.
+- **CRDT history versus Liquid History:** CRDT libraries keep their own change history; D-035 decides whether Liquid History derives from it or is stored separately.
 - **Variable-height virtualization:** Views whose height is unknown until built cause scroll jumps; rule 5's persisted heights are the mitigation and need observational evidence.

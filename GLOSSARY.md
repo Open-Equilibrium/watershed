@@ -138,7 +138,8 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **Shortcut profile** — Liquid's set of shortcuts: Liquid key, Standard (⌘ only) or Custom.
 - **Reveal key** — The key whose hold shows contextual shortcut hints: the Liquid key while it is on, ⌘ otherwise.
 - **Role** — A reusable allow-only composition of permissions assigned to users, groups, agent profiles, sessions or Automations. Anything not allowed is denied by default; explicit deny/blacklist rules are post-MVP.
-- **History** — Liquid's attributed and reversible record of Workspace Actions; also called **workspace action history / workspace VCS** when distinguishing it from project-code VCS. Its detailed storage/recovery model remains open in [D-028](docs/decisions/open-decisions.html#d-028) and [D-031](docs/decisions/open-decisions.html#d-031).
+- **Protected** — A Page, Block or Source that stops inheriting rights from its area or Page, so only Roles allowed on it may change it; the allow-only way to restrict one part of an editable Page (ADR-0235).
+- **History** — Liquid's attributed and reversible record of Workspace Actions; also called **workspace action history / workspace VCS** when distinguishing it from project-code VCS. A revert records a new reversing Action; Restore version returns a Page to an earlier save point (ADR-0235).
 - **Agent surface** — Liquid's view of one agent session: the sidebar, the Chat, Trajectory and Diff tabs, the widget strip, the input area and the status bar.
 - **Start page** — What the agent surface shows before a session's first message: the project's recent sessions to continue and chips to set the new one up.
 - **Input area** — The fixed-height area at the bottom of the agent surface: the composer, or in its place an approval or an agent question.

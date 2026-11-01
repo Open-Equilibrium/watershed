@@ -219,7 +219,7 @@ Completes the Git integration for the agent's Git project (ADR-0190, ADR-0191): 
 - Synchronized multi-Page Views over one canonical Block. Duplicate creates a new Block; deleting the last View deletes the Block, its Connections and owned Automations in one reversible Action, while independent dependent Automations are disabled for repair.
 - Connections/formulas for direct logic and Workspace Automations for when/if/then logic.
 - Allow-only Roles with default-denied unlisted access; explicit deny rules are post-MVP.
-- One mutation pipeline and History for every M3a write surface, including UI, Connections/formulas, Automations and import. History design and revert detail remain D-028/D-031.
+- One mutation pipeline and History for every M3a write surface, including UI, Connections/formulas, Automations and import. History and revert follow ADR-0235.
 
 **M3a DoD:** offline, a user can create and navigate Pages/Sources, act immediately on a blank Page, edit and connect Blocks, reuse a Block through synchronized Views, arrange the Page responsively, assign a Role, run a simple Automation and recover the tested deletion cascade through History.
 
