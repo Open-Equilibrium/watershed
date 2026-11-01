@@ -1006,7 +1006,7 @@ class _TurnHeader extends StatelessWidget {
   final String? branch;
   final ValueChanged<DiffScope> onSelect;
 
-  /// Asks to revert the files to before the shown turn; none for all turns.
+  /// Asks to revert the files to before the shown turn; none unless one turn is shown.
   final VoidCallback? onRevert;
   final VoidCallback onRestore;
   final VoidCallback onDiscard;

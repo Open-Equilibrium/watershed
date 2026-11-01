@@ -247,7 +247,7 @@ class _BranchMenuState extends State<_BranchMenu> {
     void submit() {
       if (refused) return;
       if (matches.where((branch) => !branch.current).firstOrNull
-          case final first? when !creatable || matches.isNotEmpty) {
+          case final first?) {
         choose(first);
       } else if (creatable && problem == null) {
         create();
@@ -363,8 +363,13 @@ class _BranchMenuState extends State<_BranchMenu> {
                       ),
                       const SizedBox(height: WsMetrics.space1),
                       if (refused)
-                        _Notice(
-                          '${whoRuns(running)}. ${stopFirst(running)}, then switch branches.',
+                        Padding(
+                          padding: const EdgeInsets.symmetric(
+                            vertical: WsMetrics.space1,
+                          ),
+                          child: WarningNotice(
+                            '${whoRuns(running)}. ${stopFirst(running)}, then switch branches.',
+                          ),
                         ),
                       if (local.isNotEmpty) ...[
                         label('Local branches'),
@@ -454,32 +459,6 @@ class _Foot extends StatelessWidget {
   );
 }
 
-class _Notice extends StatelessWidget {
-  const _Notice(this.text);
-
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    final ws = context.ws;
-    return Container(
-      margin: const EdgeInsets.symmetric(vertical: WsMetrics.space1),
-      padding: const EdgeInsets.symmetric(
-        horizontal: WsMetrics.space4,
-        vertical: WsMetrics.space3,
-      ),
-      decoration: BoxDecoration(
-        color: ws.warningSubtle,
-        borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
-      ),
-      child: Text(
-        text,
-        style: TextStyle(color: ws.warning, fontSize: WsMetrics.fsCompact),
-      ),
-    );
-  }
-}
-
 /// Asks where uncommitted changes go when switching, with GitHub Desktop's words; closes with
 /// `true` to leave them in the stash of the branch left, `false` to bring them along.
 class _SwitchDialog extends StatefulWidget {
@@ -511,7 +490,7 @@ class _SwitchDialogState extends State<_SwitchDialog> {
       detail: detail,
       onTap: () => setState(() => _leave = leave),
     );
-    return _GitDialog(
+    return ActionDialog(
       title: 'Switch branch',
       bindings: {
         const Keys(LogicalKeyboardKey.enter).activator: confirmed,
@@ -540,7 +519,7 @@ class _SwitchDialogState extends State<_SwitchDialog> {
           'Your in-progress work will be stashed on this branch for you to return to later',
         ),
         if (_leave && widget.stashed)
-          _Notice(
+          WarningNotice(
             '⚠ ${widget.left} already has stashed changes. Leaving these changes replaces them.',
           ),
         choice(
@@ -647,7 +626,7 @@ class _RefusedDialog extends StatelessWidget {
     final ws = context.ws;
     final left = this.left;
     void leave() => Navigator.of(context).pop(true);
-    return _GitDialog(
+    return ActionDialog(
       title: 'Could not switch to $target',
       bindings: {
         if (left != null) const Keys(LogicalKeyboardKey.enter).activator: leave,
@@ -697,66 +676,4 @@ class _RefusedDialog extends StatelessWidget {
       ],
     );
   }
-}
-
-/// A dialog of a Git step: its title, text and actions, and Cancel, which esc also takes.
-class _GitDialog extends StatelessWidget {
-  const _GitDialog({
-    required this.title,
-    required this.children,
-    required this.actions,
-    required this.bindings,
-  });
-
-  final String title;
-  final List<Widget> children;
-  final List<Widget> actions;
-  final Map<ShortcutActivator, VoidCallback> bindings;
-
-  @override
-  Widget build(BuildContext context) => CallbackShortcuts(
-    bindings: bindings,
-    child: Focus(
-      autofocus: true,
-      child: Dialog(
-        backgroundColor: context.ws.surface,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(WsMetrics.radiusXl),
-        ),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 520),
-          child: Padding(
-            padding: const EdgeInsets.all(WsMetrics.space5),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              spacing: WsMetrics.space4,
-              children: [
-                Text(
-                  title,
-                  style: Theme.of(context).textTheme.titleSmall
-                      ?.copyWith(fontWeight: WsMetrics.fwSemibold),
-                ),
-                ...children,
-                // Long labels wrap below each other rather than overflow.
-                OverflowBar(
-                  alignment: MainAxisAlignment.spaceBetween,
-                  spacing: WsMetrics.space3,
-                  overflowSpacing: WsMetrics.space3,
-                  children: [
-                    ...actions,
-                    SecondaryButton(
-                      label: actions.isEmpty ? 'Close' : 'Cancel',
-                      shortcut: 'esc',
-                      onPressed: () => Navigator.of(context).pop(),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    ),
-  );
 }

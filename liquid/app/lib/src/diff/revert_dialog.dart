@@ -216,23 +216,7 @@ class _Running extends StatelessWidget {
   final List<BridgeRunningAgent> running;
 
   @override
-  Widget build(BuildContext context) {
-    final ws = context.ws;
-    final text =
-        '${whoRuns(running)}. ${stopFirst(running)}, then revert the files.';
-    return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: WsMetrics.space4,
-        vertical: WsMetrics.space3,
-      ),
-      decoration: BoxDecoration(
-        color: ws.warningSubtle,
-        borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
-      ),
-      child: Text(
-        text,
-        style: TextStyle(color: ws.warning, fontSize: WsMetrics.fsCompact),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => WarningNotice(
+    '${whoRuns(running)}. ${stopFirst(running)}, then revert the files.',
+  );
 }

@@ -1,5 +1,7 @@
 //! Checkpoints of a session's Git project at each turn's start and end (ADR-0220, ADR-0234): commits
-//! under `refs/watershed/checkpoints/<session>/<turn>/<start|end>` that the Diff tab compares.
+//! under `refs/watershed/checkpoints/<session>/<turn>/<start|end>` that the Diff tab compares. The
+//! checkout's other Git operations, its branches, stash and fetch, run here too, under the same
+//! time limit and, when they change files, the same lock against running agents.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::{Future, poll_fn};
@@ -124,7 +126,7 @@ pub struct Branches {
     pub running: Vec<String>,
 }
 
-/// A session's checkpoints in its project.
+/// A session's checkpoints in its project, and the Git operations on its checkout.
 #[derive(Debug)]
 pub struct Checkpoints {
     dir: PathBuf,

@@ -1,6 +1,8 @@
-//! States of an agent's Git project and their changes (ADR-0190, ADR-0191). Trees and checkpoint
-//! commits go into the project's object database, refs only under Watershed's own namespace
-//! (ADR-0220); the project's index, HEAD and branches stay untouched.
+//! States of an agent's Git project and their changes (ADR-0190, ADR-0191). Snapshots,
+//! checkpoints and reverts put trees and checkpoint commits into the project's object database
+//! and refs only under Watershed's own namespace (ADR-0220); they leave the project's index, HEAD
+//! and branches untouched. Only the Git writes a user asks for in [`branches`] and [`stash`], and
+//! the background fetch, change them.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::ffi::OsString;
