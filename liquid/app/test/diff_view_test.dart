@@ -1060,6 +1060,48 @@ void main() {
     });
   });
 
+  testWidgets(
+    'drops an obsolete patch when the stash changes with the same file',
+    (tester) async {
+      final files = [
+        BridgeFileChange(
+          path: 'notes/todo.md',
+          shown: 'notes/todo.md',
+          status: BridgeChangeStatus.added,
+          added: 1,
+          removed: 0,
+        ),
+      ];
+      final backend = FakeBackend()
+        ..stashed = BridgeStash(id: 's1', createdMs: 1, files: files)
+        ..stashPatches = {
+          's1': {'notes/todo.md': '@@ -0,0 +1 @@\n+old stash\n'},
+          's2': {'notes/todo.md': '@@ -0,0 +1 @@\n+fresh stash\n'},
+        };
+      final state = await show(tester, backend);
+      await state.git.refresh();
+      backend.patchGate = Completer();
+      await state.showTurns(const StashedChanges());
+      await tester.pumpAndSettle();
+
+      backend.stashed = BridgeStash(id: 's2', createdMs: 2, files: files);
+      await state.git.refresh();
+      await tester.pumpAndSettle();
+      backend.patchGate!.complete();
+      await tester.pumpAndSettle();
+
+      expect(find.text('Stashed changes'), findsOneWidget);
+      expect(
+        find.textContaining('fresh stash', findRichText: true),
+        findsOneWidget,
+      );
+      expect(
+        find.textContaining('old stash', findRichText: true),
+        findsNothing,
+      );
+    },
+  );
+
   testWidgets('shows the branch’s stashed changes with Restore and Discard', (
     tester,
   ) async {

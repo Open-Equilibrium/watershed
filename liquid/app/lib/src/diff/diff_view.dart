@@ -171,12 +171,15 @@ class _DiffViewState extends State<DiffView> {
     }
   }
 
-  /// What the shown patch compares: the turns and whether whitespace is hidden.
+  /// What the shown patch compares: the turns or stash and whether whitespace is hidden.
   String get _comparison {
     final shown = widget.state.shown.value;
     final scope = widget.state.shownScope.value;
+    final stash = scope is StashedChanges
+        ? widget.state.git.stash.value?.id
+        : null;
     return '${scope.runtimeType} ${shown?.from.id}..${shown?.to.id} '
-        '${widget.state.hideWhitespace.value}';
+        '$stash ${widget.state.hideWhitespace.value}';
   }
 
   /// Whether a folded folder hides `row`.

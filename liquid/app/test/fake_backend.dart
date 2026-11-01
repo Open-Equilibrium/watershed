@@ -270,6 +270,7 @@ class FakeBackend implements SessionBackend {
   Object? gitError;
   BridgeBranches branches = const BridgeBranches(branches: [], running: []);
   BridgeStash? stashed;
+  Map<String, Map<String, String>> stashPatches = const {};
 
   /// What each Git write returns, until it is set otherwise.
   BridgeGitOutcome outcome = outcomeOf(BridgeGitOutcomeKind.done);
@@ -314,7 +315,8 @@ class FakeBackend implements SessionBackend {
     required bool hideWhitespace,
   }) async {
     calls.add('stash patch $path');
-    return patches[path] ?? '';
+    await patchGate?.future;
+    return stashPatches[id]?[path] ?? patches[path] ?? '';
   }
 
   @override
