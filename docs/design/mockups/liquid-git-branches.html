@@ -139,6 +139,12 @@ kbd{font-size:11px;padding:0 4px;border-radius:4px;border:1px solid currentColor
 .q ul{margin:0 0 8px;padding-left:18px}.q li{margin:0 0 4px}
 .q .t3{color:var(--ws-text-muted)}
 .q .rec{color:var(--ws-success);font-weight:500}
+.choice{display:flex;gap:10px;align-items:flex-start;padding:8px 10px;border-radius:8px;box-shadow:inset 0 0 0 1px var(--ws-border-strong)}
+.choice.on{box-shadow:inset 0 0 0 2px var(--ws-accent)}
+.choice b{display:block;font-weight:500;color:var(--ws-text)}
+.choice span{color:var(--ws-text-muted)}
+.rd{width:14px;height:14px;border-radius:50%;box-shadow:inset 0 0 0 1.5px var(--ws-border-strong);flex:none;margin-top:3px}
+.choice.on .rd{box-shadow:inset 0 0 0 4px var(--ws-accent)}
 @media (max-width:560px){.rows>div{grid-template-columns:1fr}.nrow{flex-direction:column;gap:0}.nrow .k{width:auto}}
 </style></head><body class="theme-light chrome">
 <div class="page">
@@ -147,8 +153,8 @@ kbd{font-size:11px;padding:0 4px;border-radius:4px;border:1px solid currentColor
     <div>Size <span class="seg" id="size"><button data-v="fit" class="on">Fit</button><button data-v="full">100 %</button></span></div>
   </div>
   <section>
-    <h1>Git branches and commits: draft mockups</h1>
-    <p class="sub">The next step of the Liquid Git slice in <a href="../../../PLAN.md#liquid-git-integration--next-slice">PLAN.md</a>: the current branch, switching and creating branches, committing, and push and pull state. Pull requests and worktrees follow later; section 10 shows where they attach. Bounds already decided (ADR-0190, ADR-0191, ADR-0220, ADR-0234, <a href="../../../SECURITY.md#mvp-vcs-boundary">SECURITY.md</a>): Meta-Harness runs the host's <code>git</code> and <code>gh</code> and Liquid only presents them, every Git write needs an explicit user action, a checkout with a running agent allows no branch switch, and parallel sessions use their own worktrees. Layout, components and wording follow the <a href="liquid-agent-surface.html">agent surface</a> and <a href="liquid-checkpoints.html">checkpoint</a> mockups and <a href="../guidelines.md">guidelines.md</a>; Git's own words and T3 Code's Git panel set the wording. <b>Draft, not approved:</b> section 11 lists what the maintainer decides.</p>
+    <h1>Git branches and commits: mockups</h1>
+    <p class="sub">The next step of the Liquid Git slice in <a href="../../../PLAN.md#liquid-git-integration--next-slice">PLAN.md</a>: the current branch, switching and creating branches, committing, and push and pull state. Pull requests and worktrees follow later; section 10 shows where they attach. Bounds already decided (ADR-0190, ADR-0191, ADR-0220, ADR-0234, <a href="../../../SECURITY.md#mvp-vcs-boundary">SECURITY.md</a>): Meta-Harness runs the host's <code>git</code> and <code>gh</code> and Liquid only presents them, every Git write needs an explicit user action, a checkout with a running agent allows no branch switch, and parallel sessions use their own worktrees. Layout, components and wording follow the <a href="liquid-agent-surface.html">agent surface</a> and <a href="liquid-checkpoints.html">checkpoint</a> mockups and <a href="../guidelines.md">guidelines.md</a>; Git's own words and T3 Code's Git panel set the wording. <b>Approved 2026-11-01</b>, sections 1–10 as drawn; with section 4 changed the same day to stashing as GitHub Desktop does; see Decisions.</p>
   </section>
   <section>
     <h3 class="sec">1 · The branch and Git state in every tab</h3>
@@ -157,7 +163,7 @@ kbd{font-size:11px;padding:0 4px;border-radius:4px;border:1px solid currentColor
   </section>
   <section>
     <h3 class="sec">2 · Switching and creating a branch</h3>
-    <p class="sub">The branch opens one searchable menu, as T3 Code's branch picker does: local branches with the current one checked, then remote branches. Choosing a branch switches to it; a remote branch gets a local branch that tracks it. Typing a name that no branch has offers "Create branch", which starts from the current commit and switches to it. Uncommitted changes come along, as <code>git switch</code> does (question 6). Git's word is "switch"; T3 Code's menu says "ref", which Liquid does not use.</p>
+    <p class="sub">The branch opens one searchable menu, as T3 Code's branch picker does: local branches with the current one checked, then remote branches. Choosing a branch switches to it; a remote branch gets a local branch that tracks it. Typing a name that no branch has offers "Create branch", which starts from the current commit and switches to it. With uncommitted changes, switching asks where they go, as GitHub Desktop does (section 4); a new branch takes them along, as GitHub Desktop's does. Git's word is "switch"; T3 Code's menu says "ref", which Liquid does not use.</p>
     <div class="stage"><div class="scaler"><div class="win" id="w-branch"></div></div></div>
     <div class="opts" style="margin-top:16px">
       <div><div class="lab">Typing a new name</div><div class="win mini"><div class="menu static" style="width:360px">
@@ -179,9 +185,45 @@ kbd{font-size:11px;padding:0 4px;border-radius:4px;border:1px solid currentColor
     <div class="stage"><div class="scaler"><div class="win" id="w-refused"></div></div></div>
   </section>
   <section>
-    <h3 class="sec">4 · Git refuses a switch over uncommitted changes</h3>
-    <p class="sub">When the target branch changes a file that has uncommitted changes, Git refuses the switch and nothing changes. Liquid lists Git's files and offers the commit dialog. T3 Code shows Git's message in a toast. Stashing is left out of this step (question 6).</p>
-    <div class="win mini"><div class="dlg"><h4>Could not switch to feature/token-bucket</h4><p>Git did not switch, because it would overwrite your uncommitted changes in these files. Nothing was changed.</p><div class="flist"><div class="frow"><span class="st M">M</span><code>src/routes/login.ts</code><span class="r">+4 −1</span></div><div class="frow"><span class="st M">M</span><code>src/middleware/rateLimit.ts</code><span class="r">+5 −0</span></div></div><p>Commit the changes or discard them, then switch.</p><div class="acts"><span class="btn pri">Commit changes… <kbd>⏎</kbd></span><span class="sp"></span><span class="btn">Close <kbd>esc</kbd></span></div></div></div>
+    <h3 class="sec">4 · Uncommitted changes when switching</h3>
+    <p class="sub">With uncommitted changes, choosing another branch asks what happens to them, with GitHub Desktop's dialog and words. "Leave my changes on main" stashes them, untracked files included, for this branch: <code>git stash push --include-untracked</code> with a message naming the branch (question 15). "Bring my changes" switches as <code>git switch</code> does. A branch holds one stash, as in GitHub Desktop (question 16). Back on the branch, its stashed changes show in the Diff tab with "Restore" and "Discard", and the branch menu marks branches that have them. T3 Code has no stash; it switches and shows Git's refusal in a toast.</p>
+    <div class="opts">
+      <div><div class="lab">Switching with uncommitted changes</div><div class="win mini"><div class="dlg">
+        <h4>Switch branch</h4>
+        <p>You have changes on this branch. What would you like to do with them?</p>
+        <div class="choice on"><span class="rd"></span><div><b>Leave my changes on <code>main</code></b><span>Your in-progress work will be stashed on this branch for you to return to later</span></div></div>
+        <div class="choice"><span class="rd"></span><div><b>Bring my changes to <code>feature/token-bucket</code></b><span>Your in-progress work will follow you to the new branch</span></div></div>
+        <div class="acts"><span class="btn pri">Switch branch <kbd>⏎</kbd></span><span class="sp"></span><span class="btn">Cancel <kbd>esc</kbd></span></div>
+      </div></div></div>
+      <div><div class="lab">The branch already has stashed changes</div><div class="win mini"><div class="dlg">
+        <h4>Switch branch</h4>
+        <p>You have changes on this branch. What would you like to do with them?</p>
+        <div class="choice on"><span class="rd"></span><div><b>Leave my changes on <code>main</code></b><span>Your in-progress work will be stashed on this branch for you to return to later</span></div></div>
+        <div class="notice">⚠ main already has stashed changes from 10:12 (3 files). Leaving these changes replaces them.</div>
+        <div class="choice"><span class="rd"></span><div><b>Bring my changes to <code>feature/token-bucket</code></b><span>Your in-progress work will follow you to the new branch</span></div></div>
+        <div class="acts"><span class="btn pri">Replace stash and switch <kbd>⏎</kbd></span><span class="sp"></span><span class="btn">Cancel <kbd>esc</kbd></span></div>
+      </div></div></div>
+    </div>
+    <div class="opts" style="margin-top:16px">
+      <div><div class="lab">Git refuses to bring them</div><div class="win mini"><div class="dlg"><h4>Could not switch to feature/token-bucket</h4><p>Git did not switch, because it would overwrite your uncommitted changes in these files. Nothing was changed.</p><div class="flist"><div class="frow"><span class="st M">M</span><code>src/routes/login.ts</code><span class="r">+4 −1</span></div><div class="frow"><span class="st M">M</span><code>src/middleware/rateLimit.ts</code><span class="r">+5 −0</span></div></div><p>Leave them on main to switch, or commit them first.</p><div class="acts"><span class="btn pri">Leave them on main and switch <kbd>⏎</kbd></span><span class="btn">Commit changes…</span><span class="sp"></span><span class="btn">Close <kbd>esc</kbd></span></div></div></div></div>
+      <div><div class="lab">Back on main: its stashed changes in the Diff tab</div><div class="win mini"><div class="dlg">
+        <div class="kvrow"><h4 style="flex:1">Stashed changes</h4><span class="btn pri">Restore</span><span class="btn">Discard…</span></div>
+        <p>Left on main at 10:41. <b>Restore</b> moves the stashed files back to your uncommitted changes.</p>
+        <div class="flist"><div class="frow"><span class="st M">M</span><code>docs/api.md</code><span class="r"><span class="add">+3</span> <span class="del">−0</span></span></div><div class="frow"><span class="st M">M</span><code>src/middleware/rateLimit.ts</code><span class="r"><span class="add">+5</span> <span class="del">−0</span></span></div><div class="frow"><span class="st M">M</span><code>src/routes/login.ts</code><span class="r"><span class="add">+4</span> <span class="del">−1</span></span></div><div class="frow"><span class="st A">A</span><code>notes/todo.md</code><span class="r"><span class="add">+6</span> <span class="del">−0</span></span></div></div>
+        <p>A file's diff opens below the list, as a turn's does. The Diff tab's turn menu lists "Stashed changes" beside "Uncommitted changes" while the branch has them.</p>
+      </div></div></div>
+    </div>
+    <div class="opts" style="margin-top:16px">
+      <div><div class="lab">Discarding stashed changes</div><div class="win mini"><div class="dlg"><h4>Discard stashed changes?</h4><p>The 4 files stashed on main at 10:41 are deleted and cannot be restored. Your uncommitted changes, commits and branches stay.</p><div class="acts"><span class="btn pri" style="background:var(--ws-danger)">Discard <kbd>⏎</kbd></span><span class="sp"></span><span class="btn">Cancel <kbd>esc</kbd></span></div></div></div></div>
+      <div><div class="lab">Notices</div><div class="win mini" style="display:block"><div class="flist">
+        <div class="nrow frow"><span class="k">Switched, changes left</span><span>ⓘ Switched to feature/token-bucket. Your 4 changes are stashed on main.</span></div>
+        <div class="nrow frow"><span class="k">Back on the branch</span><span>ⓘ main has stashed changes from 10:41 · Show</span></div>
+        <div class="nrow frow"><span class="k">Restored</span><span>ⓘ Restored 4 stashed files on main</span></div>
+        <div class="nrow frow"><span class="k">Restore refused by Git</span><span class="wa">⚠ Could not restore: Git would overwrite your uncommitted changes in src/routes/login.ts. The stash stays; commit or discard those changes, then restore.</span></div>
+        <div class="nrow frow"><span class="k">Restored with conflicts</span><span class="wa">⚠ Restored with conflicts in src/routes/login.ts; Git kept the stash. Resolve them in an editor, then discard the stash.</span></div>
+        <div class="nrow frow"><span class="k">Agent running</span><span class="wa">⚠ Could not restore: “Fix flaky sync test” is running in this checkout. Stop it or wait until it finishes.</span></div>
+      </div></div></div>
+    </div>
   </section>
   <section>
     <h3 class="sec">5 · Committing the project's changes</h3>
@@ -337,9 +379,10 @@ kbd{font-size:11px;padding:0 4px;border-radius:4px;border:1px solid currentColor
     <div class="q"><h4>6 · Uncommitted changes when switching</h4>
       <ul><li><b>A · Git's behavior</b> (drawn): changes come along; if Git refuses, list its files and offer Commit: + no Liquid rule on top of Git; − the user may not notice the changes came along, so the menu says so.</li>
       <li><b>B · Refuse any switch with uncommitted changes</b>: + nothing surprising; − stricter than Git, more commits for nothing.</li>
-      <li><b>C · Offer "Stash and switch"</b>: + one step; − adds stash and its restore to this step's scope.</li></ul>
-      <p class="t3">T3 Code: A, with Git's error as a toast.</p>
-      <p class="rec">Recommendation: A.</p></div>
+      <li><b>C · Offer "Stash and switch"</b>: + one step; − adds stash and its restore to this step's scope.</li>
+      <li><b>D · Ask, as GitHub Desktop does</b> (drawn in section 4): leave the changes stashed on the branch, or bring them along: + nothing is lost or carried unnoticed; − adds stash, restore and discard to this step.</li></ul>
+      <p class="t3">T3 Code: A, with Git's error as a toast. GitHub Desktop: D.</p>
+      <p class="rec">Recommendation: A. The maintainer chose D.</p></div>
     <div class="q"><h4>7 · How fresh ahead and behind are</h4>
       <p><code>git fetch</code> updates the repository's remote-tracking refs, so it may count as a Git write that needs an explicit action (ADR-0191).</p>
       <ul><li><b>A · Fetch only on request</b> (drawn): a "Fetch" menu entry, and before Push and Pull; the menu says when it last fetched: + no write and no network call without a click; − counts can be stale.</li>
@@ -385,6 +428,17 @@ kbd{font-size:11px;padding:0 4px;border-radius:4px;border:1px solid currentColor
       <li><b>B · The branch of the session's last turn</b>: + history stays true; − can differ from the checkout, which the header then contradicts.</li></ul>
       <p class="t3">T3 Code: a local thread follows the checkout's branch live.</p>
       <p class="rec">Recommendation: A for sessions of the open checkout; a closed session shows the branch of its last turn.</p></div>
+    <div class="q"><h4>15 · How Liquid marks a branch's stash</h4>
+      <p>Git's stash is one list for the whole repository, so each entry's message has to say which branch it belongs to.</p>
+      <ul><li><b>A · Liquid's own message</b>, <code>Liquid: changes left on main</code>: + reads plainly in <code>git stash list</code> and other tools; − GitHub Desktop does not show Liquid's stashes, nor Liquid Desktop's.</li>
+      <li><b>B · GitHub Desktop's message</b>, <code>!!GitHub_Desktop&lt;main&gt;</code>: + both apps show and restore the same stash; − depends on another app's internal format and reads oddly elsewhere.</li></ul>
+      <p class="t3">T3 Code: no stash. GitHub Desktop: B, its own marker; other entries stay out of its list.</p>
+      <p class="rec">Recommendation: A; other stashes stay untouched and unlisted either way. The maintainer chose A.</p></div>
+    <div class="q"><h4>16 · A branch that already has stashed changes</h4>
+      <ul><li><b>A · One stash per branch; leaving new changes replaces it after a warning</b> (drawn): + GitHub Desktop's model, one place to look; − the older stash is deleted, so the dialog says so and the button says "Replace stash".</li>
+      <li><b>B · Keep every stash</b> and list them all: + nothing is lost; − several stashes per branch need a list and choosing which to restore.</li></ul>
+      <p class="t3">GitHub Desktop: A, asking once more before it replaces the stash.</p>
+      <p class="rec">Recommendation: A. The maintainer chose A.</p></div>
     <p class="sub" style="margin-top:12px">Not covered here: shortcuts for the branch menu and the commit dialog follow in the <a href="liquid-shortcuts.html">shortcuts mockup</a> once placement is decided; adding a remote or publishing a repository, which T3 Code offers, is left out.</p>
   </section>
   <section>
@@ -395,7 +449,7 @@ kbd{font-size:11px;padding:0 4px;border-radius:4px;border:1px solid currentColor
       <li>A commit preselects every uncommitted file with "Edit" to leave files out and commits whole files, saying so when the user staged parts (question 3).</li>
       <li>The user writes the commit message; it is required and nothing is generated (question 4).</li>
       <li>Commit and pull are refused while an agent runs in the checkout, with the revert's lock and notice (question 5).</li>
-      <li>Switching carries uncommitted changes as Git does; when Git refuses, Liquid lists its files and offers to commit; no stash (question 6).</li>
+      <li>Switching with uncommitted changes asks, as GitHub Desktop does: leave them stashed on the branch, or bring them along; a branch's stashed changes show in the Diff tab with Restore and Discard, and stash, restore and discard are refused while an agent runs in the checkout (question 6).</li>
       <li>Liquid fetches in the background every 15 seconds while the session is open, as T3 Code does, so ahead and behind stay current; "Fetch" in the menu fetches at once. This is the one Git write without a user action besides checkpoints, recorded in the ADR log (question 7).</li>
       <li>The split button's main part runs the next single step: commit, push or pull (question 8).</li>
       <li>A push asks first only for the default branch (question 9).</li>
@@ -404,6 +458,8 @@ kbd{font-size:11px;padding:0 4px;border-radius:4px;border:1px solid currentColor
       <li>With a detached HEAD, commit and push need a branch; the button offers "Create branch …" (question 12).</li>
       <li>The Diff tab's turn menu gets "Uncommitted changes" (question 13).</li>
       <li>The sidebar shows the checkout's live branch; a closed session shows the branch of its last turn (question 14).</li>
+      <li>A stash's message names its branch in Liquid's own words, <code>Liquid: changes left on main</code>; other stashes stay untouched and unlisted (question 15).</li>
+      <li>A branch holds one stash; leaving new changes replaces it after the dialog's warning (question 16).</li>
     </ol>
   </section>
 </div>
@@ -459,11 +515,11 @@ ${refused?'<div class="notice">“Fix flaky sync test” is running in this chec
 <div class="lbl">Local branches</div>
 <div class="it ${refused?'':'on'}"><span class="ck">✓</span><code>main</code><span class="r">↑1 · now</span></div>
 <div class="it ${refused?'dis':''}"><span class="ck"></span><code>feature/token-bucket</code><span class="r">2 days ago</span></div>
-<div class="it ${refused?'dis':''}"><span class="ck"></span><code>fix/sync-flake</code><span class="r">5 h ago</span></div>
+<div class="it ${refused?'dis':''}"><span class="ck"></span><code>fix/sync-flake</code><span class="r">stashed changes · 5 h ago</span></div>
 <div class="lbl">Remote branches · origin</div>
 <div class="it ${refused?'dis':''}"><span class="ck"></span><code>origin/release-1.2</code><span class="r">3 weeks ago</span></div>
 <div class="it ${refused?'dis':''}"><span class="ck"></span><code>origin/docs-refresh</code><span class="r">1 month ago</span></div>
-${refused?'':'<hr><div class="foot">Your 4 uncommitted changes come along when you switch.</div>'}</div>`;
+${refused?'':'<hr><div class="foot">You have 4 uncommitted changes; switching asks where they go.</div>'}</div>`;
 frame('w-branch','chat',chat,560,{chipOn:true,over:branchMenu(false)});
 frame('w-refused','chat',chat,560,{chipOn:true,running:true,over:branchMenu(true)});
 
