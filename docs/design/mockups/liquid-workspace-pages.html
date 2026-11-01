@@ -1,0 +1,425 @@
+<!doctype html>
+<html lang="en"><head><title>Liquid: Workspace Pages mockups</title>
+<link rel="stylesheet" href="../tokens.css"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+.chrome{--foreground:var(--ws-text);--muted-foreground:var(--ws-text-muted);--muted:var(--ws-subtle);--border:var(--ws-border-strong);--secondary:var(--ws-hover);--radius:8px;background:var(--ws-canvas);padding:24px}
+body{margin:0;font-family:var(--ws-font-ui);color:var(--foreground)}
+.page{display:flex;flex-direction:column;gap:28px;max-width:1400px}
+.toolbar{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;font-size:13px;color:var(--muted-foreground)}
+.toolbar>div{display:flex;gap:8px;align-items:center}
+.seg{display:inline-flex;border:1px solid var(--border);border-radius:6px;overflow:hidden}
+.seg button{all:unset;cursor:pointer;padding:4px 10px;font-size:12.5px;color:var(--muted-foreground)}
+.seg button.on{background:var(--secondary);color:var(--foreground)}
+h1{margin:0 0 6px;font-size:var(--ws-fs-h1);line-height:var(--ws-lh-h1)}
+h3.sec{margin:0 0 4px;font-size:15px;font-weight:600}
+p.sub{margin:0 0 10px;font-size:13px;color:var(--muted-foreground);line-height:1.5;max-width:900px}
+.stage{padding:16px;border-radius:8px;background:var(--muted);overflow:hidden}
+.scaler{position:relative}
+.scaler>.win{position:absolute;top:0;left:0;transform-origin:0 0}
+.win{font-family:var(--ws-font-ui);color:var(--ws-text);font-size:var(--ws-fs-ui);line-height:var(--ws-lh-ui);-webkit-font-smoothing:antialiased;background:var(--ws-canvas);border-radius:var(--ws-radius-xl);overflow:hidden;box-shadow:var(--ws-shadow)}
+.win code,.win kbd,.mono{font-family:var(--ws-font-mono)}
+.win.bare{background:transparent;box-shadow:none;overflow:visible;border-radius:0}
+.tbar{height:38px;background:var(--ws-titlebar);display:flex;align-items:center;padding:0 14px}
+.lights{display:flex;gap:8px}.lights i{width:12px;height:12px;border-radius:50%;display:block}
+.body{display:flex;height:var(--h);position:relative}
+.side{width:280px;flex:none;overflow:hidden;background:var(--ws-subtle);padding:4px 8px 8px;display:flex;flex-direction:column;gap:1px;box-shadow:inset -1px 0 0 var(--ws-border);box-sizing:border-box}
+.wsw{display:flex;align-items:center;gap:8px;height:var(--ws-row-nav);padding:0 8px;font-weight:500;border-radius:6px}
+.av{width:22px;height:22px;border-radius:4px;background:var(--ws-accent);color:var(--ws-on-accent);display:grid;place-items:center;font-size:12px;font-weight:600;flex:none}
+.srch{height:var(--ws-row-nav);display:flex;align-items:center;gap:8px;padding:0 8px;border-radius:6px;color:var(--ws-text-muted)}
+.srch kbd{margin-left:auto}
+.side h6{font-size:12px;line-height:16px;color:var(--ws-text-faint);font-weight:500;margin:14px 8px 4px;display:flex;justify-content:space-between;align-items:center}
+.side h6 span.a{display:flex;gap:10px}
+.nav{flex:none;display:flex;align-items:center;gap:8px;height:var(--ws-row-nav);padding:0 8px 0 calc(8px + var(--d,0) * 18px);border-radius:6px;color:var(--ws-text-muted);white-space:nowrap;overflow:hidden;box-sizing:border-box}
+.nav.on{background:var(--ws-selected);color:var(--ws-text)}
+.nav .tw{width:12px;flex:none;color:var(--ws-text-faint);font-size:11px;text-align:center}
+.nav .r{margin-left:auto;font-size:12px;color:var(--ws-text-faint)}
+.nav .r.warn{color:var(--ws-warning)}
+.ico{width:18px;flex:none;display:inline-flex;justify-content:center;color:var(--ws-text-faint)}
+.foot{margin-top:auto;padding-top:6px;box-shadow:inset 0 1px 0 var(--ws-border)}
+.main{flex:1;display:flex;flex-direction:column;min-width:0;position:relative}
+.head{height:44px;flex:none;display:flex;align-items:center;gap:8px;padding:0 16px 0 24px;font-size:14px}
+.crumb{color:var(--ws-text-muted);display:flex;gap:6px;align-items:center;white-space:nowrap}
+.crumb b{color:var(--ws-text);font-weight:500}
+.head .end{margin-left:auto;display:flex;gap:4px;align-items:center}
+.ib{height:28px;min-width:28px;padding:0 6px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;gap:6px;color:var(--ws-text-muted);font-size:13px;box-sizing:border-box}
+.ib.on{background:var(--ws-accent-subtle);color:var(--ws-accent)}
+kbd{font-size:11px;padding:0 4px;border-radius:4px;border:1px solid currentColor;opacity:.6;line-height:16px;font-weight:400}
+.btn{height:28px;padding:0 10px;border-radius:6px;background:var(--ws-canvas);box-shadow:inset 0 0 0 1px var(--ws-border-strong);color:var(--ws-text);font-size:13px;display:inline-flex;align-items:center;gap:8px;font-weight:500;white-space:nowrap}
+.btn.pri{background:var(--ws-accent);color:var(--ws-on-accent);box-shadow:none}
+.btn.ghost{box-shadow:none;background:transparent;color:var(--ws-text-muted)}
+.pg{flex:1;overflow:hidden;padding:28px 0 0;-webkit-mask-image:linear-gradient(to top,transparent 0,#000 40px);mask-image:linear-gradient(to top,transparent 0,#000 40px)}
+.col{width:740px;margin:0 auto;display:flex;flex-direction:column;gap:14px}
+.ttl{font-size:var(--ws-fs-display);line-height:var(--ws-lh-display);font-weight:var(--ws-fw-bold);margin:0 0 6px}
+.ttl.ph{color:var(--ws-text-faint)}
+.prose{font-size:var(--ws-fs-prose);line-height:var(--ws-lh-prose)}
+.prose p{margin:0 0 8px}
+.prose h2{font-size:var(--ws-fs-h2);line-height:var(--ws-lh-h2);margin:6px 0 6px;font-weight:600}
+.hint{color:var(--ws-text-faint);font-size:var(--ws-fs-prose);line-height:var(--ws-lh-prose);display:flex;align-items:center;gap:2px}
+.caret{display:inline-block;width:1.5px;height:20px;background:var(--ws-text);margin-right:6px;vertical-align:middle}
+.blk{position:relative}
+.gut{position:absolute;left:-52px;top:2px;display:flex;gap:2px;color:var(--ws-text-faint)}
+.gut span{width:22px;height:24px;display:grid;place-items:center;border-radius:4px}
+.gut span.on{background:var(--ws-hover);color:var(--ws-text-muted)}
+.bh{display:flex;align-items:center;gap:8px;height:30px;font-size:14px;color:var(--ws-text-muted)}
+.bh b{color:var(--ws-text);font-weight:600}
+.bh .end{margin-left:auto;display:flex;gap:6px;align-items:center}
+.chip{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 8px;border-radius:6px;color:var(--ws-text-muted);font-size:13px;white-space:nowrap;background:var(--ws-subtle)}
+.tag{display:inline-block;font-size:12px;font-weight:500;padding:0 6px;border-radius:4px;line-height:20px}
+.t1{background:var(--ws-accent-subtle);color:var(--ws-accent)}.t2{background:color-mix(in srgb,var(--ws-data-2) 14%,transparent);color:var(--ws-data-2)}.t3{background:var(--ws-success-subtle);color:var(--ws-success)}.t4{background:var(--ws-warning-subtle);color:var(--ws-warning)}
+.tbl{border-radius:8px;box-shadow:0 0 0 1px var(--ws-border);overflow:hidden;font-size:14px}
+.tr{display:grid;grid-template-columns:var(--cols);height:var(--ws-row-table);align-items:center;box-shadow:inset 0 -1px 0 var(--ws-border);white-space:nowrap}
+.tr>span{padding:0 10px;overflow:hidden;text-overflow:ellipsis}
+.tr>span+span{box-shadow:inset 1px 0 0 var(--ws-border);height:100%;display:flex;align-items:center}
+.tr.hd{color:var(--ws-text-faint);font-size:13px;height:30px;background:var(--ws-subtle)}
+.tr.add{color:var(--ws-text-faint);font-size:13px;box-shadow:none}
+.tr.add>span+span{box-shadow:none}
+.num{justify-content:flex-end;font-variant-numeric:tabular-nums}
+.tr.sum{color:var(--ws-text-muted);font-size:13px;box-shadow:none;background:var(--ws-subtle)}
+.card{border-radius:8px;box-shadow:0 0 0 1px var(--ws-border);padding:12px 14px;background:var(--ws-canvas)}
+.cap{font-size:12px;line-height:18px;color:var(--ws-text-faint)}
+.fx{font-family:var(--ws-font-mono);font-size:13px;color:var(--ws-text-muted)}
+.ref{display:inline-flex;align-items:center;gap:4px;height:20px;padding:0 6px;border-radius:4px;background:var(--ws-accent-subtle);color:var(--ws-accent);font-family:var(--ws-font-ui);font-size:12px;font-weight:500;vertical-align:middle}
+.big{font-size:var(--ws-fs-h1);line-height:var(--ws-lh-h1);font-weight:600;font-variant-numeric:tabular-nums}
+.pop{position:absolute;z-index:3;border-radius:8px;background:var(--ws-surface);box-shadow:var(--ws-shadow);padding:6px;display:flex;flex-direction:column;gap:1px;font-size:14px}
+.pop .lbl{font-size:12px;color:var(--ws-text-faint);padding:6px 8px 2px}
+.pop .it{display:flex;gap:10px;align-items:center;min-height:32px;padding:0 8px;border-radius:6px;white-space:nowrap;color:var(--ws-text)}
+.pop .it.on{background:var(--ws-hover)}
+.pop .it .d{color:var(--ws-text-faint);font-size:12px}
+.pop .it .r{margin-left:auto;color:var(--ws-text-faint);font-size:12px}
+.pop .it .bi{width:28px;height:28px;border-radius:6px;box-shadow:inset 0 0 0 1px var(--ws-border);display:grid;place-items:center;color:var(--ws-text-muted);flex:none}
+.pop .it .tx{display:flex;flex-direction:column;line-height:18px;padding:4px 0}
+.pop hr{border:0;height:1px;background:var(--ws-border);margin:4px 2px}
+.pb{position:absolute;left:50%;top:70px;transform:translateX(-50%);width:640px;border-radius:12px;background:var(--ws-surface);box-shadow:var(--ws-shadow);z-index:4;overflow:hidden}
+.pb .in{height:52px;display:flex;align-items:center;gap:10px;padding:0 16px;font-size:16px;box-shadow:inset 0 -1px 0 var(--ws-border)}
+.pb .in .ph{color:var(--ws-text-faint)}
+.pb .in .back{height:24px;padding:0 8px;border-radius:6px;background:var(--ws-hover);font-size:13px;display:inline-flex;align-items:center;gap:6px;color:var(--ws-text-muted)}
+.pb .ls{padding:6px;display:flex;flex-direction:column;gap:1px;font-size:14px}
+.pb .lbl{font-size:12px;color:var(--ws-text-faint);padding:8px 10px 4px}
+.pb .it{display:flex;gap:10px;align-items:center;height:36px;padding:0 10px;border-radius:6px;white-space:nowrap}
+.pb .it.on{background:var(--ws-hover)}
+.pb .it .d{color:var(--ws-text-faint);font-size:13px;overflow:hidden;text-overflow:ellipsis}
+.pb .it .r{margin-left:auto;color:var(--ws-text-faint);font-size:12px}
+.pb mark{background:none;color:var(--ws-text);font-weight:600}
+.scrim{position:absolute;inset:0;background:rgba(15,15,15,.24);z-index:2}
+.grid12{position:relative;display:grid;grid-template-columns:repeat(12,1fr);gap:16px;align-items:start}
+.grid12.lines::before{content:"";position:absolute;inset:-8px 0;background:repeating-linear-gradient(to right,color-mix(in srgb,var(--ws-accent) 6%,transparent) 0,color-mix(in srgb,var(--ws-accent) 6%,transparent) calc((100% - 176px)/12),transparent calc((100% - 176px)/12),transparent calc((100% - 176px)/12 + 16px));pointer-events:none;border-radius:4px}
+.tile{position:relative;border-radius:8px;padding:10px 12px;background:var(--ws-canvas);box-shadow:0 0 0 1px var(--ws-border-strong);min-width:0}
+.tile.sel{box-shadow:0 0 0 2px var(--ws-accent)}
+.tile .mv{position:absolute;top:-11px;left:50%;transform:translateX(-50%);height:18px;padding:0 6px;border-radius:4px;background:var(--ws-surface);box-shadow:0 0 0 1px var(--ws-border-strong);font-size:11px;color:var(--ws-text-faint);display:flex;align-items:center;letter-spacing:1px}
+.tile.sel .mv{background:var(--ws-accent);color:var(--ws-on-accent);box-shadow:none}
+.tile .rs{position:absolute;right:-5px;top:50%;width:8px;height:28px;margin-top:-14px;border-radius:4px;background:var(--ws-surface);box-shadow:0 0 0 1px var(--ws-border-strong)}
+.tile.sel .rs{background:var(--ws-accent);box-shadow:none}
+.tile .span{position:absolute;right:10px;bottom:-11px;font-size:11px;line-height:18px;padding:0 6px;border-radius:4px;background:var(--ws-accent);color:var(--ws-on-accent)}
+.armode{height:44px;flex:none;display:flex;align-items:center;gap:12px;padding:0 16px 0 24px;background:var(--ws-accent-subtle);font-size:13px;color:var(--ws-accent)}
+.armode b{font-weight:600}
+.armode .end{margin-left:auto;display:flex;gap:8px;align-items:center}
+.sg2{display:inline-flex;background:var(--ws-canvas);border-radius:6px;padding:2px;font-size:13px;box-shadow:inset 0 0 0 1px var(--ws-border)}
+.sg2 span{padding:1px 10px;color:var(--ws-text-muted);border-radius:4px;line-height:22px}.sg2 span.on{background:var(--ws-hover);color:var(--ws-text)}
+.bars{display:flex;align-items:flex-end;gap:14px;height:120px;padding:4px 4px 0;box-shadow:inset 0 -1px 0 var(--ws-border)}
+.bars div{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:4px;height:100%;font-size:11px;color:var(--ws-text-faint);font-variant-numeric:tabular-nums}
+.bars i{display:block;width:100%;background:var(--ws-data-1);border-radius:3px 3px 0 0}
+.blab{display:flex;gap:14px;padding:4px 4px 0;font-size:11px;color:var(--ws-text-faint)}.blab span{flex:1;text-align:center}
+.code{background:var(--ws-code);border-radius:8px;padding:10px 14px;font-family:var(--ws-font-mono);font-size:13px;line-height:20px;white-space:pre;overflow:hidden}
+i.kw{font-style:normal;color:var(--ws-syn-kw)}i.st{font-style:normal;color:var(--ws-syn-str)}i.cm{font-style:italic;color:var(--ws-syn-com)}i.nu{font-style:normal;color:var(--ws-syn-num)}
+.img{height:150px;border-radius:8px;background:linear-gradient(135deg,color-mix(in srgb,var(--ws-data-1) 30%,var(--ws-subtle)),color-mix(in srgb,var(--ws-data-3) 35%,var(--ws-subtle)));position:relative}
+.img::after{content:"";position:absolute;left:18%;bottom:0;width:0;height:0;border-left:60px solid transparent;border-right:60px solid transparent;border-bottom:70px solid color-mix(in srgb,var(--ws-data-3) 55%,var(--ws-subtle))}
+.bm{display:flex;gap:12px;align-items:center;border-radius:8px;box-shadow:0 0 0 1px var(--ws-border);padding:10px 12px;font-size:14px}
+.bm .u{color:var(--ws-text-faint);font-size:12px}
+.emb{border-radius:8px;background:var(--ws-subtle);height:120px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;font-size:13px;color:var(--ws-text-muted);text-align:center;padding:0 20px}
+.wb{height:150px;border-radius:8px;box-shadow:0 0 0 1px var(--ws-border);background-image:radial-gradient(var(--ws-border-strong) 1px,transparent 1px);background-size:16px 16px;position:relative;overflow:hidden}
+.wb svg{position:absolute;inset:0}
+.todo{display:flex;gap:8px;align-items:center}
+.cb{width:14px;height:14px;border-radius:3px;box-shadow:inset 0 0 0 1.5px var(--ws-border-strong);display:inline-grid;place-items:center;font-size:10px;flex:none}
+.cb.on{background:var(--ws-accent);box-shadow:none;color:var(--ws-on-accent)}
+.toggle{display:flex;gap:6px;align-items:center}
+.quote{box-shadow:inset 3px 0 0 var(--ws-text);padding-left:14px}
+.gal{display:grid;align-items:start;grid-template-columns:repeat(auto-fill,minmax(min(100%,380px),1fr));gap:16px}
+.gcell{padding:14px 16px 16px;border-radius:12px;background:var(--ws-canvas);box-shadow:var(--ws-shadow);display:flex;flex-direction:column;gap:8px;font-family:var(--ws-font-ui);color:var(--ws-text);font-size:14px;line-height:20px}
+.gcell h4{margin:0;font-size:13px;font-weight:600;display:flex;gap:8px;align-items:center}
+.gcell h4 span{font-weight:400;color:var(--ws-text-faint)}
+.gcell .cap{margin-top:auto}
+.maps{border-collapse:collapse;font-size:13px;line-height:1.5;width:100%;max-width:900px}
+.maps td,.maps th{padding:6px 10px;text-align:left;vertical-align:top;border-bottom:1px solid var(--ws-border)}
+.maps th{color:var(--muted-foreground);font-weight:500;font-size:12px}
+.maps code{font-family:var(--ws-font-mono);font-size:12.5px;background:var(--ws-subtle);padding:0 4px;border-radius:4px}
+.wrapx{overflow-x:auto;max-width:100%}
+.phone{width:390px;border-radius:28px;overflow:hidden;background:var(--ws-canvas);box-shadow:var(--ws-shadow);font-size:15px;line-height:22px}
+.phone .sb{height:44px;display:flex;align-items:center;justify-content:space-between;padding:0 22px;font-size:13px;font-weight:600}
+.phone .ph{height:44px;display:flex;align-items:center;gap:10px;padding:0 16px;font-size:14px;color:var(--ws-text-muted)}
+.phone .st{display:flex;flex-direction:column;gap:12px;padding:6px 16px 20px}
+.opn{display:flex;justify-content:space-between;align-items:center;font-size:13px;color:var(--ws-accent);padding-top:6px}
+.notes{font-size:13px;line-height:1.6;margin:0;padding-left:18px;max-width:900px}.notes li{margin:0 0 6px}
+.qs{font-size:13px;line-height:1.6;margin:0;padding-left:18px;max-width:900px}.qs li{margin:0 0 8px}
+h4.qh{margin:14px 0 6px;font-size:13px}
+</style></head><body class="theme-light chrome">
+<div class="page">
+  <div class="toolbar">
+    <div>Theme <span class="seg" id="theme"><button data-v="light">Light</button><button data-v="dark">Dark</button><button data-v="system" class="on">System</button></span></div>
+    <div>Size <span class="seg" id="size"><button data-v="fit" class="on">Fit</button><button data-v="full">100 %</button></span></div>
+  </div>
+  <section>
+    <h1>Liquid Workspace: Pages</h1>
+    <p class="sub">Mockups for the M3a slice in <a href="../../../PLAN.md#m3a--local-workspace-foundation">PLAN.md</a>, for approval: the Explorer, a blank Page and its first actions, the built-in Blocks, Arrange mode, the PowerBar and a Source. They follow the <a href="../../concept/V-Spec_Liquid.html#experience">V-Spec</a>, ADR-0235 and <a href="../guidelines.md">guidelines.md</a>. Views, Connections and Automations are in the <a href="liquid-workspace-blocks.html">Blocks mockups</a>, History and Roles in the <a href="liquid-workspace-history.html">History mockups</a>.</p>
+  </section>
+  <section>
+    <h3 class="sec">1 · Explorer and a Page</h3>
+    <p class="sub">The Explorer shows each area as a section, as Notion shows teamspaces. Pages nest; Sources sit among them as peers with a file or folder icon and open the same way. Agent sessions keep their approved place. Automations and History sit at the foot. A Page that has never been arranged is one vertical flow at the 740 px reading width.</p>
+    <div class="stage"><div class="scaler"><div class="win" id="w-page" data-w="1240"></div></div></div>
+  </section>
+  <section>
+    <h3 class="sec">2 · A blank Page</h3>
+    <p class="sub">A new Page opens with its title focused and one quiet line that names the first actions, so the empty Page explains itself. It has no type and no layout to choose. The Area's <b>+</b> creates it; the PowerBar and the Explorer's menu do too.</p>
+    <div class="stage"><div class="scaler"><div class="win" id="w-blank" data-w="1240"></div></div></div>
+  </section>
+  <section>
+    <h3 class="sec">3 · The first action picks the Block</h3>
+    <p class="sub">The same input always creates the same Block, so nobody has to choose a type first. Pasting a URL offers Notion's choice afterwards: keep the bookmark or turn it into an embed.</p>
+    <div class="wrapx"><table class="maps">
+      <tr><th>Action</th><th>Creates</th><th>Detail</th></tr>
+      <tr><td>Type</td><td>Text Block</td><td>Typing goes on in the same Text Block across paragraphs, headings, lists and toggles. A new Text Block starts only below a Block of another type.</td></tr>
+      <tr><td><code>/</code></td><td>Block chooser</td><td>Lists the built-in Blocks, an existing Block to add as a View, and Page templates (state 4). Typing filters it.</td></tr>
+      <tr><td>Paste text or Markdown</td><td>Text Block</td><td>Markdown becomes formatting; Markdown and HTML only serve import and export.</td></tr>
+      <tr><td>Paste a table (tab- or comma-separated)</td><td>Database Block</td><td>Columns become fields; their types are guessed and can be changed.</td></tr>
+      <tr><td>Paste code from an editor</td><td>Code Block</td><td>When the clipboard marks it as code, with its language.</td></tr>
+      <tr><td>Paste an image, or drop a file</td><td>Media Block</td><td>The file becomes an attachment of the Workspace (ADR-0228). A dropped CSV becomes a Database Block instead, as a copy; a file that stays outside is added as a Source from the Explorer.</td></tr>
+      <tr><td>Paste a URL</td><td>Media Block as a bookmark</td><td>The bookmark shows the link and fetches nothing. A menu then offers "Embed", which loads only after a click (ADR-0235).</td></tr>
+      <tr><td>Paste a copied Liquid Block</td><td>A copy of it</td><td>A chip offers "Paste as View" instead (ADR-0235); see the <a href="liquid-workspace-blocks.html">Blocks mockups</a>.</td></tr>
+      <tr><td>Draw with a pen, or choose Draw</td><td>Whiteboard Block</td><td>A pen or Apple Pencil stroke on the empty Page starts a Whiteboard there. With a mouse or trackpad, "Draw" in the first line does the same.</td></tr>
+    </table></div>
+  </section>
+  <section>
+    <h3 class="sec">4 · The Block chooser</h3>
+    <p class="sub">Typing <code>/</code> opens the chooser where the caret is, as in Notion and AppFlowy. "Existing Block…" adds a View of a Block from any Page; templates fill an empty Page with a starting composition.</p>
+    <div class="stage"><div class="scaler"><div class="win" id="w-slash" data-w="1240"></div></div></div>
+  </section>
+  <section>
+    <h3 class="sec">5 · Text shortcuts</h3>
+    <p class="sub">Inside a Text Block, Notion's Markdown shortcuts format the current line: <code>#</code>, <code>##</code>, <code>###</code> headings, <code>-</code> bullets, <code>1.</code> numbers, <code>[]</code> to-dos, <code>&gt;</code> a toggle, <code>"</code> a quote, <code>---</code> a divider, <code>**bold**</code>, <code>*italic*</code>, <code>`code`</code> and <code>@</code> a link to a Page or Block. A toggle is formatting, not a Block. <code>```</code> is the one exception: it ends the Text Block and starts a Code Block.</p>
+    <div class="stage"><div class="scaler"><div class="win" id="w-text" data-w="900"></div></div></div>
+  </section>
+  <section>
+    <h3 class="sec">6 · The built-in Blocks</h3>
+    <p class="sub">Seven Block types, each with a quiet header that names the Block, its View kind and its menu. The header shows only on hover or focus, except where a Block has a name.</p>
+    <div class="gal" id="gal"></div>
+  </section>
+  <section>
+    <h3 class="sec">7 · Arrange mode</h3>
+    <p class="sub">"Arrange" in the Page header, or the PowerBar, switches the Page into Arrange mode. A 12-column grid appears; each Block becomes a tile that moves by its top handle and resizes by its right edge in whole columns, and the selected tile shows its width. Arrow keys move the selected tile, ⌥ and the arrow keys resize it. Done or esc ends it. An arranged Page uses the main column's width, up to 1120 px; text inside a tile keeps the reading width.</p>
+    <div class="stage"><div class="scaler"><div class="win" id="w-arr" data-w="1240"></div></div></div>
+  </section>
+  <section>
+    <h3 class="sec">8 · The same Page in a narrow window and on a phone</h3>
+    <p class="sub">The order of Blocks is the same on every device. In a narrow window, tiles narrower than half the grid become half width and the rest full width. On a phone every Block stacks in Page order and stays visible; a Database, a Whiteboard and Code show a preview that opens a focused full-screen surface. Arrange mode on a phone starts with a long press.</p>
+    <div class="stage"><div class="scaler"><div class="win bare" id="w-resp" data-w="1240"></div></div></div>
+  </section>
+  <section>
+    <h3 class="sec">9 · PowerBar</h3>
+    <p class="sub">⌘K, or a tap of the Liquid key, opens the PowerBar over the current Page, as T3 Code's command palette works: one field, grouped results, and lists such as "Add Block" that open in place with a way back. It finds Pages, Sources and Blocks, creates Blocks and runs only actions the current Role allows.</p>
+    <div class="stage"><div class="scaler"><div class="win" id="w-pb1" data-w="1240"></div></div></div>
+    <div class="stage" style="margin-top:16px"><div class="scaler"><div class="win bare" id="w-pb23" data-w="1320"></div></div></div>
+  </section>
+  <section>
+    <h3 class="sec">10 · A Source</h3>
+    <p class="sub">A Source opens like a Page. In M3a it is a local file or folder that Liquid reads but never writes (ADR-0235); Liquid rereads it when the file changes. "Use in a Block…" creates a Connection, and "Used by" lists them. The area's <b>+</b> menu adds it.</p>
+    <div class="stage"><div class="scaler"><div class="win" id="w-src" data-w="1240"></div></div></div>
+  </section>
+  <section>
+    <h3 class="sec">Decisions and points to approve</h3>
+    <h4 class="qh">Decided (ADR-0235)</h4>
+    <ol class="qs">
+      <li>Areas are Explorer sections with nested Pages; Sources are peers in the same tree.</li>
+      <li>M3a Sources are local files and folders, read-only.</li>
+      <li>A pasted URL is a bookmark that fetches nothing; an embed loads only after a click.</li>
+    </ol>
+    <h4 class="qh">Defaults in these mockups, approved with them</h4>
+    <ol class="qs">
+      <li>The deterministic mapping of section 3, including a dropped CSV becoming a Database copy and ``` starting a Code Block.</li>
+      <li>Database Views are Table, Board and Calendar; the Code Block shows code and never runs it.</li>
+      <li>Arrange mode uses 12 columns; narrow windows use half or full width; phones stack in Page order. An arranged Page widens to at most 1120 px.</li>
+      <li>Automations and History sit at the Explorer's foot; Roles live in Settings.</li>
+    </ol>
+    <h4 class="qh">Open</h4>
+    <ol class="qs">
+      <li><b>Shortcut for a new Page.</b> ⌘N already starts an agent session. Recommendation: ⇧⌘N for a new Page in the current area, since Notion's ⌘N is taken; the alternative is moving the agent session to ⇧⌘N.</li>
+    </ol>
+  </section>
+</div>
+<script>
+const DW=1240;
+const sv=(p,w=14)=>`<svg viewBox="0 0 16 16" width="${w}" height="${w}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
+const I={
+page:sv('<path d="M4 2h5l3 3v9H4z"/><path d="M9 2v3h3"/>'),
+file:sv('<path d="M4 2h5l3 3v9H4z"/><path d="M6 9h4M6 11.5h4"/>'),
+dir:sv('<path d="M1.8 4.2c0-.6.4-1 1-1h3.4l1.4 1.6h5.6c.6 0 1 .4 1 1v6.9c0 .6-.4 1-1 1H2.8c-.6 0-1-.4-1-1z"/>'),
+srch:sv('<circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5l3 3"/>'),
+zap:sv('<path d="M9 1.5L3 9h4.5L7 14.5 13 7H8.5z"/>'),
+clock:sv('<circle cx="8" cy="8" r="6"/><path d="M8 4.5V8l2.5 1.5"/>'),
+grid:sv('<rect x="2" y="2" width="5" height="5" rx="1"/><rect x="9" y="2" width="5" height="5" rx="1"/><rect x="2" y="9" width="5" height="5" rx="1"/><rect x="9" y="9" width="5" height="5" rx="1"/>'),
+more:sv('<circle cx="3.5" cy="8" r=".8"/><circle cx="8" cy="8" r=".8"/><circle cx="12.5" cy="8" r=".8"/>'),
+drag:sv('<circle cx="6" cy="4" r=".8"/><circle cx="10" cy="4" r=".8"/><circle cx="6" cy="8" r=".8"/><circle cx="10" cy="8" r=".8"/><circle cx="6" cy="12" r=".8"/><circle cx="10" cy="12" r=".8"/>'),
+plus:sv('<path d="M8 3v10M3 8h10"/>'),
+text:sv('<path d="M3 3.5h10M8 3.5V13"/>'),
+db:sv('<rect x="2" y="2.5" width="12" height="11" rx="1.5"/><path d="M2 6h12M6 6v7.5"/>'),
+chart:sv('<path d="M2.5 13.5h11"/><path d="M4.5 11V8M8 11V4M11.5 11V6.5"/>'),
+code:sv('<path d="M5.5 4.5L2 8l3.5 3.5M10.5 4.5L14 8l-3.5 3.5"/>'),
+fx:sv('<path d="M11.5 3H5.5l4 5-4 5h6"/>'),
+img:sv('<rect x="2" y="2.5" width="12" height="11" rx="1.5"/><circle cx="6" cy="6.5" r="1.2"/><path d="M2.5 12l3.5-3.5 2.5 2.5 2-2 3 3"/>'),
+pen:sv('<path d="M10.5 2.5l3 3L6 13H3v-3z"/>'),
+link:sv('<path d="M6.5 9.5l3-3"/><path d="M7 4.5l1-1a2.5 2.5 0 013.5 3.5l-1 1M9 11.5l-1 1A2.5 2.5 0 014.5 9l1-1"/>'),
+copy:sv('<rect x="5" y="5" width="8.5" height="8.5" rx="1.5"/><path d="M11 5V3.5c0-.6-.4-1-1-1H3.5c-.6 0-1 .4-1 1V10c0 .6.4 1 1 1H5"/>'),
+tpl:sv('<rect x="2" y="2" width="12" height="12" rx="1.5"/><path d="M2 6h12M6 6v8"/>'),
+cog:sv('<circle cx="8" cy="8" r="2"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4"/>'),
+reload:sv('<path d="M13 8a5 5 0 11-1.5-3.5"/><path d="M13 2.5V5h-2.5"/>'),
+back:sv('<path d="M10 3.5L5.5 8l4.5 4.5"/>'),
+};
+const nav=(d,ic,label,o={})=>`<div class="nav ${o.on?'on':''}" style="--d:${d}"><span class="tw">${o.tw||''}</span><span class="ico">${ic}</span><span>${label}</span>${o.r?`<span class="r ${o.warn?'warn':''}">${o.r}</span>`:''}</div>`;
+function side(o={}){const s=o.sel||'budget';const e=(k)=>s==k;
+return `<div class="side"><div class="wsw"><span class="av">B</span>Benni's Workspace<span style="margin-left:auto;color:var(--ws-text-faint)">⌄</span></div>
+<div class="srch">${I.srch}<span>Search or run a command</span><kbd>⌘K</kbd></div>
+<h6>Private<span class="a">${o.plus?'<span style="color:var(--ws-text-muted)">···  ＋</span>':''}</span></h6>
+${nav(0,I.page,'Household budget',{tw:'⌄',on:e('budget')})}
+${nav(1,I.page,'Monthly review',{on:e('review')})}
+${o.newp?nav(0,I.page,o.newp,{on:e('new')}):''}
+${nav(0,I.page,'Trip to Lisbon',{tw:'›',on:e('trip')})}
+${nav(0,I.file,'bank-export.csv',{on:e('csv')})}
+<h6>Acme API</h6>
+${nav(0,I.page,'Roadmap',{on:e('road')})}
+${nav(0,I.page,'API design',{on:e('api')})}
+${nav(0,I.dir,'docs',{tw:'›',on:e('docs')})}
+<h6>Agent sessions <kbd>⌘N</kbd></h6>
+${nav(0,I.dir,'acme-api <span style="color:var(--ws-text-faint);font-size:12px">2 sessions</span>',{tw:'›'})}
+<div class="foot">${nav(0,I.zap,'Automations',o.att?{r:'⚠ 1',warn:true}:{})}${nav(0,I.clock,'History')}</div>
+${o.menu||''}</div>`}
+function head(crumb,o={}){return `<div class="head"><span class="crumb">${crumb}</span><span class="end">${o.right!==undefined?o.right:`<span class="ib ${o.arr?'on':''}">${I.grid}Arrange</span><span class="ib" title="Page history">${I.clock}</span><span class="ib">${I.more}</span>`}</span></div>`}
+function frame(id,o){document.getElementById(id).innerHTML=`<div class="tbar"><div class="lights"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></div></div>
+<div class="body" style="--h:${o.h}px">${side(o.side||{})}<div class="main">${o.head||''}${o.main}</div>${o.over||''}</div>`}
+
+const rows=[['1 Nov','Groceries','Food','t1','84.20'],['30 Oct','Electricity','Home','t2','96.00'],['28 Oct','Train to Porto','Travel','t3','42.50'],['27 Oct','Rent','Home','t2','950.00'],['25 Oct','Cinema','Leisure','t4','111.80']];
+const dbTable=(o={})=>`<div class="tbl" style="--cols:96px 1fr 120px 110px"><div class="tr hd"><span>Date</span><span>Item</span><span>Category</span><span class="num">Amount</span></div>
+${rows.slice(0,o.n||5).map(r=>`<div class="tr"><span>${r[0]}</span><span>${r[1]}</span><span><span class="tag ${r[3]}">${r[2]}</span></span><span class="num">€ ${r[4]}</span></div>`).join('')}
+<div class="tr sum"><span>5 rows</span><span></span><span></span><span class="num">Sum € 1,284.50</span></div></div>`;
+const dbHead=(o={})=>`<div class="bh"><span class="ico">${I.db}</span><b>Expenses</b><span class="chip">Table ⌄</span><span class="end">${o.synced?'<span class="cap">Synced · on 2 Pages</span>':''}<span class="ib">${I.more}</span></span></div>`;
+const chart=(h=120)=>`<div class="bars" style="height:${h}px">${[['Home',1046],['Leisure',112],['Food',84],['Travel',43]].map(([k,v])=>`<div><span>€ ${v}</span><i style="height:${Math.max(4,v/1046*(h-30))}px"></i></div>`).join('')}</div><div class="blab"><span>Home</span><span>Leisure</span><span>Food</span><span>Travel</span></div>`;
+const chartBlk=`<div class="bh"><span class="ico">${I.chart}</span><b>Spending by category</b><span class="chip">Bar ⌄</span><span class="end"><span class="cap">from Expenses</span></span></div>${chart()}`;
+const fxBlk=(o={})=>`<div class="card"><div class="cap">Left this month</div><div class="big">€ 715.50</div>${o.f!==false?`<div class="fx" style="margin-top:4px">= 2000 − SUM(<span class="ref">${I.db} Expenses › Amount</span>)</div>`:''}</div>`;
+
+// 1 · Page
+frame('w-page',{h:700,head:head('Private <span>›</span> <b>Household budget</b>'),main:`<div class="pg"><div class="col">
+<div class="ttl">Household budget</div>
+<div class="prose"><p>October is almost done. Rent is the largest share, as every month; the trip to Porto stayed under € 50.</p></div>
+<div class="blk"><div class="gut"><span>＋</span><span class="on">${I.drag}</span></div>${dbHead({synced:true})}${dbTable()}</div>
+<div class="blk">${chartBlk}</div>
+<div class="blk">${fxBlk()}</div>
+</div></div>`});
+
+// 2 · Blank
+frame('w-blank',{h:440,side:{sel:'new',newp:'Untitled',plus:true},head:head('Private <span>›</span> <b>Untitled</b>'),main:`<div class="pg"><div class="col">
+<div class="ttl ph"><span class="caret" style="height:34px"></span>Untitled</div>
+<div class="hint">Type to write, press <code style="margin:0 4px">/</code> for Blocks, or paste, drop or <span style="color:var(--ws-text-muted);text-decoration:underline;margin-left:4px">draw</span>.</div>
+<div class="hint" style="font-size:13px;margin-top:20px">Start from a template&nbsp;&nbsp;<span class="chip">Budget</span>&nbsp;<span class="chip">Meeting notes</span>&nbsp;<span class="chip">Project</span></div>
+</div></div>`});
+
+// 4 · Slash
+const chooser=`<div class="pop" style="left:394px;top:200px;width:360px">
+<div class="lbl">Blocks</div>
+${[['text','Text','Paragraphs, headings, lists and toggles',1],['db','Database','Rows with typed fields; Table, Board or Calendar'],['chart','Chart','Draws data from a Database or Source'],['fx','Formula','One value calculated from other Blocks'],['code','Code','Code with highlighting'],['img','Media','Image, video, file, bookmark or embed'],['pen','Whiteboard','Draw and place shapes freely']].map(([i,n,d,on])=>`<div class="it ${on?'on':''}"><span class="bi">${I[i]}</span><span class="tx"><span>${n}</span><span class="d">${d}</span></span></div>`).join('')}
+<hr><div class="lbl">Reuse</div><div class="it"><span class="bi">${I.link}</span><span class="tx"><span>Existing Block…</span><span class="d">Add a View of a Block from any Page</span></span></div>
+<hr><div class="lbl">Templates</div><div class="it"><span class="bi">${I.tpl}</span><span>Budget</span><span class="r">Text, Database, Chart, Formula</span></div></div>`;
+frame('w-slash',{h:760,side:{sel:'new',newp:'Weekly plan'},head:head('Private <span>›</span> <b>Weekly plan</b>'),main:`<div class="pg"><div class="col">
+<div class="ttl">Weekly plan</div>
+<div class="prose"><p>Things to sort out before Friday.</p><p style="margin:0">/<span class="caret" style="margin-left:1px"></span></p></div>
+</div></div>`,over:chooser});
+
+// 5 · Text
+frame('w-text',{h:560,side:{sel:'trip'},head:head('Private <span>›</span> <b>Trip to Lisbon</b>'),main:`<div class="pg" style="padding-top:20px"><div class="col" style="width:520px;gap:0">
+<div class="blk prose"><div class="gut"><span>＋</span><span class="on">${I.drag}</span></div>
+<h2>Before we go</h2>
+<div class="todo"><span class="cb on">✓</span><span style="color:var(--ws-text-faint);text-decoration:line-through">Book the flat in Alfama</span></div>
+<div class="todo"><span class="cb"></span><span>Renew the passport</span></div>
+<div class="toggle" style="margin-top:6px"><span style="color:var(--ws-text-faint)">▸</span><b style="font-weight:600">Packing list</b></div>
+<div class="quote" style="margin:8px 0">“Bring shoes for the hills.” Ana</div>
+<p>See also <span style="color:var(--ws-text-muted);text-decoration:underline">@Household budget</span> for what is left.</p>
+<p style="margin:0">&gt; <span class="caret"></span><span style="color:var(--ws-text-faint)">Toggle: press space</span></p>
+</div><div class="cap" style="margin-top:12px">One Text Block: heading, to-dos, a toggle, a quote and a link. The last line shows a shortcut about to apply.</div>
+</div></div>`});
+
+// 6 · Gallery
+const G=[
+['text','Text','one Block for all prose',`<div class="prose" style="font-size:15px;line-height:22px"><b>Monday</b><br>Call the landlord about the heating.<div class="todo" style="margin-top:4px"><span class="cb"></span>Pay the electricity bill</div></div>`,'Formatting inside: headings, lists, to-dos, toggles, quotes.'],
+['db','Database','Table · Board · Calendar',`${dbTable({n:3})}`,'Typed fields: text, number, select, date, checkbox, file, link to a row, formula and button.'],
+['chart','Chart','bar, line or pie',chart(100),'Its data comes through a Connection from a Database or a Source.'],
+['fx','Formula','one value',fxBlk(),'Excel function names; references are chips bound to stable IDs, so renaming breaks nothing.'],
+['code','Code','highlighted, never run',`<div class="code"><i class="kw">export function</i> share(part, total) {\n  <i class="kw">return</i> Math.round(part / total * <i class="nu">100</i>);\n}</div>`,'Language picked from the paste or the menu; Apps that run code come with M3b.'],
+['img','Media','image, file, bookmark, embed',`<div class="img"></div><div class="bm"><span class="ico">${I.link}</span><span><b style="font-weight:500">Tram 28 timetable</b><br><span class="u">carris.pt › tram-28</span></span></div><div class="emb">${I.link}<span>Embed from youtube.com</span><span class="btn">Load content</span><span class="cap">Loading sends your address to youtube.com.</span></div>`,'Images and files are Workspace attachments. Bookmarks fetch nothing; embeds load after a click.'],
+['pen','Whiteboard','free canvas',`<div class="wb"><svg viewBox="0 0 340 150"><rect x="24" y="30" width="96" height="52" rx="8" fill="none" stroke="var(--ws-data-1)" stroke-width="2"/><text x="72" y="61" text-anchor="middle" font-size="13" fill="var(--ws-text)">Lisbon</text><rect x="210" y="74" width="100" height="52" rx="8" fill="none" stroke="var(--ws-data-2)" stroke-width="2"/><text x="260" y="105" text-anchor="middle" font-size="13" fill="var(--ws-text)">Porto</text><path d="M122 62 C 170 60, 170 98, 206 100" fill="none" stroke="var(--ws-text-muted)" stroke-width="1.6"/><path d="M200 96l7 4-6 5" fill="none" stroke="var(--ws-text-muted)" stroke-width="1.6"/><path d="M40 120c20-14 40 10 60-4" fill="none" stroke="var(--ws-text-faint)" stroke-width="2"/></svg></div>`,'Pen strokes, shapes, text and arrows. Large boards slice into tiles.'],
+];
+document.getElementById('gal').innerHTML=G.map(([i,n,k,b,c])=>`<div class="win gcell"><h4>${I[i]} ${n} <span>${k}</span></h4>${b}<div class="cap">${c}</div></div>`).join('');
+
+// 7 · Arrange
+const tile=(span,body,o={})=>`<div class="tile ${o.sel?'sel':''}" style="grid-column:span ${span}"><span class="mv">• • •</span><span class="rs"></span>${o.sel?`<span class="span">${span} of 12</span>`:''}${body}</div>`;
+frame('w-arr',{h:640,head:`<div class="armode"><b>${I.grid}</b><b>Arranging Household budget</b><span>Drag the top handle to move, the right edge to resize</span><span class="end"><span class="sg2"><span class="on">Desktop</span><span>Narrow</span><span>Phone</span></span><span class="btn pri">Done <kbd>esc</kbd></span></span></div>`,main:`<div class="pg" style="padding:28px 32px 0"><div style="max-width:1120px;margin:0 auto">
+<div class="ttl" style="font-size:24px;line-height:32px">Household budget</div>
+<div class="grid12 lines" style="margin-top:14px">
+${tile(8,`<div class="prose" style="font-size:15px;line-height:22px">October is almost done. Rent is the largest share, as every month; the trip to Porto stayed under € 50.</div>`)}
+${tile(4,fxBlk({f:false}).replace('class="card"','style=""'))}
+${tile(7,`${dbHead()}${dbTable({n:4})}`,{sel:true})}
+${tile(5,chartBlk)}
+</div></div></div>`});
+
+// 8 · Responsive
+const narrow=`<div class="win" style="width:700px;flex:none"><div class="tbar"><div class="lights"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></div></div><div style="padding:20px 24px 24px;height:560px;overflow:hidden;box-sizing:border-box;-webkit-mask-image:linear-gradient(to top,transparent 0,#000 40px);mask-image:linear-gradient(to top,transparent 0,#000 40px)">
+<div class="ttl" style="font-size:24px;line-height:32px">Household budget</div>
+<div class="grid12" style="grid-template-columns:repeat(2,1fr);margin-top:12px">
+<div style="grid-column:span 2" class="prose">October is almost done. Rent is the largest share, as every month.</div>
+<div>${fxBlk({f:false})}</div><div></div>
+<div style="grid-column:span 2">${dbHead()}${dbTable({n:3})}</div>
+<div class="card">${chartBlk.replace('<span class="chip">Bar ⌄</span>','').replace('<span class="end"><span class="cap">from Expenses</span></span>','')}${''}</div></div></div></div>`;
+const phone=`<div class="phone" style="flex:none"><div class="sb"><span>9:41</span><span>●●●</span></div><div class="ph"><span>‹</span><span>Private › <b style="color:var(--ws-text);font-weight:500">Household budget</b></span><span style="margin-left:auto">${I.more}</span></div>
+<div class="st" style="height:520px;overflow:hidden;-webkit-mask-image:linear-gradient(to top,transparent 0,#000 40px);mask-image:linear-gradient(to top,transparent 0,#000 40px)"><div class="ttl" style="font-size:24px;line-height:32px;margin:0">Household budget</div>
+<div class="prose" style="font-size:15px;line-height:22px">October is almost done. Rent is the largest share, as every month.</div>
+${fxBlk({f:false})}
+<div class="card" style="padding:10px 12px"><div class="bh" style="height:24px"><span class="ico">${I.db}</span><b>Expenses</b><span class="end cap">5 rows</span></div>
+${rows.slice(0,3).map(r=>`<div style="display:flex;justify-content:space-between;font-size:14px;height:30px;align-items:center;box-shadow:inset 0 -1px 0 var(--ws-border)"><span>${r[1]}</span><span style="font-variant-numeric:tabular-nums">€ ${r[4]}</span></div>`).join('')}<div class="opn"><span>Open table</span><span>›</span></div></div>
+<div class="card">${chartBlk}</div></div></div>`;
+document.getElementById('w-resp').innerHTML=`<div style="display:flex;gap:32px;align-items:flex-start">${narrow}${phone}</div>`;
+
+// 9 · PowerBar
+const pbItem=(ic,label,d,r,on)=>`<div class="it ${on?'on':''}"><span class="ico">${ic}</span><span>${label}</span>${d?`<span class="d">${d}</span>`:''}${r?`<span class="r">${r}</span>`:''}</div>`;
+const pbEmpty=`<div class="pb"><div class="in">${I.srch}<span class="ph">Search or run a command</span></div><div class="ls">
+<div class="lbl">Recent</div>${pbItem(I.page,'Household budget','Private','',1)}${pbItem(I.page,'API design','Acme API')}${pbItem(I.file,'bank-export.csv','Private · Source')}
+<div class="lbl">Create</div>${pbItem(I.page,'New Page','in Private','⇧⌘N')}${pbItem(I.plus,'Add Block','on Household budget','›')}${pbItem(I.dir,'Add Source','File or folder','›')}
+<div class="lbl">This Page</div>${pbItem(I.grid,'Arrange')}${pbItem(I.clock,'Page history')}
+<div class="lbl">Workspace</div>${pbItem(I.zap,'Automations')}${pbItem(I.clock,'History')}${pbItem(I.cog,'Settings','','⌘,')}</div></div>`;
+frame('w-pb1',{h:720,head:head('Private <span>›</span> <b>Household budget</b>'),main:`<div class="pg"><div class="col"><div class="ttl">Household budget</div><div class="prose"><p>October is almost done.</p></div>${dbHead({synced:true})}${dbTable()}</div></div>`,over:`<div class="scrim"></div>${pbEmpty}`});
+const pbQuery=`<div class="pb" style="position:relative;left:auto;top:auto;transform:none"><div class="in">${I.srch}<span>exp<span class="caret" style="margin-left:1px;height:18px"></span></span></div><div class="ls">
+<div class="lbl">Pages and Sources</div>${pbItem(I.file,'bank-<mark>exp</mark>ort.csv','Private · Source','',1)}
+<div class="lbl">Blocks</div>${pbItem(I.db,'<mark>Exp</mark>enses','Database · Household budget, Monthly review')}${pbItem(I.chart,'Spending by category','Chart · uses <mark>Exp</mark>enses')}
+<div class="lbl">Text</div>${pbItem(I.text,'“… <mark>exp</mark>ect rain on Tuesday …”','Trip to Lisbon')}
+<div class="lbl">Actions</div>${pbItem(I.plus,'Add Block › Database','on Household budget')}</div></div>`;
+const pbSub=`<div class="pb" style="position:relative;left:auto;top:auto;transform:none"><div class="in"><span class="back">${I.back}Add Block</span><span class="ph">Filter Block types</span></div><div class="ls">
+<div class="lbl">Add to Household budget, below the selection</div>
+${[['text','Text'],['db','Database'],['chart','Chart'],['fx','Formula'],['code','Code'],['img','Media'],['pen','Whiteboard']].map(([i,n],k)=>pbItem(I[i],n,'','',k==2)).join('')}
+<div class="lbl">Reuse</div>${pbItem(I.link,'Existing Block…','Add a View')}</div></div>`;
+document.getElementById('w-pb23').innerHTML=`<div style="display:flex;gap:40px;align-items:flex-start">${pbQuery}${pbSub}</div>`;
+
+// 10 · Source
+const csv=[['2026-11-01','REWE SAGT DANKE','-84.20'],['2026-10-30','STADTWERKE','-96.00'],['2026-10-28','CP COMBOIOS','-42.50'],['2026-10-27','MIETE OKT','-950.00'],['2026-10-25','KINO','-111.80'],['2026-10-24','GEHALT','+3,200.00']];
+const addMenu=`<div class="pop" style="left:40px;top:200px;width:236px"><div class="it">${I.page}<span>New Page</span><span class="r">⇧⌘N</span></div><div class="it">${I.tpl}<span>New Page from template</span><span class="r">›</span></div><hr><div class="lbl">Add Source</div><div class="it on">${I.file}<span>File…</span></div><div class="it">${I.dir}<span>Folder…</span></div></div>`;
+frame('w-src',{h:620,side:{sel:'csv',plus:true,menu:addMenu},head:head('Private <span>›</span> <b>bank-export.csv</b>',{right:`<span class="ib">${I.reload}Reload</span><span class="ib">Show in Finder</span><span class="ib">${I.more}</span>`}),main:`<div class="pg"><div class="col">
+<div style="display:flex;align-items:center;gap:10px"><span style="color:var(--ws-text-faint)">${sv('<path d="M4 2h5l3 3v9H4z"/><path d="M6 9h4M6 11.5h4"/>',28)}</span><div class="ttl" style="margin:0">bank-export.csv</div></div>
+<div class="cap" style="font-size:13px">Source · local file <code>~/Documents/bank-export.csv</code> · read-only · read at 10:42 · 6 rows</div>
+<div class="tbl" style="--cols:130px 1fr 130px"><div class="tr hd"><span>Date</span><span>Text</span><span class="num">Amount</span></div>${csv.map(r=>`<div class="tr"><span class="mono" style="font-size:13px">${r[0]}</span><span>${r[1]}</span><span class="num">${r[2]}</span></div>`).join('')}</div>
+<div style="display:flex;gap:8px;align-items:center"><span class="btn">${I.link}Use in a Block…</span><span class="cap">Liquid reads this file and never writes it.</span></div>
+<div><div class="cap" style="margin-bottom:4px">Used by</div><div class="nav" style="padding:0 6px"><span class="ico">${I.chart}</span><span>Balance over time</span><span class="r">Chart · Household budget</span></div></div>
+</div></div>`});
+
+let mode='system',fit=true;const mq=matchMedia('(prefers-color-scheme: dark)');
+function hostDark(){const v=getComputedStyle(document.documentElement).getPropertyValue('--background').trim();if(!v)return mq.matches;const c=document.createElement('canvas');c.width=c.height=1;const x=c.getContext('2d');x.fillStyle='#808080';x.fillStyle=v;x.fillRect(0,0,1,1);const d=x.getImageData(0,0,1,1).data;return .2126*d[0]+.7152*d[1]+.0722*d[2]<128}
+function applyTheme(){const dark=mode=='dark'||(mode=='system'&&hostDark());document.querySelectorAll('.win,.maps,.stage').forEach(w=>{w.classList.toggle('theme-dark',dark);w.classList.toggle('theme-light',!dark)});document.body.classList.toggle('theme-dark',dark);document.body.classList.toggle('theme-light',!dark);document.querySelectorAll('#theme button').forEach(b=>b.classList.toggle('on',b.dataset.v==mode))}
+function layout(){document.querySelectorAll('.stage').forEach(st=>{const sc=st.querySelector('.scaler'),w=sc.firstElementChild;const W=+(w.dataset.w||DW);w.style.width=W+'px';const s=fit?Math.min(1,(st.clientWidth-32)/W):1;w.style.transform=`scale(${s})`;sc.style.width=W*s+'px';sc.style.height=w.offsetHeight*s+'px';st.style.overflowX=fit?'hidden':'auto'});document.querySelectorAll('#size button').forEach(b=>b.classList.toggle('on',(b.dataset.v=='fit')==fit))}
+document.querySelectorAll('#theme button').forEach(b=>b.onclick=()=>{mode=b.dataset.v;applyTheme()});
+document.querySelectorAll('#size button').forEach(b=>b.onclick=()=>{fit=b.dataset.v=='fit';layout()});
+mq.addEventListener('change',applyTheme);addEventListener('resize',layout);setInterval(()=>{if(mode=='system')applyTheme()},1500);
+applyTheme();layout();
+</script>
+</body></html>
