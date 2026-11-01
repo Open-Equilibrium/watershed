@@ -462,7 +462,7 @@ impl AgentSession {
     }
 
     /// Deletes the session stored in `path`, a session of this project in pi's session
-    /// directory other than the open one, with its checkpoints first; refused while its agent
+    /// directory other than the open one, with its checkpoints first; refused while an agent
     /// runs in any worktree of the repository. Neither comes back. A session pi never stored
     /// leaves nothing to delete.
     pub fn delete_session(&self, path: String) -> Result<(), String> {
