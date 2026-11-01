@@ -69,7 +69,8 @@ impl Checkpoint {
 /// What reverting the files to a checkpoint would change.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RevertPlan {
-    /// The files below the working folder that differ from the checkpoint, sorted by path.
+    /// The files below the working folder that differ from the checkpoint, sorted by path,
+    /// those it leaves alone near repositories among them.
     pub files: Vec<RevertFile>,
     /// The sessions whose agents run in the checkout, which refuse the revert.
     pub running: Vec<String>,
@@ -94,6 +95,9 @@ pub struct RevertFile {
     /// file needs its place: a file already at a restored path, or a folder (its path ends in
     /// `/`) or file in the way of one.
     pub ignored: bool,
+    /// Whether the revert leaves it as it is, as it is inside, at or above a submodule or
+    /// nested repository, whose files are their own.
+    pub kept: bool,
 }
 
 /// A session's checkpoints in its project.
@@ -217,14 +221,19 @@ impl Checkpoints {
                 .collect(),
             None => Default::default(),
         };
-        let (changes, _) = self.bounded(tree.revertable(&now, &target)).await?;
-        let (replaced, removed) = self.bounded(tree.in_the_way(&changes)).await?;
-        let mut files: Vec<RevertFile> = changes
+        let revertable = self.bounded(tree.revertable(&now, &target)).await?;
+        let (replaced, removed) = self.bounded(tree.in_the_way(&revertable.changes)).await?;
+        let kept = revertable.kept.into_iter().map(|change| (change, true));
+        let mut files: Vec<RevertFile> = revertable
+            .changes
             .into_iter()
-            .map(|change| RevertFile {
+            .map(|change| (change, false))
+            .chain(kept)
+            .map(|(change, kept)| RevertFile {
                 edited: edited.contains(&change.path),
                 modified_ms: modified_ms(&tree.file(&change.path)),
                 ignored: replaced.contains(&change.path),
+                kept,
                 path: change.path,
                 status: change.status,
             })
@@ -234,6 +243,7 @@ impl Checkpoints {
                 path,
                 status: ChangeStatus::Deleted,
                 ignored: true,
+                kept: false,
             }))
             .collect();
         files.sort_by(|a, b| a.path.cmp(&b.path));

@@ -20,6 +20,9 @@ use tokio::sync::Mutex;
 /// Largest Git output read for one file list or patch; longer output is cut off.
 const MAX_OUTPUT_BYTES: u64 = 4 * 1024 * 1024;
 
+/// Most folders searched for a repository in a returning file's place.
+const MAX_SEARCHED_FOLDERS: usize = 10_000;
+
 /// Largest part of Git's error output kept for an error message.
 const MAX_ERROR_BYTES: usize = 64 * 1024;
 
@@ -27,6 +30,17 @@ static STORES: AtomicU64 = AtomicU64::new(0);
 
 /// The e-mail address checkpoint commits carry.
 const CHECKPOINT_EMAIL: &str = "checkpoints@watershed.invalid";
+
+/// What a revert changes and what it leaves alone near repositories.
+#[derive(Debug, Default)]
+pub struct Revertable {
+    /// The changes it makes.
+    pub changes: Vec<FileChange>,
+    /// The changes it leaves alone, as they are inside, at or above a repository.
+    pub kept: Vec<FileChange>,
+    /// The paths it leaves alone, which `git restore` is told to skip.
+    left_alone: BTreeSet<String>,
+}
 
 /// A project state captured as a Git tree in the project's object database.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -247,28 +261,32 @@ impl WorkingTree {
         &self,
         from: &Snapshot,
         to: &Snapshot,
-    ) -> Result<(Vec<FileChange>, BTreeSet<String>), DiffError> {
-        let mut repositories = BTreeSet::new();
+    ) -> Result<Revertable, DiffError> {
+        let mut revertable = Revertable::default();
         let mut changes = Vec::new();
         for (change, repository) in self.listed(from, to, Whitespace::Shown).await? {
             if !self.within(&change.path) {
                 continue;
             }
             if repository {
-                repositories.insert(change.path);
+                revertable.left_alone.insert(change.path.clone());
+                revertable.kept.push(change);
             } else {
                 changes.push(change);
             }
         }
-        let (mut reverted, mut left_alone) = (Vec::new(), Vec::new());
+        // Git lists a folder's path before those below it, so a path left alone is known when
+        // the ones below it come, and they are left alone too.
         for change in changes {
-            match self.repository_near(&change.path, &repositories) {
-                Some(repository) => left_alone.push(repository),
-                None => reverted.push(change),
+            match self.repository_near(&change.path, &revertable.left_alone) {
+                Some(path) => {
+                    revertable.left_alone.insert(path);
+                    revertable.kept.push(change);
+                }
+                None => revertable.changes.push(change),
             }
         }
-        repositories.extend(left_alone);
-        Ok((reverted, repositories))
+        Ok(revertable)
     }
 
     /// The path a revert must leave alone so it writes nothing into a repository near the
@@ -385,7 +403,11 @@ impl WorkingTree {
         // The private index then lists the current files, so `git restore` deletes those `to`
         // lacks, and a file that was untracked before the turn returns untracked.
         let now = Snapshot(self.capture(&[]).await?);
-        let (changes, repositories) = self.revertable(&now, to).await?;
+        let Revertable {
+            changes,
+            left_alone,
+            ..
+        } = self.revertable(&now, to).await?;
         if changes.is_empty() {
             return Ok(());
         }
@@ -394,7 +416,7 @@ impl WorkingTree {
         } else {
             format!(":(top,literal){}", self.prefix)
         };
-        let left_alone: Vec<String> = repositories
+        let left_alone: Vec<String> = left_alone
             .iter()
             .map(|path| format!(":(exclude,top,literal){path}"))
             .collect();
@@ -423,7 +445,7 @@ impl WorkingTree {
             .filter(|path| std::fs::symlink_metadata(self.root.join(path)).is_ok())
             .collect();
         let after = Snapshot(self.capture(&written).await?);
-        let (left, _) = self.revertable(&after, to).await?;
+        let left = self.revertable(&after, to).await?.changes;
         if left.is_empty() {
             Ok(())
         } else {
@@ -888,22 +910,31 @@ fn git_command(dir: &Path, env: &[(&str, OsString)], args: &[&str]) -> Command {
     command
 }
 
-/// Whether `.git` is anywhere at or below the folder at `dir`; links are not followed and
-/// the search ends at the first.
+/// Whether a repository is at or below the folder at `dir`, found as Git finds one: by
+/// asking for `.git` in each folder, which a file system without capitals also finds as
+/// `.GIT`. Links are not followed. Past [`MAX_SEARCHED_FOLDERS`] it counts as holding one,
+/// so a revert leaves a vast folder alone rather than search it all.
 fn holds_repository(dir: &Path) -> bool {
+    if !std::fs::symlink_metadata(dir).is_ok_and(|meta| meta.is_dir()) {
+        return false;
+    }
     let mut folders = vec![dir.to_owned()];
+    let mut searched = 0;
     while let Some(folder) = folders.pop() {
+        searched += 1;
+        if searched > MAX_SEARCHED_FOLDERS || std::fs::symlink_metadata(folder.join(".git")).is_ok()
+        {
+            return true;
+        }
         let Ok(entries) = std::fs::read_dir(&folder) else {
             continue;
         };
-        for entry in entries.flatten() {
-            if entry.file_name() == ".git" {
-                return true;
-            }
-            if entry.file_type().is_ok_and(|kind| kind.is_dir()) {
-                folders.push(entry.path());
-            }
-        }
+        folders.extend(
+            entries
+                .flatten()
+                .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
+                .map(|entry| entry.path()),
+        );
     }
     false
 }

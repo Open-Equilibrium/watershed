@@ -789,6 +789,18 @@ fn closing_stops_a_capture_in_progress_and_removes_its_index() {
     });
 }
 
+/// The paths the plan reverts and those it leaves alone near a repository.
+fn split(plan: &RevertPlan) -> (Vec<&str>, Vec<&str>) {
+    let paths = |kept: bool| {
+        plan.files
+            .iter()
+            .filter(|file| file.kept == kept)
+            .map(|file| file.path.as_str())
+            .collect()
+    };
+    (paths(false), paths(true))
+}
+
 /// The file `path` of the plan, with how the revert changes it and whether it changed since the
 /// last turn ended.
 fn planned(plan: &RevertPlan, path: &str) -> (ChangeStatus, bool) {
@@ -1047,8 +1059,11 @@ fn a_revert_leaves_submodules_and_their_work_alone() {
             .revert_plan(&at("t1", Phase::Start), None)
             .await
             .expect("plan");
-        let paths: Vec<_> = plan.files.iter().map(|file| file.path.as_str()).collect();
-        assert_eq!(paths, ["a.txt"], "a submodule is not reverted");
+        assert_eq!(
+            split(&plan),
+            (vec!["a.txt"], vec!["sub"]),
+            "a submodule is left alone"
+        );
         checkpoints
             .revert(&at("t1", Phase::Start))
             .await
@@ -1255,8 +1270,11 @@ fn a_revert_never_writes_into_a_repository_a_turn_made() {
             .revert_plan(&at("t1", Phase::Start), None)
             .await
             .expect("plan");
-        let paths: Vec<_> = plan.files.iter().map(|file| file.path.as_str()).collect();
-        assert_eq!(paths, ["a.txt"], "{plan:?}");
+        assert_eq!(
+            split(&plan),
+            (vec!["a.txt"], vec!["foo", "lib/x.txt"]),
+            "{plan:?}"
+        );
         checkpoints
             .revert(&at("t1", Phase::Start))
             .await
@@ -1416,6 +1434,7 @@ fn a_returning_file_deletes_no_repository_in_its_place() {
                 &repo.path().join("outer/sub"),
                 &["commit", "-q", "-m", "inner"],
             );
+            repo.write("outer/README.md", "beside it\n");
             // A repository with a commit that Git ignores.
             folder("kept");
             git_at(&repo.path().join("kept"), &["init", "-q"]);
@@ -1429,18 +1448,79 @@ fn a_returning_file_deletes_no_repository_in_its_place() {
             .revert_plan(&at("t1", Phase::Start), None)
             .await
             .expect("plan");
-        let paths: Vec<_> = plan.files.iter().map(|file| file.path.as_str()).collect();
-        assert_eq!(paths, ["a.txt"], "{plan:?}");
+        assert_eq!(
+            split(&plan),
+            (
+                vec!["a.txt"],
+                vec!["bare", "kept", "outer", "outer/README.md", "outer/sub"]
+            ),
+            "{plan:?}"
+        );
         checkpoints
             .revert(&at("t1", Phase::Start))
             .await
             .expect("reverted");
-        for kept in ["bare/.git", "bare/work.txt", "outer/sub/.git", "kept/.git"] {
+        for kept in [
+            "bare/.git",
+            "bare/work.txt",
+            "outer/sub/.git",
+            "outer/README.md",
+            "kept/.git",
+        ] {
             assert!(repo.path().join(kept).exists(), "{kept} was deleted");
         }
         assert_eq!(
             std::fs::read_to_string(repo.path().join("a.txt")).expect("a"),
             "old\n"
         );
+    });
+}
+
+#[test]
+fn a_repository_is_found_as_git_finds_it_and_links_are_not_followed() {
+    use std::os::unix::fs::symlink;
+    run(async {
+        let repo = Repo::new("revert-find-repositories");
+        repo.write("link", "a file\n");
+        repo.write("caps", "a file\n");
+        repo.git(&["add", "link", "caps"]);
+        repo.git(&["commit", "-q", "-m", "files"]);
+        let elsewhere = Repo::new("revert-find-repositories-elsewhere");
+        // Git finds `.git` by asking the file system, which may not tell capitals apart.
+        let blind = std::fs::symlink_metadata(repo.path().join("A.TXT")).is_ok();
+        let checkpoints = Checkpoints::new(repo.path());
+        turn(&checkpoints, "t1", || {
+            std::fs::remove_file(repo.path().join("link")).expect("removed");
+            symlink(elsewhere.path(), repo.path().join("link")).expect("link");
+            std::fs::remove_file(repo.path().join("caps")).expect("removed");
+            std::fs::create_dir_all(repo.path().join("caps/sub")).expect("folder");
+            git_at(&repo.path().join("caps/sub"), &["init", "-q"]);
+            std::fs::rename(
+                repo.path().join("caps/sub/.git"),
+                repo.path().join("caps/sub/.GIT"),
+            )
+            .expect("renamed");
+        })
+        .await;
+        let plan = checkpoints
+            .revert_plan(&at("t1", Phase::Start), None)
+            .await
+            .expect("plan");
+        let (reverted, kept) = split(&plan);
+        assert!(
+            reverted.contains(&"link"),
+            "a link is no repository: {plan:?}"
+        );
+        assert_eq!(kept.contains(&"caps"), blind, "{plan:?}");
+        checkpoints
+            .revert(&at("t1", Phase::Start))
+            .await
+            .expect("reverted");
+        assert_eq!(
+            std::fs::read_to_string(repo.path().join("link")).expect("file"),
+            "a file\n"
+        );
+        assert_eq!(repo.path().join("caps/sub/.GIT").exists(), blind);
+        drop(elsewhere);
     });
 }
