@@ -185,6 +185,78 @@ fn branches_list_local_ones_then_remote_ones_no_local_branch_tracks() {
 }
 
 #[test]
+fn the_bounded_branch_list_keeps_the_current_branch_and_recent_order() {
+    run(async {
+        let repo = Repo::new("branches-current-limit");
+        let current = repo.git(&["branch", "--show-current"]).trim().to_owned();
+        let timestamp = repo
+            .git(&["show", "-s", "--format=%ct", "HEAD"])
+            .trim()
+            .parse::<u64>()
+            .expect("commit timestamp")
+            + 1;
+        let newer = Command::new("git")
+            .args([
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=test@example.com",
+                "commit-tree",
+                "HEAD^{tree}",
+                "-p",
+                "HEAD",
+                "-m",
+                "newer",
+            ])
+            .current_dir(repo.path())
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_COMMITTER_DATE", format!("@{timestamp} +0000"))
+            .output()
+            .expect("commit created");
+        assert!(newer.status.success(), "{newer:?}");
+        let newer = String::from_utf8(newer.stdout).expect("commit id");
+        let refs: String = (0..1000)
+            .map(|i| format!("{} refs/heads/newer/{i:04}\n", newer.trim()))
+            .collect();
+        repo.write(".git/packed-refs", &refs);
+        let checkpoints = Checkpoints::new(repo.path());
+
+        let branches = checkpoints.branches().await.expect("branches").branches;
+
+        assert_eq!(branches.len(), 1000);
+        let source = branches
+            .iter()
+            .find(|branch| branch.current)
+            .expect("current branch retained");
+        assert_eq!(source.name, current);
+        assert_eq!(branches.first().expect("first").name, "newer/0000");
+        assert_eq!(branches.last().expect("last").name, current);
+        assert!(
+            branches
+                .windows(2)
+                .all(|pair| pair[0].committed_ms >= pair[1].committed_ms)
+        );
+        repo.write("a.txt", "edited\n");
+        checkpoints
+            .switch_branch(
+                &local("newer/0000"),
+                Changes::Leave {
+                    branch: source.name.clone(),
+                    stash: None,
+                },
+            )
+            .await
+            .expect("changes left on the listed source branch");
+        assert_eq!(read(&repo, "a.txt"), "old\n");
+        assert_eq!(
+            repo.git(&["stash", "list", "--format=%s"]),
+            format!("On {current}: Liquid: changes left on {current}\n")
+        );
+    });
+}
+
+#[test]
 fn tracking_a_local_branch_keeps_both_local_branches_in_the_list() {
     run(async {
         let clone = Clone::new("branches-local-upstream");

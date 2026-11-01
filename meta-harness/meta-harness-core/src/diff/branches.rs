@@ -60,7 +60,7 @@ pub enum Changes {
     },
 }
 
-/// Most branches listed; the most recently committed ones are kept.
+/// Most refs considered, keeping the current branch and the most recently committed others.
 const MAX_BRANCHES: usize = 1000;
 
 impl WorkingTree {
@@ -136,6 +136,8 @@ impl WorkingTree {
             &[
                 "for-each-ref",
                 "--sort=-committerdate",
+                // Keep the checkout's source branch within the bounded result.
+                "--sort=-HEAD",
                 &count,
                 "--format=%(refname)%00%(committerdate:unix)%00%(upstream)%00%(symref)%00%(HEAD)",
                 "refs/heads",
@@ -175,8 +177,12 @@ impl WorkingTree {
                 })
             })
             .collect();
-        // Stable, so each group stays most recent first.
-        branches.sort_by_key(|branch| branch.remote);
+        branches.sort_by(|a, b| {
+            a.remote
+                .cmp(&b.remote)
+                .then_with(|| b.committed_ms.cmp(&a.committed_ms))
+                .then_with(|| a.name.cmp(&b.name))
+        });
         Ok(branches)
     }
 
