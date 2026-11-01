@@ -1492,14 +1492,17 @@ fn a_repository_is_found_as_git_finds_it_and_links_are_not_followed() {
         turn(&checkpoints, "t1", || {
             std::fs::remove_file(repo.path().join("link")).expect("removed");
             symlink(elsewhere.path(), repo.path().join("link")).expect("link");
-            std::fs::remove_file(repo.path().join("caps")).expect("removed");
-            std::fs::create_dir_all(repo.path().join("caps/sub")).expect("folder");
-            git_at(&repo.path().join("caps/sub"), &["init", "-q"]);
-            std::fs::rename(
-                repo.path().join("caps/sub/.git"),
-                repo.path().join("caps/sub/.GIT"),
-            )
-            .expect("renamed");
+            // Where capitals count, Git refuses a `.GIT` path and nothing is captured.
+            if blind {
+                std::fs::remove_file(repo.path().join("caps")).expect("removed");
+                std::fs::create_dir_all(repo.path().join("caps/sub")).expect("folder");
+                git_at(&repo.path().join("caps/sub"), &["init", "-q"]);
+                std::fs::rename(
+                    repo.path().join("caps/sub/.git"),
+                    repo.path().join("caps/sub/.GIT"),
+                )
+                .expect("renamed");
+            }
         })
         .await;
         let plan = checkpoints
