@@ -1085,6 +1085,31 @@ void main() {
     expect(backend.calls.last, 'answer q2 Fixed');
   });
 
+  testWidgets('names extension statuses but not Watershed\'s own', (
+    tester,
+  ) async {
+    await show(tester);
+    for (final (key, text) in [
+      ('watershed.revert', 'Waiting for a revert in this checkout to finish'),
+      ('todo', '2 left'),
+    ]) {
+      await emit(
+        tester,
+        event(
+          BridgeEventKind.statusChanged,
+          display: BridgeDisplay(key: key, lines: const []),
+          text: text,
+        ),
+      );
+    }
+    expect(
+      find.text(
+        'Waiting for a revert in this checkout to finish · todo 2 left',
+      ),
+      findsOneWidget,
+    );
+  });
+
   testWidgets('fits many extension statuses and a long tool name', (
     tester,
   ) async {

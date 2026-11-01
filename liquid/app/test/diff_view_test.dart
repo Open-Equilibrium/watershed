@@ -908,7 +908,10 @@ void main() {
         findsOneWidget,
       );
       expect(find.text('new since then, deleted'), findsOneWidget);
-      expect(find.text('ignored folder, in the way, deleted'), findsOneWidget);
+      expect(
+        find.text('holds files Git ignores, in the way, deleted'),
+        findsOneWidget,
+      );
       expect(find.text('restored over a file Git ignores'), findsOneWidget);
       expect(
         find.text(
@@ -1001,7 +1004,7 @@ void main() {
       expect(backend.calls, contains('revert T2'));
       expect(
         state.notice.value?.text,
-        'Could not revert and branch: git failed: disk full',
+        'Could not revert and branch. Git failed: disk full',
       );
     });
 

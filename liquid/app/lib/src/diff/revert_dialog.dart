@@ -36,6 +36,9 @@ Future<void> confirmRevert(
   if (confirmed == true) await state.revert(turn);
 }
 
+/// Whether the plan lists `file` as a folder.
+bool _isFolder(BridgeRevertFile file) => file.path.endsWith('/');
+
 class _RevertDialog extends StatelessWidget {
   const _RevertDialog({required this.turn, required this.plan});
 
@@ -59,14 +62,13 @@ class _RevertDialog extends StatelessWidget {
       BridgeChangesState.outsideGit => 'This project has no Git repository, so it has no checkpoints to revert to.',
       BridgeChangesState.removed =>
         'This turn’s checkpoint was removed, so its files cannot be reverted.',
+      // A folder is listed only beside the file that needs its place, so never alone.
       BridgeChangesState.shown => switch (files.length) {
         0 => 'No file differs from how it was when $name started.',
-        1 =>
-          'This ${files.first.path.endsWith('/') ? 'folder' : 'file'} reverts to how it was '
-              'when $name started.',
+        1 => 'This file reverts to how it was when $name started.',
         final count =>
-          'These $count ${files.any((file) => file.path.endsWith('/')) ? 'files and folders' : 'files'} '
-              'revert to how they were when $name started.',
+          'These $count ${files.any(_isFolder) ? 'files and folders' : 'files'} revert to how '
+              'they were when $name started.',
       },
     };
     // A file Git ignores in a restored file's place does not stay.
@@ -184,10 +186,10 @@ class _Files extends StatelessWidget {
         BridgeChangeStatus.deleted => (
           'D',
           ws.danger,
-          switch ((file.ignored, file.path.endsWith('/'))) {
+          switch ((file.ignored, _isFolder(file))) {
             (false, _) => 'new since then, deleted',
-            (true, true) => 'ignored folder, in the way, deleted',
-            (true, false) => 'ignored by Git, in the way, deleted',
+            (true, true) => 'holds files Git ignores, in the way, deleted',
+            (true, false) => 'a file Git ignores, in the way, deleted',
           },
         ),
       };

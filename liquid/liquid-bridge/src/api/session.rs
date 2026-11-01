@@ -355,10 +355,12 @@ impl AgentSession {
                 .await
                 .map_err(|error| match error {
                     DiffError::NotReverted(paths) => left_unreverted(&paths),
+                    // Git's messages name files, written out as Liquid shows file names.
                     DiffError::PartlyReverted(error) => format!(
-                        "the files may be partly reverted ({error}); reverting again finishes it"
+                        "the files may be partly reverted ({}); reverting again finishes it",
+                        visible_name(&error.to_string())
                     ),
-                    error => not_reverted(error.to_string()),
+                    error => not_reverted(visible_name(&error.to_string())),
                 })?;
             let continued = async move {
                 let pending = open(&mut session)?

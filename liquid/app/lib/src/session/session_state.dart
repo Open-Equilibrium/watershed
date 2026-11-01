@@ -550,7 +550,12 @@ class SessionState {
       await reverting;
     } on Object catch (error) {
       // The error says whether the files changed; the Diff tab shows them either way.
-      notify(BridgeLevel.error, 'Could not revert and branch: $error');
+      final said = '$error';
+      notify(
+        BridgeLevel.error,
+        'Could not revert and branch. '
+        '${said.isEmpty ? '' : said[0].toUpperCase()}${said.isEmpty ? '' : said.substring(1)}',
+      );
       await readChanges();
       return false;
     } finally {

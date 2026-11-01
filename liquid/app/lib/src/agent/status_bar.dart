@@ -160,8 +160,11 @@ class _StatusBarState extends State<StatusBar> {
                 Flexible(
                   child: Text(
                     [
+                      // Watershed's own entries need no key to tell them apart.
                       for (final entry in state.statuses.value.entries)
-                        '${entry.key} ${entry.value}',
+                        entry.key.startsWith('watershed.')
+                            ? entry.value
+                            : '${entry.key} ${entry.value}',
                     ].join(' · '),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
