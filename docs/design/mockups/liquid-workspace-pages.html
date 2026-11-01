@@ -288,7 +288,7 @@ ${nav(0,I.page,'API design',{on:e('api')})}
 ${nav(0,I.dir,'docs',{tw:'›',on:e('docs')})}
 <h6>Agent sessions <kbd>⌘N</kbd></h6>
 ${nav(0,I.dir,'acme-api <span style="color:var(--ws-text-faint);font-size:12px">2 sessions</span>',{tw:'›'})}
-<div class="foot">${nav(0,I.zap,'Automations',o.att?{r:'⚠ 1',warn:true}:{})}${nav(0,I.clock,'History')}</div>
+<div class="foot">${nav(0,I.zap,'Automations',Object.assign({on:e('auto')},o.att?{r:'⚠ 1',warn:true}:{}))}${nav(0,I.clock,'History',{on:e('hist')})}</div>
 ${o.menu||''}</div>`}
 function head(crumb,o={}){return `<div class="head"><span class="crumb">${crumb}</span><span class="end">${o.right!==undefined?o.right:`<span class="ib ${o.arr?'on':''}">${I.grid}Arrange</span><span class="ib" title="Page history">${I.clock}</span><span class="ib">${I.more}</span>`}</span></div>`}
 function frame(id,o){document.getElementById(id).innerHTML=`<div class="tbar"><div class="lights"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></div></div>
