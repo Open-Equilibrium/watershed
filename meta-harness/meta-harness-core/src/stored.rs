@@ -1,5 +1,6 @@
 //! pi's stored session files, read only as far as a listing needs.
 
+use std::collections::HashMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
@@ -86,6 +87,18 @@ pub fn session_title_of(dir: &Path, project: &Path, id: &str) -> Option<String> 
         let head = head(&path, &project)?;
         (head.id == id).then(|| head.title.unwrap_or_else(|| UNTITLED.to_owned()))
     })
+}
+
+/// The titles of the sessions in pi's session directory `dir` that started in `project`, by
+/// session id, as [`recent_sessions`] gives them; one pass over the directory.
+pub fn session_titles(dir: &Path, project: &Path) -> HashMap<String, String> {
+    let project = canonical(project);
+    session_files(dir)
+        .into_iter()
+        .flatten()
+        .filter_map(|path| head(&path, &project))
+        .map(|head| (head.id, head.title.unwrap_or_else(|| UNTITLED.to_owned())))
+        .collect()
 }
 
 /// The session files in `dir`.

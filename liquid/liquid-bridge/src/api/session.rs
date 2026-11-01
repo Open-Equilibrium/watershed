@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use meta_harness_core::{
     AgentCommand, Answer, Checkpoint, Checkpoints, CommandError, Delivery, DiffError, Phase,
     RequestId, Session, SessionEvent, TurnCheckpoints, Whitespace, recent_sessions, session_id,
-    session_title, session_title_of, visible_lines, visible_name,
+    session_title, session_title_of, session_titles, visible_lines, visible_name,
 };
 use tokio::runtime::Runtime;
 use tokio::sync::{Mutex, mpsc};
@@ -405,13 +405,16 @@ impl AgentSession {
             if sessions.is_empty() {
                 return Ok(Vec::new());
             }
-            let dir = session_dir(&mut *self.session.lock().await).await;
+            let titles = session_dir(&mut *self.session.lock().await)
+                .await
+                .map(|dir| session_titles(&dir, &self.cwd))
+                .unwrap_or_default();
             Ok(sessions
                 .into_iter()
                 .map(|(id, turns)| BridgeCheckpointSession {
-                    title: dir
-                        .as_deref()
-                        .and_then(|dir| session_title_of(dir, &self.cwd, &id))
+                    title: titles
+                        .get(&id)
+                        .cloned()
                         .unwrap_or_else(|| "Unknown session".to_owned()),
                     turns: i64::try_from(turns).unwrap_or(i64::MAX),
                 })
@@ -463,11 +466,10 @@ impl AgentSession {
             let Some(id) = self.stored_session(&path, Open::Refused).await? else {
                 return Ok(());
             };
-            match self.checkpoints.remove_session(&id).await {
-                Ok(()) | Err(DiffError::NotARepository) => {}
-                Err(error) => return Err(shown(error)),
-            }
-            std::fs::remove_file(&path).map_err(|error| error.to_string())
+            self.checkpoints
+                .delete_session(&id, Path::new(&path))
+                .await
+                .map_err(shown)
         })
     }
 

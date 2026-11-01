@@ -1718,20 +1718,28 @@ fn checkpoints_are_listed_and_removed_by_session_or_all() {
             [("s1".to_owned(), 2), ("s2".to_owned(), 1)]
         );
 
-        // A session whose agent runs keeps its checkpoints; the others may go.
+        // While an agent runs, no session goes, so none of its turns can start meanwhile.
+        let file = repo.path().join(".git/s1.jsonl");
+        std::fs::write(&file, "{}\n").expect("session file");
         other
             .capture(&theirs("u2", Phase::Start))
             .await
             .expect("started");
         assert!(matches!(
-            mine.remove_session("s2").await,
+            mine.delete_session("s1", &file).await,
             Err(DiffError::AgentRunning(running)) if running == ["s2"]
         ));
+        assert!(file.exists(), "kept");
         assert!(matches!(
             mine.remove_all().await,
             Err(DiffError::AgentRunning(_))
         ));
-        mine.remove_session("s1").await.expect("removed");
+        other
+            .capture(&theirs("u2", Phase::End))
+            .await
+            .expect("ended");
+        mine.delete_session("s1", &file).await.expect("deleted");
+        assert!(!file.exists());
         assert_eq!(
             mine.sessions().await.expect("listed"),
             [("s2".to_owned(), 2)]
@@ -1740,16 +1748,11 @@ fn checkpoints_are_listed_and_removed_by_session_or_all() {
             changes_of(&mine, "t1").await,
             Err(DiffError::NoCheckpoint)
         ));
-
-        other
-            .capture(&theirs("u2", Phase::End))
-            .await
-            .expect("ended");
         mine.remove_all().await.expect("removed");
         assert!(mine.sessions().await.expect("listed").is_empty());
         assert_eq!(repo.git(&["for-each-ref", "refs/watershed"]), "");
         assert!(matches!(
-            mine.remove_session("../x").await,
+            mine.delete_session("../x", &file).await,
             Err(DiffError::InvalidCheckpoint(_))
         ));
     });
@@ -1779,14 +1782,34 @@ fn an_agent_running_in_another_worktree_keeps_the_shared_checkpoints() {
             here.remove_all().await,
             Err(DiffError::AgentRunning(running)) if running == ["s2"]
         ));
+        let file = repo.path().join(".git/s2.jsonl");
+        std::fs::write(&file, "{}\n").expect("session file");
         assert!(matches!(
-            here.remove_session("s2").await,
+            here.delete_session("s2", &file).await,
             Err(DiffError::AgentRunning(_))
         ));
+        assert!(file.exists());
         there.capture(&theirs(Phase::End)).await.expect("ended");
         here.remove_all().await.expect("removed once nothing runs");
         assert!(here.sessions().await.expect("listed").is_empty());
         there.close().await;
         let _ = std::fs::remove_dir_all(&linked);
+    });
+}
+
+#[test]
+fn worktrees_that_cannot_be_listed_keep_the_checkpoints() {
+    use std::os::unix::fs::PermissionsExt;
+    run(async {
+        let repo = Repo::new("remove-unlisted");
+        let checkpoints = Checkpoints::new(repo.path());
+        turn(&checkpoints, "t1", || repo.write("a.txt", "new\n")).await;
+        let worktrees = repo.path().join(".git/worktrees");
+        std::fs::create_dir_all(&worktrees).expect("folder");
+        std::fs::set_permissions(&worktrees, std::fs::Permissions::from_mode(0o000)).expect("mode");
+        let removed = checkpoints.remove_all().await;
+        std::fs::set_permissions(&worktrees, std::fs::Permissions::from_mode(0o755)).expect("mode");
+        assert!(matches!(removed, Err(DiffError::Io(_))), "{removed:?}");
+        assert_eq!(checkpoints.sessions().await.expect("listed").len(), 1);
     });
 }

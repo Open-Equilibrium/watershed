@@ -259,16 +259,22 @@ impl WorkingTree {
 
     /// The locks of every worktree of the repository, which share its refs: the main one and
     /// each linked one.
-    pub(crate) fn checkouts(&self) -> Vec<crate::checkout::Checkout> {
-        let linked = std::fs::read_dir(self.common.join("worktrees"))
+    /// Fails when the linked ones cannot be listed, so nothing that could run there is missed.
+    pub(crate) fn checkouts(&self) -> Result<Vec<crate::checkout::Checkout>, DiffError> {
+        let mut checkouts = vec![self.common.join("watershed")];
+        match std::fs::read_dir(self.common.join("worktrees")) {
+            Ok(entries) => {
+                for entry in entries {
+                    checkouts.push(entry.map_err(DiffError::Io)?.path().join("watershed"));
+                }
+            }
+            Err(error) if error.kind() == ErrorKind::NotFound => {}
+            Err(error) => return Err(DiffError::Io(error)),
+        }
+        Ok(checkouts
             .into_iter()
-            .flatten()
-            .flatten()
-            .map(|entry| entry.path().join("watershed"));
-        std::iter::once(self.common.join("watershed"))
-            .chain(linked)
             .map(crate::checkout::Checkout::new)
-            .collect()
+            .collect())
     }
 
     /// The changes from `from` to `to` a revert to `to` makes, and the repositories it leaves

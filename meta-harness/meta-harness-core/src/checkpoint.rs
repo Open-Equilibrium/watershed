@@ -18,7 +18,7 @@ use crate::diff::{ChangeStatus, DiffError, FileChange, Whitespace, WorkingTree};
 /// started that stay in its process group.
 const GIT_TIMEOUT: Duration = Duration::from_secs(60);
 
-/// Longest removing a session's checkpoints waits for a turn of it that is ending.
+/// Longest deleting a session or removing all checkpoints waits for a turn that is ending.
 const ENDING_WAIT: Duration = Duration::from_secs(2);
 
 /// Longest closing waits for commands in progress to stop their Git.
@@ -340,45 +340,68 @@ impl Checkpoints {
             .collect())
     }
 
-    /// Removes the checkpoints of `session`, refused while its agent runs in any worktree of
-    /// the repository; a turn of it that is ending gets a moment to end. Git frees their space at
-    /// its next cleanup.
-    pub async fn remove_session(&self, session: &str) -> Result<(), DiffError> {
+    /// Deletes the session `session` stored in `file` with its checkpoints first. While an
+    /// agent runs in any worktree of the repository it is refused, so no turn of it starts
+    /// meanwhile; a turn that is ending gets a moment to end. Git frees the checkpoints' space at
+    /// its next cleanup; outside Git only the file goes.
+    pub async fn delete_session(&self, session: &str, file: &Path) -> Result<(), DiffError> {
         valid_id(session)?;
-        let tree = self.tree().await?;
-        let runs = || {
-            tree.checkouts()
-                .iter()
-                .any(|checkout| checkout.running().iter().any(|running| running == session))
+        let tree = match self.tree().await {
+            Ok(tree) => Some(tree),
+            Err(DiffError::NotARepository) => None,
+            Err(error) => return Err(error),
         };
-        let refused = || DiffError::AgentRunning(vec![session.to_owned()]);
-        let waited = Instant::now();
-        while runs() {
-            if waited.elapsed() > ENDING_WAIT {
-                return Err(refused());
+        // Held until the file is gone.
+        let _alone = match &tree {
+            Some(tree) => {
+                let alone = self.alone_everywhere(tree).await?;
+                let references = self
+                    .bounded(tree.references(&format!("{REFS}{session}/")))
+                    .await?;
+                self.bounded(tree.delete_references(&references)).await?;
+                alone
             }
-            tokio::time::sleep(RETRY).await;
-        }
-        let references = self
-            .bounded(tree.references(&format!("{REFS}{session}/")))
-            .await?;
-        // A turn of it that started meanwhile keeps its checkpoints.
-        if runs() {
-            return Err(refused());
-        }
-        self.bounded(tree.delete_references(&references)).await
+            None => Vec::new(),
+        };
+        std::fs::remove_file(file).map_err(DiffError::Io)
     }
 
     /// Removes every checkpoint in the project's repository, which all its worktrees share, so
     /// refused while an agent runs in any of them.
     pub async fn remove_all(&self) -> Result<(), DiffError> {
         let tree = self.tree().await?;
-        let mut alone = Vec::new();
-        for checkout in tree.checkouts() {
-            alone.push(checkout.alone().await?);
-        }
+        let _alone = self.alone_everywhere(&tree).await?;
         let references = self.bounded(tree.references(REFS)).await?;
         self.bounded(tree.delete_references(&references)).await
+    }
+
+    /// Holds every worktree's checkout alone, waiting a moment for a turn that is ending.
+    async fn alone_everywhere(
+        &self,
+        tree: &WorkingTree,
+    ) -> Result<Vec<crate::checkout::Alone>, DiffError> {
+        let waited = Instant::now();
+        loop {
+            let mut alone = Vec::new();
+            let mut refused = None;
+            for checkout in tree.checkouts()? {
+                match checkout.alone().await {
+                    Ok(held) => alone.push(held),
+                    Err(error) => {
+                        refused = Some(error);
+                        break;
+                    }
+                }
+            }
+            match refused {
+                None => return Ok(alone),
+                Some(DiffError::AgentRunning(_)) if waited.elapsed() < ENDING_WAIT => {
+                    drop(alone);
+                    tokio::time::sleep(RETRY).await;
+                }
+                Some(error) => return Err(error),
+            }
+        }
     }
 
     /// Stops commands in progress and removes the private index.
