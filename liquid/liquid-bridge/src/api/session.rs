@@ -23,7 +23,7 @@ use crate::frb_generated::StreamSink;
 use crate::ready::{SHUTDOWN_GRACE, START_TIMEOUT, error_output, ready};
 use crate::stream::{STREAM_WINDOW, gather, push};
 
-static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
+pub(crate) static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
     tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
         .enable_all()
@@ -91,16 +91,16 @@ pub enum BridgeApprovalMode {
 /// A running agent session; dropping it kills the agent.
 #[flutter_rust_bridge::frb(opaque)]
 pub struct AgentSession {
-    session: Mutex<Option<Session>>,
+    pub(crate) session: Mutex<Option<Session>>,
     /// The session's events until Dart subscribes; the core buffers a bounded number and then
     /// pauses the agent.
     receiver: std::sync::Mutex<Option<mpsc::Receiver<SessionEvent>>>,
     /// Events that arrived while the agent started.
     early: std::sync::Mutex<Vec<SessionEvent>>,
     /// The project's checkpoints at each turn's start and end.
-    checkpoints: Arc<Checkpoints>,
+    pub(crate) checkpoints: Arc<Checkpoints>,
     /// The directory the agent works in.
-    cwd: PathBuf,
+    pub(crate) cwd: PathBuf,
     /// Stops the agent even while a request holds the session.
     stopper: std::sync::Mutex<Option<meta_harness_core::Stopper>>,
 }
@@ -761,14 +761,14 @@ impl AgentSession {
     }
 }
 
-fn open(session: &mut Option<Session>) -> Result<&mut Session, String> {
+pub(crate) fn open(session: &mut Option<Session>) -> Result<&mut Session, String> {
     session
         .as_mut()
         .ok_or_else(|| "the session was shut down".to_owned())
 }
 
 /// Whether a diff hides changes that are only whitespace.
-fn whitespace(hide: bool) -> Whitespace {
+pub(crate) fn whitespace(hide: bool) -> Whitespace {
     if hide {
         Whitespace::Hidden
     } else {
@@ -837,7 +837,7 @@ pub(crate) fn left_unreverted(paths: &[String]) -> String {
 
 /// A checkpoint error as Liquid shows it: Git's messages name files, so what could hide or
 /// reorder them is written out, as in file names.
-fn shown(error: DiffError) -> String {
+pub(crate) fn shown(error: DiffError) -> String {
     visible_name(&error.to_string())
 }
 

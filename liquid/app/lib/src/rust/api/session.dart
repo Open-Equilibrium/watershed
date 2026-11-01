@@ -5,6 +5,7 @@
 
 import '../frb_generated.dart';
 import 'events.dart';
+import 'git.dart';
 import 'history.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
@@ -42,6 +43,9 @@ abstract class AgentSession implements RustOpaqueInterface {
   /// `entry` is a response.
   Future<BridgeContextDetail?> context({required String entry});
 
+  /// Creates the branch `name` at the current commit and switches to it.
+  Future<BridgeGitOutcome> createBranch({required String name});
+
   /// The selected model as `provider/id`.
   Future<String?> currentModel();
 
@@ -57,11 +61,27 @@ abstract class AgentSession implements RustOpaqueInterface {
   /// leaves nothing to delete.
   Future<void> deleteSession({required String path});
 
+  /// Deletes the branch's stashed changes.
+  Future<BridgeGitOutcome> discardStash();
+
   /// Dismisses a question.
   Future<void> dismiss({required String request});
 
   /// Streams the session's events; a session has one subscriber.
   Stream<BridgeEvent> events();
+
+  /// Fetches the remote of the branch's upstream, without credential prompts; returns whether
+  /// there was one.
+  Future<bool> fetch();
+
+  /// The checkout's branches.
+  Future<BridgeBranches> gitBranches();
+
+  /// The stashed changes of the branch checked out, if any.
+  Future<BridgeStash?> gitStash();
+
+  /// The checkout's branch, upstream and uncommitted files; none outside Git.
+  Future<BridgeGitStatus?> gitStatus();
 
   /// Reads the session's branch tree and the Trajectory of each branch ending at an entry in
   /// `leaves`, or of the current branch when `leaves` is empty.
@@ -82,6 +102,9 @@ abstract class AgentSession implements RustOpaqueInterface {
   /// Removes every checkpoint in the project's repository; refused while an agent runs in any
   /// of its worktrees. Outside Git there is nothing to remove.
   Future<void> removeAllCheckpoints();
+
+  /// Moves the branch's stashed changes back into the checkout.
+  Future<BridgeGitOutcome> restoreStash();
 
   /// What reverting the files to before turn `turn` of the current branch would change;
   /// files changed after the branch's last turn ended are marked.
@@ -115,9 +138,23 @@ abstract class AgentSession implements RustOpaqueInterface {
   static Future<AgentSession> start({required SessionConfig config}) =>
       RustLib.instance.api.crateApiSessionAgentSessionStart(config: config);
 
+  /// The unified diff of the stashed file `path`, its lines written out as a turn's are.
+  Future<String> stashPatch({
+    required String path,
+    required bool hideWhitespace,
+  });
+
   /// The turns with checkpoints of the session stored in `path`, the open one too; none
   /// outside Git or before pi stored the session.
   Future<PlatformInt64> storedTurns({required String path});
+
+  /// Switches to the branch `name`, a remote one when `remote`; with `leave_changes`,
+  /// uncommitted changes stay in the stash of the branch left, else they come along.
+  Future<BridgeGitOutcome> switchBranch({
+    required String name,
+    required bool remote,
+    required bool leaveChanges,
+  });
 
   /// Continues the session stored in `path`; `false` when an extension cancelled it.
   Future<bool> switchSession({required String path});
