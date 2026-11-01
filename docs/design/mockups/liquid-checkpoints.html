@@ -218,7 +218,7 @@ i.kw{font-style:normal;color:var(--ws-syn-kw)}i.st{font-style:normal;color:var(-
   </div>
   <section>
     <h3 class="sec">Checkpoints: approved mockups</h3>
-    <p class="sub">First pull request of the Liquid Git slice in <a href="../../../PLAN.md#liquid-git-integration--next-slice">PLAN.md</a>, following ADR-0234: a checkpoint at each turn's start and end, the Diff tab reading from them, a revert to before a turn, removal with the session and one action that removes all checkpoints. Layout, components and wording follow the <a href="liquid-agent-surface.html">agent surface mockups</a> and <a href="../guidelines.md">guidelines.md</a>. The maintainer approved them on 2026-11-01 with the decisions at the end.</p>
+    <p class="sub">Checkpoints of the Liquid Git slice in <a href="../../../PLAN.md#liquid-git-integration--next-slice">PLAN.md</a>, following ADR-0234: a checkpoint at each turn's start and end, the Diff tab reading from them, a revert to before a turn, removal with the session and one action that removes all checkpoints. Layout, components and wording follow the <a href="liquid-agent-surface.html">agent surface mockups</a> and <a href="../guidelines.md">guidelines.md</a>. The maintainer approved them on 2026-11-01 with the decisions at the end.</p>
   </section>
   <section>
     <h3 class="sec">1 · Diff tab shows one turn</h3>
@@ -259,7 +259,7 @@ i.kw{font-style:normal;color:var(--ws-syn-kw)}i.st{font-style:normal;color:var(-
     <ol class="qs">
       <li>A revert starts a new branch from before the turn and puts that turn's prompt back into the input area; the undone turns stay on their branch, rather than only reverting the files and telling the agent.</li>
       <li>The Diff menu offers "All turns" besides each turn.</li>
-      <li>This pull request adds "Delete session", which deletes the pi session file and its checkpoints after confirmation.</li>
+      <li>"Delete session" deletes the pi session file and its checkpoints after confirmation.</li>
       <li>"Remove all checkpoints" lives in the project's menu in the sidebar.</li>
     </ol>
   </section>
