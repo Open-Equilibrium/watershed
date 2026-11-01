@@ -114,14 +114,6 @@ summary{cursor:pointer}summary h3{display:inline;margin:0}summary:focus-visible{
         <ul><li><strong>A:</strong> A small set of resource-specific commands and action schemas. Pro: compact for agents, easy to test and restrict. Con: new capabilities need explicit additions.</li><li><strong>B:</strong> One broad document interface. Pro: flexible. Con: harder to secure, discover efficiently and change safely.</li></ul>
         <p><strong>Recommendation:</strong> A.</p>
       </details>
-      <details id="d-035" class="decision">
-        <summary><h3>D-035 - Sync Conflict Semantics</h3></summary>
-        <p><strong>Status:</strong> Open before M3a storage work: on 2026-10-29 the maintainer confirmed the CRDT approach and kept this open until Liquid's own History is built; the History model and revert (ADR-0235) and the storage engine (ADR-0237) were decided on 2026-11-01. ADR-0182 already requires an established CRDT library (a data structure that lets copies edited offline merge to the same result) and forbids custom conflict-resolution logic.</p>
-        <p><strong>Question:</strong> Which CRDT library should combine concurrent offline changes? This also decides whether History is derived from that library's own change history or stored separately.</p>
-        <ul><li><strong>A:</strong> yrs, the Rust port of Yjs. Pro: very fast rich-text editing and compact updates; widely deployed, including in AppFlowy. Con: Liquid's Block and View model must be mapped onto Yjs data types; when two devices change the same field, one value silently wins and the other is dropped; its history is not attributed per actor.</li><li><strong>B:</strong> Automerge. Pro: JSON-like documents with a complete change history that maps naturally to attributed History; when two devices change the same field it keeps both values, so Liquid can show the user both instead of losing one. Con: historically higher memory and CPU use on large documents, so it must be proven against the Liquid workloads.</li></ul>
-        <p><strong>Recommendation:</strong> B, because it does not silently drop a concurrent change, unless the acceptance spike shows it cannot keep typing and memory use responsive; then reconsider A. History is stored separately from the library's change history unless the chosen library already records actor-attributed, revertible changes. Either way every replica keeps applying received changes through its own mutation pipeline as <a href="../../SECURITY.md">SECURITY.md</a> requires.</p>
-        <p><strong>Acceptance criterion:</strong> The chosen library passes convergence tests for the M3 Block Types (text, Database rows, View order, deletion cascade), retains fixed observational typing and memory evidence on the Liquid targets, and a remote change denied by Roles is rejected identically for every replica.</p>
-      </details>
     </div>
   </section>
 

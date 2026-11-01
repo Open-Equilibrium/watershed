@@ -214,6 +214,7 @@ The agent writes only to its project and temporary folders unless the person all
 #### M3a — Local Workspace foundation
 
 - Local replica as the only interactive store: SQLite with SQLCipher and FTS5 (ADR-0237).
+- Before storage work, a spike proves Automerge 3 against ADR-0238's acceptance criterion and measures Loro alongside.
 - Flutter clients over the Rust core follow the [client architecture](docs/concept/liquid-client-architecture.md) invariants (ADR-0182).
 - Pages, Blocks, Views, Sources, Connections, Automations, Roles, History and settings.
 - Explorer with Pages and Sources as peer navigation entries; Page templates create use-case compositions rather than new Page Types.
@@ -243,7 +244,7 @@ The agent writes only to its project and temporary folders unless the person all
 
 #### M3c — Central sync, mobile and headless execution
 
-- Central Sync Server with resumable star-topology exchange; conflict rules remain D-035.
+- Central Sync Server with resumable star-topology exchange, merging with Automerge 3 (ADR-0238); a concurrent edit of one field shows both values, after an approved mockup.
 - Authorized user devices sync complete Workspaces and continue offline from local replicas.
 - Optional headless Liquid replica receives only explicitly enabled Workspaces and exposes the same Role/mutation boundary to same-host agents while user devices are offline.
 - Sync applies received actions through the same permissioned mutation/History pipeline.

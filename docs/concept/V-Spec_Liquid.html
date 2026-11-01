@@ -212,7 +212,7 @@ Headless replica ┘</code></pre>
         <li>A headless Liquid replica is an optional normal replica without UI. It requires workspace-level opt-in because it introduces a server execution boundary.</li>
         <li>Same-host agents use the headless replica's normal CLI/API, Roles and mutation pipeline even while user devices are offline.</li>
         <li>The Sync Server does not execute Apps or agents. It and headless Liquid may be co-located in one hosted deployment while remaining separate logical services.</li>
-        <li>Conflict semantics remain <a href="../decisions/open-decisions.html#d-035">D-035</a>.</li>
+        <li>Replicas merge with Automerge 3, which keeps both values of a concurrent edit to one field (ADR-0238).</li>
       </ul>
     </div></section>
 
@@ -276,7 +276,7 @@ integrations
 
     <section id="delivery" class="section"><h2>12. Delivery and open decisions</h2><div class="body">
       <p>The target model above is delivered in four stages: local Workspace foundation; Apps and agent actions; central sync/mobile/headless execution; then Block Registry and MCP adapters. Scope and Definitions of Done are canonical in <a href="../../PLAN.md">PLAN.md</a>.</p>
-      <p>Remaining Liquid implementation decisions: CLI/API syntax (<a href="../decisions/open-decisions.html#d-027">D-027</a>) and sync conflicts (<a href="../decisions/open-decisions.html#d-035">D-035</a>).</p>
+      <p>Remaining Liquid implementation decisions: CLI/API syntax (<a href="../decisions/open-decisions.html#d-027">D-027</a>).</p>
     </div></section>
   </main>
 </div>
