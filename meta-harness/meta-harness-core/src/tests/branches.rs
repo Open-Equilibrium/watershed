@@ -859,6 +859,55 @@ fn no_restore_runs_over_uncommitted_changes_or_ignored_files_in_the_way() {
 }
 
 #[test]
+fn leaving_changes_never_cleans_up_unsaved_ignored_contents() {
+    run(async {
+        for placement in ["at-file", "at-parent"] {
+            let repo = Repo::new(&format!("leave-ignored-{placement}"));
+            let main = repo.git(&["branch", "--show-current"]).trim().to_owned();
+            if placement == "at-parent" {
+                repo.git(&["mv", "a.txt", "saved.txt"]);
+                std::fs::create_dir(repo.path().join("a.txt")).expect("folder");
+                repo.git(&["mv", "saved.txt", "a.txt/child"]);
+                repo.git(&["commit", "-qm", "nested file"]);
+                std::fs::remove_file(repo.path().join("a.txt/child")).expect("removed");
+                std::fs::remove_dir(repo.path().join("a.txt")).expect("removed folder");
+                repo.write("a.txt", "private\n");
+            } else {
+                std::fs::remove_file(repo.path().join("a.txt")).expect("removed");
+                std::fs::create_dir(repo.path().join("a.txt")).expect("folder");
+                repo.write("a.txt/private", "private\n");
+            }
+            let protected = if placement == "at-file" {
+                "a.txt/private"
+            } else {
+                "a.txt"
+            };
+            std::fs::write(repo.path().join(".git/info/exclude"), "a.txt\n").expect("excluded");
+            repo.git(&["branch", "other"]);
+            let index = std::fs::read(repo.path().join(".git/index")).expect("index");
+            let checkpoints = Checkpoints::new(repo.path());
+
+            let switched = checkpoints
+                .switch_branch(&local("other"), leave_on(&checkpoints).await)
+                .await;
+
+            assert_eq!(
+                read(&repo, protected),
+                "private\n",
+                "{placement}: {switched:?}"
+            );
+            assert!(matches!(switched, Err(DiffError::WouldOverwrite(_))));
+            assert_eq!(repo.git(&["branch", "--show-current"]).trim(), main);
+            assert!(repo.git(&["stash", "list"]).is_empty());
+            assert_eq!(
+                std::fs::read(repo.path().join(".git/index")).expect("index"),
+                index
+            );
+        }
+    });
+}
+
+#[test]
 fn no_restore_partly_applies_a_stash_with_undecodable_paths() {
     use std::io::Write;
     use std::process::Stdio;

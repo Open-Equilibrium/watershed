@@ -119,6 +119,21 @@ impl WorkingTree {
                         .to_owned(),
                 ));
             }
+            // Stash ends with a hard reset to HEAD, which can remove ignored contents where
+            // a tracked file or parent returns. They were excluded from the saved changes.
+            git_path_output(&self.root, &[], &["ls-files", "-z"]).await?;
+            let now = Snapshot(self.capture(&[]).await?);
+            let head = self
+                .checkpointed("HEAD")
+                .await?
+                .ok_or(DiffError::NoBranch)?;
+            self.tree_paths(&now).await?;
+            self.tree_paths(&head).await?;
+            let reset = self.changes(&now, &head, Whitespace::Shown).await?;
+            let ignored = self.ignored_in_the_way(&reset, &self.env(&index)).await?;
+            if !ignored.is_empty() {
+                return Err(DiffError::WouldOverwrite(ignored.into_iter().collect()));
+            }
         }
         let branch = self.branch().await?.ok_or(DiffError::NoBranch)?;
         let message = format!("{MESSAGE}{branch}");
@@ -179,19 +194,7 @@ impl WorkingTree {
         // contents too. Check both trees because --index restores saved index-only changes.
         for tree in [&index, &tracked] {
             let changes = self.changes(&current, tree, Whitespace::Shown).await?;
-            let (replaced, removed) = self.in_the_way(&changes).await?;
-            for path in replaced.into_iter().chain(removed) {
-                // A case-only rename can alias a tracked file on disk. Only actual ignored
-                // paths block it; a directory ending in / already holds ignored contents.
-                if !path.ends_with('/') {
-                    match git(&self.root, &[], &["check-ignore", "--quiet", "--", &path]).await {
-                        Ok(_) => {}
-                        Err(DiffError::Git(reason)) if reason.is_empty() => continue,
-                        Err(error) => return Err(error),
-                    }
-                }
-                in_the_way.insert(path);
-            }
+            in_the_way.extend(self.ignored_in_the_way(&changes, &[]).await?);
         }
         for path in untracked {
             if obstructed(&self.root, &path).map_err(DiffError::Io)? {
@@ -202,6 +205,30 @@ impl WorkingTree {
             return Err(DiffError::WouldOverwrite(in_the_way.into_iter().collect()));
         }
         self.pop(id).await
+    }
+
+    /// The ignored paths a tracked-tree write would overwrite or remove, using its source
+    /// index so a tracked descendant of a now-ignored parent does not hide that obstruction.
+    async fn ignored_in_the_way(
+        &self,
+        changes: &[FileChange],
+        env: &[(&str, OsString)],
+    ) -> Result<BTreeSet<String>, DiffError> {
+        let (replaced, removed) = self.in_the_way(changes).await?;
+        let mut ignored = BTreeSet::new();
+        for path in replaced.into_iter().chain(removed) {
+            // A case-only rename can alias a tracked file on disk. Only actual ignored
+            // paths block it; a directory ending in / already holds ignored contents.
+            if !path.ends_with('/') {
+                match git(&self.root, env, &["check-ignore", "--quiet", "--", &path]).await {
+                    Ok(_) => {}
+                    Err(DiffError::Git(reason)) if reason.is_empty() => continue,
+                    Err(error) => return Err(error),
+                }
+            }
+            ignored.insert(path);
+        }
+        Ok(ignored)
     }
 
     /// A tree's paths, refusing bytes that would name a different destination once decoded.
