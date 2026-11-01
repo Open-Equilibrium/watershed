@@ -173,22 +173,8 @@ impl WorkingTree {
     pub async fn open(dir: &Path) -> Result<Self, DiffError> {
         // Git reports paths relative to `dir`; later commands run elsewhere and need them whole.
         let dir = &std::path::absolute(dir).map_err(DiffError::Io)?;
-        let lines = git(
-            dir,
-            &[],
-            &["rev-parse", "--show-toplevel", "--git-path", "index"],
-        )
-        .await
-        .map_err(|error| match error {
-            DiffError::Git(reason) if reason.contains("not a git repository") => {
-                DiffError::NotARepository
-            }
-            error => error,
-        })?;
-        let mut lines = lines.lines();
-        let (Some(root), Some(index)) = (lines.next(), lines.next()) else {
-            return Err(DiffError::NotARepository);
-        };
+        let root = git_path(dir, &["rev-parse", "--show-toplevel"]).await?;
+        let index = git_path(dir, &["rev-parse", "--git-path", "index"]).await?;
         let absolute = |path: &str| {
             let path = Path::new(path);
             if path.is_absolute() {
@@ -200,7 +186,7 @@ impl WorkingTree {
         let store = Store(private_dir().map_err(DiffError::Io)?);
         Ok(Self {
             root: PathBuf::from(root),
-            index: absolute(index),
+            index: absolute(&index),
             store,
             busy: Mutex::new(()),
         })
@@ -494,6 +480,22 @@ impl WorkingTree {
             ("GIT_INDEX_FILE", index.into()),
             ("GIT_OPTIONAL_LOCKS", "0".into()),
         ]
+    }
+}
+
+/// The one path a `git rev-parse` query in `dir` prints. A path may hold line breaks, so only
+/// the single trailing one is taken off; splitting the output into lines could name another
+/// repository.
+async fn git_path(dir: &Path, args: &[&str]) -> Result<String, DiffError> {
+    let output = git(dir, &[], args).await.map_err(|error| match error {
+        DiffError::Git(reason) if reason.contains("not a git repository") => {
+            DiffError::NotARepository
+        }
+        error => error,
+    })?;
+    match output.strip_suffix('\n') {
+        Some(path) if !path.is_empty() => Ok(path.to_owned()),
+        _ => Err(DiffError::NotARepository),
     }
 }
 

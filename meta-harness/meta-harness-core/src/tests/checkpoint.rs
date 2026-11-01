@@ -9,10 +9,14 @@ struct Repo(PathBuf);
 
 impl Repo {
     fn new(name: &str) -> Self {
-        let dir = std::env::temp_dir().join(format!(
+        Self::at(std::env::temp_dir().join(format!(
             "watershed-checkpoint-{name}-{}",
             std::process::id()
-        ));
+        )))
+    }
+
+    /// A repository at `dir` with `a.txt` committed as `old`.
+    fn at(dir: PathBuf) -> Self {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("repository directory");
         let repo = Self(dir);
@@ -262,6 +266,28 @@ fn a_file_ignored_after_an_earlier_checkpoint_stays_out_of_later_ones() {
             "refs/watershed/checkpoints/s1/t2/start",
         ]);
         assert_eq!(files.lines().collect::<Vec<_>>(), [".gitignore", "a.txt"]);
+    });
+}
+
+#[test]
+fn a_project_whose_path_holds_a_line_break_keeps_its_checkpoints() {
+    run(async {
+        // Read line by line, the project's path would name the repository `outer`.
+        let base = std::env::temp_dir().join(format!("watershed-newline-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).expect("base");
+        let outer = Repo::at(base.join("outer"));
+        let project = Repo::at(base.join("outer\nproject"));
+        let checkpoints = Checkpoints::new(project.path());
+        turn(&checkpoints, "t1", || project.write("a.txt", "new\n")).await;
+        assert_eq!(
+            changes_of(&checkpoints, "t1").await.expect("changes"),
+            [modified("a.txt")]
+        );
+        assert_eq!(outer.git(&["for-each-ref", "refs/watershed"]), "");
+        assert_ne!(project.git(&["for-each-ref", "refs/watershed"]), "");
+        drop((outer, project));
+        let _ = std::fs::remove_dir_all(&base);
     });
 }
 
