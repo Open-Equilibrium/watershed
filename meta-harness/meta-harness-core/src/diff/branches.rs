@@ -294,6 +294,8 @@ impl WorkingTree {
                 "fetch",
                 "--quiet",
                 "--no-tags",
+                // Pruning settings otherwise add a tag refspec even with `--no-tags`.
+                "--no-prune-tags",
                 "--no-auto-gc",
                 "--no-write-fetch-head",
                 "--no-recurse-submodules",

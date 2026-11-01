@@ -330,6 +330,28 @@ fn fetching_updates_only_the_upstreams_remote_tracking_branches() {
 }
 
 #[test]
+fn a_background_fetch_leaves_tags_alone_despite_pruning_settings() {
+    run(async {
+        for scope in ["fetch", "remote.origin"] {
+            let clone = Clone::new(&format!("fetch-prune-{scope}"));
+            let repo = &clone.repo;
+            repo.git(&["tag", "local-only"]);
+            let tags = repo.git(&["show-ref", "--tags"]);
+            clone.commit_upstream("theirs\n");
+            clone.origin.git(&["tag", "remote-only"]);
+            repo.git(&["config", &format!("{scope}.prune"), "true"]);
+            repo.git(&["config", &format!("{scope}.pruneTags"), "true"]);
+            let checkpoints = Checkpoints::new(repo.path());
+
+            assert!(checkpoints.fetch().await.expect("fetched"));
+
+            assert_eq!(repo.git(&["show-ref", "--tags"]), tags, "{scope}");
+            assert_eq!(checkpoints.status().await.expect("status").behind, 1);
+        }
+    });
+}
+
+#[test]
 fn a_failed_fetch_keeps_credentials_out_of_its_error() {
     run(async {
         let repo = Repo::new("fetch-secret");
