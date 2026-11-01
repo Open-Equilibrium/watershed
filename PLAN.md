@@ -234,6 +234,7 @@ The agent writes only to its project and temporary folders unless the person all
 - Restricted local JavaScript/TypeScript App Runtime with declarative UI, resource limits and explicit capabilities; WASM is a later extension.
 - App and Agent Session Blocks, including permitted agent actions in the PowerBar.
 - Web-link Sources, read-only and loaded only when opened, in a built-in browser (ADR-0236).
+- Reviewing agent changes: what an agent changed is marked on the Page and filterable in History, from Automerge's attributed changes (ADR-0238), and the person can approve or revert it at any time; an approved mockup comes first.
 - App SDK for AI/user-built Workspace-local Apps, with versioned state, Views and typed App actions.
 - Workspace CLI/API (D-027) exposes compact typed reads, mutation proposals/execution and permitted App actions to agents.
 - Liquid AI uses the same Role, capability, mutation and History boundaries.
