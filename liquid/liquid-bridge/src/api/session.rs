@@ -220,7 +220,7 @@ impl AgentSession {
     pub fn in_repository(&self) -> Result<bool, String> {
         RUNTIME
             .block_on(self.checkpoints.in_repository())
-            .map_err(|error| visible_name(&error.to_string()))
+            .map_err(shown)
     }
 
     /// The turns of the current branch, oldest first, with what each changed.
@@ -273,7 +273,7 @@ impl AgentSession {
                 .patch(&from, &to, &path, whitespace(hide_whitespace))
                 .await
                 .map(|patch| visible_lines(&patch))
-                .map_err(|error| visible_name(&error.to_string()))
+                .map_err(shown)
         })
     }
 
@@ -355,12 +355,11 @@ impl AgentSession {
                 .await
                 .map_err(|error| match error {
                     DiffError::NotReverted(paths) => left_unreverted(&paths),
-                    // Git's messages name files, written out as Liquid shows file names.
                     DiffError::PartlyReverted(error) => format!(
                         "the files may be partly reverted ({}); reverting again finishes it",
-                        visible_name(&error.to_string())
+                        shown(*error)
                     ),
-                    error => not_reverted(visible_name(&error.to_string())),
+                    error => not_reverted(shown(error)),
                 })?;
             let continued = async move {
                 let pending = open(&mut session)?
@@ -669,12 +668,17 @@ pub(crate) fn left_unreverted(paths: &[String]) -> String {
     )
 }
 
+/// A checkpoint error as Liquid shows it: Git's messages name files, so what could hide or
+/// reorder them is written out, as in file names.
+fn shown(error: DiffError) -> String {
+    visible_name(&error.to_string())
+}
+
 /// Why checkpoints could not be read, when they cannot exist here or were removed.
 pub(crate) fn unread(error: DiffError) -> Result<BridgeChangesState, String> {
     match error {
         DiffError::NotARepository => Ok(BridgeChangesState::OutsideGit),
         DiffError::NoCheckpoint => Ok(BridgeChangesState::Removed),
-        // Git's messages name files, written out as Liquid shows file names.
-        error => Err(visible_name(&error.to_string())),
+        error => Err(shown(error)),
     }
 }

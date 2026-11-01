@@ -1569,3 +1569,41 @@ fn a_revert_reads_paths_as_git_writes_them_whatever_their_order_or_links() {
         drop(elsewhere);
     });
 }
+
+#[test]
+fn a_folder_holding_a_submodule_stays_whole_when_a_turn_replaces_it() {
+    run(async {
+        let sub = Repo::new("revert-replaced-holder-inner");
+        let repo = Repo::new("revert-replaced-holder");
+        std::fs::create_dir_all(repo.path().join("d")).expect("folder");
+        repo.write("d/x", "beside the submodule\n");
+        repo.git(&[
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            "-q",
+            &sub.path().display().to_string(),
+            "d/sub",
+        ]);
+        repo.git(&["add", "d/x"]);
+        repo.git(&["commit", "-q", "-m", "holder"]);
+        let checkpoints = Checkpoints::new(repo.path());
+        turn(&checkpoints, "t1", || {
+            std::fs::remove_dir_all(repo.path().join("d")).expect("removed");
+            repo.write("d", "now a file\n");
+        })
+        .await;
+        let plan = checkpoints
+            .revert_plan(&at("t1", Phase::Start), None)
+            .await
+            .expect("plan");
+        let (reverted, kept) = split(&plan);
+        assert!(reverted.is_empty(), "{plan:?}");
+        assert!(kept.contains(&"d/x"), "{plan:?}");
+        checkpoints
+            .revert(&at("t1", Phase::Start))
+            .await
+            .expect("nothing promised is skipped");
+    });
+}

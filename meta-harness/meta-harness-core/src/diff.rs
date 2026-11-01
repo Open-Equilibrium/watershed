@@ -306,11 +306,15 @@ impl WorkingTree {
     ) -> Option<String> {
         let mut folders = path.match_indices('/').map(|(end, _)| &path[..end]);
         for folder in folders.by_ref() {
+            // A repository either state records stays whole, whatever is on disk now.
+            if known.contains(folder) {
+                return Some(folder.to_owned());
+            }
             let on_disk = self.root.join(folder);
             if !std::fs::symlink_metadata(&on_disk).is_ok_and(|meta| meta.is_dir()) {
                 return None;
             }
-            if known.contains(folder) || std::fs::symlink_metadata(on_disk.join(".git")).is_ok() {
+            if std::fs::symlink_metadata(on_disk.join(".git")).is_ok() {
                 return Some(folder.to_owned());
             }
         }
@@ -926,7 +930,7 @@ fn git_command(dir: &Path, env: &[(&str, OsString)], args: &[&str]) -> Command {
 /// `.GIT`. Links are not followed. Each entry read costs one of `budget`; once it is spent the
 /// folder counts as holding one, so a revert leaves vast folders alone rather than read them
 /// all.
-fn holds_repository(dir: &Path, budget: &mut usize) -> bool {
+pub(crate) fn holds_repository(dir: &Path, budget: &mut usize) -> bool {
     if !std::fs::symlink_metadata(dir).is_ok_and(|meta| meta.is_dir()) {
         return false;
     }
