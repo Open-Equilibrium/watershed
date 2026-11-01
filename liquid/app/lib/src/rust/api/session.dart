@@ -96,6 +96,9 @@ abstract class AgentSession implements RustOpaqueInterface {
   /// checkpointed, so the Diff tab shows what it changed.
   Future<void> send({required String message, required bool followUp});
 
+  /// The file pi stores the open session in, unless it keeps the session in memory.
+  Future<String?> sessionFile();
+
   /// Changes which tool calls need the user's approval.
   Future<void> setApprovalMode({required BridgeApprovalMode mode});
 
@@ -110,7 +113,7 @@ abstract class AgentSession implements RustOpaqueInterface {
   static Future<AgentSession> start({required SessionConfig config}) =>
       RustLib.instance.api.crateApiSessionAgentSessionStart(config: config);
 
-  /// The turns with checkpoints of the stored session in `path`.
+  /// The turns with checkpoints of the session stored in `path`, the open one too.
   Future<PlatformInt64> storedTurns({required String path});
 
   /// Continues the session stored in `path`; `false` when an extension cancelled it.

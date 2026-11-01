@@ -424,10 +424,19 @@ impl AgentSession {
             .map_err(shown)
     }
 
-    /// The turns with checkpoints of the stored session in `path`.
+    /// The file pi stores the open session in, unless it keeps the session in memory.
+    pub fn session_file(&self) -> Result<Option<String>, String> {
+        RUNTIME.block_on(async {
+            let mut session = self.session.lock().await;
+            let state = open(&mut session)?.state().await.map_err(describe)?;
+            Ok(state.session_file.map(|file| file.display().to_string()))
+        })
+    }
+
+    /// The turns with checkpoints of the session stored in `path`, the open one too.
     pub fn stored_turns(&self, path: String) -> Result<i64, String> {
         RUNTIME.block_on(async {
-            let id = self.stored_session(&path).await?;
+            let id = self.stored_session(&path, true).await?;
             let sessions = self.checkpoints.sessions().await.map_err(shown)?;
             let turns = sessions
                 .into_iter()
@@ -442,7 +451,7 @@ impl AgentSession {
     /// runs in the checkout. Neither comes back.
     pub fn delete_session(&self, path: String) -> Result<(), String> {
         RUNTIME.block_on(async {
-            let id = self.stored_session(&path).await?;
+            let id = self.stored_session(&path, false).await?;
             match self.checkpoints.remove_session(&id).await {
                 Ok(()) | Err(DiffError::NotARepository) => {}
                 Err(error) => return Err(shown(error)),
@@ -452,8 +461,9 @@ impl AgentSession {
     }
 
     /// The id of the session stored in `path`, which must be a session of this project in pi's
-    /// session directory and not the open one, so Dart never names another file.
-    async fn stored_session(&self, path: &str) -> Result<String, String> {
+    /// session directory, and with `open_too` false not the open one, so Dart never names
+    /// another file.
+    async fn stored_session(&self, path: &str, open_too: bool) -> Result<String, String> {
         let path = Path::new(path);
         let current = {
             let mut session = self.session.lock().await;
@@ -466,7 +476,7 @@ impl AgentSession {
         let Some(current) = current else {
             return Err("pi keeps this session in memory and stores no others".to_owned());
         };
-        if path == current {
+        if path == current && !open_too {
             return Err("the open session cannot be deleted from inside it".to_owned());
         }
         if path.parent() != current.parent() {

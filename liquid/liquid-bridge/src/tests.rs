@@ -1008,6 +1008,7 @@ fn deletes_a_stored_session_with_its_checkpoints_and_removes_all_checkpoints() {
         state_with(4, &current),
         state_with(5, &current),
         state_with(6, &current),
+        state_with(7, &current),
         "IFS= read -r line || exit 0".to_owned(),
     ]
     .concat();
@@ -1026,6 +1027,7 @@ fn deletes_a_stored_session_with_its_checkpoints_and_removes_all_checkpoints() {
         ])
     );
     assert_eq!(session.stored_turns(old.display().to_string()), Ok(1));
+    assert_eq!(session.stored_turns(current.display().to_string()), Ok(1));
     assert!(
         session
             .delete_session(current.display().to_string())

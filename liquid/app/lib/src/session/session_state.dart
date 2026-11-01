@@ -529,6 +529,79 @@ class SessionState {
 
   Future<bool>? _branching;
 
+  /// The sessions with checkpoints in the project's repository.
+  Future<List<BridgeCheckpointSession>> checkpointSessions() =>
+      _backend.checkpointSessions();
+
+  /// Removes every checkpoint of the project; returns whether it did, and says why not.
+  Future<bool> removeAllCheckpoints() async {
+    try {
+      await _backend.removeAllCheckpoints();
+    } on Object catch (error) {
+      notify(BridgeLevel.error, 'Could not remove the checkpoints: $error');
+      return false;
+    }
+    await readChanges();
+    return true;
+  }
+
+  /// The file pi stores the open session in, unless it keeps it in memory.
+  Future<String?> sessionFile() => _backend.sessionFile();
+
+  /// The turns with checkpoints of the session stored at `path`.
+  Future<int> storedTurns(String path) => _backend.storedTurns(path);
+
+  /// Deletes the session stored at `path` with its checkpoints (approved checkpoint mockups).
+  /// The open session's agent stops and a new session takes its place first, as T3 Code moves
+  /// on after deleting the active thread. Returns whether it deleted, and says why not.
+  Future<bool> deleteSession(String path) async {
+    if (path == await _backend.sessionFile()) {
+      if (status.value case RunStatus.running || RunStatus.waitingForYou) {
+        await stop();
+        await _settled();
+      }
+      await newSession();
+      if (path == await _backend.sessionFile()) {
+        notify(
+          BridgeLevel.info,
+          'The session stayed open, so it was not deleted.',
+        );
+        return false;
+      }
+    }
+    try {
+      await _backend.deleteSession(path);
+    } on Object catch (error) {
+      notify(BridgeLevel.error, 'Could not delete the session: $error');
+      return false;
+    }
+    await loadStart();
+    return true;
+  }
+
+  /// Waits, up to a few seconds, until the stopped agent no longer runs.
+  Future<void> _settled() async {
+    bool busy() => switch (status.value) {
+      RunStatus.running || RunStatus.waitingForYou => true,
+      _ => false,
+    };
+    if (!busy()) return;
+    final settled = Completer<void>();
+    void check() {
+      if (!busy() && !settled.isCompleted) settled.complete();
+    }
+
+    status.addListener(check);
+    try {
+      await settled.future.timeout(
+        const Duration(seconds: 5),
+        onTimeout: () {},
+      );
+    } finally {
+      status.removeListener(check);
+    }
+  }
+
   /// What reverting the files to before `turn` would change.
   Future<BridgeRevertPlan> revertPlan(BridgeTurn turn) =>
       _backend.revertPlan(turn.id);

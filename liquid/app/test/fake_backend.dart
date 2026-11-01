@@ -213,6 +213,7 @@ class FakeBackend implements SessionBackend {
   Future<bool> newSession() async {
     calls.add('new session');
     await switchGate?.future;
+    if (!switchCancelled) openFile = '/sessions/new.jsonl';
     return !switchCancelled;
   }
 
@@ -279,6 +280,43 @@ class FakeBackend implements SessionBackend {
   Future<void> revertToTurn(String turn) async {
     calls.add('revert $turn');
     if (revertError case final error?) throw error;
+  }
+
+  /// The sessions with checkpoints, and what removing them fails with.
+  List<BridgeCheckpointSession> checkpointed = const [];
+  Object? removeError;
+
+  @override
+  Future<List<BridgeCheckpointSession>> checkpointSessions() async =>
+      checkpointed;
+
+  @override
+  Future<void> removeAllCheckpoints() async {
+    calls.add('remove all checkpoints');
+    if (removeError case final error?) throw error;
+    checkpointed = const [];
+  }
+
+  /// The file of the open session.
+  String? openFile = '/sessions/open.jsonl';
+
+  @override
+  Future<String?> sessionFile() async => openFile;
+
+  /// Turns with checkpoints by session file.
+  Map<String, int> turnCounts = const {};
+
+  @override
+  Future<int> storedTurns(String path) async => turnCounts[path] ?? 0;
+
+  @override
+  Future<void> deleteSession(String path) async {
+    calls.add('delete $path');
+    if (removeError case final error?) throw error;
+    storedSessions = [
+      for (final session in storedSessions)
+        if (session.path != path) session,
+    ];
   }
 
   /// Moves the leaf like pi: to the entry, or before it for a prompt.

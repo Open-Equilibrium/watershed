@@ -53,6 +53,21 @@ abstract interface class SessionBackend {
   /// prompt, which returns to the input area.
   Future<void> revertToTurn(String turn);
 
+  /// The sessions with checkpoints in the project's repository.
+  Future<List<BridgeCheckpointSession>> checkpointSessions();
+
+  /// Removes every checkpoint in the project's repository.
+  Future<void> removeAllCheckpoints();
+
+  /// The file pi stores the open session in, unless it keeps it in memory.
+  Future<String?> sessionFile();
+
+  /// The turns with checkpoints of the session stored at `path`.
+  Future<int> storedTurns(String path);
+
+  /// Deletes the stored session at `path`, not the open one, with its checkpoints.
+  Future<void> deleteSession(String path);
+
   /// The project's recent stored sessions, newest first, without the current one.
   Future<List<BridgeStoredSession>> recentSessions();
 
@@ -140,6 +155,18 @@ class RustSessionBackend implements SessionBackend {
       _session.revertPlan(turn: turn);
   @override
   Future<void> revertToTurn(String turn) => _session.revertToTurn(turn: turn);
+  @override
+  Future<List<BridgeCheckpointSession>> checkpointSessions() =>
+      _session.checkpointSessions();
+  @override
+  Future<void> removeAllCheckpoints() => _session.removeAllCheckpoints();
+  @override
+  Future<String?> sessionFile() => _session.sessionFile();
+  @override
+  Future<int> storedTurns(String path) async =>
+      (await _session.storedTurns(path: path)).toInt();
+  @override
+  Future<void> deleteSession(String path) => _session.deleteSession(path: path);
   @override
   Future<List<BridgeStoredSession>> recentSessions() =>
       _session.recentSessions(limit: recentLimit);

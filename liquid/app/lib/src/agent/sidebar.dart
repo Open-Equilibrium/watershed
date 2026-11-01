@@ -1,6 +1,10 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
 import '../controls.dart';
+import '../rust/api/events.dart';
+import 'session_menus.dart';
 import '../session/session_state.dart';
 import '../shortcuts/keymap.dart';
 import '../theme/icons.dart';
@@ -15,9 +19,13 @@ class SessionInfo {
     required this.project,
     required this.harness,
     required this.device,
+    this.path,
   });
 
   final String project;
+
+  /// The project's folder, when known.
+  final String? path;
   final String harness;
   final String device;
 }
@@ -57,6 +65,25 @@ class Sidebar extends StatelessWidget {
   final SessionState state;
   final SessionInfo info;
   final VoidCallback? onSettings;
+
+  /// Asks before deleting the open session, which a new session then replaces.
+  Future<void> _deleteOpen(BuildContext context) async {
+    final path = await state.sessionFile();
+    if (!context.mounted) return;
+    if (path == null) {
+      state.notify(
+        BridgeLevel.info,
+        'pi keeps this session in memory, so it has no file.',
+      );
+      return;
+    }
+    await confirmDeleteSession(
+      context,
+      state,
+      path: path,
+      title: state.sessionTitle.value ?? 'New session',
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -101,69 +128,94 @@ class Sidebar extends StatelessWidget {
             child: Row(children: [Text('Agent sessions', style: small)]),
           ),
           const SizedBox(height: WsMetrics.space2),
-          Padding(
-            padding: const EdgeInsets.symmetric(
-              horizontal: WsMetrics.space3,
-              vertical: WsMetrics.space2,
-            ),
-            child: Text(
-              info.project,
-              style: TextStyle(
-                color: ws.textMuted,
-                fontWeight: WsMetrics.fwMedium,
+          RowMenu(
+            actions: [
+              if (info.path case final path?)
+                RowAction(
+                  Platform.isMacOS ? 'Open in Finder' : 'Open in file manager',
+                  () => openInFileManager(path),
+                ),
+              RowAction('New agent session', state.newSession, shortcut: '⌘N'),
+              null,
+              RowAction(
+                'Remove all checkpoints…',
+                () => confirmRemoveCheckpoints(context, state, info.project),
+                danger: true,
+              ),
+            ],
+            child: Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: WsMetrics.space3,
+                vertical: WsMetrics.space2,
+              ),
+              child: Text(
+                info.project,
+                style: TextStyle(
+                  color: ws.textMuted,
+                  fontWeight: WsMetrics.fwMedium,
+                ),
               ),
             ),
           ),
-          Container(
-            padding: const EdgeInsets.fromLTRB(
-              WsMetrics.space6,
-              WsMetrics.space2,
-              WsMetrics.space3,
-              WsMetrics.space2,
-            ),
-            decoration: BoxDecoration(
-              color: ws.hover,
-              borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
-            ),
-            child: ValueListenableBuilder(
-              valueListenable: state.status,
-              builder: (context, status, _) {
-                final (label, color) = statusLabel(context, status);
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Container(
-                          width: 7,
-                          height: 7,
-                          decoration: BoxDecoration(
-                            color: color,
-                            shape: BoxShape.circle,
+          RowMenu(
+            actions: [
+              RowAction(
+                'Delete session…',
+                () => _deleteOpen(context),
+                danger: true,
+              ),
+            ],
+            child: Container(
+              padding: const EdgeInsets.fromLTRB(
+                WsMetrics.space6,
+                WsMetrics.space2,
+                WsMetrics.space3,
+                WsMetrics.space2,
+              ),
+              decoration: BoxDecoration(
+                color: ws.hover,
+                borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
+              ),
+              child: ValueListenableBuilder(
+                valueListenable: state.status,
+                builder: (context, status, _) {
+                  final (label, color) = statusLabel(context, status);
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            width: 7,
+                            height: 7,
+                            decoration: BoxDecoration(
+                              color: color,
+                              shape: BoxShape.circle,
+                            ),
                           ),
-                        ),
-                        const SizedBox(width: WsMetrics.space3),
-                        Expanded(child: SessionTitle(state: state)),
-                        Text(
-                          label,
-                          style: TextStyle(
-                            color: color,
-                            fontSize: WsMetrics.fsSmall,
+                          const SizedBox(width: WsMetrics.space3),
+                          Expanded(child: SessionTitle(state: state)),
+                          Text(
+                            label,
+                            style: TextStyle(
+                              color: color,
+                              fontSize: WsMetrics.fsSmall,
+                            ),
                           ),
-                        ),
-                      ],
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.only(left: 15),
-                      child: Text(
-                        [info.harness, info.device].join(' · '),
-                        style: small,
-                        overflow: TextOverflow.ellipsis,
+                        ],
                       ),
-                    ),
-                  ],
-                );
-              },
+                      Padding(
+                        padding: const EdgeInsets.only(left: 15),
+                        child: Text(
+                          [info.harness, info.device].join(' · '),
+                          style: small,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  );
+                },
+              ),
             ),
           ),
           const Spacer(),
