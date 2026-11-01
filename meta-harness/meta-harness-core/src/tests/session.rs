@@ -714,10 +714,13 @@ fn a_turn_that_waits_for_a_revert_says_so_in_the_status() {
     run(async {
         let project = git_project("checkpoint-waits");
         // Another window reverts the checkout.
-        let reverting = crate::checkout::Checkout::new(project.join(".git/watershed"))
-            .alone()
-            .await
-            .expect("nothing runs");
+        let reverting = crate::checkout::Checkout::new(
+            project.join(".git/watershed"),
+            project.join(".git/watershed"),
+        )
+        .alone()
+        .await
+        .expect("nothing runs");
         let script = [
             r#"printf '%s\n' '{"type":"extension_ui_request","id":"c1","method":"input","title":"watershed.checkpoint {\"session\":\"s1\",\"turn\":\"t1\",\"phase\":\"start\"}","placeholder":""}'
 "#

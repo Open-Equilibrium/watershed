@@ -254,7 +254,7 @@ impl WorkingTree {
 
     /// The locks that tell which agents run in the checkout.
     pub(crate) fn checkout(&self) -> crate::checkout::Checkout {
-        crate::checkout::Checkout::new(self.locks.clone())
+        crate::checkout::Checkout::new(self.locks.clone(), self.common.join("watershed"))
     }
 
     /// The locks of every worktree of the repository, which share its refs: the main one and
@@ -271,9 +271,10 @@ impl WorkingTree {
             Err(error) if error.kind() == ErrorKind::NotFound => {}
             Err(error) => return Err(DiffError::Io(error)),
         }
+        let repository = self.common.join("watershed");
         Ok(checkouts
             .into_iter()
-            .map(crate::checkout::Checkout::new)
+            .map(|dir| crate::checkout::Checkout::new(dir, repository.clone()))
             .collect())
     }
 

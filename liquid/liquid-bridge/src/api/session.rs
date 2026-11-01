@@ -444,7 +444,11 @@ impl AgentSession {
     /// outside Git or before pi stored the session.
     pub fn stored_turns(&self, path: String) -> Result<i64, String> {
         RUNTIME.block_on(async {
-            let Some(id) = self.stored_session(&path, Open::Counts).await? else {
+            let mut session = self.session.lock().await;
+            let Some(id) = self
+                .stored_session(&mut session, &path, Open::Counts)
+                .await?
+            else {
                 return Ok(0);
             };
             let turns = self
@@ -463,7 +467,12 @@ impl AgentSession {
     /// leaves nothing to delete.
     pub fn delete_session(&self, path: String) -> Result<(), String> {
         RUNTIME.block_on(async {
-            let Some(id) = self.stored_session(&path, Open::Refused).await? else {
+            // Held until the session is gone, so switching to it waits.
+            let mut session = self.session.lock().await;
+            let Some(id) = self
+                .stored_session(&mut session, &path, Open::Refused)
+                .await?
+            else {
                 return Ok(());
             };
             self.checkpoints
@@ -485,16 +494,14 @@ impl AgentSession {
     /// The id of the session stored in `path`, which must be a session file of this project in
     /// pi's session directory, and with [`Open::Refused`] not the open session, whatever its
     /// name; none when pi has not stored it yet. So Dart never names another file.
-    async fn stored_session(&self, path: &str, the_open: Open) -> Result<Option<String>, String> {
+    async fn stored_session(
+        &self,
+        session: &mut Option<Session>,
+        path: &str,
+        the_open: Open,
+    ) -> Result<Option<String>, String> {
         let path = Path::new(path);
-        let current = {
-            let mut session = self.session.lock().await;
-            open(&mut session)?
-                .state()
-                .await
-                .map_err(describe)?
-                .session_file
-        };
+        let current = open(session)?.state().await.map_err(describe)?.session_file;
         let Some(current) = current else {
             return Err("pi keeps this session in memory and stores no others".to_owned());
         };

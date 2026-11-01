@@ -998,10 +998,13 @@ fn a_turn_that_starts_during_a_revert_waits_until_the_files_are_back() {
         let checkpoints = std::sync::Arc::new(Checkpoints::new(repo.path()));
         assert!(matches!(checkpoints.in_repository().await, Ok(true)));
         // Another window reverts the checkout.
-        let reverting = crate::checkout::Checkout::new(repo.path().join(".git/watershed"))
-            .alone()
-            .await
-            .expect("nothing runs");
+        let reverting = crate::checkout::Checkout::new(
+            repo.path().join(".git/watershed"),
+            repo.path().join(".git/watershed"),
+        )
+        .alone()
+        .await
+        .expect("nothing runs");
         let starting = tokio::spawn({
             let checkpoints = checkpoints.clone();
             async move { checkpoints.capture(&at("t1", Phase::Start)).await }
@@ -1203,10 +1206,13 @@ fn a_turn_waits_for_a_revert_past_the_time_limit_of_one_git() {
             Duration::from_secs(1),
         ));
         assert!(matches!(checkpoints.in_repository().await, Ok(true)));
-        let reverting = crate::checkout::Checkout::new(repo.path().join(".git/watershed"))
-            .alone()
-            .await
-            .expect("nothing runs");
+        let reverting = crate::checkout::Checkout::new(
+            repo.path().join(".git/watershed"),
+            repo.path().join(".git/watershed"),
+        )
+        .alone()
+        .await
+        .expect("nothing runs");
         let starting = tokio::spawn({
             let checkpoints = checkpoints.clone();
             async move { checkpoints.capture(&at("t1", Phase::Start)).await }
@@ -1811,5 +1817,76 @@ fn worktrees_that_cannot_be_listed_keep_the_checkpoints() {
         std::fs::set_permissions(&worktrees, std::fs::Permissions::from_mode(0o755)).expect("mode");
         assert!(matches!(removed, Err(DiffError::Io(_))), "{removed:?}");
         assert_eq!(checkpoints.sessions().await.expect("listed").len(), 1);
+    });
+}
+
+#[test]
+fn a_turn_in_a_worktree_the_cleanup_cannot_see_still_holds_it_off() {
+    run(async {
+        let repo = Repo::new("remove-unseen");
+        let linked = repo.path().with_file_name(format!(
+            "watershed-checkpoint-remove-unseen-linked-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&linked);
+        repo.git(&["worktree", "add", "-q", &linked.display().to_string()]);
+        let here = Checkpoints::new(repo.path());
+        turn(&here, "t1", || repo.write("a.txt", "new\n")).await;
+        let there = Checkpoints::new(&linked);
+        there
+            .capture(&Checkpoint {
+                session: "s2".to_owned(),
+                turn: "u1".to_owned(),
+                phase: Phase::Start,
+            })
+            .await
+            .expect("started");
+        // The worktree's entry is gone from the list, as one made after the cleanup listed them.
+        let entries = repo.path().join(".git/worktrees");
+        let hidden = repo.path().join(".git/worktrees-hidden");
+        std::fs::rename(&entries, &hidden).expect("hidden");
+        let removed = here.remove_all().await;
+        std::fs::rename(&hidden, &entries).expect("back");
+        assert!(
+            matches!(removed, Err(DiffError::AgentRunning(_))),
+            "{removed:?}"
+        );
+        there.close().await;
+        let _ = std::fs::remove_dir_all(&linked);
+    });
+}
+
+#[test]
+fn a_turns_end_releases_only_the_same_sessions_turn() {
+    run(async {
+        let repo = Repo::new("revert-same-turn-id");
+        let checkpoints = Checkpoints::new(repo.path());
+        turn(&checkpoints, "t0", || repo.write("a.txt", "new\n")).await;
+        let of = |session: &str, phase| Checkpoint {
+            session: session.to_owned(),
+            turn: "t1".to_owned(),
+            phase,
+        };
+        checkpoints
+            .capture(&of("s1", Phase::Start))
+            .await
+            .expect("started");
+        // The agent switched sessions; the new session's turn has the same id.
+        checkpoints
+            .capture(&of("s2", Phase::Start))
+            .await
+            .expect("started");
+        checkpoints
+            .capture(&of("s1", Phase::End))
+            .await
+            .expect("ended");
+        let other = Checkpoints::new(repo.path());
+        assert!(
+            matches!(
+                other.revert(&at("t0", Phase::Start)).await,
+                Err(DiffError::AgentRunning(_))
+            ),
+            "session s2's turn still runs"
+        );
     });
 }

@@ -1,7 +1,9 @@
 //! Which agents run a turn in a Git checkout, so a revert never changes files under one
-//! (ADR-0234). Each running agent holds a shared lock on the checkout and a lock on a file named
-//! after its session in `<git-dir>/watershed`; a revert holds the checkout alone. The system
-//! drops the locks of a process that ends, so a crash leaves no agent running.
+//! (ADR-0234). Each running agent holds a shared lock on its checkout, one on the repository its
+//! worktrees share, and a lock on a file named after its session in `<git-dir>/watershed`; a
+//! revert holds the checkout alone, and removing checkpoints, which all worktrees share, holds
+//! the repository alone. The system drops the locks of a process that ends, so a crash leaves
+//! no agent running.
 
 use std::fs::{File, OpenOptions, TryLockError};
 use std::os::unix::fs::OpenOptionsExt;
@@ -16,20 +18,22 @@ pub(crate) const RETRY: Duration = Duration::from_millis(20);
 /// How often a turn's start tries for its session's name while a listing reads it.
 const NAME_TRIES: usize = 50;
 
-/// How often a revert tries for the checkout while no agent is named running there: a process
-/// starting a program holds a copy of every open lock until the program runs.
+/// How often a revert or a removal tries for its lock while no agent is named running.
 const ALONE_TRIES: usize = 25;
 
 /// The locks of one checkout.
 #[derive(Debug)]
 pub(crate) struct Checkout {
     dir: PathBuf,
+    /// The `watershed` folder in the Git directory all worktrees share.
+    repository: PathBuf,
 }
 
 /// Marks a session's agent as running in the checkout until dropped.
 #[derive(Debug)]
 pub(crate) struct Running {
     _checkout: File,
+    _repository: File,
     name: PathBuf,
     /// The name's lock, when this holder has it; only then it removes the name.
     name_lock: Option<File>,
@@ -44,16 +48,17 @@ impl Drop for Running {
     }
 }
 
-/// Holds the checkout alone until dropped.
+/// Holds the checkout or the repository alone until dropped.
 #[derive(Debug)]
 pub(crate) struct Alone {
-    _checkout: File,
+    _lock: File,
 }
 
 impl Checkout {
-    /// The locks in `dir`, the checkout's `watershed` folder in its Git directory.
-    pub(crate) fn new(dir: PathBuf) -> Self {
-        Self { dir }
+    /// The locks in `dir`, the checkout's `watershed` folder in its Git directory, and in
+    /// `repository`, the one in the Git directory all worktrees share.
+    pub(crate) fn new(dir: PathBuf, repository: PathBuf) -> Self {
+        Self { dir, repository }
     }
 
     /// Marks `session`'s agent as running; while a revert holds the checkout, says so through
@@ -64,18 +69,21 @@ impl Checkout {
         session: &str,
         waits: impl FnOnce(),
     ) -> Result<Running, DiffError> {
-        let checkout = self.lock_file()?;
+        let checkout = lock_file(&self.dir, "checkout.lock")?;
+        let repository = lock_file(&self.repository, "repository.lock")?;
         let mut waits = Some(waits);
-        loop {
-            match checkout.try_lock_shared() {
-                Ok(()) => break,
-                Err(TryLockError::WouldBlock) => {
-                    if let Some(waits) = waits.take() {
-                        waits();
+        for lock in [&checkout, &repository] {
+            loop {
+                match lock.try_lock_shared() {
+                    Ok(()) => break,
+                    Err(TryLockError::WouldBlock) => {
+                        if let Some(waits) = waits.take() {
+                            waits();
+                        }
+                        tokio::time::sleep(RETRY).await;
                     }
-                    tokio::time::sleep(RETRY).await;
+                    Err(TryLockError::Error(error)) => return Err(DiffError::Io(error)),
                 }
-                Err(TryLockError::Error(error)) => return Err(DiffError::Io(error)),
             }
         }
         // The turn counts as running from here, even if its name cannot be kept.
@@ -83,6 +91,7 @@ impl Checkout {
         let name_lock = self.name_lock(&name).await;
         Ok(Running {
             _checkout: checkout,
+            _repository: repository,
             name,
             name_lock,
         })
@@ -106,25 +115,16 @@ impl Checkout {
 
     /// Holds the checkout alone, or names the sessions whose agents run there.
     pub(crate) async fn alone(&self) -> Result<Alone, DiffError> {
-        let checkout = self.lock_file()?;
-        for _ in 0..ALONE_TRIES {
-            match checkout.try_lock() {
-                Ok(()) => {
-                    return Ok(Alone {
-                        _checkout: checkout,
-                    });
-                }
-                Err(TryLockError::WouldBlock) => {
-                    let running = self.running();
-                    if !running.is_empty() {
-                        return Err(DiffError::AgentRunning(running));
-                    }
-                    tokio::time::sleep(RETRY).await;
-                }
-                Err(TryLockError::Error(error)) => return Err(DiffError::Io(error)),
-            }
-        }
-        Err(DiffError::AgentRunning(self.running()))
+        hold_alone(lock_file(&self.dir, "checkout.lock")?, || self.running()).await
+    }
+
+    /// Holds the repository alone, so no turn runs or starts in any of its worktrees, or names
+    /// the sessions `running` finds.
+    pub(crate) async fn repository_alone(
+        &self,
+        running: impl Fn() -> Vec<String>,
+    ) -> Result<Alone, DiffError> {
+        hold_alone(lock_file(&self.repository, "repository.lock")?, running).await
     }
 
     /// The sessions whose agents run in the checkout, sorted.
@@ -145,14 +145,35 @@ impl Checkout {
         running
     }
 
-    fn lock_file(&self) -> Result<File, DiffError> {
-        std::fs::create_dir_all(&self.dir).map_err(DiffError::Io)?;
-        open(&self.dir.join("checkout.lock"), true)
-    }
-
     fn running_dir(&self) -> PathBuf {
         self.dir.join("running")
     }
+}
+
+/// Holds `lock` alone, or names the sessions `running` finds. While none is named it tries a
+/// little longer, as a process starting a program holds a copy of every open lock until the
+/// program runs.
+async fn hold_alone(lock: File, running: impl Fn() -> Vec<String>) -> Result<Alone, DiffError> {
+    for _ in 0..ALONE_TRIES {
+        match lock.try_lock() {
+            Ok(()) => return Ok(Alone { _lock: lock }),
+            Err(TryLockError::WouldBlock) => {
+                let named = running();
+                if !named.is_empty() {
+                    return Err(DiffError::AgentRunning(named));
+                }
+                tokio::time::sleep(RETRY).await;
+            }
+            Err(TryLockError::Error(error)) => return Err(DiffError::Io(error)),
+        }
+    }
+    Err(DiffError::AgentRunning(running()))
+}
+
+/// Opens or creates the lock file `name` in the folder `dir`.
+fn lock_file(dir: &Path, name: &str) -> Result<File, DiffError> {
+    std::fs::create_dir_all(dir).map_err(DiffError::Io)?;
+    open(&dir.join(name), true)
 }
 
 /// Opens the lock file at `path`, creating it with `create`. Anyone who can write the Git

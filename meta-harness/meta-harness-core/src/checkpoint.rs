@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 use tokio::sync::watch;
 
-use crate::checkout::{RETRY, Running};
+use crate::checkout::{Alone, RETRY, Running};
 use crate::diff::{ChangeStatus, DiffError, FileChange, Whitespace, WorkingTree};
 
 /// Longest one Git command on the project may take; Git is then stopped with the programs it
@@ -123,9 +123,9 @@ pub struct Checkpoints {
     /// Checkpoints are taken one after another; one waiting for its turn does not count its wait
     /// against the time limit.
     captures: tokio::sync::Mutex<()>,
-    /// Marks this session's agent as running in the checkout while a turn runs, with the
-    /// turn's id.
-    running: std::sync::Mutex<Option<(String, Running)>>,
+    /// Marks this session's agent as running in the checkout while a turn runs, with the turn's
+    /// start checkpoint, as the agent may switch sessions between turns.
+    running: std::sync::Mutex<Option<(Checkpoint, Running)>>,
     /// Whether a turn's start waits for a revert in the checkout.
     waiting: watch::Sender<bool>,
 }
@@ -195,7 +195,7 @@ impl Checkpoints {
             if *self.closed.borrow() {
                 return Err(DiffError::Closed);
             }
-            *slot = Some((checkpoint.turn.clone(), running));
+            *slot = Some((checkpoint.clone(), running));
         }
         let captured = async {
             let _turn = self
@@ -205,12 +205,12 @@ impl Checkpoints {
         }
         .await;
         if checkpoint.phase == Phase::End {
-            // Only its own turn's mark: a later turn's start may already have replaced it.
+            // Only its own turn's mark: a later turn's start, perhaps of another session after a
+            // switch, may already have replaced it.
             let mut slot = self.running.lock().expect("running lock");
-            if slot
-                .as_ref()
-                .is_some_and(|(turn, _)| *turn == checkpoint.turn)
-            {
+            if slot.as_ref().is_some_and(|(start, _)| {
+                start.session == checkpoint.session && start.turn == checkpoint.turn
+            }) {
                 slot.take();
             }
         }
@@ -359,9 +359,9 @@ impl Checkpoints {
                     .bounded(tree.references(&format!("{REFS}{session}/")))
                     .await?;
                 self.bounded(tree.delete_references(&references)).await?;
-                alone
+                Some(alone)
             }
-            None => Vec::new(),
+            None => None,
         };
         std::fs::remove_file(file).map_err(DiffError::Io)
     }
@@ -375,31 +375,23 @@ impl Checkpoints {
         self.bounded(tree.delete_references(&references)).await
     }
 
-    /// Holds every worktree's checkout alone, waiting a moment for a turn that is ending.
-    async fn alone_everywhere(
-        &self,
-        tree: &WorkingTree,
-    ) -> Result<Vec<crate::checkout::Alone>, DiffError> {
+    /// Holds the repository alone, so no turn runs or starts in any of its worktrees, waiting a
+    /// moment for a turn that is ending; a refusal names the sessions running in its worktrees.
+    async fn alone_everywhere(&self, tree: &WorkingTree) -> Result<Alone, DiffError> {
+        let checkouts = tree.checkouts()?;
+        let running = || -> Vec<String> {
+            checkouts
+                .iter()
+                .flat_map(|checkout| checkout.running())
+                .collect()
+        };
         let waited = Instant::now();
         loop {
-            let mut alone = Vec::new();
-            let mut refused = None;
-            for checkout in tree.checkouts()? {
-                match checkout.alone().await {
-                    Ok(held) => alone.push(held),
-                    Err(error) => {
-                        refused = Some(error);
-                        break;
-                    }
-                }
-            }
-            match refused {
-                None => return Ok(alone),
-                Some(DiffError::AgentRunning(_)) if waited.elapsed() < ENDING_WAIT => {
-                    drop(alone);
+            match tree.checkout().repository_alone(running).await {
+                Err(DiffError::AgentRunning(_)) if waited.elapsed() < ENDING_WAIT => {
                     tokio::time::sleep(RETRY).await;
                 }
-                Some(error) => return Err(error),
+                held => return held,
             }
         }
     }
