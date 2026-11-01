@@ -260,6 +260,7 @@ class _AgentShellState extends State<AgentShell> {
                     state: widget.state,
                     info: widget.info,
                     onSettings: _toggleSettings,
+                    onNewSession: _newSession,
                   ),
                   Expanded(
                     child: ValueListenableBuilder(

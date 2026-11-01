@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -203,5 +204,125 @@ void main() {
     await tester.tap(find.text('Session 8'));
     await tester.pumpAndSettle();
     expect(backend.calls, contains('switch /sessions/8.jsonl'));
+  });
+
+  Future<void> rightClick(WidgetTester tester, Finder target) async {
+    await tester.tap(target, buttons: kSecondaryButton);
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets('deletes a recent session with its checkpoints from its row', (
+    tester,
+  ) async {
+    await show(
+      tester,
+      setUp: () => backend
+        ..storedSessions = [
+          BridgeStoredSession(
+            path: '/sessions/a.jsonl',
+            title: 'Rate limit for /login',
+            modifiedMs: DateTime.now().millisecondsSinceEpoch,
+          ),
+        ]
+        ..turnCounts = {'/sessions/a.jsonl': 3},
+    );
+    await rightClick(tester, find.text('Rate limit for /login'));
+    await tester.tap(find.text('Delete session…'));
+    await tester.pumpAndSettle();
+    expect(find.text('Delete “Rate limit for /login”?'), findsOneWidget);
+    expect(
+      find.text(
+        'Its pi session file and its 3 turns’ checkpoints are deleted and cannot be '
+        'restored. Project files, commits and branches stay.',
+      ),
+      findsOneWidget,
+    );
+    await tester.tap(find.text('Delete session'));
+    await tester.pumpAndSettle();
+    expect(backend.calls, contains('delete /sessions/a.jsonl'));
+    expect(find.text('Rate limit for /login'), findsNothing);
+  });
+
+  testWidgets('deletes the open session after a new one takes its place', (
+    tester,
+  ) async {
+    await show(tester);
+    state.sessionTitle.value = 'Fix flaky sync test';
+    await tester.pumpAndSettle();
+    await rightClick(
+      tester,
+      find.descendant(
+        of: find.byType(Sidebar),
+        matching: find.text('Fix flaky sync test'),
+      ),
+    );
+    await tester.tap(find.text('Delete session…'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Delete session'));
+    await tester.pumpAndSettle();
+    expect(
+      backend.calls.where(
+        (call) => call.startsWith('new') || call.startsWith('delete'),
+      ),
+      ['new session', 'delete /sessions/open.jsonl'],
+    );
+  });
+
+  testWidgets('removes all checkpoints of the project from its menu', (
+    tester,
+  ) async {
+    await show(
+      tester,
+      setUp: () => backend.checkpointed = const [
+        BridgeCheckpointSession(title: 'Rate limit for /login', turns: 3),
+        BridgeCheckpointSession(title: 'Fix flaky sync test', turns: 1),
+      ],
+    );
+    await rightClick(tester, find.text('acme-api').first);
+    expect(find.text('New agent session'), findsOneWidget);
+    await tester.tap(find.text('Remove all checkpoints…'));
+    await tester.pumpAndSettle();
+    expect(find.text('Remove all checkpoints of acme-api?'), findsOneWidget);
+    expect(find.text('3 turns'), findsOneWidget);
+    expect(find.text('1 turn'), findsOneWidget);
+    await tester.tap(find.text('Remove checkpoints'));
+    await tester.pumpAndSettle();
+    expect(backend.calls, contains('remove all checkpoints'));
+
+    backend.removeError = 'an agent runs in this checkout';
+    backend.checkpointed = const [
+      BridgeCheckpointSession(title: 'Fix flaky sync test', turns: 1),
+    ];
+    await rightClick(tester, find.text('acme-api').first);
+    await tester.tap(find.text('Remove all checkpoints…'));
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(
+      state.notice.value?.text,
+      'Could not remove the checkpoints: an agent runs in this checkout',
+    );
+  });
+
+  testWidgets('opens a row\'s menu from the keyboard', (tester) async {
+    await show(tester);
+    final more = find.descendant(
+      of: find.byTooltip('More actions').first,
+      matching: find.byType(Icon),
+    );
+    Focus.of(tester.element(more)).requestFocus();
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(find.text('Remove all checkpoints…'), findsOneWidget);
+  });
+
+  testWidgets('a screen reader finds a row\'s menu before any hover', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    await show(tester);
+    expect(find.bySemanticsLabel('More actions'), findsWidgets);
+    semantics.dispose();
   });
 }

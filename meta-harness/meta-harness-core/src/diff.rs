@@ -164,6 +164,8 @@ pub struct WorkingTree {
     prefix: String,
     /// The checkout's `watershed` folder in its Git directory.
     locks: PathBuf,
+    /// The Git directory every worktree of the repository shares.
+    common: PathBuf,
     index: PathBuf,
     store: Store,
     /// Serializes use of the private index.
@@ -210,6 +212,7 @@ impl WorkingTree {
         let root = git_path(dir, &["rev-parse", "--show-toplevel"]).await?;
         let index = git_path(dir, &["rev-parse", "--git-path", "index"]).await?;
         let locks = git_path(dir, &["rev-parse", "--git-path", "watershed"]).await?;
+        let common = git_path(dir, &["rev-parse", "--git-common-dir"]).await?;
         let prefix = git(dir, &[], &["rev-parse", "--show-prefix"]).await?;
         let prefix = prefix.strip_suffix('\n').unwrap_or(&prefix).to_owned();
         let absolute = |path: &str| {
@@ -226,6 +229,7 @@ impl WorkingTree {
             work: dir.clone(),
             prefix,
             locks: absolute(&locks),
+            common: absolute(&common),
             index: absolute(&index),
             store,
             busy: Mutex::new(()),
@@ -250,7 +254,28 @@ impl WorkingTree {
 
     /// The locks that tell which agents run in the checkout.
     pub(crate) fn checkout(&self) -> crate::checkout::Checkout {
-        crate::checkout::Checkout::new(self.locks.clone())
+        crate::checkout::Checkout::new(self.locks.clone(), self.common.join("watershed"))
+    }
+
+    /// The locks of every worktree of the repository, which share its refs: the main one and
+    /// each linked one.
+    /// Fails when the linked ones cannot be listed, so nothing that could run there is missed.
+    pub(crate) fn checkouts(&self) -> Result<Vec<crate::checkout::Checkout>, DiffError> {
+        let mut checkouts = vec![self.common.join("watershed")];
+        match std::fs::read_dir(self.common.join("worktrees")) {
+            Ok(entries) => {
+                for entry in entries {
+                    checkouts.push(entry.map_err(DiffError::Io)?.path().join("watershed"));
+                }
+            }
+            Err(error) if error.kind() == ErrorKind::NotFound => {}
+            Err(error) => return Err(DiffError::Io(error)),
+        }
+        let repository = self.common.join("watershed");
+        Ok(checkouts
+            .into_iter()
+            .map(|dir| crate::checkout::Checkout::new(dir, repository.clone()))
+            .collect())
     }
 
     /// The changes from `from` to `to` a revert to `to` makes, and the repositories it leaves
@@ -390,6 +415,36 @@ impl WorkingTree {
                 "could not list the files Git ignores in {folder}"
             )))
         }
+    }
+
+    /// The refs whose names start with `prefix`.
+    pub(crate) async fn references(&self, prefix: &str) -> Result<Vec<String>, DiffError> {
+        let listed = git(
+            &self.root,
+            &[],
+            &["for-each-ref", "--format=%(refname)", prefix],
+        )
+        .await?;
+        Ok(listed.lines().map(str::to_owned).collect())
+    }
+
+    /// Deletes `references` in one transaction, so either all or none go.
+    pub(crate) async fn delete_references(&self, references: &[String]) -> Result<(), DiffError> {
+        if references.is_empty() {
+            return Ok(());
+        }
+        let input: String = references
+            .iter()
+            .map(|reference| format!("delete {reference}\n"))
+            .collect();
+        let args = ["update-ref", "--no-deref", "--stdin"];
+        self.git_input(
+            &[],
+            &args,
+            input.as_bytes(),
+            "could not remove the checkpoints",
+        )
+        .await
     }
 
     /// The branch checked out, or none when HEAD names a commit.
@@ -650,6 +705,21 @@ impl WorkingTree {
         let copy = self.store.0.join("index.new");
         match std::fs::copy(&self.index, &copy) {
             Ok(_) => {
+                // Git rereads a file changed in the clock tick its index was written in only while
+                // the index is not newer than the file, so the copy keeps the index's time; Git
+                // itself keeps that guard when it rewrites the copy.
+                let kept = std::fs::metadata(&self.index)
+                    .and_then(|meta| meta.modified())
+                    .and_then(|time| {
+                        std::fs::File::options()
+                            .write(true)
+                            .open(&copy)?
+                            .set_modified(time)
+                    });
+                if let Err(error) = kept {
+                    let _ = std::fs::remove_file(&copy);
+                    return Err(DiffError::Io(error));
+                }
                 let cleared = self.unmark(&self.env(&copy)).await;
                 if let Err(error) =
                     cleared.and_then(|()| std::fs::rename(&copy, &index).map_err(DiffError::Io))

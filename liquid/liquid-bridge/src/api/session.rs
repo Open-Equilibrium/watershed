@@ -7,8 +7,8 @@ use std::path::{Path, PathBuf};
 
 use meta_harness_core::{
     AgentCommand, Answer, Checkpoint, Checkpoints, CommandError, Delivery, DiffError, Phase,
-    RequestId, Session, SessionEvent, TurnCheckpoints, Whitespace, recent_sessions, session_title,
-    session_title_of, visible_lines, visible_name,
+    RequestId, Session, SessionEvent, TurnCheckpoints, Whitespace, recent_sessions, session_id,
+    session_title, session_title_of, session_titles, visible_lines, visible_name,
 };
 use tokio::runtime::Runtime;
 use tokio::sync::{Mutex, mpsc};
@@ -52,6 +52,16 @@ pub struct BridgeStoredSession {
     pub title: String,
     /// When pi last wrote it, in Unix milliseconds.
     pub modified_ms: i64,
+}
+
+/// A session with checkpoints in the project's repository.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgeCheckpointSession {
+    /// Its title, as the start page names stored sessions; "Unknown session" when no session
+    /// of this project is stored with its id.
+    pub title: String,
+    /// Its turns with checkpoints.
+    pub turns: i64,
 }
 
 /// A model the agent can use.
@@ -388,6 +398,144 @@ impl AgentSession {
         })
     }
 
+    /// The sessions with checkpoints in the project's repository, sorted by their ids.
+    pub fn checkpoint_sessions(&self) -> Result<Vec<BridgeCheckpointSession>, String> {
+        RUNTIME.block_on(async {
+            let sessions = self.checkpoint_ids().await?;
+            if sessions.is_empty() {
+                return Ok(Vec::new());
+            }
+            let titles = session_dir(&mut *self.session.lock().await)
+                .await
+                .map(|dir| session_titles(&dir, &self.cwd))
+                .unwrap_or_default();
+            Ok(sessions
+                .into_iter()
+                .map(|(id, turns)| BridgeCheckpointSession {
+                    title: titles
+                        .get(&id)
+                        .cloned()
+                        .unwrap_or_else(|| "Unknown session".to_owned()),
+                    turns: i64::try_from(turns).unwrap_or(i64::MAX),
+                })
+                .collect())
+        })
+    }
+
+    /// Removes every checkpoint in the project's repository; refused while an agent runs in any
+    /// of its worktrees. Outside Git there is nothing to remove.
+    pub fn remove_all_checkpoints(&self) -> Result<(), String> {
+        match RUNTIME.block_on(self.checkpoints.remove_all()) {
+            Ok(()) | Err(DiffError::NotARepository) => Ok(()),
+            Err(error) => Err(shown(error)),
+        }
+    }
+
+    /// The file pi stores the open session in, unless it keeps the session in memory.
+    pub fn session_file(&self) -> Result<Option<String>, String> {
+        RUNTIME.block_on(async {
+            let mut session = self.session.lock().await;
+            let state = open(&mut session)?.state().await.map_err(describe)?;
+            Ok(state.session_file.map(|file| file.display().to_string()))
+        })
+    }
+
+    /// The turns with checkpoints of the session stored in `path`, the open one too; none
+    /// outside Git or before pi stored the session.
+    pub fn stored_turns(&self, path: String) -> Result<i64, String> {
+        RUNTIME.block_on(async {
+            let mut session = self.session.lock().await;
+            let Some(id) = self
+                .stored_session(&mut session, &path, Open::Counts)
+                .await?
+            else {
+                return Ok(0);
+            };
+            let turns = self
+                .checkpoint_ids()
+                .await?
+                .into_iter()
+                .find(|(session, _)| *session == id)
+                .map_or(0, |(_, turns)| turns);
+            Ok(i64::try_from(turns).unwrap_or(i64::MAX))
+        })
+    }
+
+    /// Deletes the session stored in `path`, a session of this project in pi's session
+    /// directory other than the open one, with its checkpoints first; refused while an agent
+    /// runs in any worktree of the repository. Neither comes back. A session pi never stored
+    /// leaves nothing to delete.
+    pub fn delete_session(&self, path: String) -> Result<(), String> {
+        RUNTIME.block_on(async {
+            // Held until the session is gone, so switching to it waits.
+            let mut session = self.session.lock().await;
+            let Some(id) = self
+                .stored_session(&mut session, &path, Open::Refused)
+                .await?
+            else {
+                return Ok(());
+            };
+            self.checkpoints
+                .delete_session(&id, Path::new(&path))
+                .await
+                .map_err(shown)
+        })
+    }
+
+    /// The sessions with checkpoints, by id with their turns; none outside Git.
+    async fn checkpoint_ids(&self) -> Result<Vec<(String, usize)>, String> {
+        match self.checkpoints.sessions().await {
+            Ok(sessions) => Ok(sessions),
+            Err(DiffError::NotARepository) => Ok(Vec::new()),
+            Err(error) => Err(shown(error)),
+        }
+    }
+
+    /// The id of the session stored in `path`, which must be a session file of this project in
+    /// pi's session directory, and with [`Open::Refused`] not the open session, whatever its
+    /// name; none when pi has not stored it yet. So Dart never names another file.
+    async fn stored_session(
+        &self,
+        session: &mut Option<Session>,
+        path: &str,
+        the_open: Open,
+    ) -> Result<Option<String>, String> {
+        let path = Path::new(path);
+        let current = open(session)?.state().await.map_err(describe)?.session_file;
+        let Some(current) = current else {
+            return Err("pi keeps this session in memory and stores no others".to_owned());
+        };
+        let not_open = || "the open session cannot be deleted from inside it".to_owned();
+        if path == current && the_open == Open::Refused {
+            return Err(not_open());
+        }
+        let refused = || "not a session file in pi's session directory".to_owned();
+        if path.parent() != current.parent() {
+            return Err(refused());
+        }
+        // A pipe or device would block the read; pi writes plain `.jsonl` files.
+        let meta = match std::fs::symlink_metadata(path) {
+            Ok(meta) => meta,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error.to_string()),
+        };
+        if !meta.is_file()
+            || path
+                .extension()
+                .is_none_or(|extension| extension != "jsonl")
+        {
+            return Err(refused());
+        }
+        let id =
+            session_id(path, &self.cwd).ok_or_else(|| "no session of this project".to_owned())?;
+        if the_open == Open::Refused
+            && session_id(&current, &self.cwd).as_deref() == Some(id.as_str())
+        {
+            return Err(not_open());
+        }
+        Ok(Some(id))
+    }
+
     /// Reads the session's branch tree and the Trajectory of each branch ending at an entry in
     /// `leaves`, or of the current branch when `leaves` is empty.
     pub fn history(&self, leaves: Vec<String>) -> Result<BridgeHistory, String> {
@@ -626,6 +774,15 @@ fn whitespace(hide: bool) -> Whitespace {
     } else {
         Whitespace::Shown
     }
+}
+
+/// Whether a stored session may be the open one.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Open {
+    /// It may, as when counting its turns.
+    Counts,
+    /// It may not, as when deleting it.
+    Refused,
 }
 
 /// The turns of the current branch.

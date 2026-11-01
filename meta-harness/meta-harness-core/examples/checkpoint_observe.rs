@@ -3,7 +3,8 @@
 //! checkpoint, ten changed files and one new file, its end checkpoint, the list of what it
 //! changed, the plan of a revert to its start and that revert. The first sample's start also
 //! opens the project. A last turn replaces a file with a folder of 20,000 folders, which the
-//! plan searches for repositories before it would write the file back. The project is written by
+//! plan searches for repositories before it would write the file back. Last, the sessions with
+//! checkpoints are listed and all checkpoints removed. The project is written by
 //! a second run of this example, so building it adds nothing to the measured process. It prints
 //! one JSON line per sample and a summary and never compares with a threshold. Run from the
 //! repository root:
@@ -187,6 +188,13 @@ async fn observe(dir: &Path) {
         .await
         .expect("plan");
     let in_place_ms = ms(started);
+    let started = Instant::now();
+    let sessions = checkpoints.sessions().await.expect("sessions");
+    let sessions_ms = ms(started);
+    assert_eq!(sessions, [("observe".to_owned(), SAMPLES + 1)]);
+    let started = Instant::now();
+    checkpoints.remove_all().await.expect("removed");
+    let remove_all_ms = ms(started);
     checkpoints.close().await;
     // The first start also opens the project, so the summary leaves it out.
     let summary = |values: &mut Vec<f64>| {
@@ -202,6 +210,8 @@ async fn observe(dir: &Path) {
             "samples": SAMPLES,
             "first_start_ms": round(starts[0]),
             "plan_with_folders_in_place_ms": round(in_place_ms),
+            "list_sessions_ms": round(sessions_ms),
+            "remove_all_ms": round(remove_all_ms),
             "start": summary(&mut starts[1..].to_vec()),
             "end": summary(&mut ends),
             "list": summary(&mut lists),

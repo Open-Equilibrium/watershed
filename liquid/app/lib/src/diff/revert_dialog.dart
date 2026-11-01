@@ -1,12 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../controls.dart';
 import '../format.dart';
 import '../rust/api/events.dart';
 import '../rust/api/history.dart';
 import '../session/session_state.dart';
-import '../shortcuts/keymap.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 
@@ -49,16 +47,11 @@ class _RevertDialog extends StatelessWidget {
   Widget build(BuildContext context) {
     final ws = context.ws;
     final name = 'turn ${turn.number}';
-    final muted = TextStyle(
-      color: ws.textMuted,
-      fontSize: WsMetrics.fsCompact,
-      height: WsMetrics.lhCompact / WsMetrics.fsCompact,
-    );
+    final muted = DangerDialog.text(context);
     final files = plan.files;
     final reverted = files.where((file) => !file.kept).toList();
     final shown = plan.state == BridgeChangesState.shown;
     final allowed = shown && plan.running.isEmpty;
-    void revert() => Navigator.of(context).pop(true);
     final lead = switch (plan.state) {
       BridgeChangesState.outsideGit => 'This project has no Git repository, so it has no checkpoints to revert to.',
       BridgeChangesState.removed =>
@@ -76,88 +69,43 @@ class _RevertDialog extends StatelessWidget {
     // A file Git ignores in a restored file's place does not stay.
     final other = files.any((file) => file.ignored) ? 'other ' : '';
     final branch = plan.branch;
-    return CallbackShortcuts(
-      bindings: {
-        if (allowed) const Keys(LogicalKeyboardKey.enter).activator: revert,
-      },
-      child: Focus(
-        autofocus: true,
-        child: Dialog(
-          backgroundColor: ws.surface,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(WsMetrics.radiusXl),
-          ),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 520),
-            child: Padding(
-              padding: const EdgeInsets.all(WsMetrics.space5),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                spacing: WsMetrics.space4,
-                children: [
-                  Text(
-                    'Revert to before $name?',
-                    style: Theme.of(context).textTheme.titleSmall
-                        ?.copyWith(fontWeight: WsMetrics.fwSemibold),
-                  ),
-                  Text(lead, style: muted),
-                  if (files.isNotEmpty) _Files(turn: turn, files: files),
-                  if (shown && plan.running.isNotEmpty)
-                    _Running(running: plan.running)
-                  else if (shown) ...[
-                    Text.rich(
-                      TextSpan(
-                        children: [
-                          if (branch == null)
-                            const TextSpan(
-                              text: 'Commits, the checked-out commit',
-                            )
-                          else ...[
-                            const TextSpan(text: 'Commits, the branch '),
-                            TextSpan(
-                              text: branch,
-                              style: monoStyle(context, color: ws.text),
-                            ),
-                          ],
-                          TextSpan(
-                            text:
-                                ' and ${other}files Git ignores stay as they are.',
-                          ),
-                        ],
-                      ),
-                      style: muted,
-                    ),
-                    Text(
-                      'The session continues on a new branch from before $name, and '
-                      '$name’s prompt returns to the input area. Turn ${turn.number} stays '
-                      'on its own branch in the session tree.',
-                      style: muted,
-                    ),
-                  ],
-                  Row(
-                    spacing: WsMetrics.space3,
-                    children: [
-                      if (shown)
-                        DangerButton(
-                          label: 'Revert and branch',
-                          shortcut: allowed ? '⏎' : null,
-                          onPressed: allowed ? revert : null,
-                        ),
-                      const Spacer(),
-                      SecondaryButton(
-                        label: 'Cancel',
-                        shortcut: 'esc',
-                        onPressed: () => Navigator.of(context).pop(false),
-                      ),
-                    ],
+    return DangerDialog(
+      title: 'Revert to before $name?',
+      action: shown ? 'Revert and branch' : null,
+      allowed: allowed,
+      children: [
+        Text(lead, style: muted),
+        if (files.isNotEmpty) _Files(turn: turn, files: files),
+        if (shown && plan.running.isNotEmpty)
+          _Running(running: plan.running)
+        else if (shown) ...[
+          Text.rich(
+            TextSpan(
+              children: [
+                if (branch == null)
+                  const TextSpan(text: 'Commits, the checked-out commit')
+                else ...[
+                  const TextSpan(text: 'Commits, the branch '),
+                  TextSpan(
+                    text: branch,
+                    style: monoStyle(context, color: ws.text),
                   ),
                 ],
-              ),
+                TextSpan(
+                  text: ' and ${other}files Git ignores stay as they are.',
+                ),
+              ],
             ),
+            style: muted,
           ),
-        ),
-      ),
+          Text(
+            'The session continues on a new branch from before $name, and '
+            '$name’s prompt returns to the input area. Turn ${turn.number} stays '
+            'on its own branch in the session tree.',
+            style: muted,
+          ),
+        ],
+      ],
     );
   }
 }

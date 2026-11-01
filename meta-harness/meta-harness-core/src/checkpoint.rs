@@ -1,6 +1,7 @@
 //! Checkpoints of a session's Git project at each turn's start and end (ADR-0220, ADR-0234): commits
 //! under `refs/watershed/checkpoints/<session>/<turn>/<start|end>` that the Diff tab compares.
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::future::{Future, poll_fn};
 use std::path::{Path, PathBuf};
 use std::pin::pin;
@@ -10,12 +11,15 @@ use std::time::{Duration, Instant};
 
 use tokio::sync::watch;
 
-use crate::checkout::Running;
+use crate::checkout::{Alone, RETRY, Running};
 use crate::diff::{ChangeStatus, DiffError, FileChange, Whitespace, WorkingTree};
 
 /// Longest one Git command on the project may take; Git is then stopped with the programs it
 /// started that stay in its process group.
 const GIT_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Longest deleting a session or removing all checkpoints waits for a turn that is ending.
+const ENDING_WAIT: Duration = Duration::from_secs(2);
 
 /// Longest closing waits for commands in progress to stop their Git.
 const CLOSE_WAIT: Duration = Duration::from_secs(1);
@@ -50,19 +54,26 @@ impl Checkpoint {
     /// Its ref. Ids come from the agent, so only letters, digits, `-` and `_` may name a ref.
     fn reference(&self) -> Result<String, DiffError> {
         for id in [&self.session, &self.turn] {
-            let valid = (1..=MAX_ID_BYTES).contains(&id.len())
-                && id
-                    .bytes()
-                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_');
-            if !valid {
-                return Err(DiffError::InvalidCheckpoint(id.clone()));
-            }
+            valid_id(id)?;
         }
         let phase = match self.phase {
             Phase::Start => "start",
             Phase::End => "end",
         };
         Ok(format!("{REFS}{}/{}/{phase}", self.session, self.turn))
+    }
+}
+
+/// Refuses an id that could leave Watershed's refs.
+fn valid_id(id: &str) -> Result<(), DiffError> {
+    let valid = (1..=MAX_ID_BYTES).contains(&id.len())
+        && id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_');
+    if valid {
+        Ok(())
+    } else {
+        Err(DiffError::InvalidCheckpoint(id.to_owned()))
     }
 }
 
@@ -112,9 +123,9 @@ pub struct Checkpoints {
     /// Checkpoints are taken one after another; one waiting for its turn does not count its wait
     /// against the time limit.
     captures: tokio::sync::Mutex<()>,
-    /// Marks this session's agent as running in the checkout while a turn runs, with the
-    /// turn's id.
-    running: std::sync::Mutex<Option<(String, Running)>>,
+    /// Marks this session's agent as running in the checkout while a turn runs, with the turn's
+    /// start checkpoint, as the agent may switch sessions between turns.
+    running: std::sync::Mutex<Option<(Checkpoint, Running)>>,
     /// Whether a turn's start waits for a revert in the checkout.
     waiting: watch::Sender<bool>,
 }
@@ -184,7 +195,7 @@ impl Checkpoints {
             if *self.closed.borrow() {
                 return Err(DiffError::Closed);
             }
-            *slot = Some((checkpoint.turn.clone(), running));
+            *slot = Some((checkpoint.clone(), running));
         }
         let captured = async {
             let _turn = self
@@ -194,12 +205,12 @@ impl Checkpoints {
         }
         .await;
         if checkpoint.phase == Phase::End {
-            // Only its own turn's mark: a later turn's start may already have replaced it.
+            // Only its own turn's mark: a later turn's start, perhaps of another session after a
+            // switch, may already have replaced it.
             let mut slot = self.running.lock().expect("running lock");
-            if slot
-                .as_ref()
-                .is_some_and(|(turn, _)| *turn == checkpoint.turn)
-            {
+            if slot.as_ref().is_some_and(|(start, _)| {
+                start.session == checkpoint.session && start.turn == checkpoint.turn
+            }) {
                 slot.take();
             }
         }
@@ -269,7 +280,7 @@ impl Checkpoints {
         let tree = self.tree().await?;
         let target = self.read(&tree, to).await?;
         // Held alone, so no turn starts in the checkout until the files are back.
-        let _alone = tree.checkout().alone()?;
+        let _alone = tree.checkout().alone().await?;
         let _turn = self
             .until_closed(async { Ok(self.captures.lock().await) })
             .await?;
@@ -307,6 +318,82 @@ impl Checkpoints {
         let tree = self.tree().await?;
         let (from, to) = (self.read(&tree, from).await?, self.read(&tree, to).await?);
         self.bounded(tree.patch(&from, &to, path, whitespace)).await
+    }
+
+    /// The sessions with checkpoints in the project's repository, by id, each with its number
+    /// of turns, sorted by id.
+    pub async fn sessions(&self) -> Result<Vec<(String, usize)>, DiffError> {
+        let tree = self.tree().await?;
+        let mut turns: BTreeMap<String, BTreeSet<String>> = Default::default();
+        for reference in self.bounded(tree.references(REFS)).await? {
+            let mut ids = reference.trim_start_matches(REFS).split('/');
+            if let (Some(session), Some(turn)) = (ids.next(), ids.next()) {
+                turns
+                    .entry(session.to_owned())
+                    .or_default()
+                    .insert(turn.to_owned());
+            }
+        }
+        Ok(turns
+            .into_iter()
+            .map(|(session, turns)| (session, turns.len()))
+            .collect())
+    }
+
+    /// Deletes the session `session` stored in `file` with its checkpoints first. While an
+    /// agent runs in any worktree of the repository it is refused, so no turn of it starts
+    /// meanwhile; a turn that is ending gets a moment to end. Git frees the checkpoints' space at
+    /// its next cleanup; outside Git only the file goes.
+    pub async fn delete_session(&self, session: &str, file: &Path) -> Result<(), DiffError> {
+        valid_id(session)?;
+        let tree = match self.tree().await {
+            Ok(tree) => Some(tree),
+            Err(DiffError::NotARepository) => None,
+            Err(error) => return Err(error),
+        };
+        // Held until the file is gone.
+        let _alone = match &tree {
+            Some(tree) => {
+                let alone = self.alone_everywhere(tree).await?;
+                let references = self
+                    .bounded(tree.references(&format!("{REFS}{session}/")))
+                    .await?;
+                self.bounded(tree.delete_references(&references)).await?;
+                Some(alone)
+            }
+            None => None,
+        };
+        std::fs::remove_file(file).map_err(DiffError::Io)
+    }
+
+    /// Removes every checkpoint in the project's repository, which all its worktrees share, so
+    /// refused while an agent runs in any of them.
+    pub async fn remove_all(&self) -> Result<(), DiffError> {
+        let tree = self.tree().await?;
+        let _alone = self.alone_everywhere(&tree).await?;
+        let references = self.bounded(tree.references(REFS)).await?;
+        self.bounded(tree.delete_references(&references)).await
+    }
+
+    /// Holds the repository alone, so no turn runs or starts in any of its worktrees, waiting a
+    /// moment for a turn that is ending; a refusal names the sessions running in its worktrees.
+    async fn alone_everywhere(&self, tree: &WorkingTree) -> Result<Alone, DiffError> {
+        let checkouts = tree.checkouts()?;
+        let running = || -> Vec<String> {
+            checkouts
+                .iter()
+                .flat_map(|checkout| checkout.running())
+                .collect()
+        };
+        let waited = Instant::now();
+        loop {
+            match tree.checkout().repository_alone(running).await {
+                Err(DiffError::AgentRunning(_)) if waited.elapsed() < ENDING_WAIT => {
+                    tokio::time::sleep(RETRY).await;
+                }
+                held => return held,
+            }
+        }
     }
 
     /// Stops commands in progress and removes the private index.

@@ -270,6 +270,12 @@ i.kw{font-style:normal;color:var(--ws-syn-kw)}i.st{font-style:normal;color:var(-
     </div>
   </section>
   <section>
+    <h3 class="sec">8 · Where a session is deleted</h3>
+    <p class="sub">As in T3 Code's thread list and Notion's pages, a session's row opens a menu on right-click or from the "···" that shows on hover: in the sidebar for the open session and on the start page for each recent session. "Delete session…" opens the dialog of section 6. Deleting the open session stops its agent, starts a new session and then deletes the old one, as T3 Code moves on after deleting the active thread. Approved by the maintainer on 2026-11-01.</p>
+    <div class="stage"><div class="scaler"><div class="win" id="w-delete-side"></div></div></div>
+    <div class="win mini" style="margin-top:16px"><div class="dlg" style="width:560px;position:relative"><div style="font-size:12px;color:var(--ws-text-faint);padding:0 6px">Recent in acme-api</div><div class="flist" style="background:transparent;padding:0"><div class="frow" style="background:var(--ws-hover)">🕑<span>Fix flaky sync test</span><span class="r">continue · 2 h ago <span style="margin-left:8px;color:var(--ws-text-muted)">···</span></span></div><div class="frow">🕑<span>Rename the billing service</span><span class="r">continue · yesterday</span></div></div><div class="menu" style="position:static;margin-left:auto;width:220px"><div class="it dng">Delete session…</div></div></div></div>
+  </section>
+  <section>
     <h3 class="sec">Decisions</h3>
     <ol class="qs">
       <li>A revert starts a new branch from before the turn and puts that turn's prompt back into the input area; the undone turns stay on their branch, rather than only reverting the files and telling the agent.</li>
@@ -294,7 +300,7 @@ function side(o){return `<div class="side"><div class="wsw"><span class="av">B</
 <h6>Pages</h6><div class="nav"><span class="ico">${I.page}</span>Roadmap</div>
 <h6>Agent sessions <kbd>⌘N</kbd></h6>
 <div class="proj" ${o.projOn?'style="background:var(--ws-hover);border-radius:6px"':''}><span class="ico">⌄</span>acme-api <span class="f">~/code/acme-api</span>${o.projOn?'<span style="margin-left:auto;color:var(--ws-text-faint)">···</span>':''}</div>
-<div class="sess on"><div class="l1"><span class="dot" style="background:var(--ws-text-faint)"></span><span>Rate limit for /login</span><span class="end" style="color:var(--ws-text-faint)">idle</span></div>${meta('pi','main','MacBook')}</div>
+<div class="sess on"><div class="l1"><span class="dot" style="background:var(--ws-text-faint)"></span><span>Rate limit for /login</span><span class="end" style="color:var(--ws-text-faint)">${o.sessOn?'···':'idle'}</span></div>${meta('pi','main','MacBook')}</div>
 <div class="sess"><div class="l1"><span class="dot" style="background:${o.running?'var(--ws-accent)':'var(--ws-text-faint)'}"></span><span>Fix flaky sync test</span><span class="end">${o.running?'running':'done'}</span></div>${meta('pi','main','MacBook')}</div>
 <div class="nav" style="color:var(--ws-text-faint);margin-top:2px"><span class="ico">+</span>New agent session</div>${o.menu||''}</div>`}
 const composer=`<div class="actbox"><div class="ph">Ask the agent…</div><div class="bar"><span class="chip box">◐ Ask ⌄</span><span class="chip">＋ Context</span><span style="flex:1"></span><kbd style="color:var(--ws-text-faint)">⌘L</kbd><span class="btn pri">Send <kbd>⏎</kbd></span></div></div>`;
@@ -347,6 +353,8 @@ document.getElementById('empties').innerHTML=[
 
 const projMenu=`<div class="menu" style="left:150px;top:196px;width:250px"><div class="it">Open in Finder</div><div class="it">New agent session<span class="r">⌘N</span></div><hr><div class="it dng">Remove all checkpoints…</div></div>`;
 frame('w-remove','chat',`<div class="chat"><div class="col"><p class="prose" style="color:var(--ws-text-faint)">…</p></div></div>`,420,{projOn:true,menu:projMenu,keys:''});
+const sessMenu=`<div class="menu" style="left:150px;top:252px;width:220px"><div class="it dng">Delete session…</div></div>`;
+frame('w-delete-side','chat',`<div class="chat"><div class="col"><p class="prose" style="color:var(--ws-text-faint)">…</p></div></div>`,420,{sessOn:true,menu:sessMenu,keys:''});
 document.getElementById('d-all').innerHTML=`<div class="dlg"><h4>Remove all checkpoints of acme-api?</h4><p>2 sessions keep their chats and Trajectories, but no longer show turn changes or revert files. Project files, commits and branches stay. Git frees the space at its next cleanup.</p><div class="flist"><div class="frow">Rate limit for /login<span class="r">3 turns</span></div><div class="frow">Fix flaky sync test<span class="r">5 turns</span></div></div><div class="acts"><span class="btn dngp">Remove checkpoints</span>${cancel}</div></div>`;
 document.getElementById('d-del').innerHTML=`<div class="dlg"><h4>Delete “Rate limit for /login”?</h4><p>Its pi session file and its 3 turns’ checkpoints are deleted and cannot be restored. Project files, commits and branches stay.</p><div class="acts"><span class="btn dngp">Delete session</span>${cancel}</div></div>`;
 
