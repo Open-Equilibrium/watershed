@@ -300,7 +300,7 @@ kbd{font-size:11px;padding:0 4px;border-radius:4px;border:1px solid currentColor
   </section>
   <section>
     <h3 class="sec">11 · Open questions for the maintainer</h3>
-    <p class="sub">The mockups above draw the recommendation of each question; nothing here is decided.</p>
+    <p class="sub">The mockups above draw the recommendation of each question. The maintainer answered them on 2026-11-01; see Decisions.</p>
     <div class="q"><h4>1 · Where the branch and the Git actions live</h4>
       <ul><li><b>A · Session header, right side</b> (drawn): visible in Chat, Trajectory and Diff alike; + one place, guideline 8; − the header gets busier.</li>
       <li><b>B · Input area bar</b>, beside "Ask" and "Context": + T3 Code's spot for a new thread's branch; − mixes Git writes with prompt settings, hidden while an approval fills the input area.</li>
@@ -390,7 +390,20 @@ kbd{font-size:11px;padding:0 4px;border-radius:4px;border:1px solid currentColor
   <section>
     <h3 class="sec">Decisions</h3>
     <ol class="qs">
-      <li>None yet: the maintainer's answers to section 11 are recorded here on approval.</li>
+      <li>The branch and the Git actions live at the right of the session header, in every tab (question 1).</li>
+      <li>Git keeps "branch"; Liquid's own branches are "session branches", in labels too ("Branch from here" stays, "Turns of this session branch") (question 2).</li>
+      <li>A commit preselects every uncommitted file with "Edit" to leave files out and commits whole files, saying so when the user staged parts (question 3).</li>
+      <li>The user writes the commit message; it is required and nothing is generated (question 4).</li>
+      <li>Commit and pull are refused while an agent runs in the checkout, with the revert's lock and notice (question 5).</li>
+      <li>Switching carries uncommitted changes as Git does; when Git refuses, Liquid lists its files and offers to commit; no stash (question 6).</li>
+      <li>Liquid fetches in the background every 15 seconds while the session is open, as T3 Code does, so ahead and behind stay current; "Fetch" in the menu fetches at once. This is the one Git write without a user action besides checkpoints, recorded in the ADR log (question 7).</li>
+      <li>The split button's main part runs the next single step: commit, push or pull (question 8).</li>
+      <li>A push asks first only for the default branch (question 9).</li>
+      <li>Pull is fast-forward only; when the branches diverged, Liquid points to the terminal (question 10).</li>
+      <li>A folder without Git offers "Initialize Git" (question 11).</li>
+      <li>With a detached HEAD, commit and push need a branch; the button offers "Create branch …" (question 12).</li>
+      <li>The Diff tab's turn menu gets "Uncommitted changes" (question 13).</li>
+      <li>The sidebar shows the checkout's live branch; a closed session shows the branch of its last turn (question 14).</li>
     </ol>
   </section>
 </div>
