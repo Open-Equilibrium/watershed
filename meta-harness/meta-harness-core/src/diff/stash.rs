@@ -190,14 +190,20 @@ impl WorkingTree {
             None => Vec::new(),
         };
         let mut in_the_way = BTreeSet::new();
+        let index_changes = self.changes(&current, &index, Whitespace::Shown).await?;
+        let tracked_changes = self.changes(&current, &tracked, Whitespace::Shown).await?;
         // A staged addition, or a tracked file deleted since the stash, can replace ignored
         // contents too. Check both trees because --index restores saved index-only changes.
-        for tree in [&index, &tracked] {
-            let changes = self.changes(&current, tree, Whitespace::Shown).await?;
-            in_the_way.extend(self.ignored_in_the_way(&changes, &[]).await?);
+        for changes in [&index_changes, &tracked_changes] {
+            in_the_way.extend(self.ignored_in_the_way(changes, &[]).await?);
         }
+        let removed: HashSet<&str> = tracked_changes
+            .iter()
+            .filter(|change| change.status == ChangeStatus::Deleted)
+            .map(|change| change.path.as_str())
+            .collect();
         for path in untracked {
-            if obstructed(&self.root, &path).map_err(DiffError::Io)? {
+            if obstructed(&self.root, &path, &removed).map_err(DiffError::Io)? {
                 in_the_way.insert(path);
             }
         }
@@ -387,7 +393,15 @@ impl WorkingTree {
 
 /// An existing destination, or a non-directory ancestor, would prevent untracked restoration.
 /// Inspect each component without following links before Git can apply tracked changes.
-fn obstructed(root: &Path, path: &str) -> std::io::Result<bool> {
+fn obstructed(root: &Path, path: &str, removed: &HashSet<&str>) -> std::io::Result<bool> {
+    // The tracked merge removes these paths before Git restores untracked files, permitting
+    // a tracked file to return as a directory. Other existing paths still block restoration.
+    if Path::new(path)
+        .ancestors()
+        .any(|parent| parent.to_str().is_some_and(|path| removed.contains(path)))
+    {
+        return Ok(false);
+    }
     let mut file = root.to_owned();
     let mut components = Path::new(path).components().peekable();
     while let Some(component) = components.next() {

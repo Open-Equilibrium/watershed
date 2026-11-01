@@ -908,6 +908,49 @@ fn leaving_changes_never_cleans_up_unsaved_ignored_contents() {
 }
 
 #[test]
+fn a_stashed_file_can_return_as_a_directory() {
+    run(async {
+        for staged in [false, true] {
+            let repo = Repo::new(&format!("stash-file-directory-{staged}"));
+            let main = repo.git(&["branch", "--show-current"]).trim().to_owned();
+            repo.git(&["branch", "other"]);
+            if staged {
+                repo.git(&["rm", "-q", "a.txt"]);
+            } else {
+                std::fs::remove_file(repo.path().join("a.txt")).expect("removed");
+            }
+            std::fs::create_dir(repo.path().join("a.txt")).expect("folder");
+            repo.write("a.txt/new.txt", "untracked\n");
+            let checkpoints = Checkpoints::new(repo.path());
+            checkpoints
+                .switch_branch(&local("other"), leave_on(&checkpoints).await)
+                .await
+                .expect("left");
+            checkpoints
+                .switch_branch(&local(&main), Changes::Bring)
+                .await
+                .expect("back");
+
+            let stash = stash_of(&checkpoints).await;
+            let restored = checkpoints.restore_stash(&stash).await;
+            if !staged {
+                // Git saved the tracked file unchanged, so its untracked child really is
+                // obstructed. Native pop would fail after starting the restoration.
+                assert!(matches!(restored, Err(DiffError::WouldOverwrite(_))));
+                assert_eq!(read(&repo, "a.txt"), "old\n");
+                assert_eq!(stash_of(&checkpoints).await, stash);
+                continue;
+            }
+            restored.expect("restored after tracked deletion");
+
+            assert_eq!(read(&repo, "a.txt/new.txt"), "untracked\n");
+            assert!(repo.git(&["ls-files", "--", "a.txt"]).is_empty());
+            assert!(checkpoints.stash().await.expect("stash").is_none());
+        }
+    });
+}
+
+#[test]
 fn no_restore_partly_applies_a_stash_with_undecodable_paths() {
     use std::io::Write;
     use std::process::Stdio;
