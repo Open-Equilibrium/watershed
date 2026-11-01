@@ -3,6 +3,7 @@
 
 use super::process::user_git;
 use super::*;
+use std::collections::BTreeMap;
 
 /// What a stash's message starts with, followed by its branch.
 const MESSAGE: &str = "Liquid: changes left on ";
@@ -44,18 +45,28 @@ impl WorkingTree {
         let Some(entry) = self.stash_entry().await? else {
             return Ok(None);
         };
-        let (base, tracked, untracked) = self.stash_trees(&entry.id).await?;
-        let mut files = self.changes(&base, &tracked, Whitespace::Shown).await?;
+        let (base, index, tracked, untracked) = self.stash_trees(&entry.id).await?;
+        let mut files: BTreeMap<String, FileChange> = self
+            .changes(&base, &tracked, Whitespace::Shown)
+            .await?
+            .into_iter()
+            .map(|file| (file.path.clone(), file))
+            .collect();
+        // As in the working diff, show a file once, preferring its working contents.
+        for file in self.changes(&base, &index, Whitespace::Shown).await? {
+            files.entry(file.path.clone()).or_insert(file);
+        }
         if let Some(untracked) = untracked {
             files.extend(
                 self.changes(&self.empty_tree().await?, &untracked, Whitespace::Shown)
-                    .await?,
+                    .await?
+                    .into_iter()
+                    .map(|file| (file.path.clone(), file)),
             );
         }
-        files.sort_by(|a, b| a.path.cmp(&b.path));
         Ok(Some(Stash {
             created_ms: entry.created_ms,
-            files,
+            files: files.into_values().collect(),
             id: entry.id,
         }))
     }
@@ -67,7 +78,7 @@ impl WorkingTree {
         path: &str,
         whitespace: Whitespace,
     ) -> Result<String, DiffError> {
-        let (base, tracked, untracked) = self.stash_trees(id).await?;
+        let (base, index, tracked, untracked) = self.stash_trees(id).await?;
         if let Some(untracked) = untracked {
             let empty = self.empty_tree().await?;
             let patch = self.patch(&empty, &untracked, path, whitespace).await?;
@@ -75,7 +86,11 @@ impl WorkingTree {
                 return Ok(patch);
             }
         }
-        self.patch(&base, &tracked, path, whitespace).await
+        let patch = self.patch(&base, &tracked, path, whitespace).await?;
+        if !patch.is_empty() {
+            return Ok(patch);
+        }
+        self.patch(&base, &index, path, whitespace).await
     }
 
     /// Stashes the uncommitted changes, untracked files included, for the branch checked out;
@@ -242,12 +257,12 @@ impl WorkingTree {
             .collect())
     }
 
-    /// The trees of stash `id`: the commit it was made on, its tracked files, and its untracked
-    /// files if it has any.
+    /// The trees of stash `id`: its base, index, tracked working files and optional untracked
+    /// files.
     async fn stash_trees(
         &self,
         id: &str,
-    ) -> Result<(Snapshot, Snapshot, Option<Snapshot>), DiffError> {
+    ) -> Result<(Snapshot, Snapshot, Snapshot, Option<Snapshot>), DiffError> {
         let tree = |name: String| async move {
             self.resolve(&format!("{name}^{{tree}}"))
                 .await?
@@ -260,6 +275,7 @@ impl WorkingTree {
             .map(Snapshot);
         Ok((
             tree(format!("{id}^1")).await?,
+            tree(format!("{id}^2")).await?,
             tree(id.to_owned()).await?,
             untracked,
         ))

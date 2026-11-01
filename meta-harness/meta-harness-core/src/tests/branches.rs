@@ -683,6 +683,40 @@ fn no_restore_runs_over_unresolved_conflicts_or_untracked_files_in_the_way() {
 }
 
 #[test]
+fn a_stash_preview_includes_changes_saved_only_in_the_index() {
+    run(async {
+        let repo = Repo::new("stash-index-preview");
+        let main = repo.git(&["branch", "--show-current"]).trim().to_owned();
+        repo.git(&["branch", "other"]);
+        repo.write("a.txt", "staged\n");
+        repo.git(&["add", "a.txt"]);
+        repo.write("a.txt", "old\n");
+        let checkpoints = Checkpoints::new(repo.path());
+        checkpoints
+            .switch_branch(&local("other"), Changes::Leave)
+            .await
+            .expect("left");
+        checkpoints
+            .switch_branch(&local(&main), Changes::Bring)
+            .await
+            .expect("back");
+
+        let stash = checkpoints.stash().await.expect("read").expect("saved");
+        let paths: Vec<&str> = stash.files.iter().map(|file| file.path.as_str()).collect();
+        assert_eq!(
+            paths,
+            ["a.txt"],
+            "discard counts include index-only changes"
+        );
+        let patch = checkpoints
+            .stash_patch(&stash.id, "a.txt", crate::Whitespace::Shown)
+            .await
+            .expect("patch");
+        assert!(patch.contains("-old\n+staged\n"), "{patch}");
+    });
+}
+
+#[test]
 fn a_stashed_files_patch_shows_tracked_and_untracked_changes() {
     run(async {
         let repo = Repo::new("stash-patch");
