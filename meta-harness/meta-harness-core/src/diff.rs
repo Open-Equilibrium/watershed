@@ -20,8 +20,8 @@ use tokio::sync::Mutex;
 /// Largest Git output read for one file list or patch; longer output is cut off.
 const MAX_OUTPUT_BYTES: u64 = 4 * 1024 * 1024;
 
-/// Most folders searched for a repository in a returning file's place.
-const MAX_SEARCHED_FOLDERS: usize = 10_000;
+/// Most folder entries one revert reads to find repositories in returning files' places.
+const MAX_SEARCHED_ENTRIES: usize = 100_000;
 
 /// Largest part of Git's error output kept for an error message.
 const MAX_ERROR_BYTES: usize = 64 * 1024;
@@ -275,10 +275,13 @@ impl WorkingTree {
                 changes.push(change);
             }
         }
-        // Git lists a folder's path before those below it, so a path left alone is known when
-        // the ones below it come, and they are left alone too.
+        // Sorted, a folder's path comes before those below it, whatever order a project's
+        // settings give Git's listing, so a path left alone is known when the ones below it
+        // come, and they are left alone too.
+        changes.sort_by(|a, b| a.path.cmp(&b.path));
+        let mut budget = MAX_SEARCHED_ENTRIES;
         for change in changes {
-            match self.repository_near(&change.path, &revertable.left_alone) {
+            match self.repository_near(&change.path, &revertable.left_alone, &mut budget) {
                 Some(path) => {
                     revertable.left_alone.insert(path);
                     revertable.kept.push(change);
@@ -290,16 +293,24 @@ impl WorkingTree {
     }
 
     /// The path a revert must leave alone so it writes nothing into a repository near the
-    /// repository path `path`: the nearest folder above it that is one of `known` or has
+    /// repository path `path`: the outermost folder above it that is one of `known` or has
     /// `.git` on disk, or `path` itself when one of `known` or a `.git` on disk is at or below
-    /// it.
-    fn repository_near(&self, path: &str, known: &BTreeSet<String>) -> Option<String> {
-        let mut folder = path;
-        while let Some((parent, _)) = folder.rsplit_once('/') {
-            folder = parent;
-            if known.contains(folder)
-                || std::fs::symlink_metadata(self.root.join(folder).join(".git")).is_ok()
-            {
+    /// it. The disk is read as `git restore` writes it: from the top and without following
+    /// links, so below a link or a file in place of a folder no repository counts, as Git
+    /// replaces it. Searches below `path` share `budget`, in entries read.
+    fn repository_near(
+        &self,
+        path: &str,
+        known: &BTreeSet<String>,
+        budget: &mut usize,
+    ) -> Option<String> {
+        let mut folders = path.match_indices('/').map(|(end, _)| &path[..end]);
+        for folder in folders.by_ref() {
+            let on_disk = self.root.join(folder);
+            if !std::fs::symlink_metadata(&on_disk).is_ok_and(|meta| meta.is_dir()) {
+                return None;
+            }
+            if known.contains(folder) || std::fs::symlink_metadata(on_disk.join(".git")).is_ok() {
                 return Some(folder.to_owned());
             }
         }
@@ -307,7 +318,7 @@ impl WorkingTree {
         let known_below = known
             .iter()
             .any(|repository| repository.starts_with(&below));
-        (known_below || holds_repository(&self.root.join(path))).then(|| path.to_owned())
+        (known_below || holds_repository(&self.root.join(path), budget)).then(|| path.to_owned())
     }
 
     /// What Git ignores in the place of files `changes` restores, which a revert deletes or
@@ -912,29 +923,30 @@ fn git_command(dir: &Path, env: &[(&str, OsString)], args: &[&str]) -> Command {
 
 /// Whether a repository is at or below the folder at `dir`, found as Git finds one: by
 /// asking for `.git` in each folder, which a file system without capitals also finds as
-/// `.GIT`. Links are not followed. Past [`MAX_SEARCHED_FOLDERS`] it counts as holding one,
-/// so a revert leaves a vast folder alone rather than search it all.
-fn holds_repository(dir: &Path) -> bool {
+/// `.GIT`. Links are not followed. Each entry read costs one of `budget`; once it is spent the
+/// folder counts as holding one, so a revert leaves vast folders alone rather than read them
+/// all.
+fn holds_repository(dir: &Path, budget: &mut usize) -> bool {
     if !std::fs::symlink_metadata(dir).is_ok_and(|meta| meta.is_dir()) {
         return false;
     }
     let mut folders = vec![dir.to_owned()];
-    let mut searched = 0;
     while let Some(folder) = folders.pop() {
-        searched += 1;
-        if searched > MAX_SEARCHED_FOLDERS || std::fs::symlink_metadata(folder.join(".git")).is_ok()
-        {
+        if std::fs::symlink_metadata(folder.join(".git")).is_ok() {
             return true;
         }
         let Ok(entries) = std::fs::read_dir(&folder) else {
             continue;
         };
-        folders.extend(
-            entries
-                .flatten()
-                .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
-                .map(|entry| entry.path()),
-        );
+        for entry in entries.flatten() {
+            let Some(left) = budget.checked_sub(1) else {
+                return true;
+            };
+            *budget = left;
+            if entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+                folders.push(entry.path());
+            }
+        }
     }
     false
 }

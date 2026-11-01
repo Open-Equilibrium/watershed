@@ -1524,3 +1524,48 @@ fn a_repository_is_found_as_git_finds_it_and_links_are_not_followed() {
         drop(elsewhere);
     });
 }
+
+#[test]
+fn a_revert_reads_paths_as_git_writes_them_whatever_their_order_or_links() {
+    use std::os::unix::fs::symlink;
+    run(async {
+        let repo = Repo::new("revert-order-links");
+        repo.write("p", "a file\n");
+        std::fs::create_dir_all(repo.path().join("d")).expect("folder");
+        repo.write("d/f.txt", "in a folder\n");
+        repo.git(&["add", "p", "d"]);
+        repo.git(&["commit", "-q", "-m", "files"]);
+        // A project setting that lists `p/README.md` before `p`.
+        repo.write(".git/order", "p/*\n*\n");
+        repo.git(&["config", "diff.orderFile", ".git/order"]);
+        let elsewhere = Repo::new("revert-order-links-elsewhere");
+        let checkpoints = Checkpoints::new(repo.path());
+        turn(&checkpoints, "t1", || {
+            std::fs::remove_file(repo.path().join("p")).expect("removed");
+            std::fs::create_dir_all(repo.path().join("p/sub")).expect("folder");
+            git_at(&repo.path().join("p/sub"), &["init", "-q"]);
+            repo.write("p/README.md", "beside it\n");
+            // The folder `d` becomes a link to another repository.
+            std::fs::remove_dir_all(repo.path().join("d")).expect("removed");
+            symlink(elsewhere.path(), repo.path().join("d")).expect("link");
+        })
+        .await;
+        let plan = checkpoints
+            .revert_plan(&at("t1", Phase::Start), None)
+            .await
+            .expect("plan");
+        let (reverted, kept) = split(&plan);
+        assert_eq!(reverted, ["d", "d/f.txt"], "{plan:?}");
+        assert_eq!(kept, ["p", "p/README.md"], "{plan:?}");
+        checkpoints
+            .revert(&at("t1", Phase::Start))
+            .await
+            .expect("reverted");
+        assert_eq!(
+            std::fs::read_to_string(repo.path().join("d/f.txt")).expect("file"),
+            "in a folder\n"
+        );
+        assert!(repo.path().join("p/sub/.git").exists());
+        drop(elsewhere);
+    });
+}
