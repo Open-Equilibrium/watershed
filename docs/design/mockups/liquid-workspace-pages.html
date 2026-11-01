@@ -36,7 +36,8 @@ p.sub{margin:0 0 10px;font-size:13px;color:var(--muted-foreground);line-height:1
 .nav .r.warn{color:var(--ws-warning)}
 .ico{width:18px;flex:none;display:inline-flex;justify-content:center;color:var(--ws-text-faint)}
 .em{font-size:15px;line-height:1}
-.picon{font-size:56px;line-height:64px;margin:4px 0 2px}
+.tic{display:inline-block;margin-right:10px;font-size:30px;vertical-align:-2px}
+.tic.add{font-size:15px;font-weight:400;color:var(--ws-text-faint);vertical-align:6px;margin-right:12px}
 .modal{position:absolute;left:50%;top:28px;bottom:28px;transform:translateX(-50%);z-index:4;background:var(--ws-canvas);border-radius:12px;box-shadow:var(--ws-shadow);display:flex;flex-direction:column;overflow:hidden}
 .mh{height:48px;flex:none;display:flex;align-items:center;gap:8px;padding:0 12px 0 20px;font-size:15px;font-weight:600;box-shadow:inset 0 -1px 0 var(--ws-border)}
 .mh .end{margin-left:auto;display:flex;gap:6px;align-items:center;font-weight:400}
@@ -174,7 +175,7 @@ h4.qh{margin:14px 0 6px;font-size:13px}
   </div>
   <section>
     <h1>Liquid Workspace: Pages</h1>
-    <p class="sub">Mockups for the M3a slice in <a href="../../../PLAN.md#m3a--local-workspace-foundation">PLAN.md</a>, approved by the maintainer on 2026-11-01: the Explorer, a blank Page and its first actions, the built-in Blocks, Arrange mode, the PowerBar and a Source. They follow the <a href="../../concept/V-Spec_Liquid.html#experience">V-Spec</a>, ADR-0235 and <a href="../guidelines.md">guidelines.md</a>. Page icons, Settings at the Explorer's foot and the PowerBar's prefixes were added on his request the same day and await review. Views, Connections and Automations are in the <a href="liquid-workspace-blocks.html">Blocks mockups</a>, History and Roles in the <a href="liquid-workspace-history.html">History mockups</a>.</p>
+    <p class="sub">Mockups for the M3a slice in <a href="../../../PLAN.md#m3a--local-workspace-foundation">PLAN.md</a>, approved by the maintainer on 2026-11-01: the Explorer, a blank Page and its first actions, the built-in Blocks, Arrange mode, the PowerBar and a Source. They follow the <a href="../../concept/V-Spec_Liquid.html#experience">V-Spec</a>, ADR-0235 and <a href="../guidelines.md">guidelines.md</a>. Page icons, Settings at the Explorer's foot and the PowerBar's prefixes were added on his request and approved the same day. Views, Connections and Automations are in the <a href="liquid-workspace-blocks.html">Blocks mockups</a>, History and Roles in the <a href="liquid-workspace-history.html">History mockups</a>.</p>
   </section>
   <section>
     <h3 class="sec">1 · Explorer and a Page</h3>
@@ -188,7 +189,7 @@ h4.qh{margin:14px 0 6px;font-size:13px}
   </section>
   <section>
     <h3 class="sec">3 · Page icons</h3>
-    <p class="sub">Every Page can have an icon, as in Notion and AppFlowy: "Add icon" above the title of a new Page, or a click on the icon, opens the picker with Emoji and Icons tabs and a search. The icon appears in the Explorer, the breadcrumb, the PowerBar, mentions and Views on other Pages; without one, the plain Page symbol shows. Sources keep their file or folder symbol.</p>
+    <p class="sub">Every Page can have an icon, as in Notion and AppFlowy, but it sits beside the title in the title's size instead of above it, so the Page keeps its space for content: "Add icon" beside the title of a new Page, shown on hover, or a click on the icon opens the picker with Emoji and Icons tabs and a search. The icon appears in the Explorer, the breadcrumb, the PowerBar, mentions and Views on other Pages; without one, the plain Page symbol shows. Sources keep their file or folder symbol.</p>
     <div class="stage"><div class="scaler"><div class="win" id="w-icon" data-w="1240"></div></div></div>
   </section>
   <section>
@@ -214,7 +215,7 @@ h4.qh{margin:14px 0 6px;font-size:13px}
   </section>
   <section>
     <h3 class="sec">6 · Text shortcuts</h3>
-    <p class="sub">Inside a Text Block, Notion's Markdown shortcuts format the current line: <code>#</code>, <code>##</code>, <code>###</code> headings, <code>-</code> bullets, <code>1.</code> numbers, <code>[]</code> to-dos, <code>&gt;</code> a toggle, <code>"</code> a quote, <code>---</code> a divider, <code>**bold**</code>, <code>*italic*</code>, <code>`code`</code> and <code>@</code> a link to a Page or Block. A toggle is formatting, not a Block. <code>```</code> is the one exception: it ends the Text Block and starts a Code Block.</p>
+    <p class="sub">Inside a Text Block, Notion's Markdown shortcuts format the current line: <code>#</code>, <code>##</code>, <code>###</code> headings, <code>-</code> bullets, <code>1.</code> numbers, <code>[]</code> to-dos, <code>&gt;</code> a toggle, <code>"</code> a quote, <code>**bold**</code>, <code>*italic*</code>, <code>`code`</code> and <code>@</code> a link to a Page or Block. A toggle is formatting, not a Block. Two shortcuts end the Text Block instead: <code>---</code> starts a new Text Block below a divider (see the <a href="liquid-workspace-text-sections.html">divider mockups</a>), and <code>```</code> starts a Code Block.</p>
     <div class="stage"><div class="scaler"><div class="win" id="w-text" data-w="900"></div></div></div>
   </section>
   <section>
@@ -234,7 +235,7 @@ h4.qh{margin:14px 0 6px;font-size:13px}
   </section>
   <section>
     <h3 class="sec">10 · PowerBar</h3>
-    <p class="sub">⌘K, or a tap of the Liquid key, opens the PowerBar over the current Page, as T3 Code's command palette works: one field and grouped results. It understands the Page's own commands: <code>/</code> lists the Blocks to add to the current Page, <code>@</code> finds a Page, Block or Source to open, or with ⌘⏎ to mention at the caret, and <code>&gt;</code> lists only actions, as in T3 Code and VS Code. Without a prefix it searches everything. It runs only actions the current Role allows; the footer names the prefixes.</p>
+    <p class="sub">⌘K, or a tap of the Liquid key, opens the PowerBar over the current Page, as T3 Code's command palette works: one field and grouped results. Without a prefix it searches Pages, Sources, Blocks and text and jumps to the result, as ⌘P does in VS Code. <code>/</code> lists the Blocks to add to the current Page, as on the Page, and <code>&gt;</code> lists only actions, as in T3 Code and VS Code. <code>@</code> stays reserved for people, for chat after Release 1. It runs only actions the current Role allows; the footer names the prefixes.</p>
     <div class="stage"><div class="scaler"><div class="win" id="w-pb1" data-w="1240"></div></div></div>
     <div class="stage" style="margin-top:16px"><div class="scaler"><div class="win bare" id="w-pb23" data-w="1320"></div></div></div>
     <div class="stage" style="margin-top:16px"><div class="scaler"><div class="win bare" id="w-pb45" data-w="1320"></div></div></div>
@@ -254,16 +255,16 @@ h4.qh{margin:14px 0 6px;font-size:13px}
     </ol>
     <h4 class="qh">Approved with these mockups (2026-11-01)</h4>
     <ol class="qs">
-      <li>The deterministic mapping of section 3, including a dropped CSV becoming a Database copy and ``` starting a Code Block.</li>
+      <li>The deterministic mapping of section 4, including a dropped CSV becoming a Database copy and ``` starting a Code Block.</li>
       <li>Database Views are Table, Board and Calendar; the Code Block shows code and never runs it.</li>
       <li>Arrange mode uses 12 columns; narrow windows use half or full width; phones stack in Page order. An arranged Page widens to at most 1120 px.</li>
       <li>⇧⌘N creates a new Page in the current area; ⌘N stays with agent sessions.</li>
     </ol>
-    <h4 class="qh">Added on request, for review</h4>
+    <h4 class="qh">Added on request, approved the same day</h4>
     <ol class="qs">
-      <li>Page icons with Emoji and Icons tabs; uploaded images come later.</li>
+      <li>Page icons beside the title, with Emoji and Icons tabs; uploaded images come later.</li>
       <li>Automations, History and Settings sit together at the Explorer's foot and open as dialogs; Roles live in Settings.</li>
-      <li>The PowerBar understands <code>/</code>, <code>@</code> and <code>&gt;</code>; "Add Block" is gone from its list.</li>
+      <li>The PowerBar searches without a prefix and understands <code>/</code> and <code>&gt;</code>; <code>@</code> stays reserved for people; "Add Block" is gone from its list.</li>
     </ol>
   </section>
 </div>
@@ -331,7 +332,7 @@ const fxBlk=(o={})=>`<div class="card"><div class="cap">Left this month</div><di
 
 // 1 · Page
 frame('w-page',{h:700,head:head('Private <span>›</span> <b>💰 Household budget</b>'),main:`<div class="pg"><div class="col">
-<div class="picon">💰</div><div class="ttl">Household budget</div>
+<div class="ttl"><span class="tic">💰</span>Household budget</div>
 <div class="prose"><p>October is almost done. Rent is the largest share, as every month; the trip to Porto stayed under € 50.</p></div>
 <div class="blk"><div class="gut"><span>＋</span><span class="on">${I.drag}</span></div>${dbHead({synced:true})}${dbTable()}</div>
 <div class="blk">${chartBlk}</div>
@@ -340,18 +341,17 @@ frame('w-page',{h:700,head:head('Private <span>›</span> <b>💰 Household budg
 
 // 2 · Blank
 frame('w-blank',{h:440,side:{sel:'new',newp:'Untitled',plus:true},head:head('Private <span>›</span> <b>Untitled</b>'),main:`<div class="pg"><div class="col">
-<div class="hint" style="font-size:13px;gap:6px"><span>☺</span>Add icon</div>
-<div class="ttl ph"><span class="caret" style="height:34px"></span>Untitled</div>
+<div class="ttl ph"><span class="tic add">☺ Add icon</span><span class="caret" style="height:34px"></span>Untitled</div>
 <div class="hint">Type to write, press <code style="margin:0 4px">/</code> for Blocks, or paste, drop or <span style="color:var(--ws-text-muted);text-decoration:underline;margin-left:4px">draw</span>.</div>
 <div class="hint" style="font-size:13px;margin-top:20px">Start from a template&nbsp;&nbsp;<span class="chip">Budget</span>&nbsp;<span class="chip">Meeting notes</span>&nbsp;<span class="chip">Project</span></div>
 </div></div>`});
 
 // 3 · Icons
-const picker=`<div class="pop ipick" style="left:394px;top:150px"><div class="tabs2"><span class="on">Emoji</span><span>Icons</span><span class="end">Remove</span></div>
+const picker=`<div class="pop ipick" style="left:394px;top:112px"><div class="tabs2"><span class="on">Emoji</span><span>Icons</span><span class="end">Remove</span></div>
 <div style="padding:8px 10px"><div class="sel" style="height:30px">${I.srch}<span style="color:var(--ws-text-faint)">Search</span></div></div>
 <div class="lbl" style="padding:2px 12px">Recent</div><div class="egrid">${'💰📊🧳🗺️🧩🗓️📝✅🏠'.match(/\p{Extended_Pictographic}️?/gu).map((e,i)=>`<span class="${i==0?'on':''}">${e}</span>`).join('')}</div>
 <div class="lbl" style="padding:2px 12px">Objects</div><div class="egrid">${'📁📌📎📚💡🔑🧾📦🛒🎯📈📉🧮🗂️📅🧭🔖🎒'.match(/\p{Extended_Pictographic}️?/gu).map(e=>`<span>${e}</span>`).join('')}</div></div>`;
-frame('w-icon',{h:520,head:head('Private <span>›</span> <b>💰 Household budget</b>'),main:`<div class="pg"><div class="col"><div class="picon" style="display:inline-block;border-radius:8px;background:var(--ws-hover);width:72px;text-align:center">💰</div><div class="ttl">Household budget</div><div class="prose"><p>October is almost done.</p></div></div></div>`,over:picker});
+frame('w-icon',{h:520,head:head('Private <span>›</span> <b>💰 Household budget</b>'),main:`<div class="pg"><div class="col"><div class="ttl"><span class="tic" style="border-radius:6px;background:var(--ws-hover);padding:0 4px">💰</span>Household budget</div><div class="prose"><p>October is almost done.</p></div></div></div>`,over:picker});
 // 4 · Slash
 const chooser=`<div class="pop" style="left:394px;top:200px;width:360px">
 <div class="lbl">Blocks</div>
@@ -359,7 +359,7 @@ ${[['text','Text','Paragraphs, headings, lists and toggles',1],['db','Database',
 <hr><div class="lbl">Reuse</div><div class="it"><span class="bi">${I.link}</span><span class="tx"><span>Existing Block…</span><span class="d">Add a View of a Block from any Page</span></span></div>
 <hr><div class="lbl">Templates</div><div class="it"><span class="bi">${I.tpl}</span><span>Budget</span><span class="r">Text, Database, Chart, Formula</span></div></div>`;
 frame('w-slash',{h:760,side:{sel:'new',newp:'Weekly plan'},head:head('Private <span>›</span> <b>🗓️ Weekly plan</b>'),main:`<div class="pg"><div class="col">
-<div class="picon">🗓️</div><div class="ttl">Weekly plan</div>
+<div class="ttl"><span class="tic">🗓️</span>Weekly plan</div>
 <div class="prose"><p>Things to sort out before Friday.</p><p style="margin:0">/<span class="caret" style="margin-left:1px"></span></p></div>
 </div></div>`,over:chooser});
 
@@ -418,13 +418,13 @@ document.getElementById('w-resp').innerHTML=`<div style="display:flex;gap:32px;a
 
 // 9 · PowerBar
 const pbItem=(ic,label,d,r,on)=>`<div class="it ${on?'on':''}"><span class="ico">${ic}</span><span>${label}</span>${d?`<span class="d">${d}</span>`:''}${r?`<span class="r">${r}</span>`:''}</div>`;
-const pbFoot=`<div class="pbfoot"><span><b>/</b>Blocks</span><span><b>@</b>Pages, Blocks and Sources</span><span><b>&gt;</b>Actions</span></div>`;
+const pbFoot=`<div class="pbfoot"><span><b>/</b>Blocks</span><span><b>&gt;</b>Actions</span></div>`;
 const pbEmpty=`<div class="pb"><div class="in">${I.srch}<span class="ph">Search or run a command</span></div><div class="ls">
 <div class="lbl">Recent</div>${pbItem(em(E.budget),'Household budget','Private','',1)}${pbItem(em(E.api),'API design','Acme API')}${pbItem(I.file,'bank-export.csv','Private · Source')}
 <div class="lbl">Create</div>${pbItem(I.page,'New Page','in Private','⇧⌘N')}${pbItem(I.dir,'Add Source','File or folder','›')}
 <div class="lbl">This Page</div>${pbItem(I.grid,'Arrange')}${pbItem(I.clock,'Page history')}
 <div class="lbl">Workspace</div>${pbItem(I.zap,'Automations')}${pbItem(I.clock,'History')}${pbItem(I.cog,'Settings','','⌘,')}</div>${pbFoot}</div>`;
-frame('w-pb1',{h:760,head:head('Private <span>›</span> <b>💰 Household budget</b>'),main:`<div class="pg"><div class="col"><div class="picon">💰</div><div class="ttl">Household budget</div><div class="prose"><p>October is almost done.</p></div>${dbHead({synced:true})}${dbTable()}</div></div>`,over:`<div class="scrim"></div>${pbEmpty}`});
+frame('w-pb1',{h:760,head:head('Private <span>›</span> <b>💰 Household budget</b>'),main:`<div class="pg"><div class="col"><div class="ttl"><span class="tic">💰</span>Household budget</div><div class="prose"><p>October is almost done.</p></div>${dbHead({synced:true})}${dbTable()}</div></div>`,over:`<div class="scrim"></div>${pbEmpty}`});
 const pbBox=(input,list,foot)=>`<div class="pb" style="position:relative;left:auto;top:auto;transform:none"><div class="in">${input}</div><div class="ls">${list}</div>${foot||pbFoot}</div>`;
 const typed=t=>`${I.srch}<span>${t}<span class="caret" style="margin-left:1px;height:18px"></span></span>`;
 const pbQuery=pbBox(typed('exp'),`<div class="lbl">Pages and Sources</div>${pbItem(I.file,'bank-<mark>exp</mark>ort.csv','Private · Source','',1)}
@@ -438,7 +438,7 @@ const pbAt=pbBox(typed('@lis'),`<div class="lbl">Pages and Sources</div>${pbItem
 const pbAct=pbBox(typed('&gt;'),`<div class="lbl">This Page</div>${pbItem(I.grid,'Arrange','','',1)}${pbItem(I.clock,'Page history')}${pbItem('☺','Change icon')}${pbItem(I.copy,'Duplicate Page')}
 <div class="lbl">Workspace</div>${pbItem(I.page,'New Page','','⇧⌘N')}${pbItem(I.zap,'Automations')}${pbItem(I.clock,'History')}${pbItem(I.cog,'Settings','','⌘,')}`,`<div class="pbfoot"><span>Only actions your Role allows</span></div>`);
 document.getElementById('w-pb23').innerHTML=`<div style="display:flex;gap:40px;align-items:flex-start">${pbQuery}${pbSlash}</div>`;
-document.getElementById('w-pb45').innerHTML=`<div style="display:flex;gap:40px;align-items:flex-start">${pbAt}${pbAct}</div>`;
+document.getElementById('w-pb45').innerHTML=`<div style="display:flex;gap:40px;align-items:flex-start">${pbAct}</div>`;
 
 // 10 · Source
 const csv=[['2026-11-01','REWE SAGT DANKE','-84.20'],['2026-10-30','STADTWERKE','-96.00'],['2026-10-28','CP COMBOIOS','-42.50'],['2026-10-27','MIETE OKT','-950.00'],['2026-10-25','KINO','-111.80'],['2026-10-24','GEHALT','+3,200.00']];

@@ -36,7 +36,8 @@ p.sub{margin:0 0 10px;font-size:13px;color:var(--muted-foreground);line-height:1
 .nav .r.warn{color:var(--ws-warning)}
 .ico{width:18px;flex:none;display:inline-flex;justify-content:center;color:var(--ws-text-faint)}
 .em{font-size:15px;line-height:1}
-.picon{font-size:56px;line-height:64px;margin:4px 0 2px}
+.tic{display:inline-block;margin-right:10px;font-size:30px;vertical-align:-2px}
+.tic.add{font-size:15px;font-weight:400;color:var(--ws-text-faint);vertical-align:6px;margin-right:12px}
 .modal{position:absolute;left:50%;top:28px;bottom:28px;transform:translateX(-50%);z-index:4;background:var(--ws-canvas);border-radius:12px;box-shadow:var(--ws-shadow);display:flex;flex-direction:column;overflow:hidden}
 .mh{height:48px;flex:none;display:flex;align-items:center;gap:8px;padding:0 12px 0 20px;font-size:15px;font-weight:600;box-shadow:inset 0 -1px 0 var(--ws-border)}
 .mh .end{margin-left:auto;display:flex;gap:6px;align-items:center;font-weight:400}
@@ -279,7 +280,7 @@ h4.qh{margin:14px 0 6px;font-size:13px}
       <li>A Connection is made in the panel of the Block that needs the data; the panel lists "Uses" and "Used by".</li>
       <li>M3a Automation actions: change a field, add a row, create a Page from a template and show a notification.</li>
     </ol>
-    <h4 class="qh">Added on request, for review</h4>
+    <h4 class="qh">Added on request, approved the same day</h4>
     <ol class="qs">
       <li>Automations open as a dialog over the current Page or Source, with the editor inside it; closing it returns there.</li>
     </ol>
@@ -370,7 +371,7 @@ const blockMenu=`<div class="pop" style="left:830px;top:212px;width:290px">
 <hr><div class="it on">${I.trash}<span>Remove from this Page</span><span class="r">stays on 1 Page</span></div>
 <div class="it" style="color:var(--ws-danger)">${I.trash}<span>Delete everywhere…</span></div></div>`;
 frame('w-views',{h:560,side:{sel:'review'},head:head('Private <span>›</span> Household budget <span>›</span> <b>📊 Monthly review</b>'),main:`<div class="pg"><div class="col">
-<div class="picon">📊</div><div class="ttl">Monthly review</div>
+<div class="ttl"><span class="tic">📊</span>Monthly review</div>
 <div class="prose"><p>What went where in October.</p></div>
 <div class="blk"><div class="gut"><span>＋</span><span class="on">${I.drag}</span></div>${boardHead}${board}</div>
 </div></div>`,over:blockMenu});
@@ -406,7 +407,7 @@ const delDlg=`<div class="scrim"></div><div style="position:absolute;inset:0;dis
 <div class="frow"><span class="ico">${I.zap}</span>Monthly summary<span class="r warn">⚠ needs attention</span></div></div>
 <p>All of it is one Action in History. Reverting it brings everything back and turns Monthly summary on again.</p>
 <div class="acts"><span class="btn dngp">Delete</span><span class="sp"></span><span class="btn">Cancel <kbd>esc</kbd></span></div></div></div>`;
-frame('w-del',{h:600,head:head('Private <span>›</span> <b>💰 Household budget</b>'),main:`<div class="pg"><div class="col"><div class="picon">💰</div><div class="ttl">Household budget</div><div class="blk">${dbHead()}${dbTable()}</div><div class="blk">${chartBlk}</div></div></div>`,over:delDlg});
+frame('w-del',{h:600,head:head('Private <span>›</span> <b>💰 Household budget</b>'),main:`<div class="pg"><div class="col"><div class="ttl"><span class="tic">💰</span>Household budget</div><div class="blk">${dbHead()}${dbTable()}</div><div class="blk">${chartBlk}</div></div></div>`,over:delDlg});
 const after=`<div class="win" style="width:740px;flex:none;padding:20px 24px 24px;box-sizing:border-box;position:relative;height:430px">
 <div class="ttl" style="font-size:24px;line-height:32px">Household budget</div>
 <div class="prose"><p>October is almost done. Rent is the largest share, as every month.</p></div>
@@ -443,7 +444,7 @@ const sugg=`<div class="pop" style="left:600px;top:250px;width:340px">
 <div class="lbl">Functions</div>
 <div class="it"><span class="mono">SUMIF</span><span class="r">sum of the values that match</span></div></div>`;
 frame('w-fx',{h:600,head:head('Private <span>›</span> <b>💰 Household budget</b>'),main:`<div class="pg"><div class="col">
-<div class="picon">💰</div><div class="ttl">Household budget</div>
+<div class="ttl"><span class="tic">💰</span>Household budget</div>
 <div class="card focus"><div class="cap">Left this month</div><div class="big">€ 715.50</div>
 <div class="fxin" style="margin-top:8px">= 2000 − SUM(<span class="ref">${I.db} Expenses › Amount</span>) − SUMIF(Exp<span class="caret" style="height:16px;margin:0"></span></div>
 <div class="cap" style="margin-top:6px">⏎ saves · esc cancels · the value updates while typing</div></div>
@@ -454,7 +455,7 @@ ${rows.slice(0,3).map(r=>`<div class="tr"><span>${r[1]}</span><span class="num">
 </div></div>`,over:sugg});
 
 // 6 · Automations list (dialog over the prior Page)
-const bgPage=`<div class="pg"><div class="col"><div class="picon">💰</div><div class="ttl">Household budget</div><div class="prose"><p>October is almost done.</p></div>${dbHead({synced:true})}${dbTable()}</div></div>`;
+const bgPage=`<div class="pg"><div class="col"><div class="ttl"><span class="tic">💰</span>Household budget</div><div class="prose"><p>October is almost done.</p></div>${dbHead({synced:true})}${dbTable()}</div></div>`;
 const bgHead=head('Private <span>›</span> <b>💰 Household budget</b>');
 const mbody=c=>`<div style="flex:1;min-width:0;padding:20px 28px;display:flex;flex-direction:column;gap:14px;overflow:hidden">${c}</div>`;
 const arow=(n,owner,when,role,st)=>`<div class="tr"><span>${n}</span><span>${owner}</span><span>${when}</span><span>${role}</span><span>${st}</span></div>`;

@@ -36,7 +36,8 @@ p.sub{margin:0 0 10px;font-size:13px;color:var(--muted-foreground);line-height:1
 .nav .r.warn{color:var(--ws-warning)}
 .ico{width:18px;flex:none;display:inline-flex;justify-content:center;color:var(--ws-text-faint)}
 .em{font-size:15px;line-height:1}
-.picon{font-size:56px;line-height:64px;margin:4px 0 2px}
+.tic{display:inline-block;margin-right:10px;font-size:30px;vertical-align:-2px}
+.tic.add{font-size:15px;font-weight:400;color:var(--ws-text-faint);vertical-align:6px;margin-right:12px}
 .modal{position:absolute;left:50%;top:28px;bottom:28px;transform:translateX(-50%);z-index:4;background:var(--ws-canvas);border-radius:12px;box-shadow:var(--ws-shadow);display:flex;flex-direction:column;overflow:hidden}
 .mh{height:48px;flex:none;display:flex;align-items:center;gap:8px;padding:0 12px 0 20px;font-size:15px;font-weight:600;box-shadow:inset 0 -1px 0 var(--ws-border)}
 .mh .end{margin-left:auto;display:flex;gap:6px;align-items:center;font-weight:400}
@@ -287,7 +288,7 @@ h4.qh{margin:14px 0 6px;font-size:13px}
       <li>The person who creates a Workspace holds Full access, which a protected Block always keeps, so nothing can lock its owner out.</li>
       <li>Workspace settings: General with name and areas, and Roles.</li>
     </ol>
-    <h4 class="qh">Added on request, for review</h4>
+    <h4 class="qh">Added on request, approved the same day</h4>
     <ol class="qs">
       <li>History, Page history and Settings open as dialogs over the current Page or Source; closing one shows it again. Settings sits at the Explorer's foot beside Automations and History. This replaces the approved Settings page that took over the main area.</li>
     </ol>
@@ -360,7 +361,7 @@ lock:sv('<rect x="3.5" y="7" width="9" height="7" rx="1.2"/><path d="M5.5 7V5a2.
 undo:sv('<path d="M5 3L2 6l3 3"/><path d="M2 6h7.5a4 4 0 010 8H7"/>'),
 area:sv('<rect x="2" y="3" width="12" height="10" rx="1.5"/><path d="M2 6.5h12"/>'),
 });
-const bgPage=`<div class="pg"><div class="col"><div class="picon">💰</div><div class="ttl">Household budget</div><div class="prose"><p>October is almost done.</p></div>${dbHead({synced:true})}${dbTable()}</div></div>`;
+const bgPage=`<div class="pg"><div class="col"><div class="ttl"><span class="tic">💰</span>Household budget</div><div class="prose"><p>October is almost done.</p></div>${dbHead({synced:true})}${dbTable()}</div></div>`;
 const bgHead=head('Private <span>›</span> <b>💰 Household budget</b>');
 const he=(t,title,meta,on)=>`<div class="he ${on?'on':''}"><span class="t">${t}</span><span>${title}</span><span class="m">${meta}</span></div>`;
 const you='<span class="av" style="width:16px;height:16px;font-size:10px;border-radius:3px">B</span>You';
@@ -418,7 +419,7 @@ const vlist=`<div class="vers"><h5>Versions of Household budget</h5>
 <div class="vr">30 Oct<span>Save point</span></div></div>`;
 frame('w-ver',{h:660,head:bgHead,main:bgPage,over:modal('Page history <span style="font-weight:400;color:var(--ws-text-muted)">· 💰 Household budget</span>',`<div style="flex:1;display:flex;flex-direction:column;min-width:0"><div class="vban">Version from today 09:15 · read-only<span class="end"><span class="btn pri">Restore version</span></span></div>
 <div style="display:flex;flex:1;min-height:0"><div class="pg"><div class="col" style="width:600px">
-<div class="picon">💰</div><div class="ttl">Household budget</div>
+<div class="ttl"><span class="tic">💰</span>Household budget</div>
 <div class="prose"><p>October is almost done. Rent is the largest share, as every month<span class="mark-del">; the trip to Porto stayed under € 50</span>.</p></div>
 <div class="notice" style="padding:8px 10px;border-radius:6px;background:var(--ws-warning-subtle);color:var(--ws-warning);font-size:13px">Expenses is also on Monthly review; restoring changes it there too.</div>
 ${dbHead({synced:true})}<div class="tbl" style="--cols:96px 1fr 120px 110px"><div class="tr hd"><span>Date</span><span>Item</span><span>Category</span><span class="num">Amount</span></div>
@@ -458,7 +459,7 @@ const protDlg=`<div class="scrim"></div><div style="position:absolute;inset:0;di
 <div class="frow"><span class="cb"></span>Can edit<span class="r">loses Apply here</span></div></div>
 <p>Reading still follows the area. To keep it secret, move it to an area of its own.</p>
 <div class="acts"><span class="btn pri">Protect <kbd>⏎</kbd></span><span class="sp"></span><span class="btn">Cancel <kbd>esc</kbd></span></div></div></div>`;
-frame('w-prot',{h:560,head:bgHead,main:`<div class="pg"><div class="col"><div class="picon">💰</div><div class="ttl">Household budget</div>
+frame('w-prot',{h:560,head:bgHead,main:`<div class="pg"><div class="col"><div class="ttl"><span class="tic">💰</span>Household budget</div>
 <div class="bh"><span class="ico">${I.db}</span><b>Expenses</b><span class="chip">Table ⌄</span><span class="prot">${I.lock} protected</span><span class="end"><span class="cap">Synced · on 2 Pages</span><span class="ib">${I.more}</span></span></div>${dbTable()}</div></div>`,over:protDlg});
 
 // 6 · Settings
