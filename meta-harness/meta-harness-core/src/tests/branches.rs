@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 use std::process::Command;
+use std::time::Duration;
 
 use super::checkpoint::{Repo, at, run};
 use crate::{BranchTarget, Changes, Checkpoints, DiffError, GitStatus, Phase};
@@ -702,5 +703,52 @@ fn no_background_fetch_writes_outside_remote_tracking_branches() {
             Err(DiffError::FetchOutsideRemotes(_))
         ));
         assert_eq!(repo.git(&["rev-parse", "feature"]), before);
+    });
+}
+
+#[test]
+fn a_switch_whose_caller_gives_up_still_finishes_and_leaves_no_lock() {
+    run(async {
+        let repo = Repo::new("switch-slow");
+        let main = repo.git(&["branch", "--show-current"]).trim().to_owned();
+        repo.git(&["config", "filter.slow.smudge", "sleep 1; cat"]);
+        repo.git(&["config", "filter.slow.clean", "cat"]);
+        repo.git(&["switch", "-q", "-c", "other"]);
+        repo.write(".gitattributes", "*.slow filter=slow\n");
+        repo.write("f.slow", "slow\n");
+        repo.git(&["add", "."]);
+        repo.git(&["commit", "-q", "-m", "slow"]);
+        repo.git(&["switch", "-q", &main]);
+        repo.write("a.txt", "edited\n");
+        let checkpoints = Checkpoints::new(repo.path());
+
+        let given_up = tokio::time::timeout(
+            Duration::from_millis(300),
+            checkpoints.switch_branch(&local("other"), Changes::Leave),
+        )
+        .await;
+        assert!(given_up.is_err(), "the switch outlasts its caller");
+        checkpoints.close().await;
+
+        let waited = std::time::Instant::now();
+        while repo.git(&["branch", "--show-current"]) != "other\n" {
+            assert!(
+                waited.elapsed() < Duration::from_secs(20),
+                "the switch finishes"
+            );
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        while repo.path().join(".git/index.lock").exists() {
+            assert!(
+                waited.elapsed() < Duration::from_secs(20),
+                "Git removes its lock"
+            );
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        assert_eq!(read(&repo, "f.slow"), "slow\n");
+        assert_eq!(
+            repo.git(&["stash", "list", "--format=%s"]),
+            format!("On {main}: Liquid: changes left on {main}\n")
+        );
     });
 }
