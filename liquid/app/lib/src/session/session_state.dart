@@ -550,7 +550,7 @@ class SessionState {
       await reverting;
     } on Object catch (error) {
       // The error says whether the files changed; the Diff tab shows them either way.
-      notify(BridgeLevel.error, 'Could not revert to before this turn: $error');
+      notify(BridgeLevel.error, 'Could not revert and branch: $error');
       await readChanges();
       return false;
     } finally {

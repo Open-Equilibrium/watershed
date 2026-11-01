@@ -342,30 +342,23 @@ impl AgentSession {
     /// changed.
     pub fn revert_to_turn(&self, turn: String) -> Result<(), String> {
         RUNTIME.block_on(async {
+            let not_reverted = |error: String| format!("the files were not reverted: {error}");
             // Held until the branch is asked for, so a prompt sent meanwhile starts on it.
             let mut session = self.session.lock().await;
-            let turns = branch_turns(&mut session).await?;
-            let found = turn_of(&turns, &turn)?;
-            let prompt = found
-                .prompt_entry
-                .clone()
-                .ok_or_else(|| format!("turn {turn} has no prompt to continue before"))?;
+            let turns = branch_turns(&mut session).await.map_err(not_reverted)?;
+            let found = turn_of(&turns, &turn).map_err(not_reverted)?;
+            let prompt = found.prompt_entry.clone().ok_or_else(|| {
+                not_reverted(format!("turn {turn} has no prompt to continue before"))
+            })?;
             self.checkpoints
                 .revert(&checkpoint(found, Phase::Start))
                 .await
                 .map_err(|error| match error {
-                    DiffError::AgentRunning(_)
-                    | DiffError::NoCheckpoint
-                    | DiffError::NotARepository
-                    | DiffError::Closed => format!("the files were not reverted: {error}"),
-                    DiffError::NotReverted(_) => format!(
-                        "{error}; the other files were reverted, and the session stays on its \
-                         branch"
+                    DiffError::NotReverted(paths) => left_unreverted(&paths),
+                    DiffError::PartlyReverted(error) => format!(
+                        "the files may be partly reverted ({error}); reverting again finishes it"
                     ),
-                    error => format!(
-                        "the files may be partly reverted ({error}); reverting again finishes \
-                         it"
-                    ),
+                    error => not_reverted(error.to_string()),
                 })?;
             let continued = async move {
                 let pending = open(&mut session)?
@@ -654,6 +647,24 @@ fn checkpoint(turn: &TurnCheckpoints, phase: Phase) -> Checkpoint {
         turn: turn.turn.clone(),
         phase,
     }
+}
+
+/// Says which files Git left unreverted, at most a few of them, as Liquid shows file names.
+pub(crate) fn left_unreverted(paths: &[String]) -> String {
+    const NAMED: usize = 3;
+    let mut named: Vec<String> = paths
+        .iter()
+        .take(NAMED)
+        .map(|path| visible_name(path))
+        .collect();
+    if paths.len() > NAMED {
+        named.push(format!("{} more", paths.len() - NAMED));
+    }
+    format!(
+        "the other files were reverted and the session stays on its branch; Git could not \
+         revert {}",
+        named.join(", ")
+    )
 }
 
 /// Why checkpoints could not be read, when they cannot exist here or were removed.

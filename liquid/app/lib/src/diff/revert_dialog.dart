@@ -61,11 +61,16 @@ class _RevertDialog extends StatelessWidget {
         'This turn’s checkpoint was removed, so its files cannot be reverted.',
       BridgeChangesState.shown => switch (files.length) {
         0 => 'No file differs from how it was when $name started.',
-        1 => 'This file reverts to how it was when $name started.',
+        1 =>
+          'This ${files.first.path.endsWith('/') ? 'folder' : 'file'} reverts to how it was '
+              'when $name started.',
         final count =>
-          'These $count files revert to how they were when $name started.',
+          'These $count ${files.any((file) => file.path.endsWith('/')) ? 'files and folders' : 'files'} '
+              'revert to how they were when $name started.',
       },
     };
+    // A file Git ignores in a restored file's place does not stay.
+    final other = files.any((file) => file.ignored) ? 'other ' : '';
     final branch = plan.branch;
     return CallbackShortcuts(
       bindings: {
@@ -111,8 +116,9 @@ class _RevertDialog extends StatelessWidget {
                               style: monoStyle(context, color: ws.text),
                             ),
                           ],
-                          const TextSpan(
-                            text: ' and files Git ignores stay as they are.',
+                          TextSpan(
+                            text:
+                                ' and ${other}files Git ignores stay as they are.',
                           ),
                         ],
                       ),
@@ -171,14 +177,18 @@ class _Files extends StatelessWidget {
         BridgeChangeStatus.added => (
           'A',
           ws.success,
-          'deleted since then, restored',
+          file.ignored
+              ? 'restored over a file Git ignores'
+              : 'deleted since then, restored',
         ),
         BridgeChangeStatus.deleted => (
           'D',
           ws.danger,
-          file.ignored
-              ? 'ignored by Git, in the way, deleted'
-              : 'new since then, deleted',
+          switch ((file.ignored, file.path.endsWith('/'))) {
+            (false, _) => 'new since then, deleted',
+            (true, true) => 'ignored folder, in the way, deleted',
+            (true, false) => 'ignored by Git, in the way, deleted',
+          },
         ),
       };
       final edit = switch ((file.edited, file.modifiedMs)) {

@@ -888,6 +888,18 @@ IFS= read -r line || exit 0"#
 }
 
 #[test]
+fn names_a_few_files_git_left_unreverted_as_liquid_shows_them() {
+    let paths: Vec<String> = ["a\u{202e}.txt", "b.txt", "c.txt", "d.txt", "e.txt"]
+        .map(str::to_owned)
+        .to_vec();
+    assert_eq!(
+        crate::api::session::left_unreverted(&paths),
+        "the other files were reverted and the session stays on its branch; Git could not \
+         revert a<U+202E>.txt, b.txt, c.txt, 2 more"
+    );
+}
+
+#[test]
 fn a_project_outside_git_has_no_checkpoints_and_says_so() {
     let dir = std::env::temp_dir().join(format!("liquid-bridge-no-git-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);

@@ -9,7 +9,7 @@ import 'history.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `answer`, `branch_turns`, `checkpoint`, `checkpoints_of`, `open`, `session_dir`, `turn_of`, `unread`, `whitespace`
+// These functions are ignored because they are not marked as `pub`: `answer`, `branch_turns`, `checkpoint`, `checkpoints_of`, `left_unreverted`, `open`, `session_dir`, `turn_of`, `unread`, `whitespace`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`
 // These functions are ignored (category: IgnoreBecauseExplicitAttribute): `forward`, `launch`
 

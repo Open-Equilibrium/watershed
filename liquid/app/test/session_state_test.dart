@@ -261,7 +261,7 @@ void main() {
       expect(await state.revert(turnOf('T1', number: 1)), isFalse);
       expect(
         state.notice.value?.text,
-        'Could not revert to before this turn: the files were reverted, but the session could '
+        'Could not revert and branch: the files were reverted, but the session could '
         'not continue from before the turn: the agent has exited',
       );
       expect(changes, [1]);

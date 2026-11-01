@@ -866,6 +866,13 @@ void main() {
           ),
           revertedFile('src/limits.json', BridgeChangeStatus.deleted),
           const BridgeRevertFile(
+            path: 'config.local',
+            shown: 'config.local',
+            status: BridgeChangeStatus.added,
+            edited: false,
+            ignored: true,
+          ),
+          const BridgeRevertFile(
             path: 'tmp/',
             shown: 'tmp/',
             status: BridgeChangeStatus.deleted,
@@ -889,7 +896,9 @@ void main() {
       expect(backend.calls, contains('revert plan T2'));
       expect(find.text('Revert to before turn 3?'), findsOneWidget);
       expect(
-        find.text('These 4 files revert to how they were when turn 3 started.'),
+        find.text(
+          'These 5 files and folders revert to how they were when turn 3 started.',
+        ),
         findsOneWidget,
       );
       final back = 'back to ${formatClockMs(started)}';
@@ -899,10 +908,11 @@ void main() {
         findsOneWidget,
       );
       expect(find.text('new since then, deleted'), findsOneWidget);
-      expect(find.text('ignored by Git, in the way, deleted'), findsOneWidget);
+      expect(find.text('ignored folder, in the way, deleted'), findsOneWidget);
+      expect(find.text('restored over a file Git ignores'), findsOneWidget);
       expect(
         find.text(
-          'Commits, the branch main and files Git ignores stay as they are.',
+          'Commits, the branch main and other files Git ignores stay as they are.',
         ),
         findsOneWidget,
       );
@@ -991,7 +1001,7 @@ void main() {
       expect(backend.calls, contains('revert T2'));
       expect(
         state.notice.value?.text,
-        'Could not revert to before this turn: git failed: disk full',
+        'Could not revert and branch: git failed: disk full',
       );
     });
 
