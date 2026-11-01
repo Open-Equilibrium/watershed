@@ -10,7 +10,8 @@ use std::time::{Duration, Instant};
 
 use tokio::sync::watch;
 
-use crate::diff::{DiffError, FileChange, Whitespace, WorkingTree};
+use crate::checkout::{Checkout, Running};
+use crate::diff::{ChangeStatus, DiffError, FileChange, Whitespace, WorkingTree};
 
 /// Longest one Git command on the project may take; Git is then stopped with the programs it
 /// started that stay in its process group.
@@ -65,6 +66,32 @@ impl Checkpoint {
     }
 }
 
+/// What reverting the files to a checkpoint would change.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RevertPlan {
+    /// The files below the working folder that differ from the checkpoint, sorted by path.
+    pub files: Vec<RevertFile>,
+    /// The sessions whose agents run in the checkout, which refuse the revert.
+    pub running: Vec<String>,
+    /// The branch checked out, or none when HEAD names a commit.
+    pub branch: Option<String>,
+}
+
+/// One file a revert would change.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RevertFile {
+    /// The path relative to the repository root.
+    pub path: String,
+    /// How the revert changes it: `Added` writes back a file deleted since, `Deleted` deletes a
+    /// file new since.
+    pub status: ChangeStatus,
+    /// Whether it changed since the checkpoint the plan was asked about, such as the last
+    /// turn's end, so the revert also undoes an edit made outside the turns.
+    pub edited: bool,
+    /// When the file was last written, in Unix milliseconds, if it exists.
+    pub modified_ms: Option<u64>,
+}
+
 /// A session's checkpoints in its project.
 #[derive(Debug)]
 pub struct Checkpoints {
@@ -77,6 +104,8 @@ pub struct Checkpoints {
     /// Checkpoints are taken one after another; one waiting for its turn does not count its wait
     /// against the time limit.
     captures: tokio::sync::Mutex<()>,
+    /// Marks this session's agent as running in the checkout while a turn runs.
+    running: std::sync::Mutex<Option<Running>>,
 }
 
 #[derive(Debug, Clone)]
@@ -101,6 +130,7 @@ impl Checkpoints {
             timeout,
             closed: watch::Sender::new(false),
             captures: tokio::sync::Mutex::new(()),
+            running: std::sync::Mutex::new(None),
         }
     }
 
@@ -114,13 +144,86 @@ impl Checkpoints {
     }
 
     /// Takes `checkpoint` of the project as it is now. It can take a while in a large project.
+    /// From a turn's start to its end, the session's agent counts as running in the checkout,
+    /// even when a capture fails; a turn's start waits for a revert in progress.
     pub async fn capture(&self, checkpoint: &Checkpoint) -> Result<(), DiffError> {
         let reference = checkpoint.reference()?;
         let tree = self.tree().await?;
+        if checkpoint.phase == Phase::Start {
+            let running = self
+                .until_closed(
+                    Checkout::new(tree.locks().to_owned()).run(&checkpoint.session, self.timeout),
+                )
+                .await?;
+            *self.running.lock().expect("running lock") = Some(running);
+        }
+        let captured = async {
+            let _turn = self
+                .until_closed(async { Ok(self.captures.lock().await) })
+                .await?;
+            self.bounded(tree.checkpoint(&reference)).await.map(drop)
+        }
+        .await;
+        if checkpoint.phase == Phase::End {
+            self.running.lock().expect("running lock").take();
+        }
+        captured
+    }
+
+    /// What reverting the files to `to` would change; `since`, such as the last turn's end,
+    /// tells which of them changed after it.
+    pub async fn revert_plan(
+        &self,
+        to: &Checkpoint,
+        since: Option<&Checkpoint>,
+    ) -> Result<RevertPlan, DiffError> {
+        let tree = self.tree().await?;
+        let target = self.read(&tree, to).await?;
+        let since = match since {
+            Some(since) => Some(self.read(&tree, since).await?),
+            None => None,
+        };
+        let now = self.bounded(tree.snapshot()).await?;
+        let edited: std::collections::HashSet<String> = match &since {
+            Some(since) => self
+                .bounded(tree.changes(since, &now, Whitespace::Shown))
+                .await?
+                .into_iter()
+                .map(|change| change.path)
+                .collect(),
+            None => Default::default(),
+        };
+        let files = self
+            .bounded(tree.changes(&now, &target, Whitespace::Shown))
+            .await?
+            .into_iter()
+            .filter(|change| tree.within(&change.path))
+            .map(|change| RevertFile {
+                edited: edited.contains(&change.path),
+                modified_ms: modified_ms(&tree.file(&change.path)),
+                path: change.path,
+                status: change.status,
+            })
+            .collect();
+        Ok(RevertPlan {
+            files,
+            running: Checkout::new(tree.locks().to_owned()).running(),
+            branch: self.bounded(tree.branch()).await?,
+        })
+    }
+
+    /// Reverts the files below the working folder to `to`: files it holds are written back and
+    /// the others Git does not ignore are deleted; the project's index, HEAD and branches stay.
+    /// Refused while an agent, this session's too, runs in the checkout.
+    pub async fn revert(&self, to: &Checkpoint) -> Result<(), DiffError> {
+        let tree = self.tree().await?;
+        let target = self.read(&tree, to).await?;
+        // Held alone, so no turn starts in the checkout until the files are back.
+        let _alone = Checkout::new(tree.locks().to_owned()).alone()?;
         let _turn = self
             .until_closed(async { Ok(self.captures.lock().await) })
             .await?;
-        self.bounded(tree.checkpoint(&reference)).await.map(drop)
+        self.bounded(tree.restore(&target)).await
     }
 
     /// The files that changed from checkpoint `from` to `to`.
@@ -152,6 +255,7 @@ impl Checkpoints {
     pub async fn close(&self) {
         // Told first, so an open in progress stops instead of holding the project.
         self.closed.send_replace(true);
+        self.running.lock().expect("running lock").take();
         let tree = self
             .tree
             .lock()
@@ -250,4 +354,14 @@ impl Checkpoints {
         })
         .await
     }
+}
+
+/// When the file at `path` was last written, in Unix milliseconds.
+fn modified_ms(path: &Path) -> Option<u64> {
+    let modified = std::fs::symlink_metadata(path).ok()?.modified().ok()?;
+    let millis = modified
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_millis();
+    u64::try_from(millis).ok()
 }

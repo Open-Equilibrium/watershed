@@ -2,7 +2,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
-use crate::{ChangeStatus, Checkpoint, Checkpoints, DiffError, FileChange, Phase, Whitespace};
+use crate::{
+    ChangeStatus, Checkpoint, Checkpoints, DiffError, FileChange, Phase, RevertPlan, Whitespace,
+};
 
 /// A throwaway Git repository with one committed file, `a.txt`.
 struct Repo(PathBuf);
@@ -450,7 +452,7 @@ fn a_first_capture_that_failed_still_clears_the_projects_marks() {
 }
 
 #[test]
-fn checkpoints_add_only_objects_and_refs_to_the_projects_git_directory() {
+fn checkpoints_add_only_objects_refs_and_their_locks_to_the_projects_git_directory() {
     run(async {
         let repo = Repo::new("split-index");
         repo.git(&["config", "core.splitIndex", "true"]);
@@ -469,7 +471,11 @@ fn checkpoints_add_only_objects_and_refs_to_the_projects_git_directory() {
             changes_of(&checkpoints, "t1").await.expect("changes"),
             [modified("a.txt")]
         );
-        assert_eq!(listing(), before);
+        // Besides objects and refs, only the locks that tell which agents run there.
+        let mut expected = before;
+        expected.push("watershed".into());
+        expected.sort();
+        assert_eq!(listing(), expected);
     });
 }
 
@@ -780,5 +786,220 @@ fn closing_stops_a_capture_in_progress_and_removes_its_index() {
             capturing.await.expect("the capture ends"),
             Err(DiffError::Closed)
         ));
+    });
+}
+
+/// The file `path` of the plan, with how the revert changes it and whether it changed since the
+/// last turn ended.
+fn planned(plan: &RevertPlan, path: &str) -> (ChangeStatus, bool) {
+    let file = plan
+        .files
+        .iter()
+        .find(|file| file.path == path)
+        .unwrap_or_else(|| panic!("{path} in {plan:?}"));
+    (file.status, file.edited)
+}
+
+#[test]
+fn reverting_to_before_a_turn_restores_its_files_and_leaves_git_alone() {
+    run(async {
+        let repo = Repo::new("revert");
+        repo.write(".gitignore", "*.log\n");
+        repo.write("gone.txt", "kept by the turn's start\n");
+        repo.git(&["add", "."]);
+        repo.git(&["commit", "-q", "-m", "more"]);
+        repo.write("draft.txt", "untracked\n");
+        let checkpoints = Checkpoints::new(repo.path());
+        turn(&checkpoints, "t1", || {
+            repo.write("a.txt", "new\n");
+            repo.write("b.txt", "new file\n");
+            std::fs::remove_file(repo.path().join("gone.txt")).expect("removed");
+            std::fs::remove_file(repo.path().join("draft.txt")).expect("removed");
+            repo.write("run.log", "ignored\n");
+        })
+        .await;
+        // The user edits a file after the turn.
+        repo.write("a.txt", "newer\n");
+        repo.git(&["add", "a.txt"]);
+        let (index, head) = (
+            std::fs::read(repo.path().join(".git/index")).expect("index"),
+            repo.git(&["rev-parse", "HEAD"]),
+        );
+
+        let plan = checkpoints
+            .revert_plan(&at("t1", Phase::Start), Some(&at("t1", Phase::End)))
+            .await
+            .expect("plan");
+        assert_eq!(plan.files.len(), 4, "{plan:?}");
+        assert_eq!(planned(&plan, "a.txt"), (ChangeStatus::Modified, true));
+        assert_eq!(planned(&plan, "b.txt"), (ChangeStatus::Deleted, false));
+        assert_eq!(planned(&plan, "gone.txt"), (ChangeStatus::Added, false));
+        assert_eq!(planned(&plan, "draft.txt"), (ChangeStatus::Added, false));
+        assert!(plan.running.is_empty());
+        assert_eq!(
+            plan.branch.as_deref(),
+            Some(repo.git(&["branch", "--show-current"]).trim())
+        );
+
+        checkpoints
+            .revert(&at("t1", Phase::Start))
+            .await
+            .expect("reverted");
+        let read = |path: &str| std::fs::read_to_string(repo.path().join(path)).ok();
+        assert_eq!(read("a.txt").as_deref(), Some("old\n"));
+        assert_eq!(read("b.txt"), None, "new since the turn started");
+        assert_eq!(
+            read("gone.txt").as_deref(),
+            Some("kept by the turn's start\n")
+        );
+        assert_eq!(read("draft.txt").as_deref(), Some("untracked\n"));
+        assert_eq!(
+            read("run.log").as_deref(),
+            Some("ignored\n"),
+            "Git ignores it"
+        );
+        assert_eq!(
+            std::fs::read(repo.path().join(".git/index")).expect("index"),
+            index,
+            "the user's staging stays theirs"
+        );
+        assert_eq!(repo.git(&["rev-parse", "HEAD"]), head);
+        assert!(
+            checkpoints
+                .revert_plan(&at("t1", Phase::Start), None)
+                .await
+                .expect("plan")
+                .files
+                .is_empty(),
+            "nothing differs any more"
+        );
+    });
+}
+
+#[test]
+fn a_revert_changes_only_files_below_the_working_folder() {
+    run(async {
+        let repo = Repo::new("revert-folder");
+        std::fs::create_dir_all(repo.path().join("app")).expect("folder");
+        repo.write("app/main.txt", "old\n");
+        repo.git(&["add", "."]);
+        repo.git(&["commit", "-q", "-m", "app"]);
+        let checkpoints = Checkpoints::new(&repo.path().join("app"));
+        turn(&checkpoints, "t1", || {
+            repo.write("app/main.txt", "new\n");
+            repo.write("app/extra.txt", "new\n");
+            repo.write("a.txt", "outside\n");
+        })
+        .await;
+
+        let plan = checkpoints
+            .revert_plan(&at("t1", Phase::Start), None)
+            .await
+            .expect("plan");
+        let paths: Vec<_> = plan.files.iter().map(|file| file.path.as_str()).collect();
+        assert_eq!(paths, ["app/extra.txt", "app/main.txt"]);
+        checkpoints
+            .revert(&at("t1", Phase::Start))
+            .await
+            .expect("reverted");
+        let read = |path: &str| std::fs::read_to_string(repo.path().join(path)).ok();
+        assert_eq!(read("app/main.txt").as_deref(), Some("old\n"));
+        assert_eq!(read("app/extra.txt"), None);
+        assert_eq!(read("a.txt").as_deref(), Some("outside\n"));
+    });
+}
+
+#[test]
+fn a_revert_is_refused_while_an_agent_runs_in_the_checkout() {
+    run(async {
+        let repo = Repo::new("revert-running");
+        let mine = Checkpoints::new(repo.path());
+        turn(&mine, "t1", || repo.write("a.txt", "new\n")).await;
+        // Another window's session starts a turn in the same checkout.
+        let other = Checkpoints::new(repo.path());
+        let theirs = |phase| Checkpoint {
+            session: "s2".to_owned(),
+            turn: "u1".to_owned(),
+            phase,
+        };
+        other.capture(&theirs(Phase::Start)).await.expect("started");
+
+        let plan = mine
+            .revert_plan(&at("t1", Phase::Start), None)
+            .await
+            .expect("plan");
+        assert_eq!(plan.running, ["s2"]);
+        assert_eq!(plan.files.len(), 1, "the files still show");
+        assert!(matches!(
+            mine.revert(&at("t1", Phase::Start)).await,
+            Err(DiffError::AgentRunning(running)) if running == ["s2"]
+        ));
+        assert_eq!(
+            std::fs::read_to_string(repo.path().join("a.txt")).expect("a"),
+            "new\n"
+        );
+
+        other.capture(&theirs(Phase::End)).await.expect("ended");
+        // This session's own running turn holds it up too.
+        mine.capture(&at("t2", Phase::Start))
+            .await
+            .expect("started");
+        assert!(matches!(
+            mine.revert(&at("t1", Phase::Start)).await,
+            Err(DiffError::AgentRunning(running)) if running == ["s1"]
+        ));
+        // A session that ends, even without its turn's end, no longer runs there.
+        mine.close().await;
+        let later = Checkpoints::new(repo.path());
+        later
+            .revert(&at("t1", Phase::Start))
+            .await
+            .expect("reverted once nothing runs");
+        assert_eq!(
+            std::fs::read_to_string(repo.path().join("a.txt")).expect("a"),
+            "old\n"
+        );
+        other.close().await;
+    });
+}
+
+#[test]
+fn a_revert_to_a_removed_checkpoint_is_reported() {
+    run(async {
+        let repo = Repo::new("revert-removed");
+        let checkpoints = Checkpoints::new(repo.path());
+        assert!(matches!(
+            checkpoints.revert_plan(&at("t1", Phase::Start), None).await,
+            Err(DiffError::NoCheckpoint)
+        ));
+        assert!(matches!(
+            checkpoints.revert(&at("t1", Phase::Start)).await,
+            Err(DiffError::NoCheckpoint)
+        ));
+    });
+}
+
+#[test]
+fn a_turn_that_starts_during_a_revert_waits_until_the_files_are_back() {
+    run(async {
+        let repo = Repo::new("revert-wait");
+        let checkpoints = std::sync::Arc::new(Checkpoints::new(repo.path()));
+        assert!(matches!(checkpoints.in_repository().await, Ok(true)));
+        // Another window reverts the checkout.
+        let reverting = crate::checkout::Checkout::new(repo.path().join(".git/watershed"))
+            .alone()
+            .expect("nothing runs");
+        let starting = tokio::spawn({
+            let checkpoints = checkpoints.clone();
+            async move { checkpoints.capture(&at("t1", Phase::Start)).await }
+        });
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(!starting.is_finished(), "the turn waits for the revert");
+        drop(reverting);
+        tokio::time::timeout(Duration::from_secs(5), starting)
+            .await
+            .expect("the turn starts once the revert is done")
+            .expect("joined")
+            .expect("captured");
     });
 }

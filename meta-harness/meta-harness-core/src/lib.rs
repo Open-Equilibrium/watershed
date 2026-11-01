@@ -4,6 +4,7 @@
 #![deny(missing_docs)]
 
 mod approval;
+mod checkout;
 mod checkpoint;
 mod diff;
 mod event;
@@ -15,7 +16,7 @@ mod stored;
 mod visible;
 
 pub use approval::ApprovalMode;
-pub use checkpoint::{Checkpoint, Checkpoints, Phase};
+pub use checkpoint::{Checkpoint, Checkpoints, Phase, RevertFile, RevertPlan};
 pub use diff::{ChangeStatus, DiffError, FileChange, Whitespace};
 pub use event::{
     AgentEvent, Answer, ChangedLines, Decision, Delivery, EditChange, EditPreview, EntryKind,

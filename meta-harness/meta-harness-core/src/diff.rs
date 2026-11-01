@@ -98,6 +98,8 @@ pub enum DiffError {
     InvalidCheckpoint(String),
     /// The session ended while Git read the project.
     Closed,
+    /// Agents of these sessions run in the checkout, so its files must not be reverted.
+    AgentRunning(Vec<String>),
 }
 
 impl fmt::Display for DiffError {
@@ -119,6 +121,9 @@ impl fmt::Display for DiffError {
             Self::NoCheckpoint => f.write_str("the checkpoint no longer exists"),
             Self::InvalidCheckpoint(id) => write!(f, "{id:?} cannot name a checkpoint"),
             Self::Closed => f.write_str("the session ended"),
+            Self::AgentRunning(sessions) => {
+                write!(f, "an agent runs in this checkout: {}", sessions.join(", "))
+            }
         }
     }
 }
@@ -130,6 +135,12 @@ impl std::error::Error for DiffError {}
 #[derive(Debug)]
 pub struct WorkingTree {
     root: PathBuf,
+    /// The working folder, below which a revert changes files.
+    work: PathBuf,
+    /// The working folder relative to `root`, ending in `/`; empty at the root.
+    prefix: String,
+    /// The checkout's `watershed` folder in its Git directory.
+    locks: PathBuf,
     index: PathBuf,
     store: Store,
     /// Serializes use of the private index.
@@ -175,6 +186,9 @@ impl WorkingTree {
         let dir = &std::path::absolute(dir).map_err(DiffError::Io)?;
         let root = git_path(dir, &["rev-parse", "--show-toplevel"]).await?;
         let index = git_path(dir, &["rev-parse", "--git-path", "index"]).await?;
+        let locks = git_path(dir, &["rev-parse", "--git-path", "watershed"]).await?;
+        let prefix = git(dir, &[], &["rev-parse", "--show-prefix"]).await?;
+        let prefix = prefix.strip_suffix('\n').unwrap_or(&prefix).to_owned();
         let absolute = |path: &str| {
             let path = Path::new(path);
             if path.is_absolute() {
@@ -186,6 +200,9 @@ impl WorkingTree {
         let store = Store(private_dir().map_err(DiffError::Io)?);
         Ok(Self {
             root: PathBuf::from(root),
+            work: dir.clone(),
+            prefix,
+            locks: absolute(&locks),
             index: absolute(&index),
             store,
             busy: Mutex::new(()),
@@ -193,10 +210,69 @@ impl WorkingTree {
     }
 
     /// Captures the current state, including untracked files that are not ignored, without a
-    /// ref; tests compare such states directly.
-    #[cfg(test)]
+    /// ref.
     pub async fn snapshot(&self) -> Result<Snapshot, DiffError> {
         Ok(Snapshot(self.write_tree().await?))
+    }
+
+    /// Whether the repository path `path` lies below the working folder.
+    pub fn within(&self, path: &str) -> bool {
+        path.starts_with(&self.prefix)
+    }
+
+    /// The file at the repository path `path`.
+    pub fn file(&self, path: &str) -> PathBuf {
+        self.root.join(path)
+    }
+
+    /// The checkout's `watershed` folder in its Git directory.
+    pub(crate) fn locks(&self) -> &Path {
+        &self.locks
+    }
+
+    /// The branch checked out, or none when HEAD names a commit.
+    pub async fn branch(&self) -> Result<Option<String>, DiffError> {
+        match git(
+            &self.root,
+            &[],
+            &["symbolic-ref", "--quiet", "--short", "HEAD"],
+        )
+        .await
+        {
+            Ok(name) => Ok(Some(name.trim_end_matches('\n').to_owned())),
+            // `--quiet` fails silently only when HEAD names no branch.
+            Err(DiffError::Git(reason)) if reason.is_empty() => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+
+    /// Reverts the files below the working folder to `to`, as T3 Code's revert does with
+    /// `git restore` and `git clean`: files `to` holds are written back and the others Git does
+    /// not ignore are deleted. The project's index, HEAD and ignored files stay.
+    pub async fn restore(&self, to: &Snapshot) -> Result<(), DiffError> {
+        let _busy = self.busy.lock().await;
+        // The private index then lists the current files, so `git restore` deletes those `to`
+        // lacks, and a file that was untracked before the turn returns untracked.
+        let now = Snapshot(self.capture().await?);
+        let changes = self.changes(&now, to, Whitespace::Shown).await?;
+        if !changes.iter().any(|change| self.within(&change.path)) {
+            return Ok(());
+        }
+        let below = if self.prefix.is_empty() {
+            ":/".to_owned()
+        } else {
+            format!(":(top,literal){}", self.prefix)
+        };
+        let env = self.env(&self.store.0.join("index"));
+        let restored = git(
+            &self.root,
+            &env,
+            &["restore", "--source", &to.0, "--worktree", "--", &below],
+        )
+        .await;
+        // Deleting its last file can remove the working folder, where the agent still runs.
+        let _ = std::fs::create_dir_all(&self.work);
+        restored.map(drop)
     }
 
     /// Captures the current state as a commit under `reference`, with the project's HEAD as its
@@ -341,6 +417,11 @@ impl WorkingTree {
     /// Writes the working tree into the private store and returns its tree id.
     async fn write_tree(&self) -> Result<String, DiffError> {
         let _busy = self.busy.lock().await;
+        self.capture().await
+    }
+
+    /// [`Self::write_tree`] while the private index is held.
+    async fn capture(&self) -> Result<String, DiffError> {
         // A Git stopped at its time limit leaves its lock; no other Git uses this index now.
         let _ = std::fs::remove_file(self.store.0.join("index.lock"));
         let _ = std::fs::remove_file(self.store.0.join("index.new.lock"));
