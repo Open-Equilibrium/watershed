@@ -260,7 +260,7 @@ h4.qh{margin:14px 0 6px;font-size:13px}
   </section>
   <section>
     <h3 class="sec">4 · Roles</h3>
-    <p class="sub">Settings opens from the Explorer's foot or with ⌘, as a dialog over the current Page, like Notion's Settings; Roles is one of its sections. A Role allows capabilities on areas, Pages, Blocks and Sources; anything it does not list is denied. Rights inherit from an area to everything in it, and the table shows where a right comes from. Three editable templates follow Notion's levels: Can view, Can edit and Full access. In M3a a Role is assigned to Automations; people join with sync and agent profiles with agents (ADR-0235).</p>
+    <p class="sub">Settings opens from the Explorer's foot or with ⌘, as a dialog over the current Page, like Notion's Settings; Roles is one of its sections. A Role allows capabilities on areas, Pages, Blocks and Sources; anything it does not list is denied. Rights inherit from an area to everything in it, and the table shows where a right comes from. Three editable templates follow Notion's levels: Can view, Can edit and Can manage, named so that none repeats the approval mode Full access. In M3a a Role is assigned to Automations; people join with sync and agent profiles with agents (ADR-0235).</p>
     <div class="stage"><div class="scaler"><div class="win" id="w-roles" data-w="1240"></div></div></div>
   </section>
   <section>
@@ -284,8 +284,8 @@ h4.qh{margin:14px 0 6px;font-size:13px}
     <h4 class="qh">Approved with these mockups (2026-11-01)</h4>
     <ol class="qs">
       <li>History is a list with a detail pane, like the Diff tab; typing groups into one entry per pause of a few seconds.</li>
-      <li>Capabilities appear as the columns Read, Propose, Apply, Approve and Manage; templates are Can view (Read), Can edit (Read, Apply) and Full access (all).</li>
-      <li>The person who creates a Workspace holds Full access, which a protected Block always keeps, so nothing can lock its owner out.</li>
+      <li>Capabilities appear as the columns Read, Propose, Apply, Approve and Manage; templates are Can view (Read), Can edit (Read, Apply) and Can manage (all).</li>
+      <li>The person who creates a Workspace holds Can manage, which a protected Block always keeps, so nothing can lock its owner out.</li>
       <li>Workspace settings: General with name and areas, and Roles.</li>
     </ol>
     <h4 class="qh">Added on request, approved the same day</h4>
@@ -380,7 +380,7 @@ ${he('18:05','Created Page “Monthly review” from Budget',`${you}<span>·</sp
 ${he('17:50','Protected Block “Expenses”',`${you}<span>·</span><span class="org">App</span>`)}
 </div></div>`;
 const hdetail=`<div class="hd2"><div style="display:flex;align-items:center;gap:10px"><h2>Deleted Block “Expenses”</h2><span style="margin-left:auto" class="btn">${I.undo}Revert…</span></div>
-<div class="kv"><span class="l">By</span><span>You, in the app</span><span class="l">When</span><span>Today 11:02</span><span class="l">Allowed by</span><span>Full access in Private</span></div>
+<div class="kv"><span class="l">By</span><span>You, in the app</span><span class="l">When</span><span>Today 11:02</span><span class="l">Allowed by</span><span>Can manage in Private</span></div>
 <div class="chg">
 <div><span class="d">−</span>${I.db}Expenses<span class="r">Database Block, 5 rows</span></div>
 <div><span class="d">−</span>${I.page}View on Household budget<span class="r">its last View</span></div>
@@ -434,7 +434,7 @@ const cb=(v)=>v=='y'?'<span class="cb on">✓</span>':v=='i'?'<span class="cb on
 const prow=(ic,name,sub,vals)=>`<div class="tr"><span style="display:flex;gap:8px;align-items:center"><span class="ico">${ic}</span>${name}${sub?`<span class="inh">${sub}</span>`:''}</span>${vals.split('').map(v=>`<span>${cb(v)}</span>`).join('')}</div>`;
 frame('w-roles',{h:680,side:{sel:'set'},head:bgHead,main:bgPage,over:modal('Settings',`<div class="sett">${snav('roles')}<div class="sc"><h2>Roles<span class="btn">${I.plus}New Role</span></h2>
 <div class="roles"><div class="rl">
-<div class="rr">Full access<span class="r">template · you</span></div>
+<div class="rr">Can manage<span class="r">template · you</span></div>
 <div class="rr">Can edit<span class="r">template · 2</span></div>
 <div class="rr">Can view<span class="r">template</span></div>
 <div class="rr on">Budget editor<span class="r">1</span></div></div>
@@ -454,7 +454,7 @@ ${prow(I.file,'bank-export.csv','','i    ')}
 const protDlg=`<div class="scrim"></div><div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:4"><div class="dlg"><h4>Protect “Expenses”?</h4>
 <p>It stops inheriting rights from Private and Household budget. Only the Roles chosen here may change it.</p>
 <div class="flist">
-<div class="frow"><span class="cb on" style="opacity:.6">✓</span>Full access<span class="r">always</span></div>
+<div class="frow"><span class="cb on" style="opacity:.6">✓</span>Can manage<span class="r">always</span></div>
 <div class="frow"><span class="cb on">✓</span>Budget editor<span class="r">Read, Apply</span></div>
 <div class="frow"><span class="cb"></span>Can edit<span class="r">loses Apply here</span></div></div>
 <p>Reading still follows the area, and every device in this Workspace holds its content. To keep it off other people's devices, put it in a separate Workspace.</p>
