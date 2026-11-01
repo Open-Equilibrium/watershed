@@ -107,7 +107,9 @@ class _Button extends StatelessWidget {
 
   final String label;
   final String? shortcut;
-  final VoidCallback onPressed;
+
+  /// None shows the button disabled.
+  final VoidCallback? onPressed;
   final Color foreground;
   final Color background;
   final Color? outline;
@@ -157,6 +159,7 @@ class _Button extends StatelessWidget {
         ),
       ),
     );
+    if (onPressed == null) return Opacity(opacity: 0.45, child: button);
     final hint = shortcut;
     if (hint == null || hint.isEmpty || !ShortcutReveal.shown(context)) {
       return button;
@@ -208,6 +211,31 @@ class PrimaryButton extends StatelessWidget {
     focusNode: focusNode,
     foreground: context.ws.onAccent,
     background: context.ws.accent,
+  );
+}
+
+/// The primary action when it cannot be undone from Liquid, such as reverting files.
+class DangerButton extends StatelessWidget {
+  const DangerButton({
+    super.key,
+    required this.label,
+    required this.onPressed,
+    this.shortcut,
+  });
+
+  final String label;
+  final String? shortcut;
+
+  /// None shows the button disabled.
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) => _Button(
+    label: label,
+    shortcut: shortcut,
+    onPressed: onPressed,
+    foreground: context.ws.onAccent,
+    background: context.ws.danger,
   );
 }
 

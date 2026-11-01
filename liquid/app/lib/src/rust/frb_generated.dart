@@ -69,7 +69,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.13.0';
 
   @override
-  int get rustContentHash => -857163519;
+  int get rustContentHash => 2038387327;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -148,6 +148,16 @@ abstract class RustLibApi extends BaseApi {
   Future<List<BridgeStoredSession>> crateApiSessionAgentSessionRecentSessions({
     required AgentSession that,
     required int limit,
+  });
+
+  Future<BridgeRevertPlan> crateApiSessionAgentSessionRevertPlan({
+    required AgentSession that,
+    required String turn,
+  });
+
+  Future<void> crateApiSessionAgentSessionRevertToTurn({
+    required AgentSession that,
+    required String turn,
   });
 
   Future<void> crateApiSessionAgentSessionSend({
@@ -792,6 +802,82 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<BridgeRevertPlan> crateApiSessionAgentSessionRevertPlan({
+    required AgentSession that,
+    required String turn,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerAgentSession(
+            that,
+            serializer,
+          );
+          sse_encode_String(turn, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 16,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_bridge_revert_plan,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiSessionAgentSessionRevertPlanConstMeta,
+        argValues: [that, turn],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiSessionAgentSessionRevertPlanConstMeta =>
+      const TaskConstMeta(
+        debugName: "AgentSession_revert_plan",
+        argNames: ["that", "turn"],
+      );
+
+  @override
+  Future<void> crateApiSessionAgentSessionRevertToTurn({
+    required AgentSession that,
+    required String turn,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerAgentSession(
+            that,
+            serializer,
+          );
+          sse_encode_String(turn, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 17,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiSessionAgentSessionRevertToTurnConstMeta,
+        argValues: [that, turn],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiSessionAgentSessionRevertToTurnConstMeta =>
+      const TaskConstMeta(
+        debugName: "AgentSession_revert_to_turn",
+        argNames: ["that", "turn"],
+      );
+
+  @override
   Future<void> crateApiSessionAgentSessionSend({
     required AgentSession that,
     required String message,
@@ -810,7 +896,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 16,
+            funcId: 18,
             port: port_,
           );
         },
@@ -848,7 +934,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 17,
+            funcId: 19,
             port: port_,
           );
         },
@@ -888,7 +974,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 18,
+            funcId: 20,
             port: port_,
           );
         },
@@ -924,7 +1010,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 19,
+            funcId: 21,
             port: port_,
           );
         },
@@ -957,7 +1043,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 20,
+            funcId: 22,
             port: port_,
           );
         },
@@ -996,7 +1082,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 21,
+            funcId: 23,
             port: port_,
           );
         },
@@ -1032,7 +1118,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 22,
+            funcId: 24,
             port: port_,
           );
         },
@@ -1069,7 +1155,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 23,
+            funcId: 25,
             port: port_,
           );
         },
@@ -1111,7 +1197,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 24,
+            funcId: 26,
             port: port_,
           );
         },
@@ -1155,7 +1241,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 25,
+            funcId: 27,
             port: port_,
           );
         },
@@ -1191,7 +1277,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 26,
+            funcId: 28,
             port: port_,
           );
         },
@@ -1218,7 +1304,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 27,
+            funcId: 29,
             port: port_,
           );
         },
@@ -1245,7 +1331,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 28,
+            funcId: 30,
             port: port_,
           );
         },
@@ -1275,7 +1361,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 29,
+            funcId: 31,
             port: port_,
           );
         },
@@ -1771,6 +1857,49 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgeRevertFile dco_decode_bridge_revert_file(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 7)
+      throw Exception('unexpected arr length: expect 7 but see ${arr.length}');
+    return BridgeRevertFile(
+      path: dco_decode_String(arr[0]),
+      shown: dco_decode_String(arr[1]),
+      status: dco_decode_bridge_change_status(arr[2]),
+      edited: dco_decode_bool(arr[3]),
+      modifiedMs: dco_decode_opt_box_autoadd_i_64(arr[4]),
+      ignored: dco_decode_bool(arr[5]),
+      kept: dco_decode_bool(arr[6]),
+    );
+  }
+
+  @protected
+  BridgeRevertPlan dco_decode_bridge_revert_plan(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 4)
+      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
+    return BridgeRevertPlan(
+      state: dco_decode_bridge_changes_state(arr[0]),
+      files: dco_decode_list_bridge_revert_file(arr[1]),
+      running: dco_decode_list_bridge_running_agent(arr[2]),
+      branch: dco_decode_opt_String(arr[3]),
+    );
+  }
+
+  @protected
+  BridgeRunningAgent dco_decode_bridge_running_agent(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 2)
+      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    return BridgeRunningAgent(
+      own: dco_decode_bool(arr[0]),
+      title: dco_decode_opt_String(arr[1]),
+    );
+  }
+
+  @protected
   BridgeStep dco_decode_bridge_step(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
@@ -1893,21 +2022,22 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeTurn dco_decode_bridge_turn(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 12)
-      throw Exception('unexpected arr length: expect 12 but see ${arr.length}');
+    if (arr.length != 13)
+      throw Exception('unexpected arr length: expect 13 but see ${arr.length}');
     return BridgeTurn(
       id: dco_decode_String(arr[0]),
       startEntry: dco_decode_String(arr[1]),
       endEntry: dco_decode_opt_String(arr[2]),
       number: dco_decode_i_64(arr[3]),
-      prompt: dco_decode_String(arr[4]),
-      startedMs: dco_decode_opt_box_autoadd_i_64(arr[5]),
-      endedMs: dco_decode_opt_box_autoadd_i_64(arr[6]),
-      ended: dco_decode_bool(arr[7]),
-      failure: dco_decode_opt_String(arr[8]),
-      files: dco_decode_opt_box_autoadd_i_64(arr[9]),
-      added: dco_decode_opt_box_autoadd_i_64(arr[10]),
-      removed: dco_decode_opt_box_autoadd_i_64(arr[11]),
+      promptEntry: dco_decode_opt_String(arr[4]),
+      prompt: dco_decode_String(arr[5]),
+      startedMs: dco_decode_opt_box_autoadd_i_64(arr[6]),
+      endedMs: dco_decode_opt_box_autoadd_i_64(arr[7]),
+      ended: dco_decode_bool(arr[8]),
+      failure: dco_decode_opt_String(arr[9]),
+      files: dco_decode_opt_box_autoadd_i_64(arr[10]),
+      added: dco_decode_opt_box_autoadd_i_64(arr[11]),
+      removed: dco_decode_opt_box_autoadd_i_64(arr[12]),
     );
   }
 
@@ -1995,6 +2125,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   List<BridgeRecord> dco_decode_list_bridge_record(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return (raw as List<dynamic>).map(dco_decode_bridge_record).toList();
+  }
+
+  @protected
+  List<BridgeRevertFile> dco_decode_list_bridge_revert_file(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_bridge_revert_file).toList();
+  }
+
+  @protected
+  List<BridgeRunningAgent> dco_decode_list_bridge_running_agent(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_bridge_running_agent).toList();
   }
 
   @protected
@@ -2748,6 +2890,52 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgeRevertFile sse_decode_bridge_revert_file(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_path = sse_decode_String(deserializer);
+    var var_shown = sse_decode_String(deserializer);
+    var var_status = sse_decode_bridge_change_status(deserializer);
+    var var_edited = sse_decode_bool(deserializer);
+    var var_modifiedMs = sse_decode_opt_box_autoadd_i_64(deserializer);
+    var var_ignored = sse_decode_bool(deserializer);
+    var var_kept = sse_decode_bool(deserializer);
+    return BridgeRevertFile(
+      path: var_path,
+      shown: var_shown,
+      status: var_status,
+      edited: var_edited,
+      modifiedMs: var_modifiedMs,
+      ignored: var_ignored,
+      kept: var_kept,
+    );
+  }
+
+  @protected
+  BridgeRevertPlan sse_decode_bridge_revert_plan(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_state = sse_decode_bridge_changes_state(deserializer);
+    var var_files = sse_decode_list_bridge_revert_file(deserializer);
+    var var_running = sse_decode_list_bridge_running_agent(deserializer);
+    var var_branch = sse_decode_opt_String(deserializer);
+    return BridgeRevertPlan(
+      state: var_state,
+      files: var_files,
+      running: var_running,
+      branch: var_branch,
+    );
+  }
+
+  @protected
+  BridgeRunningAgent sse_decode_bridge_running_agent(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_own = sse_decode_bool(deserializer);
+    var var_title = sse_decode_opt_String(deserializer);
+    return BridgeRunningAgent(own: var_own, title: var_title);
+  }
+
+  @protected
   BridgeStep sse_decode_bridge_step(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_usage = sse_decode_bridge_usage(deserializer);
@@ -2889,6 +3077,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_startEntry = sse_decode_String(deserializer);
     var var_endEntry = sse_decode_opt_String(deserializer);
     var var_number = sse_decode_i_64(deserializer);
+    var var_promptEntry = sse_decode_opt_String(deserializer);
     var var_prompt = sse_decode_String(deserializer);
     var var_startedMs = sse_decode_opt_box_autoadd_i_64(deserializer);
     var var_endedMs = sse_decode_opt_box_autoadd_i_64(deserializer);
@@ -2902,6 +3091,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       startEntry: var_startEntry,
       endEntry: var_endEntry,
       number: var_number,
+      promptEntry: var_promptEntry,
       prompt: var_prompt,
       startedMs: var_startedMs,
       endedMs: var_endedMs,
@@ -3044,6 +3234,34 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var ans_ = <BridgeRecord>[];
     for (var idx_ = 0; idx_ < len_; ++idx_) {
       ans_.add(sse_decode_bridge_record(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
+  List<BridgeRevertFile> sse_decode_list_bridge_revert_file(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <BridgeRevertFile>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_bridge_revert_file(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
+  List<BridgeRunningAgent> sse_decode_list_bridge_running_agent(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <BridgeRunningAgent>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_bridge_running_agent(deserializer));
     }
     return ans_;
   }
@@ -3909,6 +4127,43 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_bridge_revert_file(
+    BridgeRevertFile self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.path, serializer);
+    sse_encode_String(self.shown, serializer);
+    sse_encode_bridge_change_status(self.status, serializer);
+    sse_encode_bool(self.edited, serializer);
+    sse_encode_opt_box_autoadd_i_64(self.modifiedMs, serializer);
+    sse_encode_bool(self.ignored, serializer);
+    sse_encode_bool(self.kept, serializer);
+  }
+
+  @protected
+  void sse_encode_bridge_revert_plan(
+    BridgeRevertPlan self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_bridge_changes_state(self.state, serializer);
+    sse_encode_list_bridge_revert_file(self.files, serializer);
+    sse_encode_list_bridge_running_agent(self.running, serializer);
+    sse_encode_opt_String(self.branch, serializer);
+  }
+
+  @protected
+  void sse_encode_bridge_running_agent(
+    BridgeRunningAgent self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_bool(self.own, serializer);
+    sse_encode_opt_String(self.title, serializer);
+  }
+
+  @protected
   void sse_encode_bridge_step(BridgeStep self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_bridge_usage(self.usage, serializer);
@@ -4015,6 +4270,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.startEntry, serializer);
     sse_encode_opt_String(self.endEntry, serializer);
     sse_encode_i_64(self.number, serializer);
+    sse_encode_opt_String(self.promptEntry, serializer);
     sse_encode_String(self.prompt, serializer);
     sse_encode_opt_box_autoadd_i_64(self.startedMs, serializer);
     sse_encode_opt_box_autoadd_i_64(self.endedMs, serializer);
@@ -4136,6 +4392,30 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_i_32(self.length, serializer);
     for (final item in self) {
       sse_encode_bridge_record(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_list_bridge_revert_file(
+    List<BridgeRevertFile> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_bridge_revert_file(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_list_bridge_running_agent(
+    List<BridgeRunningAgent> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_bridge_running_agent(item, serializer);
     }
   }
 
@@ -4584,6 +4864,20 @@ class AgentSessionImpl extends RustOpaque implements AgentSession {
         that: this,
         limit: limit,
       );
+
+  /// What reverting the files to before turn `turn` of the current branch would change;
+  /// files changed after the branch's last turn ended are marked.
+  Future<BridgeRevertPlan> revertPlan({required String turn}) => RustLib
+      .instance
+      .api
+      .crateApiSessionAgentSessionRevertPlan(that: this, turn: turn);
+
+  /// Reverts the files to before turn `turn` of the current branch and continues the session
+  /// from before its prompt, which returns to the input area; the undone turns keep their
+  /// branch. Refused while an agent runs in the checkout. Each error says whether the files
+  /// changed.
+  Future<void> revertToTurn({required String turn}) => RustLib.instance.api
+      .crateApiSessionAgentSessionRevertToTurn(that: this, turn: turn);
 
   /// Sends a message: an idle agent starts a run with it, a running one takes it before its
   /// next model request or, with `follow_up`, once it is done. Each run's start and end are

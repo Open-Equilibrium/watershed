@@ -4,6 +4,7 @@
 #![deny(missing_docs)]
 
 mod approval;
+mod checkout;
 mod checkpoint;
 mod diff;
 mod event;
@@ -15,7 +16,7 @@ mod stored;
 mod visible;
 
 pub use approval::ApprovalMode;
-pub use checkpoint::{Checkpoint, Checkpoints, Phase};
+pub use checkpoint::{Checkpoint, Checkpoints, Phase, RevertFile, RevertPlan};
 pub use diff::{ChangeStatus, DiffError, FileChange, Whitespace};
 pub use event::{
     AgentEvent, Answer, ChangedLines, Decision, Delivery, EditChange, EditPreview, EntryKind,
@@ -33,7 +34,7 @@ pub use session::{
     AgentCommand, CommandError, MAX_RECORD_BYTES, Model, Pending, Session, SessionEvent,
     SessionState, Stopper,
 };
-pub use stored::{StoredSession, recent_sessions, session_title};
+pub use stored::{StoredSession, recent_sessions, session_title, session_title_of};
 pub use visible::{visible_lines, visible_name};
 
 #[cfg(test)]

@@ -233,6 +233,8 @@ pub struct BridgeTurn {
     pub end_entry: Option<String>,
     /// The Trajectory's turn of its first prompt; 0 before a prompt was stored.
     pub number: i64,
+    /// The entry of its first prompt, before which a revert continues the session.
+    pub prompt_entry: Option<String>,
     /// The first line of its first prompt.
     pub prompt: String,
     /// Unix milliseconds when it started, if known.
@@ -269,4 +271,48 @@ pub struct BridgeTurnChanges {
     pub state: BridgeChangesState,
     /// The changed files; empty unless shown.
     pub files: Vec<crate::api::events::BridgeFileChange>,
+}
+
+/// What reverting the files to before a turn would change.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgeRevertPlan {
+    /// Whether the turn's start checkpoint could be read.
+    pub state: BridgeChangesState,
+    /// The files below the working folder that would change, sorted by path.
+    pub files: Vec<BridgeRevertFile>,
+    /// The agents running in the checkout, which refuse the revert.
+    pub running: Vec<BridgeRunningAgent>,
+    /// The branch checked out, as Liquid shows it, or none when HEAD names a commit.
+    pub branch: Option<String>,
+}
+
+/// One file a revert would change.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgeRevertFile {
+    /// The path relative to the root of the Git repository.
+    pub path: String,
+    /// The path as Liquid shows it, with characters that could hide or reorder it written out.
+    pub shown: String,
+    /// How the revert changes it: `Added` writes back a file deleted since the turn started,
+    /// `Deleted` deletes a file new since then.
+    pub status: crate::api::events::BridgeChangeStatus,
+    /// Whether it changed after the last turn ended, so the revert also undoes that edit.
+    pub edited: bool,
+    /// Unix milliseconds when it was last written, if it exists.
+    pub modified_ms: Option<i64>,
+    /// Whether the revert deletes or overwrites something Git ignores, only because a restored
+    /// file needs its place; such a folder's path ends in `/`.
+    pub ignored: bool,
+    /// Whether the revert leaves it alone because it is inside, at or above a submodule or
+    /// nested repository.
+    pub kept: bool,
+}
+
+/// An agent that runs a turn in the checkout.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgeRunningAgent {
+    /// Whether it is this session's agent.
+    pub own: bool,
+    /// Its session's title, when its session file is found.
+    pub title: Option<String>,
 }

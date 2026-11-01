@@ -1,7 +1,9 @@
 //! Observation workload for checkpoints in a large project (PERFORMANCE.md, Meta-Harness): a Git
 //! project of 20,000 committed files of 1 KiB in 200 folders. Each sample is one turn: its start
-//! checkpoint, ten changed files and one new file, its end checkpoint and the list of what it
-//! changed. The first sample's start also opens the project. The project is written by
+//! checkpoint, ten changed files and one new file, its end checkpoint, the list of what it
+//! changed, the plan of a revert to its start and that revert. The first sample's start also
+//! opens the project. A last turn replaces a file with a folder of 20,000 folders, which the
+//! plan searches for repositories before it would write the file back. The project is written by
 //! a second run of this example, so building it adds nothing to the measured process. It prints
 //! one JSON line per sample and a summary and never compares with a threshold. Run from the
 //! repository root:
@@ -23,6 +25,7 @@ const FILES_PER_FOLDER: usize = 100;
 const FILE_BYTES: usize = 1024;
 const CHANGED_PER_TURN: usize = 10;
 const SAMPLES: usize = 20;
+const FOLDERS_IN_PLACE: usize = 20_000;
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -91,6 +94,8 @@ async fn observe(dir: &Path) {
     let mut starts = Vec::new();
     let mut ends = Vec::new();
     let mut lists = Vec::new();
+    let mut plans = Vec::new();
+    let mut reverts = Vec::new();
     for sample in 0..SAMPLES {
         let at = |phase| Checkpoint {
             session: "observe".to_owned(),
@@ -123,6 +128,23 @@ async fn observe(dir: &Path) {
             .await
             .expect("changes");
         let list_ms = ms(started);
+        let started = Instant::now();
+        let plan = checkpoints
+            .revert_plan(&at(Phase::Start), Some(&at(Phase::End)))
+            .await
+            .expect("plan");
+        let plan_ms = ms(started);
+        let started = Instant::now();
+        checkpoints
+            .revert(&at(Phase::Start))
+            .await
+            .expect("reverted");
+        let revert_ms = ms(started);
+        assert_eq!(
+            plan.files.len(),
+            changes.len(),
+            "the revert undoes the turn"
+        );
         println!(
             "{}",
             json!({
@@ -130,13 +152,41 @@ async fn observe(dir: &Path) {
                 "start_ms": round(start_ms),
                 "end_ms": round(end_ms),
                 "list_ms": round(list_ms),
+                "plan_ms": round(plan_ms),
+                "revert_ms": round(revert_ms),
                 "files": changes.len(),
             })
         );
         starts.push(start_ms);
         ends.push(end_ms);
         lists.push(list_ms);
+        plans.push(plan_ms);
+        reverts.push(revert_ms);
     }
+    let in_place = |phase| Checkpoint {
+        session: "observe".to_owned(),
+        turn: "in-place".to_owned(),
+        phase,
+    };
+    checkpoints
+        .capture(&in_place(Phase::Start))
+        .await
+        .expect("start captured");
+    let replaced = file(dir, 0);
+    std::fs::remove_file(&replaced).expect("file removed");
+    for index in 0..FOLDERS_IN_PLACE {
+        std::fs::create_dir_all(replaced.join(format!("d{index:05}"))).expect("folder");
+    }
+    checkpoints
+        .capture(&in_place(Phase::End))
+        .await
+        .expect("end captured");
+    let started = Instant::now();
+    checkpoints
+        .revert_plan(&in_place(Phase::Start), None)
+        .await
+        .expect("plan");
+    let in_place_ms = ms(started);
     checkpoints.close().await;
     // The first start also opens the project, so the summary leaves it out.
     let summary = |values: &mut Vec<f64>| {
@@ -151,9 +201,12 @@ async fn observe(dir: &Path) {
             "files": FOLDERS * FILES_PER_FOLDER,
             "samples": SAMPLES,
             "first_start_ms": round(starts[0]),
+            "plan_with_folders_in_place_ms": round(in_place_ms),
             "start": summary(&mut starts[1..].to_vec()),
             "end": summary(&mut ends),
             "list": summary(&mut lists),
+            "plan": summary(&mut plans),
+            "revert": summary(&mut reverts),
         })
     );
 }

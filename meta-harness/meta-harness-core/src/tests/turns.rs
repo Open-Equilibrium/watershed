@@ -22,19 +22,23 @@ const ENTRIES: &str = r#"{"entries":[
 fn a_branch_lists_its_turns_with_their_checkpoints() {
     let data: Value = serde_json::from_str(ENTRIES).expect("JSON");
     let history = History::from_entries(&data);
-    let turn = |id: &str, entry: &str, number, prompt: &str, started: u64| TurnCheckpoints {
-        session: "s1".to_owned(),
-        turn: id.to_owned(),
-        start_entry: entry.to_owned(),
-        end_entry: None,
-        number,
-        prompt: prompt.to_owned(),
-        started_ms: Some(started),
-        ended_ms: None,
-        ended: false,
-        failure: None,
-        changed: None,
-    };
+    let turn =
+        |id: &str, entry: &str, number, (prompt_entry, prompt): (&str, &str), started: u64| {
+            TurnCheckpoints {
+                session: "s1".to_owned(),
+                turn: id.to_owned(),
+                start_entry: entry.to_owned(),
+                end_entry: None,
+                number,
+                prompt_entry: Some(prompt_entry.to_owned()),
+                prompt: prompt.to_owned(),
+                started_ms: Some(started),
+                ended_ms: None,
+                ended: false,
+                failure: None,
+                changed: None,
+            }
+        };
     assert_eq!(
         history.turns(None),
         [
@@ -47,10 +51,16 @@ fn a_branch_lists_its_turns_with_their_checkpoints() {
                     added: 12,
                     removed: 1,
                 }),
-                ..turn("T1", "c1", 1, "Add rate limiting", 1_793_527_201_000)
+                ..turn(
+                    "T1",
+                    "c1",
+                    1,
+                    ("u1", "Add rate limiting"),
+                    1_793_527_201_000
+                )
             },
             // Still running: its end is not recorded yet. The steering prompt counted as turn 2.
-            turn("T2", "c3", 3, "Return 429", 1_793_527_260_000),
+            turn("T2", "c3", 3, ("u3", "Return 429"), 1_793_527_260_000),
         ]
     );
     assert_eq!(
@@ -59,7 +69,13 @@ fn a_branch_lists_its_turns_with_their_checkpoints() {
             ended_ms: Some(1_793_527_325_000),
             end_entry: Some("c5".to_owned()),
             failure: Some("git did not finish within 60 s".to_owned()),
-            ..turn("T3", "c4", 3, "Use a token bucket", 1_793_527_320_000)
+            ..turn(
+                "T3",
+                "c4",
+                3,
+                ("u4", "Use a token bucket"),
+                1_793_527_320_000
+            )
         }
     );
 }

@@ -16,6 +16,7 @@ import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'diff_model.dart';
 import 'diff_settings.dart';
+import 'revert_dialog.dart';
 import 'turn_scope.dart';
 
 /// Keys of the Diff tab, for the status bar (approved mockup).
@@ -328,6 +329,10 @@ class _DiffViewState extends State<DiffView> {
           : null,
       shown: shown,
       onSelect: (scope) => unawaited(widget.state.showTurns(scope)),
+      // Reverting applies to the turn shown, not to all turns.
+      onRevert: scope is AllTurns
+          ? null
+          : () => unawaited(confirmRevert(context, widget.state, shown.to)),
     );
   }
 
@@ -943,6 +948,7 @@ class _TurnHeader extends StatelessWidget {
     required this.allLines,
     required this.shown,
     required this.onSelect,
+    required this.onRevert,
   });
 
   final GlobalKey<PopupMenuButtonState<DiffScope>> menuKey;
@@ -953,6 +959,9 @@ class _TurnHeader extends StatelessWidget {
   final ({int added, int removed})? allLines;
   final Compared shown;
   final ValueChanged<DiffScope> onSelect;
+
+  /// Asks to revert the files to before the shown turn; none for all turns.
+  final VoidCallback? onRevert;
 
   @override
   Widget build(BuildContext context) {
@@ -991,59 +1000,75 @@ class _TurnHeader extends StatelessWidget {
         ],
       ),
     );
+    final menu = PopupMenuButton<DiffScope>(
+      key: menuKey,
+      tooltip: 'Choose the turn',
+      initialValue: scope,
+      onSelected: onSelect,
+      itemBuilder: (context) => [
+        PopupMenuItem(
+          enabled: false,
+          height: 24,
+          child: Text('Turns of this branch', style: small),
+        ),
+        item(
+          const LatestTurn(),
+          'Latest turn · ${turnName(ended.last)}',
+          counts(ended.last),
+        ),
+        for (final older in ended.reversed.skip(1))
+          item(OneTurn(older.id), turnName(older), counts(older)),
+        const PopupMenuDivider(),
+        item(
+          const AllTurns(),
+          'All turns',
+          [
+            if (turns.first.startedMs case final at?)
+              'since ${formatClockMs(at)}',
+            if (allLines case final lines?) '+${lines.added} −${lines.removed}',
+          ].join(' · '),
+        ),
+      ],
+      child: Container(
+        height: 28,
+        padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space3),
+        decoration: BoxDecoration(
+          border: Border.all(color: ws.borderStrong),
+          borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              all ? 'All turns' : turnName(turn),
+              style: Theme.of(context).textTheme.labelMedium
+                  ?.copyWith(fontWeight: WsMetrics.fwSemibold),
+            ),
+            const SizedBox(width: WsMetrics.space2),
+            Icon(LucideIcons.chevronDown, size: 13, color: ws.textFaint),
+          ],
+        ),
+      ),
+    );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        PopupMenuButton<DiffScope>(
-          key: menuKey,
-          tooltip: 'Choose the turn',
-          initialValue: scope,
-          onSelected: onSelect,
-          itemBuilder: (context) => [
-            PopupMenuItem(
-              enabled: false,
-              height: 24,
-              child: Text('Turns of this branch', style: small),
-            ),
-            item(
-              const LatestTurn(),
-              'Latest turn · ${turnName(ended.last)}',
-              counts(ended.last),
-            ),
-            for (final older in ended.reversed.skip(1))
-              item(OneTurn(older.id), turnName(older), counts(older)),
-            const PopupMenuDivider(),
-            item(
-              const AllTurns(),
-              'All turns',
-              [
-                if (turns.first.startedMs case final at?)
-                  'since ${formatClockMs(at)}',
-                if (allLines case final lines?)
-                  '+${lines.added} −${lines.removed}',
-              ].join(' · '),
-            ),
-          ],
-          child: Container(
-            height: 28,
-            padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space3),
-            decoration: BoxDecoration(
-              border: Border.all(color: ws.borderStrong),
-              borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  all ? 'All turns' : turnName(turn),
-                  style: Theme.of(context).textTheme.labelMedium
-                      ?.copyWith(fontWeight: WsMetrics.fwSemibold),
+        Row(
+          children: [
+            menu,
+            // A narrow tab shortens the label rather than the menu.
+            if (onRevert case final revert?)
+              Expanded(
+                child: Align(
+                  alignment: Alignment.centerRight,
+                  child: SecondaryButton(
+                    label: 'Revert files to before this turn…',
+                    icon: LucideIcons.undo2,
+                    onPressed: revert,
+                  ),
                 ),
-                const SizedBox(width: WsMetrics.space2),
-                Icon(LucideIcons.chevronDown, size: 13, color: ws.textFaint),
-              ],
-            ),
-          ),
+              ),
+          ],
         ),
         const SizedBox(height: WsMetrics.space1),
         Text(

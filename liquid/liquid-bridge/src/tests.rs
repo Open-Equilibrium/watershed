@@ -13,7 +13,8 @@ use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
 use crate::api::history::{
-    BridgeChangesState, BridgeEntryKind, BridgeRecordKind, BridgeTurn, BridgeTurnChanges,
+    BridgeChangesState, BridgeEntryKind, BridgeRecordKind, BridgeRevertFile, BridgeRunningAgent,
+    BridgeTurn, BridgeTurnChanges,
 };
 use crate::api::session::{
     AgentSession, BridgeApprovalMode, BridgeModel, BridgeStoredSession, SessionConfig,
@@ -685,8 +686,13 @@ case "$line" in *'"id":"{id}"'*'{answer}'*) ;; *) exit 9 ;; esac
 
 /// Answers a history read with `entries`, the first time after its `get_state`.
 fn entries(id: u32, entries: &str) -> String {
+    entries_at(id, entries, "c2")
+}
+
+/// Answers a history read with `entries` and the session's leaf at `leaf`.
+fn entries_at(id: u32, entries: &str, leaf: &str) -> String {
     format!(
-        "IFS= read -r line\ncase \"$line\" in *'\"type\":\"get_entries\"'*) ;; *) exit 9 ;; esac\nprintf '%s\\n' '{{\"id\":\"{id}\",\"type\":\"response\",\"command\":\"get_entries\",\"success\":true,\"data\":{{\"entries\":[{entries}],\"leafId\":\"c2\"}}}}'\n"
+        "IFS= read -r line\ncase \"$line\" in *'\"type\":\"get_entries\"'*) ;; *) exit 9 ;; esac\nprintf '%s\\n' '{{\"id\":\"{id}\",\"type\":\"response\",\"command\":\"get_entries\",\"success\":true,\"data\":{{\"entries\":[{entries}],\"leafId\":\"{leaf}\"}}}}'\n"
     )
 }
 
@@ -733,6 +739,7 @@ fn diffs_each_turn_between_its_checkpoints() {
             start_entry: "c1".to_owned(),
             end_entry: Some("c2".to_owned()),
             number: 1,
+            prompt_entry: Some("u1".to_owned()),
             prompt: "edit".to_owned(),
             started_ms: Some(1_793_527_200_000),
             ended_ms: Some(1_793_527_205_000),
@@ -776,6 +783,178 @@ fn diffs_each_turn_between_its_checkpoints() {
     );
     assert!(call(session.shutdown()));
     let _ = std::fs::remove_dir_all(&repo);
+}
+
+#[test]
+fn reverts_a_turns_files_and_continues_from_before_its_prompt() {
+    let repo = repository("revert");
+    let script = [
+        checkpoint("q1", "T1", "start", r#"\"ok\":true"#),
+        "printf 'new\\n' > a.txt\n".to_owned(),
+        checkpoint("q2", "T1", "end", r#"\"files\":1"#),
+        "touch .git/checkpointed\n".to_owned(),
+        no_session_file(2),
+        entries(3, TURN),
+        // The plan looks for pi's session directory to name the other agent's session.
+        no_session_file(4),
+        entries(5, ""),
+        entries(6, ""),
+        gate(7),
+        r#"IFS= read -r line
+case "$line" in *'"message":"/watershed-branch u1"'*) ;; *) exit 9 ;; esac
+printf '%s\n' '{"id":"8","type":"response","command":"prompt","success":true,"data":{"disposition":"handled"}}'
+"#
+        .to_owned(),
+        // pi now continues before the turn's prompt.
+        entries_at(9, "", "c1"),
+        "IFS= read -r line || exit 0".to_owned(),
+    ]
+    .concat();
+    let session = launch(gated(&script), repo.display().to_string()).expect("agent starts");
+    reached(&repo.join(".git/checkpointed"));
+    // Another window's agent runs a turn in the same checkout.
+    let other = meta_harness_core::Checkpoints::new(&repo);
+    let theirs = |phase| meta_harness_core::Checkpoint {
+        session: "s2".to_owned(),
+        turn: "u1".to_owned(),
+        phase,
+    };
+    call(other.capture(&theirs(meta_harness_core::Phase::Start))).expect("started");
+
+    let plan = session.revert_plan("T1".to_owned()).expect("plan");
+    assert_eq!(plan.state, BridgeChangesState::Shown);
+    assert_eq!(
+        plan.files,
+        [BridgeRevertFile {
+            path: "a.txt".to_owned(),
+            shown: "a.txt".to_owned(),
+            status: BridgeChangeStatus::Modified,
+            edited: false,
+            modified_ms: plan.files[0].modified_ms,
+            ignored: false,
+            kept: false,
+        }]
+    );
+    assert!(plan.files[0].modified_ms.is_some());
+    assert_eq!(
+        plan.running,
+        [BridgeRunningAgent {
+            own: false,
+            title: None,
+        }]
+    );
+    assert!(plan.branch.is_some());
+    assert!(
+        matches!(session.revert_to_turn("T1".to_owned()), Err(error) if error.contains("an agent runs in this checkout")),
+        "refused"
+    );
+    assert_eq!(
+        std::fs::read_to_string(repo.join("a.txt")).expect("a"),
+        "new\n"
+    );
+
+    call(other.capture(&theirs(meta_harness_core::Phase::End))).expect("ended");
+    assert_eq!(session.revert_to_turn("T1".to_owned()), Ok(()));
+    assert_eq!(
+        std::fs::read_to_string(repo.join("a.txt")).expect("a"),
+        "old\n"
+    );
+    call(other.close());
+    assert!(call(session.shutdown()));
+    let _ = std::fs::remove_dir_all(&repo);
+}
+
+#[test]
+fn says_when_pi_handled_the_branch_but_stayed_on_the_turn() {
+    let repo = repository("revert-stayed");
+    let script = [
+        checkpoint("q1", "T1", "start", r#"\"ok\":true"#),
+        "printf 'new\\n' > a.txt\n".to_owned(),
+        checkpoint("q2", "T1", "end", r#"\"files\":1"#),
+        "touch .git/checkpointed\n".to_owned(),
+        no_session_file(2),
+        entries(3, TURN),
+        gate(4),
+        // An extension cancelled the navigation; pi still reports the command handled.
+        r#"IFS= read -r line
+printf '%s\n' '{"id":"5","type":"response","command":"prompt","success":true,"data":{"disposition":"handled"}}'
+"#
+        .to_owned(),
+        entries(6, ""),
+        "IFS= read -r line || exit 0".to_owned(),
+    ]
+    .concat();
+    let session = launch(gated(&script), repo.display().to_string()).expect("agent starts");
+    reached(&repo.join(".git/checkpointed"));
+    let reverted = session.revert_to_turn("T1".to_owned());
+    assert!(
+        matches!(&reverted, Err(error) if error.starts_with("the files were reverted, but the session could not continue")),
+        "{reverted:?}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(repo.join("a.txt")).expect("a"),
+        "old\n"
+    );
+    assert!(call(session.shutdown()));
+    let _ = std::fs::remove_dir_all(&repo);
+}
+
+#[test]
+fn says_when_the_files_were_reverted_but_the_session_did_not_branch() {
+    let repo = repository("revert-unbranched");
+    let script = [
+        checkpoint("q1", "T1", "start", r#"\"ok\":true"#),
+        "printf 'new\\n' > a.txt\n".to_owned(),
+        checkpoint("q2", "T1", "end", r#"\"files\":1"#),
+        "touch .git/checkpointed\n".to_owned(),
+        no_session_file(2),
+        entries(3, TURN),
+        gate(4),
+        r#"IFS= read -r line
+printf '%s\n' '{"id":"5","type":"response","command":"prompt","success":false,"error":"Agent is busy"}'
+IFS= read -r line || exit 0"#
+            .to_owned(),
+    ]
+    .concat();
+    let session = launch(gated(&script), repo.display().to_string()).expect("agent starts");
+    reached(&repo.join(".git/checkpointed"));
+    let reverted = session.revert_to_turn("T1".to_owned());
+    assert!(
+        matches!(&reverted, Err(error) if error.starts_with("the files were reverted, but the session could not continue")),
+        "{reverted:?}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(repo.join("a.txt")).expect("a"),
+        "old\n"
+    );
+    assert!(call(session.shutdown()));
+    let _ = std::fs::remove_dir_all(&repo);
+}
+
+#[test]
+fn names_a_few_files_git_left_unreverted_as_liquid_shows_them() {
+    let paths: Vec<String> = ["a\u{202e}.txt", "b.txt", "c.txt", "d.txt", "e.txt"]
+        .map(str::to_owned)
+        .to_vec();
+    assert_eq!(
+        crate::api::session::left_unreverted(&paths),
+        "the other files were reverted and the session stays on its branch; Git could not \
+         revert a<U+202E>.txt, b.txt, c.txt, 2 more"
+    );
+}
+
+#[test]
+fn writes_out_what_hides_in_gits_errors() {
+    assert_eq!(
+        crate::api::session::unread(meta_harness_core::DiffError::Git(
+            "cannot read 'a\u{202e}txt.exe'".to_owned()
+        )),
+        Err("git failed: cannot read 'a<U+202E>txt.exe'".to_owned())
+    );
+    assert_eq!(
+        crate::api::session::unread(meta_harness_core::DiffError::NoCheckpoint),
+        Ok(BridgeChangesState::Removed)
+    );
 }
 
 #[test]

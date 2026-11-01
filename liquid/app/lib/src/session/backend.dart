@@ -46,6 +46,13 @@ abstract interface class SessionBackend {
   Future<BridgeTranscript> transcript(String? before);
   Future<void> branch(String entry);
 
+  /// What reverting the files to before turn `turn` would change.
+  Future<BridgeRevertPlan> revertPlan(String turn);
+
+  /// Reverts the files to before turn `turn` and continues the session from before its
+  /// prompt, which returns to the input area.
+  Future<void> revertToTurn(String turn);
+
   /// The project's recent stored sessions, newest first, without the current one.
   Future<List<BridgeStoredSession>> recentSessions();
 
@@ -128,6 +135,11 @@ class RustSessionBackend implements SessionBackend {
       _session.context(entry: entry);
   @override
   Future<void> branch(String entry) => _session.branch(entry: entry);
+  @override
+  Future<BridgeRevertPlan> revertPlan(String turn) =>
+      _session.revertPlan(turn: turn);
+  @override
+  Future<void> revertToTurn(String turn) => _session.revertToTurn(turn: turn);
   @override
   Future<List<BridgeStoredSession>> recentSessions() =>
       _session.recentSessions(limit: recentLimit);

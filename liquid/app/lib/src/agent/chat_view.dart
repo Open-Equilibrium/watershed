@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../controls.dart';
+import '../diff/revert_dialog.dart';
 import '../format.dart';
 import '../rust/api/events.dart';
 import '../rust/api/history.dart';
@@ -91,6 +94,9 @@ class ChatView extends StatelessWidget {
                                   onOpenDiff: onOpenDiff == null
                                       ? null
                                       : () => onOpenDiff!(turn.id),
+                                  onRevert: () => unawaited(
+                                    confirmRevert(context, state, turn),
+                                  ),
                                 ),
                                 _ => ItemTile(item: item, state: state),
                               },
@@ -109,10 +115,18 @@ class ChatView extends StatelessWidget {
 
 /// What a turn changed, below its last item (approved checkpoint mockups).
 class TurnChanges extends StatelessWidget {
-  const TurnChanges({super.key, required this.turn, this.onOpenDiff});
+  const TurnChanges({
+    super.key,
+    required this.turn,
+    this.onOpenDiff,
+    this.onRevert,
+  });
 
   final BridgeTurn turn;
   final VoidCallback? onOpenDiff;
+
+  /// Asks to revert the files to before the turn.
+  final VoidCallback? onRevert;
 
   @override
   Widget build(BuildContext context) {
@@ -129,6 +143,17 @@ class TurnChanges extends StatelessWidget {
         if (onOpenDiff case final open?) ...[
           const SizedBox(width: WsMetrics.space3),
           GhostButton(label: 'Open diff', onPressed: open),
+        ],
+        if (onRevert case final revert?) ...[
+          const SizedBox(width: WsMetrics.space1),
+          // A narrow window shortens its label rather than the counts.
+          Flexible(
+            child: GhostButton(
+              label: 'Revert files to before this turn…',
+              icon: LucideIcons.undo2,
+              onPressed: revert,
+            ),
+          ),
         ],
       ],
     );

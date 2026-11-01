@@ -566,3 +566,27 @@ fn hides_whitespace_changes_when_asked() {
         assert!(patch.contains("+c\n") && !patch.contains("-b\n"), "{patch}");
     });
 }
+
+#[test]
+fn the_search_for_repositories_stops_at_its_budget_and_counts_it_as_found() {
+    use crate::diff::holds_repository;
+    let dir = std::env::temp_dir().join(format!("watershed-budget-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    for index in 0..10 {
+        std::fs::create_dir_all(dir.join(format!("d{index}"))).expect("folder");
+    }
+    let mut enough = 100;
+    assert!(!holds_repository(&dir, &mut enough), "no repository there");
+    assert_eq!(enough, 90, "one per entry read");
+    let mut short = 5;
+    assert!(
+        holds_repository(&dir, &mut short),
+        "a search cut short leaves the folder alone"
+    );
+    assert_eq!(short, 0);
+    assert!(
+        holds_repository(&dir, &mut short),
+        "a spent budget stays spent for the next path"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

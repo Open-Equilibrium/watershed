@@ -7,15 +7,16 @@ use std::path::{Path, PathBuf};
 
 use meta_harness_core::{
     AgentCommand, Answer, Checkpoint, Checkpoints, CommandError, Delivery, DiffError, Phase,
-    RequestId, Session, SessionEvent, Whitespace, recent_sessions, session_title, visible_lines,
+    RequestId, Session, SessionEvent, TurnCheckpoints, Whitespace, recent_sessions, session_title,
+    session_title_of, visible_lines, visible_name,
 };
 use tokio::runtime::Runtime;
 use tokio::sync::{Mutex, mpsc};
 
 use crate::api::events::{BridgeDecision, BridgeEvent, BridgeQueue};
 use crate::api::history::{
-    BridgeChangesState, BridgeContextDetail, BridgeHistory, BridgeTranscript, BridgeTurn,
-    BridgeTurnChanges,
+    BridgeChangesState, BridgeContextDetail, BridgeHistory, BridgeRevertPlan, BridgeRunningAgent,
+    BridgeTranscript, BridgeTurn, BridgeTurnChanges,
 };
 use crate::convert::describe;
 use crate::frb_generated::StreamSink;
@@ -219,15 +220,14 @@ impl AgentSession {
     pub fn in_repository(&self) -> Result<bool, String> {
         RUNTIME
             .block_on(self.checkpoints.in_repository())
-            .map_err(|error| error.to_string())
+            .map_err(shown)
     }
 
     /// The turns of the current branch, oldest first, with what each changed.
     pub fn turns(&self) -> Result<Vec<BridgeTurn>, String> {
         RUNTIME.block_on(async {
-            let mut session = self.session.lock().await;
-            let history = open(&mut session)?.history().await.map_err(describe)?;
-            Ok(history.turns(None).into_iter().map(Into::into).collect())
+            let turns = branch_turns(&mut *self.session.lock().await).await?;
+            Ok(turns.into_iter().map(Into::into).collect())
         })
     }
 
@@ -251,9 +251,7 @@ impl AgentSession {
                     BridgeChangesState::Shown,
                     changes.into_iter().map(Into::into).collect(),
                 ),
-                Err(DiffError::NotARepository) => (BridgeChangesState::OutsideGit, Vec::new()),
-                Err(DiffError::NoCheckpoint) => (BridgeChangesState::Removed, Vec::new()),
-                Err(error) => return Err(error.to_string()),
+                Err(error) => (unread(error)?, Vec::new()),
             };
             Ok(BridgeTurnChanges { state, files })
         })
@@ -275,7 +273,7 @@ impl AgentSession {
                 .patch(&from, &to, &path, whitespace(hide_whitespace))
                 .await
                 .map(|patch| visible_lines(&patch))
-                .map_err(|error| error.to_string())
+                .map_err(shown)
         })
     }
 
@@ -286,26 +284,108 @@ impl AgentSession {
         from: &str,
         to: &str,
     ) -> Result<(Checkpoint, Checkpoint), String> {
-        let turns = {
-            let mut session = self.session.lock().await;
-            open(&mut session)?
-                .history()
-                .await
-                .map_err(describe)?
-                .turns(None)
-        };
-        let point = |id: &str, phase| {
-            turns
+        let turns = branch_turns(&mut *self.session.lock().await).await?;
+        Ok((
+            checkpoint(turn_of(&turns, from)?, Phase::Start),
+            checkpoint(turn_of(&turns, to)?, Phase::End),
+        ))
+    }
+
+    /// What reverting the files to before turn `turn` of the current branch would change;
+    /// files changed after the branch's last turn ended are marked.
+    pub fn revert_plan(&self, turn: String) -> Result<BridgeRevertPlan, String> {
+        RUNTIME.block_on(async {
+            let (to, since, dir) = {
+                let mut session = self.session.lock().await;
+                let turns = branch_turns(&mut session).await?;
+                let to = checkpoint(turn_of(&turns, &turn)?, Phase::Start);
+                let since = turns
+                    .iter()
+                    .rev()
+                    .find(|turn| turn.ended)
+                    .map(|turn| checkpoint(turn, Phase::End));
+                (to, since, session_dir(&mut session).await)
+            };
+            let plan = match self.checkpoints.revert_plan(&to, since.as_ref()).await {
+                Ok(plan) => plan,
+                Err(error) => {
+                    return Ok(BridgeRevertPlan {
+                        state: unread(error)?,
+                        files: Vec::new(),
+                        running: Vec::new(),
+                        branch: None,
+                    });
+                }
+            };
+            let running = plan
+                .running
                 .iter()
-                .find(|turn| turn.turn == id)
-                .map(|turn| Checkpoint {
-                    session: turn.session.clone(),
-                    turn: turn.turn.clone(),
-                    phase,
+                .map(|session| BridgeRunningAgent {
+                    own: *session == to.session,
+                    title: dir
+                        .as_deref()
+                        .and_then(|dir| session_title_of(dir, &self.cwd, session)),
                 })
-                .ok_or_else(|| format!("no turn {id} on the current branch"))
-        };
-        Ok((point(from, Phase::Start)?, point(to, Phase::End)?))
+                .collect();
+            Ok(BridgeRevertPlan {
+                state: BridgeChangesState::Shown,
+                files: plan.files.into_iter().map(Into::into).collect(),
+                running,
+                branch: plan.branch.as_deref().map(visible_name),
+            })
+        })
+    }
+
+    /// Reverts the files to before turn `turn` of the current branch and continues the session
+    /// from before its prompt, which returns to the input area; the undone turns keep their
+    /// branch. Refused while an agent runs in the checkout. Each error says whether the files
+    /// changed.
+    pub fn revert_to_turn(&self, turn: String) -> Result<(), String> {
+        RUNTIME.block_on(async {
+            let not_reverted = |error: String| format!("the files were not reverted: {error}");
+            // Held until the branch is asked for, so a prompt sent meanwhile starts on it.
+            let mut session = self.session.lock().await;
+            let turns = branch_turns(&mut session).await.map_err(not_reverted)?;
+            let found = turn_of(&turns, &turn).map_err(not_reverted)?;
+            let prompt = found.prompt_entry.clone().ok_or_else(|| {
+                not_reverted(format!("turn {turn} has no prompt to continue before"))
+            })?;
+            self.checkpoints
+                .revert(&checkpoint(found, Phase::Start))
+                .await
+                .map_err(|error| match error {
+                    DiffError::NotReverted(paths) => left_unreverted(&paths),
+                    DiffError::PartlyReverted(error) => format!(
+                        "the files may be partly reverted ({}); reverting again finishes it",
+                        shown(*error)
+                    ),
+                    error => not_reverted(shown(error)),
+                })?;
+            let continued = async move {
+                let pending = open(&mut session)?
+                    .branch(&prompt, None)
+                    .await
+                    .map_err(describe)?;
+                drop(session);
+                pending.accepted().await.map_err(describe)?;
+                // pi reports the command handled even when an extension cancelled the move, so
+                // the branch is read back: the turn's prompt must be off it.
+                let turns = branch_turns(&mut *self.session.lock().await).await?;
+                if turns
+                    .iter()
+                    .any(|turn| turn.prompt_entry.as_deref() == Some(prompt.as_str()))
+                {
+                    return Err("pi stayed on the turn's branch".to_owned());
+                }
+                Ok(())
+            };
+            continued.await.map_err(|error| {
+                format!(
+                    "the files were reverted, but the session could not continue from before \
+                     the turn: {error}"
+                )
+            })
+        })
     }
 
     /// Reads the session's branch tree and the Trajectory of each branch ending at an entry in
@@ -545,5 +625,70 @@ fn whitespace(hide: bool) -> Whitespace {
         Whitespace::Hidden
     } else {
         Whitespace::Shown
+    }
+}
+
+/// The turns of the current branch.
+async fn branch_turns(session: &mut Option<Session>) -> Result<Vec<TurnCheckpoints>, String> {
+    Ok(open(session)?
+        .history()
+        .await
+        .map_err(describe)?
+        .turns(None))
+}
+
+/// pi's session directory, unless pi keeps the session in memory.
+async fn session_dir(session: &mut Option<Session>) -> Option<PathBuf> {
+    let file = open(session).ok()?.state().await.ok()?.session_file?;
+    file.parent().map(Path::to_owned)
+}
+
+/// Turn `id` among `turns`.
+fn turn_of<'a>(turns: &'a [TurnCheckpoints], id: &str) -> Result<&'a TurnCheckpoints, String> {
+    turns
+        .iter()
+        .find(|turn| turn.turn == id)
+        .ok_or_else(|| format!("no turn {id} on the current branch"))
+}
+
+/// `turn`'s checkpoint at `phase`.
+fn checkpoint(turn: &TurnCheckpoints, phase: Phase) -> Checkpoint {
+    Checkpoint {
+        session: turn.session.clone(),
+        turn: turn.turn.clone(),
+        phase,
+    }
+}
+
+/// Says which files Git left unreverted, at most a few of them, as Liquid shows file names.
+pub(crate) fn left_unreverted(paths: &[String]) -> String {
+    const NAMED: usize = 3;
+    let mut named: Vec<String> = paths
+        .iter()
+        .take(NAMED)
+        .map(|path| visible_name(path))
+        .collect();
+    if paths.len() > NAMED {
+        named.push(format!("{} more", paths.len() - NAMED));
+    }
+    format!(
+        "the other files were reverted and the session stays on its branch; Git could not \
+         revert {}",
+        named.join(", ")
+    )
+}
+
+/// A checkpoint error as Liquid shows it: Git's messages name files, so what could hide or
+/// reorder them is written out, as in file names.
+fn shown(error: DiffError) -> String {
+    visible_name(&error.to_string())
+}
+
+/// Why checkpoints could not be read, when they cannot exist here or were removed.
+pub(crate) fn unread(error: DiffError) -> Result<BridgeChangesState, String> {
+    match error {
+        DiffError::NotARepository => Ok(BridgeChangesState::OutsideGit),
+        DiffError::NoCheckpoint => Ok(BridgeChangesState::Removed),
+        error => Err(shown(error)),
     }
 }
