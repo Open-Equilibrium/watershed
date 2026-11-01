@@ -555,28 +555,21 @@ class SessionState {
   /// The open session's agent stops and a new session takes its place first, as T3 Code moves
   /// on after deleting the active thread. Returns whether it deleted, and says why not.
   Future<bool> deleteSession(String path) async {
-    final String? open;
     try {
-      open = await _backend.sessionFile();
-    } on Object catch (error) {
-      notify(BridgeLevel.error, 'Could not delete the session: $error');
-      return false;
-    }
-    if (path == open) {
-      if (status.value case RunStatus.running || RunStatus.waitingForYou) {
-        await stop();
-        await _settled();
-      }
-      await newSession();
       if (path == await _backend.sessionFile()) {
-        notify(
-          BridgeLevel.info,
-          'The session stayed open, so it was not deleted.',
-        );
-        return false;
+        if (status.value case RunStatus.running || RunStatus.waitingForYou) {
+          await stop();
+          await _settled();
+        }
+        await newSession();
+        if (path == await _backend.sessionFile()) {
+          notify(
+            BridgeLevel.info,
+            'The session stayed open, so it was not deleted.',
+          );
+          return false;
+        }
       }
-    }
-    try {
       await _backend.deleteSession(path);
     } on Object catch (error) {
       notify(BridgeLevel.error, 'Could not delete the session: $error');
