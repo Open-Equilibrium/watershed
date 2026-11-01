@@ -307,6 +307,28 @@ impl WorkingTree {
         if remote.is_empty() || remote == "." {
             return Ok(false);
         }
+        // Git expands a group with multiple members before using the named remote's refspecs.
+        let group = format!("remotes.{remote}");
+        let groups = git(
+            &self.root,
+            &[],
+            &["config", "--null", "--get-regexp", "^remotes\\."],
+        )
+        .await
+        .unwrap_or_default();
+        let members = groups
+            .split('\0')
+            .filter_map(|entry| entry.split_once('\n'))
+            .filter(|(key, _)| *key == group)
+            .flat_map(|(_, value)| value.split([' ', '\t', '\n']))
+            .filter(|name| !name.is_empty())
+            .take(2)
+            .count();
+        if members > 1 {
+            return Err(DiffError::Git(
+                "Git remote groups cannot be expanded by automatic fetch.".to_owned(),
+            ));
+        }
         // A fetch writes where the remote's refspecs say, which can be a local branch.
         let key = format!("remote.{remote}.fetch");
         let specs = git(&self.root, &[], &["config", "--get-all", &key])

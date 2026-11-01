@@ -485,6 +485,67 @@ fn fetching_updates_only_the_upstreams_remote_tracking_branches() {
 }
 
 #[test]
+fn automatic_fetch_never_expands_a_remote_group_into_unchecked_destinations() {
+    run(async {
+        for (case, members) in [
+            ("list", vec!["backup vendor"]),
+            ("values", vec!["backup", "vendor"]),
+            ("duplicate", vec!["backup backup"]),
+        ] {
+            let clone = Clone::new(&format!("fetch-group-{case}"));
+            let repo = &clone.repo;
+            repo.git(&["branch", "release"]);
+            let before = repo.git(&["show-ref"]);
+            clone.commit_upstream("theirs\n");
+            for remote in ["backup", "vendor"] {
+                repo.git(&[
+                    "remote",
+                    "add",
+                    remote,
+                    clone.origin.path().to_str().expect("origin path"),
+                ]);
+            }
+            repo.git(&[
+                "config",
+                "remote.backup.fetch",
+                "+refs/heads/main:refs/heads/release",
+            ]);
+            for member in members {
+                repo.git(&["config", "--add", "remotes.origin", member]);
+            }
+            let checkpoints = Checkpoints::new(repo.path());
+
+            let fetched = checkpoints.fetch().await;
+
+            assert_eq!(repo.git(&["show-ref"]), before, "{case}: {fetched:?}");
+            assert!(matches!(fetched, Err(DiffError::Git(_))), "{fetched:?}");
+            // Git uses the named remote for a one-member group, without expanding it.
+            repo.git(&["config", "--replace-all", "remotes.origin", "backup"]);
+            assert!(checkpoints.fetch().await.expect("only origin fetched"));
+            assert_eq!(
+                repo.git(&["rev-parse", "release"]),
+                repo.git(&["rev-parse", "HEAD"])
+            );
+            assert_eq!(checkpoints.status().await.expect("status").behind, 1);
+            // Group names use Git's normalized variable spelling, unlike remote subsections.
+            repo.git(&["remote", "rename", "origin", "temporary"]);
+            repo.git(&["remote", "rename", "temporary", "Origin"]);
+            repo.git(&["config", "--replace-all", "remotes.origin", "backup vendor"]);
+            assert!(
+                checkpoints
+                    .fetch()
+                    .await
+                    .expect("Origin is not the group origin")
+            );
+            assert_eq!(
+                repo.git(&["rev-parse", "release"]),
+                repo.git(&["rev-parse", "HEAD"])
+            );
+        }
+    });
+}
+
+#[test]
 fn a_background_fetch_leaves_tags_alone_despite_pruning_settings() {
     run(async {
         for scope in ["fetch", "remote.origin"] {
