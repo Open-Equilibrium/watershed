@@ -103,25 +103,33 @@ class _RowMenuState extends State<RowMenu> {
           // Always there for the keyboard and screen readers; seen on hover or focus.
           Opacity(
             opacity: _hovered || _focused ? 1 : 0,
-            child: Tooltip(
-              message: 'More actions',
-              child: Builder(
-                builder: (context) => InkWell(
-                  borderRadius: BorderRadius.circular(WsMetrics.radiusSm),
-                  onFocusChange: (focused) =>
-                      setState(() => _focused = focused),
-                  onTap: () {
-                    final box = context.findRenderObject()! as RenderBox;
-                    _open(box.localToGlobal(box.size.bottomLeft(Offset.zero)));
-                  },
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: WsMetrics.space2,
-                    ),
-                    child: Icon(
-                      LucideIcons.ellipsis,
-                      size: 16,
-                      color: context.ws.textMuted,
+            alwaysIncludeSemantics: true,
+            child: Semantics(
+              label: 'More actions',
+              button: true,
+              child: Tooltip(
+                message: 'More actions',
+                excludeFromSemantics: true,
+                child: Builder(
+                  builder: (context) => InkWell(
+                    borderRadius: BorderRadius.circular(WsMetrics.radiusSm),
+                    onFocusChange: (focused) =>
+                        setState(() => _focused = focused),
+                    onTap: () {
+                      final box = context.findRenderObject()! as RenderBox;
+                      _open(
+                        box.localToGlobal(box.size.bottomLeft(Offset.zero)),
+                      );
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: WsMetrics.space2,
+                      ),
+                      child: Icon(
+                        LucideIcons.ellipsis,
+                        size: 16,
+                        color: context.ws.textMuted,
+                      ),
                     ),
                   ),
                 ),

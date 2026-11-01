@@ -316,4 +316,13 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Remove all checkpoints…'), findsOneWidget);
   });
+
+  testWidgets('a screen reader finds a row\'s menu before any hover', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    await show(tester);
+    expect(find.bySemanticsLabel('More actions'), findsWidgets);
+    semantics.dispose();
+  });
 }
