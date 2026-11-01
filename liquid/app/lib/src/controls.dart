@@ -297,6 +297,7 @@ class ActionDialog extends StatelessWidget {
     required this.actions,
     this.bindings = const {},
     this.cancelled,
+    this.dismiss,
   });
 
   final String title;
@@ -304,6 +305,9 @@ class ActionDialog extends StatelessWidget {
   final List<Widget> actions;
   final Map<ShortcutActivator, VoidCallback> bindings;
   final Object? cancelled;
+
+  /// The label of the button esc takes, if not Cancel or, without actions, Close.
+  final String? dismiss;
 
   @override
   Widget build(BuildContext context) => CallbackShortcuts(
@@ -338,7 +342,7 @@ class ActionDialog extends StatelessWidget {
                   children: [
                     ...actions,
                     SecondaryButton(
-                      label: actions.isEmpty ? 'Close' : 'Cancel',
+                      label: dismiss ?? (actions.isEmpty ? 'Close' : 'Cancel'),
                       shortcut: 'esc',
                       onPressed: () => Navigator.of(context).pop(cancelled),
                     ),

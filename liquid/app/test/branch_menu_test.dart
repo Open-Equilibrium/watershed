@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/agent/shell.dart';
 import 'package:liquid/src/agent/sidebar.dart';
+import 'package:liquid/src/rust/api/events.dart';
 import 'package:liquid/src/rust/api/git.dart';
 import 'package:liquid/src/rust/api/history.dart';
 import 'package:liquid/src/session/session_state.dart';
@@ -109,19 +110,26 @@ void main() {
     tester,
   ) async {
     await show(tester);
-    backend.branches = BridgeBranches(
-      branches: [
-        branchOf('main', current: true, stashed: true),
-        branchOf('feature/token-bucket'),
+    backend.stashed = BridgeStash(
+      createdMs: DateTime(2026, 11, 1, 10, 12).millisecondsSinceEpoch,
+      files: [
+        BridgeFileChange(
+          path: 'a.txt',
+          shown: 'a.txt',
+          status: BridgeChangeStatus.modified,
+          added: 1,
+          removed: 0,
+        ),
       ],
-      running: const [],
     );
+    await state.git.refresh();
     await openMenu(tester);
     await tester.tap(find.text('feature/token-bucket'));
     await tester.pumpAndSettle();
     expect(
       find.text(
-        '⚠ main already has stashed changes. Leaving these changes replaces them.',
+        '⚠ main already has stashed changes from 10:12 (1 file). Leaving these changes '
+        'replaces them.',
       ),
       findsOneWidget,
     );

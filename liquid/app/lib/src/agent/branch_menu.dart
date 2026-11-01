@@ -55,7 +55,12 @@ class BranchChip extends StatelessWidget {
         return Semantics(
           key: const Key('branch-chip'),
           button: true,
-          label: 'Branch $name',
+          label: [
+            'Branch $name',
+            if (status.ahead > 0) '${status.ahead} ahead',
+            if (status.behind > 0) '${status.behind} behind',
+            if (status.branch != null && status.upstream == null) 'no upstream',
+          ].join(', '),
           excludeSemantics: true,
           child: InkWell(
             borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
@@ -138,11 +143,8 @@ Future<void> showBranchMenu(BuildContext context, SessionState state) async {
   final chosen = await showDialog<_Chosen>(
     context: context,
     barrierColor: Colors.transparent,
-    builder: (context) => _BranchMenu(
-      branches: branches,
-      changed: git.status.value?.changed ?? 0,
-      current: git.status.value?.branch,
-    ),
+    builder: (context) =>
+        _BranchMenu(branches: branches, status: git.status.value),
   );
   if (!context.mounted) return;
   switch (chosen) {
@@ -163,7 +165,7 @@ Future<void> _switch(
   final git = state.git;
   final left = git.status.value?.branch;
   final changed = git.status.value?.changed ?? 0;
-  final stashed = branches.branches.any((it) => it.current && it.stashed);
+  final stashed = git.stash.value;
   var leave = false;
   // On no branch the changes can only come along.
   if (changed > 0 && left != null) {
@@ -195,15 +197,13 @@ Future<void> _switch(
 /// The searchable list of local and remote branches, with "Create branch" for a new name
 /// (approved Git mockups).
 class _BranchMenu extends StatefulWidget {
-  const _BranchMenu({
-    required this.branches,
-    required this.changed,
-    required this.current,
-  });
+  const _BranchMenu({required this.branches, required this.status});
 
   final BridgeBranches branches;
-  final int changed;
-  final String? current;
+  final BridgeGitStatus? status;
+
+  int get changed => status?.changed ?? 0;
+  String? get current => status?.branch;
 
   @override
   State<_BranchMenu> createState() => _BranchMenuState();
@@ -311,7 +311,12 @@ class _BranchMenuState extends State<_BranchMenu> {
       name: Text(branch.shown),
       detail: [
         if (branch.stashed) 'stashed changes',
-        branch.current ? 'now' : formatAgo(branch.committedMs, now),
+        if (branch.current) ...[
+          if ((widget.status?.ahead ?? 0) > 0) '↑${widget.status!.ahead}',
+          if ((widget.status?.behind ?? 0) > 0) '↓${widget.status!.behind}',
+          'now',
+        ] else
+          formatAgo(branch.committedMs, now),
       ].join(' · '),
       onTap: refused ? null : () => choose(branch),
     );
@@ -471,8 +476,8 @@ class _SwitchDialog extends StatefulWidget {
   final String left;
   final String target;
 
-  /// Whether the branch left already has stashed changes, which leaving replaces.
-  final bool stashed;
+  /// The stashed changes of the branch left, which leaving replaces.
+  final BridgeStash? stashed;
 
   @override
   State<_SwitchDialog> createState() => _SwitchDialogState();
@@ -501,7 +506,7 @@ class _SwitchDialogState extends State<_SwitchDialog> {
       },
       actions: [
         PrimaryButton(
-          label: _leave && widget.stashed
+          label: _leave && widget.stashed != null
               ? 'Replace stash and switch'
               : 'Switch branch',
           shortcut: '⏎',
@@ -518,9 +523,11 @@ class _SwitchDialogState extends State<_SwitchDialog> {
           'Leave my changes on ${widget.left}',
           'Your in-progress work will be stashed on this branch for you to return to later',
         ),
-        if (_leave && widget.stashed)
+        if (widget.stashed case final stashed? when _leave)
           WarningNotice(
-            '⚠ ${widget.left} already has stashed changes. Leaving these changes replaces them.',
+            '⚠ ${widget.left} already has stashed changes from '
+            '${formatClockMs(stashed.createdMs)} (${stashed.files.length == 1 ? '1 file' : '${stashed.files.length} files'}). '
+            'Leaving these changes replaces them.',
           ),
         choice(
           false,
@@ -619,7 +626,7 @@ class _RefusedDialog extends StatelessWidget {
   final String target;
   final List<String> files;
   final String? left;
-  final bool stashed;
+  final BridgeStash? stashed;
 
   @override
   Widget build(BuildContext context) {
@@ -628,13 +635,15 @@ class _RefusedDialog extends StatelessWidget {
     void leave() => Navigator.of(context).pop(true);
     return ActionDialog(
       title: 'Could not switch to $target',
+      // Nothing changed, so it closes rather than cancels.
+      dismiss: 'Close',
       bindings: {
         if (left != null) const Keys(LogicalKeyboardKey.enter).activator: leave,
       },
       actions: [
         if (left != null)
           PrimaryButton(
-            label: stashed
+            label: stashed != null
                 ? 'Replace the stash on $left and switch'
                 : 'Leave them on $left and switch',
             shortcut: '⏎',

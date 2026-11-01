@@ -137,7 +137,7 @@ class GitState {
         final name = now?.branch ?? branch.shown;
         final changes = left?.changed ?? 0;
         return leaveChanges && changes > 0 && left?.branch != null
-            ? 'Switched to $name. Your $changes changes are stashed on ${left!.branch}.'
+            ? 'Switched to $name. Your ${changes == 1 ? '1 change is' : '$changes changes are'} stashed on ${left!.branch}.'
             : 'Switched to $name.';
       },
     );
