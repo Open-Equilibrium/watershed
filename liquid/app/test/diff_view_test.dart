@@ -865,6 +865,13 @@ void main() {
             modifiedMs: edited,
           ),
           revertedFile('src/limits.json', BridgeChangeStatus.deleted),
+          const BridgeRevertFile(
+            path: 'tmp/',
+            shown: 'tmp/',
+            status: BridgeChangeStatus.deleted,
+            edited: false,
+            ignored: true,
+          ),
         ],
       );
 
@@ -882,7 +889,7 @@ void main() {
       expect(backend.calls, contains('revert plan T2'));
       expect(find.text('Revert to before turn 3?'), findsOneWidget);
       expect(
-        find.text('These 3 files revert to how they were when turn 3 started.'),
+        find.text('These 4 files revert to how they were when turn 3 started.'),
         findsOneWidget,
       );
       final back = 'back to ${formatClockMs(started)}';
@@ -892,6 +899,7 @@ void main() {
         findsOneWidget,
       );
       expect(find.text('new since then, deleted'), findsOneWidget);
+      expect(find.text('ignored by Git, in the way, deleted'), findsOneWidget);
       expect(
         find.text(
           'Commits, the branch main and files Git ignores stay as they are.',
@@ -955,6 +963,23 @@ void main() {
         ),
         findsOneWidget,
       );
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+
+      backend.revertPlanned = revertPlanOf(
+        running: [
+          const BridgeRunningAgent(own: false, title: 'Fix flaky sync test'),
+          const BridgeRunningAgent(own: false, title: null),
+        ],
+      );
+      await open(tester);
+      expect(
+        find.text(
+          '“Fix flaky sync test” and 1 more are running in this checkout. Stop them or wait '
+          'until they finish, then revert the files.',
+        ),
+        findsOneWidget,
+      );
     });
 
     testWidgets('reports a revert that failed', (tester) async {
@@ -966,7 +991,7 @@ void main() {
       expect(backend.calls, contains('revert T2'));
       expect(
         state.notice.value?.text,
-        'The files were not reverted: git failed: disk full',
+        'Could not revert to before this turn: git failed: disk full',
       );
     });
 

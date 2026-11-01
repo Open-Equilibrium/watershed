@@ -823,6 +823,7 @@ IFS= read -r line || exit 0"#
             status: BridgeChangeStatus::Modified,
             edited: false,
             modified_ms: plan.files[0].modified_ms,
+            ignored: false,
         }]
     );
     assert!(plan.files[0].modified_ms.is_some());
@@ -850,6 +851,38 @@ IFS= read -r line || exit 0"#
         "old\n"
     );
     call(other.close());
+    assert!(call(session.shutdown()));
+    let _ = std::fs::remove_dir_all(&repo);
+}
+
+#[test]
+fn says_when_the_files_were_reverted_but_the_session_did_not_branch() {
+    let repo = repository("revert-unbranched");
+    let script = [
+        checkpoint("q1", "T1", "start", r#"\"ok\":true"#),
+        "printf 'new\\n' > a.txt\n".to_owned(),
+        checkpoint("q2", "T1", "end", r#"\"files\":1"#),
+        "touch .git/checkpointed\n".to_owned(),
+        no_session_file(2),
+        entries(3, TURN),
+        gate(4),
+        r#"IFS= read -r line
+printf '%s\n' '{"id":"5","type":"response","command":"prompt","success":false,"error":"Agent is busy"}'
+IFS= read -r line || exit 0"#
+            .to_owned(),
+    ]
+    .concat();
+    let session = launch(gated(&script), repo.display().to_string()).expect("agent starts");
+    reached(&repo.join(".git/checkpointed"));
+    let reverted = session.revert_to_turn("T1".to_owned());
+    assert!(
+        matches!(&reverted, Err(error) if error.starts_with("the files were reverted, but the session could not continue")),
+        "{reverted:?}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(repo.join("a.txt")).expect("a"),
+        "old\n"
+    );
     assert!(call(session.shutdown()));
     let _ = std::fs::remove_dir_all(&repo);
 }

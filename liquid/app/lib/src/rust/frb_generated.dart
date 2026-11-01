@@ -1860,14 +1860,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeRevertFile dco_decode_bridge_revert_file(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 5)
-      throw Exception('unexpected arr length: expect 5 but see ${arr.length}');
+    if (arr.length != 6)
+      throw Exception('unexpected arr length: expect 6 but see ${arr.length}');
     return BridgeRevertFile(
       path: dco_decode_String(arr[0]),
       shown: dco_decode_String(arr[1]),
       status: dco_decode_bridge_change_status(arr[2]),
       edited: dco_decode_bool(arr[3]),
       modifiedMs: dco_decode_opt_box_autoadd_i_64(arr[4]),
+      ignored: dco_decode_bool(arr[5]),
     );
   }
 
@@ -2895,12 +2896,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_status = sse_decode_bridge_change_status(deserializer);
     var var_edited = sse_decode_bool(deserializer);
     var var_modifiedMs = sse_decode_opt_box_autoadd_i_64(deserializer);
+    var var_ignored = sse_decode_bool(deserializer);
     return BridgeRevertFile(
       path: var_path,
       shown: var_shown,
       status: var_status,
       edited: var_edited,
       modifiedMs: var_modifiedMs,
+      ignored: var_ignored,
     );
   }
 
@@ -4131,6 +4134,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_bridge_change_status(self.status, serializer);
     sse_encode_bool(self.edited, serializer);
     sse_encode_opt_box_autoadd_i_64(self.modifiedMs, serializer);
+    sse_encode_bool(self.ignored, serializer);
   }
 
   @protected
@@ -4866,7 +4870,8 @@ class AgentSessionImpl extends RustOpaque implements AgentSession {
 
   /// Reverts the files to before turn `turn` of the current branch and continues the session
   /// from before its prompt, which returns to the input area; the undone turns keep their
-  /// branch. Refused while an agent runs in the checkout.
+  /// branch. Refused while an agent runs in the checkout. Each error says whether the files
+  /// changed.
   Future<void> revertToTurn({required String turn}) => RustLib.instance.api
       .crateApiSessionAgentSessionRevertToTurn(that: this, turn: turn);
 

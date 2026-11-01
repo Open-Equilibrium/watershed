@@ -282,7 +282,7 @@ pub struct BridgeRevertPlan {
     pub files: Vec<BridgeRevertFile>,
     /// The agents running in the checkout, which refuse the revert.
     pub running: Vec<BridgeRunningAgent>,
-    /// The branch checked out, or none when HEAD names a commit.
+    /// The branch checked out, as Liquid shows it, or none when HEAD names a commit.
     pub branch: Option<String>,
 }
 
@@ -300,6 +300,9 @@ pub struct BridgeRevertFile {
     pub edited: bool,
     /// Unix milliseconds when it was last written, if it exists.
     pub modified_ms: Option<i64>,
+    /// Whether Git ignores it and the revert deletes it only because a restored file needs its
+    /// place; such a folder's path ends in `/`.
+    pub ignored: bool,
 }
 
 /// An agent that runs a turn in the checkout.

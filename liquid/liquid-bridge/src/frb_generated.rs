@@ -2181,12 +2181,14 @@ impl SseDecode for crate::api::history::BridgeRevertFile {
         let mut var_status = <crate::api::events::BridgeChangeStatus>::sse_decode(deserializer);
         let mut var_edited = <bool>::sse_decode(deserializer);
         let mut var_modifiedMs = <Option<i64>>::sse_decode(deserializer);
+        let mut var_ignored = <bool>::sse_decode(deserializer);
         return crate::api::history::BridgeRevertFile {
             path: var_path,
             shown: var_shown,
             status: var_status,
             edited: var_edited,
             modified_ms: var_modifiedMs,
+            ignored: var_ignored,
         };
     }
 }
@@ -3741,6 +3743,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::history::BridgeRevertFile {
             self.status.into_into_dart().into_dart(),
             self.edited.into_into_dart().into_dart(),
             self.modified_ms.into_into_dart().into_dart(),
+            self.ignored.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -4537,6 +4540,7 @@ impl SseEncode for crate::api::history::BridgeRevertFile {
         <crate::api::events::BridgeChangeStatus>::sse_encode(self.status, serializer);
         <bool>::sse_encode(self.edited, serializer);
         <Option<i64>>::sse_encode(self.modified_ms, serializer);
+        <bool>::sse_encode(self.ignored, serializer);
     }
 }
 

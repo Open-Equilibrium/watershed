@@ -549,22 +549,28 @@ class SessionState {
     try {
       await reverting;
     } on Object catch (error) {
-      notify(BridgeLevel.error, 'The files were not reverted: $error');
+      // The error says whether the files changed; the Diff tab shows them either way.
+      notify(BridgeLevel.error, 'Could not revert to before this turn: $error');
+      await readChanges();
       return false;
     } finally {
       _branching = null;
     }
-    stored.value++;
-    await loadChat();
+    await _branched();
     await readChanges();
     return true;
   }
 
   Future<bool> _branch(String entry) async {
     await _backend.branch(entry);
+    await _branched();
+    return true;
+  }
+
+  /// Shows the branch the session now continues.
+  Future<void> _branched() async {
     stored.value++;
     await loadChat();
-    return true;
   }
 
   /// Rebuilds the chat from the session's current branch, as the model sees it, and marks

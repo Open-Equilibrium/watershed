@@ -482,6 +482,7 @@ BridgeRevertFile revertedFile(
   status: status,
   edited: edited,
   modifiedMs: modifiedMs,
+  ignored: false,
 );
 
 /// A turn of the current branch; it ended unless `ended` says otherwise.

@@ -336,12 +336,17 @@ class BridgeRevertFile {
   /// Unix milliseconds when it was last written, if it exists.
   final PlatformInt64? modifiedMs;
 
+  /// Whether Git ignores it and the revert deletes it only because a restored file needs its
+  /// place; such a folder's path ends in `/`.
+  final bool ignored;
+
   const BridgeRevertFile({
     required this.path,
     required this.shown,
     required this.status,
     required this.edited,
     this.modifiedMs,
+    required this.ignored,
   });
 
   @override
@@ -350,7 +355,8 @@ class BridgeRevertFile {
       shown.hashCode ^
       status.hashCode ^
       edited.hashCode ^
-      modifiedMs.hashCode;
+      modifiedMs.hashCode ^
+      ignored.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -361,7 +367,8 @@ class BridgeRevertFile {
           shown == other.shown &&
           status == other.status &&
           edited == other.edited &&
-          modifiedMs == other.modifiedMs;
+          modifiedMs == other.modifiedMs &&
+          ignored == other.ignored;
 }
 
 /// What reverting the files to before a turn would change.
@@ -375,7 +382,7 @@ class BridgeRevertPlan {
   /// The agents running in the checkout, which refuse the revert.
   final List<BridgeRunningAgent> running;
 
-  /// The branch checked out, or none when HEAD names a commit.
+  /// The branch checked out, as Liquid shows it, or none when HEAD names a commit.
   final String? branch;
 
   const BridgeRevertPlan({

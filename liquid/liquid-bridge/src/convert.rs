@@ -261,6 +261,7 @@ impl From<RevertFile> for BridgeRevertFile {
             status: file.status.into(),
             edited: file.edited,
             modified_ms: file.modified_ms.map(int),
+            ignored: file.ignored,
         }
     }
 }

@@ -252,13 +252,20 @@ void main() {
       expect(state.turns.value.map((turn) => turn.id), ['T1']);
       expect(state.shown.value?.to.id, 'T1');
 
-      backend.revertError = 'an agent runs in this checkout: s2';
+      // The files changed, but the session stayed on its branch: the Diff tab still rereads.
+      backend
+        ..revertError =
+            'the files were reverted, but the session could not continue from before the '
+            'turn: the agent has exited'
+        ..turnList = [turnOf('T0', number: 1)];
       expect(await state.revert(turnOf('T1', number: 1)), isFalse);
       expect(
         state.notice.value?.text,
-        'The files were not reverted: an agent runs in this checkout: s2',
+        'Could not revert to before this turn: the files were reverted, but the session could '
+        'not continue from before the turn: the agent has exited',
       );
       expect(changes, [1]);
+      expect(state.turns.value.map((turn) => turn.id), ['T0']);
     },
   );
 

@@ -6,6 +6,7 @@ import '../format.dart';
 import '../rust/api/events.dart';
 import '../rust/api/history.dart';
 import '../session/session_state.dart';
+import '../shortcuts/keymap.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 
@@ -68,7 +69,7 @@ class _RevertDialog extends StatelessWidget {
     final branch = plan.branch;
     return CallbackShortcuts(
       bindings: {
-        if (allowed) const SingleActivator(LogicalKeyboardKey.enter): revert,
+        if (allowed) const Keys(LogicalKeyboardKey.enter).activator: revert,
       },
       child: Focus(
         autofocus: true,
@@ -96,12 +97,25 @@ class _RevertDialog extends StatelessWidget {
                   if (shown && plan.running.isNotEmpty)
                     _Running(running: plan.running)
                   else if (shown) ...[
-                    Text(
-                      branch == null
-                          ? 'Commits, the checked-out commit and files Git ignores stay as '
-                                'they are.'
-                          : 'Commits, the branch $branch and files Git ignores stay as they '
-                                'are.',
+                    Text.rich(
+                      TextSpan(
+                        children: [
+                          if (branch == null)
+                            const TextSpan(
+                              text: 'Commits, the checked-out commit',
+                            )
+                          else ...[
+                            const TextSpan(text: 'Commits, the branch '),
+                            TextSpan(
+                              text: branch,
+                              style: monoStyle(context, color: ws.text),
+                            ),
+                          ],
+                          const TextSpan(
+                            text: ' and files Git ignores stay as they are.',
+                          ),
+                        ],
+                      ),
                       style: muted,
                     ),
                     Text(
@@ -162,7 +176,9 @@ class _Files extends StatelessWidget {
         BridgeChangeStatus.deleted => (
           'D',
           ws.danger,
-          'new since then, deleted',
+          file.ignored
+              ? 'ignored by Git, in the way, deleted'
+              : 'new since then, deleted',
         ),
       };
       final edit = switch ((file.edited, file.modifiedMs)) {
@@ -237,13 +253,18 @@ class _Running extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ws = context.ws;
-    const after = 'Stop it or wait until it finishes, then revert the files.';
     final first = running.first;
-    final who = switch ((first.own, first.title)) {
-      (true, _) => 'This session’s agent is running.',
-      (false, final title?) => '“$title” is running in this checkout.',
-      (false, null) => 'Another agent session is running in this checkout.',
+    final name = switch ((first.own, first.title)) {
+      (true, _) => 'This session’s agent',
+      (false, final title?) => '“$title”',
+      (false, null) => 'Another agent session',
     };
+    final more = running.length - 1;
+    final text = more == 0
+        ? '$name is running${first.own ? '' : ' in this checkout'}. Stop it or wait until '
+              'it finishes, then revert the files.'
+        : '$name and $more more are running in this checkout. Stop them or wait until they '
+              'finish, then revert the files.';
     return Container(
       padding: const EdgeInsets.symmetric(
         horizontal: WsMetrics.space4,
@@ -254,7 +275,7 @@ class _Running extends StatelessWidget {
         borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
       ),
       child: Text(
-        '$who $after',
+        text,
         style: TextStyle(color: ws.warning, fontSize: WsMetrics.fsCompact),
       ),
     );
