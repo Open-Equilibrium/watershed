@@ -1163,7 +1163,9 @@ class _TurnHeader extends StatelessWidget {
                           (status?.changed ?? 0) == 0
                           ? PrimaryButton(
                               label: 'Restore',
-                              onPressed: onRestore,
+                              onPressed: status?.branch == branch
+                                  ? onRestore
+                                  : null,
                             )
                           : const Tooltip(
                               message:

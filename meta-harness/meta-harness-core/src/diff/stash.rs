@@ -168,7 +168,14 @@ impl WorkingTree {
     /// part.
     pub async fn restore_stash(&self, id: &str) -> Result<(), DiffError> {
         let _stash = self.checkout().stash_alone().await?;
-        self.liquid_stash(id).await?;
+        // A displayed stash can outlive an external branch switch before the next UI read.
+        if !self
+            .stash_entry()
+            .await?
+            .is_some_and(|entry| entry.id == id)
+        {
+            return Err(DiffError::NoStash);
+        }
         // As GitHub Desktop, only into a checkout without changes: Git restores a stash only in
         // part when one of its files changed meanwhile, and keeps it.
         let changed = self.status().await?.changed;

@@ -546,6 +546,40 @@ fn leaving_changes_stashes_them_on_the_branch_and_restoring_brings_them_back() {
 }
 
 #[test]
+fn restoring_a_stash_requires_its_original_branch() {
+    run(async {
+        let repo = Repo::new("stash-original-branch");
+        let main = repo.git(&["branch", "--show-current"]).trim().to_owned();
+        repo.git(&["branch", "other"]);
+        repo.write("a.txt", "stashed\n");
+        let checkpoints = Checkpoints::new(repo.path());
+        checkpoints
+            .switch_branch(&local("other"), leave_on(&checkpoints).await)
+            .await
+            .expect("left");
+        let stash = repo.git(&["rev-parse", "refs/stash"]).trim().to_owned();
+        let index = std::fs::read(repo.path().join(".git/index")).expect("index");
+
+        let restored = checkpoints.restore_stash(&stash).await;
+
+        assert!(matches!(restored, Err(DiffError::NoStash)), "{restored:?}");
+        assert_eq!(read(&repo, "a.txt"), "old\n");
+        assert_eq!(repo.git(&["rev-parse", "refs/stash"]).trim(), stash);
+        assert_eq!(
+            std::fs::read(repo.path().join(".git/index")).expect("index"),
+            index
+        );
+        checkpoints
+            .switch_branch(&local(&main), Changes::Bring)
+            .await
+            .expect("back");
+        checkpoints.restore_stash(&stash).await.expect("restored");
+        assert_eq!(read(&repo, "a.txt"), "stashed\n");
+        assert_eq!(repo.git(&["stash", "list"]), "");
+    });
+}
+
+#[test]
 fn restoring_or_rolling_back_a_stash_preserves_the_saved_index() {
     run(async {
         for target in ["other", "missing"] {

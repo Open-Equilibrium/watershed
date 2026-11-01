@@ -1104,6 +1104,9 @@ void main() {
       await state.git.refresh();
       await tester.pumpAndSettle();
       expect(find.textContaining('Left on feature at 10:42'), findsOneWidget);
+      await tester.tap(find.text('Restore'));
+      await tester.pumpAndSettle();
+      expect(backend.calls, isNot(contains('restore stash s2')));
       await tester.tap(find.text('Discard…'));
       await tester.pumpAndSettle();
       expect(
