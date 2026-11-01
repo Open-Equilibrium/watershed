@@ -112,8 +112,9 @@ pub struct Checkpoints {
     /// Checkpoints are taken one after another; one waiting for its turn does not count its wait
     /// against the time limit.
     captures: tokio::sync::Mutex<()>,
-    /// Marks this session's agent as running in the checkout while a turn runs.
-    running: std::sync::Mutex<Option<Running>>,
+    /// Marks this session's agent as running in the checkout while a turn runs, with the
+    /// turn's id.
+    running: std::sync::Mutex<Option<(String, Running)>>,
     /// Whether a turn's start waits for a revert in the checkout.
     waiting: watch::Sender<bool>,
 }
@@ -183,7 +184,7 @@ impl Checkpoints {
             if *self.closed.borrow() {
                 return Err(DiffError::Closed);
             }
-            *slot = Some(running);
+            *slot = Some((checkpoint.turn.clone(), running));
         }
         let captured = async {
             let _turn = self
@@ -193,7 +194,14 @@ impl Checkpoints {
         }
         .await;
         if checkpoint.phase == Phase::End {
-            self.running.lock().expect("running lock").take();
+            // Only its own turn's mark: a later turn's start may already have replaced it.
+            let mut slot = self.running.lock().expect("running lock");
+            if slot
+                .as_ref()
+                .is_some_and(|(turn, _)| *turn == checkpoint.turn)
+            {
+                slot.take();
+            }
         }
         captured
     }

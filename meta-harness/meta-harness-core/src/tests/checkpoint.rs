@@ -1650,3 +1650,39 @@ fn a_revert_leaves_bare_repositories_alone_as_git_finds_them() {
         drop(source);
     });
 }
+
+#[test]
+fn a_turns_end_releases_only_its_own_turn() {
+    run(async {
+        let repo = Repo::new("revert-overlap");
+        let checkpoints = std::sync::Arc::new(Checkpoints::new(repo.path()));
+        turn(&checkpoints, "t0", || repo.write("a.txt", "new\n")).await;
+        checkpoints
+            .capture(&at("t1", Phase::Start))
+            .await
+            .expect("started");
+        // Turn t1's end waits for the capture in progress while turn t2 starts.
+        let held = checkpoints.hold().await;
+        let ending = tokio::spawn({
+            let checkpoints = checkpoints.clone();
+            async move { checkpoints.capture(&at("t1", Phase::End)).await }
+        });
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let starting = tokio::spawn({
+            let checkpoints = checkpoints.clone();
+            async move { checkpoints.capture(&at("t2", Phase::Start)).await }
+        });
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        drop(held);
+        ending.await.expect("joined").expect("ended");
+        starting.await.expect("joined").expect("started");
+        let other = Checkpoints::new(repo.path());
+        assert!(
+            matches!(
+                other.revert(&at("t0", Phase::Start)).await,
+                Err(DiffError::AgentRunning(_))
+            ),
+            "turn t2 still runs"
+        );
+    });
+}
