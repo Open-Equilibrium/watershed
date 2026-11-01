@@ -710,6 +710,46 @@ fn takes_the_checkpoints_the_extension_asks_for_without_asking_the_user() {
 }
 
 #[test]
+fn a_turn_that_waits_for_a_revert_says_so_in_the_status() {
+    run(async {
+        let project = git_project("checkpoint-waits");
+        // Another window reverts the checkout.
+        let reverting = crate::checkout::Checkout::new(project.join(".git/watershed"))
+            .alone()
+            .expect("nothing runs");
+        let script = [
+            r#"printf '%s\n' '{"type":"extension_ui_request","id":"c1","method":"input","title":"watershed.checkpoint {\"session\":\"s1\",\"turn\":\"t1\",\"phase\":\"start\"}","placeholder":""}'
+"#
+            .to_owned(),
+            expect_response(&[r#""id":"c1""#, r#"\"ok\":true"#]),
+        ]
+        .concat();
+        let command = AgentCommand {
+            program: "/bin/sh".into(),
+            args: vec!["-c".into(), script.into()],
+            extension: EXTENSION.into(),
+            session: None,
+            cwd: project.clone(),
+        };
+        let (_session, mut events) = Session::start(&command).expect("fake agent starts");
+        let status = |text: Option<&str>| {
+            SessionEvent::Agent(AgentEvent::StatusChanged {
+                key: "watershed.revert".to_owned(),
+                text: text.map(str::to_owned),
+            })
+        };
+        assert_eq!(
+            next(&mut events).await,
+            status(Some("Waiting for a revert in this checkout to finish"))
+        );
+        drop(reverting);
+        assert_eq!(next(&mut events).await, status(None));
+        assert_eq!(next(&mut events).await, exited(true));
+        let _ = std::fs::remove_dir_all(&project);
+    });
+}
+
+#[test]
 fn an_agent_that_exits_stops_the_checkpoint_it_asked_for() {
     run(async {
         let project = git_project("checkpoint-exit");

@@ -327,6 +327,11 @@ impl Session {
         let (captures, requests) = mpsc::channel(CAPTURE_BUFFER);
         tokio::spawn(capture(checkpoints.clone(), writer.clone(), requests));
         let ended = Arc::new(tokio::sync::Mutex::new(false));
+        tokio::spawn(report_waiting(
+            checkpoints.waiting(),
+            events.clone(),
+            ended.clone(),
+        ));
         let supervisor = Supervisor {
             events: events.clone(),
             ended: ended.clone(),
@@ -737,6 +742,27 @@ async fn capture(
         };
         let answer = json!({ "value": outcome.to_string() });
         if writer.send(ui_response(&request, answer)).await.is_err() {
+            break;
+        }
+    }
+}
+
+/// Shows in the status while a turn's start waits for a revert in the checkout, until the
+/// agent's exit was reported, which stays last.
+async fn report_waiting(
+    mut waiting: tokio::sync::watch::Receiver<bool>,
+    events: mpsc::Sender<SessionEvent>,
+    ended: Arc<tokio::sync::Mutex<bool>>,
+) {
+    while waiting.changed().await.is_ok() {
+        let text = (*waiting.borrow_and_update())
+            .then(|| "Waiting for a revert in this checkout to finish".to_owned());
+        let status = AgentEvent::StatusChanged {
+            key: "watershed.revert".to_owned(),
+            text,
+        };
+        let ended = ended.lock().await;
+        if *ended || events.send(SessionEvent::Agent(status)).await.is_err() {
             break;
         }
     }

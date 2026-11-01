@@ -53,15 +53,25 @@ impl Checkout {
         Self { dir }
     }
 
-    /// Marks `session`'s agent as running; while a revert holds the checkout, waits for it,
-    /// which its own time limits bound, so the turn never runs unmarked on files a revert
-    /// still writes.
-    pub(crate) async fn run(&self, session: &str) -> Result<Running, DiffError> {
+    /// Marks `session`'s agent as running; while a revert holds the checkout, says so through
+    /// `waits` and waits for it, which its own time limits bound, so the turn never runs
+    /// unmarked on files a revert still writes.
+    pub(crate) async fn run(
+        &self,
+        session: &str,
+        waits: impl FnOnce(),
+    ) -> Result<Running, DiffError> {
         let checkout = self.lock_file()?;
+        let mut waits = Some(waits);
         loop {
             match checkout.try_lock_shared() {
                 Ok(()) => break,
-                Err(TryLockError::WouldBlock) => tokio::time::sleep(RETRY).await,
+                Err(TryLockError::WouldBlock) => {
+                    if let Some(waits) = waits.take() {
+                        waits();
+                    }
+                    tokio::time::sleep(RETRY).await;
+                }
                 Err(TryLockError::Error(error)) => return Err(DiffError::Io(error)),
             }
         }

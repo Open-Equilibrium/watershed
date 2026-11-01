@@ -342,7 +342,8 @@ pub enum AgentEvent {
         /// The text.
         message: String,
     },
-    /// An agent extension set or cleared a status entry.
+    /// An agent extension, or the session while a turn waits for a revert, set or cleared a
+    /// status entry.
     StatusChanged {
         /// The extension's status key.
         key: String,

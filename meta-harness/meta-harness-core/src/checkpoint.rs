@@ -109,6 +109,8 @@ pub struct Checkpoints {
     captures: tokio::sync::Mutex<()>,
     /// Marks this session's agent as running in the checkout while a turn runs.
     running: std::sync::Mutex<Option<Running>>,
+    /// Whether a turn's start waits for a revert in the checkout.
+    waiting: watch::Sender<bool>,
 }
 
 #[derive(Debug, Clone)]
@@ -134,7 +136,13 @@ impl Checkpoints {
             closed: watch::Sender::new(false),
             captures: tokio::sync::Mutex::new(()),
             running: std::sync::Mutex::new(None),
+            waiting: watch::Sender::new(false),
         }
+    }
+
+    /// Whether a turn's start waits for a revert in the checkout, which can take a while.
+    pub fn waiting(&self) -> watch::Receiver<bool> {
+        self.waiting.subscribe()
     }
 
     /// Whether the project is in a Git working tree, so it can have checkpoints.
@@ -157,8 +165,12 @@ impl Checkpoints {
             // new one holds.
             self.running.lock().expect("running lock").take();
             let running = self
-                .until_closed(tree.checkout().run(&checkpoint.session))
-                .await?;
+                .until_closed(tree.checkout().run(&checkpoint.session, || {
+                    self.waiting.send_replace(true);
+                }))
+                .await;
+            self.waiting.send_if_modified(std::mem::take);
+            let running = running?;
             let mut slot = self.running.lock().expect("running lock");
             // Closing empties the slot after telling it closed, so a mark that arrives later
             // drops here instead of outliving the session.
