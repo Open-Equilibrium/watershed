@@ -227,7 +227,7 @@ i.kw{font-style:normal;color:var(--ws-syn-kw)}i.st{font-style:normal;color:var(-
   </section>
   <section>
     <h3 class="sec">2 · A turn ends with its changes in the chat</h3>
-    <p class="sub">Below a turn's last reply, one quiet row counts the turn's files and lines and offers both actions, as T3 Code's "changed files" card offers "Open diff". It appears only once the turn's end checkpoint exists.</p>
+    <p class="sub">Below a turn's last reply, one quiet row counts the turn's files and lines and offers both actions, with T3 Code's "changed files" wording and its "Open diff". It appears only once the turn's end checkpoint exists.</p>
     <div class="stage"><div class="scaler"><div class="win" id="w-chat"></div></div></div>
   </section>
   <section>
@@ -310,7 +310,7 @@ frame('w-chat','chat',`<div class="chat"><div class="col">
 <div class="tool"><span class="ok">✓</span>edit <code>src/routes/login.ts</code><span class="r"><span class="add">+4</span><span class="del">−1</span></span></div>
 <div class="tool"><span class="ok">✓</span>edit <code>docs/api.md</code><span class="r"><span class="add">+3</span></span></div>
 <p class="prose">Blocked attempts now get 429 with the seconds until the window frees up, and docs/api.md describes the header.</p>
-<div class="turnfoot"><span>3 files changed</span><span><span class="add">+12</span> <span class="del">−1</span></span><span class="btn ghost">Show changes</span><span class="btn ghost">${I.undo}Revert files to before this turn…</span></div>
+<div class="turnfoot"><span>3 changed files</span><span><span class="add">+12</span> <span class="del">−1</span></span><span class="btn ghost">Open diff</span><span class="btn ghost">${I.undo}Revert files to before this turn…</span></div>
 </div></div>`,560,{keys:'⌘1–3 tabs · ⌘↑↓ sessions'});
 
 const files=`<div class="flist"><div class="frow"><span class="st M">M</span><code>docs/api.md</code><span class="r">back to 10:56</span></div><div class="frow"><span class="st M">M</span><code>src/middleware/rateLimit.ts</code><span class="r">back to 10:56</span></div><div class="frow"><span class="st M">M</span><code>src/routes/login.ts</code><span class="r">back to 10:56 · also your edit at 11:02</span></div><div class="frow"><span class="st D">D</span><code>src/limits.json</code><span class="r">new since then, deleted</span></div></div>`;
