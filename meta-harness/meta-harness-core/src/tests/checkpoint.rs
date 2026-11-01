@@ -1385,3 +1385,62 @@ fn a_revert_that_git_stopped_midway_says_the_files_may_be_partly_reverted() {
         );
     });
 }
+
+#[test]
+fn a_returning_file_deletes_no_repository_in_its_place() {
+    run(async {
+        let repo = Repo::new("revert-repository-in-place");
+        repo.write(".gitignore", "kept/\n");
+        repo.git(&["add", ".gitignore"]);
+        repo.git(&["commit", "-q", "-m", "ignore"]);
+        for name in ["bare", "outer", "kept"] {
+            repo.write(name, "a file\n");
+        }
+        let checkpoints = Checkpoints::new(repo.path());
+        turn(&checkpoints, "t1", || {
+            let folder = |name: &str| {
+                std::fs::remove_file(repo.path().join(name)).expect("removed");
+                std::fs::create_dir_all(repo.path().join(name)).expect("folder");
+            };
+            // A repository without a commit where the file was.
+            folder("bare");
+            git_at(&repo.path().join("bare"), &["init", "-q"]);
+            repo.write("bare/work.txt", "work\n");
+            // A folder holding a repository with a commit.
+            folder("outer");
+            std::fs::create_dir_all(repo.path().join("outer/sub")).expect("folder");
+            git_at(&repo.path().join("outer/sub"), &["init", "-q"]);
+            repo.write("outer/sub/inner.txt", "inner\n");
+            git_at(&repo.path().join("outer/sub"), &["add", "."]);
+            git_at(
+                &repo.path().join("outer/sub"),
+                &["commit", "-q", "-m", "inner"],
+            );
+            // A repository with a commit that Git ignores.
+            folder("kept");
+            git_at(&repo.path().join("kept"), &["init", "-q"]);
+            repo.write("kept/k.txt", "k\n");
+            git_at(&repo.path().join("kept"), &["add", "."]);
+            git_at(&repo.path().join("kept"), &["commit", "-q", "-m", "k"]);
+            repo.write("a.txt", "new\n");
+        })
+        .await;
+        let plan = checkpoints
+            .revert_plan(&at("t1", Phase::Start), None)
+            .await
+            .expect("plan");
+        let paths: Vec<_> = plan.files.iter().map(|file| file.path.as_str()).collect();
+        assert_eq!(paths, ["a.txt"], "{plan:?}");
+        checkpoints
+            .revert(&at("t1", Phase::Start))
+            .await
+            .expect("reverted");
+        for kept in ["bare/.git", "bare/work.txt", "outer/sub/.git", "kept/.git"] {
+            assert!(repo.path().join(kept).exists(), "{kept} was deleted");
+        }
+        assert_eq!(
+            std::fs::read_to_string(repo.path().join("a.txt")).expect("a"),
+            "old\n"
+        );
+    });
+}

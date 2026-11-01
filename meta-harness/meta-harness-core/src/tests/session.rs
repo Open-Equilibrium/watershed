@@ -1686,3 +1686,19 @@ exit 0"#,
         );
     });
 }
+
+#[test]
+fn kept_checkpoints_keep_no_event_stream_open_after_the_exit() {
+    run(async {
+        let (session, mut events) = fake_agent("exit 0");
+        let checkpoints = session.checkpoints();
+        assert_eq!(next(&mut events).await, exited(true));
+        drop(session);
+        assert_eq!(
+            timeout(WAIT, events.recv()).await,
+            Ok(None),
+            "the event stream ends while the checkpoints are still held"
+        );
+        drop(checkpoints);
+    });
+}

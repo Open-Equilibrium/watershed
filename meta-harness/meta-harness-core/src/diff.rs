@@ -240,8 +240,9 @@ impl WorkingTree {
     }
 
     /// The changes from `from` to `to` a revert to `to` makes, and the repositories it leaves
-    /// alone. It changes only files below the working folder and nothing at or below a
-    /// submodule or nested repository, whether either state records it or it is on disk now.
+    /// alone. It changes only files below the working folder, and no path inside, at or above
+    /// a submodule or nested repository that either state records or that is on disk now:
+    /// `git restore` deletes what is at a path it writes, a folder with all it holds.
     pub async fn revertable(
         &self,
         from: &Snapshot,
@@ -259,23 +260,22 @@ impl WorkingTree {
                 changes.push(change);
             }
         }
-        let mut below = Vec::new();
-        changes.retain(
-            |change| match self.repository_above(&change.path, &repositories) {
-                Some(repository) => {
-                    below.push(repository);
-                    false
-                }
-                None => true,
-            },
-        );
-        repositories.extend(below);
-        Ok((changes, repositories))
+        let (mut reverted, mut left_alone) = (Vec::new(), Vec::new());
+        for change in changes {
+            match self.repository_near(&change.path, &repositories) {
+                Some(repository) => left_alone.push(repository),
+                None => reverted.push(change),
+            }
+        }
+        repositories.extend(left_alone);
+        Ok((reverted, repositories))
     }
 
-    /// The nearest folder above the repository path `path` that is a repository: one of `known`
-    /// or one with `.git` on disk.
-    fn repository_above(&self, path: &str, known: &BTreeSet<String>) -> Option<String> {
+    /// The path a revert must leave alone so it writes nothing into a repository near the
+    /// repository path `path`: the nearest folder above it that is one of `known` or has
+    /// `.git` on disk, or `path` itself when one of `known` or a `.git` on disk is at or below
+    /// it.
+    fn repository_near(&self, path: &str, known: &BTreeSet<String>) -> Option<String> {
         let mut folder = path;
         while let Some((parent, _)) = folder.rsplit_once('/') {
             folder = parent;
@@ -285,7 +285,11 @@ impl WorkingTree {
                 return Some(folder.to_owned());
             }
         }
-        None
+        let below = format!("{path}/");
+        let known_below = known
+            .iter()
+            .any(|repository| repository.starts_with(&below));
+        (known_below || holds_repository(&self.root.join(path))).then(|| path.to_owned())
     }
 
     /// What Git ignores in the place of files `changes` restores, which a revert deletes or
@@ -341,12 +345,19 @@ impl WorkingTree {
         let mut listing = Git::spawn(git_command(&self.root, &[], &args).stderr(Stdio::null()))?;
         let mut stdout = listing.child.stdout.take().expect("stdout is piped");
         let mut first = [0; 1];
-        let read = stdout
-            .read(&mut first)
-            .await
-            .map_err(|error| DiffError::Git(error.to_string()))?;
-        // Dropped unread, the listing ends with its process group.
-        Ok(read > 0)
+        let unreadable = |error: std::io::Error| DiffError::Git(error.to_string());
+        if stdout.read(&mut first).await.map_err(unreadable)? > 0 {
+            // Dropped unread, the listing ends with its process group.
+            return Ok(true);
+        }
+        // An empty listing counts only from a Git that succeeded.
+        if listing.wait().await.map_err(unreadable)?.success() {
+            Ok(false)
+        } else {
+            Err(DiffError::Git(format!(
+                "could not list the files Git ignores in {folder}"
+            )))
+        }
     }
 
     /// The branch checked out, or none when HEAD names a commit.
@@ -633,20 +644,51 @@ impl WorkingTree {
             args.extend(skipped.iter().map(String::as_str));
             git(&self.root, &env, &args).await?;
         }
-        // In parts, so no command line grows past the system's limit.
-        for part in forced.chunks(256) {
-            let paths: Vec<String> = part
-                .iter()
-                .map(|path| format!(":(top,literal){path}"))
-                .collect();
-            let mut args = vec!["add", "--force", "--"];
-            args.extend(paths.iter().map(String::as_str));
-            git(&self.root, &env, &args).await?;
+        if !forced.is_empty() {
+            self.add_forced(&env, forced).await?;
         }
         Ok(git(&self.root, &env, &["write-tree"])
             .await?
             .trim()
             .to_owned())
+    }
+
+    /// Adds the files at the repository paths `paths` although Git may ignore them, in one Git
+    /// that reads them from its input, so no command line grows past the system's limit.
+    async fn add_forced(
+        &self,
+        env: &[(&'static str, OsString)],
+        paths: &[String],
+    ) -> Result<(), DiffError> {
+        let args = [
+            "add",
+            "--force",
+            "--pathspec-from-file=-",
+            "--pathspec-file-nul",
+        ];
+        let mut command = git_command(&self.root, env, &args);
+        let mut adding = Git::spawn(
+            command
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null()),
+        )?;
+        let mut listed = Vec::new();
+        for path in paths {
+            listed.extend_from_slice(format!(":(top,literal){path}").as_bytes());
+            listed.push(0);
+        }
+        let failed = |error: std::io::Error| DiffError::Git(error.to_string());
+        let mut input = adding.child.stdin.take().expect("stdin is piped");
+        input.write_all(&listed).await.map_err(failed)?;
+        drop(input);
+        if adding.wait().await.map_err(failed)?.success() {
+            Ok(())
+        } else {
+            Err(DiffError::Git(
+                "could not read the reverted files".to_owned(),
+            ))
+        }
     }
 
     /// Pathspecs that leave out each untracked nested repository without a commit.
@@ -844,6 +886,26 @@ fn git_command(dir: &Path, env: &[(&str, OsString)], args: &[&str]) -> Command {
         .stderr(Stdio::piped())
         .kill_on_drop(true);
     command
+}
+
+/// Whether `.git` is anywhere at or below the folder at `dir`; links are not followed and
+/// the search ends at the first.
+fn holds_repository(dir: &Path) -> bool {
+    let mut folders = vec![dir.to_owned()];
+    while let Some(folder) = folders.pop() {
+        let Ok(entries) = std::fs::read_dir(&folder) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            if entry.file_name() == ".git" {
+                return true;
+            }
+            if entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+                folders.push(entry.path());
+            }
+        }
+    }
+    false
 }
 
 /// Each file's added and removed lines from `git diff --numstat -z`; a binary file counts none.

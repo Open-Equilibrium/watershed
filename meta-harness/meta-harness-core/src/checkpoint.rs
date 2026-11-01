@@ -91,8 +91,8 @@ pub struct RevertFile {
     /// When the file was last written, in Unix milliseconds, if it exists.
     pub modified_ms: Option<u64>,
     /// Whether the revert deletes or overwrites something Git ignores, only because a restored
-    /// file needs its place: a file already at a restored path, or a folder, whose path ends in
-    /// `/`, or file in the way of one.
+    /// file needs its place: a file already at a restored path, or a folder (its path ends in
+    /// `/`) or file in the way of one.
     pub ignored: bool,
 }
 
@@ -170,6 +170,7 @@ impl Checkpoints {
                     self.waiting.send_replace(true);
                 }))
                 .await;
+            // Back to not waiting, telling only if it waited.
             self.waiting.send_if_modified(std::mem::take);
             let running = running?;
             let mut slot = self.running.lock().expect("running lock");

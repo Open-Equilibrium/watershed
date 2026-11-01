@@ -329,7 +329,7 @@ impl Session {
         let ended = Arc::new(tokio::sync::Mutex::new(false));
         tokio::spawn(report_waiting(
             checkpoints.waiting(),
-            events.clone(),
+            events.downgrade(),
             ended.clone(),
         ));
         let supervisor = Supervisor {
@@ -748,13 +748,17 @@ async fn capture(
 }
 
 /// Shows in the status while a turn's start waits for a revert in the checkout, until the
-/// agent's exit was reported, which stays last.
+/// agent's exit was reported, which stays last. It holds the events weakly, so checkpoints
+/// kept after the session keep no event stream open.
 async fn report_waiting(
     mut waiting: tokio::sync::watch::Receiver<bool>,
-    events: mpsc::Sender<SessionEvent>,
+    events: mpsc::WeakSender<SessionEvent>,
     ended: Arc<tokio::sync::Mutex<bool>>,
 ) {
     while waiting.changed().await.is_ok() {
+        let Some(events) = events.upgrade() else {
+            break;
+        };
         let text = (*waiting.borrow_and_update())
             .then(|| "Waiting for a revert in this checkout to finish".to_owned());
         let status = AgentEvent::StatusChanged {
