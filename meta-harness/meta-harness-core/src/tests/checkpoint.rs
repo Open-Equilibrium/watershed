@@ -1607,3 +1607,46 @@ fn a_folder_holding_a_submodule_stays_whole_when_a_turn_replaces_it() {
             .expect("nothing promised is skipped");
     });
 }
+
+#[test]
+fn a_revert_leaves_bare_repositories_alone_as_git_finds_them() {
+    run(async {
+        let repo = Repo::new("revert-bare");
+        repo.write(".gitignore", "clone\n");
+        repo.write("clone", "a file\n");
+        repo.git(&["add", ".gitignore"]);
+        repo.git(&["add", "-f", "clone"]);
+        repo.git(&["commit", "-q", "-m", "files"]);
+        let source = Repo::new("revert-bare-source");
+        let checkpoints = Checkpoints::new(repo.path());
+        turn(&checkpoints, "t1", || {
+            // An ignored bare clone takes the file's place: no `.git`, only Git's own folders.
+            std::fs::remove_file(repo.path().join("clone")).expect("removed");
+            git_at(
+                repo.path(),
+                &[
+                    "clone",
+                    "-q",
+                    "--bare",
+                    &source.path().display().to_string(),
+                    "clone",
+                ],
+            );
+            repo.write("a.txt", "new\n");
+        })
+        .await;
+        let plan = checkpoints
+            .revert_plan(&at("t1", Phase::Start), None)
+            .await
+            .expect("plan");
+        let (reverted, kept) = split(&plan);
+        assert_eq!(reverted, ["a.txt"], "{plan:?}");
+        assert_eq!(kept, ["clone"], "{plan:?}");
+        checkpoints
+            .revert(&at("t1", Phase::Start))
+            .await
+            .expect("reverted");
+        assert!(repo.path().join("clone/HEAD").exists(), "its history stays");
+        drop(source);
+    });
+}

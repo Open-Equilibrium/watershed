@@ -293,9 +293,9 @@ impl WorkingTree {
     }
 
     /// The path a revert must leave alone so it writes nothing into a repository near the
-    /// repository path `path`: the outermost folder above it that is one of `known` or has
-    /// `.git` on disk, or `path` itself when one of `known` or a `.git` on disk is at or below
-    /// it. A repository either state records always counts. The disk is read as
+    /// repository path `path`: the outermost folder above it that is one of `known` or a
+    /// repository on disk, or `path` itself when one of `known` or a repository on disk is at
+    /// or below it. A repository either state records always counts. The disk is read as
     /// `git restore` writes it: from the top and without following links, so below a link or a
     /// file in place of a folder no repository on disk counts, as Git replaces it. Searches
     /// below `path` share `budget`, in entries read.
@@ -314,7 +314,7 @@ impl WorkingTree {
             if !std::fs::symlink_metadata(&on_disk).is_ok_and(|meta| meta.is_dir()) {
                 return None;
             }
-            if std::fs::symlink_metadata(on_disk.join(".git")).is_ok() {
+            if is_repository(&on_disk) {
                 return Some(folder.to_owned());
             }
         }
@@ -919,14 +919,25 @@ fn git_command(dir: &Path, env: &[(&str, OsString)], args: &[&str]) -> Command {
     command
 }
 
+/// Whether the folder `folder` is a repository as Git finds one: it holds `.git`, a folder or
+/// a file pointing elsewhere, which a file system without capitals also finds as `.GIT`; or
+/// it is itself a repository's Git folder, as a bare clone is, with `HEAD`, `objects` and
+/// `refs`. Links are not followed.
+fn is_repository(folder: &Path) -> bool {
+    let entry = |name: &str| std::fs::symlink_metadata(folder.join(name));
+    entry(".git").is_ok()
+        || (entry("HEAD").is_ok()
+            && entry("objects").is_ok_and(|meta| meta.is_dir())
+            && entry("refs").is_ok_and(|meta| meta.is_dir()))
+}
+
 /// A failed read of Git's output or write of its input.
 fn unreadable(error: std::io::Error) -> DiffError {
     DiffError::Git(error.to_string())
 }
 
-/// Whether a repository is at or below the folder at `dir`, found as Git finds one: by
-/// asking for `.git` in each folder, which a file system without capitals also finds as
-/// `.GIT`. Links are not followed. Each entry read costs one of `budget`; once it is spent the
+/// Whether a repository is at or below the folder at `dir`, found as Git finds one (see
+/// [`is_repository`]). Links are not followed. Each entry read costs one of `budget`; once it is spent the
 /// folder counts as holding one, so a revert leaves vast folders alone rather than read them
 /// all.
 pub(crate) fn holds_repository(dir: &Path, budget: &mut usize) -> bool {
@@ -935,7 +946,7 @@ pub(crate) fn holds_repository(dir: &Path, budget: &mut usize) -> bool {
     }
     let mut folders = vec![dir.to_owned()];
     while let Some(folder) = folders.pop() {
-        if std::fs::symlink_metadata(folder.join(".git")).is_ok() {
+        if is_repository(&folder) {
             return true;
         }
         let Ok(entries) = std::fs::read_dir(&folder) else {

@@ -686,8 +686,13 @@ case "$line" in *'"id":"{id}"'*'{answer}'*) ;; *) exit 9 ;; esac
 
 /// Answers a history read with `entries`, the first time after its `get_state`.
 fn entries(id: u32, entries: &str) -> String {
+    entries_at(id, entries, "c2")
+}
+
+/// Answers a history read with `entries` and the session's leaf at `leaf`.
+fn entries_at(id: u32, entries: &str, leaf: &str) -> String {
     format!(
-        "IFS= read -r line\ncase \"$line\" in *'\"type\":\"get_entries\"'*) ;; *) exit 9 ;; esac\nprintf '%s\\n' '{{\"id\":\"{id}\",\"type\":\"response\",\"command\":\"get_entries\",\"success\":true,\"data\":{{\"entries\":[{entries}],\"leafId\":\"c2\"}}}}'\n"
+        "IFS= read -r line\ncase \"$line\" in *'\"type\":\"get_entries\"'*) ;; *) exit 9 ;; esac\nprintf '%s\\n' '{{\"id\":\"{id}\",\"type\":\"response\",\"command\":\"get_entries\",\"success\":true,\"data\":{{\"entries\":[{entries}],\"leafId\":\"{leaf}\"}}}}'\n"
     )
 }
 
@@ -798,8 +803,11 @@ fn reverts_a_turns_files_and_continues_from_before_its_prompt() {
         r#"IFS= read -r line
 case "$line" in *'"message":"/watershed-branch u1"'*) ;; *) exit 9 ;; esac
 printf '%s\n' '{"id":"8","type":"response","command":"prompt","success":true,"data":{"disposition":"handled"}}'
-IFS= read -r line || exit 0"#
-            .to_owned(),
+"#
+        .to_owned(),
+        // pi now continues before the turn's prompt.
+        entries_at(9, "", "c1"),
+        "IFS= read -r line || exit 0".to_owned(),
     ]
     .concat();
     let session = launch(gated(&script), repo.display().to_string()).expect("agent starts");
@@ -852,6 +860,41 @@ IFS= read -r line || exit 0"#
         "old\n"
     );
     call(other.close());
+    assert!(call(session.shutdown()));
+    let _ = std::fs::remove_dir_all(&repo);
+}
+
+#[test]
+fn says_when_pi_handled_the_branch_but_stayed_on_the_turn() {
+    let repo = repository("revert-stayed");
+    let script = [
+        checkpoint("q1", "T1", "start", r#"\"ok\":true"#),
+        "printf 'new\\n' > a.txt\n".to_owned(),
+        checkpoint("q2", "T1", "end", r#"\"files\":1"#),
+        "touch .git/checkpointed\n".to_owned(),
+        no_session_file(2),
+        entries(3, TURN),
+        gate(4),
+        // An extension cancelled the navigation; pi still reports the command handled.
+        r#"IFS= read -r line
+printf '%s\n' '{"id":"5","type":"response","command":"prompt","success":true,"data":{"disposition":"handled"}}'
+"#
+        .to_owned(),
+        entries(6, ""),
+        "IFS= read -r line || exit 0".to_owned(),
+    ]
+    .concat();
+    let session = launch(gated(&script), repo.display().to_string()).expect("agent starts");
+    reached(&repo.join(".git/checkpointed"));
+    let reverted = session.revert_to_turn("T1".to_owned());
+    assert!(
+        matches!(&reverted, Err(error) if error.starts_with("the files were reverted, but the session could not continue")),
+        "{reverted:?}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(repo.join("a.txt")).expect("a"),
+        "old\n"
+    );
     assert!(call(session.shutdown()));
     let _ = std::fs::remove_dir_all(&repo);
 }

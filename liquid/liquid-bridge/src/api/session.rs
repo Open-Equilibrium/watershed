@@ -367,7 +367,17 @@ impl AgentSession {
                     .await
                     .map_err(describe)?;
                 drop(session);
-                pending.accepted().await.map_err(describe)
+                pending.accepted().await.map_err(describe)?;
+                // pi reports the command handled even when an extension cancelled the move, so
+                // the branch is read back: the turn's prompt must be off it.
+                let turns = branch_turns(&mut *self.session.lock().await).await?;
+                if turns
+                    .iter()
+                    .any(|turn| turn.prompt_entry.as_deref() == Some(prompt.as_str()))
+                {
+                    return Err("pi stayed on the turn's branch".to_owned());
+                }
+                Ok(())
             };
             continued.await.map_err(|error| {
                 format!(
