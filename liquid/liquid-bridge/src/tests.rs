@@ -1003,15 +1003,7 @@ fn deletes_a_stored_session_with_its_checkpoints_and_removes_all_checkpoints() {
         }
     }
     let script = [
-        state_with(2, &current),
-        state_with(3, &current),
-        state_with(4, &current),
-        state_with(5, &current),
-        state_with(6, &current),
-        state_with(7, &current),
-        state_with(8, &current),
-        state_with(9, &current),
-        state_with(10, &current),
+        (2..=10).map(|id| state_with(id, &current)).collect(),
         "IFS= read -r line || exit 0".to_owned(),
     ]
     .concat();

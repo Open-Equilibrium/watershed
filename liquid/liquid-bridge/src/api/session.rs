@@ -401,11 +401,10 @@ impl AgentSession {
     /// The sessions with checkpoints in the project's repository, sorted by their ids.
     pub fn checkpoint_sessions(&self) -> Result<Vec<BridgeCheckpointSession>, String> {
         RUNTIME.block_on(async {
-            let sessions = match self.checkpoints.sessions().await {
-                Ok(sessions) => sessions,
-                Err(DiffError::NotARepository) => return Ok(Vec::new()),
-                Err(error) => return Err(shown(error)),
-            };
+            let sessions = self.checkpoint_ids().await?;
+            if sessions.is_empty() {
+                return Ok(Vec::new());
+            }
             let dir = session_dir(&mut *self.session.lock().await).await;
             Ok(sessions
                 .into_iter()
@@ -442,15 +441,12 @@ impl AgentSession {
     /// outside Git or before pi stored the session.
     pub fn stored_turns(&self, path: String) -> Result<i64, String> {
         RUNTIME.block_on(async {
-            let Some(id) = self.stored_session(&path, true).await? else {
+            let Some(id) = self.stored_session(&path, Open::Counts).await? else {
                 return Ok(0);
             };
-            let sessions = match self.checkpoints.sessions().await {
-                Ok(sessions) => sessions,
-                Err(DiffError::NotARepository) => return Ok(0),
-                Err(error) => return Err(shown(error)),
-            };
-            let turns = sessions
+            let turns = self
+                .checkpoint_ids()
+                .await?
                 .into_iter()
                 .find(|(session, _)| *session == id)
                 .map_or(0, |(_, turns)| turns);
@@ -464,7 +460,7 @@ impl AgentSession {
     /// leaves nothing to delete.
     pub fn delete_session(&self, path: String) -> Result<(), String> {
         RUNTIME.block_on(async {
-            let Some(id) = self.stored_session(&path, false).await? else {
+            let Some(id) = self.stored_session(&path, Open::Refused).await? else {
                 return Ok(());
             };
             match self.checkpoints.remove_session(&id).await {
@@ -475,10 +471,19 @@ impl AgentSession {
         })
     }
 
+    /// The sessions with checkpoints, by id with their turns; none outside Git.
+    async fn checkpoint_ids(&self) -> Result<Vec<(String, usize)>, String> {
+        match self.checkpoints.sessions().await {
+            Ok(sessions) => Ok(sessions),
+            Err(DiffError::NotARepository) => Ok(Vec::new()),
+            Err(error) => Err(shown(error)),
+        }
+    }
+
     /// The id of the session stored in `path`, which must be a session file of this project in
-    /// pi's session directory, and with `open_too` false not the open session, whatever its
+    /// pi's session directory, and with [`Open::Refused`] not the open session, whatever its
     /// name; none when pi has not stored it yet. So Dart never names another file.
-    async fn stored_session(&self, path: &str, open_too: bool) -> Result<Option<String>, String> {
+    async fn stored_session(&self, path: &str, the_open: Open) -> Result<Option<String>, String> {
         let path = Path::new(path);
         let current = {
             let mut session = self.session.lock().await;
@@ -492,7 +497,7 @@ impl AgentSession {
             return Err("pi keeps this session in memory and stores no others".to_owned());
         };
         let not_open = || "the open session cannot be deleted from inside it".to_owned();
-        if path == current && !open_too {
+        if path == current && the_open == Open::Refused {
             return Err(not_open());
         }
         let refused = || "not a session file in pi's session directory".to_owned();
@@ -514,7 +519,9 @@ impl AgentSession {
         }
         let id =
             session_id(path, &self.cwd).ok_or_else(|| "no session of this project".to_owned())?;
-        if !open_too && session_id(&current, &self.cwd).as_deref() == Some(id.as_str()) {
+        if the_open == Open::Refused
+            && session_id(&current, &self.cwd).as_deref() == Some(id.as_str())
+        {
             return Err(not_open());
         }
         Ok(Some(id))
@@ -758,6 +765,15 @@ fn whitespace(hide: bool) -> Whitespace {
     } else {
         Whitespace::Shown
     }
+}
+
+/// Whether a stored session may be the open one.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Open {
+    /// It may, as when counting its turns.
+    Counts,
+    /// It may not, as when deleting it.
+    Refused,
 }
 
 /// The turns of the current branch.

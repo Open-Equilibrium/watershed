@@ -1,6 +1,7 @@
 //! Checkpoints of a session's Git project at each turn's start and end (ADR-0220, ADR-0234): commits
 //! under `refs/watershed/checkpoints/<session>/<turn>/<start|end>` that the Diff tab compares.
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::future::{Future, poll_fn};
 use std::path::{Path, PathBuf};
 use std::pin::pin;
@@ -10,7 +11,7 @@ use std::time::{Duration, Instant};
 
 use tokio::sync::watch;
 
-use crate::checkout::Running;
+use crate::checkout::{RETRY, Running};
 use crate::diff::{ChangeStatus, DiffError, FileChange, Whitespace, WorkingTree};
 
 /// Longest one Git command on the project may take; Git is then stopped with the programs it
@@ -323,8 +324,7 @@ impl Checkpoints {
     /// of turns, sorted by id.
     pub async fn sessions(&self) -> Result<Vec<(String, usize)>, DiffError> {
         let tree = self.tree().await?;
-        let mut turns: std::collections::BTreeMap<String, std::collections::BTreeSet<String>> =
-            Default::default();
+        let mut turns: BTreeMap<String, BTreeSet<String>> = Default::default();
         for reference in self.bounded(tree.references(REFS)).await? {
             let mut ids = reference.trim_start_matches(REFS).split('/');
             if let (Some(session), Some(turn)) = (ids.next(), ids.next()) {
@@ -357,7 +357,7 @@ impl Checkpoints {
             if waited.elapsed() > ENDING_WAIT {
                 return Err(refused());
             }
-            tokio::time::sleep(Duration::from_millis(20)).await;
+            tokio::time::sleep(RETRY).await;
         }
         let references = self
             .bounded(tree.references(&format!("{REFS}{session}/")))

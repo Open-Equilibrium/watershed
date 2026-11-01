@@ -11,7 +11,7 @@ use std::time::Duration;
 use crate::diff::DiffError;
 
 /// How often a turn's start retries while a revert holds the checkout.
-const RETRY: Duration = Duration::from_millis(20);
+pub(crate) const RETRY: Duration = Duration::from_millis(20);
 
 /// How often a turn's start tries for its session's name while a listing reads it.
 const NAME_TRIES: usize = 50;
