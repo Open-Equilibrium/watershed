@@ -1,6 +1,6 @@
 # Design guidelines
 
-These rules apply to every Watershed GUI. Every GUI change starts with HTML mockups that the maintainer approves; approved mockups live in [mockups/](mockups/liquid-agent-surface.html), [session flows](mockups/liquid-session-flows.html), [look](mockups/liquid-look.html) and [navigation](mockups/liquid-trajectory-navigation.html). Design tokens are canonical in [tokens.css](tokens.css); components use tokens, never raw values. Flutter reads them from `liquid/app/lib/src/theme/tokens.g.dart`, which `scripts/design_tokens.py` generates; a tooling test fails when it falls out of date.
+These rules apply to every Watershed GUI. Every GUI change starts with HTML mockups that the maintainer approves; approved mockups live in [mockups/](mockups/liquid-agent-surface.html), [session flows](mockups/liquid-session-flows.html), [look](mockups/liquid-look.html), [navigation](mockups/liquid-trajectory-navigation.html) and the Workspace's [Pages](mockups/liquid-workspace-pages.html), [Blocks](mockups/liquid-workspace-blocks.html) and [History](mockups/liquid-workspace-history.html). Design tokens are canonical in [tokens.css](tokens.css); components use tokens, never raw values. Flutter reads them from `liquid/app/lib/src/theme/tokens.g.dart`, which `scripts/design_tokens.py` generates; a tooling test fails when it falls out of date.
 
 References: Notion, AppFlowy, Microsoft Loop and T3 Code.
 
@@ -33,3 +33,4 @@ References: Notion, AppFlowy, Microsoft Loop and T3 Code.
 - Filters dim what does not match instead of hiding it; a range set with the timeline's handles limits the list to its steps.
 - A step's kind has one shape and color everywhere: the Kind tags, the timeline and the session tree.
 - A choice of one among a few options uses the shared segments as the [closeout mockups](mockups/liquid-closeout.html) draw them, framed and the same in every view; older mockups that draw it otherwise are superseded.
+- Automations, History, Page history and Settings open as a dialog over the current Page or Source, and closing it shows that Page again; the Settings page that replaced the main area in older mockups is superseded.

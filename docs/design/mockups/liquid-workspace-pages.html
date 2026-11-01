@@ -35,6 +35,21 @@ p.sub{margin:0 0 10px;font-size:13px;color:var(--muted-foreground);line-height:1
 .nav .r{margin-left:auto;font-size:12px;color:var(--ws-text-faint)}
 .nav .r.warn{color:var(--ws-warning)}
 .ico{width:18px;flex:none;display:inline-flex;justify-content:center;color:var(--ws-text-faint)}
+.em{font-size:15px;line-height:1}
+.picon{font-size:56px;line-height:64px;margin:4px 0 2px}
+.modal{position:absolute;left:50%;top:28px;bottom:28px;transform:translateX(-50%);z-index:4;background:var(--ws-canvas);border-radius:12px;box-shadow:var(--ws-shadow);display:flex;flex-direction:column;overflow:hidden}
+.mh{height:48px;flex:none;display:flex;align-items:center;gap:8px;padding:0 12px 0 20px;font-size:15px;font-weight:600;box-shadow:inset 0 -1px 0 var(--ws-border)}
+.mh .end{margin-left:auto;display:flex;gap:6px;align-items:center;font-weight:400}
+.mb{flex:1;display:flex;min-height:0}
+.pbfoot{display:flex;gap:16px;padding:8px 16px;font-size:12px;color:var(--ws-text-faint);box-shadow:inset 0 1px 0 var(--ws-border)}
+.pbfoot b{font-family:var(--ws-font-mono);color:var(--ws-text-muted);font-weight:500;margin-right:4px}
+.ipick{width:360px;padding:0;overflow:hidden}
+.ipick .tabs2{display:flex;gap:14px;padding:0 12px;height:38px;align-items:center;font-size:13px;color:var(--ws-text-muted);box-shadow:inset 0 -1px 0 var(--ws-border)}
+.ipick .tabs2 .on{color:var(--ws-text);font-weight:500;box-shadow:inset 0 -2px 0 var(--ws-text);height:100%;display:flex;align-items:center}
+.ipick .tabs2 .end{margin-left:auto}
+.egrid{display:grid;grid-template-columns:repeat(9,1fr);gap:2px;padding:4px 10px 10px;font-size:20px;text-align:center}
+.egrid span{height:34px;display:grid;place-items:center;border-radius:6px}
+.egrid span.on{background:var(--ws-hover)}
 .foot{margin-top:auto;padding-top:6px;box-shadow:inset 0 1px 0 var(--ws-border)}
 .main{flex:1;display:flex;flex-direction:column;min-width:0;position:relative}
 .head{height:44px;flex:none;display:flex;align-items:center;gap:8px;padding:0 16px 0 24px;font-size:14px}
@@ -159,11 +174,11 @@ h4.qh{margin:14px 0 6px;font-size:13px}
   </div>
   <section>
     <h1>Liquid Workspace: Pages</h1>
-    <p class="sub">Mockups for the M3a slice in <a href="../../../PLAN.md#m3a--local-workspace-foundation">PLAN.md</a>, for approval: the Explorer, a blank Page and its first actions, the built-in Blocks, Arrange mode, the PowerBar and a Source. They follow the <a href="../../concept/V-Spec_Liquid.html#experience">V-Spec</a>, ADR-0235 and <a href="../guidelines.md">guidelines.md</a>. Views, Connections and Automations are in the <a href="liquid-workspace-blocks.html">Blocks mockups</a>, History and Roles in the <a href="liquid-workspace-history.html">History mockups</a>.</p>
+    <p class="sub">Mockups for the M3a slice in <a href="../../../PLAN.md#m3a--local-workspace-foundation">PLAN.md</a>, approved by the maintainer on 2026-11-01: the Explorer, a blank Page and its first actions, the built-in Blocks, Arrange mode, the PowerBar and a Source. They follow the <a href="../../concept/V-Spec_Liquid.html#experience">V-Spec</a>, ADR-0235 and <a href="../guidelines.md">guidelines.md</a>. Page icons, Settings at the Explorer's foot and the PowerBar's prefixes were added on his request the same day and await review. Views, Connections and Automations are in the <a href="liquid-workspace-blocks.html">Blocks mockups</a>, History and Roles in the <a href="liquid-workspace-history.html">History mockups</a>.</p>
   </section>
   <section>
     <h3 class="sec">1 · Explorer and a Page</h3>
-    <p class="sub">The Explorer shows each area as a section, as Notion shows teamspaces. Pages nest; Sources sit among them as peers with a file or folder icon and open the same way. Agent sessions keep their approved place. Automations and History sit at the foot. A Page that has never been arranged is one vertical flow at the 740 px reading width.</p>
+    <p class="sub">The Explorer shows each area as a section, as Notion shows teamspaces. Pages nest; Sources sit among them as peers with a file or folder icon and open the same way. Agent sessions keep their approved place. Automations, History and Settings sit at the foot and open as dialogs over the current Page or Source; closing one shows it again. A Page that has never been arranged is one vertical flow at the 740 px reading width.</p>
     <div class="stage"><div class="scaler"><div class="win" id="w-page" data-w="1240"></div></div></div>
   </section>
   <section>
@@ -172,7 +187,12 @@ h4.qh{margin:14px 0 6px;font-size:13px}
     <div class="stage"><div class="scaler"><div class="win" id="w-blank" data-w="1240"></div></div></div>
   </section>
   <section>
-    <h3 class="sec">3 · The first action picks the Block</h3>
+    <h3 class="sec">3 · Page icons</h3>
+    <p class="sub">Every Page can have an icon, as in Notion and AppFlowy: "Add icon" above the title of a new Page, or a click on the icon, opens the picker with Emoji and Icons tabs and a search. The icon appears in the Explorer, the breadcrumb, the PowerBar, mentions and Views on other Pages; without one, the plain Page symbol shows. Sources keep their file or folder symbol.</p>
+    <div class="stage"><div class="scaler"><div class="win" id="w-icon" data-w="1240"></div></div></div>
+  </section>
+  <section>
+    <h3 class="sec">4 · The first action picks the Block</h3>
     <p class="sub">The same input always creates the same Block, so nobody has to choose a type first. Pasting a URL offers Notion's choice afterwards: keep the bookmark or turn it into an embed.</p>
     <div class="wrapx"><table class="maps">
       <tr><th>Action</th><th>Creates</th><th>Detail</th></tr>
@@ -188,59 +208,62 @@ h4.qh{margin:14px 0 6px;font-size:13px}
     </table></div>
   </section>
   <section>
-    <h3 class="sec">4 · The Block chooser</h3>
+    <h3 class="sec">5 · The Block chooser</h3>
     <p class="sub">Typing <code>/</code> opens the chooser where the caret is, as in Notion and AppFlowy. "Existing Block…" adds a View of a Block from any Page; templates fill an empty Page with a starting composition.</p>
     <div class="stage"><div class="scaler"><div class="win" id="w-slash" data-w="1240"></div></div></div>
   </section>
   <section>
-    <h3 class="sec">5 · Text shortcuts</h3>
+    <h3 class="sec">6 · Text shortcuts</h3>
     <p class="sub">Inside a Text Block, Notion's Markdown shortcuts format the current line: <code>#</code>, <code>##</code>, <code>###</code> headings, <code>-</code> bullets, <code>1.</code> numbers, <code>[]</code> to-dos, <code>&gt;</code> a toggle, <code>"</code> a quote, <code>---</code> a divider, <code>**bold**</code>, <code>*italic*</code>, <code>`code`</code> and <code>@</code> a link to a Page or Block. A toggle is formatting, not a Block. <code>```</code> is the one exception: it ends the Text Block and starts a Code Block.</p>
     <div class="stage"><div class="scaler"><div class="win" id="w-text" data-w="900"></div></div></div>
   </section>
   <section>
-    <h3 class="sec">6 · The built-in Blocks</h3>
+    <h3 class="sec">7 · The built-in Blocks</h3>
     <p class="sub">Seven Block types, each with a quiet header that names the Block, its View kind and its menu. The header shows only on hover or focus, except where a Block has a name.</p>
     <div class="gal" id="gal"></div>
   </section>
   <section>
-    <h3 class="sec">7 · Arrange mode</h3>
+    <h3 class="sec">8 · Arrange mode</h3>
     <p class="sub">"Arrange" in the Page header, or the PowerBar, switches the Page into Arrange mode. A 12-column grid appears; each Block becomes a tile that moves by its top handle and resizes by its right edge in whole columns, and the selected tile shows its width. Arrow keys move the selected tile, ⌥ and the arrow keys resize it. Done or esc ends it. An arranged Page uses the main column's width, up to 1120 px; text inside a tile keeps the reading width.</p>
     <div class="stage"><div class="scaler"><div class="win" id="w-arr" data-w="1240"></div></div></div>
   </section>
   <section>
-    <h3 class="sec">8 · The same Page in a narrow window and on a phone</h3>
+    <h3 class="sec">9 · The same Page in a narrow window and on a phone</h3>
     <p class="sub">The order of Blocks is the same on every device. In a narrow window, tiles narrower than half the grid become half width and the rest full width. On a phone every Block stacks in Page order and stays visible; a Database, a Whiteboard and Code show a preview that opens a focused full-screen surface. Arrange mode on a phone starts with a long press.</p>
     <div class="stage"><div class="scaler"><div class="win bare" id="w-resp" data-w="1240"></div></div></div>
   </section>
   <section>
-    <h3 class="sec">9 · PowerBar</h3>
-    <p class="sub">⌘K, or a tap of the Liquid key, opens the PowerBar over the current Page, as T3 Code's command palette works: one field, grouped results, and lists such as "Add Block" that open in place with a way back. It finds Pages, Sources and Blocks, creates Blocks and runs only actions the current Role allows.</p>
+    <h3 class="sec">10 · PowerBar</h3>
+    <p class="sub">⌘K, or a tap of the Liquid key, opens the PowerBar over the current Page, as T3 Code's command palette works: one field and grouped results. It understands the Page's own commands: <code>/</code> lists the Blocks to add to the current Page, <code>@</code> finds a Page, Block or Source to open, or with ⌘⏎ to mention at the caret, and <code>&gt;</code> lists only actions, as in T3 Code and VS Code. Without a prefix it searches everything. It runs only actions the current Role allows; the footer names the prefixes.</p>
     <div class="stage"><div class="scaler"><div class="win" id="w-pb1" data-w="1240"></div></div></div>
     <div class="stage" style="margin-top:16px"><div class="scaler"><div class="win bare" id="w-pb23" data-w="1320"></div></div></div>
+    <div class="stage" style="margin-top:16px"><div class="scaler"><div class="win bare" id="w-pb45" data-w="1320"></div></div></div>
   </section>
   <section>
-    <h3 class="sec">10 · A Source</h3>
+    <h3 class="sec">11 · A Source</h3>
     <p class="sub">A Source opens like a Page. In M3a it is a local file or folder that Liquid reads but never writes (ADR-0235); Liquid rereads it when the file changes. "Use in a Block…" creates a Connection, and "Used by" lists them. The area's <b>+</b> menu adds it.</p>
     <div class="stage"><div class="scaler"><div class="win" id="w-src" data-w="1240"></div></div></div>
   </section>
   <section>
-    <h3 class="sec">Decisions and points to approve</h3>
+    <h3 class="sec">Decisions</h3>
     <h4 class="qh">Decided (ADR-0235)</h4>
     <ol class="qs">
       <li>Areas are Explorer sections with nested Pages; Sources are peers in the same tree.</li>
       <li>M3a Sources are local files and folders, read-only.</li>
       <li>A pasted URL is a bookmark that fetches nothing; an embed loads only after a click.</li>
     </ol>
-    <h4 class="qh">Defaults in these mockups, approved with them</h4>
+    <h4 class="qh">Approved with these mockups (2026-11-01)</h4>
     <ol class="qs">
       <li>The deterministic mapping of section 3, including a dropped CSV becoming a Database copy and ``` starting a Code Block.</li>
       <li>Database Views are Table, Board and Calendar; the Code Block shows code and never runs it.</li>
       <li>Arrange mode uses 12 columns; narrow windows use half or full width; phones stack in Page order. An arranged Page widens to at most 1120 px.</li>
-      <li>Automations and History sit at the Explorer's foot; Roles live in Settings.</li>
+      <li>⇧⌘N creates a new Page in the current area; ⌘N stays with agent sessions.</li>
     </ol>
-    <h4 class="qh">Open</h4>
+    <h4 class="qh">Added on request, for review</h4>
     <ol class="qs">
-      <li><b>Shortcut for a new Page.</b> ⌘N already starts an agent session. Recommendation: ⇧⌘N for a new Page in the current area, since Notion's ⌘N is taken; the alternative is moving the agent session to ⇧⌘N.</li>
+      <li>Page icons with Emoji and Icons tabs; uploaded images come later.</li>
+      <li>Automations, History and Settings sit together at the Explorer's foot and open as dialogs; Roles live in Settings.</li>
+      <li>The PowerBar understands <code>/</code>, <code>@</code> and <code>&gt;</code>; "Add Block" is gone from its list.</li>
     </ol>
   </section>
 </div>
@@ -272,23 +295,26 @@ cog:sv('<circle cx="8" cy="8" r="2"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2
 reload:sv('<path d="M13 8a5 5 0 11-1.5-3.5"/><path d="M13 2.5V5h-2.5"/>'),
 back:sv('<path d="M10 3.5L5.5 8l4.5 4.5"/>'),
 };
+const E={budget:'💰',review:'📊',trip:'🧳',road:'🗺️',api:'🧩',plan:'🗓️'};
+const em=e=>`<span class="em">${e}</span>`;
+const modal=(title,body,o={})=>`<div class="scrim"></div><div class="modal" style="width:${o.w||1000}px"><div class="mh">${title}<span class="end">${o.right||''}<span class="ib">✕</span></span></div><div class="mb">${body}</div></div>`;
 const nav=(d,ic,label,o={})=>`<div class="nav ${o.on?'on':''}" style="--d:${d}"><span class="tw">${o.tw||''}</span><span class="ico">${ic}</span><span>${label}</span>${o.r?`<span class="r ${o.warn?'warn':''}">${o.r}</span>`:''}</div>`;
 function side(o={}){const s=o.sel||'budget';const e=(k)=>s==k;
 return `<div class="side"><div class="wsw"><span class="av">B</span>Benni's Workspace<span style="margin-left:auto;color:var(--ws-text-faint)">⌄</span></div>
 <div class="srch">${I.srch}<span>Search or run a command</span><kbd>⌘K</kbd></div>
 <h6>Private<span class="a">${o.plus?'<span style="color:var(--ws-text-muted)">···  ＋</span>':''}</span></h6>
-${nav(0,I.page,'Household budget',{tw:'⌄',on:e('budget')})}
-${nav(1,I.page,'Monthly review',{on:e('review')})}
-${o.newp?nav(0,I.page,o.newp,{on:e('new')}):''}
-${nav(0,I.page,'Trip to Lisbon',{tw:'›',on:e('trip')})}
+${nav(0,em(E.budget),'Household budget',{tw:'⌄',on:e('budget')})}
+${nav(1,em(E.review),'Monthly review',{on:e('review')})}
+${o.newp?nav(0,o.newp=='Untitled'?I.page:em(E.plan),o.newp,{on:e('new')}):''}
+${nav(0,em(E.trip),'Trip to Lisbon',{tw:'›',on:e('trip')})}
 ${nav(0,I.file,'bank-export.csv',{on:e('csv')})}
 <h6>Acme API</h6>
-${nav(0,I.page,'Roadmap',{on:e('road')})}
-${nav(0,I.page,'API design',{on:e('api')})}
+${nav(0,em(E.road),'Roadmap',{on:e('road')})}
+${nav(0,em(E.api),'API design',{on:e('api')})}
 ${nav(0,I.dir,'docs',{tw:'›',on:e('docs')})}
 <h6>Agent sessions <kbd>⌘N</kbd></h6>
 ${nav(0,I.dir,'acme-api <span style="color:var(--ws-text-faint);font-size:12px">2 sessions</span>',{tw:'›'})}
-<div class="foot">${nav(0,I.zap,'Automations',Object.assign({on:e('auto')},o.att?{r:'⚠ 1',warn:true}:{}))}${nav(0,I.clock,'History',{on:e('hist')})}</div>
+<div class="foot">${nav(0,I.zap,'Automations',Object.assign({on:e('auto')},o.att?{r:'⚠ 1',warn:true}:{}))}${nav(0,I.clock,'History',{on:e('hist')})}${nav(0,I.cog,'Settings',{on:e('set')})}</div>
 ${o.menu||''}</div>`}
 function head(crumb,o={}){return `<div class="head"><span class="crumb">${crumb}</span><span class="end">${o.right!==undefined?o.right:`<span class="ib ${o.arr?'on':''}">${I.grid}Arrange</span><span class="ib" title="Page history">${I.clock}</span><span class="ib">${I.more}</span>`}</span></div>`}
 function frame(id,o){document.getElementById(id).innerHTML=`<div class="tbar"><div class="lights"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></div></div>
@@ -304,8 +330,8 @@ const chartBlk=`<div class="bh"><span class="ico">${I.chart}</span><b>Spending b
 const fxBlk=(o={})=>`<div class="card"><div class="cap">Left this month</div><div class="big">€ 715.50</div>${o.f!==false?`<div class="fx" style="margin-top:4px">= 2000 − SUM(<span class="ref">${I.db} Expenses › Amount</span>)</div>`:''}</div>`;
 
 // 1 · Page
-frame('w-page',{h:700,head:head('Private <span>›</span> <b>Household budget</b>'),main:`<div class="pg"><div class="col">
-<div class="ttl">Household budget</div>
+frame('w-page',{h:700,head:head('Private <span>›</span> <b>💰 Household budget</b>'),main:`<div class="pg"><div class="col">
+<div class="picon">💰</div><div class="ttl">Household budget</div>
 <div class="prose"><p>October is almost done. Rent is the largest share, as every month; the trip to Porto stayed under € 50.</p></div>
 <div class="blk"><div class="gut"><span>＋</span><span class="on">${I.drag}</span></div>${dbHead({synced:true})}${dbTable()}</div>
 <div class="blk">${chartBlk}</div>
@@ -314,24 +340,31 @@ frame('w-page',{h:700,head:head('Private <span>›</span> <b>Household budget</b
 
 // 2 · Blank
 frame('w-blank',{h:440,side:{sel:'new',newp:'Untitled',plus:true},head:head('Private <span>›</span> <b>Untitled</b>'),main:`<div class="pg"><div class="col">
+<div class="hint" style="font-size:13px;gap:6px"><span>☺</span>Add icon</div>
 <div class="ttl ph"><span class="caret" style="height:34px"></span>Untitled</div>
 <div class="hint">Type to write, press <code style="margin:0 4px">/</code> for Blocks, or paste, drop or <span style="color:var(--ws-text-muted);text-decoration:underline;margin-left:4px">draw</span>.</div>
 <div class="hint" style="font-size:13px;margin-top:20px">Start from a template&nbsp;&nbsp;<span class="chip">Budget</span>&nbsp;<span class="chip">Meeting notes</span>&nbsp;<span class="chip">Project</span></div>
 </div></div>`});
 
+// 3 · Icons
+const picker=`<div class="pop ipick" style="left:394px;top:150px"><div class="tabs2"><span class="on">Emoji</span><span>Icons</span><span class="end">Remove</span></div>
+<div style="padding:8px 10px"><div class="sel" style="height:30px">${I.srch}<span style="color:var(--ws-text-faint)">Search</span></div></div>
+<div class="lbl" style="padding:2px 12px">Recent</div><div class="egrid">${'💰📊🧳🗺️🧩🗓️📝✅🏠'.match(/\p{Extended_Pictographic}️?/gu).map((e,i)=>`<span class="${i==0?'on':''}">${e}</span>`).join('')}</div>
+<div class="lbl" style="padding:2px 12px">Objects</div><div class="egrid">${'📁📌📎📚💡🔑🧾📦🛒🎯📈📉🧮🗂️📅🧭🔖🎒'.match(/\p{Extended_Pictographic}️?/gu).map(e=>`<span>${e}</span>`).join('')}</div></div>`;
+frame('w-icon',{h:520,head:head('Private <span>›</span> <b>💰 Household budget</b>'),main:`<div class="pg"><div class="col"><div class="picon" style="display:inline-block;border-radius:8px;background:var(--ws-hover);width:72px;text-align:center">💰</div><div class="ttl">Household budget</div><div class="prose"><p>October is almost done.</p></div></div></div>`,over:picker});
 // 4 · Slash
 const chooser=`<div class="pop" style="left:394px;top:200px;width:360px">
 <div class="lbl">Blocks</div>
 ${[['text','Text','Paragraphs, headings, lists and toggles',1],['db','Database','Rows with typed fields; Table, Board or Calendar'],['chart','Chart','Draws data from a Database or Source'],['fx','Formula','One value calculated from other Blocks'],['code','Code','Code with highlighting'],['img','Media','Image, video, file, bookmark or embed'],['pen','Whiteboard','Draw and place shapes freely']].map(([i,n,d,on])=>`<div class="it ${on?'on':''}"><span class="bi">${I[i]}</span><span class="tx"><span>${n}</span><span class="d">${d}</span></span></div>`).join('')}
 <hr><div class="lbl">Reuse</div><div class="it"><span class="bi">${I.link}</span><span class="tx"><span>Existing Block…</span><span class="d">Add a View of a Block from any Page</span></span></div>
 <hr><div class="lbl">Templates</div><div class="it"><span class="bi">${I.tpl}</span><span>Budget</span><span class="r">Text, Database, Chart, Formula</span></div></div>`;
-frame('w-slash',{h:760,side:{sel:'new',newp:'Weekly plan'},head:head('Private <span>›</span> <b>Weekly plan</b>'),main:`<div class="pg"><div class="col">
-<div class="ttl">Weekly plan</div>
+frame('w-slash',{h:760,side:{sel:'new',newp:'Weekly plan'},head:head('Private <span>›</span> <b>🗓️ Weekly plan</b>'),main:`<div class="pg"><div class="col">
+<div class="picon">🗓️</div><div class="ttl">Weekly plan</div>
 <div class="prose"><p>Things to sort out before Friday.</p><p style="margin:0">/<span class="caret" style="margin-left:1px"></span></p></div>
 </div></div>`,over:chooser});
 
 // 5 · Text
-frame('w-text',{h:560,side:{sel:'trip'},head:head('Private <span>›</span> <b>Trip to Lisbon</b>'),main:`<div class="pg" style="padding-top:20px"><div class="col" style="width:520px;gap:0">
+frame('w-text',{h:560,side:{sel:'trip'},head:head('Private <span>›</span> <b>🧳 Trip to Lisbon</b>'),main:`<div class="pg" style="padding-top:20px"><div class="col" style="width:520px;gap:0">
 <div class="blk prose"><div class="gut"><span>＋</span><span class="on">${I.drag}</span></div>
 <h2>Before we go</h2>
 <div class="todo"><span class="cb on">✓</span><span style="color:var(--ws-text-faint);text-decoration:line-through">Book the flat in Alfama</span></div>
@@ -385,22 +418,27 @@ document.getElementById('w-resp').innerHTML=`<div style="display:flex;gap:32px;a
 
 // 9 · PowerBar
 const pbItem=(ic,label,d,r,on)=>`<div class="it ${on?'on':''}"><span class="ico">${ic}</span><span>${label}</span>${d?`<span class="d">${d}</span>`:''}${r?`<span class="r">${r}</span>`:''}</div>`;
+const pbFoot=`<div class="pbfoot"><span><b>/</b>Blocks</span><span><b>@</b>Pages, Blocks and Sources</span><span><b>&gt;</b>Actions</span></div>`;
 const pbEmpty=`<div class="pb"><div class="in">${I.srch}<span class="ph">Search or run a command</span></div><div class="ls">
-<div class="lbl">Recent</div>${pbItem(I.page,'Household budget','Private','',1)}${pbItem(I.page,'API design','Acme API')}${pbItem(I.file,'bank-export.csv','Private · Source')}
-<div class="lbl">Create</div>${pbItem(I.page,'New Page','in Private','⇧⌘N')}${pbItem(I.plus,'Add Block','on Household budget','›')}${pbItem(I.dir,'Add Source','File or folder','›')}
+<div class="lbl">Recent</div>${pbItem(em(E.budget),'Household budget','Private','',1)}${pbItem(em(E.api),'API design','Acme API')}${pbItem(I.file,'bank-export.csv','Private · Source')}
+<div class="lbl">Create</div>${pbItem(I.page,'New Page','in Private','⇧⌘N')}${pbItem(I.dir,'Add Source','File or folder','›')}
 <div class="lbl">This Page</div>${pbItem(I.grid,'Arrange')}${pbItem(I.clock,'Page history')}
-<div class="lbl">Workspace</div>${pbItem(I.zap,'Automations')}${pbItem(I.clock,'History')}${pbItem(I.cog,'Settings','','⌘,')}</div></div>`;
-frame('w-pb1',{h:720,head:head('Private <span>›</span> <b>Household budget</b>'),main:`<div class="pg"><div class="col"><div class="ttl">Household budget</div><div class="prose"><p>October is almost done.</p></div>${dbHead({synced:true})}${dbTable()}</div></div>`,over:`<div class="scrim"></div>${pbEmpty}`});
-const pbQuery=`<div class="pb" style="position:relative;left:auto;top:auto;transform:none"><div class="in">${I.srch}<span>exp<span class="caret" style="margin-left:1px;height:18px"></span></span></div><div class="ls">
-<div class="lbl">Pages and Sources</div>${pbItem(I.file,'bank-<mark>exp</mark>ort.csv','Private · Source','',1)}
+<div class="lbl">Workspace</div>${pbItem(I.zap,'Automations')}${pbItem(I.clock,'History')}${pbItem(I.cog,'Settings','','⌘,')}</div>${pbFoot}</div>`;
+frame('w-pb1',{h:760,head:head('Private <span>›</span> <b>💰 Household budget</b>'),main:`<div class="pg"><div class="col"><div class="picon">💰</div><div class="ttl">Household budget</div><div class="prose"><p>October is almost done.</p></div>${dbHead({synced:true})}${dbTable()}</div></div>`,over:`<div class="scrim"></div>${pbEmpty}`});
+const pbBox=(input,list,foot)=>`<div class="pb" style="position:relative;left:auto;top:auto;transform:none"><div class="in">${input}</div><div class="ls">${list}</div>${foot||pbFoot}</div>`;
+const typed=t=>`${I.srch}<span>${t}<span class="caret" style="margin-left:1px;height:18px"></span></span>`;
+const pbQuery=pbBox(typed('exp'),`<div class="lbl">Pages and Sources</div>${pbItem(I.file,'bank-<mark>exp</mark>ort.csv','Private · Source','',1)}
 <div class="lbl">Blocks</div>${pbItem(I.db,'<mark>Exp</mark>enses','Database · Household budget, Monthly review')}${pbItem(I.chart,'Spending by category','Chart · uses <mark>Exp</mark>enses')}
-<div class="lbl">Text</div>${pbItem(I.text,'“… <mark>exp</mark>ect rain on Tuesday …”','Trip to Lisbon')}
-<div class="lbl">Actions</div>${pbItem(I.plus,'Add Block › Database','on Household budget')}</div></div>`;
-const pbSub=`<div class="pb" style="position:relative;left:auto;top:auto;transform:none"><div class="in"><span class="back">${I.back}Add Block</span><span class="ph">Filter Block types</span></div><div class="ls">
-<div class="lbl">Add to Household budget, below the selection</div>
+<div class="lbl">Text</div>${pbItem(I.text,'“… <mark>exp</mark>ect rain on Tuesday …”','Trip to Lisbon')}`);
+const pbSlash=pbBox(typed('/'),`<div class="lbl">Add to 💰 Household budget, below the selection</div>
 ${[['text','Text'],['db','Database'],['chart','Chart'],['fx','Formula'],['code','Code'],['img','Media'],['pen','Whiteboard']].map(([i,n],k)=>pbItem(I[i],n,'','',k==2)).join('')}
-<div class="lbl">Reuse</div>${pbItem(I.link,'Existing Block…','Add a View')}</div></div>`;
-document.getElementById('w-pb23').innerHTML=`<div style="display:flex;gap:40px;align-items:flex-start">${pbQuery}${pbSub}</div>`;
+<div class="lbl">Reuse</div>${pbItem(I.link,'Existing Block…','Add a View')}<div class="lbl">Templates</div>${pbItem(I.tpl,'Budget','Text, Database, Chart, Formula')}`,`<div class="pbfoot"><span>⏎ adds it to the Page</span></div>`);
+const pbAt=pbBox(typed('@lis'),`<div class="lbl">Pages and Sources</div>${pbItem(em(E.trip),'Trip to <mark>Lis</mark>bon','Private','',1)}${pbItem(I.file,'packing-<mark>lis</mark>t.md','Private › docs · Source')}
+<div class="lbl">Blocks</div>${pbItem(I.pen,'<mark>Lis</mark>bon to Porto','Whiteboard · Trip to Lisbon')}${pbItem(I.db,'Shopping <mark>lis</mark>t','Database · Household budget')}`,`<div class="pbfoot"><span>⏎ opens it</span><span>⌘⏎ mentions it at the caret</span></div>`);
+const pbAct=pbBox(typed('&gt;'),`<div class="lbl">This Page</div>${pbItem(I.grid,'Arrange','','',1)}${pbItem(I.clock,'Page history')}${pbItem('☺','Change icon')}${pbItem(I.copy,'Duplicate Page')}
+<div class="lbl">Workspace</div>${pbItem(I.page,'New Page','','⇧⌘N')}${pbItem(I.zap,'Automations')}${pbItem(I.clock,'History')}${pbItem(I.cog,'Settings','','⌘,')}`,`<div class="pbfoot"><span>Only actions your Role allows</span></div>`);
+document.getElementById('w-pb23').innerHTML=`<div style="display:flex;gap:40px;align-items:flex-start">${pbQuery}${pbSlash}</div>`;
+document.getElementById('w-pb45').innerHTML=`<div style="display:flex;gap:40px;align-items:flex-start">${pbAt}${pbAct}</div>`;
 
 // 10 · Source
 const csv=[['2026-11-01','REWE SAGT DANKE','-84.20'],['2026-10-30','STADTWERKE','-96.00'],['2026-10-28','CP COMBOIOS','-42.50'],['2026-10-27','MIETE OKT','-950.00'],['2026-10-25','KINO','-111.80'],['2026-10-24','GEHALT','+3,200.00']];

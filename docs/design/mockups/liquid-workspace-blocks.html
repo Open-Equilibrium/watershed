@@ -35,6 +35,21 @@ p.sub{margin:0 0 10px;font-size:13px;color:var(--muted-foreground);line-height:1
 .nav .r{margin-left:auto;font-size:12px;color:var(--ws-text-faint)}
 .nav .r.warn{color:var(--ws-warning)}
 .ico{width:18px;flex:none;display:inline-flex;justify-content:center;color:var(--ws-text-faint)}
+.em{font-size:15px;line-height:1}
+.picon{font-size:56px;line-height:64px;margin:4px 0 2px}
+.modal{position:absolute;left:50%;top:28px;bottom:28px;transform:translateX(-50%);z-index:4;background:var(--ws-canvas);border-radius:12px;box-shadow:var(--ws-shadow);display:flex;flex-direction:column;overflow:hidden}
+.mh{height:48px;flex:none;display:flex;align-items:center;gap:8px;padding:0 12px 0 20px;font-size:15px;font-weight:600;box-shadow:inset 0 -1px 0 var(--ws-border)}
+.mh .end{margin-left:auto;display:flex;gap:6px;align-items:center;font-weight:400}
+.mb{flex:1;display:flex;min-height:0}
+.pbfoot{display:flex;gap:16px;padding:8px 16px;font-size:12px;color:var(--ws-text-faint);box-shadow:inset 0 1px 0 var(--ws-border)}
+.pbfoot b{font-family:var(--ws-font-mono);color:var(--ws-text-muted);font-weight:500;margin-right:4px}
+.ipick{width:360px;padding:0;overflow:hidden}
+.ipick .tabs2{display:flex;gap:14px;padding:0 12px;height:38px;align-items:center;font-size:13px;color:var(--ws-text-muted);box-shadow:inset 0 -1px 0 var(--ws-border)}
+.ipick .tabs2 .on{color:var(--ws-text);font-weight:500;box-shadow:inset 0 -2px 0 var(--ws-text);height:100%;display:flex;align-items:center}
+.ipick .tabs2 .end{margin-left:auto}
+.egrid{display:grid;grid-template-columns:repeat(9,1fr);gap:2px;padding:4px 10px 10px;font-size:20px;text-align:center}
+.egrid span{height:34px;display:grid;place-items:center;border-radius:6px}
+.egrid span.on{background:var(--ws-hover)}
 .foot{margin-top:auto;padding-top:6px;box-shadow:inset 0 1px 0 var(--ws-border)}
 .main{flex:1;display:flex;flex-direction:column;min-width:0;position:relative}
 .head{height:44px;flex:none;display:flex;align-items:center;gap:8px;padding:0 16px 0 24px;font-size:14px}
@@ -205,7 +220,7 @@ h4.qh{margin:14px 0 6px;font-size:13px}
   </div>
   <section>
     <h1>Liquid Workspace: Blocks</h1>
-    <p class="sub">Mockups for the M3a slice in <a href="../../../PLAN.md#m3a--local-workspace-foundation">PLAN.md</a>, for approval: synchronized Views over one Block, copying, the deletion cascade, Connections and formulas, and Automations. They follow the <a href="../../concept/V-Spec_Liquid.html#model">V-Spec</a>, ADR-0235 and <a href="../guidelines.md">guidelines.md</a>; the shell is the one in the <a href="liquid-workspace-pages.html">Pages mockups</a>.</p>
+    <p class="sub">Mockups for the M3a slice in <a href="../../../PLAN.md#m3a--local-workspace-foundation">PLAN.md</a>, approved by the maintainer on 2026-11-01: synchronized Views over one Block, copying, the deletion cascade, Connections and formulas, and Automations. They follow the <a href="../../concept/V-Spec_Liquid.html#model">V-Spec</a>, ADR-0235 and <a href="../guidelines.md">guidelines.md</a>; the shell is the one in the <a href="liquid-workspace-pages.html">Pages mockups</a>.</p>
   </section>
   <section>
     <h3 class="sec">1 · One Block, two Views</h3>
@@ -235,7 +250,7 @@ h4.qh{margin:14px 0 6px;font-size:13px}
   </section>
   <section>
     <h3 class="sec">6 · Automations</h3>
-    <p class="sub">"Automations" at the Explorer's foot lists every Automation: those that belong to a Block and are deleted with it, and those of the Workspace. M3a Automations start when a row is added, a field changes or a button is clicked (ADR-0235); each runs as the Role it is assigned.</p>
+    <p class="sub">"Automations" at the Explorer's foot opens a dialog over the current Page that lists every Automation; closing it shows the Page again. It lists those that belong to a Block and are deleted with it, and those of the Workspace. M3a Automations start when a row is added, a field changes or a button is clicked (ADR-0235); each runs as the Role it is assigned.</p>
     <div class="stage"><div class="scaler"><div class="win" id="w-alist" data-w="1240"></div></div></div>
   </section>
   <section>
@@ -249,20 +264,24 @@ h4.qh{margin:14px 0 6px;font-size:13px}
     <div class="stage"><div class="scaler"><div class="win" id="w-att" data-w="1240"></div></div></div>
   </section>
   <section>
-    <h3 class="sec">Decisions and points to approve</h3>
+    <h3 class="sec">Decisions</h3>
     <h4 class="qh">Decided (V-Spec, ADR-0235)</h4>
     <ol class="qs">
       <li>Removing the last View deletes the Block, its Connections and its own Automations in one revertible Action; Automations of the Workspace that use it turn off and need attention. There is no Trash.</li>
       <li>Pasting a copied Block creates a copy; a View is always explicit.</li>
       <li>Formulas use Excel function names with references as chips bound to stable IDs; Automations read as sentences and start on events and buttons.</li>
     </ol>
-    <h4 class="qh">Defaults in these mockups, approved with them</h4>
+    <h4 class="qh">Approved with these mockups (2026-11-01)</h4>
     <ol class="qs">
       <li>The synced marker "Synced · on 2 Pages" with the other Pages on hover.</li>
       <li>Block menu: Add to Page, Duplicate, Copy, Copy link to Block, Move to, Protect, Block history, Remove from this Page (Delete when it is the last View) and Delete everywhere.</li>
       <li>Deleting without dependents needs no dialog and offers Undo; with dependents a dialog lists them.</li>
       <li>A Connection is made in the panel of the Block that needs the data; the panel lists "Uses" and "Used by".</li>
       <li>M3a Automation actions: change a field, add a row, create a Page from a template and show a notification.</li>
+    </ol>
+    <h4 class="qh">Added on request, for review</h4>
+    <ol class="qs">
+      <li>Automations open as a dialog over the current Page or Source, with the editor inside it; closing it returns there.</li>
     </ol>
   </section>
 </div>
@@ -294,23 +313,26 @@ cog:sv('<circle cx="8" cy="8" r="2"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2
 reload:sv('<path d="M13 8a5 5 0 11-1.5-3.5"/><path d="M13 2.5V5h-2.5"/>'),
 back:sv('<path d="M10 3.5L5.5 8l4.5 4.5"/>'),
 };
+const E={budget:'💰',review:'📊',trip:'🧳',road:'🗺️',api:'🧩',plan:'🗓️'};
+const em=e=>`<span class="em">${e}</span>`;
+const modal=(title,body,o={})=>`<div class="scrim"></div><div class="modal" style="width:${o.w||1000}px"><div class="mh">${title}<span class="end">${o.right||''}<span class="ib">✕</span></span></div><div class="mb">${body}</div></div>`;
 const nav=(d,ic,label,o={})=>`<div class="nav ${o.on?'on':''}" style="--d:${d}"><span class="tw">${o.tw||''}</span><span class="ico">${ic}</span><span>${label}</span>${o.r?`<span class="r ${o.warn?'warn':''}">${o.r}</span>`:''}</div>`;
 function side(o={}){const s=o.sel||'budget';const e=(k)=>s==k;
 return `<div class="side"><div class="wsw"><span class="av">B</span>Benni's Workspace<span style="margin-left:auto;color:var(--ws-text-faint)">⌄</span></div>
 <div class="srch">${I.srch}<span>Search or run a command</span><kbd>⌘K</kbd></div>
 <h6>Private<span class="a">${o.plus?'<span style="color:var(--ws-text-muted)">···  ＋</span>':''}</span></h6>
-${nav(0,I.page,'Household budget',{tw:'⌄',on:e('budget')})}
-${nav(1,I.page,'Monthly review',{on:e('review')})}
-${o.newp?nav(0,I.page,o.newp,{on:e('new')}):''}
-${nav(0,I.page,'Trip to Lisbon',{tw:'›',on:e('trip')})}
+${nav(0,em(E.budget),'Household budget',{tw:'⌄',on:e('budget')})}
+${nav(1,em(E.review),'Monthly review',{on:e('review')})}
+${o.newp?nav(0,o.newp=='Untitled'?I.page:em(E.plan),o.newp,{on:e('new')}):''}
+${nav(0,em(E.trip),'Trip to Lisbon',{tw:'›',on:e('trip')})}
 ${nav(0,I.file,'bank-export.csv',{on:e('csv')})}
 <h6>Acme API</h6>
-${nav(0,I.page,'Roadmap',{on:e('road')})}
-${nav(0,I.page,'API design',{on:e('api')})}
+${nav(0,em(E.road),'Roadmap',{on:e('road')})}
+${nav(0,em(E.api),'API design',{on:e('api')})}
 ${nav(0,I.dir,'docs',{tw:'›',on:e('docs')})}
 <h6>Agent sessions <kbd>⌘N</kbd></h6>
 ${nav(0,I.dir,'acme-api <span style="color:var(--ws-text-faint);font-size:12px">2 sessions</span>',{tw:'›'})}
-<div class="foot">${nav(0,I.zap,'Automations',Object.assign({on:e('auto')},o.att?{r:'⚠ 1',warn:true}:{}))}${nav(0,I.clock,'History',{on:e('hist')})}</div>
+<div class="foot">${nav(0,I.zap,'Automations',Object.assign({on:e('auto')},o.att?{r:'⚠ 1',warn:true}:{}))}${nav(0,I.clock,'History',{on:e('hist')})}${nav(0,I.cog,'Settings',{on:e('set')})}</div>
 ${o.menu||''}</div>`}
 function head(crumb,o={}){return `<div class="head"><span class="crumb">${crumb}</span><span class="end">${o.right!==undefined?o.right:`<span class="ib ${o.arr?'on':''}">${I.grid}Arrange</span><span class="ib" title="Page history">${I.clock}</span><span class="ib">${I.more}</span>`}</span></div>`}
 function frame(id,o){document.getElementById(id).innerHTML=`<div class="tbar"><div class="lights"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></div></div>
@@ -347,8 +369,8 @@ const blockMenu=`<div class="pop" style="left:830px;top:212px;width:290px">
 <div class="it">${I.clock}<span>Block history</span></div>
 <hr><div class="it on">${I.trash}<span>Remove from this Page</span><span class="r">stays on 1 Page</span></div>
 <div class="it" style="color:var(--ws-danger)">${I.trash}<span>Delete everywhere…</span></div></div>`;
-frame('w-views',{h:560,side:{sel:'review'},head:head('Private <span>›</span> Household budget <span>›</span> <b>Monthly review</b>'),main:`<div class="pg"><div class="col">
-<div class="ttl">Monthly review</div>
+frame('w-views',{h:560,side:{sel:'review'},head:head('Private <span>›</span> Household budget <span>›</span> <b>📊 Monthly review</b>'),main:`<div class="pg"><div class="col">
+<div class="picon">📊</div><div class="ttl">Monthly review</div>
 <div class="prose"><p>What went where in October.</p></div>
 <div class="blk"><div class="gut"><span>＋</span><span class="on">${I.drag}</span></div>${boardHead}${board}</div>
 </div></div>`,over:blockMenu});
@@ -384,7 +406,7 @@ const delDlg=`<div class="scrim"></div><div style="position:absolute;inset:0;dis
 <div class="frow"><span class="ico">${I.zap}</span>Monthly summary<span class="r warn">⚠ needs attention</span></div></div>
 <p>All of it is one Action in History. Reverting it brings everything back and turns Monthly summary on again.</p>
 <div class="acts"><span class="btn dngp">Delete</span><span class="sp"></span><span class="btn">Cancel <kbd>esc</kbd></span></div></div></div>`;
-frame('w-del',{h:600,head:head('Private <span>›</span> <b>Household budget</b>'),main:`<div class="pg"><div class="col"><div class="ttl">Household budget</div><div class="blk">${dbHead()}${dbTable()}</div><div class="blk">${chartBlk}</div></div></div>`,over:delDlg});
+frame('w-del',{h:600,head:head('Private <span>›</span> <b>💰 Household budget</b>'),main:`<div class="pg"><div class="col"><div class="picon">💰</div><div class="ttl">Household budget</div><div class="blk">${dbHead()}${dbTable()}</div><div class="blk">${chartBlk}</div></div></div>`,over:delDlg});
 const after=`<div class="win" style="width:740px;flex:none;padding:20px 24px 24px;box-sizing:border-box;position:relative;height:430px">
 <div class="ttl" style="font-size:24px;line-height:32px">Household budget</div>
 <div class="prose"><p>October is almost done. Rent is the largest share, as every month.</p></div>
@@ -408,7 +430,7 @@ const chartPanel=`<div class="panel"><div class="ttlr">${I.chart}Spending by cat
 <h5>Uses</h5><div class="flist"><div class="frow"><span class="ico">${I.db}</span>Expenses<span class="r">Database · Household budget</span></div></div>
 <h5>Used by</h5><div class="cap">Nothing yet. A formula or Automation that reads this Chart appears here.</div>
 <div class="cap">The data list offers Databases and Sources you may read. Removing a Connection leaves both Blocks in place.</div></div>`;
-frame('w-conn',{h:580,head:head('Private <span>›</span> <b>Household budget</b>'),main:`<div style="display:flex;flex:1;min-height:0"><div class="pg"><div class="col" style="width:580px">
+frame('w-conn',{h:580,head:head('Private <span>›</span> <b>💰 Household budget</b>'),main:`<div style="display:flex;flex:1;min-height:0"><div class="pg"><div class="col" style="width:580px">
 <div class="blk">${dbHead({synced:true})}${dbTable({n:3})}</div>
 <div class="blk focus" style="padding:6px 8px">${chartBlk}</div></div></div>${chartPanel}</div>`});
 
@@ -420,8 +442,8 @@ const sugg=`<div class="pop" style="left:600px;top:250px;width:340px">
 <div class="it"><span class="ico">${I.fx}</span><span>Left this month</span><span class="r">Formula</span></div>
 <div class="lbl">Functions</div>
 <div class="it"><span class="mono">SUMIF</span><span class="r">sum of the values that match</span></div></div>`;
-frame('w-fx',{h:600,head:head('Private <span>›</span> <b>Household budget</b>'),main:`<div class="pg"><div class="col">
-<div class="ttl">Household budget</div>
+frame('w-fx',{h:600,head:head('Private <span>›</span> <b>💰 Household budget</b>'),main:`<div class="pg"><div class="col">
+<div class="picon">💰</div><div class="ttl">Household budget</div>
 <div class="card focus"><div class="cap">Left this month</div><div class="big">€ 715.50</div>
 <div class="fxin" style="margin-top:8px">= 2000 − SUM(<span class="ref">${I.db} Expenses › Amount</span>) − SUMIF(Exp<span class="caret" style="height:16px;margin:0"></span></div>
 <div class="cap" style="margin-top:6px">⏎ saves · esc cancels · the value updates while typing</div></div>
@@ -431,20 +453,20 @@ ${rows.slice(0,3).map(r=>`<div class="tr"><span>${r[1]}</span><span class="num">
 <div class="fx">Share = ROUND([Amount] / SUM(<span class="ref">${I.db} Expenses › Amount</span>) * 100)</div>
 </div></div>`,over:sugg});
 
-// 6 · Automations list
+// 6 · Automations list (dialog over the prior Page)
+const bgPage=`<div class="pg"><div class="col"><div class="picon">💰</div><div class="ttl">Household budget</div><div class="prose"><p>October is almost done.</p></div>${dbHead({synced:true})}${dbTable()}</div></div>`;
+const bgHead=head('Private <span>›</span> <b>💰 Household budget</b>');
+const mbody=c=>`<div style="flex:1;min-width:0;padding:20px 28px;display:flex;flex-direction:column;gap:14px;overflow:hidden">${c}</div>`;
 const arow=(n,owner,when,role,st)=>`<div class="tr"><span>${n}</span><span>${owner}</span><span>${when}</span><span>${role}</span><span>${st}</span></div>`;
-frame('w-alist',{h:460,side:{sel:'auto',att:true},head:head('<b>Automations</b>',{right:`<span class="btn pri">${I.plus}New Automation</span>`}),main:`<div class="pg"><div class="col" style="width:900px">
-<div class="ttl">Automations</div>
+frame('w-alist',{h:520,side:{sel:'auto',att:true},head:bgHead,main:bgPage,over:modal('Automations',mbody(`
 <div class="tbl alist"><div class="tr hd"><span>Name</span><span>Belongs to</span><span>When</span><span>Runs as</span><span>Status</span></div>
 ${arow('Flag large expenses',`${I.db} Expenses`,'a row is added','Budget editor','<span class="st on">● On</span>')}
 ${arow('Monthly summary','Workspace','“Summarize” in Months is clicked','Can edit','<span class="st warn">⚠ Needs attention</span>')}
 ${arow('Archive paid bills',`${I.db} Bills`,'“Paid” changes','Can edit','<span class="st off">○ Off</span>')}</div>
-<div class="cap">Last runs and their changes are in History, filtered by the Automation.</div>
-</div></div>`});
+<div class="cap">Last runs and their changes are in History, filtered by the Automation. Closing this dialog shows 💰 Household budget again.</div>`),{right:`<span class="btn pri">${I.plus}New Automation</span>`})});
 
 // 7 · Editor
-frame('w-aed',{h:600,side:{sel:'auto'},head:head('Automations <span>›</span> <b>Flag large expenses</b>',{right:`<span class="ib">${I.play}Test</span><span class="ib">${I.clock}</span><span class="ib">On <span class="sw"></span></span>`}),main:`<div class="pg"><div class="col">
-<div class="ttl">Flag large expenses</div>
+frame('w-aed',{h:640,side:{sel:'auto'},head:bgHead,main:bgPage,over:modal(`<span class="ib">${I.back}</span><span style="font-weight:400;color:var(--ws-text-muted)">Automations ›</span> Flag large expenses`,mbody(`
 <div class="sent">
 <div class="ln"><span class="kw">When</span><span class="tok">a row is added</span>to<span class="tok ref">${I.db} Expenses</span></div>
 <div class="ln"><span class="kw">If</span><span class="tok ref">Amount</span><span class="tok">is more than</span><span class="tok">500</span><span class="tok add">＋ and</span></div>
@@ -454,18 +476,15 @@ frame('w-aed',{h:600,side:{sel:'auto'},head:head('Automations <span>›</span> <
 <div class="fld" style="grid-template-columns:120px 1fr;margin-top:12px;font-size:14px">
 <span class="l">Runs as</span><span style="display:flex;gap:10px;align-items:center"><span class="sel" style="width:200px">Budget editor<span class="c">⌄</span></span><span class="st on">✓ allows Apply on Expenses</span></span>
 <span class="l">Belongs to</span><span>${I.db} Expenses <span class="cap">· deleted together with it</span></span>
-<span class="l">Last run</span><span>today 10:42 · set 1 row · <span style="color:var(--ws-accent)">Show in History</span></span></div>
-</div></div>`});
+<span class="l">Last run</span><span>today 10:42 · set 1 row · <span style="color:var(--ws-accent)">Show in History</span></span></div>`),{right:`<span class="ib">${I.play}Test</span><span class="ib">On <span class="sw"></span></span>`})});
 
 // 8 · Needs attention
-frame('w-att',{h:520,side:{sel:'auto',att:true},head:head('Automations <span>›</span> <b>Monthly summary</b>',{right:`<span class="ib">${I.play}Test</span><span class="ib">Off <span class="sw off"></span></span>`}),main:`<div class="pg"><div class="col">
-<div class="ttl">Monthly summary</div>
+frame('w-att',{h:560,side:{sel:'auto',att:true},head:bgHead,main:bgPage,over:modal(`<span class="ib">${I.back}</span><span style="font-weight:400;color:var(--ws-text-muted)">Automations ›</span> Monthly summary`,mbody(`
 <div class="banner"><span>⚠</span><span>Turned off: its Database “Expenses” was deleted today at 11:02. Choose another Database, or revert the deletion in History.</span><span class="acts"><span class="btn">Show in History</span></span></div>
 <div class="sent">
 <div class="ln"><span class="kw">When</span><span class="tok">the button</span><span class="tok ref">Summarize</span>in<span class="tok ref">${I.db} Months</span>is clicked</div>
 <div class="ln"><span class="kw">Then</span><span class="tok">create a Page from</span><span class="tok ref">${I.tpl} Month summary</span>with the total of<span class="tok bad">${I.db} Expenses › Amount</span></div></div>
-<div class="fld" style="grid-template-columns:120px 1fr;margin-top:12px;font-size:14px"><span class="l">Runs as</span><span class="sel" style="width:200px">Can edit<span class="c">⌄</span></span><span class="l">Belongs to</span><span>Workspace <span class="cap">· stays when Blocks it uses are deleted</span></span></div>
-</div></div>`});
+<div class="fld" style="grid-template-columns:120px 1fr;margin-top:12px;font-size:14px"><span class="l">Runs as</span><span class="sel" style="width:200px">Can edit<span class="c">⌄</span></span><span class="l">Belongs to</span><span>Workspace <span class="cap">· stays when Blocks it uses are deleted</span></span></div>`),{right:`<span class="ib">${I.play}Test</span><span class="ib">Off <span class="sw off"></span></span>`})});
 
 let mode='system',fit=true;const mq=matchMedia('(prefers-color-scheme: dark)');
 function hostDark(){const v=getComputedStyle(document.documentElement).getPropertyValue('--background').trim();if(!v)return mq.matches;const c=document.createElement('canvas');c.width=c.height=1;const x=c.getContext('2d');x.fillStyle='#808080';x.fillStyle=v;x.fillRect(0,0,1,1);const d=x.getImageData(0,0,1,1).data;return .2126*d[0]+.7152*d[1]+.0722*d[2]<128}
