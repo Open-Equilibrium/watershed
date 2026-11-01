@@ -1,0 +1,160 @@
+//! Running the host's `git`: bounded output, kept error text and a process group that ends with
+//! it.
+
+use super::*;
+
+/// The one path a `git rev-parse` query in `dir` prints. A path may hold line breaks, so only
+/// the single trailing one is taken off; splitting the output into lines could name another
+/// repository.
+pub(super) async fn git_path(dir: &Path, args: &[&str]) -> Result<String, DiffError> {
+    let output = git(dir, &[], args).await.map_err(|error| match error {
+        DiffError::Git(reason) if reason.contains("not a git repository") => {
+            DiffError::NotARepository
+        }
+        error => error,
+    })?;
+    match output.strip_suffix('\n') {
+        Some(path) if !path.is_empty() => Ok(path.to_owned()),
+        _ => Err(DiffError::NotARepository),
+    }
+}
+
+/// Runs the host's `git` in `dir` and returns at most [`MAX_OUTPUT_BYTES`] of its output.
+pub(super) async fn git(
+    dir: &Path,
+    env: &[(&str, OsString)],
+    args: &[&str],
+) -> Result<String, DiffError> {
+    let mut child = Git::spawn(&mut git_command(dir, env, args))?;
+    // Git's warnings drain meanwhile, so a full error pipe never blocks it; dropped, the set ends
+    // the drain.
+    let stderr = child.child.stderr.take().expect("stderr is piped");
+    let mut errors = tokio::task::JoinSet::new();
+    errors.spawn(keep_start(stderr, MAX_ERROR_BYTES));
+    let mut output = Vec::new();
+    // Reading one byte past the limit tells a cut-off output apart; dropping the child then
+    // stops Git instead of buffering unbounded output.
+    let stdout = child.child.stdout.take().expect("stdout is piped");
+    stdout
+        .take(MAX_OUTPUT_BYTES + 1)
+        .read_to_end(&mut output)
+        .await
+        .map_err(|error| DiffError::Git(error.to_string()))?;
+    if output.len() as u64 > MAX_OUTPUT_BYTES {
+        return Err(DiffError::TooLarge);
+    }
+    // A program Git started can hold its error output after Git ended. Git is reaped only once
+    // that output ended too, so until then its time limit still ends such programs with it.
+    let errors = errors
+        .join_next()
+        .await
+        .and_then(Result::ok)
+        .unwrap_or_default();
+    let status = child
+        .wait()
+        .await
+        .map_err(|error| DiffError::Git(error.to_string()))?;
+    if !status.success() {
+        return Err(DiffError::Git(
+            String::from_utf8_lossy(&errors).trim().to_owned(),
+        ));
+    }
+    Ok(String::from_utf8_lossy(&output).into_owned())
+}
+
+/// The host's `git` in `dir` with its output piped. Project settings that would run something
+/// or let Git skip a changed file are overridden.
+pub(super) fn git_command(dir: &Path, env: &[(&str, OsString)], args: &[&str]) -> Command {
+    let mut command = Command::new("git");
+    command
+        .args([
+            // Reading the project runs none of its hooks or file monitors, which could change it.
+            "-c",
+            "core.hooksPath=/dev/null",
+            "-c",
+            "core.fsmonitor=false",
+            // Every file's state is checked in full, so no setting hides a change.
+            "-c",
+            "core.ignoreStat=false",
+            "-c",
+            "core.checkStat=default",
+            "-c",
+            "core.trustctime=true",
+            "-c",
+            "core.fileMode=true",
+            "-c",
+            "core.sparseCheckout=false",
+            // No split index lands in the project's Git directory, and a submodule's diff runs
+            // none of its commands.
+            "-c",
+            "core.splitIndex=false",
+            "-c",
+            "diff.submodule=short",
+            // Blank context lines keep their leading space, which Liquid reads as context.
+            "-c",
+            "diff.suppressBlankEmpty=false",
+        ])
+        .args(args)
+        .current_dir(dir)
+        // A group of its own, so Git ends with the programs it starts (see [`Git`]).
+        .process_group(0)
+        // Git's messages in English, as Liquid shows them and reads one.
+        .env("LC_ALL", "C")
+        .envs(env.iter().map(|(name, value)| (name, value)))
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+    command
+}
+
+/// A failed read of Git's output or write of its input.
+pub(super) fn unreadable(error: std::io::Error) -> DiffError {
+    DiffError::Git(error.to_string())
+}
+
+/// A running Git. Dropped before it ended, as at its time limit, it ends with the programs it
+/// started that stay in its process group, such as a project's clean filter (ADR-0210).
+pub(super) struct Git {
+    pub(super) child: Child,
+    /// Git's process group; `None` once Git was reaped, since its id may then be reused.
+    group: Option<rustix::process::Pid>,
+}
+
+impl Git {
+    pub(super) fn spawn(command: &mut Command) -> Result<Self, DiffError> {
+        let child = crate::spawn(command).map_err(DiffError::GitStart)?;
+        let group = child
+            .id()
+            .and_then(|id| i32::try_from(id).ok())
+            .and_then(rustix::process::Pid::from_raw);
+        Ok(Self { child, group })
+    }
+
+    pub(super) async fn wait(&mut self) -> std::io::Result<std::process::ExitStatus> {
+        let status = self.child.wait().await;
+        if status.is_ok() {
+            self.group = None;
+        }
+        status
+    }
+}
+
+impl Drop for Git {
+    fn drop(&mut self) {
+        if let Some(group) = self.group {
+            let _ = rustix::process::kill_process_group(group, rustix::process::Signal::KILL);
+        }
+    }
+}
+
+/// Reads `reader` to its end and keeps at most `limit` bytes from its start.
+async fn keep_start(mut reader: impl AsyncRead + Unpin, limit: usize) -> Vec<u8> {
+    let mut kept = Vec::new();
+    let mut chunk = [0; 8192];
+    while let Ok(read @ 1..) = reader.read(&mut chunk).await {
+        let room = limit.saturating_sub(kept.len());
+        kept.extend_from_slice(&chunk[..read.min(room)]);
+    }
+    kept
+}
