@@ -218,11 +218,11 @@ i.kw{font-style:normal;color:var(--ws-syn-kw)}i.st{font-style:normal;color:var(-
   </div>
   <section>
     <h3 class="sec">Checkpoints: approved mockups</h3>
-    <p class="sub">First pull request of the Liquid Git slice in <a href="../../../PLAN.md#liquid-git-integration--next-slice">PLAN.md</a>, following ADR-0234: a checkpoint at each turn's start and end, the Diff tab reading from them, a return to before a turn, removal with the session and one action that removes all checkpoints. Layout, components and wording follow the <a href="liquid-agent-surface.html">agent surface mockups</a> and <a href="../guidelines.md">guidelines.md</a>. The maintainer approved them on 2026-11-01 with the decisions at the end.</p>
+    <p class="sub">First pull request of the Liquid Git slice in <a href="../../../PLAN.md#liquid-git-integration--next-slice">PLAN.md</a>, following ADR-0234: a checkpoint at each turn's start and end, the Diff tab reading from them, a revert to before a turn, removal with the session and one action that removes all checkpoints. Layout, components and wording follow the <a href="liquid-agent-surface.html">agent surface mockups</a> and <a href="../guidelines.md">guidelines.md</a>. The maintainer approved them on 2026-11-01 with the decisions at the end.</p>
   </section>
   <section>
     <h3 class="sec">1 · Diff tab shows one turn</h3>
-    <p class="sub">The header names the turn shown and opens a menu of the session's turns, newest first, as T3 Code's Diff panel does (<code>Latest turn</code>, <code>Turn n</code>). A turn's changes run from its start checkpoint to its end checkpoint, so earlier turns stay visible after a restart. "All turns" compares the end of the latest turn with the start of the first. The return action sits beside the menu and applies to the turn shown.</p>
+    <p class="sub">The header names the turn shown and opens a menu of the session's turns, newest first, as T3 Code's Diff panel does (<code>Latest turn</code>, <code>Turn n</code>). A turn's changes run from its start checkpoint to its end checkpoint, so earlier turns stay visible after a restart. "All turns" compares the end of the latest turn with the start of the first. The revert action sits beside the menu and applies to the turn shown.</p>
     <div class="stage"><div class="scaler"><div class="win" id="w-diff"></div></div></div>
   </section>
   <section>
@@ -231,13 +231,13 @@ i.kw{font-style:normal;color:var(--ws-syn-kw)}i.st{font-style:normal;color:var(-
     <div class="stage"><div class="scaler"><div class="win" id="w-chat"></div></div></div>
   </section>
   <section>
-    <h3 class="sec">3 · Returning to before a turn</h3>
+    <h3 class="sec">3 · Reverting to before a turn</h3>
     <p class="sub">The dialog lists every file that changes, including edits made outside the agent since then, and says what stays: commits, the branch and files Git ignores. T3 Code's dialog lists no files. Like T3 Code's "Edit from here", the session continues from before the turn with its prompt back in the input area, but on a new branch, so the undone turns stay in the session tree with their checkpoints.</p>
     <div class="win mini"><div id="d-b"></div></div>
   </section>
   <section>
     <h3 class="sec">4 · Refused while an agent runs in the checkout</h3>
-    <p class="sub">Another session runs in the same folder, so the return would change files under it. The dialog still lists the files, names the running session and keeps the action disabled until it stops. T3 Code refuses every file return outside its own worktree; Watershed refuses only while an agent runs there.</p>
+    <p class="sub">Another session runs in the same folder, so the revert would change files under it. The dialog still lists the files, names the running session and keeps the action disabled until it stops. T3 Code refuses every file revert outside its own worktree; Watershed refuses only while an agent runs there.</p>
     <div class="stage"><div class="scaler"><div class="win" id="w-refused"></div></div></div>
   </section>
   <section>
@@ -247,7 +247,7 @@ i.kw{font-style:normal;color:var(--ws-syn-kw)}i.st{font-style:normal;color:var(-
   </section>
   <section>
     <h3 class="sec">6 · Removing checkpoints</h3>
-    <p class="sub">The project's menu in the sidebar removes all of Watershed's checkpoints in its repository; Git frees the space at its next cleanup. Deleting a session removes its checkpoints with it. T3 Code removes checkpoints only when a return makes them obsolete.</p>
+    <p class="sub">The project's menu in the sidebar removes all of Watershed's checkpoints in its repository; Git frees the space at its next cleanup. Deleting a session removes its checkpoints with it. T3 Code removes checkpoints only when a revert makes them obsolete.</p>
     <div class="stage"><div class="scaler"><div class="win" id="w-remove"></div></div></div>
     <div class="opts" style="margin-top:16px">
       <div><div class="lab">Remove all checkpoints</div><div class="win mini"><div id="d-all"></div></div></div>
@@ -257,7 +257,7 @@ i.kw{font-style:normal;color:var(--ws-syn-kw)}i.st{font-style:normal;color:var(-
   <section>
     <h3 class="sec">Decisions</h3>
     <ol class="qs">
-      <li>A return starts a new branch from before the turn and puts that turn's prompt back into the input area; the undone turns stay on their branch, rather than only returning the files and telling the agent.</li>
+      <li>A revert starts a new branch from before the turn and puts that turn's prompt back into the input area; the undone turns stay on their branch, rather than only reverting the files and telling the agent.</li>
       <li>The Diff menu offers "All turns" besides each turn.</li>
       <li>This pull request adds "Delete session", which deletes the pi session file and its checkpoints after confirmation.</li>
       <li>"Remove all checkpoints" lives in the project's menu in the sidebar.</li>
@@ -301,7 +301,7 @@ ${fold(0,'docs')}${file(1,'M','api.md','<span class="add">+3</span>')}${fold(0,'
 <div class="dv">${diffHead(ret)}
 <div><div class="fh"><span class="st M" style="font-weight:600;font-size:12px">M</span><code style="font-size:13px">src/routes/login.ts</code><span class="r"><span class="add">+4</span> <span class="del">−1</span></span></div>
 <div class="dbox mono"><div class="hunk">@@ -14,5 +14,8 @@</div>${dl}</div></div></div></div>`;
-const retBtn=`<span class="btn">${I.undo}Return files to before this turn…</span>`;
+const retBtn=`<span class="btn">${I.undo}Revert files to before this turn…</span>`;
 frame('w-diff','diff',diffBody(retBtn),700,{keys:'T turn menu · ↑↓ file · ⌥↑↓ hunk · U unified/split',over:turnMenu});
 
 frame('w-chat','chat',`<div class="chat"><div class="col">
@@ -310,18 +310,18 @@ frame('w-chat','chat',`<div class="chat"><div class="col">
 <div class="tool"><span class="ok">✓</span>edit <code>src/routes/login.ts</code><span class="r"><span class="add">+4</span><span class="del">−1</span></span></div>
 <div class="tool"><span class="ok">✓</span>edit <code>docs/api.md</code><span class="r"><span class="add">+3</span></span></div>
 <p class="prose">Blocked attempts now get 429 with the seconds until the window frees up, and docs/api.md describes the header.</p>
-<div class="turnfoot"><span>3 files changed</span><span><span class="add">+12</span> <span class="del">−1</span></span><span class="btn ghost">Show changes</span><span class="btn ghost">${I.undo}Return files to before this turn…</span></div>
+<div class="turnfoot"><span>3 files changed</span><span><span class="add">+12</span> <span class="del">−1</span></span><span class="btn ghost">Show changes</span><span class="btn ghost">${I.undo}Revert files to before this turn…</span></div>
 </div></div>`,560,{keys:'⌘1–3 tabs · ⌘↑↓ sessions'});
 
 const files=`<div class="flist"><div class="frow"><span class="st M">M</span><code>docs/api.md</code><span class="r">back to 10:56</span></div><div class="frow"><span class="st M">M</span><code>src/middleware/rateLimit.ts</code><span class="r">back to 10:56</span></div><div class="frow"><span class="st M">M</span><code>src/routes/login.ts</code><span class="r">back to 10:56 · also your edit at 11:02</span></div><div class="frow"><span class="st D">D</span><code>src/limits.json</code><span class="r">new since then, deleted</span></div></div>`;
 const keep=`<p>Commits, the branch <code>main</code> and files Git ignores stay as they are.</p>`;
 const dlg=(title,lead,extra,acts)=>`<div class="dlg"><h4>${title}</h4><p>${lead}</p>${files}${keep}${extra}<div class="acts">${acts}</div></div>`;
 const cancel=`<span class="sp"></span><span class="btn">Cancel <kbd>esc</kbd></span>`;
-document.getElementById('d-b').innerHTML=dlg('Return to before turn 3?','These 4 files return to how they were when turn 3 started.','<p>The session continues on a new branch from before turn 3, and turn 3’s prompt returns to the input area. Turn 3 stays on its own branch in the session tree.</p>',`<span class="btn dngp">Return and branch <kbd>⏎</kbd></span>${cancel}`);
+document.getElementById('d-b').innerHTML=dlg('Revert to before turn 3?','These 4 files revert to how they were when turn 3 started.','<p>The session continues on a new branch from before turn 3, and turn 3’s prompt returns to the input area. Turn 3 stays on its own branch in the session tree.</p>',`<span class="btn dngp">Revert and branch <kbd>⏎</kbd></span>${cancel}`);
 
-const refused=`<div class="scrim"><div class="dlg"><h4>Return to before turn 3?</h4><p>These 4 files return to how they were when turn 3 started.</p>${files}
-<div class="notice">“Fix flaky sync test” is running in this checkout. Stop it or wait until it finishes, then return the files.</div>
-<div class="acts"><span class="btn dngp off">Return and branch</span><span class="btn">Show the running session</span><span class="sp"></span><span class="btn">Cancel <kbd>esc</kbd></span></div></div></div>`;
+const refused=`<div class="scrim"><div class="dlg"><h4>Revert to before turn 3?</h4><p>These 4 files revert to how they were when turn 3 started.</p>${files}
+<div class="notice">“Fix flaky sync test” is running in this checkout. Stop it or wait until it finishes, then revert the files.</div>
+<div class="acts"><span class="btn dngp off">Revert and branch</span><span class="btn">Show the running session</span><span class="sp"></span><span class="btn">Cancel <kbd>esc</kbd></span></div></div></div>`;
 frame('w-refused','diff',diffBody(retBtn),560,{running:true,keys:'',over:refused});
 
 document.getElementById('empties').innerHTML=[
@@ -332,7 +332,7 @@ document.getElementById('empties').innerHTML=[
 
 const projMenu=`<div class="menu" style="left:150px;top:196px;width:250px"><div class="it">Open in Finder</div><div class="it">New agent session<span class="r">⌘N</span></div><hr><div class="it dng">Remove all checkpoints…</div></div>`;
 frame('w-remove','chat',`<div class="chat"><div class="col"><p class="prose" style="color:var(--ws-text-faint)">…</p></div></div>`,420,{projOn:true,menu:projMenu,keys:''});
-document.getElementById('d-all').innerHTML=`<div class="dlg"><h4>Remove all checkpoints of acme-api?</h4><p>2 sessions keep their chats and Trajectories, but no longer show turn changes or return files. Project files, commits and branches stay. Git frees the space at its next cleanup.</p><div class="flist"><div class="frow">Rate limit for /login<span class="r">3 turns</span></div><div class="frow">Fix flaky sync test<span class="r">5 turns</span></div></div><div class="acts"><span class="btn dngp">Remove checkpoints</span>${cancel}</div></div>`;
+document.getElementById('d-all').innerHTML=`<div class="dlg"><h4>Remove all checkpoints of acme-api?</h4><p>2 sessions keep their chats and Trajectories, but no longer show turn changes or revert files. Project files, commits and branches stay. Git frees the space at its next cleanup.</p><div class="flist"><div class="frow">Rate limit for /login<span class="r">3 turns</span></div><div class="frow">Fix flaky sync test<span class="r">5 turns</span></div></div><div class="acts"><span class="btn dngp">Remove checkpoints</span>${cancel}</div></div>`;
 document.getElementById('d-del').innerHTML=`<div class="dlg"><h4>Delete “Rate limit for /login”?</h4><p>Its pi session file and its 3 turns’ checkpoints are deleted and cannot be restored. Project files, commits and branches stay.</p><div class="acts"><span class="btn dngp">Delete session</span>${cancel}</div></div>`;
 
 let mode='system',fit=true;const mq=matchMedia('(prefers-color-scheme: dark)');
