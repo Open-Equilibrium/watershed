@@ -213,7 +213,7 @@ The agent writes only to its project and temporary folders unless the person all
 
 #### M3a — Local Workspace foundation
 
-- Local replica as the only interactive store; storage choice remains D-029.
+- Local replica as the only interactive store: SQLite with SQLCipher and FTS5 (ADR-0237).
 - Flutter clients over the Rust core follow the [client architecture](docs/concept/liquid-client-architecture.md) invariants (ADR-0182).
 - Pages, Blocks, Views, Sources, Connections, Automations, Roles, History and settings.
 - Explorer with Pages and Sources as peer navigation entries; Page templates create use-case compositions rather than new Page Types.

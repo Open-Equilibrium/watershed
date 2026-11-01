@@ -218,7 +218,7 @@ h4.qh{margin:14px 0 6px;font-size:13px}
   </div>
   <section>
     <h1>Liquid Workspace: Sections</h1>
-    <p class="sub">Mockups for review, replacing the dropped groups idea of 2026-11-01, as the maintainer defined it. A Text Block is one paragraph, heading, list item or to-do; ⏎ ends it and starts the next, as in Notion. Consecutive Text Blocks form a Section, which <code>---</code> or a Block of another type ends. In Arrange mode a Section is one tile, so text is arranged as a whole, while every other Block is its own tile. Shell and wording follow the <a href="liquid-workspace-pages.html">Pages mockups</a>.</p>
+    <p class="sub">Approved by the maintainer on 2026-11-01, except section 3 and the Markdown rule, which await review; they replace the dropped groups idea. A Text Block is one paragraph, heading, list item or to-do; ⏎ ends it and starts the next, as in Notion. Consecutive Text Blocks form a Section, which <code>---</code> or a Block of another type ends. In Arrange mode a Section is one tile, so text is arranged as a whole, while every other Block is its own tile. Shell and wording follow the <a href="liquid-workspace-pages.html">Pages mockups</a>.</p>
   </section>
   <section>
     <h3 class="sec">1 · How Sections form</h3>
@@ -231,19 +231,31 @@ h4.qh{margin:14px 0 6px;font-size:13px}
     <div class="stage"><div class="scaler"><div class="win" id="w-t2" data-w="1240"></div></div></div>
   </section>
   <section>
-    <h3 class="sec">3 · Splitting and joining Sections</h3>
+    <h3 class="sec">3 · Arranging inside a Section</h3>
+    <p class="sub">A double-click or ⏎ on a Section's tile enters it, as the dropped groups did: everything outside dims, the Arrange bar shows where you are, and the Section's own columns appear, as many as it spans. Its Text Blocks then move and resize in those columns, so text can run in two or three columns. esc leaves the Section. On a phone the Text Blocks stack in their Page order again.</p>
+    <div class="stage"><div class="scaler"><div class="win" id="w-t4" data-w="1240"></div></div></div>
+  </section>
+  <section>
+    <h3 class="sec">4 · Splitting and joining Sections</h3>
     <p class="sub"><code>---</code> and ⏎ between two Text Blocks splits their Section. ⌫ at the start of the Text Block below a divider removes the divider and joins both Sections. This changes only the layout, so it needs no dialog and Undo reverts it. Inserting a Block of another type between Text Blocks also splits a Section, and deleting it joins them again.</p>
     <div class="stage"><div class="scaler"><div class="win bare" id="w-t3" data-w="1240"></div></div></div>
   </section>
   <section>
-    <h3 class="sec">Assumptions for review</h3>
+    <h3 class="sec">Decisions</h3>
+    <h4 class="qh">Approved (2026-11-01)</h4>
     <ol class="qs">
       <li><b>Text Block.</b> One paragraph, heading, list item, to-do or quote; ⏎ ends it, as in Notion. A toggle stays formatting: the Text Blocks indented below it fold with it.</li>
       <li><b>Section is layout only.</b> It holds no content and has no rights, Connections or Views of its own; it follows from the order of Text Blocks and their boundaries, like a column in Notion. Each Text Block stays a full Block with History, rights and Views; a View of one Text Block on another Page joins the Section it lands in there.</li>
       <li><b>Boundaries.</b> A Section ends at <code>---</code>, at any Block of another type and at the Page's start and end. <code>---</code> right after a Block of another type stays plain text, since a boundary already exists. There is no decorative divider.</li>
       <li><b>Tiles.</b> When two Sections join, the joined one keeps the upper Section's place and width; when one splits, the new lower Section starts below it at the same width.</li>
-      <li><b>Import and export.</b> Markdown paragraphs become Text Blocks and <code>---</code> a Section boundary; export writes <code>---</code> between two Sections that follow each other directly.</li>
+
       <li><b>Phone and narrow windows.</b> A Section is one tile for the half-or-full rule; on a phone everything stacks in Page order.</li>
+    </ol>
+    <h4 class="qh">For review</h4>
+    <ol class="qs">
+      <li><b>Inside a Section</b> as the dropped groups worked: enter with a double-click or ⏎, leave with esc; the Section's own columns, as many as it spans; its Text Blocks move and resize in them; the Page order stays the reading order on a phone and for screen readers.</li>
+      <li><b>Markdown import follows CommonMark.</b> Only a thematic break becomes a Section boundary: <code>---</code>, <code>***</code> or <code>___</code> on a line of its own. <code>---</code> directly under a line of text underlines a heading (a setext heading, like <code>===</code>), so it becomes a Text Block formatted as a heading and no boundary. A <code>---</code> block at the very start is YAML front matter and becomes no boundary either; inside code and table rows <code>---</code> stays text.</li>
+      <li><b>Markdown export</b> writes headings as <code>#</code> and <code>##</code>, never underlined, and writes each Section boundary as <code>---</code> with a blank line above, so a round trip never turns a boundary into a heading.</li>
     </ol>
   </section>
 </div>
@@ -332,6 +344,15 @@ const card=(label,inner)=>`<div class="win" style="width:600px;flex:none;padding
 const split=card('Typing <code>---</code> and ⏎ after “Book the flat”: one Section becomes two',`<div class="secb">${tb('<h4>Plan</h4>')}${tb('Five days in Lisbon, one in Porto.')}${tb('<h4>Before we go</h4>')}${tb('<div class="todo"><span class="cb on">✓</span>Book the flat in Alfama</div>')}</div><div class="dv"></div><div class="secb">${tb('<div class="todo"><span class="cb"></span>Renew the passport</div>')}</div>`);
 const join=card('⌫ at the start of “Renew the passport”: the divider goes, both Sections join',`<div class="secb">${tb('<h4>Plan</h4>')}${tb('Five days in Lisbon, one in Porto.')}${tb('<h4>Before we go</h4>')}${tb('<div class="todo"><span class="cb on">✓</span>Book the flat in Alfama</div>')}${tb('<div class="todo"><span class="cb"></span><span class="caret" style="margin-right:2px"></span>Renew the passport</div>')}</div><div style="margin-top:14px;display:flex;justify-content:center"><span class="toast" style="position:static;transform:none">Joined Sections<span class="u">Undo ⌘Z</span></span></div>`);
 document.getElementById('w-t3').innerHTML=`<div style="display:flex;gap:40px;align-items:flex-start">${split}${join}</div>`;
+
+const inS=`<div class="ga" style="grid-template-columns:repeat(8,1fr);gap:12px;position:relative">
+<div class="t" style="grid-column:1/9;box-shadow:0 0 0 1px var(--ws-border)">${plain(tb('<h4>Plan</h4>'))}</div>
+<div class="t sel" style="grid-column:1/5"><span class="mv">• • •</span><span class="rs"></span><span class="span">4 of 8</span>${plain(tb('Five days in Lisbon, one in Porto. We fly on 12 November and come back on the 18th; the flat in Alfama is booked from the 12th.'))}</div>
+<div class="t" style="grid-column:5/9;box-shadow:0 0 0 1px var(--ws-border)">${plain(tb('Porto gets one night: the train leaves Santa Apolónia at 9:09 and returns on the 17th in the evening.'))}</div>
+<div class="t" style="grid-column:1/9;box-shadow:0 0 0 1px var(--ws-border)">${plain(tb('<div class="todo"><span class="cb"></span>Renew the passport</div>'))}</div></div>`;
+frame('w-t4',{h:600,side:{sel:'trip'},head:bar(`<span class="crumb2"><span>🧳 Trip to Lisbon ›</span> <span>Section · Plan ›</span> <b>Five days in Lisbon…</b></span>`,`<span style="color:var(--ws-accent)">esc leaves the Section</span>`),main:`<div class="pg" style="padding:28px 32px 0"><div style="max-width:1120px;margin:0 auto"><div class="ttl" style="font-size:24px;line-height:32px"><span class="tic" style="font-size:22px">🧳</span>Trip to Lisbon</div><div class="ga lines" style="margin-top:18px;font-size:15px;line-height:22px">
+<div class="grp open" style="grid-column:1/9;grid-row:1/3"><span class="glab">Section · Plan</span>${inS}</div>
+<div class="t" style="grid-column:9/13;grid-row:1;opacity:.4">${IMG.replace('150px','120px')}</div><div class="t" style="grid-column:9/13;grid-row:2;opacity:.4">${plain(S2)}</div></div></div></div>`});
 
 let mode='system',fit=true;const mq=matchMedia('(prefers-color-scheme: dark)');
 function hostDark(){const v=getComputedStyle(document.documentElement).getPropertyValue('--background').trim();if(!v)return mq.matches;const c=document.createElement('canvas');c.width=c.height=1;const x=c.getContext('2d');x.fillStyle='#808080';x.fillStyle=v;x.fillRect(0,0,1,1);const d=x.getImageData(0,0,1,1).data;return .2126*d[0]+.7152*d[1]+.0722*d[2]<128}

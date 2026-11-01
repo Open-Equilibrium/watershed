@@ -67,10 +67,10 @@ Liquid        = local-first workspace and App platform</code></pre>
         <li>Typing creates a Text Block; <code>/</code> opens the Block chooser; paste/drop/drawing create the deterministic matching Block.</li>
         <li>Text shortcuts format the current Text Block. For example, <code>&gt;</code> plus space applies toggle formatting; a toggle is not a Block.</li>
         <li>Blocks begin in one ordered vertical flow. Arrange mode reveals a responsive grid with move/resize handles, like placing mobile widgets without a separate container.</li>
-        <li>A Text Block is one paragraph, heading or item; ⏎ ends it. Consecutive Text Blocks form a <strong>Section</strong>, which <code>---</code> or a Block of another type ends; Arrange mode places each Section and each other Block as one tile. A Section is layout only and owns no content (ADR-0235).</li>
+        <li>A Text Block is one paragraph, heading or item; ⏎ ends it. Consecutive Text Blocks form a <strong>Section</strong>, which <code>---</code> or a Block of another type ends; Arrange mode places each Section and each other Block as one tile, and a Section's Text Blocks can be arranged in columns inside it. A Section is layout only and owns no content (ADR-0235).</li>
         <li>Page templates create useful starting compositions, such as an AI Project with Agent Session, Database and App Blocks. A template is not a Page Type.</li>
         <li>The Explorer shows Pages and Sources as peer entries. Opening either follows one navigation model; the internal object types remain distinct.</li>
-        <li>The Explorer shows areas as sections, as Notion shows teamspaces; each holds a tree of nested Pages with Sources among them (ADR-0235).</li>
+        <li>The Explorer shows each area under its own heading, as Notion shows teamspaces; each holds a tree of nested Pages with Sources among them (ADR-0235).</li>
         <li>In M3a a Source is a local file or folder, read-only, because History cannot revert writes outside Workspace data (ADR-0235). Web links follow after M3a as read-only Sources that load only when opened and show in a built-in browser (ADR-0236).</li>
         <li>Media come from local attachments; a web link is a bookmark that fetches nothing, and an embed loads remote content only after a click (ADR-0235).</li>
         <li>The PowerBar finds Workspace objects, creates Blocks and invokes permitted Workspace or agent actions.</li>
@@ -264,19 +264,19 @@ liquid-ui (Flutter)
 
 integrations
   Meta-Harness projection clients and MCP adapters</code></pre>
-      <p>Package names are design targets, not frozen implementation names. Interactive clients use Flutter over the Rust core; thread, bridge, rendering, durability and resource rules live in the <a href="liquid-client-architecture.md">Liquid client architecture</a>. The storage engine remains open. All cross-product access uses public IDs and protocol surfaces; no product reads another product's private store.</p>
+      <p>Package names are design targets, not frozen implementation names. Interactive clients use Flutter over the Rust core; thread, bridge, rendering, durability and resource rules live in the <a href="liquid-client-architecture.md">Liquid client architecture</a>. The local replica uses SQLite with SQLCipher (ADR-0237). All cross-product access uses public IDs and protocol surfaces; no product reads another product's private store.</p>
     </div></section>
 
     <section id="history" class="section"><h2>11. History and Workspace CLI/API</h2><div class="body">
       <p>History covers Liquid Workspace data only: Pages, Blocks, Views, Sources, Connections, Automations, Roles, App state, layout and settings. It supports attribution, diff, undo/revert and sync; it is not project-code VCS.</p>
       <pre><code>request → validate → effective permission → diff/proposal
         → apply atomically → record Action → emit event</code></pre>
-      <p>UI, Liquid AI, CLI/API, App, Automation, import and sync all use this path. The CLI/API exposes small typed operations rather than one unrestricted document interface; final syntax remains <a href="../decisions/open-decisions.html#d-027">D-027</a>. History is a sequence of Actions plus save points. A revert records a new reversing Action, as <code>git revert</code> does; Restore version returns a Page to an earlier point, also when later changes conflict; ⌘Z reverts the person's last Action as an Undo entry (ADR-0235). Storage remains <a href="../decisions/open-decisions.html#d-029">D-029</a>.</p>
+      <p>UI, Liquid AI, CLI/API, App, Automation, import and sync all use this path. The CLI/API exposes small typed operations rather than one unrestricted document interface; final syntax remains <a href="../decisions/open-decisions.html#d-027">D-027</a>. History is a sequence of Actions plus save points. A revert records a new reversing Action, as <code>git revert</code> does; Restore version returns a Page to an earlier point, also when later changes conflict; ⌘Z reverts the person's last Action as an Undo entry (ADR-0235). Storage is SQLite with SQLCipher (ADR-0237).</p>
     </div></section>
 
     <section id="delivery" class="section"><h2>12. Delivery and open decisions</h2><div class="body">
       <p>The target model above is delivered in four stages: local Workspace foundation; Apps and agent actions; central sync/mobile/headless execution; then Block Registry and MCP adapters. Scope and Definitions of Done are canonical in <a href="../../PLAN.md">PLAN.md</a>.</p>
-      <p>Remaining Liquid implementation decisions: CLI/API syntax (<a href="../decisions/open-decisions.html#d-027">D-027</a>), storage (<a href="../decisions/open-decisions.html#d-029">D-029</a>) and sync conflicts (<a href="../decisions/open-decisions.html#d-035">D-035</a>).</p>
+      <p>Remaining Liquid implementation decisions: CLI/API syntax (<a href="../decisions/open-decisions.html#d-027">D-027</a>) and sync conflicts (<a href="../decisions/open-decisions.html#d-035">D-035</a>).</p>
     </div></section>
   </main>
 </div>

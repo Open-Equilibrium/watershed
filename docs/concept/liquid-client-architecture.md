@@ -1,6 +1,6 @@
 # Liquid client architecture
 
-This document turns the accepted Liquid client stack (Flutter UI over a Rust Liquid core) and its performance and stability invariants (ADR-0182) into implementation rules. Product behavior is canonical in the [Liquid V-Spec](V-Spec_Liquid.html), targets in [`PLATFORMS.md`](../../PLATFORMS.md), performance evidence in [`PERFORMANCE.md`](../../PERFORMANCE.md#liquid), security in [`SECURITY.md`](../../SECURITY.md) and pass/fail evidence in [`TESTING.md`](../../TESTING.md). The bridge is flutter_rust_bridge v2 (ADR-0186); the History model is ADR-0235, and the storage engine and CRDT library remain [D-029](../decisions/open-decisions.html#d-029) and [D-035](../decisions/open-decisions.html#d-035).
+This document turns the accepted Liquid client stack (Flutter UI over a Rust Liquid core) and its performance and stability invariants (ADR-0182) into implementation rules. Product behavior is canonical in the [Liquid V-Spec](V-Spec_Liquid.html), targets in [`PLATFORMS.md`](../../PLATFORMS.md), performance evidence in [`PERFORMANCE.md`](../../PERFORMANCE.md#liquid), security in [`SECURITY.md`](../../SECURITY.md) and pass/fail evidence in [`TESTING.md`](../../TESTING.md). The bridge is flutter_rust_bridge v2 (ADR-0186); the History model is ADR-0235, the storage engine ADR-0237, and the CRDT library remains [D-035](../decisions/open-decisions.html#d-035).
 
 ## Priority
 
@@ -12,7 +12,7 @@ Input responsiveness and zero loss of acknowledged local changes take precedence
 flowchart TD
   UI["Flutter UI<br/>main isolate: input, layout, paint"] -->|"async intents"| BR["Bridge (flutter_rust_bridge v2)"]
   BR --> CORE["Rust Liquid core<br/>mutation pipeline, History, queries"]
-  CORE --> ST["Local replica<br/>durable store (D-029)"]
+  CORE --> ST["Local replica<br/>SQLite with SQLCipher"]
   CORE --> SY["Sync client<br/>committed changes, CRDT merge (D-035)"]
   SY <--> SS["Sync Server"]
   CORE -->|"bounded deltas"| BR
@@ -49,6 +49,10 @@ flowchart TD
 
 13. Database Views read windowed pages sized to the viewport. Sorting, filtering, grouping and aggregation run in Rust against indexes; Charts and Formulas receive computed results, not source rows.
 14. Every stream subscription, native handle and Dart listener has exactly one owner, normally the View widget, and is released when that owner is disposed or its Page closes. Cancelling a Dart stream drops the corresponding Rust producer.
+
+### Storage
+
+15. The local replica is SQLite in write-ahead-log mode, encrypted with SQLCipher, with FTS5 for PowerBar search (ADR-0237). Its key lives in the operating system's keystore and is released only to Liquid (ADR-0229); attachments are encrypted blobs outside the database (ADR-0228). SQL stays inside `liquid-storage` behind typed reads and writes, so no other crate depends on the engine and replacing it touches only that crate and a one-time migration.
 
 ## Risks against the current V-Spec
 
