@@ -1,7 +1,8 @@
 //! Observation workload for checkpoints in a large project (PERFORMANCE.md, Meta-Harness): a Git
 //! project of 20,000 committed files of 1 KiB in 200 folders. Each sample is one turn: its start
-//! checkpoint, ten changed files and one new file, its end checkpoint and the list of what it
-//! changed. The first sample's start also opens the project. The project is written by
+//! checkpoint, ten changed files and one new file, its end checkpoint, the list of what it
+//! changed, the plan of a revert to its start and that revert. The first sample's start also
+//! opens the project. The project is written by
 //! a second run of this example, so building it adds nothing to the measured process. It prints
 //! one JSON line per sample and a summary and never compares with a threshold. Run from the
 //! repository root:
@@ -91,6 +92,8 @@ async fn observe(dir: &Path) {
     let mut starts = Vec::new();
     let mut ends = Vec::new();
     let mut lists = Vec::new();
+    let mut plans = Vec::new();
+    let mut reverts = Vec::new();
     for sample in 0..SAMPLES {
         let at = |phase| Checkpoint {
             session: "observe".to_owned(),
@@ -123,6 +126,19 @@ async fn observe(dir: &Path) {
             .await
             .expect("changes");
         let list_ms = ms(started);
+        let started = Instant::now();
+        let plan = checkpoints
+            .revert_plan(&at(Phase::Start), Some(&at(Phase::End)))
+            .await
+            .expect("plan");
+        let plan_ms = ms(started);
+        let started = Instant::now();
+        checkpoints
+            .revert(&at(Phase::Start))
+            .await
+            .expect("reverted");
+        let revert_ms = ms(started);
+        assert_eq!(plan.files.len(), changes.len(), "the revert undoes the turn");
         println!(
             "{}",
             json!({
@@ -130,12 +146,16 @@ async fn observe(dir: &Path) {
                 "start_ms": round(start_ms),
                 "end_ms": round(end_ms),
                 "list_ms": round(list_ms),
+                "plan_ms": round(plan_ms),
+                "revert_ms": round(revert_ms),
                 "files": changes.len(),
             })
         );
         starts.push(start_ms);
         ends.push(end_ms);
         lists.push(list_ms);
+        plans.push(plan_ms);
+        reverts.push(revert_ms);
     }
     checkpoints.close().await;
     // The first start also opens the project, so the summary leaves it out.
@@ -154,6 +174,8 @@ async fn observe(dir: &Path) {
             "start": summary(&mut starts[1..].to_vec()),
             "end": summary(&mut ends),
             "list": summary(&mut lists),
+            "plan": summary(&mut plans),
+            "revert": summary(&mut reverts),
         })
     );
 }
