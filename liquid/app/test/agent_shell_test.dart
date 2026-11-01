@@ -1092,6 +1092,8 @@ void main() {
     for (final (key, text) in [
       ('watershed.revert', 'Waiting for a revert in this checkout to finish'),
       ('todo', '2 left'),
+      // An extension's key that only looks like Watershed's still shows.
+      ('watershed.other', 'busy'),
     ]) {
       await emit(
         tester,
@@ -1104,7 +1106,8 @@ void main() {
     }
     expect(
       find.text(
-        'Waiting for a revert in this checkout to finish · todo 2 left',
+        'Waiting for a revert in this checkout to finish · todo 2 left · '
+        'watershed.other busy',
       ),
       findsOneWidget,
     );

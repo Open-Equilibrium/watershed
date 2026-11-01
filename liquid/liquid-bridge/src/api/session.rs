@@ -220,7 +220,7 @@ impl AgentSession {
     pub fn in_repository(&self) -> Result<bool, String> {
         RUNTIME
             .block_on(self.checkpoints.in_repository())
-            .map_err(|error| error.to_string())
+            .map_err(|error| visible_name(&error.to_string()))
     }
 
     /// The turns of the current branch, oldest first, with what each changed.
@@ -273,7 +273,7 @@ impl AgentSession {
                 .patch(&from, &to, &path, whitespace(hide_whitespace))
                 .await
                 .map(|patch| visible_lines(&patch))
-                .map_err(|error| error.to_string())
+                .map_err(|error| visible_name(&error.to_string()))
         })
     }
 
@@ -670,7 +670,7 @@ pub(crate) fn left_unreverted(paths: &[String]) -> String {
 }
 
 /// Why checkpoints could not be read, when they cannot exist here or were removed.
-fn unread(error: DiffError) -> Result<BridgeChangesState, String> {
+pub(crate) fn unread(error: DiffError) -> Result<BridgeChangesState, String> {
     match error {
         DiffError::NotARepository => Ok(BridgeChangesState::OutsideGit),
         DiffError::NoCheckpoint => Ok(BridgeChangesState::Removed),

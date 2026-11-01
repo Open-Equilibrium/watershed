@@ -901,6 +901,20 @@ fn names_a_few_files_git_left_unreverted_as_liquid_shows_them() {
 }
 
 #[test]
+fn writes_out_what_hides_in_gits_errors() {
+    assert_eq!(
+        crate::api::session::unread(meta_harness_core::DiffError::Git(
+            "cannot read 'a\u{202e}txt.exe'".to_owned()
+        )),
+        Err("git failed: cannot read 'a<U+202E>txt.exe'".to_owned())
+    );
+    assert_eq!(
+        crate::api::session::unread(meta_harness_core::DiffError::NoCheckpoint),
+        Ok(BridgeChangesState::Removed)
+    );
+}
+
+#[test]
 fn a_project_outside_git_has_no_checkpoints_and_says_so() {
     let dir = std::env::temp_dir().join(format!("liquid-bridge-no-git-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
