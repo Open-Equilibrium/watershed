@@ -5,7 +5,7 @@ Observational evidence for the checkpoints of the [Liquid Git slice](../../PLAN.
 ## Environment
 
 - Apple M6, 24 GB, macOS 27.0 (26A428), Git 2.54.0 (Apple Git-157).
-- Rust 1.99.0, release build; observed on 2026-11-01 at commit `995fd8c`; one run.
+- Rust 1.99.0, release build; observed on 2026-11-01 at commit `260f92b`; one run.
 
 ## Workload
 
@@ -15,30 +15,30 @@ Observational evidence for the checkpoints of the [Liquid Git slice](../../PLAN.
 
 ## Observations
 
-A start checkpoint takes 71.3 ms p50 (101.9 ms p95), an end checkpoint 76.9 ms p50 (100.7 ms p95), listing a turn's changes 26.3 ms p50; planning a revert takes 99.3 ms p50 (139.9 ms p95), as it captures the project once more, and the revert 187.8 ms p50 (257.2 ms p95), as it captures the project before and after writing the files back to check them; the first start, which also opens the project, took 89.5 ms. Since `54dd77f` each sample also reverts its turn, so its start and end compare only with runs since then; at `54dd77f`, before the revert checked its result, a revert took 102.2 ms p50 on the same machine, and at `69b9d01`, without reverts, a start took 82.1 ms p50 and an end 84.2 ms p50. A checkpoint rereads only the files whose index entries changed, so its time grows with the project's file count rather than its size. Peak memory footprint 2.4 MB; `/usr/bin/time` reports 12.7 MB maximum resident set size, which includes the waited-for writer run.
+A start checkpoint takes 66.6 ms p50 (86.8 ms p95), an end checkpoint 71.6 ms p50 (89.9 ms p95), listing a turn's changes 24.1 ms p50; planning a revert takes 90.6 ms p50 (125.6 ms p95), as it captures the project once more, and the revert 177.3 ms p50 (229.5 ms p95), as it captures the project before and after writing the files back to check them; the first start, which also opens the project, took 87.4 ms. Since `54dd77f` each sample also reverts its turn, so its start and end compare only with runs since then; at `54dd77f`, before the revert checked its result, a revert took 102.2 ms p50 on the same machine, and at `69b9d01`, without reverts, a start took 82.1 ms p50 and an end 84.2 ms p50. A checkpoint rereads only the files whose index entries changed, so its time grows with the project's file count rather than its size. Peak memory footprint 2.4 MB; `/usr/bin/time` reports 12.7 MB maximum resident set size, which includes the waited-for writer run.
 
 ### Raw output
 
 ```json
-{"end_ms":75.095,"files":11,"list_ms":26.175,"plan_ms":95.289,"revert_ms":189.043,"sample":0,"start_ms":89.473}
-{"end_ms":78.65,"files":11,"list_ms":27.631,"plan_ms":139.872,"revert_ms":252.683,"sample":1,"start_ms":70.607}
-{"end_ms":91.531,"files":11,"list_ms":27.956,"plan_ms":104.057,"revert_ms":205.685,"sample":2,"start_ms":85.052}
-{"end_ms":85.44,"files":11,"list_ms":26.105,"plan_ms":112.287,"revert_ms":179.53,"sample":3,"start_ms":78.821}
-{"end_ms":72.512,"files":11,"list_ms":26.101,"plan_ms":96.448,"revert_ms":221.105,"sample":4,"start_ms":66.618}
-{"end_ms":93.391,"files":11,"list_ms":27.517,"plan_ms":118.919,"revert_ms":197.657,"sample":5,"start_ms":89.719}
-{"end_ms":75.051,"files":11,"list_ms":23.981,"plan_ms":87.572,"revert_ms":165.251,"sample":6,"start_ms":69.73}
-{"end_ms":67.496,"files":11,"list_ms":23.334,"plan_ms":86.397,"revert_ms":166.859,"sample":7,"start_ms":62.488}
-{"end_ms":67.73,"files":11,"list_ms":22.951,"plan_ms":85.391,"revert_ms":163.763,"sample":8,"start_ms":62.659}
-{"end_ms":71.04,"files":11,"list_ms":23.658,"plan_ms":85.994,"revert_ms":166.853,"sample":9,"start_ms":62.694}
-{"end_ms":67.628,"files":11,"list_ms":22.741,"plan_ms":85.987,"revert_ms":167.324,"sample":10,"start_ms":62.818}
-{"end_ms":68.501,"files":11,"list_ms":23.113,"plan_ms":87.066,"revert_ms":167.915,"sample":11,"start_ms":63.429}
-{"end_ms":68.444,"files":11,"list_ms":23.131,"plan_ms":86.706,"revert_ms":183.041,"sample":12,"start_ms":63.624}
-{"end_ms":77.773,"files":11,"list_ms":27.827,"plan_ms":99.329,"revert_ms":186.011,"sample":13,"start_ms":73.65}
-{"end_ms":76.892,"files":11,"list_ms":26.637,"plan_ms":99.51,"revert_ms":187.752,"sample":14,"start_ms":71.516}
-{"end_ms":76.877,"files":11,"list_ms":26.273,"plan_ms":123.894,"revert_ms":257.174,"sample":15,"start_ms":71.338}
-{"end_ms":111.693,"files":11,"list_ms":44.144,"plan_ms":133.118,"revert_ms":213.492,"sample":16,"start_ms":112.1}
-{"end_ms":93.177,"files":11,"list_ms":36.656,"plan_ms":148.584,"revert_ms":310.553,"sample":17,"start_ms":94.865}
-{"end_ms":89.335,"files":11,"list_ms":28.249,"plan_ms":107.471,"revert_ms":202.188,"sample":18,"start_ms":101.917}
-{"end_ms":100.714,"files":11,"list_ms":28.219,"plan_ms":92.681,"revert_ms":178.109,"sample":19,"start_ms":81.568}
-{"end":{"max_ms":111.693,"p50_ms":76.892,"p95_ms":100.714},"files":20000,"first_start_ms":89.473,"list":{"max_ms":44.144,"p50_ms":26.273,"p95_ms":36.656},"plan":{"max_ms":148.584,"p50_ms":99.329,"p95_ms":139.872},"revert":{"max_ms":310.553,"p50_ms":187.752,"p95_ms":257.174},"samples":20,"start":{"max_ms":112.1,"p50_ms":71.338,"p95_ms":101.917},"summary":"checkpoints"}
+{"end_ms":74.944,"files":11,"list_ms":26.202,"plan_ms":95.238,"revert_ms":187.324,"sample":0,"start_ms":87.383}
+{"end_ms":78.607,"files":11,"list_ms":26.58,"plan_ms":100.462,"revert_ms":208.457,"sample":1,"start_ms":70.756}
+{"end_ms":86.259,"files":11,"list_ms":26.851,"plan_ms":104.794,"revert_ms":216.063,"sample":2,"start_ms":77.522}
+{"end_ms":87.931,"files":11,"list_ms":26.325,"plan_ms":94.444,"revert_ms":177.346,"sample":3,"start_ms":83.019}
+{"end_ms":71.588,"files":11,"list_ms":25.433,"plan_ms":113.41,"revert_ms":229.474,"sample":4,"start_ms":66.751}
+{"end_ms":89.872,"files":11,"list_ms":34.322,"plan_ms":125.616,"revert_ms":236.632,"sample":5,"start_ms":86.793}
+{"end_ms":88.377,"files":11,"list_ms":27.924,"plan_ms":107.163,"revert_ms":218.399,"sample":6,"start_ms":81.241}
+{"end_ms":86.135,"files":11,"list_ms":36.912,"plan_ms":110.435,"revert_ms":201.019,"sample":7,"start_ms":77.537}
+{"end_ms":130.683,"files":11,"list_ms":42.333,"plan_ms":133.275,"revert_ms":220.432,"sample":8,"start_ms":113.084}
+{"end_ms":77.075,"files":11,"list_ms":23.553,"plan_ms":90.307,"revert_ms":177.204,"sample":9,"start_ms":75.907}
+{"end_ms":70.128,"files":11,"list_ms":24.123,"plan_ms":88.546,"revert_ms":172.0,"sample":10,"start_ms":64.76}
+{"end_ms":69.275,"files":11,"list_ms":24.139,"plan_ms":88.389,"revert_ms":170.944,"sample":11,"start_ms":65.064}
+{"end_ms":69.151,"files":11,"list_ms":23.039,"plan_ms":87.388,"revert_ms":170.247,"sample":12,"start_ms":64.147}
+{"end_ms":69.037,"files":11,"list_ms":24.026,"plan_ms":86.897,"revert_ms":168.429,"sample":13,"start_ms":65.184}
+{"end_ms":69.711,"files":11,"list_ms":23.671,"plan_ms":87.542,"revert_ms":171.367,"sample":14,"start_ms":64.762}
+{"end_ms":69.814,"files":11,"list_ms":22.784,"plan_ms":86.946,"revert_ms":170.378,"sample":15,"start_ms":64.808}
+{"end_ms":69.636,"files":11,"list_ms":22.966,"plan_ms":90.571,"revert_ms":171.227,"sample":16,"start_ms":64.91}
+{"end_ms":70.452,"files":11,"list_ms":22.967,"plan_ms":88.429,"revert_ms":172.071,"sample":17,"start_ms":65.332}
+{"end_ms":71.196,"files":11,"list_ms":23.219,"plan_ms":88.194,"revert_ms":174.207,"sample":18,"start_ms":66.594}
+{"end_ms":70.925,"files":11,"list_ms":23.173,"plan_ms":89.575,"revert_ms":178.549,"sample":19,"start_ms":65.933}
+{"end":{"max_ms":130.683,"p50_ms":71.588,"p95_ms":89.872},"files":20000,"first_start_ms":87.383,"list":{"max_ms":42.333,"p50_ms":24.139,"p95_ms":36.912},"plan":{"max_ms":133.275,"p50_ms":90.571,"p95_ms":125.616},"revert":{"max_ms":236.632,"p50_ms":177.346,"p95_ms":229.474},"samples":20,"start":{"max_ms":113.084,"p50_ms":66.594,"p95_ms":86.793},"summary":"checkpoints"}
 ```
