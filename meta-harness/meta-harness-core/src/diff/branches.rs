@@ -149,7 +149,11 @@ impl WorkingTree {
         let mut branches: Vec<Branch> = rows
             .iter()
             // A symbolic ref, such as `origin/HEAD`, names another branch.
-            .filter(|row| row.len() == 5 && row[3].is_empty() && !tracked.contains(row[0]))
+            .filter(|row| {
+                row.len() == 5
+                    && row[3].is_empty()
+                    && (row[0].starts_with("refs/heads/") || !tracked.contains(row[0]))
+            })
             .filter_map(|row| {
                 let (name, remote) = match row[0].strip_prefix("refs/heads/") {
                     Some(name) => (name, false),

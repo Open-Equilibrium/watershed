@@ -169,6 +169,25 @@ fn branches_list_local_ones_then_remote_ones_no_local_branch_tracks() {
 }
 
 #[test]
+fn tracking_a_local_branch_keeps_both_local_branches_in_the_list() {
+    run(async {
+        let clone = Clone::new("branches-local-upstream");
+        let repo = &clone.repo;
+        repo.git(&["branch", "--track", "feature", "main"]);
+        let checkpoints = Checkpoints::new(repo.path());
+
+        let branches = checkpoints.branches().await.expect("branches");
+
+        let names: Vec<(&str, bool, bool)> = branches
+            .branches
+            .iter()
+            .map(|branch| (branch.name.as_str(), branch.remote, branch.current))
+            .collect();
+        assert_eq!(names, [("feature", false, false), ("main", false, true)]);
+    });
+}
+
+#[test]
 fn switching_carries_uncommitted_changes_and_a_remote_branch_gets_a_local_one_tracking_it() {
     run(async {
         let clone = Clone::new("switch");
