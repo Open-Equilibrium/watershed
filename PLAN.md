@@ -214,7 +214,8 @@ The agent writes only to its project and temporary folders unless the person all
 #### M3a — Local Workspace foundation
 
 - Local replica as the only interactive store: SQLite with SQLCipher and FTS5 (ADR-0237).
-- Before storage work, a spike proves Automerge 3 against ADR-0238's acceptance criterion and measures Loro alongside.
+- The ADR-0238 spike passed on macOS: Automerge converges on every case and refuses Role-denied changes identically, with Loro measured alongside ([evidence](liquid/benchmarks/CRDT_SPIKE_EVIDENCE.md)); the other targets follow with `liquid-core`.
+- Delivery order, one PR each: `liquid-core` object model, mutation pipeline, Actions and History over Automerge, in memory; `liquid-storage` with SQLite, SQLCipher and FTS5 and the durable commit; the Workspace bridge calls (ADR-0216); Explorer, Pages, Text Blocks and Sections; the other built-in Blocks; Views, copy and the deletion cascade; Arrange mode; PowerBar; Connections and formulas; Automations; Roles and protection; History, revert and Restore version; Sources, Page icons, Markdown import and export, and Settings, History and Automations as dialogs.
 - Flutter clients over the Rust core follow the [client architecture](docs/concept/liquid-client-architecture.md) invariants (ADR-0182).
 - Pages, Blocks, Views, Sources, Connections, Automations, Roles, History and settings.
 - Explorer with Pages and Sources as peer navigation entries; Page templates create use-case compositions rather than new Page Types.
