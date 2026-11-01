@@ -11,7 +11,7 @@ class FakeBackend implements SessionBackend {
   final controller = StreamController<BridgeEvent>();
   final calls = <String>[];
 
-  /// The files the latest run changed; none outside Git.
+  /// The files the shown turns changed; none outside Git.
   List<BridgeFileChange>? changed = const [];
   Map<String, String> patches = const {};
   BridgeHistory stored = historyOf([]);
@@ -88,14 +88,62 @@ class FakeBackend implements SessionBackend {
   /// The changes once whitespace is hidden; [changed] when null.
   List<BridgeFileChange>? changedWithoutWhitespace;
 
+  /// The turns of the current branch; by default one that ended.
+  List<BridgeTurn> turnList = [turnOf('T1', number: 1)];
+
+  /// Whether the compared checkpoints were removed.
+  bool checkpointsRemoved = false;
+
+  /// The checkpoints each read compared, as `from..to`.
+  final compared = <String>[];
+
+  /// Whether the project is in a Git repository.
+  bool inRepository = true;
+
   @override
-  Future<List<BridgeFileChange>?> changes({
+  Future<bool> isInRepository() async => inRepository;
+
+  @override
+  Future<List<BridgeTurn>> turns() async {
+    await turnsGate?.future;
+    return turnList;
+  }
+
+  /// Holds turn reads until it completes.
+  Completer<void>? turnsGate;
+
+  @override
+  Future<BridgeTurnChanges> turnChanges(
+    String from,
+    String to, {
     required bool hideWhitespace,
   }) async {
     changeReads++;
+    compared.add('$from..$to');
     await changesGate?.future;
     if (changesError case final error?) throw error;
-    return hideWhitespace ? changedWithoutWhitespace ?? changed : changed;
+    final files = hideWhitespace
+        ? changedWithoutWhitespace ?? changed
+        : changed;
+    // A failed turn has no checkpoint at the end the comparison needs, as in the core.
+    String? failureOf(String id) =>
+        turnList.where((turn) => turn.id == id).firstOrNull?.failure;
+    final missing =
+        failureOf(to) != null || (from == to && failureOf(from) != null);
+    if (missing && files != null) {
+      return const BridgeTurnChanges(
+        state: BridgeChangesState.removed,
+        files: [],
+      );
+    }
+    return BridgeTurnChanges(
+      state: files == null
+          ? BridgeChangesState.outsideGit
+          : checkpointsRemoved
+          ? BridgeChangesState.removed
+          : BridgeChangesState.shown,
+      files: checkpointsRemoved ? const [] : files ?? const [],
+    );
   }
 
   /// What reading a patch fails with, like the bridge does.
@@ -107,12 +155,20 @@ class FakeBackend implements SessionBackend {
   /// The files whose patch was read, in order.
   final patchReads = <String>[];
 
+  /// Patches of particular comparisons, as `from..to`; others come from [patches].
+  Map<String, Map<String, String>> turnPatches = const {};
+
   @override
-  Future<String> patch(String path, {required bool hideWhitespace}) async {
+  Future<String> turnPatch(
+    String from,
+    String to,
+    String path, {
+    required bool hideWhitespace,
+  }) async {
     patchReads.add(hideWhitespace ? '$path without whitespace' : path);
     await patchGate?.future;
     if (patchError case final error?) throw error;
-    return patches[path] ?? '';
+    return turnPatches['$from..$to']?[path] ?? patches[path] ?? '';
   }
 
   @override
@@ -205,6 +261,24 @@ class FakeBackend implements SessionBackend {
     calls.add('context $entry');
     if (contextError case final error?) throw error;
     return contexts[entry];
+  }
+
+  /// What reverting to before a turn would change.
+  BridgeRevertPlan revertPlanned = revertPlanOf();
+
+  /// What a revert fails with.
+  Object? revertError;
+
+  @override
+  Future<BridgeRevertPlan> revertPlan(String turn) async {
+    calls.add('revert plan $turn');
+    return revertPlanned;
+  }
+
+  @override
+  Future<void> revertToTurn(String turn) async {
+    calls.add('revert $turn');
+    if (revertError case final error?) throw error;
   }
 
   /// Moves the leaf like pi: to the entry, or before it for a prompt.
@@ -381,4 +455,62 @@ BridgeTranscriptItem chatItem(
   text: text,
   tool: tool,
   failed: false,
+);
+
+/// A revert plan of `files`, refused while `running` agents run.
+BridgeRevertPlan revertPlanOf({
+  List<BridgeRevertFile> files = const [],
+  List<BridgeRunningAgent> running = const [],
+  String? branch = 'main',
+  BridgeChangesState state = BridgeChangesState.shown,
+}) => BridgeRevertPlan(
+  state: state,
+  files: files,
+  running: running,
+  branch: branch,
+);
+
+/// A file a revert changes as `status` says.
+BridgeRevertFile revertedFile(
+  String path,
+  BridgeChangeStatus status, {
+  bool edited = false,
+  int? modifiedMs,
+}) => BridgeRevertFile(
+  path: path,
+  shown: path,
+  status: status,
+  edited: edited,
+  modifiedMs: modifiedMs,
+  ignored: false,
+  kept: false,
+);
+
+/// A turn of the current branch; it ended unless `ended` says otherwise.
+BridgeTurn turnOf(
+  String id, {
+  required int number,
+  String prompt = 'Add rate limiting',
+  bool ended = true,
+  int startedMs = 1793527200000,
+  String? failure,
+  int? files,
+  int? added,
+  int? removed,
+  String? startEntry,
+  String? endEntry,
+}) => BridgeTurn(
+  id: id,
+  startEntry: startEntry ?? '$id-start',
+  endEntry: ended ? endEntry ?? '$id-end' : null,
+  number: number,
+  promptEntry: '$id-prompt',
+  prompt: prompt,
+  startedMs: startedMs,
+  endedMs: ended ? startedMs + 120000 : null,
+  ended: ended && failure == null,
+  failure: failure,
+  files: files ?? (added == null ? null : 1),
+  added: added,
+  removed: removed,
 );

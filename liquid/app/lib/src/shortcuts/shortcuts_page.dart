@@ -112,6 +112,7 @@ const List<_Group> _right = [
       _Entry.fixed(Fixed.previousOrNextHunk),
       _Entry.fixed(Fixed.unifiedOrSplit),
       _Entry.fixed(Fixed.hideWhitespace),
+      _Entry.fixed(Fixed.turnMenu),
     ],
   ),
 ];

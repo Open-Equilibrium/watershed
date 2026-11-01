@@ -26,4 +26,5 @@ abstract final class LucideIcons {
   static const listFilter = IconData(0xe460, fontFamily: _family);
   static const settings = IconData(0xe154, fontFamily: _family);
   static const arrowLeftRight = IconData(0xe24a, fontFamily: _family);
+  static const undo2 = IconData(0xe2a1, fontFamily: _family);
 }

@@ -20,12 +20,38 @@ abstract interface class SessionBackend {
   Future<void> answerConfirm(String request, bool confirmed);
   Future<void> dismiss(String request);
   Future<bool> shutdown();
-  Future<List<BridgeFileChange>?> changes({required bool hideWhitespace});
-  Future<String> patch(String path, {required bool hideWhitespace});
+
+  /// Whether the project is in a Git repository, so its turns can have checkpoints.
+  Future<bool> isInRepository();
+
+  /// The turns of the current branch, oldest first, with what each changed.
+  Future<List<BridgeTurn>> turns();
+
+  /// The files that changed from the start of turn `from` to the end of turn `to`.
+  Future<BridgeTurnChanges> turnChanges(
+    String from,
+    String to, {
+    required bool hideWhitespace,
+  });
+
+  /// One file's unified diff from the start of turn `from` to the end of turn `to`.
+  Future<String> turnPatch(
+    String from,
+    String to,
+    String path, {
+    required bool hideWhitespace,
+  });
   Future<BridgeHistory> history(List<String> leaves);
   Future<BridgeContextDetail?> context(String entry);
   Future<BridgeTranscript> transcript(String? before);
   Future<void> branch(String entry);
+
+  /// What reverting the files to before turn `turn` would change.
+  Future<BridgeRevertPlan> revertPlan(String turn);
+
+  /// Reverts the files to before turn `turn` and continues the session from before its
+  /// prompt, which returns to the input area.
+  Future<void> revertToTurn(String turn);
 
   /// The project's recent stored sessions, newest first, without the current one.
   Future<List<BridgeStoredSession>> recentSessions();
@@ -76,11 +102,28 @@ class RustSessionBackend implements SessionBackend {
   @override
   Future<bool> shutdown() => _session.shutdown();
   @override
-  Future<List<BridgeFileChange>?> changes({required bool hideWhitespace}) =>
-      _session.changes(hideWhitespace: hideWhitespace);
+  Future<bool> isInRepository() => _session.inRepository();
   @override
-  Future<String> patch(String path, {required bool hideWhitespace}) =>
-      _session.patch(path: path, hideWhitespace: hideWhitespace);
+  Future<List<BridgeTurn>> turns() => _session.turns();
+  @override
+  Future<BridgeTurnChanges> turnChanges(
+    String from,
+    String to, {
+    required bool hideWhitespace,
+  }) =>
+      _session.turnChanges(from: from, to: to, hideWhitespace: hideWhitespace);
+  @override
+  Future<String> turnPatch(
+    String from,
+    String to,
+    String path, {
+    required bool hideWhitespace,
+  }) => _session.turnPatch(
+    from: from,
+    to: to,
+    path: path,
+    hideWhitespace: hideWhitespace,
+  );
   @override
   Future<BridgeHistory> history(List<String> leaves) =>
       _session.history(leaves: leaves);
@@ -92,6 +135,11 @@ class RustSessionBackend implements SessionBackend {
       _session.context(entry: entry);
   @override
   Future<void> branch(String entry) => _session.branch(entry: entry);
+  @override
+  Future<BridgeRevertPlan> revertPlan(String turn) =>
+      _session.revertPlan(turn: turn);
+  @override
+  Future<void> revertToTurn(String turn) => _session.revertToTurn(turn: turn);
   @override
   Future<List<BridgeStoredSession>> recentSessions() =>
       _session.recentSessions(limit: recentLimit);

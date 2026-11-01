@@ -1,6 +1,8 @@
-//! Manual check of the core against real pi: the approval extension is loaded, two turns with a scripted model, one allowed and one
-//! rejected command, the branch tree and Trajectory, a branch at the second prompt, the state,
-//! then the history again after reopening the session file, a new session and the way back.
+//! Manual check of the core against real pi: the approval extension is loaded, two turns with a
+//! scripted model in a Git project, one allowed command that writes a file and one rejected
+//! command, both turns' checkpoints and the first turn's changes, the branch tree and Trajectory,
+//! a branch at the second prompt, the state, then the history again after reopening the session
+//! file, a new session and the way back.
 //! Run from the repository root:
 //!
 //! ```sh
@@ -11,7 +13,10 @@ use std::ffi::OsString;
 use std::path::Path;
 use std::time::Duration;
 
-use meta_harness_core::{AgentCommand, AgentEvent, Decision, RecordKind, Session, SessionEvent};
+use meta_harness_core::{
+    AgentCommand, AgentEvent, Checkpoint, Decision, Phase, RecordKind, Session, SessionEvent,
+    Whitespace,
+};
 
 const WAIT: Duration = Duration::from_secs(30);
 
@@ -47,7 +52,7 @@ fn pi(dir: &Path, session: Option<&Path>) -> AgentCommand {
         args,
         extension: extensions.join("watershed.ts"),
         session: session.map(Path::to_path_buf),
-        cwd: std::env::temp_dir(),
+        cwd: dir.join("project"),
     }
 }
 
@@ -90,8 +95,37 @@ async fn reopen(file: &Path, entries: usize) {
     session.shutdown(Duration::from_secs(5)).await;
 }
 
+/// A Git project with one commit for pi to work in.
+fn project(dir: &Path) {
+    let project = dir.join("project");
+    std::fs::create_dir_all(&project).expect("project");
+    std::fs::write(project.join("a.txt"), "a\n").expect("file");
+    for args in [
+        &["init", "-q"][..],
+        &["add", "."],
+        &[
+            "-c",
+            "user.name=Check",
+            "-c",
+            "user.email=check@example.invalid",
+            "commit",
+            "-q",
+            "-m",
+            "base",
+        ],
+    ] {
+        let status = std::process::Command::new("git")
+            .args(args)
+            .current_dir(&project)
+            .status()
+            .expect("git runs");
+        assert!(status.success(), "git {args:?}");
+    }
+}
+
 async fn check() {
     let dir = std::env::temp_dir().join(format!("pi-check-{}", std::process::id()));
+    project(&dir);
     let command = pi(&dir, None);
     let (mut session, mut events) = Session::start(&command).expect("pi starts");
     session
@@ -139,7 +173,26 @@ async fn check() {
                         .expect("prompt accepted");
                     continue;
                 }
+                let checkpoints = session.checkpoints();
                 let history = session.history().await.expect("history");
+                let turns = history.turns(None);
+                for turn in &turns {
+                    println!("turn: {turn:?}");
+                }
+                assert_eq!(turns.len(), 2, "both runs are turns");
+                assert!(turns.iter().all(|turn| turn.ended), "both turns ended");
+                let first = &turns[0];
+                let at = |phase| Checkpoint {
+                    session: first.session.clone(),
+                    turn: first.turn.clone(),
+                    phase,
+                };
+                let changes = checkpoints
+                    .changes(&at(Phase::Start), &at(Phase::End), Whitespace::Shown)
+                    .await
+                    .expect("the first turn's changes");
+                println!("first turn changed: {changes:?}");
+                assert_eq!(changes.len(), 1, "the allowed command wrote run.txt");
                 let tree = history.tree();
                 println!("tree: {} entries, leaf {:?}", tree.nodes.len(), tree.leaf);
                 let records = history.trajectory(None).records;

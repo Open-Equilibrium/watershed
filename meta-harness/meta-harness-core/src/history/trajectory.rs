@@ -408,7 +408,7 @@ impl<'a> Projection<'a> {
                 let label = format!("{role} message");
                 self.count(Some(label.clone()), label, *chars);
             }
-            Body::Custom | Body::Label { .. } | Body::Other => {}
+            Body::Custom | Body::Checkpoint { .. } | Body::Label { .. } | Body::Other => {}
         }
     }
 

@@ -3,9 +3,9 @@
 use meta_harness_core::{
     AgentEvent, ApprovalMode, ChangeStatus, CommandError, ContextDetail, ContextMessage,
     ContextPart, Decision, EntryKind, FileChange, ItemDetail, ItemKind, ItemStatus,
-    MAX_RECORD_BYTES, Model, NotificationLevel, Queue, RecordKind, RequestKind, SessionEvent,
-    StepContext, StoredSession, ToolOutcome, Trajectory, TrajectoryRecord, Transcript,
-    TranscriptItem, TreeNode, Usage, UserInput, visible_name,
+    MAX_RECORD_BYTES, Model, NotificationLevel, Queue, RecordKind, RequestKind, RevertFile,
+    SessionEvent, StepContext, StoredSession, ToolOutcome, Trajectory, TrajectoryRecord,
+    Transcript, TranscriptItem, TreeNode, TurnCheckpoints, Usage, UserInput, visible_name,
 };
 
 use crate::api::events::{
@@ -16,8 +16,8 @@ use crate::api::events::{
 };
 use crate::api::history::{
     BridgeContextDetail, BridgeContextMessage, BridgeContextPart, BridgeEntryKind, BridgeRecord,
-    BridgeRecordKind, BridgeStepContext, BridgeToolOutcome, BridgeTrajectory, BridgeTranscript,
-    BridgeTranscriptItem, BridgeTreeNode,
+    BridgeRecordKind, BridgeRevertFile, BridgeStepContext, BridgeToolOutcome, BridgeTrajectory,
+    BridgeTranscript, BridgeTranscriptItem, BridgeTreeNode, BridgeTurn,
 };
 use crate::api::session::{BridgeApprovalMode, BridgeModel, BridgeStoredSession};
 
@@ -208,18 +208,61 @@ impl From<StepContext> for BridgeStepContext {
     }
 }
 
+impl From<TurnCheckpoints> for BridgeTurn {
+    fn from(turn: TurnCheckpoints) -> Self {
+        let counted = |count: fn(&meta_harness_core::ChangeCount) -> u64| {
+            turn.changed.as_ref().map(|changed| int(count(changed)))
+        };
+        Self {
+            files: counted(|changed| changed.files),
+            added: counted(|changed| changed.added),
+            removed: counted(|changed| changed.removed),
+            id: turn.turn,
+            start_entry: turn.start_entry,
+            end_entry: turn.end_entry,
+            number: int(turn.number),
+            prompt_entry: turn.prompt_entry,
+            prompt: turn.prompt,
+            started_ms: turn.started_ms.map(int),
+            ended_ms: turn.ended_ms.map(int),
+            ended: turn.ended,
+            failure: turn.failure,
+        }
+    }
+}
+
+impl From<ChangeStatus> for BridgeChangeStatus {
+    fn from(status: ChangeStatus) -> Self {
+        match status {
+            ChangeStatus::Added => Self::Added,
+            ChangeStatus::Modified => Self::Modified,
+            ChangeStatus::Deleted => Self::Deleted,
+        }
+    }
+}
+
 impl From<FileChange> for BridgeFileChange {
     fn from(change: FileChange) -> Self {
         Self {
             shown: visible_name(&change.path),
             path: change.path,
-            status: match change.status {
-                ChangeStatus::Added => BridgeChangeStatus::Added,
-                ChangeStatus::Modified => BridgeChangeStatus::Modified,
-                ChangeStatus::Deleted => BridgeChangeStatus::Deleted,
-            },
+            status: change.status.into(),
             added: int(change.added),
             removed: int(change.removed),
+        }
+    }
+}
+
+impl From<RevertFile> for BridgeRevertFile {
+    fn from(file: RevertFile) -> Self {
+        Self {
+            shown: visible_name(&file.path),
+            path: file.path,
+            status: file.status.into(),
+            edited: file.edited,
+            modified_ms: file.modified_ms.map(int),
+            ignored: file.ignored,
+            kept: file.kept,
         }
     }
 }

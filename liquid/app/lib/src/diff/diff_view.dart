@@ -6,7 +6,9 @@ import 'package:flutter/material.dart';
 
 import '../agent/input_lane.dart';
 import '../controls.dart';
+import '../format.dart';
 import '../rust/api/events.dart';
+import '../rust/api/history.dart';
 import '../session/session_state.dart';
 import '../shortcuts/keymap.dart';
 import '../theme/icons.dart';
@@ -14,16 +16,19 @@ import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'diff_model.dart';
 import 'diff_settings.dart';
+import 'revert_dialog.dart';
+import 'turn_scope.dart';
 
 /// Keys of the Diff tab, for the status bar (approved mockup).
 String diffKeys() =>
-    '${Fixed.previousOrNextFile.display} file · ${Fixed.foldFolder.display} folder · '
-    '${Fixed.previousOrNextHunk.display} hunk · ${Fixed.unifiedOrSplit.display} unified/split · '
-    '${Fixed.hideWhitespace.display} whitespace';
+    '${Fixed.turnMenu.display} turn · ${Fixed.previousOrNextFile.display} file · '
+    '${Fixed.foldFolder.display} folder · ${Fixed.previousOrNextHunk.display} hunk · '
+    '${Fixed.unifiedOrSplit.display} unified/split · ${Fixed.hideWhitespace.display} whitespace';
 
-/// The changes of the latest run against the project before it: a folder tree of changed files
-/// and the selected file's diff, unified or split. Up and Down select files, Left and Right fold
-/// and unfold the selected file's folders, ⌥Up and ⌥Down move between the file's changes.
+/// What a turn changed between its checkpoints, or all turns of the branch (approved checkpoint
+/// mockups): a folder tree of changed files and the selected file's diff, unified or split. Up
+/// and Down select files, Left and Right fold and unfold the selected file's folders, ⌥Up and
+/// ⌥Down move between the file's changes, T chooses the turn.
 class DiffView extends StatefulWidget {
   const DiffView({
     super.key,
@@ -67,12 +72,16 @@ class _DiffViewState extends State<DiffView> {
   /// Scrolls the selected file's lines.
   final _scroll = ScrollController();
 
+  /// Opens the turn menu from the keyboard.
+  final _turnMenu = GlobalKey<PopupMenuButtonState<DiffScope>>();
+
   @override
   void initState() {
     super.initState();
     widget.state.changed.addListener(_show);
-    widget.state.ran.addListener(_show);
-    // Opening the tab reads the changes again, so it shows the project as it is now.
+    widget.state.shown.addListener(_rebuild);
+    widget.state.shownScope.addListener(_rebuild);
+    // Opening the tab reads the turns again, so it shows the latest one.
     unawaited(widget.state.readChanges());
     // It also shows the last list at once and moves the keyboard to it.
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -85,11 +94,15 @@ class _DiffViewState extends State<DiffView> {
   @override
   void dispose() {
     widget.state.changed.removeListener(_show);
-    widget.state.ran.removeListener(_show);
+    widget.state.shown.removeListener(_rebuild);
+    widget.state.shownScope.removeListener(_rebuild);
     _focus.dispose();
     _scroll.dispose();
     super.dispose();
   }
+
+  /// Another turn shows its name, also when it changed the same files.
+  void _rebuild() => setState(() {});
 
   void _show() {
     final changes = widget.state.changed.value;
@@ -119,6 +132,7 @@ class _DiffViewState extends State<DiffView> {
       // Selections passed while a patch loaded are never read.
       while (mounted) {
         final wanted = _selected;
+        final comparison = _comparison;
         if (wanted == null) return;
         // Why the file shows no lines: a diff that could not be read, such as one over Git's
         // output limit, or a change without text.
@@ -137,7 +151,10 @@ class _DiffViewState extends State<DiffView> {
             'Could not show the changes of ${wanted.shown}: $error',
           );
         }
-        if (!mounted || _selected != wanted) continue;
+        // A file or turn chosen meanwhile, even with the same name and counts, reads again.
+        if (!mounted || _selected != wanted || _comparison != comparison) {
+          continue;
+        }
         setState(() {
           _lines = lines;
           _note = note;
@@ -149,6 +166,12 @@ class _DiffViewState extends State<DiffView> {
     } finally {
       _loading = false;
     }
+  }
+
+  /// What the shown patch compares: the turns and whether whitespace is hidden.
+  String get _comparison {
+    final shown = widget.state.shown.value;
+    return '${shown?.from.id}..${shown?.to.id} ${widget.state.hideWhitespace.value}';
   }
 
   /// Whether a folded folder hides `row`.
@@ -271,6 +294,7 @@ class _DiffViewState extends State<DiffView> {
       ...Fixed.previousOrNextHunk.bind([() => _jump(-1), () => _jump(1)]),
       ...Fixed.unifiedOrSplit.bind([_switchLayout]),
       ...Fixed.hideWhitespace.bind([_switchWhitespace]),
+      ...Fixed.turnMenu.bind([() => _turnMenu.currentState?.showButtonMenu()]),
     },
     child: Focus(
       focusNode: _focus,
@@ -278,18 +302,85 @@ class _DiffViewState extends State<DiffView> {
         valueListenable: widget.state.changesProblem,
         builder: (context, problem, _) => problem == null
             ? _content(context)
-            : InputLane(
-                input: widget.input,
-                child: Center(
-                  child: Text(
-                    problem,
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                ),
-              ),
+            : _empty(context, problem.title, problem.text),
       ),
     ),
   );
+
+  /// The turn menu and what the shown turns are, once a turn ended.
+  Widget? _header() {
+    final shown = widget.state.shown.value;
+    if (shown == null) return null;
+    final scope = widget.state.shownScope.value;
+    final files = widget.state.changed.value;
+    return _TurnHeader(
+      menuKey: _turnMenu,
+      turns: widget.state.turns.value,
+      scope: scope,
+      // What all turns changed is known once they were read.
+      allLines:
+          scope is AllTurns &&
+              files != null &&
+              widget.state.changesProblem.value == null
+          ? (
+              added: files.fold(0, (sum, file) => sum + file.added),
+              removed: files.fold(0, (sum, file) => sum + file.removed),
+            )
+          : null,
+      shown: shown,
+      onSelect: (scope) => unawaited(widget.state.showTurns(scope)),
+      // Reverting applies to the turn shown, not to all turns.
+      onRevert: scope is AllTurns
+          ? null
+          : () => unawaited(confirmRevert(context, widget.state, shown.to)),
+    );
+  }
+
+  /// Says why nothing is shown, below the turn menu when a turn ended.
+  Widget _empty(BuildContext context, String title, String text) {
+    final header = _header();
+    return InputLane(
+      input: widget.input,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (header != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                WsMetrics.space7,
+                WsMetrics.space5,
+                WsMetrics.space7,
+                0,
+              ),
+              child: header,
+            ),
+          Expanded(
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 420),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      title,
+                      style: Theme.of(context).textTheme.labelMedium
+                          ?.copyWith(fontWeight: WsMetrics.fwMedium),
+                    ),
+                    const SizedBox(height: WsMetrics.space2),
+                    Text(
+                      text,
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
   Widget _content(BuildContext context) {
     final ws = context.ws;
@@ -297,20 +388,19 @@ class _DiffViewState extends State<DiffView> {
       return InputLane(input: widget.input, child: const SizedBox.expand());
     }
     if (_changes.isEmpty) {
-      return InputLane(
-        input: widget.input,
-        child: Center(
-          child: Text(
-            !widget.state.ran.value
-                ? 'No run since Liquid opened this session'
-                : widget.settings.value.hideWhitespace
-                ? 'No changes in this run with whitespace hidden; '
-                      '${Fixed.hideWhitespace.display} shows them'
-                : 'No changes in this run',
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
-        ),
-      );
+      final all = widget.state.shownScope.value is AllTurns;
+      final turns = all ? 'these turns' : 'this turn';
+      return widget.settings.value.hideWhitespace
+          ? _empty(
+              context,
+              'No changes in $turns with whitespace hidden',
+              '${Fixed.hideWhitespace.display} shows them.',
+            )
+          : _empty(
+              context,
+              'No changes in $turns',
+              'The project was the same at its end as at its start.',
+            );
     }
     final added = _changes.fold(0, (sum, change) => sum + change.added);
     final removed = _changes.fold(0, (sum, change) => sum + change.removed);
@@ -357,6 +447,7 @@ class _DiffViewState extends State<DiffView> {
           child: InputLane(
             input: widget.input,
             child: _Patch(
+              header: _header(),
               change: _selected,
               lines: _lines,
               note: _note,
@@ -471,6 +562,7 @@ class _FileTile extends StatelessWidget {
 
 class _Patch extends StatelessWidget {
   const _Patch({
+    required this.header,
     required this.change,
     required this.lines,
     required this.note,
@@ -481,6 +573,8 @@ class _Patch extends StatelessWidget {
     required this.onWhitespace,
   });
 
+  /// The turn menu and what the shown turns are.
+  final Widget? header;
   final BridgeFileChange? change;
   final List<DiffLine> lines;
 
@@ -512,21 +606,9 @@ class _Patch extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                'Changes in this run',
-                style: Theme.of(context).textTheme.labelMedium
-                    ?.copyWith(fontWeight: WsMetrics.fwSemibold),
-              ),
-              const SizedBox(width: WsMetrics.space4),
-              Expanded(
-                child: Text(
-                  'compared with the project before the run',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-              ),
+              Expanded(child: header ?? const SizedBox.shrink()),
               _Toggle(
                 label: 'Hide whitespace',
                 on: settings.hideWhitespace,
@@ -854,4 +936,148 @@ TextSpan highlight(BuildContext context, String code) {
   }
   if (start < code.length) spans.add(TextSpan(text: code.substring(start)));
   return TextSpan(style: base, children: spans);
+}
+
+/// The turn menu with what the shown turns are: their prompt, their time and what they are
+/// compared with (approved checkpoint mockups).
+class _TurnHeader extends StatelessWidget {
+  const _TurnHeader({
+    required this.menuKey,
+    required this.turns,
+    required this.scope,
+    required this.allLines,
+    required this.shown,
+    required this.onSelect,
+    required this.onRevert,
+  });
+
+  final GlobalKey<PopupMenuButtonState<DiffScope>> menuKey;
+  final List<BridgeTurn> turns;
+  final DiffScope scope;
+
+  /// The lines all turns added and removed, once read.
+  final ({int added, int removed})? allLines;
+  final Compared shown;
+  final ValueChanged<DiffScope> onSelect;
+
+  /// Asks to revert the files to before the shown turn; none for all turns.
+  final VoidCallback? onRevert;
+
+  @override
+  Widget build(BuildContext context) {
+    final ws = context.ws;
+    final all = scope is AllTurns;
+    final turn = shown.to;
+    final ended = finished(turns);
+    final started = shown.from.startedMs;
+    final since = started == null ? '' : formatClockMs(started);
+    final until = turn.endedMs == null ? '' : formatClockMs(turn.endedMs!);
+    final about = all
+        ? 'All turns of this branch · since $since · compared with the project when the first '
+              'turn started'
+        : '“${turn.prompt}” · $since–$until · compared with the project when the turn '
+              'started';
+    final small = TextStyle(color: ws.textFaint, fontSize: WsMetrics.fsSmall);
+    String counts(BridgeTurn turn) => [
+      if (turn.endedMs case final at?) formatClockMs(at),
+      if (turn.failure != null)
+        'failed'
+      else if ((turn.added, turn.removed) case (final added?, final removed?))
+        '+$added −$removed',
+    ].join(' · ');
+    PopupMenuItem<DiffScope> item(
+      DiffScope value,
+      String name,
+      String detail,
+    ) => PopupMenuItem(
+      value: value,
+      height: 32,
+      child: Row(
+        children: [
+          Expanded(child: Text(name)),
+          const SizedBox(width: WsMetrics.space5),
+          Text(detail, style: small),
+        ],
+      ),
+    );
+    final menu = PopupMenuButton<DiffScope>(
+      key: menuKey,
+      tooltip: 'Choose the turn',
+      initialValue: scope,
+      onSelected: onSelect,
+      itemBuilder: (context) => [
+        PopupMenuItem(
+          enabled: false,
+          height: 24,
+          child: Text('Turns of this branch', style: small),
+        ),
+        item(
+          const LatestTurn(),
+          'Latest turn · ${turnName(ended.last)}',
+          counts(ended.last),
+        ),
+        for (final older in ended.reversed.skip(1))
+          item(OneTurn(older.id), turnName(older), counts(older)),
+        const PopupMenuDivider(),
+        item(
+          const AllTurns(),
+          'All turns',
+          [
+            if (turns.first.startedMs case final at?)
+              'since ${formatClockMs(at)}',
+            if (allLines case final lines?) '+${lines.added} −${lines.removed}',
+          ].join(' · '),
+        ),
+      ],
+      child: Container(
+        height: 28,
+        padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space3),
+        decoration: BoxDecoration(
+          border: Border.all(color: ws.borderStrong),
+          borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              all ? 'All turns' : turnName(turn),
+              style: Theme.of(context).textTheme.labelMedium
+                  ?.copyWith(fontWeight: WsMetrics.fwSemibold),
+            ),
+            const SizedBox(width: WsMetrics.space2),
+            Icon(LucideIcons.chevronDown, size: 13, color: ws.textFaint),
+          ],
+        ),
+      ),
+    );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            menu,
+            // A narrow tab shortens the label rather than the menu.
+            if (onRevert case final revert?)
+              Expanded(
+                child: Align(
+                  alignment: Alignment.centerRight,
+                  child: SecondaryButton(
+                    label: 'Revert files to before this turn…',
+                    icon: LucideIcons.undo2,
+                    onPressed: revert,
+                  ),
+                ),
+              ),
+          ],
+        ),
+        const SizedBox(height: WsMetrics.space1),
+        Text(
+          about,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
+      ],
+    );
+  }
 }

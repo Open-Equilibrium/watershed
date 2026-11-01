@@ -61,21 +61,6 @@ impl Drop for Repo {
     }
 }
 
-fn count_files(dir: &Path) -> usize {
-    std::fs::read_dir(dir).map_or(0, |entries| {
-        entries
-            .flatten()
-            .map(|entry| {
-                if entry.path().is_dir() {
-                    count_files(&entry.path())
-                } else {
-                    1
-                }
-            })
-            .sum()
-    })
-}
-
 fn run<F: std::future::Future>(test: F) -> F::Output {
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -85,7 +70,7 @@ fn run<F: std::future::Future>(test: F) -> F::Output {
 }
 
 #[test]
-fn diffs_a_run_against_its_snapshot_without_touching_the_repository() {
+fn diffs_a_run_against_its_snapshot_without_touching_the_projects_index() {
     run(async {
         let repo = Repo::new("run");
         repo.write("a.txt", "old\nsame\n");
@@ -99,7 +84,6 @@ fn diffs_a_run_against_its_snapshot_without_touching_the_repository() {
             .await
             .expect("repository opens");
         let index_before = std::fs::read(repo.path().join(".git/index")).expect("index");
-        let objects_before = count_files(&repo.path().join(".git/objects"));
         let snapshot = tree.snapshot().await.expect("snapshot");
 
         repo.write("a.txt", "new\nsame\n");
@@ -147,10 +131,6 @@ fn diffs_a_run_against_its_snapshot_without_touching_the_repository() {
         assert_eq!(
             std::fs::read(repo.path().join(".git/index")).expect("index"),
             index_before
-        );
-        assert_eq!(
-            count_files(&repo.path().join(".git/objects")),
-            objects_before
         );
         assert_ne!(
             repo.git(&["status", "--porcelain"]),
@@ -585,4 +565,28 @@ fn hides_whitespace_changes_when_asked() {
             .expect("patch");
         assert!(patch.contains("+c\n") && !patch.contains("-b\n"), "{patch}");
     });
+}
+
+#[test]
+fn the_search_for_repositories_stops_at_its_budget_and_counts_it_as_found() {
+    use crate::diff::holds_repository;
+    let dir = std::env::temp_dir().join(format!("watershed-budget-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    for index in 0..10 {
+        std::fs::create_dir_all(dir.join(format!("d{index}"))).expect("folder");
+    }
+    let mut enough = 100;
+    assert!(!holds_repository(&dir, &mut enough), "no repository there");
+    assert_eq!(enough, 90, "one per entry read");
+    let mut short = 5;
+    assert!(
+        holds_repository(&dir, &mut short),
+        "a search cut short leaves the folder alone"
+    );
+    assert_eq!(short, 0);
+    assert!(
+        holds_repository(&dir, &mut short),
+        "a spent budget stays spent for the next path"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
 }

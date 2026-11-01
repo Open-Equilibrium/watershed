@@ -223,6 +223,9 @@ enum Fixed {
   ], repeats: false),
   hideWhitespace('Hide or show whitespace changes', Area.diff, 'W', [
     Keys(LogicalKeyboardKey.keyW),
+  ], repeats: false),
+  turnMenu('Choose the turn', Area.diff, 'T', [
+    Keys(LogicalKeyboardKey.keyT),
   ], repeats: false);
 
   const Fixed(

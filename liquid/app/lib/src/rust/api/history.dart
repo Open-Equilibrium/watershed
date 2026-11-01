@@ -8,7 +8,19 @@ import 'events.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+
+/// Whether the changes between two checkpoints could be read.
+enum BridgeChangesState {
+  /// The changes are listed.
+  shown,
+
+  /// The project is not in a Git repository, so it has no checkpoints.
+  outsideGit,
+
+  /// A checkpoint was removed.
+  removed,
+}
 
 /// Everything the model saw for one request, in parts with their length in characters.
 class BridgeContextDetail {
@@ -306,6 +318,124 @@ enum BridgeRecordKind {
   approval,
 }
 
+/// One file a revert would change.
+class BridgeRevertFile {
+  /// The path relative to the root of the Git repository.
+  final String path;
+
+  /// The path as Liquid shows it, with characters that could hide or reorder it written out.
+  final String shown;
+
+  /// How the revert changes it: `Added` writes back a file deleted since the turn started,
+  /// `Deleted` deletes a file new since then.
+  final BridgeChangeStatus status;
+
+  /// Whether it changed after the last turn ended, so the revert also undoes that edit.
+  final bool edited;
+
+  /// Unix milliseconds when it was last written, if it exists.
+  final PlatformInt64? modifiedMs;
+
+  /// Whether the revert deletes or overwrites something Git ignores, only because a restored
+  /// file needs its place; such a folder's path ends in `/`.
+  final bool ignored;
+
+  /// Whether the revert leaves it alone because it is inside, at or above a submodule or
+  /// nested repository.
+  final bool kept;
+
+  const BridgeRevertFile({
+    required this.path,
+    required this.shown,
+    required this.status,
+    required this.edited,
+    this.modifiedMs,
+    required this.ignored,
+    required this.kept,
+  });
+
+  @override
+  int get hashCode =>
+      path.hashCode ^
+      shown.hashCode ^
+      status.hashCode ^
+      edited.hashCode ^
+      modifiedMs.hashCode ^
+      ignored.hashCode ^
+      kept.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeRevertFile &&
+          runtimeType == other.runtimeType &&
+          path == other.path &&
+          shown == other.shown &&
+          status == other.status &&
+          edited == other.edited &&
+          modifiedMs == other.modifiedMs &&
+          ignored == other.ignored &&
+          kept == other.kept;
+}
+
+/// What reverting the files to before a turn would change.
+class BridgeRevertPlan {
+  /// Whether the turn's start checkpoint could be read.
+  final BridgeChangesState state;
+
+  /// The files below the working folder that would change, sorted by path.
+  final List<BridgeRevertFile> files;
+
+  /// The agents running in the checkout, which refuse the revert.
+  final List<BridgeRunningAgent> running;
+
+  /// The branch checked out, as Liquid shows it, or none when HEAD names a commit.
+  final String? branch;
+
+  const BridgeRevertPlan({
+    required this.state,
+    required this.files,
+    required this.running,
+    this.branch,
+  });
+
+  @override
+  int get hashCode =>
+      state.hashCode ^ files.hashCode ^ running.hashCode ^ branch.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeRevertPlan &&
+          runtimeType == other.runtimeType &&
+          state == other.state &&
+          files == other.files &&
+          running == other.running &&
+          branch == other.branch;
+}
+
+/// An agent that runs a turn in the checkout.
+class BridgeRunningAgent {
+  /// Whether it is this session's agent.
+  final bool own;
+
+  /// Its session's title, when its session file is found.
+  final String? title;
+
+  const BridgeRunningAgent({required this.own, this.title});
+
+  @override
+  int get hashCode => own.hashCode ^ title.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeRunningAgent &&
+          runtimeType == other.runtimeType &&
+          own == other.own &&
+          title == other.title;
+}
+
 /// What the agent sent to the model for one request.
 class BridgeStepContext {
   /// Characters of the system prompt.
@@ -584,4 +714,120 @@ class BridgeTreeNode {
           label == other.label &&
           atMs == other.atMs &&
           failed == other.failed;
+}
+
+/// A turn of the current branch, as the Diff tab lists it (ADR-0234).
+class BridgeTurn {
+  /// The turn's checkpoint id.
+  final String id;
+
+  /// The entry that recorded its start checkpoint; the chat places its changes after the
+  /// turn's entries.
+  final String startEntry;
+
+  /// The entry that recorded its end checkpoint, once it ended.
+  final String? endEntry;
+
+  /// The Trajectory's turn of its first prompt; 0 before a prompt was stored.
+  final PlatformInt64 number;
+
+  /// The entry of its first prompt, before which a revert continues the session.
+  final String? promptEntry;
+
+  /// The first line of its first prompt.
+  final String prompt;
+
+  /// Unix milliseconds when it started, if known.
+  final PlatformInt64? startedMs;
+
+  /// Unix milliseconds when it ended, if it did.
+  final PlatformInt64? endedMs;
+
+  /// Whether its end checkpoint was taken, so its changes can be shown.
+  final bool ended;
+
+  /// Why one of its checkpoints could not be taken.
+  final String? failure;
+
+  /// Files it changed, counted at its end.
+  final PlatformInt64? files;
+
+  /// Lines it added, counted at its end.
+  final PlatformInt64? added;
+
+  /// Lines it removed, counted at its end.
+  final PlatformInt64? removed;
+
+  const BridgeTurn({
+    required this.id,
+    required this.startEntry,
+    this.endEntry,
+    required this.number,
+    this.promptEntry,
+    required this.prompt,
+    this.startedMs,
+    this.endedMs,
+    required this.ended,
+    this.failure,
+    this.files,
+    this.added,
+    this.removed,
+  });
+
+  @override
+  int get hashCode =>
+      id.hashCode ^
+      startEntry.hashCode ^
+      endEntry.hashCode ^
+      number.hashCode ^
+      promptEntry.hashCode ^
+      prompt.hashCode ^
+      startedMs.hashCode ^
+      endedMs.hashCode ^
+      ended.hashCode ^
+      failure.hashCode ^
+      files.hashCode ^
+      added.hashCode ^
+      removed.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeTurn &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          startEntry == other.startEntry &&
+          endEntry == other.endEntry &&
+          number == other.number &&
+          promptEntry == other.promptEntry &&
+          prompt == other.prompt &&
+          startedMs == other.startedMs &&
+          endedMs == other.endedMs &&
+          ended == other.ended &&
+          failure == other.failure &&
+          files == other.files &&
+          added == other.added &&
+          removed == other.removed;
+}
+
+/// The files that changed between two checkpoints.
+class BridgeTurnChanges {
+  /// Whether they could be read.
+  final BridgeChangesState state;
+
+  /// The changed files; empty unless shown.
+  final List<BridgeFileChange> files;
+
+  const BridgeTurnChanges({required this.state, required this.files});
+
+  @override
+  int get hashCode => state.hashCode ^ files.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeTurnChanges &&
+          runtimeType == other.runtimeType &&
+          state == other.state &&
+          files == other.files;
 }

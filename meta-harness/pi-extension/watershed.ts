@@ -1,7 +1,9 @@
 // Watershed's pi extension. The Meta-Harness core loads it into pi's RPC mode: it pauses every
-// tool call until the core decides (ADR-0188), lets the core branch a session at any entry and
-// records timing as session entries, so the Trajectory reads everything from the session file
+// tool call until the core decides (ADR-0188), holds each run's start and end until the core took
+// a checkpoint of the project (ADR-0234), lets the core branch a session at any entry and records
+// timing and checkpoints as session entries, so Liquid reads everything from the session file
 // (ADR-0189).
+import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,6 +12,9 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 /** Title prefix of the select dialog the core answers instead of the user. */
 export const APPROVAL_PREFIX = "watershed.approval ";
+
+/** Title prefix of the input dialog the core answers once it took a checkpoint. */
+export const CHECKPOINT_PREFIX = "watershed.checkpoint ";
 
 /**
  * pi's built-in tools that only read; pi gives its built-ins no annotations. Only these count as
@@ -74,6 +79,45 @@ function watershed(pi: ExtensionAPI, clock: Clock): void {
     // Fail closed: a rejection, a dismissed dialog or a lost core all block the call.
     const reason = decision === "reject" ? "Rejected by the user" : "No approval was given";
     return { block: true, reason };
+  });
+
+  // A run's start checkpoint is taken before its first request and stored before its prompt;
+  // its end checkpoint once it settled, follow-ups and retries included. pi waits for both.
+  let running: { session: string; turn: string } | undefined;
+  const checkpoint = async (ui: { input(title: string): Promise<string | undefined> }, phase: "start" | "end") => {
+    if (!running) {
+      return;
+    }
+    const data = { ...running, phase };
+    const answer = await ui.input(CHECKPOINT_PREFIX + JSON.stringify(data));
+    let recorded: Record<string, unknown> = { ...data, error: "No answer from Watershed" };
+    try {
+      const parsed = JSON.parse(answer ?? "") as Record<string, unknown>;
+      if (parsed.ok === true) {
+        // At a turn's end the core also counts what the turn changed.
+        const counted = ["files", "added", "removed"].filter((key) => Number.isSafeInteger(parsed[key]));
+        recorded = { ...data, ...Object.fromEntries(counted.map((key) => [key, parsed[key]])) };
+      } else if (typeof parsed.error === "string") {
+        recorded = { ...data, error: parsed.error };
+      }
+    } catch {
+      // An unreadable answer leaves the checkpoint unknown.
+    }
+    pi.appendEntry("watershed.checkpoint", recorded);
+  };
+  pi.on("before_agent_start", async (_event, ctx) => {
+    if (ctx.mode !== "rpc") {
+      return undefined;
+    }
+    running = { session: ctx.sessionManager.getSessionId(), turn: randomUUID() };
+    await checkpoint(ctx.ui, "start");
+    return undefined;
+  });
+  pi.on("agent_settled", async (_event, ctx) => {
+    if (ctx.mode === "rpc") {
+      await checkpoint(ctx.ui, "end");
+    }
+    running = undefined;
   });
 
   // pi runs these handlers before it stores the message or tool result, so a request's timing

@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import { APPROVAL_PREFIX, watershedWith } from "./watershed.ts";
+import { APPROVAL_PREFIX, CHECKPOINT_PREFIX, watershedWith } from "./watershed.ts";
 
 type Handler = (event: unknown, ctx: unknown) => Promise<unknown>;
 
@@ -40,8 +40,10 @@ function context(
   answer: string | undefined,
   mode = "rpc",
   session: { entries?: Record<string, unknown>; navigate?: () => Promise<{ cancelled: boolean }> } = {},
+  inputs: (string | undefined)[] = [],
 ) {
   const questions: { title: string; options: string[] }[] = [];
+  const asked: string[] = [];
   const notes: string[] = [];
   const branches: unknown[][] = [];
   const drafts: string[] = [];
@@ -52,6 +54,10 @@ function context(
       select: async (title: string, options: string[]) => {
         questions.push({ title, options });
         return answer;
+      },
+      input: async (title: string) => {
+        asked.push(title);
+        return inputs.shift();
       },
       notify: (message: string) => notes.push(message),
       setEditorText: (text: string) => drafts.push(text),
@@ -66,7 +72,7 @@ function context(
       return session.navigate ? session.navigate() : { cancelled: false };
     },
   };
-  return { ctx, questions, notes, branches, drafts };
+  return { ctx, questions, notes, branches, drafts, asked };
 }
 
 test("asks the core before every tool call and records user decisions", async () => {
@@ -276,4 +282,59 @@ test("records how long an approval waited for the user", async () => {
       data: { toolCallId: "c9", tool: "bash", decision: "allow-once", waitedMs: 9400 },
     },
   ]);
+});
+
+test("takes a checkpoint at each run's start and end and records it in the session", async () => {
+  const { handlers, entries } = load();
+  const answers = [
+    '{"ok":true}',
+    '{"ok":true,"files":3,"added":12,"removed":1}',
+    '{"ok":true}',
+    '{"error":"git did not finish within 60 s"}',
+  ];
+  const { ctx, asked } = context(undefined, "rpc", {}, answers);
+  assert.equal(await handlers.get("before_agent_start")!({ type: "before_agent_start", prompt: "Hi" }, ctx), undefined);
+  assert.equal(asked.length, 1);
+  assert.ok(asked[0].startsWith(CHECKPOINT_PREFIX));
+  const start = JSON.parse(asked[0].slice(CHECKPOINT_PREFIX.length));
+  assert.match(start.turn, /^[A-Za-z0-9_-]{1,128}$/);
+  assert.deepEqual(start, { session: "s1", turn: start.turn, phase: "start" });
+
+  await handlers.get("agent_settled")!({ type: "agent_settled", aborted: false }, ctx);
+  assert.deepEqual(JSON.parse(asked[1].slice(CHECKPOINT_PREFIX.length)), { ...start, phase: "end" });
+  // A settled run without a start asks nothing more.
+  await handlers.get("agent_settled")!({ type: "agent_settled", aborted: false }, ctx);
+  assert.equal(asked.length, 2);
+
+  // The next run is a new turn; a failed checkpoint keeps the core's reason.
+  await handlers.get("before_agent_start")!({ type: "before_agent_start", prompt: "Again" }, ctx);
+  const next = JSON.parse(asked[2].slice(CHECKPOINT_PREFIX.length));
+  assert.notEqual(next.turn, start.turn);
+  await handlers.get("agent_settled")!({ type: "agent_settled", aborted: false }, ctx);
+  assert.deepEqual(entries, [
+    { customType: "watershed.checkpoint", data: start },
+    { customType: "watershed.checkpoint", data: { ...start, phase: "end", files: 3, added: 12, removed: 1 } },
+    { customType: "watershed.checkpoint", data: next },
+    {
+      customType: "watershed.checkpoint",
+      data: { ...next, phase: "end", error: "git did not finish within 60 s" },
+    },
+  ]);
+});
+
+test("records a checkpoint the core did not answer as failed and asks nothing outside RPC", async () => {
+  const { handlers, entries } = load();
+  const { ctx } = context(undefined, "rpc", {}, [undefined, "not JSON"]);
+  await handlers.get("before_agent_start")!({ type: "before_agent_start", prompt: "Hi" }, ctx);
+  await handlers.get("agent_settled")!({ type: "agent_settled", aborted: true }, ctx);
+  assert.deepEqual(
+    entries.map(({ data }) => (data as { error?: string }).error),
+    ["No answer from Watershed", "No answer from Watershed"],
+  );
+
+  const outside = load();
+  const interactive = context(undefined, "interactive");
+  await outside.handlers.get("before_agent_start")!({ type: "before_agent_start", prompt: "Hi" }, interactive.ctx);
+  await outside.handlers.get("agent_settled")!({ type: "agent_settled", aborted: false }, interactive.ctx);
+  assert.deepEqual([outside.entries, interactive.asked], [[], []]);
 });

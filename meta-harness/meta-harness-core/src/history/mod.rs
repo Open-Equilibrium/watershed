@@ -5,6 +5,9 @@ mod outcome;
 mod trajectory;
 mod transcript;
 mod tree;
+mod turns;
+
+pub use turns::{ChangeCount, TurnCheckpoints};
 
 pub(crate) use entry::first_line;
 pub(crate) use outcome::patch_lines;
@@ -120,6 +123,12 @@ impl History {
     /// `before`, or of the newest entries.
     pub fn transcript(&self, before: Option<&str>, limit: usize) -> Transcript {
         transcript::transcript(&self.entries, self.leaf.as_deref(), before, limit)
+    }
+
+    /// The turns on the branch ending at `leaf`, or at the session's leaf, with their
+    /// checkpoints.
+    pub fn turns(&self, leaf: Option<&str>) -> Vec<TurnCheckpoints> {
+        turns::turns(&self.entries, leaf.or(self.leaf.as_deref()))
     }
 
     /// Everything the model saw for the request that produced the response `entry`, in parts;

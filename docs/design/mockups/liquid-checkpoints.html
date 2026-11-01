@@ -1,0 +1,362 @@
+<!doctype html>
+<html lang="en"><head><title>Liquid: approved checkpoint mockups</title>
+<link rel="stylesheet" href="../tokens.css"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+.chrome{--foreground:var(--ws-text);--muted-foreground:var(--ws-text-muted);--muted:var(--ws-subtle);--border:var(--ws-border-strong);--secondary:var(--ws-hover);--radius:8px;background:var(--ws-canvas);padding:24px}
+body{margin:0;font-family:var(--font-sans,system-ui,sans-serif);color:var(--foreground)}
+.page{display:flex;flex-direction:column;gap:28px}
+.toolbar{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;font-size:13px;color:var(--muted-foreground)}
+.toolbar>div{display:flex;gap:8px;align-items:center}
+.seg{display:inline-flex;border:1px solid var(--border);border-radius:calc(var(--radius,8px) - 2px);overflow:hidden}
+.seg button{all:unset;cursor:pointer;padding:4px 10px;font-size:12.5px;color:var(--muted-foreground)}
+.seg button.on{background:var(--secondary);color:var(--foreground)}
+h3.sec{margin:0 0 4px;font-size:15px;font-weight:600}
+p.sub{margin:0 0 10px;font-size:13px;color:var(--muted-foreground);line-height:1.5}
+.stage{padding:16px;border-radius:var(--radius,8px);background:var(--muted);overflow:hidden}
+.scaler{position:relative}
+.scaler>.win{position:absolute;top:0;left:0;transform-origin:0 0}
+.win,.ws{font-family:ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI Variable Display","Segoe UI",Helvetica,"Apple Color Emoji",Arial,sans-serif;color:var(--ws-text);font-size:14px;line-height:20px;-webkit-font-smoothing:antialiased}
+.win{width:1240px;background:var(--ws-canvas);border-radius:12px;overflow:hidden;box-shadow:var(--ws-shadow)}
+.win code,.win kbd,.mono,.ws code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.tbar{height:38px;background:var(--ws-titlebar);display:flex;align-items:center;padding:0 14px;position:relative}
+.lights{display:flex;gap:8px}.lights i{width:12px;height:12px;border-radius:50%;display:block}
+.body{display:flex;height:var(--h)}
+.side{width:264px;flex:none;background:var(--ws-subtle);padding:4px 8px 12px;display:flex;flex-direction:column;gap:1px;box-shadow:inset -1px 0 0 var(--ws-border)}
+.wsw{display:flex;align-items:center;gap:8px;height:32px;padding:0 8px;font-weight:500;border-radius:6px}
+.av{width:22px;height:22px;border-radius:4px;background:var(--ws-accent);color:var(--ws-on-accent);display:grid;place-items:center;font-size:12px;font-weight:600}
+.srch{height:30px;display:flex;align-items:center;gap:8px;padding:0 8px;border-radius:6px;color:var(--ws-text-muted)}
+.srch kbd{margin-left:auto}
+.side h6{font-size:12px;line-height:16px;color:var(--ws-text-faint);font-weight:500;margin:16px 8px 4px;display:flex;justify-content:space-between}
+.nav{display:flex;align-items:center;gap:8px;height:28px;padding:0 8px;border-radius:6px;color:var(--ws-text-muted);white-space:nowrap;overflow:hidden}
+.ico{width:18px;text-align:center;color:var(--ws-text-faint);flex:none;display:inline-flex;justify-content:center}
+.proj{display:flex;align-items:center;gap:6px;height:28px;padding:0 8px;color:var(--ws-text-muted);font-weight:500}
+.proj .f{color:var(--ws-text-faint);font-weight:400;font-size:12px}
+.sess{padding:5px 8px 6px 30px;border-radius:6px;color:var(--ws-text-muted)}
+.sess.on{background:var(--ws-hover);color:var(--ws-text)}
+.sess .l1{display:flex;align-items:center;gap:8px;white-space:nowrap;height:20px}
+.sess .l1 .end{margin-left:auto;font-size:12px}
+.sess .l2{display:flex;align-items:center;gap:5px;font-size:12px;line-height:18px;color:var(--ws-text-faint);white-space:nowrap;overflow:hidden;margin-left:15px}
+.sess .l2 svg{flex:none}
+.dot{width:7px;height:7px;border-radius:50%;flex:none;display:inline-block}
+.main{flex:1;display:flex;flex-direction:column;min-width:0}
+.head{height:44px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:0 24px}
+.head b{font-size:14px;font-weight:600}
+.tabs{display:flex;gap:2px;padding:0 20px;height:38px;flex:none;align-items:flex-end;box-shadow:inset 0 -1px 0 var(--ws-border)}
+.tab{height:36px;padding:0 10px;color:var(--ws-text-muted);border-bottom:2px solid transparent;display:flex;gap:6px;align-items:center}
+.tab.on{color:var(--ws-text);border-color:var(--ws-text);font-weight:500}
+.tab kbd{opacity:.4}
+.badge{font-size:12px;padding:0 6px;border-radius:4px;background:var(--ws-hover);color:var(--ws-text-muted);line-height:18px}
+kbd{font-size:11px;padding:0 4px;border-radius:4px;border:1px solid currentColor;opacity:.6;line-height:16px;font-weight:400}
+.chip{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 8px;border-radius:6px;color:var(--ws-text-muted);font-size:13px;white-space:nowrap}
+.chip.on{background:var(--ws-accent-subtle);color:var(--ws-accent)}
+.chip.box{box-shadow:inset 0 0 0 1px var(--ws-border-strong)}
+.btn{height:28px;padding:0 10px;border-radius:6px;background:var(--ws-canvas);box-shadow:inset 0 0 0 1px var(--ws-border-strong);color:var(--ws-text);font-size:13px;display:inline-flex;align-items:center;gap:8px;font-weight:500;white-space:nowrap}
+.btn.pri{background:var(--ws-accent);color:var(--ws-on-accent);box-shadow:none}
+.btn.ghost{box-shadow:none;background:transparent;color:var(--ws-text-muted)}
+.btn.dng{color:var(--ws-danger)}
+.ok,.add{color:var(--ws-success)}.del{color:var(--ws-danger)}
+.wid{flex:none;height:36px;display:flex;justify-content:center;align-items:flex-end;padding-bottom:6px;box-sizing:border-box}
+.wid>div{width:740px;display:flex;gap:16px;align-items:center;font-size:12px;color:var(--ws-text-muted);padding:0 12px}
+.wid b{font-weight:500;color:var(--ws-text-faint)}
+.act{flex:none;height:132px;padding:0 0 12px;box-sizing:border-box;display:flex;justify-content:center}
+.actbox{width:740px;height:120px;box-sizing:border-box;border-radius:12px;background:var(--ws-surface);box-shadow:var(--ws-shadow);padding:12px 14px;display:flex;flex-direction:column}
+.actbox .ph{flex:1;color:var(--ws-text-faint);font-size:15px;line-height:24px}
+.actbox .bar{display:flex;align-items:center;gap:6px}
+.actbox.appr{box-shadow:0 0 0 1px var(--ws-warning-border),0 3px 6px rgba(15,15,15,.08),0 9px 24px rgba(15,15,15,.12);gap:10px}
+.appr .top{display:flex;gap:10px;align-items:center}
+.appr .ic{width:22px;height:22px;border-radius:4px;background:var(--ws-warning-subtle);color:var(--ws-warning);display:grid;place-items:center;font-weight:700;font-size:12px}
+.appr .ttl{font-weight:600}
+.appr .top .end{margin-left:auto;color:var(--ws-text-faint);font-size:12px}
+.appr .cmd{display:flex;gap:10px;align-items:center;padding:6px 10px;background:var(--ws-code);border-radius:6px;font-size:13px}
+.appr .cmd span{color:var(--ws-text-faint)}
+.appr .cmd i{margin-left:auto;font-style:normal;font-family:ui-sans-serif,-apple-system,sans-serif;font-size:12px;color:var(--ws-text-muted)}
+.status{height:30px;flex:none;display:flex;align-items:center;gap:18px;padding:0 16px;font-size:12px;color:var(--ws-text-muted);font-variant-numeric:tabular-nums;white-space:nowrap;box-shadow:inset 0 1px 0 var(--ws-border)}
+.status .end{margin-left:auto;color:var(--ws-text-faint)}
+.chat{flex:1;overflow:hidden;display:flex;flex-direction:column;justify-content:flex-end;padding-bottom:8px;min-height:0;-webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 64px);mask-image:linear-gradient(to bottom,transparent 0,#000 64px)}
+.col{width:740px;margin:0 auto;display:flex;flex-direction:column;gap:12px}
+.user{align-self:flex-end;background:var(--ws-hover);padding:10px 14px;border-radius:12px;max-width:80%;font-size:16px;line-height:24px}
+.prose{font-size:16px;line-height:24px;margin:2px 0}
+.tool{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ws-text-muted);height:32px;padding:0 10px;border-radius:6px;background:var(--ws-subtle)}
+.tool code{color:var(--ws-text);font-size:13px}
+.tool .r{margin-left:auto;display:flex;gap:10px;font-variant-numeric:tabular-nums}
+.tool.wait{background:var(--ws-warning-subtle);color:var(--ws-warning)}
+.ttb{height:44px;flex:none;display:flex;align-items:center;gap:6px;padding:0 16px}
+.ttb .sch{width:220px;height:28px;border-radius:6px;display:flex;align-items:center;justify-content:space-between;padding:0 8px;color:var(--ws-text-faint);font-size:13px;background:var(--ws-subtle)}
+.ttb .end{margin-left:auto;display:flex;gap:6px;align-items:center}
+.sg2{display:inline-flex;background:var(--ws-subtle);border-radius:6px;padding:2px;font-size:13px}
+.sg2 span{padding:2px 10px;color:var(--ws-text-muted);border-radius:4px;line-height:20px}.sg2 span.on{background:var(--ws-canvas);color:var(--ws-text);box-shadow:0 0 0 1px var(--ws-border),0 1px 2px rgba(15,15,15,.06)}
+.ov{flex:none;padding:10px 16px 12px;background:var(--ws-subtle);box-shadow:inset 0 1px 0 var(--ws-border),inset 0 -1px 0 var(--ws-border)}
+.ovh{display:flex;gap:14px;align-items:center;font-size:12px;color:var(--ws-text-faint);margin-bottom:8px}
+.ovh b{color:var(--ws-text-muted);font-weight:500}
+.ovh .end{margin-left:auto;color:var(--ws-accent)}
+.ovg{display:grid;grid-template-columns:56px 1fr;row-gap:6px;font-size:12px;color:var(--ws-text-faint);align-items:center}
+.trk{position:relative;height:12px}
+.trk.axis{height:14px;box-shadow:inset 0 -1px 0 var(--ws-border)}
+.trk.axis span.x{position:absolute;top:-2px;transform:translateX(-50%);font-size:11px;line-height:14px}
+.trk i{position:absolute;top:1px;bottom:1px;border-radius:2px;min-width:2px}
+.brush{position:absolute;top:-2px;bottom:-2px;background:color-mix(in srgb,var(--ws-accent) 10%,transparent);border-left:2px solid var(--ws-accent);border-right:2px solid var(--ws-accent)}
+.mark{position:absolute;top:7px;width:9px;height:9px;transform:translate(-50%,0) rotate(45deg);background:var(--ws-canvas);border:2px solid var(--ws-accent);box-sizing:border-box}
+.tbody{flex:1;display:flex;min-height:0}
+.led{flex:1;min-width:0;overflow:hidden;-webkit-mask-image:linear-gradient(to top,transparent 0,#000 48px);mask-image:linear-gradient(to top,transparent 0,#000 48px)}
+.lr{display:grid;grid-template-columns:28px 84px 1fr 64px 60px 50px 50px;gap:8px;align-items:center;height:34px;padding:0 16px;font-size:14px;white-space:nowrap;box-shadow:inset 0 -1px 0 var(--ws-border)}
+.lr>span{overflow:hidden;text-overflow:ellipsis}
+.lr.hd{height:30px;color:var(--ws-text-faint);font-size:12px}
+.lr .n{color:var(--ws-text-faint);font-variant-numeric:tabular-nums;font-size:13px}
+.lr .num{text-align:right;font-variant-numeric:tabular-nums;color:var(--ws-text-muted);font-size:13px}
+.lr.sel{background:var(--ws-selected)}
+.lr.dim{opacity:.4}
+.lr code{font-size:13px}
+.tg{display:inline-block;font-size:12px;font-weight:500;padding:0 6px;border-radius:4px;line-height:20px}
+.tg.User{background:var(--ws-hover);color:var(--ws-text-muted)}.tg.Message{background:var(--ws-accent-subtle);color:var(--ws-accent)}.tg.Tool{background:color-mix(in srgb,var(--ws-data-2) 14%,transparent);color:var(--ws-data-2)}.tg.Approval{background:var(--ws-warning-subtle);color:var(--ws-warning)}
+.turn{display:flex;gap:10px;align-items:center;height:34px;padding:0 16px;font-size:14px;white-space:nowrap;box-shadow:inset 0 -1px 0 var(--ws-border)}
+.turn b{font-weight:600}.turn .q{color:var(--ws-text-muted);overflow:hidden;text-overflow:ellipsis}.turn .end{margin-left:auto;color:var(--ws-text-faint);font-size:12px;font-variant-numeric:tabular-nums}
+.insp{margin:8px 16px 10px 52px;border-radius:8px;background:var(--ws-surface);box-shadow:0 0 0 1px var(--ws-border);overflow:hidden}
+.itabs{display:flex;gap:16px;align-items:center;padding:0 12px;height:38px;font-size:13px;color:var(--ws-text-muted);box-shadow:inset 0 -1px 0 var(--ws-border)}
+.itabs .on{color:var(--ws-text);font-weight:500}
+.itabs .end{margin-left:auto}
+.igrid{display:grid;grid-template-columns:1fr 1.15fr}
+.igrid>div{padding:12px 14px;font-size:13px}
+.igrid>div+div{box-shadow:inset 1px 0 0 var(--ws-border)}
+.igrid h5{margin:0 0 8px;font-size:12px;color:var(--ws-text-faint);font-weight:500}
+.kv{display:grid;grid-template-columns:1fr auto;gap:4px 12px;font-variant-numeric:tabular-nums}
+.kv .t{color:var(--ws-text-muted)}.kv .v{text-align:right}
+.kv .t i{font-style:normal;color:var(--ws-text-faint)}
+.stack{display:flex;height:6px;border-radius:3px;overflow:hidden;margin:0 0 10px;gap:2px}
+.sq{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:6px}
+.newc{margin-top:10px;background:var(--ws-accent-subtle);color:var(--ws-accent);border-radius:6px;padding:6px 10px;font-size:12px}
+.tree{width:300px;flex:none;padding:8px 12px;overflow:hidden;box-shadow:inset 1px 0 0 var(--ws-border)}
+.tree .th{display:flex;justify-content:space-between;align-items:center;font-size:12px;font-weight:500;color:var(--ws-text-faint);height:28px;margin-bottom:2px}
+.gg{position:relative}
+.gg svg{position:absolute;left:0;top:0}
+.gr{height:28px;display:flex;align-items:center;gap:6px;padding-left:70px;padding-right:6px;border-radius:6px;font-size:13px;white-space:nowrap;color:var(--ws-text-muted);overflow:hidden}
+.gr.sel{background:var(--ws-selected);color:var(--ws-text)}
+.gr .n{color:var(--ws-text-faint);font-variant-numeric:tabular-nums;min-width:16px}
+.ref{font-size:12px;font-weight:500;padding:0 6px;border-radius:4px;line-height:18px;color:#fff}
+.gr .nm{color:var(--ws-text);overflow:hidden;text-overflow:ellipsis}
+.gr .r{margin-left:auto;font-size:12px;color:var(--ws-text-faint);font-variant-numeric:tabular-nums}
+.gr .cb{width:13px;height:13px;border-radius:3px;box-shadow:inset 0 0 0 1.5px var(--ws-border-strong);display:grid;place-items:center;font-size:9px;flex:none}
+.gr .cb.on{background:var(--ws-accent);box-shadow:none;color:var(--ws-on-accent)}
+.cmp{flex:1;min-width:0;display:flex;flex-direction:column;gap:12px;padding:14px 16px;overflow:hidden;-webkit-mask-image:linear-gradient(to top,transparent 0,#000 48px);mask-image:linear-gradient(to top,transparent 0,#000 48px)}
+.mets{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.met{border-radius:8px;padding:8px 12px;background:var(--ws-subtle)}
+.met .l{font-size:12px;color:var(--ws-text-muted)}
+.met .v{font-size:16px;font-weight:600;line-height:24px;font-variant-numeric:tabular-nums}
+.met .v span{font-weight:400;color:var(--ws-text-faint);margin:0 4px}
+.met .d{font-size:12px}
+.cgrid{display:grid;grid-template-columns:1fr 1fr;border-radius:8px;overflow:hidden;box-shadow:0 0 0 1px var(--ws-border)}
+.cgrid .h{padding:0 12px;height:34px;display:flex;align-items:center;gap:8px;font-weight:600;font-size:14px;background:var(--ws-subtle)}
+.cgrid .h span.q{font-weight:400;color:var(--ws-text-muted)}
+.cgrid .same{grid-column:1/3;height:30px;display:grid;place-items:center;color:var(--ws-text-faint);font-size:12px;box-shadow:inset 0 1px 0 var(--ws-border)}
+.cc{height:34px;box-sizing:border-box;padding:0 12px;display:flex;gap:8px;align-items:center;font-size:14px;white-space:nowrap;overflow:hidden;box-shadow:inset 0 1px 0 var(--ws-border)}
+.cc:nth-child(odd){box-shadow:inset 0 1px 0 var(--ws-border),inset 1px 0 0 var(--ws-border)}
+.cc.only{background:var(--ws-warning-subtle)}
+.cc .r{margin-left:auto;color:var(--ws-text-muted);font-variant-numeric:tabular-nums;font-size:13px}
+.cc code{font-size:13px}
+.ftag{font-size:12px;color:var(--ws-warning);padding:0 6px;border-radius:4px;background:var(--ws-canvas);line-height:18px}
+.files{width:264px;flex:none;padding:10px 8px;display:flex;flex-direction:column;gap:1px;box-shadow:inset -1px 0 0 var(--ws-border)}
+.files h6{font-size:12px;color:var(--ws-text-faint);font-weight:500;margin:4px 8px 6px}
+.fl{display:flex;gap:6px;align-items:center;height:28px;padding:0 8px 0 calc(8px + var(--d,0) * 16px);border-radius:6px;font-size:13px;white-space:nowrap;color:var(--ws-text-muted)}
+.fl.on{background:var(--ws-selected);color:var(--ws-text)}
+.fl .tw{width:12px;color:var(--ws-text-faint);font-size:12px;text-align:center}
+.fl .st{width:14px;font-weight:600;font-size:12px}
+.st.M{color:var(--ws-warning)}.st.A{color:var(--ws-success)}
+.fl .r{margin-left:auto;font-size:12px;font-variant-numeric:tabular-nums}
+.dv{flex:1;min-width:0;padding:14px 24px;display:flex;flex-direction:column;gap:12px;overflow:hidden;-webkit-mask-image:linear-gradient(to top,transparent 0,#000 48px);mask-image:linear-gradient(to top,transparent 0,#000 48px)}
+.fh{display:flex;align-items:center;gap:10px;height:36px;padding:0 12px;background:var(--ws-subtle);border-radius:8px 8px 0 0;font-size:13px}
+.fh .r{margin-left:auto;font-size:12px}
+.dbox{border-radius:0 0 8px 8px;overflow:hidden;box-shadow:0 0 0 1px var(--ws-border);background:var(--ws-canvas)}
+.hunk{padding:0 12px;line-height:24px;color:var(--ws-text-faint);background:var(--ws-subtle);font-size:12px}
+.dl{display:grid;grid-template-columns:44px 44px 20px 1fr;line-height:22px}
+.dl .ln{color:var(--ws-text-faint);text-align:right;padding-right:10px;font-size:12px;font-variant-numeric:tabular-nums}
+.dl code{white-space:pre;font-size:13px}
+.dl.a{background:var(--ws-diff-add)}.dl.a .sg{color:var(--ws-success)}.dl.a .ln{background:var(--ws-diff-add-strong)}
+.dl.d{background:var(--ws-diff-del)}.dl.d .sg{color:var(--ws-danger)}.dl.d .ln{background:var(--ws-diff-del-strong)}
+.sg{text-align:center}
+i.kw{font-style:normal;color:var(--ws-syn-kw)}i.st{font-style:normal;color:var(--ws-syn-str)}i.cm{font-style:italic;color:var(--ws-syn-com)}i.nu{font-style:normal;color:var(--ws-syn-num)}
+.found{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.panel{padding:16px;border-radius:var(--radius,8px);background:var(--ws-canvas);box-shadow:0 0 0 1px var(--ws-border-strong);color:var(--ws-text)}
+.panel h5{margin:0 0 12px;font-size:12px;color:var(--ws-text-muted);font-weight:500}
+.swg{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.swi{display:flex;gap:8px;align-items:center;font-size:12px;min-width:0;line-height:16px}
+.swi i{width:28px;height:28px;border-radius:6px;box-shadow:inset 0 0 0 1px var(--ws-border-strong);flex:none}
+.swi span{display:block;color:var(--ws-text-faint);font-size:11px}
+.typo div{display:flex;align-items:baseline;gap:12px;padding:4px 0;box-shadow:inset 0 -1px 0 var(--ws-border)}
+.typo span.l{width:120px;flex:none;font-size:11px;color:var(--ws-text-faint)}
+@media (max-width:560px){.found{grid-template-columns:1fr}.swg{grid-template-columns:repeat(2,1fr)}}
+.win.mini{width:auto;display:inline-block;background:transparent;box-shadow:none;overflow:visible}
+.dlg{width:520px;box-sizing:border-box;border-radius:12px;background:var(--ws-surface);box-shadow:0 0 0 1px var(--ws-border),0 3px 6px rgba(15,15,15,.1),0 9px 24px rgba(15,15,15,.2);padding:16px;display:flex;flex-direction:column;gap:12px;font-size:13px}
+.dlg h4{margin:0;font-size:16px;line-height:22px;font-weight:600}
+.dlg p{margin:0;color:var(--ws-text-muted);line-height:20px}
+.dlg .acts{display:flex;gap:8px;align-items:center}.dlg .acts .sp{flex:1}
+.flist{border-radius:8px;background:var(--ws-subtle);padding:6px;display:flex;flex-direction:column;gap:1px}
+.frow{display:flex;gap:8px;align-items:center;height:26px;padding:0 6px;border-radius:6px;font-size:13px;white-space:nowrap}
+.frow .st{width:14px;font-weight:600;font-size:12px}.frow .r{margin-left:auto;font-size:12px;color:var(--ws-text-faint)}
+.st.D{color:var(--ws-danger)}
+.notice{padding:8px 10px;border-radius:6px;background:var(--ws-warning-subtle);color:var(--ws-warning);font-size:13px;line-height:20px}
+.btn.dngp{background:var(--ws-danger);color:var(--ws-on-accent);box-shadow:none}
+.btn.off{opacity:.45}
+.scrim{position:absolute;inset:38px 0 0 0;background:rgba(15,15,15,.32);display:flex;align-items:center;justify-content:center}
+.menu{position:absolute;z-index:2;min-width:260px;border-radius:8px;background:var(--ws-surface);box-shadow:0 0 0 1px var(--ws-border),0 3px 6px rgba(15,15,15,.1),0 9px 24px rgba(15,15,15,.2);padding:6px;display:flex;flex-direction:column;gap:1px;font-size:13px}
+.menu .it{display:flex;gap:10px;align-items:center;height:28px;padding:0 8px;border-radius:6px;white-space:nowrap;color:var(--ws-text)}
+.menu .it.on{background:var(--ws-hover)}.menu .it .r{margin-left:auto;color:var(--ws-text-faint);font-size:12px;font-variant-numeric:tabular-nums}
+.menu .it.dng{color:var(--ws-danger)}.menu hr{border:0;height:1px;background:var(--ws-border);margin:4px 2px}
+.menu .lbl{font-size:12px;color:var(--ws-text-faint);padding:4px 8px 2px}
+.scope{white-space:nowrap;display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 8px;border-radius:6px;box-shadow:inset 0 0 0 1px var(--ws-border-strong);font-weight:600;font-size:14px}
+.turnfoot{display:flex;align-items:center;gap:10px;font-size:13px;color:var(--ws-text-muted);padding:2px 0}
+.empties{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.empty{height:150px;border-radius:12px;background:var(--ws-canvas);box-shadow:var(--ws-shadow);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;padding:0 24px;text-align:center;font-size:13px;color:var(--ws-text-muted)}
+.empty b{color:var(--ws-text);font-weight:500}
+.opts{display:grid;grid-template-columns:repeat(auto-fit,minmax(540px,1fr));gap:16px;align-items:start}
+.lab{font-size:13px;font-weight:600;margin:0 0 6px}.rec{color:var(--ws-success);font-weight:500;margin-left:6px}
+.qs{font-size:13px;line-height:1.6;color:var(--foreground);margin:0;padding-left:18px}.qs li{margin:0 0 8px}
+
+</style></head><body class="theme-light chrome">
+<div class="page">
+  <div class="toolbar">
+    <div>Theme <span class="seg" id="theme"><button data-v="light">Light</button><button data-v="dark">Dark</button><button data-v="system" class="on">System</button></span></div>
+    <div>Size <span class="seg" id="size"><button data-v="fit" class="on">Fit</button><button data-v="full">100 %</button></span></div>
+  </div>
+  <section>
+    <h3 class="sec">Checkpoints: approved mockups</h3>
+    <p class="sub">Checkpoints of the Liquid Git slice in <a href="../../../PLAN.md#liquid-git-integration--next-slice">PLAN.md</a>, following ADR-0234: a checkpoint at each turn's start and end, the Diff tab reading from them, a revert to before a turn, removal with the session and one action that removes all checkpoints. Layout, components and wording follow the <a href="liquid-agent-surface.html">agent surface mockups</a> and <a href="../guidelines.md">guidelines.md</a>. The maintainer approved them on 2026-11-01 with the decisions at the end.</p>
+  </section>
+  <section>
+    <h3 class="sec">1 · Diff tab shows one turn</h3>
+    <p class="sub">The header names the turn shown and opens a menu of the session's turns, newest first, as T3 Code's Diff panel does (<code>Latest turn</code>, <code>Turn n</code>). A turn's changes run from its start checkpoint to its end checkpoint, so earlier turns stay visible after a restart. "All turns" compares the end of the latest turn with the start of the first. The revert action sits beside the menu and applies to the turn shown.</p>
+    <div class="stage"><div class="scaler"><div class="win" id="w-diff"></div></div></div>
+  </section>
+  <section>
+    <h3 class="sec">2 · A turn ends with its changes in the chat</h3>
+    <p class="sub">Below a turn's last reply, one quiet row counts the turn's files and lines and offers both actions, with T3 Code's "changed files" wording and its "Open diff". It appears only once the turn's end checkpoint exists.</p>
+    <div class="stage"><div class="scaler"><div class="win" id="w-chat"></div></div></div>
+  </section>
+  <section>
+    <h3 class="sec">3 · Reverting to before a turn</h3>
+    <p class="sub">The dialog lists every file that changes, including edits made outside the agent since then, and says what stays: commits, the branch and files Git ignores. T3 Code's dialog lists no files. Like T3 Code's "Edit from here", the session continues from before the turn with its prompt back in the input area, but on a new branch, so the undone turns stay in the session tree with their checkpoints.</p>
+    <div class="win mini"><div id="d-b"></div></div>
+  </section>
+  <section>
+    <h3 class="sec">4 · Refused while an agent runs in the checkout</h3>
+    <p class="sub">Another session runs in the same folder, so the revert would change files under it. The dialog still lists the files, names the running session and keeps the action disabled until it stops; a session in another Liquid window is named but cannot be shown from here. T3 Code refuses every file revert outside its own worktree; Watershed refuses only while an agent runs there.</p>
+    <div class="stage"><div class="scaler"><div class="win" id="w-refused"></div></div></div>
+  </section>
+  <section>
+    <h3 class="sec">5 · Without checkpoints</h3>
+    <p class="sub">The Diff tab says why it shows nothing, as T3 Code does for a folder without Git.</p>
+    <div class="win mini" style="display:block;width:100%;background:transparent;box-shadow:none"><div class="empties" id="empties"></div></div>
+  </section>
+  <section>
+    <h3 class="sec">6 · Removing checkpoints</h3>
+    <p class="sub">The project's menu in the sidebar removes all of Watershed's checkpoints in its repository; Git frees the space at its next cleanup. Deleting a session removes its checkpoints with it. T3 Code removes checkpoints only when a revert makes them obsolete.</p>
+    <div class="stage"><div class="scaler"><div class="win" id="w-remove"></div></div></div>
+    <div class="opts" style="margin-top:16px">
+      <div><div class="lab">Remove all checkpoints</div><div class="win mini"><div id="d-all"></div></div></div>
+      <div><div class="lab">Delete a session</div><div class="win mini"><div id="d-del"></div></div></div>
+    </div>
+  </section>
+  <section>
+    <h3 class="sec">7 · States added in review</h3>
+    <p class="sub">Approved by the maintainer on 2026-11-01, with "Show the running session" dropped from section 4. The reviews of the revert found cases the sections above do not show. Files Git ignores are listed where a restored file needs their place, so "files Git ignores stay" becomes "other files Git ignores stay"; a path inside, at or above a repository in the project is listed but left alone; with only such paths the dialog says “No file reverts: a revert leaves repositories inside the project alone.”. Several running agents are counted. A turn that waits for another window's revert says so in the status bar, through the status entry extensions already use. Errors after the dialog say whether the files changed.</p>
+    <div class="opts">
+      <div><div class="lab">Files Git ignores in the way</div><div class="win mini"><div class="dlg"><h4>Revert to before turn 3?</h4><p>These 5 files and folders revert to how they were when turn 3 started.</p><div class="flist"><div class="frow"><span class="st A">A</span><code>config.local</code><span class="r">restored over a file Git ignores</span></div><div class="frow"><span class="st A">A</span><code>data</code><span class="r">deleted since then, restored</span></div><div class="frow"><span class="st D">D</span><code>data/</code><span class="r">holds files Git ignores, in the way, deleted</span></div><div class="frow"><span class="st D">D</span><code>logs</code><span class="r">a file Git ignores, in the way, deleted</span></div><div class="frow"><span class="st A">A</span><code>logs/today.txt</code><span class="r">deleted since then, restored</span></div><div class="frow"><span class="st" style="color:var(--ws-text-faint)">–</span><code>vendor/lib</code><span class="r">a repository is here, left alone</span></div></div><p>Commits, the branch <code>main</code> and other files Git ignores stay as they are.</p><p>The session continues on a new branch from before turn 3, and turn 3’s prompt returns to the input area. Turn 3 stays on its own branch in the session tree.</p><div class="acts"><span class="btn dngp">Revert and branch <kbd>⏎</kbd></span><span class="sp"></span><span class="btn">Cancel <kbd>esc</kbd></span></div></div></div></div>
+      <div><div class="lab">Several agents running</div><div class="win mini"><div class="dlg"><h4>Revert to before turn 3?</h4><p>These 2 files revert to how they were when turn 3 started.</p><div class="flist"><div class="frow"><span class="st M">M</span><code>src/routes/login.ts</code><span class="r">back to 10:56</span></div><div class="frow"><span class="st D">D</span><code>src/limits.json</code><span class="r">new since then, deleted</span></div></div><div class="notice">“Fix flaky sync test” and 1 more are running in this checkout. Stop them or wait until they finish, then revert the files.</div><div class="acts"><span class="btn dngp off">Revert and branch</span><span class="sp"></span><span class="btn">Cancel <kbd>esc</kbd></span></div></div></div></div>
+    </div>
+    <div class="flist" style="margin-top:16px">
+      <div class="frow">Status bar while a turn waits<span class="r">Waiting for a revert in this checkout to finish</span></div>
+      <div class="frow">Agent started meanwhile<span class="r">Could not revert and branch. The files were not reverted: an agent runs in this checkout</span></div>
+      <div class="frow">Git left files<span class="r">Could not revert and branch. The other files were reverted and the session stays on its branch; Git could not revert ro/new.txt</span></div>
+      <div class="frow">Git failed midway<span class="r">Could not revert and branch. The files may be partly reverted (…); reverting again finishes it</span></div>
+      <div class="frow">Branch failed<span class="r">Could not revert and branch. The files were reverted, but the session could not continue from before the turn: …</span></div>
+    </div>
+  </section>
+  <section>
+    <h3 class="sec">Decisions</h3>
+    <ol class="qs">
+      <li>A revert starts a new branch from before the turn and puts that turn's prompt back into the input area; the undone turns stay on their branch, rather than only reverting the files and telling the agent.</li>
+      <li>The Diff menu offers "All turns" besides each turn.</li>
+      <li>"Delete session" deletes the pi session file and its checkpoints after confirmation.</li>
+      <li>"Remove all checkpoints" lives in the project's menu in the sidebar.</li>
+    </ol>
+  </section>
+</div>
+<script>
+const DW=1240;
+const I={br:'<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="4.5" cy="3.5" r="1.5"/><circle cx="4.5" cy="12.5" r="1.5"/><circle cx="11.5" cy="5" r="1.5"/><path d="M4.5 5v6M11.5 6.5c0 3-7 2-7 4.5"/></svg>',
+lap:'<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="3" y="3.5" width="10" height="7" rx="1"/><path d="M1.5 12.5h13"/></svg>',
+hx:'<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M8 1.8l5.4 3.1v6.2L8 14.2l-5.4-3.1V4.9z"/></svg>',
+srch:'<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5l3 3"/></svg>',
+page:'<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M4 2h5l3 3v9H4z"/><path d="M9 2v3h3"/></svg>',
+dir:'<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M1.8 4.2c0-.6.4-1 1-1h3.4l1.4 1.6h5.6c.6 0 1 .4 1 1v6.9c0 .6-.4 1-1 1H2.8c-.6 0-1-.4-1-1z"/></svg>',
+undo:'<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M5 3L2 6l3 3"/><path d="M2 6h7.5a4 4 0 010 8H7"/></svg>'};
+const meta=(h,b,d)=>`<div class="l2">${I.hx}${h}<span>·</span>${I.br}${b}<span>·</span>${I.lap}${d}</div>`;
+function side(o){return `<div class="side"><div class="wsw"><span class="av">B</span>Benni's Workspace<span style="margin-left:auto;color:var(--ws-text-faint)">⌄</span></div>
+<div class="srch">${I.srch}<span>Search or run a command</span><kbd>⌘K</kbd></div>
+<h6>Pages</h6><div class="nav"><span class="ico">${I.page}</span>Roadmap</div>
+<h6>Agent sessions <kbd>⌘N</kbd></h6>
+<div class="proj" ${o.projOn?'style="background:var(--ws-hover);border-radius:6px"':''}><span class="ico">⌄</span>acme-api <span class="f">~/code/acme-api</span>${o.projOn?'<span style="margin-left:auto;color:var(--ws-text-faint)">···</span>':''}</div>
+<div class="sess on"><div class="l1"><span class="dot" style="background:var(--ws-text-faint)"></span><span>Rate limit for /login</span><span class="end" style="color:var(--ws-text-faint)">idle</span></div>${meta('pi','main','MacBook')}</div>
+<div class="sess"><div class="l1"><span class="dot" style="background:${o.running?'var(--ws-accent)':'var(--ws-text-faint)'}"></span><span>Fix flaky sync test</span><span class="end">${o.running?'running':'done'}</span></div>${meta('pi','main','MacBook')}</div>
+<div class="nav" style="color:var(--ws-text-faint);margin-top:2px"><span class="ico">+</span>New agent session</div>${o.menu||''}</div>`}
+const composer=`<div class="actbox"><div class="ph">Ask the agent…</div><div class="bar"><span class="chip box">◐ Ask ⌄</span><span class="chip">＋ Context</span><span style="flex:1"></span><kbd style="color:var(--ws-text-faint)">⌘L</kbd><span class="btn pri">Send <kbd>⏎</kbd></span></div></div>`;
+function frame(id,tab,main,h,o){o=o||{};const tabs=[['chat','Chat','','⌘1'],['traj','Trajectory','','⌘2'],['diff','Diff','3','⌘3']].map(([k,l,b,s])=>`<div class="tab ${k==tab?'on':''}">${l}${b?`<span class="badge">${b}</span>`:''}<kbd>${s}</kbd></div>`).join('');
+document.getElementById(id).innerHTML=`<div class="tbar"><div class="lights"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></div></div>
+<div class="body" style="--h:${h}px">${side(o)}<div class="main"><div class="head"><b>Rate limit for /login</b><span style="color:var(--ws-text-faint)">···</span></div><div class="tabs">${tabs}</div>${main}
+<div class="act">${composer}</div>
+<div class="status"><span style="color:${o.running?'var(--ws-accent)':'var(--ws-text-muted)'}">● ${o.running?'Fix flaky sync test is running in this checkout':'Idle · finished 10:58'}</span><span>Context 11.2k / 200k</span><span class="end">${o.keys||''}</span></div></div></div>${o.over||''}`}
+const fold=(d,n)=>`<div class="fl" style="--d:${d}"><span class="tw">⌄</span><span class="ico">${I.dir}</span>${n}</div>`;
+const file=(d,st,n,r,on)=>`<div class="fl ${on?'on':''}" style="--d:${d}"><span class="tw"></span><span class="st ${st}">${st}</span>${n}<span class="r">${r}</span></div>`;
+const D=[[14,14,' ','  const ok = await verifyPassword(email, password);'],[15,15,' ','  if (!ok) {'],[16,16,' ','    limiter.hit(req.ip);'],[17,0,'-','    return res.status(401).json({ error: "invalid_credentials" });'],[0,17,'+','    const wait = limiter.retryAfter(req.ip);'],[0,18,'+','    if (wait) return res.status(429).set("Retry-After", String(wait)).end();'],[0,19,'+','    return res.status(401).json({ error: "invalid_credentials" });'],[0,20,'+','  }'],[18,21,' ','  res.json({ token: await issueToken(email) });']];
+const esc=s=>s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+const dl=D.map(([o,n,t,x])=>`<div class="dl ${t=='+'?'a':t=='-'?'d':''}"><span class="ln">${o||''}</span><span class="ln">${n||''}</span><span class="sg">${t=='-'?'−':t.trim()}</span><code>${esc(x)||' '}</code></div>`).join('');
+const turnMenu=`<div class="menu" style="left:552px;top:168px;width:330px"><div class="lbl">Turns of this branch</div>
+<div class="it on">Latest turn · Turn 3<span class="r">10:58 · +12 −1</span></div><div class="it">Turn 2<span class="r">10:51 · +14 −3</span></div><div class="it">Turn 1<span class="r">10:43 · +59 −5</span></div><hr><div class="it">All turns<span class="r">since 10:41 · +85 −9</span></div></div>`;
+const diffHead=(ret)=>`<div><div style="display:flex;align-items:center;gap:10px"><span class="scope">Turn 3 <span style="color:var(--ws-text-faint);font-weight:400">⌄</span></span><span style="margin-left:auto;display:flex;gap:8px;align-items:center">${ret}<span class="sg2"><span class="on">Unified</span><span>Split</span></span></span></div><div style="color:var(--ws-text-muted);font-size:12px;margin-top:4px">“Return 429 with Retry-After” · 10:56–10:58 · compared with the project when the turn started</div></div>`;
+const diffBody=(ret)=>`<div class="tbody"><div class="files"><h6>3 files · <span class="add">+12</span> <span class="del">−1</span></h6>
+${fold(0,'docs')}${file(1,'M','api.md','<span class="add">+3</span>')}${fold(0,'src')}${fold(1,'middleware')}${file(2,'M','rateLimit.ts','<span class="add">+5</span>')}${fold(1,'routes')}${file(2,'M','login.ts','<span class="add">+4</span> <span class="del">−1</span>',1)}</div>
+<div class="dv">${diffHead(ret)}
+<div><div class="fh"><span class="st M" style="font-weight:600;font-size:12px">M</span><code style="font-size:13px">src/routes/login.ts</code><span class="r"><span class="add">+4</span> <span class="del">−1</span></span></div>
+<div class="dbox mono"><div class="hunk">@@ -14,5 +14,8 @@</div>${dl}</div></div></div></div>`;
+const retBtn=`<span class="btn">${I.undo}Revert files to before this turn…</span>`;
+frame('w-diff','diff',diffBody(retBtn),700,{keys:'T turn menu · ↑↓ file · ⌥↑↓ hunk · U unified/split',over:turnMenu});
+
+frame('w-chat','chat',`<div class="chat"><div class="col">
+<div class="user">When the limit is reached, answer 429 with a Retry-After header, and document it.</div>
+<div class="tool"><span class="ok">✓</span>edit <code>src/middleware/rateLimit.ts</code><span class="r"><span class="add">+5</span></span></div>
+<div class="tool"><span class="ok">✓</span>edit <code>src/routes/login.ts</code><span class="r"><span class="add">+4</span><span class="del">−1</span></span></div>
+<div class="tool"><span class="ok">✓</span>edit <code>docs/api.md</code><span class="r"><span class="add">+3</span></span></div>
+<p class="prose">Blocked attempts now get 429 with the seconds until the window frees up, and docs/api.md describes the header.</p>
+<div class="turnfoot"><span>3 changed files</span><span><span class="add">+12</span> <span class="del">−1</span></span><span class="btn ghost">Open diff</span><span class="btn ghost">${I.undo}Revert files to before this turn…</span></div>
+</div></div>`,560,{keys:'⌘1–3 tabs · ⌘↑↓ sessions'});
+
+const files=`<div class="flist"><div class="frow"><span class="st M">M</span><code>docs/api.md</code><span class="r">back to 10:56</span></div><div class="frow"><span class="st M">M</span><code>src/middleware/rateLimit.ts</code><span class="r">back to 10:56</span></div><div class="frow"><span class="st M">M</span><code>src/routes/login.ts</code><span class="r">back to 10:56 · also your edit at 11:02</span></div><div class="frow"><span class="st D">D</span><code>src/limits.json</code><span class="r">new since then, deleted</span></div></div>`;
+const keep=`<p>Commits, the branch <code>main</code> and files Git ignores stay as they are.</p>`;
+const dlg=(title,lead,extra,acts)=>`<div class="dlg"><h4>${title}</h4><p>${lead}</p>${files}${keep}${extra}<div class="acts">${acts}</div></div>`;
+const cancel=`<span class="sp"></span><span class="btn">Cancel <kbd>esc</kbd></span>`;
+document.getElementById('d-b').innerHTML=dlg('Revert to before turn 3?','These 4 files revert to how they were when turn 3 started.','<p>The session continues on a new branch from before turn 3, and turn 3’s prompt returns to the input area. Turn 3 stays on its own branch in the session tree.</p>',`<span class="btn dngp">Revert and branch <kbd>⏎</kbd></span>${cancel}`);
+
+const refused=`<div class="scrim"><div class="dlg"><h4>Revert to before turn 3?</h4><p>These 4 files revert to how they were when turn 3 started.</p>${files}
+<div class="notice">“Fix flaky sync test” is running in this checkout. Stop it or wait until it finishes, then revert the files.</div>
+<div class="acts"><span class="btn dngp off">Revert and branch</span><span class="sp"></span><span class="btn">Cancel <kbd>esc</kbd></span></div></div></div>`;
+frame('w-refused','diff',diffBody(retBtn),560,{running:true,keys:'',over:refused});
+
+document.getElementById('empties').innerHTML=[
+ ['Not a Git repository','~/notes has no Git repository, so Liquid keeps no checkpoints and shows no turn changes.'],
+ ['No finished turn yet','A turn’s changes appear here when it ends.'],
+ ['Checkpoints removed','This session’s checkpoints were removed on 1 Nov, so its turns before then show no changes.']]
+ .map(([b,t])=>`<div class="empty"><b>${b}</b><span>${t}</span></div>`).join('');
+
+const projMenu=`<div class="menu" style="left:150px;top:196px;width:250px"><div class="it">Open in Finder</div><div class="it">New agent session<span class="r">⌘N</span></div><hr><div class="it dng">Remove all checkpoints…</div></div>`;
+frame('w-remove','chat',`<div class="chat"><div class="col"><p class="prose" style="color:var(--ws-text-faint)">…</p></div></div>`,420,{projOn:true,menu:projMenu,keys:''});
+document.getElementById('d-all').innerHTML=`<div class="dlg"><h4>Remove all checkpoints of acme-api?</h4><p>2 sessions keep their chats and Trajectories, but no longer show turn changes or revert files. Project files, commits and branches stay. Git frees the space at its next cleanup.</p><div class="flist"><div class="frow">Rate limit for /login<span class="r">3 turns</span></div><div class="frow">Fix flaky sync test<span class="r">5 turns</span></div></div><div class="acts"><span class="btn dngp">Remove checkpoints</span>${cancel}</div></div>`;
+document.getElementById('d-del').innerHTML=`<div class="dlg"><h4>Delete “Rate limit for /login”?</h4><p>Its pi session file and its 3 turns’ checkpoints are deleted and cannot be restored. Project files, commits and branches stay.</p><div class="acts"><span class="btn dngp">Delete session</span>${cancel}</div></div>`;
+
+let mode='system',fit=true;const mq=matchMedia('(prefers-color-scheme: dark)');
+function hostDark(){const v=getComputedStyle(document.documentElement).getPropertyValue('--background').trim();if(!v)return mq.matches;const c=document.createElement('canvas');c.width=c.height=1;const x=c.getContext('2d');x.fillStyle='#808080';x.fillStyle=v;x.fillRect(0,0,1,1);const d=x.getImageData(0,0,1,1).data;return .2126*d[0]+.7152*d[1]+.0722*d[2]<128}
+function applyTheme(){const dark=mode=='dark'||(mode=='system'&&hostDark());document.querySelectorAll('.win').forEach(w=>{w.classList.toggle('theme-dark',dark);w.classList.toggle('theme-light',!dark)});document.querySelectorAll('#theme button').forEach(b=>b.classList.toggle('on',b.dataset.v==mode))}
+function layout(){document.querySelectorAll('.stage').forEach(st=>{const sc=st.querySelector('.scaler'),w=sc.firstElementChild;const s=fit?Math.min(1,(st.clientWidth-32)/DW):1;w.style.transform=`scale(${s})`;sc.style.width=DW*s+'px';sc.style.height=w.offsetHeight*s+'px';st.style.overflowX=fit?'hidden':'auto'});document.querySelectorAll('#size button').forEach(b=>b.classList.toggle('on',(b.dataset.v=='fit')==fit))}
+document.querySelectorAll('#theme button').forEach(b=>b.onclick=()=>{mode=b.dataset.v;applyTheme()});
+document.querySelectorAll('#size button').forEach(b=>b.onclick=()=>{fit=b.dataset.v=='fit';layout()});
+mq.addEventListener('change',applyTheme);addEventListener('resize',layout);setInterval(()=>{if(mode=='system')applyTheme()},1500);
+applyTheme();layout();
+</script>
+</body></html>
