@@ -5,7 +5,10 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/diff/diff_settings.dart';
 import 'package:liquid/src/diff/diff_view.dart';
+import 'package:liquid/src/diff/turn_scope.dart';
+import 'package:liquid/src/format.dart';
 import 'package:liquid/src/rust/api/events.dart';
+import 'package:liquid/src/rust/api/history.dart';
 import 'package:liquid/src/session/session_state.dart';
 import 'package:liquid/src/theme/theme.dart';
 
@@ -842,5 +845,138 @@ void main() {
     });
     final palette = tester.element(code('const max = 10;␍')).ws;
     expect(mark?.style?.color, palette.textFaint);
+  });
+
+  group('reverting to before a turn', () {
+    const started = 1793527800000;
+    const edited = 1793528520000;
+    FakeBackend turns() => FakeBackend()
+      ..turnList = [
+        turnOf('T1', number: 1, added: 1, removed: 1),
+        turnOf('T2', number: 3, startedMs: started, added: 2, removed: 0),
+      ]
+      ..revertPlanned = revertPlanOf(
+        files: [
+          revertedFile('docs/old.md', BridgeChangeStatus.added),
+          revertedFile(
+            'src/login.ts',
+            BridgeChangeStatus.modified,
+            edited: true,
+            modifiedMs: edited,
+          ),
+          revertedFile('src/limits.json', BridgeChangeStatus.deleted),
+        ],
+      );
+
+    Future<void> open(WidgetTester tester) async {
+      await tester.tap(find.text('Revert files to before this turn…'));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('lists every file it changes and reverts on a new branch', (
+      tester,
+    ) async {
+      final backend = turns();
+      await show(tester, backend);
+      await open(tester);
+      expect(backend.calls, contains('revert plan T2'));
+      expect(find.text('Revert to before turn 3?'), findsOneWidget);
+      expect(
+        find.text('These 3 files revert to how they were when turn 3 started.'),
+        findsOneWidget,
+      );
+      final back = 'back to ${formatClockMs(started)}';
+      expect(find.text('deleted since then, restored'), findsOneWidget);
+      expect(
+        find.text('$back · also your edit at ${formatClockMs(edited)}'),
+        findsOneWidget,
+      );
+      expect(find.text('new since then, deleted'), findsOneWidget);
+      expect(
+        find.text(
+          'Commits, the branch main and files Git ignores stay as they are.',
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.text(
+          'The session continues on a new branch from before turn 3, and turn 3’s prompt '
+          'returns to the input area. Turn 3 stays on its own branch in the session tree.',
+        ),
+        findsOneWidget,
+      );
+
+      await tester.tap(find.text('Revert and branch'));
+      await tester.pumpAndSettle();
+      expect(backend.calls, contains('revert T2'));
+      expect(find.text('Revert to before turn 3?'), findsNothing);
+    });
+
+    testWidgets('is refused while an agent runs in the checkout', (
+      tester,
+    ) async {
+      final backend = turns()
+        ..revertPlanned = revertPlanOf(
+          files: [revertedFile('src/login.ts', BridgeChangeStatus.modified)],
+          running: [
+            const BridgeRunningAgent(own: false, title: 'Fix flaky sync test'),
+          ],
+        );
+      await show(tester, backend);
+      await open(tester);
+      expect(
+        find.text('This file reverts to how it was when turn 3 started.'),
+        findsOneWidget,
+        reason: 'the files still show',
+      );
+      expect(
+        find.text(
+          '“Fix flaky sync test” is running in this checkout. Stop it or wait until it '
+          'finishes, then revert the files.',
+        ),
+        findsOneWidget,
+      );
+      await tester.tap(find.text('Revert and branch'));
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      expect(backend.calls, isNot(contains('revert T2')));
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      expect(find.text('Revert to before turn 3?'), findsNothing);
+
+      backend.revertPlanned = revertPlanOf(
+        running: [const BridgeRunningAgent(own: true, title: null)],
+      );
+      await open(tester);
+      expect(
+        find.text(
+          'This session’s agent is running. Stop it or wait until it finishes, then revert '
+          'the files.',
+        ),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('reports a revert that failed', (tester) async {
+      final backend = turns()..revertError = 'git failed: disk full';
+      final state = await show(tester, backend);
+      await open(tester);
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      expect(backend.calls, contains('revert T2'));
+      expect(
+        state.notice.value?.text,
+        'The files were not reverted: git failed: disk full',
+      );
+    });
+
+    testWidgets('is offered for one turn, not for all turns', (tester) async {
+      final backend = turns();
+      final state = await show(tester, backend);
+      expect(find.text('Revert files to before this turn…'), findsOneWidget);
+      await state.showTurns(const AllTurns());
+      await tester.pumpAndSettle();
+      expect(find.text('Revert files to before this turn…'), findsNothing);
+    });
   });
 }

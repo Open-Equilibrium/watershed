@@ -529,6 +529,37 @@ class SessionState {
 
   Future<bool>? _branching;
 
+  /// What reverting the files to before `turn` would change.
+  Future<BridgeRevertPlan> revertPlan(BridgeTurn turn) =>
+      _backend.revertPlan(turn.id);
+
+  /// Reverts the files to before `turn` and continues the session on a new branch from before
+  /// its prompt, which returns to the input area (ADR-0234). Returns whether it reverted; a
+  /// failure is reported.
+  Future<bool> revert(BridgeTurn turn) async {
+    if (_branching != null || _switching != null) {
+      notify(
+        BridgeLevel.info,
+        'The session is changing, so the files were not reverted.',
+      );
+      return false;
+    }
+    final reverting = _backend.revertToTurn(turn.id).then((_) => true);
+    _branching = reverting;
+    try {
+      await reverting;
+    } on Object catch (error) {
+      notify(BridgeLevel.error, 'The files were not reverted: $error');
+      return false;
+    } finally {
+      _branching = null;
+    }
+    stored.value++;
+    await loadChat();
+    await readChanges();
+    return true;
+  }
+
   Future<bool> _branch(String entry) async {
     await _backend.branch(entry);
     stored.value++;

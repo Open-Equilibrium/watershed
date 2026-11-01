@@ -263,6 +263,24 @@ class FakeBackend implements SessionBackend {
     return contexts[entry];
   }
 
+  /// What reverting to before a turn would change.
+  BridgeRevertPlan revertPlanned = revertPlanOf();
+
+  /// What a revert fails with.
+  Object? revertError;
+
+  @override
+  Future<BridgeRevertPlan> revertPlan(String turn) async {
+    calls.add('revert plan $turn');
+    return revertPlanned;
+  }
+
+  @override
+  Future<void> revertToTurn(String turn) async {
+    calls.add('revert $turn');
+    if (revertError case final error?) throw error;
+  }
+
   /// Moves the leaf like pi: to the entry, or before it for a prompt.
   @override
   Future<void> branch(String entry) async {
@@ -439,6 +457,33 @@ BridgeTranscriptItem chatItem(
   failed: false,
 );
 
+/// A revert plan of `files`, refused while `running` agents run.
+BridgeRevertPlan revertPlanOf({
+  List<BridgeRevertFile> files = const [],
+  List<BridgeRunningAgent> running = const [],
+  String? branch = 'main',
+  BridgeChangesState state = BridgeChangesState.shown,
+}) => BridgeRevertPlan(
+  state: state,
+  files: files,
+  running: running,
+  branch: branch,
+);
+
+/// A file a revert changes as `status` says.
+BridgeRevertFile revertedFile(
+  String path,
+  BridgeChangeStatus status, {
+  bool edited = false,
+  int? modifiedMs,
+}) => BridgeRevertFile(
+  path: path,
+  shown: path,
+  status: status,
+  edited: edited,
+  modifiedMs: modifiedMs,
+);
+
 /// A turn of the current branch; it ended unless `ended` says otherwise.
 BridgeTurn turnOf(
   String id, {
@@ -457,6 +502,7 @@ BridgeTurn turnOf(
   startEntry: startEntry ?? '$id-start',
   endEntry: ended ? endEntry ?? '$id-end' : null,
   number: number,
+  promptEntry: '$id-prompt',
   prompt: prompt,
   startedMs: startedMs,
   endedMs: ended ? startedMs + 120000 : null,

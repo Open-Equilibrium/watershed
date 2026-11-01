@@ -236,6 +236,33 @@ void main() {
   });
 
   test(
+    'a revert continues the chat and the Diff tab on the new branch',
+    () async {
+      final turn = turnOf('T2', number: 2);
+      backend.turnList = [turnOf('T1', number: 1), turn];
+      await state.readChanges();
+      final changes = <int>[];
+      state.stored.addListener(() => changes.add(state.stored.value));
+      // pi continues before the turn's prompt, so the new branch holds only the earlier turn.
+      backend.turnList = [turnOf('T1', number: 1)];
+
+      expect(await state.revert(turn), isTrue);
+      expect(backend.calls, containsAllInOrder(['revert T2', 'transcript']));
+      expect(changes, [1], reason: 'the stored history changed');
+      expect(state.turns.value.map((turn) => turn.id), ['T1']);
+      expect(state.shown.value?.to.id, 'T1');
+
+      backend.revertError = 'an agent runs in this checkout: s2';
+      expect(await state.revert(turnOf('T1', number: 1)), isFalse);
+      expect(
+        state.notice.value?.text,
+        'The files were not reverted: an agent runs in this checkout: s2',
+      );
+      expect(changes, [1]);
+    },
+  );
+
+  test(
     'rebuilds the chat of the current branch with its branch mark',
     () async {
       backend.stored = historyOf(
