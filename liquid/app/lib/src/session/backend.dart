@@ -90,6 +90,8 @@ abstract interface class SessionBackend {
   Future<BridgeGitOutcome> switchBranch(
     BridgeBranch branch, {
     required bool leaveChanges,
+    required String? fromBranch,
+    required String? replacingStash,
   });
 
   /// Creates the branch `name` at the current commit and switches to it.
@@ -216,10 +218,14 @@ class RustSessionBackend implements SessionBackend {
   Future<BridgeGitOutcome> switchBranch(
     BridgeBranch branch, {
     required bool leaveChanges,
+    required String? fromBranch,
+    required String? replacingStash,
   }) => _session.switchBranch(
     name: branch.name,
     remote: branch.remote,
     leaveChanges: leaveChanges,
+    fromBranch: fromBranch,
+    replacingStash: replacingStash,
   );
   @override
   Future<BridgeGitOutcome> createBranch(String name) =>

@@ -168,6 +168,28 @@ Future<void> _switch(
   final left = git.status.value?.branch;
   final changed = git.status.value?.changed ?? 0;
   final stashed = git.stash.value;
+  final from = branches.branches
+      .where((branch) => branch.current)
+      .firstOrNull
+      ?.name;
+  Future<BridgeGitOutcome?> switchTo(bool leave) async {
+    if (leave &&
+        (left != git.status.value?.branch ||
+            stashed?.id != git.stash.value?.id)) {
+      state.notify(
+        BridgeLevel.warning,
+        'The checkout branch or stash changed. Choose the branch again.',
+      );
+      return null;
+    }
+    return git.switchTo(
+      branch,
+      leaveChanges: leave,
+      fromBranch: from,
+      replacingStash: stashed?.id,
+    );
+  }
+
   var leave = false;
   // On no branch the changes can only come along.
   if (changed > 0 && left != null) {
@@ -179,7 +201,7 @@ Future<void> _switch(
     if (choice == null || !context.mounted) return;
     leave = choice;
   }
-  final outcome = await git.switchTo(branch, leaveChanges: leave);
+  final outcome = await switchTo(leave);
   if (outcome?.kind != BridgeGitOutcomeKind.wouldOverwrite ||
       !context.mounted) {
     return;
@@ -193,7 +215,7 @@ Future<void> _switch(
       stashed: stashed,
     ),
   );
-  if (again == true) await git.switchTo(branch, leaveChanges: true);
+  if (again == true) await switchTo(true);
 }
 
 /// The searchable list of local and remote branches, with "Create branch" for a new name

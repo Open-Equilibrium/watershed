@@ -248,6 +248,8 @@ abstract class RustLibApi extends BaseApi {
     required String name,
     required bool remote,
     required bool leaveChanges,
+    String? fromBranch,
+    String? replacingStash,
   });
 
   Future<bool> crateApiSessionAgentSessionSwitchSession({
@@ -1614,6 +1616,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     required String name,
     required bool remote,
     required bool leaveChanges,
+    String? fromBranch,
+    String? replacingStash,
   }) {
     return handler.executeNormal(
       NormalTask(
@@ -1626,6 +1630,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           sse_encode_String(name, serializer);
           sse_encode_bool(remote, serializer);
           sse_encode_bool(leaveChanges, serializer);
+          sse_encode_opt_String(fromBranch, serializer);
+          sse_encode_opt_String(replacingStash, serializer);
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
@@ -1638,7 +1644,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeErrorData: sse_decode_String,
         ),
         constMeta: kCrateApiSessionAgentSessionSwitchBranchConstMeta,
-        argValues: [that, name, remote, leaveChanges],
+        argValues: [
+          that,
+          name,
+          remote,
+          leaveChanges,
+          fromBranch,
+          replacingStash,
+        ],
         apiImpl: this,
       ),
     );
@@ -1647,7 +1660,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   TaskConstMeta get kCrateApiSessionAgentSessionSwitchBranchConstMeta =>
       const TaskConstMeta(
         debugName: "AgentSession_switch_branch",
-        argNames: ["that", "name", "remote", "leaveChanges"],
+        argNames: [
+          "that",
+          "name",
+          "remote",
+          "leaveChanges",
+          "fromBranch",
+          "replacingStash",
+        ],
       );
 
   @override
@@ -6001,16 +6021,21 @@ class AgentSessionImpl extends RustOpaque implements AgentSession {
       .crateApiSessionAgentSessionStoredTurns(that: this, path: path);
 
   /// Switches to the branch `name`, a remote one when `remote`; with `leave_changes`,
-  /// uncommitted changes stay in the stash of the branch left, else they come along.
+  /// uncommitted changes stay on `from_branch`, replacing only `replacing_stash` (none
+  /// confirms its absence); else they come along.
   Future<BridgeGitOutcome> switchBranch({
     required String name,
     required bool remote,
     required bool leaveChanges,
+    String? fromBranch,
+    String? replacingStash,
   }) => RustLib.instance.api.crateApiSessionAgentSessionSwitchBranch(
     that: this,
     name: name,
     remote: remote,
     leaveChanges: leaveChanges,
+    fromBranch: fromBranch,
+    replacingStash: replacingStash,
   );
 
   /// Continues the session stored in `path`; `false` when an extension cancelled it.

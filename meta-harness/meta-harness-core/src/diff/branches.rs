@@ -47,12 +47,17 @@ pub enum BranchTarget {
 }
 
 /// What happens to uncommitted changes when switching, as GitHub Desktop asks.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Changes {
     /// They come along, as `git switch` does, unless Git refuses to overwrite them.
     Bring,
-    /// They are stashed on the branch left, replacing its earlier stash.
-    Leave,
+    /// They are stashed only while the confirmed source branch and stash still match.
+    Leave {
+        /// The source branch shown when the user confirmed leaving changes.
+        branch: String,
+        /// The stash the user confirmed replacing; none confirms that no stash existed.
+        stash: Option<String>,
+    },
 }
 
 /// Most branches listed; the most recently committed ones are kept.
@@ -180,7 +185,7 @@ impl WorkingTree {
             BranchTarget::Local(name) => ["switch", "--no-guess", branch_name(name)?],
             BranchTarget::Remote(name) => ["switch", "--track", branch_name(name)?],
         };
-        let _stash = if changes == Changes::Leave {
+        let _stash = if matches!(changes, Changes::Leave { .. }) {
             Some(self.checkout().stash_alone().await?)
         } else {
             None
@@ -188,8 +193,14 @@ impl WorkingTree {
         let start = self.head().await?;
         let mut earlier = None;
         let mut left = None;
-        if changes == Changes::Leave {
+        if let Changes::Leave { branch, stash } = changes {
+            let current = self.branch().await?.ok_or(DiffError::NoBranch)?;
             earlier = self.stash_entry().await?.map(|entry| entry.id);
+            if current != branch || earlier != stash {
+                return Err(DiffError::Git(
+                    "The checkout branch or stash changed. Choose the branch again.".to_owned(),
+                ));
+            }
             left = self.push_stash().await?;
         }
         let switched = self.switching(&args, &start).await;

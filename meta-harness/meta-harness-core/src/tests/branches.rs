@@ -63,6 +63,22 @@ fn local(name: &str) -> BranchTarget {
     BranchTarget::Local(name.to_owned())
 }
 
+async fn leave_on(checkpoints: &Checkpoints) -> Changes {
+    Changes::Leave {
+        branch: checkpoints
+            .status()
+            .await
+            .expect("status")
+            .branch
+            .unwrap_or_default(),
+        stash: checkpoints
+            .stash()
+            .await
+            .expect("stash")
+            .map(|stash| stash.id),
+    }
+}
+
 fn read(repo: &Repo, path: &str) -> String {
     std::fs::read_to_string(repo.path().join(path)).expect("file read")
 }
@@ -267,7 +283,7 @@ fn no_branch_is_switched_or_created_while_an_agent_runs_in_the_checkout() {
         ));
         repo.write("a.txt", "edited\n");
         assert!(matches!(
-            checkpoints.switch_branch(&local("other"), Changes::Leave).await,
+            checkpoints.switch_branch(&local("other"), leave_on(&checkpoints).await).await,
             Err(DiffError::AgentRunning(running)) if running == ["s1"]
         ));
         assert!(matches!(
@@ -476,7 +492,7 @@ fn leaving_changes_stashes_them_on_the_branch_and_restoring_brings_them_back() {
         let checkpoints = Checkpoints::new(repo.path());
 
         checkpoints
-            .switch_branch(&local("other"), Changes::Leave)
+            .switch_branch(&local("other"), leave_on(&checkpoints).await)
             .await
             .expect("switched");
 
@@ -544,7 +560,7 @@ fn restoring_or_rolling_back_a_stash_preserves_the_saved_index() {
             let checkpoints = Checkpoints::new(repo.path());
 
             let switched = checkpoints
-                .switch_branch(&local(target), Changes::Leave)
+                .switch_branch(&local(target), leave_on(&checkpoints).await)
                 .await;
             if target == "other" {
                 switched.expect("switched");
@@ -570,6 +586,55 @@ fn restoring_or_rolling_back_a_stash_preserves_the_saved_index() {
 }
 
 #[test]
+fn a_stale_switch_confirmation_never_replaces_unconfirmed_changes() {
+    run(async {
+        for changed in ["absent", "replaced", "branch"] {
+            let repo = Repo::new(&format!("switch-confirmed-{changed}"));
+            let main = repo.git(&["branch", "--show-current"]).trim().to_owned();
+            repo.git(&["branch", "other"]);
+            repo.git(&["branch", "next"]);
+            let checkpoints = Checkpoints::new(repo.path());
+            let another = Checkpoints::new(repo.path());
+            if changed == "replaced" {
+                repo.write("a.txt", "approved old stash\n");
+                checkpoints
+                    .switch_branch(&local("other"), leave_on(&checkpoints).await)
+                    .await
+                    .expect("left");
+                checkpoints
+                    .switch_branch(&local(&main), Changes::Bring)
+                    .await
+                    .expect("back");
+            }
+            let confirmed = leave_on(&checkpoints).await;
+            repo.write("a.txt", "unconfirmed stash\n");
+            another
+                .switch_branch(&local("other"), leave_on(&another).await)
+                .await
+                .expect("another leaves");
+            if changed != "branch" {
+                another
+                    .switch_branch(&local(&main), Changes::Bring)
+                    .await
+                    .expect("another returns");
+            }
+            repo.write("a.txt", "current edits\n");
+            let before = repo.git(&["stash", "list", "--format=%H"]);
+            let branch = repo.git(&["branch", "--show-current"]);
+            let index = repo.git(&["write-tree"]);
+
+            let switched = checkpoints.switch_branch(&local("next"), confirmed).await;
+
+            assert!(switched.is_err(), "{changed}: {switched:?}");
+            assert_eq!(repo.git(&["stash", "list", "--format=%H"]), before);
+            assert_eq!(repo.git(&["branch", "--show-current"]), branch);
+            assert_eq!(repo.git(&["write-tree"]), index);
+            assert_eq!(read(&repo, "a.txt"), "current edits\n");
+        }
+    });
+}
+
+#[test]
 fn a_branch_keeps_one_stash_and_other_stashes_stay_untouched() {
     run(async {
         let repo = Repo::new("stash-one");
@@ -582,7 +647,7 @@ fn a_branch_keeps_one_stash_and_other_stashes_stay_untouched() {
         for text in ["first\n", "second\n"] {
             repo.write("a.txt", text);
             checkpoints
-                .switch_branch(&local("other"), Changes::Leave)
+                .switch_branch(&local("other"), leave_on(&checkpoints).await)
                 .await
                 .expect("left");
             checkpoints
@@ -604,7 +669,7 @@ fn a_branch_keeps_one_stash_and_other_stashes_stay_untouched() {
 
         repo.write("a.txt", "third\n");
         checkpoints
-            .switch_branch(&local("other"), Changes::Leave)
+            .switch_branch(&local("other"), leave_on(&checkpoints).await)
             .await
             .expect("left");
         checkpoints
@@ -632,7 +697,7 @@ fn a_restore_git_refuses_or_that_conflicts_keeps_the_stash() {
         repo.write("a.txt", "stashed\n");
         let checkpoints = Checkpoints::new(repo.path());
         checkpoints
-            .switch_branch(&local("other"), Changes::Leave)
+            .switch_branch(&local("other"), leave_on(&checkpoints).await)
             .await
             .expect("left");
         checkpoints
@@ -670,7 +735,7 @@ fn a_detached_head_cannot_leave_changes_on_a_branch() {
 
         assert!(matches!(
             checkpoints
-                .switch_branch(&local(&main), Changes::Leave)
+                .switch_branch(&local(&main), leave_on(&checkpoints).await)
                 .await,
             Err(DiffError::NoBranch)
         ));
@@ -690,7 +755,7 @@ fn a_hook_failing_after_git_switched_keeps_the_changes_left_on_the_branch() {
         let checkpoints = Checkpoints::new(repo.path());
 
         let switched = checkpoints
-            .switch_branch(&local("other"), Changes::Leave)
+            .switch_branch(&local("other"), leave_on(&checkpoints).await)
             .await;
 
         assert!(
@@ -721,7 +786,7 @@ fn no_restore_runs_over_unresolved_conflicts_or_untracked_files_in_the_way() {
         repo.write("u.txt", "untracked\n");
         let checkpoints = Checkpoints::new(repo.path());
         checkpoints
-            .switch_branch(&local("other"), Changes::Leave)
+            .switch_branch(&local("other"), leave_on(&checkpoints).await)
             .await
             .expect("left");
         checkpoints
@@ -780,7 +845,7 @@ fn no_restore_applies_tracked_changes_when_an_untracked_parent_is_obstructed() {
             repo.write("dir/nested/new.txt", "untracked\n");
             let checkpoints = Checkpoints::new(repo.path());
             checkpoints
-                .switch_branch(&local("other"), Changes::Leave)
+                .switch_branch(&local("other"), leave_on(&checkpoints).await)
                 .await
                 .expect("left");
             checkpoints
@@ -817,7 +882,7 @@ fn a_stash_preview_includes_changes_saved_only_in_the_index() {
         repo.write("a.txt", "old\n");
         let checkpoints = Checkpoints::new(repo.path());
         checkpoints
-            .switch_branch(&local("other"), Changes::Leave)
+            .switch_branch(&local("other"), leave_on(&checkpoints).await)
             .await
             .expect("left");
         checkpoints
@@ -850,7 +915,7 @@ fn a_stashed_files_patch_shows_tracked_and_untracked_changes() {
         repo.write("u.txt", "untracked\n");
         let checkpoints = Checkpoints::new(repo.path());
         checkpoints
-            .switch_branch(&local("other"), Changes::Leave)
+            .switch_branch(&local("other"), leave_on(&checkpoints).await)
             .await
             .expect("left");
         checkpoints
@@ -886,7 +951,7 @@ fn a_tag_named_like_the_branch_changes_nothing() {
         assert!(checkpoints.fetch().await.expect("fetched"));
         repo.write("a.txt", "edited\n");
         checkpoints
-            .switch_branch(&local("other"), Changes::Leave)
+            .switch_branch(&local("other"), leave_on(&checkpoints).await)
             .await
             .expect("left");
         let branches = checkpoints.branches().await.expect("branches");
@@ -949,7 +1014,7 @@ fn worktrees_serialize_leaving_restoring_and_discarding_stashes() {
             repo.git(&["branch", "away"]);
             let side = Arc::new(Checkpoints::new(other.path()));
             other.write("a.txt", "side's saved changes\n");
-            side.switch_branch(&local("away"), Changes::Leave)
+            side.switch_branch(&local("away"), leave_on(&side).await)
                 .await
                 .expect("left on side");
             side.switch_branch(&local("side"), Changes::Bring)
@@ -978,7 +1043,10 @@ fn worktrees_serialize_leaving_restoring_and_discarding_stashes() {
             let mine = Arc::new(Checkpoints::new(repo.path()));
             let switching = tokio::spawn({
                 let mine = mine.clone();
-                async move { mine.switch_branch(&local("next"), Changes::Leave).await }
+                async move {
+                    mine.switch_branch(&local("next"), leave_on(&mine).await)
+                        .await
+                }
             });
             tokio::time::timeout(Duration::from_secs(5), async {
                 while !entered.exists() {
@@ -995,7 +1063,10 @@ fn worktrees_serialize_leaving_restoring_and_discarding_stashes() {
                     match action {
                         "restore" => side.restore_stash(&saved).await,
                         "discard" => side.discard_stash(&saved).await,
-                        _ => side.switch_branch(&local("away"), Changes::Leave).await,
+                        _ => {
+                            side.switch_branch(&local("away"), leave_on(&side).await)
+                                .await
+                        }
                     }
                 }
             });
@@ -1047,7 +1118,7 @@ fn a_switch_whose_caller_gives_up_still_finishes_and_leaves_no_lock() {
 
         let given_up = tokio::time::timeout(
             Duration::from_millis(300),
-            checkpoints.switch_branch(&local("other"), Changes::Leave),
+            checkpoints.switch_branch(&local("other"), leave_on(&checkpoints).await),
         )
         .await;
         assert!(given_up.is_err(), "the switch outlasts its caller");

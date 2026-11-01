@@ -148,11 +148,18 @@ class GitState {
   Future<BridgeGitOutcome?> switchTo(
     BridgeBranch branch, {
     required bool leaveChanges,
+    required String? fromBranch,
+    required String? replacingStash,
   }) {
     final left = status.value;
     return _write(
       'switch',
-      () => _backend.switchBranch(branch, leaveChanges: leaveChanges),
+      () => _backend.switchBranch(
+        branch,
+        leaveChanges: leaveChanges,
+        fromBranch: fromBranch,
+        replacingStash: replacingStash,
+      ),
       done: (now) {
         final name = now?.branch ?? branch.shown;
         final changes = left?.changed ?? 0;

@@ -135,6 +135,10 @@ void main() {
       findsOneWidget,
     );
     expect(find.text('Replace stash and switch'), findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(backend.switchConfirmation, (branch: 'main', stash: 's1'));
+    await tester.pump(const Duration(seconds: 7));
   });
 
   testWidgets('without changes a branch switches at once', (tester) async {
@@ -145,6 +149,31 @@ void main() {
     expect(backend.calls.last, 'switch origin/release-1.2');
     expect(find.text('Switch branch'), findsNothing);
     // The notice fades.
+    await tester.pump(const Duration(seconds: 7));
+  });
+
+  testWidgets('a changed stash invalidates the open replacement confirmation', (
+    tester,
+  ) async {
+    await show(tester);
+    await openMenu(tester);
+    await tester.tap(find.text('feature/token-bucket'));
+    await tester.pumpAndSettle();
+    backend.stashed = const BridgeStash(
+      id: 'unconfirmed',
+      createdMs: 1,
+      files: [],
+    );
+    await state.git.refresh();
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+
+    expect(backend.calls.where((call) => call.startsWith('switch ')), isEmpty);
+    expect(
+      find.textContaining('The checkout branch or stash changed.'),
+      findsOneWidget,
+    );
     await tester.pump(const Duration(seconds: 7));
   });
 

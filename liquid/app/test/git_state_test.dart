@@ -97,7 +97,12 @@ void main() {
       BridgeGitOutcomeKind.hookFailed,
       detail: 'git-lfs was not found on your path',
     );
-    await git.switchTo(branchOf('other'), leaveChanges: false);
+    await git.switchTo(
+      branchOf('other'),
+      leaveChanges: false,
+      fromBranch: null,
+      replacingStash: null,
+    );
     expect(notices.single, (
       BridgeLevel.warning,
       'Switched to other. A hook failed after: git-lfs was not found on your path',
@@ -125,7 +130,12 @@ void main() {
       files: [change('a.txt')],
     );
 
-    await git.switchTo(branchOf('main'), leaveChanges: false);
+    await git.switchTo(
+      branchOf('main'),
+      leaveChanges: false,
+      fromBranch: null,
+      replacingStash: null,
+    );
 
     expect(notices.map((notice) => notice.$2), [
       'Switched to main.',
@@ -138,7 +148,12 @@ void main() {
     await git.refresh();
     backend.git = gitStatusOf(branch: 'feature/token-bucket');
 
-    await git.switchTo(branchOf('feature/token-bucket'), leaveChanges: true);
+    await git.switchTo(
+      branchOf('feature/token-bucket'),
+      leaveChanges: true,
+      fromBranch: 'main',
+      replacingStash: null,
+    );
 
     expect(backend.calls.last, 'switch feature/token-bucket leaving changes');
     expect(

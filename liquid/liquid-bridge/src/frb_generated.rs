@@ -1925,6 +1925,8 @@ fn wire__crate__api__session__AgentSession_switch_branch_impl(
             let api_name = <String>::sse_decode(&mut deserializer);
             let api_remote = <bool>::sse_decode(&mut deserializer);
             let api_leave_changes = <bool>::sse_decode(&mut deserializer);
+            let api_from_branch = <Option<String>>::sse_decode(&mut deserializer);
+            let api_replacing_stash = <Option<String>>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, String>((move || {
@@ -1947,6 +1949,8 @@ fn wire__crate__api__session__AgentSession_switch_branch_impl(
                         api_name,
                         api_remote,
                         api_leave_changes,
+                        api_from_branch,
+                        api_replacing_stash,
                     )?;
                     std::result::Result::Ok(output_ok)
                 })())

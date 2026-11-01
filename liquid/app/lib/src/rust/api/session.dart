@@ -151,11 +151,14 @@ abstract class AgentSession implements RustOpaqueInterface {
   Future<PlatformInt64> storedTurns({required String path});
 
   /// Switches to the branch `name`, a remote one when `remote`; with `leave_changes`,
-  /// uncommitted changes stay in the stash of the branch left, else they come along.
+  /// uncommitted changes stay on `from_branch`, replacing only `replacing_stash` (none
+  /// confirms its absence); else they come along.
   Future<BridgeGitOutcome> switchBranch({
     required String name,
     required bool remote,
     required bool leaveChanges,
+    String? fromBranch,
+    String? replacingStash,
   });
 
   /// Continues the session stored in `path`; `false` when an extension cancelled it.

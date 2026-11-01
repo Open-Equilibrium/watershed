@@ -270,6 +270,7 @@ class FakeBackend implements SessionBackend {
   Object? gitError;
   BridgeBranches branches = const BridgeBranches(branches: [], running: []);
   BridgeStash? stashed;
+  ({String? branch, String? stash})? switchConfirmation;
   Map<String, Map<String, String>> stashPatches = const {};
 
   /// What each Git write returns, until it is set otherwise.
@@ -294,8 +295,11 @@ class FakeBackend implements SessionBackend {
   Future<BridgeGitOutcome> switchBranch(
     BridgeBranch branch, {
     required bool leaveChanges,
+    required String? fromBranch,
+    required String? replacingStash,
   }) async {
     calls.add('switch ${branch.name}${leaveChanges ? ' leaving changes' : ''}');
+    switchConfirmation = (branch: fromBranch, stash: replacingStash);
     return outcome;
   }
 

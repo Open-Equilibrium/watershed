@@ -135,12 +135,15 @@ impl AgentSession {
     }
 
     /// Switches to the branch `name`, a remote one when `remote`; with `leave_changes`,
-    /// uncommitted changes stay in the stash of the branch left, else they come along.
+    /// uncommitted changes stay on `from_branch`, replacing only `replacing_stash` (none
+    /// confirms its absence); else they come along.
     pub fn switch_branch(
         &self,
         name: String,
         remote: bool,
         leave_changes: bool,
+        from_branch: Option<String>,
+        replacing_stash: Option<String>,
     ) -> Result<BridgeGitOutcome, String> {
         let to = if remote {
             BranchTarget::Remote(name)
@@ -148,7 +151,10 @@ impl AgentSession {
             BranchTarget::Local(name)
         };
         let changes = if leave_changes {
-            Changes::Leave
+            Changes::Leave {
+                branch: from_branch.ok_or_else(|| "No source branch was confirmed.".to_owned())?,
+                stash: replacing_stash,
+            }
         } else {
             Changes::Bring
         };
