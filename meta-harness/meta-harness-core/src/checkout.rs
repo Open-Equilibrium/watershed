@@ -16,6 +16,10 @@ const RETRY: Duration = Duration::from_millis(20);
 /// How often a turn's start tries for its session's name while a listing reads it.
 const NAME_TRIES: usize = 50;
 
+/// How often a revert tries for the checkout while no agent is named running there: a process
+/// starting a program holds a copy of every open lock until the program runs.
+const ALONE_TRIES: usize = 25;
+
 /// The locks of one checkout.
 #[derive(Debug)]
 pub(crate) struct Checkout {
@@ -101,15 +105,26 @@ impl Checkout {
     }
 
     /// Holds the checkout alone, or names the sessions whose agents run there.
-    pub(crate) fn alone(&self) -> Result<Alone, DiffError> {
+    pub(crate) async fn alone(&self) -> Result<Alone, DiffError> {
         let checkout = self.lock_file()?;
-        match checkout.try_lock() {
-            Ok(()) => Ok(Alone {
-                _checkout: checkout,
-            }),
-            Err(TryLockError::WouldBlock) => Err(DiffError::AgentRunning(self.running())),
-            Err(TryLockError::Error(error)) => Err(DiffError::Io(error)),
+        for _ in 0..ALONE_TRIES {
+            match checkout.try_lock() {
+                Ok(()) => {
+                    return Ok(Alone {
+                        _checkout: checkout,
+                    });
+                }
+                Err(TryLockError::WouldBlock) => {
+                    let running = self.running();
+                    if !running.is_empty() {
+                        return Err(DiffError::AgentRunning(running));
+                    }
+                    tokio::time::sleep(RETRY).await;
+                }
+                Err(TryLockError::Error(error)) => return Err(DiffError::Io(error)),
+            }
         }
+        Err(DiffError::AgentRunning(self.running()))
     }
 
     /// The sessions whose agents run in the checkout, sorted.

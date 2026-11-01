@@ -6,6 +6,7 @@ import '../controls.dart';
 import '../rust/api/events.dart';
 import '../rust/api/session.dart';
 import '../session/session_state.dart';
+import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 
@@ -39,6 +40,7 @@ class RowMenu extends StatefulWidget {
 
 class _RowMenuState extends State<RowMenu> {
   bool _hovered = false;
+  bool _focused = false;
 
   Future<void> _open(Offset at) async {
     final ws = context.ws;
@@ -70,7 +72,8 @@ class _RowMenuState extends State<RowMenu> {
                       ),
                     ),
                   ),
-                  if (action.shortcut case final keys?) ...[
+                  if (action.shortcut case final keys?
+                      when keys.isNotEmpty) ...[
                     const SizedBox(width: WsMetrics.space5),
                     Text(
                       keys,
@@ -97,25 +100,34 @@ class _RowMenuState extends State<RowMenu> {
       child: Row(
         children: [
           Expanded(child: widget.child),
-          if (_hovered)
-            Builder(
-              builder: (context) => InkWell(
-                borderRadius: BorderRadius.circular(WsMetrics.radiusSm),
-                onTap: () {
-                  final box = context.findRenderObject()! as RenderBox;
-                  _open(box.localToGlobal(box.size.bottomLeft(Offset.zero)));
-                },
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: WsMetrics.space2,
-                  ),
-                  child: Text(
-                    '···',
-                    style: TextStyle(color: context.ws.textMuted),
+          // Always there for the keyboard and screen readers; seen on hover or focus.
+          Opacity(
+            opacity: _hovered || _focused ? 1 : 0,
+            child: Tooltip(
+              message: 'More actions',
+              child: Builder(
+                builder: (context) => InkWell(
+                  borderRadius: BorderRadius.circular(WsMetrics.radiusSm),
+                  onFocusChange: (focused) =>
+                      setState(() => _focused = focused),
+                  onTap: () {
+                    final box = context.findRenderObject()! as RenderBox;
+                    _open(box.localToGlobal(box.size.bottomLeft(Offset.zero)));
+                  },
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: WsMetrics.space2,
+                    ),
+                    child: Icon(
+                      LucideIcons.ellipsis,
+                      size: 16,
+                      color: context.ws.textMuted,
+                    ),
                   ),
                 ),
               ),
             ),
+          ),
         ],
       ),
     ),
@@ -242,6 +254,16 @@ Future<void> confirmRemoveCheckpoints(
   if (confirmed == true) await state.removeAllCheckpoints();
 }
 
-/// Shows the folder at `path` in the system's file manager.
-Future<void> openInFileManager(String path) =>
-    Process.run(Platform.isMacOS ? 'open' : 'xdg-open', [path]);
+/// Shows the folder at `path` in the system's file manager; a failure is reported.
+Future<void> openInFileManager(SessionState state, String path) async {
+  try {
+    final result = await Process.run(Platform.isMacOS ? 'open' : 'xdg-open', [
+      path,
+    ]);
+    if (result.exitCode != 0) {
+      state.notify(BridgeLevel.error, 'Could not open $path: ${result.stderr}');
+    }
+  } on ProcessException catch (error) {
+    state.notify(BridgeLevel.error, 'Could not open $path: ${error.message}');
+  }
+}

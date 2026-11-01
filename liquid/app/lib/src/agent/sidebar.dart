@@ -1,16 +1,17 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 
 import '../controls.dart';
 import '../rust/api/events.dart';
-import 'session_menus.dart';
 import '../session/session_state.dart';
 import '../shortcuts/keymap.dart';
 import '../theme/icons.dart';
 import '../theme/logo.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
+import 'session_menus.dart';
 
 /// What the sidebar shows about a session.
 @immutable
@@ -60,15 +61,25 @@ class Sidebar extends StatelessWidget {
     required this.state,
     required this.info,
     this.onSettings,
+    this.onNewSession,
   });
 
   final SessionState state;
   final SessionInfo info;
   final VoidCallback? onSettings;
 
+  /// Starts a new session as ⌘N does: in the chat, ready to describe the task.
+  final VoidCallback? onNewSession;
+
   /// Asks before deleting the open session, which a new session then replaces.
   Future<void> _deleteOpen(BuildContext context) async {
-    final path = await state.sessionFile();
+    final String? path;
+    try {
+      path = await state.sessionFile();
+    } on Object catch (error) {
+      state.notify(BridgeLevel.error, 'Could not read the session: $error');
+      return;
+    }
     if (!context.mounted) return;
     if (path == null) {
       state.notify(
@@ -133,9 +144,13 @@ class Sidebar extends StatelessWidget {
               if (info.path case final path?)
                 RowAction(
                   Platform.isMacOS ? 'Open in Finder' : 'Open in file manager',
-                  () => openInFileManager(path),
+                  () => openInFileManager(state, path),
                 ),
-              RowAction('New agent session', state.newSession, shortcut: '⌘N'),
+              RowAction(
+                'New agent session',
+                onNewSession ?? () => unawaited(state.newSession()),
+                shortcut: Keymap.of(context).label(Command.newSession),
+              ),
               null,
               RowAction(
                 'Remove all checkpoints…',

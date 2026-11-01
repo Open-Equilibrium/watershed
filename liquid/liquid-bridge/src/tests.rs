@@ -1009,6 +1009,9 @@ fn deletes_a_stored_session_with_its_checkpoints_and_removes_all_checkpoints() {
         state_with(5, &current),
         state_with(6, &current),
         state_with(7, &current),
+        state_with(8, &current),
+        state_with(9, &current),
+        state_with(10, &current),
         "IFS= read -r line || exit 0".to_owned(),
     ]
     .concat();
@@ -1041,6 +1044,20 @@ fn deletes_a_stored_session_with_its_checkpoints_and_removes_all_checkpoints() {
             .is_err()
     );
     assert!(outside.exists());
+    // A copy of the open session under another name is the open session.
+    let twin = sessions.join("twin.jsonl");
+    std::fs::copy(&current, &twin).expect("twin");
+    assert!(session.delete_session(twin.display().to_string()).is_err());
+    assert!(twin.exists());
+    let notes = sessions.join("notes.txt");
+    std::fs::copy(&old, &notes).expect("notes");
+    assert!(session.delete_session(notes.display().to_string()).is_err());
+    assert!(notes.exists());
+    // A session pi never stored leaves nothing to delete.
+    assert_eq!(
+        session.delete_session(sessions.join("never.jsonl").display().to_string()),
+        Ok(())
+    );
     assert_eq!(session.delete_session(old.display().to_string()), Ok(()));
     assert!(!old.exists());
     let refs = std::process::Command::new("git")
@@ -1057,6 +1074,41 @@ fn deletes_a_stored_session_with_its_checkpoints_and_removes_all_checkpoints() {
     call(checkpoints.close());
     assert!(call(session.shutdown()));
     let _ = std::fs::remove_dir_all(&repo);
+}
+
+#[test]
+fn deletes_a_session_of_a_project_outside_git() {
+    let dir = std::env::temp_dir().join(format!(
+        "liquid-bridge-delete-no-git-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    let sessions = dir.join("sessions");
+    std::fs::create_dir_all(&sessions).expect("sessions");
+    let header = |id: &str| {
+        format!(
+            r#"{{"type":"session","version":3,"id":"{id}","cwd":"{}"}}"#,
+            dir.display()
+        ) + "\n"
+    };
+    let current = sessions.join("current.jsonl");
+    let old = sessions.join("old.jsonl");
+    std::fs::write(&current, header("s1")).expect("current");
+    std::fs::write(&old, header("s9")).expect("old");
+    let script = [
+        state_with(2, &current),
+        state_with(3, &current),
+        "IFS= read -r line || exit 0".to_owned(),
+    ]
+    .concat();
+    let session = launch(gated(&script), dir.display().to_string()).expect("agent starts");
+    assert_eq!(session.checkpoint_sessions(), Ok(vec![]));
+    assert_eq!(session.stored_turns(old.display().to_string()), Ok(0));
+    assert_eq!(session.delete_session(old.display().to_string()), Ok(()));
+    assert!(!old.exists());
+    assert_eq!(session.remove_all_checkpoints(), Ok(()));
+    assert!(call(session.shutdown()));
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]

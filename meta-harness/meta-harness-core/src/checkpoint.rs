@@ -17,6 +17,9 @@ use crate::diff::{ChangeStatus, DiffError, FileChange, Whitespace, WorkingTree};
 /// started that stay in its process group.
 const GIT_TIMEOUT: Duration = Duration::from_secs(60);
 
+/// Longest removing a session's checkpoints waits for a turn of it that is ending.
+const ENDING_WAIT: Duration = Duration::from_secs(2);
+
 /// Longest closing waits for commands in progress to stop their Git.
 const CLOSE_WAIT: Duration = Duration::from_secs(1);
 
@@ -276,7 +279,7 @@ impl Checkpoints {
         let tree = self.tree().await?;
         let target = self.read(&tree, to).await?;
         // Held alone, so no turn starts in the checkout until the files are back.
-        let _alone = tree.checkout().alone()?;
+        let _alone = tree.checkout().alone().await?;
         let _turn = self
             .until_closed(async { Ok(self.captures.lock().await) })
             .await?;
@@ -337,30 +340,43 @@ impl Checkpoints {
             .collect())
     }
 
-    /// Removes the checkpoints of `session`, refused while its agent runs in the checkout. Git
-    /// frees their space at its next cleanup.
+    /// Removes the checkpoints of `session`, refused while its agent runs in any worktree of
+    /// the repository; a turn of it that is ending gets a moment to end. Git frees their space at
+    /// its next cleanup.
     pub async fn remove_session(&self, session: &str) -> Result<(), DiffError> {
         valid_id(session)?;
         let tree = self.tree().await?;
-        if tree
-            .checkout()
-            .running()
-            .iter()
-            .any(|running| running == session)
-        {
-            return Err(DiffError::AgentRunning(vec![session.to_owned()]));
+        let runs = || {
+            tree.checkouts()
+                .iter()
+                .any(|checkout| checkout.running().iter().any(|running| running == session))
+        };
+        let refused = || DiffError::AgentRunning(vec![session.to_owned()]);
+        let waited = Instant::now();
+        while runs() {
+            if waited.elapsed() > ENDING_WAIT {
+                return Err(refused());
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
         }
         let references = self
             .bounded(tree.references(&format!("{REFS}{session}/")))
             .await?;
+        // A turn of it that started meanwhile keeps its checkpoints.
+        if runs() {
+            return Err(refused());
+        }
         self.bounded(tree.delete_references(&references)).await
     }
 
-    /// Removes every checkpoint in the project's repository, refused while an agent runs in the
-    /// checkout.
+    /// Removes every checkpoint in the project's repository, which all its worktrees share, so
+    /// refused while an agent runs in any of them.
     pub async fn remove_all(&self) -> Result<(), DiffError> {
         let tree = self.tree().await?;
-        let _alone = tree.checkout().alone()?;
+        let mut alone = Vec::new();
+        for checkout in tree.checkouts() {
+            alone.push(checkout.alone().await?);
+        }
         let references = self.bounded(tree.references(REFS)).await?;
         self.bounded(tree.delete_references(&references)).await
     }

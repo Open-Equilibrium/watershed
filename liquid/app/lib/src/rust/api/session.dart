@@ -52,7 +52,8 @@ abstract class AgentSession implements RustOpaqueInterface {
 
   /// Deletes the session stored in `path`, a session of this project in pi's session
   /// directory other than the open one, with its checkpoints first; refused while its agent
-  /// runs in the checkout. Neither comes back.
+  /// runs in any worktree of the repository. Neither comes back. A session pi never stored
+  /// leaves nothing to delete.
   Future<void> deleteSession({required String path});
 
   /// Dismisses a question.
@@ -77,8 +78,8 @@ abstract class AgentSession implements RustOpaqueInterface {
   /// Up to `limit` stored sessions of this project, newest first, without the current one.
   Future<List<BridgeStoredSession>> recentSessions({required int limit});
 
-  /// Removes every checkpoint in the project's repository; refused while an agent runs in the
-  /// checkout.
+  /// Removes every checkpoint in the project's repository; refused while an agent runs in any
+  /// of its worktrees. Outside Git there is nothing to remove.
   Future<void> removeAllCheckpoints();
 
   /// What reverting the files to before turn `turn` of the current branch would change;
@@ -113,7 +114,8 @@ abstract class AgentSession implements RustOpaqueInterface {
   static Future<AgentSession> start({required SessionConfig config}) =>
       RustLib.instance.api.crateApiSessionAgentSessionStart(config: config);
 
-  /// The turns with checkpoints of the session stored in `path`, the open one too.
+  /// The turns with checkpoints of the session stored in `path`, the open one too; none
+  /// outside Git or before pi stored the session.
   Future<PlatformInt64> storedTurns({required String path});
 
   /// Continues the session stored in `path`; `false` when an extension cancelled it.

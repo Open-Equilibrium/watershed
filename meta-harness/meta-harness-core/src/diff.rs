@@ -164,6 +164,8 @@ pub struct WorkingTree {
     prefix: String,
     /// The checkout's `watershed` folder in its Git directory.
     locks: PathBuf,
+    /// The Git directory every worktree of the repository shares.
+    common: PathBuf,
     index: PathBuf,
     store: Store,
     /// Serializes use of the private index.
@@ -210,6 +212,7 @@ impl WorkingTree {
         let root = git_path(dir, &["rev-parse", "--show-toplevel"]).await?;
         let index = git_path(dir, &["rev-parse", "--git-path", "index"]).await?;
         let locks = git_path(dir, &["rev-parse", "--git-path", "watershed"]).await?;
+        let common = git_path(dir, &["rev-parse", "--git-common-dir"]).await?;
         let prefix = git(dir, &[], &["rev-parse", "--show-prefix"]).await?;
         let prefix = prefix.strip_suffix('\n').unwrap_or(&prefix).to_owned();
         let absolute = |path: &str| {
@@ -226,6 +229,7 @@ impl WorkingTree {
             work: dir.clone(),
             prefix,
             locks: absolute(&locks),
+            common: absolute(&common),
             index: absolute(&index),
             store,
             busy: Mutex::new(()),
@@ -251,6 +255,20 @@ impl WorkingTree {
     /// The locks that tell which agents run in the checkout.
     pub(crate) fn checkout(&self) -> crate::checkout::Checkout {
         crate::checkout::Checkout::new(self.locks.clone())
+    }
+
+    /// The locks of every worktree of the repository, which share its refs: the main one and
+    /// each linked one.
+    pub(crate) fn checkouts(&self) -> Vec<crate::checkout::Checkout> {
+        let linked = std::fs::read_dir(self.common.join("worktrees"))
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|entry| entry.path().join("watershed"));
+        std::iter::once(self.common.join("watershed"))
+            .chain(linked)
+            .map(crate::checkout::Checkout::new)
+            .collect()
     }
 
     /// The changes from `from` to `to` a revert to `to` makes, and the repositories it leaves

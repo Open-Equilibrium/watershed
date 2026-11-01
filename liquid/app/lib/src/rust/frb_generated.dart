@@ -5111,7 +5111,8 @@ class AgentSessionImpl extends RustOpaque implements AgentSession {
 
   /// Deletes the session stored in `path`, a session of this project in pi's session
   /// directory other than the open one, with its checkpoints first; refused while its agent
-  /// runs in the checkout. Neither comes back.
+  /// runs in any worktree of the repository. Neither comes back. A session pi never stored
+  /// leaves nothing to delete.
   Future<void> deleteSession({required String path}) => RustLib.instance.api
       .crateApiSessionAgentSessionDeleteSession(that: this, path: path);
 
@@ -5149,8 +5150,8 @@ class AgentSessionImpl extends RustOpaque implements AgentSession {
         limit: limit,
       );
 
-  /// Removes every checkpoint in the project's repository; refused while an agent runs in the
-  /// checkout.
+  /// Removes every checkpoint in the project's repository; refused while an agent runs in any
+  /// of its worktrees. Outside Git there is nothing to remove.
   Future<void> removeAllCheckpoints() => RustLib.instance.api
       .crateApiSessionAgentSessionRemoveAllCheckpoints(that: this);
 
@@ -5201,7 +5202,8 @@ class AgentSessionImpl extends RustOpaque implements AgentSession {
   Future<bool> shutdown() =>
       RustLib.instance.api.crateApiSessionAgentSessionShutdown(that: this);
 
-  /// The turns with checkpoints of the session stored in `path`, the open one too.
+  /// The turns with checkpoints of the session stored in `path`, the open one too; none
+  /// outside Git or before pi stored the session.
   Future<PlatformInt64> storedTurns({required String path}) => RustLib
       .instance
       .api

@@ -401,7 +401,11 @@ impl AgentSession {
     /// The sessions with checkpoints in the project's repository, sorted by their ids.
     pub fn checkpoint_sessions(&self) -> Result<Vec<BridgeCheckpointSession>, String> {
         RUNTIME.block_on(async {
-            let sessions = self.checkpoints.sessions().await.map_err(shown)?;
+            let sessions = match self.checkpoints.sessions().await {
+                Ok(sessions) => sessions,
+                Err(DiffError::NotARepository) => return Ok(Vec::new()),
+                Err(error) => return Err(shown(error)),
+            };
             let dir = session_dir(&mut *self.session.lock().await).await;
             Ok(sessions
                 .into_iter()
@@ -416,12 +420,13 @@ impl AgentSession {
         })
     }
 
-    /// Removes every checkpoint in the project's repository; refused while an agent runs in the
-    /// checkout.
+    /// Removes every checkpoint in the project's repository; refused while an agent runs in any
+    /// of its worktrees. Outside Git there is nothing to remove.
     pub fn remove_all_checkpoints(&self) -> Result<(), String> {
-        RUNTIME
-            .block_on(self.checkpoints.remove_all())
-            .map_err(shown)
+        match RUNTIME.block_on(self.checkpoints.remove_all()) {
+            Ok(()) | Err(DiffError::NotARepository) => Ok(()),
+            Err(error) => Err(shown(error)),
+        }
     }
 
     /// The file pi stores the open session in, unless it keeps the session in memory.
@@ -433,11 +438,18 @@ impl AgentSession {
         })
     }
 
-    /// The turns with checkpoints of the session stored in `path`, the open one too.
+    /// The turns with checkpoints of the session stored in `path`, the open one too; none
+    /// outside Git or before pi stored the session.
     pub fn stored_turns(&self, path: String) -> Result<i64, String> {
         RUNTIME.block_on(async {
-            let id = self.stored_session(&path, true).await?;
-            let sessions = self.checkpoints.sessions().await.map_err(shown)?;
+            let Some(id) = self.stored_session(&path, true).await? else {
+                return Ok(0);
+            };
+            let sessions = match self.checkpoints.sessions().await {
+                Ok(sessions) => sessions,
+                Err(DiffError::NotARepository) => return Ok(0),
+                Err(error) => return Err(shown(error)),
+            };
             let turns = sessions
                 .into_iter()
                 .find(|(session, _)| *session == id)
@@ -448,10 +460,13 @@ impl AgentSession {
 
     /// Deletes the session stored in `path`, a session of this project in pi's session
     /// directory other than the open one, with its checkpoints first; refused while its agent
-    /// runs in the checkout. Neither comes back.
+    /// runs in any worktree of the repository. Neither comes back. A session pi never stored
+    /// leaves nothing to delete.
     pub fn delete_session(&self, path: String) -> Result<(), String> {
         RUNTIME.block_on(async {
-            let id = self.stored_session(&path, false).await?;
+            let Some(id) = self.stored_session(&path, false).await? else {
+                return Ok(());
+            };
             match self.checkpoints.remove_session(&id).await {
                 Ok(()) | Err(DiffError::NotARepository) => {}
                 Err(error) => return Err(shown(error)),
@@ -460,10 +475,10 @@ impl AgentSession {
         })
     }
 
-    /// The id of the session stored in `path`, which must be a session of this project in pi's
-    /// session directory, and with `open_too` false not the open one, so Dart never names
-    /// another file.
-    async fn stored_session(&self, path: &str, open_too: bool) -> Result<String, String> {
+    /// The id of the session stored in `path`, which must be a session file of this project in
+    /// pi's session directory, and with `open_too` false not the open session, whatever its
+    /// name; none when pi has not stored it yet. So Dart never names another file.
+    async fn stored_session(&self, path: &str, open_too: bool) -> Result<Option<String>, String> {
         let path = Path::new(path);
         let current = {
             let mut session = self.session.lock().await;
@@ -476,13 +491,33 @@ impl AgentSession {
         let Some(current) = current else {
             return Err("pi keeps this session in memory and stores no others".to_owned());
         };
+        let not_open = || "the open session cannot be deleted from inside it".to_owned();
         if path == current && !open_too {
-            return Err("the open session cannot be deleted from inside it".to_owned());
+            return Err(not_open());
         }
+        let refused = || "not a session file in pi's session directory".to_owned();
         if path.parent() != current.parent() {
-            return Err("only sessions in pi's session directory can be deleted".to_owned());
+            return Err(refused());
         }
-        session_id(path, &self.cwd).ok_or_else(|| "no session of this project".to_owned())
+        // A pipe or device would block the read; pi writes plain `.jsonl` files.
+        let meta = match std::fs::symlink_metadata(path) {
+            Ok(meta) => meta,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error.to_string()),
+        };
+        if !meta.is_file()
+            || path
+                .extension()
+                .is_none_or(|extension| extension != "jsonl")
+        {
+            return Err(refused());
+        }
+        let id =
+            session_id(path, &self.cwd).ok_or_else(|| "no session of this project".to_owned())?;
+        if !open_too && session_id(&current, &self.cwd).as_deref() == Some(id.as_str()) {
+            return Err(not_open());
+        }
+        Ok(Some(id))
     }
 
     /// Reads the session's branch tree and the Trajectory of each branch ending at an entry in

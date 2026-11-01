@@ -303,4 +303,17 @@ void main() {
       'Could not remove the checkpoints: an agent runs in this checkout',
     );
   });
+
+  testWidgets('opens a row\'s menu from the keyboard', (tester) async {
+    await show(tester);
+    final more = find.descendant(
+      of: find.byTooltip('More actions').first,
+      matching: find.byType(Icon),
+    );
+    Focus.of(tester.element(more)).requestFocus();
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(find.text('Remove all checkpoints…'), findsOneWidget);
+  });
 }

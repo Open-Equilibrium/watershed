@@ -1000,6 +1000,7 @@ fn a_turn_that_starts_during_a_revert_waits_until_the_files_are_back() {
         // Another window reverts the checkout.
         let reverting = crate::checkout::Checkout::new(repo.path().join(".git/watershed"))
             .alone()
+            .await
             .expect("nothing runs");
         let starting = tokio::spawn({
             let checkpoints = checkpoints.clone();
@@ -1204,6 +1205,7 @@ fn a_turn_waits_for_a_revert_past_the_time_limit_of_one_git() {
         assert!(matches!(checkpoints.in_repository().await, Ok(true)));
         let reverting = crate::checkout::Checkout::new(repo.path().join(".git/watershed"))
             .alone()
+            .await
             .expect("nothing runs");
         let starting = tokio::spawn({
             let checkpoints = checkpoints.clone();
@@ -1750,5 +1752,41 @@ fn checkpoints_are_listed_and_removed_by_session_or_all() {
             mine.remove_session("../x").await,
             Err(DiffError::InvalidCheckpoint(_))
         ));
+    });
+}
+
+#[test]
+fn an_agent_running_in_another_worktree_keeps_the_shared_checkpoints() {
+    run(async {
+        let repo = Repo::new("remove-worktrees");
+        let linked = repo.path().with_file_name(format!(
+            "watershed-checkpoint-remove-worktrees-linked-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&linked);
+        repo.git(&["worktree", "add", "-q", &linked.display().to_string()]);
+        let here = Checkpoints::new(repo.path());
+        turn(&here, "t1", || repo.write("a.txt", "new\n")).await;
+        let there = Checkpoints::new(&linked);
+        let theirs = |phase| Checkpoint {
+            session: "s2".to_owned(),
+            turn: "u1".to_owned(),
+            phase,
+        };
+        there.capture(&theirs(Phase::Start)).await.expect("started");
+
+        assert!(matches!(
+            here.remove_all().await,
+            Err(DiffError::AgentRunning(running)) if running == ["s2"]
+        ));
+        assert!(matches!(
+            here.remove_session("s2").await,
+            Err(DiffError::AgentRunning(_))
+        ));
+        there.capture(&theirs(Phase::End)).await.expect("ended");
+        here.remove_all().await.expect("removed once nothing runs");
+        assert!(here.sessions().await.expect("listed").is_empty());
+        there.close().await;
+        let _ = std::fs::remove_dir_all(&linked);
     });
 }
