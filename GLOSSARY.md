@@ -133,7 +133,7 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **Source** — An external or shared resource addressable from a Workspace. Sources appear beside Pages in the Explorer and use the same open/navigation flow, but are not authored Pages internally.
 - **Explorer** — Liquid's primary Workspace navigation surface, listing Pages and Sources as peer entries.
 - **Page template** — A reusable starting composition of Blocks, Views, Connections and Automations for one use case; it creates an ordinary Page.
-- **PowerBar** — Liquid's command and creation surface for finding Workspace objects, adding Blocks and invoking permitted Workspace or agent actions.
+- **PowerBar** — Liquid's command and creation surface for finding Workspace objects, adding Blocks and invoking permitted Workspace or agent actions. Without a prefix it searches and jumps; `/` adds a Block and `>` lists actions; `@` is kept for people (ADR-0236).
 - **Liquid key** — Caps Lock when the user opts in: a tap opens Liquid from any app, holding it in Liquid reveals shortcuts and ⇪ plus a key runs a Liquid command.
 - **Shortcut profile** — Liquid's set of shortcuts: Liquid key, Standard (⌘ only) or Custom.
 - **Reveal key** — The key whose hold shows contextual shortcut hints: the Liquid key while it is on, ⌘ otherwise.

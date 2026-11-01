@@ -155,7 +155,7 @@ M2 delivers Meta-Harness as a **self-contained, host-scoped headless control pla
 
 **Wedge:** prove safe human/agent co-editing of local-first Workspace state with attributed, reviewable and reversible History. Liquid remains useful without agents, network or a hosted service. Do not build a generic Notion clone.
 
-The target product is canonical in [`docs/concept/V-Spec_Liquid.html`](docs/concept/V-Spec_Liquid.html). M3 is staged so workspace fundamentals prove value before sync, community extensions and broad integrations.
+The target product is canonical in [`docs/concept/V-Spec_Liquid.html`](docs/concept/V-Spec_Liquid.html). M3 is staged so workspace fundamentals prove value before sync, community extensions and broad integrations. Chat between people and a calendar follow after Release 1 (ADR-0236).
 
 #### Liquid agent surface — early slice
 
@@ -232,6 +232,7 @@ The agent writes only to its project and temporary folders unless the person all
 
 - Restricted local JavaScript/TypeScript App Runtime with declarative UI, resource limits and explicit capabilities; WASM is a later extension.
 - App and Agent Session Blocks, including permitted agent actions in the PowerBar.
+- Web-link Sources, read-only and loaded only when opened, in a built-in browser (ADR-0236).
 - App SDK for AI/user-built Workspace-local Apps, with versioned state, Views and typed App actions.
 - Workspace CLI/API (D-027) exposes compact typed reads, mutation proposals/execution and permitted App actions to agents.
 - Liquid AI uses the same Role, capability, mutation and History boundaries.
