@@ -1062,6 +1062,59 @@ fn leaving_changes_never_cleans_up_unsaved_ignored_contents() {
 }
 
 #[test]
+fn no_restore_exempts_ignored_paths_after_a_stashed_deletion_is_committed() {
+    run(async {
+        for ignored in ["p", "p/new.txt"] {
+            let repo = Repo::new(&format!(
+                "stash-committed-deletion-{}",
+                ignored.replace('/', "-")
+            ));
+            let main = repo.git(&["branch", "--show-current"]).trim().to_owned();
+            repo.write("p", "tracked\n");
+            repo.git(&["add", "p"]);
+            repo.git(&["commit", "-qm", "add tracked parent"]);
+            repo.git(&["branch", "other"]);
+            repo.git(&["rm", "-q", "p"]);
+            std::fs::create_dir(repo.path().join("p")).expect("directory");
+            repo.write("p/new.txt", "untracked stash contents\n");
+            repo.write("a.txt", "stashed\n");
+            let checkpoints = Checkpoints::new(repo.path());
+            checkpoints
+                .switch_branch(&local("other"), leave_on(&checkpoints).await)
+                .await
+                .expect("left");
+            checkpoints
+                .switch_branch(&local(&main), Changes::Bring)
+                .await
+                .expect("back");
+            repo.git(&["rm", "-q", "p"]);
+            repo.git(&["commit", "-qm", "commit the deletion"]);
+            repo.write(".git/info/exclude", "p\n");
+            if ignored.contains('/') {
+                std::fs::create_dir(repo.path().join("p")).expect("ignored directory");
+            }
+            repo.write(ignored, "unsaved ignored contents\n");
+            let stash = stash_of(&checkpoints).await;
+            let index = std::fs::read(repo.path().join(".git/index")).expect("index");
+
+            let restored = checkpoints.restore_stash(&stash).await;
+
+            assert_eq!(read(&repo, "a.txt"), "old\n", "{ignored}: {restored:?}");
+            assert!(
+                matches!(restored, Err(DiffError::WouldOverwrite(ref paths)) if paths == &["p/new.txt"]),
+                "{restored:?}"
+            );
+            assert_eq!(read(&repo, ignored), "unsaved ignored contents\n");
+            assert_eq!(stash_of(&checkpoints).await, stash);
+            assert_eq!(
+                std::fs::read(repo.path().join(".git/index")).expect("index"),
+                index
+            );
+        }
+    });
+}
+
+#[test]
 fn no_restore_exempts_a_tracked_parent_committed_after_the_stash() {
     run(async {
         let repo = Repo::new("stash-later-parent");

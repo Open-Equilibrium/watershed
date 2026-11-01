@@ -189,7 +189,8 @@ impl WorkingTree {
         let (base, index, tracked, untracked) = self.stash_trees(id).await?;
         // All paths used by the preflight must be represented exactly before Git can write.
         // Patches and error text can be lossy; filesystem destinations cannot.
-        for tree in [&current, &base, &index, &tracked] {
+        let current_paths: HashSet<String> = self.tree_paths(&current).await?.into_iter().collect();
+        for tree in [&base, &index, &tracked] {
             self.tree_paths(tree).await?;
         }
         let untracked = match untracked {
@@ -205,9 +206,12 @@ impl WorkingTree {
             in_the_way.extend(self.ignored_in_the_way(changes, &[]).await?);
         }
         let stash_changes = self.changes(&base, &tracked, Whitespace::Shown).await?;
+        // Only a file still tracked in HEAD can be removed to make way for untracked files.
         let removed: HashSet<&str> = stash_changes
             .iter()
-            .filter(|change| change.status == ChangeStatus::Deleted)
+            .filter(|change| {
+                change.status == ChangeStatus::Deleted && current_paths.contains(&change.path)
+            })
             .map(|change| change.path.as_str())
             .collect();
         for path in untracked {
