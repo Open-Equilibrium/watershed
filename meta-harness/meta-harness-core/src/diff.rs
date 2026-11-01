@@ -358,25 +358,30 @@ impl WorkingTree {
         // A Git stopped at its time limit leaves its lock; no other Git uses this index now.
         let _ = std::fs::remove_file(self.store.0.join("index.lock"));
         let _ = std::fs::remove_file(self.store.0.join("index.new.lock"));
-        // The first snapshot starts from the project's index, so Git rereads only the files
-        // that changed since; later snapshots keep the private index.
+        // Each snapshot starts from the project's index, so Git rereads only the files that
+        // changed, and a file the project ignores since an earlier snapshot drops out instead of
+        // staying captured. The copy replaces the private index only once its marks are cleared.
         let index = self.store.0.join("index");
-        if !index.exists() {
-            // Kept only once its marks are cleared, so a failed first snapshot leaves none.
-            let copy = self.store.0.join("index.new");
-            match std::fs::copy(&self.index, &copy) {
-                Ok(_) => {
-                    let cleared = self.unmark(&self.env(&copy)).await;
-                    if let Err(error) =
-                        cleared.and_then(|()| std::fs::rename(&copy, &index).map_err(DiffError::Io))
-                    {
-                        let _ = std::fs::remove_file(&copy);
-                        return Err(error);
-                    }
+        let copy = self.store.0.join("index.new");
+        match std::fs::copy(&self.index, &copy) {
+            Ok(_) => {
+                let cleared = self.unmark(&self.env(&copy)).await;
+                if let Err(error) =
+                    cleared.and_then(|()| std::fs::rename(&copy, &index).map_err(DiffError::Io))
+                {
+                    let _ = std::fs::remove_file(&copy);
+                    return Err(error);
                 }
-                Err(error) if error.kind() == ErrorKind::NotFound => {}
-                Err(error) => return Err(DiffError::Io(error)),
             }
+            // A project without an index starts empty each time.
+            Err(error) if error.kind() == ErrorKind::NotFound => match std::fs::remove_file(&index)
+            {
+                Err(error) if error.kind() != ErrorKind::NotFound => {
+                    return Err(DiffError::Io(error));
+                }
+                _ => {}
+            },
+            Err(error) => return Err(DiffError::Io(error)),
         }
         let env = self.env(&index);
         if let Err(error) = git(&self.root, &env, &["add", "--all", "--", "."]).await {

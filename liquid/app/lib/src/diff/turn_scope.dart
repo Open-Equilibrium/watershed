@@ -31,13 +31,17 @@ class AllTurns extends DiffScope {
 /// The checkpoints a scope compares: the start of `from` and the end of `to`.
 typedef Compared = ({BridgeTurn from, BridgeTurn to});
 
-/// What `scope` compares among `turns`, oldest first; none before a turn ended. A turn that is
-/// no longer on the branch falls back to the latest.
+/// The turns that ended, whether or not their checkpoints could be taken.
+List<BridgeTurn> finished(List<BridgeTurn> turns) => [
+  for (final turn in turns)
+    if (turn.endEntry != null) turn,
+];
+
+/// What `scope` compares among `turns`, oldest first; none before a turn ended. A turn whose
+/// checkpoint failed stays, so the Diff tab says why. A turn that is no longer on the branch
+/// falls back to the latest.
 Compared? compared(List<BridgeTurn> turns, DiffScope scope) {
-  final ended = [
-    for (final turn in turns)
-      if (turn.ended) turn,
-  ];
+  final ended = finished(turns);
   if (ended.isEmpty) return null;
   final latest = (from: ended.last, to: ended.last);
   return switch (scope) {

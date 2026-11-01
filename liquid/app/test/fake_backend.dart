@@ -98,7 +98,13 @@ class FakeBackend implements SessionBackend {
   final compared = <String>[];
 
   @override
-  Future<List<BridgeTurn>> turns() async => turnList;
+  Future<List<BridgeTurn>> turns() async {
+    await turnsGate?.future;
+    return turnList;
+  }
+
+  /// Holds turn reads until it completes.
+  Completer<void>? turnsGate;
 
   @override
   Future<BridgeTurnChanges> turnChanges(
@@ -132,6 +138,9 @@ class FakeBackend implements SessionBackend {
   /// The files whose patch was read, in order.
   final patchReads = <String>[];
 
+  /// Patches of particular comparisons, as `from..to`; others come from [patches].
+  Map<String, Map<String, String>> turnPatches = const {};
+
   @override
   Future<String> turnPatch(
     String from,
@@ -142,7 +151,7 @@ class FakeBackend implements SessionBackend {
     patchReads.add(hideWhitespace ? '$path without whitespace' : path);
     await patchGate?.future;
     if (patchError case final error?) throw error;
-    return patches[path] ?? '';
+    return turnPatches['$from..$to']?[path] ?? patches[path] ?? '';
   }
 
   @override

@@ -431,7 +431,14 @@ class SessionState {
       );
       if (generation != _generation) return;
       reportRead('changes', null);
+      // Outside Git every checkpoint fails; the project's own state says so first.
+      final failure = pair.from.failure ?? pair.to.failure;
       changesProblem.value = switch (changes.state) {
+        BridgeChangesState.shown ||
+        BridgeChangesState.removed when failure != null => (
+          title: 'No checkpoint',
+          text: 'Liquid could not capture the project: $failure',
+        ),
         BridgeChangesState.shown => null,
         BridgeChangesState.outsideGit => (
           title: 'Not a Git repository',
@@ -456,12 +463,12 @@ class SessionState {
     }
   }
 
-  /// Reads the turn that ended and adds what it changed below it in the chat.
+  /// Reads the turns that ended and adds what each changed where it ended in the chat.
   Future<void> _endTurn() async {
     final generation = _generation;
     await readChanges();
     if (generation != _generation) return;
-    if (turns.value.lastOrNull case final turn?) _chat.endTurn(turn);
+    _chat.endTurns(turns.value);
   }
 
   /// One file's unified diff between the shown checkpoints.
@@ -592,6 +599,7 @@ class SessionState {
         _stopping = false;
         stored.value++;
         unawaited(loadTitle());
+        _chat.turnCompleted();
         unawaited(_endTurn());
       case BridgeEventKind.itemStarted:
         final started = event.item!;

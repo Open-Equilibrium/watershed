@@ -203,6 +203,44 @@ void main() {
     expect(find.textContaining('All turns of this branch'), findsOneWidget);
   });
 
+  testWidgets('never shows a turn\'s patch under another turn', (tester) async {
+    final backend = FakeBackend()
+      ..changed = [
+        BridgeFileChange(
+          path: 'a.ts',
+          shown: 'a.ts',
+          status: BridgeChangeStatus.modified,
+          added: 1,
+          removed: 1,
+        ),
+      ]
+      ..turnList = [
+        turnOf('T1', number: 1, added: 1, removed: 1),
+        turnOf('T2', number: 2, startedMs: 1793527800000, added: 1, removed: 1),
+      ]
+      ..turnPatches = {
+        'T1..T1': {'a.ts': '@@ -1 +1 @@\n-one\n+first turn\n'},
+        'T2..T2': {'a.ts': '@@ -1 +1 @@\n-two\n+second turn\n'},
+      }
+      // Turn 2's patch is still loading when the user picks Turn 1.
+      ..patchGate = Completer();
+    await show(tester, backend);
+    await press(tester, LogicalKeyboardKey.keyT);
+    await tester.tap(find.text('Turn 1'));
+    await tester.pump();
+    backend.patchGate!.complete();
+    await tester.pumpAndSettle();
+    expect(find.text('Turn 1'), findsOneWidget);
+    expect(
+      find.textContaining('first turn', findRichText: true),
+      findsOneWidget,
+    );
+    expect(
+      find.textContaining('second turn', findRichText: true),
+      findsNothing,
+    );
+  });
+
   testWidgets('says when the checkpoints were removed', (tester) async {
     final backend = FakeBackend()..checkpointsRemoved = true;
     await show(tester, backend);
@@ -387,7 +425,12 @@ void main() {
   });
 
   testWidgets('says when the project is not in Git', (tester) async {
-    final backend = FakeBackend()..changed = null;
+    // Outside Git every checkpoint fails, and the core says why.
+    final backend = FakeBackend()
+      ..changed = null
+      ..turnList = [
+        turnOf('T1', number: 1, failure: 'not inside a Git working tree'),
+      ];
     final state = await show(tester, backend);
     expect(find.text('Not a Git repository'), findsOneWidget);
     expect(
@@ -398,6 +441,44 @@ void main() {
       findsOneWidget,
     );
     expect(state.notices.value, isEmpty, reason: 'nothing failed');
+  });
+
+  testWidgets('keeps a turn whose checkpoint failed and says why', (
+    tester,
+  ) async {
+    final backend = FakeBackend()
+      ..changed = [
+        BridgeFileChange(
+          path: 'a.ts',
+          shown: 'a.ts',
+          status: BridgeChangeStatus.modified,
+          added: 1,
+          removed: 0,
+        ),
+      ]
+      ..turnList = [
+        turnOf('T1', number: 1, added: 1, removed: 0),
+        turnOf(
+          'T2',
+          number: 2,
+          startedMs: 1793527800000,
+          failure: 'git did not finish within 60 s',
+        ),
+      ];
+    await show(tester, backend);
+    expect(find.text('Turn 2'), findsOneWidget, reason: 'the latest turn');
+    expect(find.text('No checkpoint'), findsOneWidget);
+    expect(
+      find.text(
+        'Liquid could not capture the project: git did not finish within 60 s',
+      ),
+      findsOneWidget,
+    );
+    await press(tester, LogicalKeyboardKey.keyT);
+    expect(find.textContaining('failed'), findsOneWidget);
+    await tester.tap(find.text('Turn 1'));
+    await tester.pumpAndSettle();
+    expect(find.text('a.ts'), findsWidgets);
   });
 
   testWidgets('reports a lasting failure to read the changes once', (

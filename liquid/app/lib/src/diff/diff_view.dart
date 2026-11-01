@@ -129,6 +129,7 @@ class _DiffViewState extends State<DiffView> {
       // Selections passed while a patch loaded are never read.
       while (mounted) {
         final wanted = _selected;
+        final comparison = _comparison;
         if (wanted == null) return;
         // Why the file shows no lines: a diff that could not be read, such as one over Git's
         // output limit, or a change without text.
@@ -147,7 +148,10 @@ class _DiffViewState extends State<DiffView> {
             'Could not show the changes of ${wanted.shown}: $error',
           );
         }
-        if (!mounted || _selected != wanted) continue;
+        // A file or turn chosen meanwhile, even with the same name and counts, reads again.
+        if (!mounted || _selected != wanted || _comparison != comparison) {
+          continue;
+        }
         setState(() {
           _lines = lines;
           _note = note;
@@ -159,6 +163,12 @@ class _DiffViewState extends State<DiffView> {
     } finally {
       _loading = false;
     }
+  }
+
+  /// What the shown patch compares: the turns and whether whitespace is hidden.
+  String get _comparison {
+    final shown = widget.state.shown.value;
+    return '${shown?.from.id}..${shown?.to.id} ${widget.state.hideWhitespace.value}';
   }
 
   /// Whether a folded folder hides `row`.
@@ -931,10 +941,7 @@ class _TurnHeader extends StatelessWidget {
     final ws = context.ws;
     final all = scope is AllTurns;
     final turn = shown.to;
-    final ended = [
-      for (final turn in turns)
-        if (turn.ended) turn,
-    ];
+    final ended = finished(turns);
     final started = shown.from.startedMs;
     final since = started == null ? '' : formatClockMs(started);
     final until = turn.endedMs == null ? '' : formatClockMs(turn.endedMs!);

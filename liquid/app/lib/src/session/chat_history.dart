@@ -42,6 +42,8 @@ class ChatHistory {
     _version++;
     _start = null;
     _pendingMark = null;
+    _ended.clear();
+    _boundaries.clear();
     more.value = false;
   }
 
@@ -79,6 +81,14 @@ class ChatHistory {
     _pendingMark = null;
     _path = _pathIndex(history.tree, history.leaf);
     _turns = turns;
+    // Turns that ended before the restore get their rows from it, not from a live end.
+    _ended
+      ..clear()
+      ..addAll([
+        for (final turn in turns)
+          if (turn.endEntry != null) turn.id,
+      ]);
+    _boundaries.clear();
     if (branchMarker(history.tree, history.leaf) case final marker?) {
       final mark = (
         marker: marker,
@@ -109,53 +119,74 @@ class ChatHistory {
   Map<String, int> _path = const {};
   List<BridgeTurn> _turns = const [];
 
-  /// Puts a row after each turn that changed files, below the turn's last item `views` show;
-  /// returns `views`.
+  /// Puts a row after each restored turn that changed files, below the turn's last item `views`
+  /// show; rows of turns that ended live stay where they are. Returns `views`.
   List<ItemView> _placeTurnEnds(List<ItemView> views) {
-    views.removeWhere((view) => view.turnEnd != null);
-    int position(ItemView view) => _path[view.entry] ?? -1;
+    int? at(String? entry) => entry == null ? null : _path[entry];
+    final placeable = {
+      for (final turn in _turns)
+        if (at(turn.startEntry) != null && at(turn.endEntry) != null) turn.id,
+    };
+    views.removeWhere((view) => placeable.contains(view.turnEnd?.id));
     final places = <(int, BridgeTurn)>[];
     for (final turn in _turns) {
-      final (start, end) = (_path[turn.startEntry], _path[turn.endEntry]);
-      if (!turn.ended ||
-          (turn.files ?? 0) == 0 ||
-          start == null ||
-          end == null) {
-        continue;
-      }
+      final (start, end) = (at(turn.startEntry), at(turn.endEntry));
+      if (start == null || end == null || !_changedFiles(turn)) continue;
       final last = views.lastIndexWhere((view) {
-        final at = position(view);
-        return at > start && at < end;
+        final position = at(view.entry) ?? -1;
+        return position > start && position < end;
       });
       if (last >= 0) places.add((last + 1, turn));
     }
     for (final (at, turn) in places.reversed) {
-      views.insert(
-        at,
-        ItemView(
-          id: _nextId--,
-          kind: BridgeItemKind.dynamicToolCall,
-          turnEnd: turn,
-        ),
-      );
+      views.insert(at, _turnEnd(turn));
     }
     return views;
   }
 
-  /// Adds the row that says what `turn` changed after the items that arrived live, unless
-  /// the chat shows it already.
-  void endTurn(BridgeTurn turn) {
-    if (!turn.ended || (turn.files ?? 0) == 0) return;
-    if (items.value.any((view) => view.turnEnd?.id == turn.id)) return;
-    items.value = [
-      ...items.value,
-      ItemView(
-        id: _nextId--,
-        kind: BridgeItemKind.dynamicToolCall,
-        turnEnd: turn,
-      ),
-    ];
+  /// Turns whose end the chat placed or passed over, so none is placed twice.
+  final _ended = <String>{};
+
+  /// Where the chat stood when each turn ended live, oldest first, until the turn is read.
+  final _boundaries = <int>[];
+
+  /// A turn ended live: its row goes here, after its items and before any of the next turn.
+  void turnCompleted() => _boundaries.add(items.value.length);
+
+  /// Places the rows of turns that ended live, oldest first, each where its turn ended.
+  void endTurns(List<BridgeTurn> turns) {
+    final views = [...items.value];
+    var inserted = 0;
+    for (final turn in turns) {
+      if (turn.endEntry == null || _ended.contains(turn.id)) continue;
+      if (_boundaries.isEmpty) break;
+      final at = _boundaries.removeAt(0) + inserted;
+      _ended.add(turn.id);
+      if (!_changedFiles(turn)) continue;
+      views.insert(at.clamp(0, views.length), _turnEnd(turn));
+      inserted++;
+      for (var index = 0; index < _boundaries.length; index++) {
+        _boundaries[index]++;
+      }
+    }
+    if (inserted > 0) items.value = views;
   }
+
+  /// Moves the places of live turns' rows after `count` items were added before them.
+  void _shift(int count) {
+    for (var index = 0; index < _boundaries.length; index++) {
+      _boundaries[index] += count;
+    }
+  }
+
+  static bool _changedFiles(BridgeTurn turn) =>
+      turn.ended && (turn.files ?? 0) > 0;
+
+  ItemView _turnEnd(BridgeTurn turn) => ItemView(
+    id: _nextId--,
+    kind: BridgeItemKind.dynamicToolCall,
+    turnEnd: turn,
+  );
 
   /// Counts restores and session changes; reads for a replaced chat are dropped.
   int _version = 0;
@@ -200,6 +231,7 @@ class ChatHistory {
             ..._stored(page.items),
             ...items.value,
           ]);
+          _shift(shown.length - items.value.length);
           if (_pendingMark case final mark?
               when _placeMark(shown, mark, complete: !more.value)) {
             _pendingMark = null;
@@ -213,6 +245,7 @@ class ChatHistory {
         final shown = [...items.value];
         _placeMark(shown, mark, complete: true);
         _pendingMark = null;
+        _shift(shown.length - items.value.length);
         items.value = shown;
       }
     } on Object catch (error) {

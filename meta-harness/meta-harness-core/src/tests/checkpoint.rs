@@ -238,6 +238,33 @@ fn checkpoints_run_none_of_the_projects_hooks() {
 }
 
 #[test]
+fn a_file_ignored_after_an_earlier_checkpoint_stays_out_of_later_ones() {
+    run(async {
+        let repo = Repo::new("newly-ignored");
+        repo.write("notes.txt", "harmless\n");
+        let checkpoints = Checkpoints::new(repo.path());
+        checkpoints
+            .capture(&at("t1", Phase::Start))
+            .await
+            .expect("captured");
+        // The project now ignores the file, which holds a secret.
+        repo.write(".gitignore", "notes.txt\n");
+        repo.write("notes.txt", "TOKEN=secret\n");
+        checkpoints
+            .capture(&at("t2", Phase::Start))
+            .await
+            .expect("captured");
+        let files = repo.git(&[
+            "ls-tree",
+            "-r",
+            "--name-only",
+            "refs/watershed/checkpoints/s1/t2/start",
+        ]);
+        assert_eq!(files.lines().collect::<Vec<_>>(), [".gitignore", "a.txt"]);
+    });
+}
+
+#[test]
 fn a_project_without_commits_gets_checkpoints_without_a_parent() {
     run(async {
         let dir =

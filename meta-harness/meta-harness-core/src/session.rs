@@ -338,6 +338,7 @@ impl Session {
             error_output,
             error_reader,
             captures,
+            checkpoints: checkpoints.clone(),
         };
         tokio::spawn(supervisor.run(child, stdout, exit));
         let writer_for_stop = writer.clone();

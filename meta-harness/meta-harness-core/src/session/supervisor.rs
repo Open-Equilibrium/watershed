@@ -16,7 +16,9 @@ use super::{CommandError, MAX_RECORD_BYTES, SessionEvent, State, Write, switched
 use crate::approval::{Allowance, needs_user};
 use crate::framing::keep_end;
 use crate::pi::checkpoint_request;
-use crate::{AgentEvent, Checkpoint, Frame, LineFramer, NotificationLevel, PiAdapter, RequestId};
+use crate::{
+    AgentEvent, Checkpoint, Checkpoints, Frame, LineFramer, NotificationLevel, PiAdapter, RequestId,
+};
 
 const READ_BUFFER: usize = 64 * 1024;
 
@@ -42,6 +44,8 @@ pub(super) struct Supervisor {
     pub(super) error_reader: tokio::task::JoinHandle<()>,
     /// Checkpoint requests, taken one after another in the order the agent asked.
     pub(super) captures: mpsc::Sender<CheckpointRequest>,
+    /// Closed once the agent is gone, so no capture outlives it.
+    pub(super) checkpoints: Arc<Checkpoints>,
 }
 
 /// A checkpoint the agent asked for, or why its request is unreadable.
@@ -93,6 +97,9 @@ impl Supervisor {
             }
             shared.approvals.clear();
         }
+        // A capture in progress stops with its Git and the programs Git started, before the
+        // exit is reported.
+        self.checkpoints.close().await;
         let stop = failure.is_some() || self.kill_requested;
         if let Some(reason) = failure {
             // A full event buffer must not keep a kill from ending the agent.

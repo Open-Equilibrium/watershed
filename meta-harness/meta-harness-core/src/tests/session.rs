@@ -710,6 +710,47 @@ fn takes_the_checkpoints_the_extension_asks_for_without_asking_the_user() {
 }
 
 #[test]
+fn an_agent_that_exits_stops_the_checkpoint_it_asked_for() {
+    run(async {
+        let project = git_project("checkpoint-exit");
+        // The project's clean filter says it runs, then holds the capture far longer than the
+        // test; Git runs it at the top of the work tree.
+        let config = project.join(".git/config");
+        let mut text = std::fs::read_to_string(&config).expect("config");
+        text.push_str(
+            "[filter \"slow\"]\n\tclean = \"echo $$ > .git/filter-pid; sleep 30; cat\"\n",
+        );
+        std::fs::write(&config, text).expect("config");
+        std::fs::write(project.join(".gitattributes"), "*.txt filter=slow\n").expect("attributes");
+        std::fs::write(project.join("a.txt"), "changed\n").expect("file");
+        let script = r#"printf '%s\n' '{"type":"extension_ui_request","id":"c1","method":"input","title":"watershed.checkpoint {\"session\":\"s1\",\"turn\":\"t1\",\"phase\":\"start\"}","placeholder":""}'
+until [ -e .git/filter-pid ]; do sleep 0.05; done"#;
+        let command = AgentCommand {
+            program: "/bin/sh".into(),
+            args: vec!["-c".into(), script.into()],
+            extension: EXTENSION.into(),
+            session: None,
+            cwd: project.clone(),
+        };
+        let (_session, mut events) = Session::start(&command).expect("fake agent starts");
+        assert_eq!(next(&mut events).await, exited(true));
+        let pid = std::fs::read_to_string(project.join(".git/filter-pid")).expect("the filter ran");
+        let alive = std::process::Command::new("kill")
+            .args(["-0", pid.trim()])
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success());
+        if alive {
+            let _ = std::process::Command::new("kill")
+                .args(["-9", pid.trim()])
+                .status();
+        }
+        assert!(!alive, "the capture's Git outlived the agent");
+        let _ = std::fs::remove_dir_all(&project);
+    });
+}
+
+#[test]
 fn answers_extension_questions() {
     run(async {
         let script = [

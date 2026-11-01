@@ -382,6 +382,56 @@ void main() {
     );
   });
 
+  test('keeps the row of a live turn when earlier messages load', () async {
+    backend.transcripts[''] = BridgeTranscript(
+      items: [chatItem('u1', BridgeItemKind.userMessage, text: 'Go')],
+      more: true,
+      start: 'u1',
+    );
+    backend.transcripts['u1'] = BridgeTranscript(
+      items: [chatItem('u0', BridgeItemKind.userMessage, text: 'Earlier')],
+      more: false,
+      start: 'u0',
+    );
+    backend.turnList = const [];
+    await state.loadChat();
+    backend.turnList = [turnOf('T1', number: 1, added: 2, removed: 0)];
+    backend.controller.add(event(BridgeEventKind.turnCompleted));
+    await pumpEventQueue();
+    await state.loadEarlier();
+    expect(
+      state.items.value.map((view) => view.turnEnd?.id ?? view.text.value),
+      ['Earlier', 'Go', 'T1'],
+    );
+  });
+
+  test(
+    'puts a turn\'s row where the turn ended, also once the next began',
+    () async {
+      backend.turnList = const [];
+      backend.turnsGate = Completer();
+      backend.controller.add(event(BridgeEventKind.turnCompleted));
+      // The next turn begins before the ended one was read.
+      backend.controller.add(
+        event(
+          BridgeEventKind.itemStarted,
+          item: item(7, kind: BridgeItemKind.userMessage),
+        ),
+      );
+      await pumpEventQueue();
+      backend.turnList = [
+        turnOf('T1', number: 1, added: 2, removed: 0),
+        turnOf('T2', number: 2, ended: false),
+      ];
+      backend.turnsGate!.complete();
+      await pumpEventQueue();
+      expect(
+        state.items.value.map((view) => view.turnEnd?.id ?? '${view.id}'),
+        ['T1', '7'],
+      );
+    },
+  );
+
   test('says nothing below a turn that changed no file', () async {
     backend.turnList = [
       turnOf('T1', number: 1, files: 0, added: 0, removed: 0),
