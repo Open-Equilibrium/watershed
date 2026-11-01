@@ -859,6 +859,78 @@ fn no_restore_runs_over_uncommitted_changes_or_ignored_files_in_the_way() {
 }
 
 #[test]
+fn no_restore_partly_applies_a_stash_with_undecodable_paths() {
+    use std::io::Write;
+    use std::process::Stdio;
+
+    run(async {
+        let repo = Repo::new("stash-undecodable");
+        let main = repo.git(&["branch", "--show-current"]).trim().to_owned();
+        repo.git(&["branch", "other"]);
+        repo.write("a.txt", "stashed\n");
+        let checkpoints = Checkpoints::new(repo.path());
+        checkpoints
+            .switch_branch(&local("other"), leave_on(&checkpoints).await)
+            .await
+            .expect("left");
+        checkpoints
+            .switch_branch(&local(&main), Changes::Bring)
+            .await
+            .expect("back");
+        let original = stash_of(&checkpoints).await;
+        let blob = repo.git(&["hash-object", "-w", "a.txt"]);
+        // Git objects can contain these pathname bytes even on a host whose filesystem cannot.
+        let mut make_tree = Command::new("git")
+            .args(["mktree", "-z"])
+            .current_dir(repo.path())
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("mktree runs");
+        let mut input = make_tree.stdin.take().expect("stdin");
+        input
+            .write_all(format!("100644 blob {}\t", blob.trim()).as_bytes())
+            .expect("tree entry");
+        input.write_all(b"\xff\0").expect("pathname");
+        drop(input);
+        let tree = make_tree.wait_with_output().expect("tree");
+        assert!(tree.status.success());
+        let tree = String::from_utf8(tree.stdout).expect("tree id");
+        let untracked = repo.git(&["commit-tree", tree.trim(), "-m", "untracked"]);
+        let tracked = repo.git(&["rev-parse", &format!("{original}^{{tree}}")]);
+        let base = repo.git(&["rev-parse", &format!("{original}^1")]);
+        let index = repo.git(&["rev-parse", &format!("{original}^2")]);
+        let message = format!("On {main}: Liquid: changes left on {main}");
+        let stash = repo.git(&[
+            "commit-tree",
+            tracked.trim(),
+            "-p",
+            base.trim(),
+            "-p",
+            index.trim(),
+            "-p",
+            untracked.trim(),
+            "-m",
+            &message,
+        ]);
+        repo.git(&["stash", "store", "-m", &message, stash.trim()]);
+        let index_before = std::fs::read(repo.path().join(".git/index")).expect("index");
+
+        let restored = checkpoints.restore_stash(stash.trim()).await;
+
+        assert_eq!(read(&repo, "a.txt"), "old\n", "{restored:?}");
+        assert!(matches!(restored, Err(DiffError::Git(reason)) if reason.contains("UTF-8")));
+        assert_eq!(stash_of(&checkpoints).await, stash.trim());
+        assert_eq!(
+            std::fs::read(repo.path().join(".git/index")).expect("index"),
+            index_before
+        );
+    });
+}
+
+#[test]
 fn leaving_changes_never_loses_edits_hidden_from_native_git() {
     use std::os::unix::fs::PermissionsExt;
 

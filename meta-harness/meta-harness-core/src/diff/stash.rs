@@ -1,7 +1,7 @@
 //! Uncommitted changes left on a branch, as GitHub Desktop leaves them: one stash per branch,
 //! whose message names it ([mockups](../../../../docs/design/mockups/liquid-git-branches.html)).
 
-use super::process::user_git;
+use super::process::{git_path_output, user_git};
 use super::*;
 use std::collections::BTreeMap;
 
@@ -164,7 +164,16 @@ impl WorkingTree {
             Some(tree) => tree,
             None => self.empty_tree().await?,
         };
-        let (_, index, tracked, _) = self.stash_trees(id).await?;
+        let (_, index, tracked, untracked) = self.stash_trees(id).await?;
+        // All paths used by the preflight must be represented exactly before Git can write.
+        // Patches and error text can be lossy; filesystem destinations cannot.
+        for tree in [&current, &index, &tracked] {
+            self.tree_paths(tree).await?;
+        }
+        let untracked = match untracked {
+            Some(tree) => self.tree_paths(&tree).await?,
+            None => Vec::new(),
+        };
         let mut in_the_way = BTreeSet::new();
         // A staged addition, or a tracked file deleted since the stash, can replace ignored
         // contents too. Check both trees because --index restores saved index-only changes.
@@ -184,23 +193,27 @@ impl WorkingTree {
                 in_the_way.insert(path);
             }
         }
-        if self.resolve(&format!("{id}^3")).await?.is_some() {
-            let untracked = git(
-                &self.root,
-                &[],
-                &["ls-tree", "-r", "-z", "--name-only", &format!("{id}^3")],
-            )
-            .await?;
-            for path in paths(&untracked) {
-                if obstructed(&self.root, &path).map_err(DiffError::Io)? {
-                    in_the_way.insert(path);
-                }
+        for path in untracked {
+            if obstructed(&self.root, &path).map_err(DiffError::Io)? {
+                in_the_way.insert(path);
             }
         }
         if !in_the_way.is_empty() {
             return Err(DiffError::WouldOverwrite(in_the_way.into_iter().collect()));
         }
         self.pop(id).await
+    }
+
+    /// A tree's paths, refusing bytes that would name a different destination once decoded.
+    async fn tree_paths(&self, tree: &Snapshot) -> Result<Vec<String>, DiffError> {
+        Ok(paths(
+            &git_path_output(
+                &self.root,
+                &[],
+                &["ls-tree", "-r", "-z", "--name-only", &tree.0],
+            )
+            .await?,
+        ))
     }
 
     /// Pops the stash commit `id`, wherever it now is in the list.

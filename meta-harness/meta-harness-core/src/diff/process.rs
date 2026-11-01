@@ -25,7 +25,17 @@ pub(super) async fn git(
     env: &[(&str, OsString)],
     args: &[&str],
 ) -> Result<String, DiffError> {
-    output(git_command(dir, env, args)).await
+    Ok(String::from_utf8_lossy(&output(git_command(dir, env, args)).await?).into_owned())
+}
+
+/// Reads pathname output without replacing bytes that the String-based path API cannot name.
+pub(super) async fn git_path_output(
+    dir: &Path,
+    env: &[(&str, OsString)],
+    args: &[&str],
+) -> Result<String, DiffError> {
+    String::from_utf8(output(git_command(dir, env, args)).await?)
+        .map_err(|_| DiffError::Git("Git returned a pathname that is not valid UTF-8".to_owned()))
 }
 
 /// Runs the host's `git` in `dir` as the user's own would run, with the project's hooks and
@@ -33,7 +43,7 @@ pub(super) async fn git(
 pub(super) async fn user_git(dir: &Path, args: &[&str]) -> Result<String, DiffError> {
     let mut command = Command::new("git");
     command.args(args).current_dir(dir);
-    output(piped(command, &NO_PROMPTS)).await
+    Ok(String::from_utf8_lossy(&output(piped(command, &NO_PROMPTS)).await?).into_owned())
 }
 
 /// Keeps Git and its credential helpers from asking on a terminal or in a window, as T3 Code
@@ -48,7 +58,7 @@ pub(super) const NO_PROMPTS: [(&str, &str); 5] = [
 ];
 
 /// Runs `command` and returns at most [`MAX_OUTPUT_BYTES`] of its output.
-async fn output(mut command: Command) -> Result<String, DiffError> {
+async fn output(mut command: Command) -> Result<Vec<u8>, DiffError> {
     let mut child = Git::spawn(&mut command)?;
     // Git's warnings drain meanwhile, so a full error pipe never blocks it; dropped, the set ends
     // the drain.
@@ -83,7 +93,7 @@ async fn output(mut command: Command) -> Result<String, DiffError> {
             String::from_utf8_lossy(&errors).trim().to_owned(),
         ));
     }
-    Ok(String::from_utf8_lossy(&output).into_owned())
+    Ok(output)
 }
 
 /// The host's `git` in `dir` with its output piped. Project settings that would run something
