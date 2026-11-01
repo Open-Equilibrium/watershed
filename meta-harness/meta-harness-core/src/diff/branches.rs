@@ -176,6 +176,11 @@ impl WorkingTree {
             BranchTarget::Local(name) => ["switch", "--no-guess", branch_name(name)?],
             BranchTarget::Remote(name) => ["switch", "--track", branch_name(name)?],
         };
+        let _stash = if changes == Changes::Leave {
+            Some(self.checkout().stash_alone().await?)
+        } else {
+            None
+        };
         let start = self.head().await?;
         let mut earlier = None;
         let mut left = None;

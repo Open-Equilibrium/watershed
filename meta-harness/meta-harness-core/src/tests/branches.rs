@@ -769,6 +769,109 @@ fn no_background_fetch_writes_outside_remote_tracking_branches() {
 }
 
 #[test]
+fn worktrees_serialize_leaving_restoring_and_discarding_stashes() {
+    run(async {
+        use std::os::unix::fs::PermissionsExt;
+        use std::sync::Arc;
+
+        for action in ["restore", "discard", "leave"] {
+            let repo = Repo::new(&format!("stash-worktrees-{action}"));
+            let main = repo.git(&["branch", "--show-current"]).trim().to_owned();
+            let other = Repo(repo.path().with_extension("worktree"));
+            let _ = std::fs::remove_dir_all(other.path());
+            repo.git(&[
+                "worktree",
+                "add",
+                "-q",
+                "-b",
+                "side",
+                other.path().to_str().unwrap(),
+            ]);
+            repo.git(&["branch", "next"]);
+            repo.git(&["branch", "away"]);
+            let side = Arc::new(Checkpoints::new(other.path()));
+            other.write("a.txt", "side's saved changes\n");
+            side.switch_branch(&local("away"), Changes::Leave)
+                .await
+                .expect("left on side");
+            side.switch_branch(&local("side"), Changes::Bring)
+                .await
+                .expect("back on side");
+            let saved = stash_of(&side).await;
+            if action == "leave" {
+                other.write("a.txt", "side's replacement\n");
+            }
+
+            let entered = repo.path().join(".git/stash-switching");
+            let release = repo.path().join(".git/release-stash");
+            let hook = repo.path().join(".git/hooks/post-checkout");
+            std::fs::write(
+                &hook,
+                format!(
+                    "#!/bin/sh\n: > {}\nwhile ! test -e {}; do sleep 0.02; done\n",
+                    super::shell_word(entered.display()),
+                    super::shell_word(release.display()),
+                ),
+            )
+            .expect("hook");
+            std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755))
+                .expect("executable");
+            repo.write("a.txt", "main's saved changes\n");
+            let mine = Arc::new(Checkpoints::new(repo.path()));
+            let switching = tokio::spawn({
+                let mine = mine.clone();
+                async move { mine.switch_branch(&local("next"), Changes::Leave).await }
+            });
+            tokio::time::timeout(Duration::from_secs(5), async {
+                while !entered.exists() {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .expect("the switch reaches its hook");
+
+            let before = repo.git(&["stash", "list", "--format=%H"]);
+            let mut writing = tokio::spawn({
+                let side = side.clone();
+                async move {
+                    match action {
+                        "restore" => side.restore_stash(&saved).await,
+                        "discard" => side.discard_stash(&saved).await,
+                        _ => side.switch_branch(&local("away"), Changes::Leave).await,
+                    }
+                }
+            });
+            let early = tokio::time::timeout(Duration::from_millis(200), &mut writing).await;
+            let waited = early.is_err();
+            let during = repo.git(&["stash", "list", "--format=%H"]);
+            std::fs::write(&release, "").expect("released");
+            switching.await.expect("joined switch").expect("switched");
+            match early {
+                Ok(result) => result,
+                Err(_) => tokio::time::timeout(Duration::from_secs(5), writing)
+                    .await
+                    .expect("the stash write resumes"),
+            }
+            .expect("joined stash write")
+            .expect("stash written");
+
+            assert!(
+                waited,
+                "{action} waits for the other worktree's stash write"
+            );
+            assert_eq!(during, before, "{action} changes no stash while waiting");
+            assert!(
+                repo.git(&["stash", "list", "--format=%gs"])
+                    .contains(&format!("Liquid: changes left on {main}"))
+            );
+            if action == "restore" {
+                assert_eq!(read(&other, "a.txt"), "side's saved changes\n");
+            }
+        }
+    });
+}
+
+#[test]
 fn a_switch_whose_caller_gives_up_still_finishes_and_leaves_no_lock() {
     run(async {
         let repo = Repo::new("switch-slow");

@@ -112,6 +112,7 @@ impl WorkingTree {
     /// stash, unless Git refuses or they conflict, which keeps it. Nothing is restored over
     /// unresolved conflicts or untracked files in the way, which Git would restore only in part.
     pub async fn restore_stash(&self, id: &str) -> Result<(), DiffError> {
+        let _stash = self.checkout().stash_alone().await?;
         self.liquid_stash(id).await?;
         let unresolved = git(
             &self.root,
@@ -171,6 +172,7 @@ impl WorkingTree {
 
     /// Deletes the stashed changes `id` left on a branch.
     pub async fn discard_stash(&self, id: &str) -> Result<(), DiffError> {
+        let _stash = self.checkout().stash_alone().await?;
         self.liquid_stash(id).await?;
         self.drop_stash(id).await
     }
