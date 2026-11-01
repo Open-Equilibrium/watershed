@@ -859,6 +859,50 @@ fn no_restore_runs_over_uncommitted_changes_or_ignored_files_in_the_way() {
 }
 
 #[test]
+fn no_restore_partly_applies_a_stash_over_hidden_tracked_edits() {
+    run(async {
+        for mark in ["--assume-unchanged", "--skip-worktree"] {
+            let repo = Repo::new(&format!("stash-hidden-{mark}"));
+            let main = repo.git(&["branch", "--show-current"]).trim().to_owned();
+            repo.git(&["branch", "other"]);
+            repo.write("a.txt", "stashed\n");
+            repo.write("new.txt", "untracked\n");
+            let checkpoints = Checkpoints::new(repo.path());
+            checkpoints
+                .switch_branch(&local("other"), leave_on(&checkpoints).await)
+                .await
+                .expect("left");
+            checkpoints
+                .switch_branch(&local(&main), Changes::Bring)
+                .await
+                .expect("back");
+            repo.git(&["update-index", mark, "a.txt"]);
+            repo.write("a.txt", "hidden edit\n");
+            let index = std::fs::read(repo.path().join(".git/index")).expect("index");
+            let stash = stash_of(&checkpoints).await;
+
+            let restored = checkpoints.restore_stash(&stash).await;
+
+            assert!(
+                !repo.path().join("new.txt").exists(),
+                "{mark}: nothing should be restored, got {restored:?}"
+            );
+            assert!(
+                matches!(restored, Err(DiffError::Uncommitted(1))),
+                "{mark}: {restored:?}"
+            );
+            assert_eq!(read(&repo, "a.txt"), "hidden edit\n");
+            assert_eq!(checkpoints.status().await.expect("status").changed, 1);
+            assert_eq!(
+                std::fs::read(repo.path().join(".git/index")).expect("index"),
+                index
+            );
+            assert_eq!(stash_of(&checkpoints).await, stash);
+        }
+    });
+}
+
+#[test]
 fn a_stashed_case_only_rename_restores_without_an_ignored_obstruction() {
     run(async {
         let repo = Repo::new("stash-case-only");

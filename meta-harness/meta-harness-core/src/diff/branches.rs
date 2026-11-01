@@ -64,12 +64,14 @@ pub enum Changes {
 const MAX_BRANCHES: usize = 1000;
 
 impl WorkingTree {
-    /// The checkout's branch, upstream and uncommitted files. Reading takes no lock and writes
-    /// nothing, so it can run beside the user's own Git.
+    /// The checkout's branch, upstream and uncommitted files. A private index with skip marks
+    /// cleared exposes hidden edits and leaves the project's index alone beside the user's Git.
     pub async fn status(&self) -> Result<GitStatus, DiffError> {
+        let _busy = self.busy.lock().await;
+        let index = self.copy_index().await?;
         let output = git(
             &self.root,
-            &[("GIT_OPTIONAL_LOCKS", "0".into())],
+            &self.env(&index),
             &[
                 "status",
                 "--porcelain=v2",

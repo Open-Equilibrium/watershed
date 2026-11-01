@@ -535,12 +535,35 @@ impl WorkingTree {
     /// [`Self::write_tree`] while the private index is held; files at the repository paths
     /// `forced` count even where Git ignores them.
     async fn capture(&self, forced: &[String]) -> Result<String, DiffError> {
+        let index = self.copy_index().await?;
+        let env = self.env(&index);
+        if let Err(error) = git(&self.root, &env, &["add", "--all", "--", "."]).await {
+            // Git cannot record a nested repository without a commit and refuses the whole
+            // snapshot, so such repositories are left out, as T3 Code does (ADR-0210).
+            let skipped = self.uncommitted_repositories(&env).await;
+            if skipped.is_empty() {
+                return Err(error);
+            }
+            let mut args = vec!["add", "--all", "--", "."];
+            args.extend(skipped.iter().map(String::as_str));
+            git(&self.root, &env, &args).await?;
+        }
+        if !forced.is_empty() {
+            self.add_forced(&env, forced).await?;
+        }
+        Ok(git(&self.root, &env, &["write-tree"])
+            .await?
+            .trim()
+            .to_owned())
+    }
+
+    /// Copies the project's index and clears its skip marks while the private index is held.
+    async fn copy_index(&self) -> Result<PathBuf, DiffError> {
         // A Git stopped at its time limit leaves its lock; no other Git uses this index now.
         let _ = std::fs::remove_file(self.store.0.join("index.lock"));
         let _ = std::fs::remove_file(self.store.0.join("index.new.lock"));
-        // Each snapshot starts from the project's index, so Git rereads only the files that
-        // changed, and a file the project ignores since an earlier snapshot drops out instead of
-        // staying captured. The copy replaces the private index only once its marks are cleared.
+        // Start from the project's index each time. Replace the private index only once the
+        // copy's marks are cleared, so a failed attempt leaves none for the next read.
         let index = self.store.0.join("index");
         let copy = self.store.0.join("index.new");
         match std::fs::copy(&self.index, &copy) {
@@ -578,25 +601,7 @@ impl WorkingTree {
             },
             Err(error) => return Err(DiffError::Io(error)),
         }
-        let env = self.env(&index);
-        if let Err(error) = git(&self.root, &env, &["add", "--all", "--", "."]).await {
-            // Git cannot record a nested repository without a commit and refuses the whole
-            // snapshot, so such repositories are left out, as T3 Code does (ADR-0210).
-            let skipped = self.uncommitted_repositories(&env).await;
-            if skipped.is_empty() {
-                return Err(error);
-            }
-            let mut args = vec!["add", "--all", "--", "."];
-            args.extend(skipped.iter().map(String::as_str));
-            git(&self.root, &env, &args).await?;
-        }
-        if !forced.is_empty() {
-            self.add_forced(&env, forced).await?;
-        }
-        Ok(git(&self.root, &env, &["write-tree"])
-            .await?
-            .trim()
-            .to_owned())
+        Ok(index)
     }
 
     /// Adds the files at the repository paths `paths` although Git may ignore them, in one Git
