@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/agent/shell.dart';
@@ -70,6 +71,26 @@ void main() {
     await state.git.refresh();
     await tester.pumpAndSettle();
     expect(find.text('Git unavailable'), findsOneWidget);
+  });
+
+  testWidgets('the branch menu opens through its accessibility action', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    try {
+      await show(tester, git: gitStatusOf());
+      final chip = tester.getSemantics(find.byKey(const Key('branch-chip')));
+      expect(chip.getSemanticsData().hasAction(SemanticsAction.tap), isTrue);
+      tester.binding.renderViews.single.owner!.semanticsOwner!.performAction(
+        chip.id,
+        SemanticsAction.tap,
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('feature/token-bucket'), findsOneWidget);
+      expect(find.text('origin/release-1.2'), findsOneWidget);
+    } finally {
+      semantics.dispose();
+    }
   });
 
   testWidgets('switching with uncommitted changes asks where they go', (

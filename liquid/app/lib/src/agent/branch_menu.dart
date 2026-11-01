@@ -55,6 +55,7 @@ class BranchChip extends StatelessWidget {
         return Semantics(
           key: const Key('branch-chip'),
           button: true,
+          onTap: () => unawaited(showBranchMenu(context, state)),
           label: [
             'Branch $name',
             if (status.ahead > 0) '${status.ahead} ahead',
