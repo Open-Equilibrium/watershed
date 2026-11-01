@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 
 import '../diff/turn_scope.dart';
 import '../rust/api/events.dart';
+import '../rust/api/git.dart';
 import '../rust/api/history.dart';
 import '../rust/api/session.dart';
 import 'backend.dart';
@@ -208,6 +209,7 @@ class SessionState {
     diffScope.value = const LatestTurn();
     shownScope.value = const LatestTurn();
     shown.value = null;
+    shownStash.value = null;
     changed.value = const [];
     changesProblem.value = null;
     _byId.clear();
@@ -373,6 +375,11 @@ class SessionState {
   /// choice still being read.
   final shownScope = ValueNotifier<DiffScope>(const LatestTurn());
 
+  /// The stash and its branch read with the shown files, retained during a later refresh.
+  final shownStash = ValueNotifier<({BridgeStash stash, String? branch})?>(
+    null,
+  );
+
   /// The files the shown turns changed, as last read; null before the first read. The Diff tab
   /// and its count show them.
   final changed = ValueNotifier<List<BridgeFileChange>?>(null);
@@ -385,9 +392,10 @@ class SessionState {
   final hideWhitespace = ValueNotifier(false);
 
   /// Shows `scope` in the Diff tab.
-  Future<void> showTurns(DiffScope scope) {
+  Future<void> showTurns(DiffScope scope) async {
     diffScope.value = scope;
-    return readChanges();
+    if (scope is StashedChanges) await git.refresh();
+    await readChanges();
   }
 
   /// Reads the branch's turns and what the shown ones changed between their checkpoints. A
@@ -422,11 +430,11 @@ class SessionState {
       if (generation != _generation) return;
       turns.value = read;
       if (diffScope.value is StashedChanges) {
-        final stash = await _backend.gitStash();
-        if (generation != _generation) return;
+        final stash = git.stash.value;
         if (stash != null) {
           reportRead('changes', null);
           shownScope.value = const StashedChanges();
+          shownStash.value = (stash: stash, branch: git.status.value?.branch);
           changesProblem.value = null;
           changed.value = stash.files;
           return;
@@ -514,7 +522,7 @@ class SessionState {
   /// One file's unified diff between the shown checkpoints.
   Future<String> patch(String path) {
     if (shownScope.value is StashedChanges) {
-      final id = git.stash.value?.id;
+      final id = shownStash.value?.stash.id;
       if (id == null) return Future.value('');
       return _backend.stashPatch(
         id,

@@ -1061,6 +1061,79 @@ void main() {
   });
 
   testWidgets(
+    'keeps the stash files, patch, heading and actions on the same read',
+    (tester) async {
+      BridgeStash stash(String id, int minute) => BridgeStash(
+        id: id,
+        createdMs: DateTime(2026, 11, 1, 10, minute).millisecondsSinceEpoch,
+        files: [
+          BridgeFileChange(
+            path: '$id.txt',
+            shown: '$id.txt',
+            status: BridgeChangeStatus.added,
+            added: 1,
+            removed: 0,
+          ),
+        ],
+      );
+      final backend = FakeBackend()
+        ..stashed = stash('s1', 41)
+        ..stashPatches = {
+          's1': {'s1.txt': '@@ -0,0 +1 @@\n+first stash\n'},
+          's2': {'s2.txt': '@@ -0,0 +1 @@\n+second stash\n'},
+          's3': {'s3.txt': '@@ -0,0 +1 @@\n+third stash\n'},
+        };
+      final state = await show(tester, backend);
+      await state.git.refresh();
+      // An external switch happened after the last poll but before choosing the stash.
+      backend.git = gitStatusOf(branch: 'feature');
+      backend.stashed = stash('s2', 42);
+      await state.showTurns(const StashedChanges());
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Left on feature at 10:42'), findsOneWidget);
+      expect(
+        find.textContaining('second stash', findRichText: true),
+        findsOneWidget,
+      );
+      expect(find.text('s2.txt'), findsWidgets);
+
+      // The next refresh must not retarget the old file list while its replacement loads.
+      backend.turnsGate = Completer();
+      backend.git = gitStatusOf(branch: 'third');
+      backend.stashed = stash('s3', 43);
+      await state.git.refresh();
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Left on feature at 10:42'), findsOneWidget);
+      await tester.tap(find.text('Discard…'));
+      await tester.pumpAndSettle();
+      expect(
+        find.textContaining('stashed on feature at 10:42'),
+        findsOneWidget,
+      );
+      await tester.tap(find.text('Discard'));
+      await tester.pumpAndSettle();
+      expect(backend.calls, contains('discard stash s2'));
+      expect(backend.calls, isNot(contains('discard stash s3')));
+
+      backend.turnsGate!.complete();
+      await state.readChanges();
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Left on third at 10:43'), findsOneWidget);
+      expect(
+        find.textContaining('third stash', findRichText: true),
+        findsOneWidget,
+      );
+      expect(find.text('s3.txt'), findsWidgets);
+      expect(find.text('s2.txt'), findsNothing);
+      await tester.tap(find.text('Restore'));
+      await tester.pumpAndSettle();
+      expect(backend.calls, contains('restore stash s3'));
+      expect(backend.calls, isNot(contains('restore stash s1')));
+      await tester.pump(const Duration(seconds: 7));
+    },
+  );
+
+  testWidgets(
     'drops an obsolete patch when the stash changes with the same file',
     (tester) async {
       final files = [

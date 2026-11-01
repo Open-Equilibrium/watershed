@@ -83,6 +83,7 @@ class _DiffViewState extends State<DiffView> {
     widget.state.changed.addListener(_show);
     widget.state.shown.addListener(_rebuild);
     widget.state.shownScope.addListener(_rebuild);
+    widget.state.shownStash.addListener(_show);
     widget.state.git.stash.addListener(_rebuild);
     // Opening the tab reads the turns again, so it shows the latest one.
     unawaited(widget.state.readChanges());
@@ -99,6 +100,7 @@ class _DiffViewState extends State<DiffView> {
     widget.state.changed.removeListener(_show);
     widget.state.shown.removeListener(_rebuild);
     widget.state.shownScope.removeListener(_rebuild);
+    widget.state.shownStash.removeListener(_show);
     widget.state.git.stash.removeListener(_rebuild);
     _focus.dispose();
     _scroll.dispose();
@@ -177,7 +179,7 @@ class _DiffViewState extends State<DiffView> {
     final shown = widget.state.shown.value;
     final scope = widget.state.shownScope.value;
     final stash = scope is StashedChanges
-        ? widget.state.git.stash.value?.id
+        ? widget.state.shownStash.value?.stash.id
         : null;
     return '${scope.runtimeType} ${shown?.from.id}..${shown?.to.id} '
         '$stash ${widget.state.hideWhitespace.value}';
@@ -320,8 +322,14 @@ class _DiffViewState extends State<DiffView> {
   /// stashed changes.
   Widget? _header() {
     final shown = widget.state.shown.value;
-    final stash = widget.state.git.stash.value;
     final scope = widget.state.shownScope.value;
+    final snapshot = widget.state.shownStash.value;
+    final stash = scope is StashedChanges
+        ? snapshot?.stash
+        : widget.state.git.stash.value;
+    final branch = scope is StashedChanges
+        ? snapshot?.branch
+        : widget.state.git.status.value?.branch;
     if (shown == null && stash == null) return null;
     final files = widget.state.changed.value;
     return _TurnHeader(
@@ -340,7 +348,7 @@ class _DiffViewState extends State<DiffView> {
           : null,
       shown: shown,
       stash: stash,
-      branch: widget.state.git.status.value?.branch,
+      branch: branch,
       git: widget.state.git.status,
       onSelect: (scope) => unawaited(widget.state.showTurns(scope)),
       // Reverting applies to the turn shown, not to all turns.
@@ -353,15 +361,14 @@ class _DiffViewState extends State<DiffView> {
       onRestore: () {
         if (stash != null) unawaited(widget.state.git.restoreStash(stash));
       },
-      onDiscard: () => unawaited(_confirmDiscard(stash)),
+      onDiscard: () => unawaited(_confirmDiscard(stash, branch)),
     );
   }
 
   /// Asks before deleting the stashed changes, then deletes them.
-  Future<void> _confirmDiscard(BridgeStash? stash) async {
+  Future<void> _confirmDiscard(BridgeStash? stash, String? branch) async {
     if (stash == null) return;
     final count = stash.files.length;
-    final branch = widget.state.git.status.value?.branch;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => DangerDialog(
