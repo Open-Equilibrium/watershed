@@ -265,7 +265,7 @@ h4.qh{margin:14px 0 6px;font-size:13px}
   </section>
   <section>
     <h3 class="sec">5 · Protecting a Block</h3>
-    <p class="sub">"Protect…" in a Block's menu, also for a Page or a Source, stops it from inheriting rights, so only the Roles allowed on it may change it (ADR-0235); it needs Manage. Reading still follows the area, and real secrecy needs an area of its own, which the dialog says. A protected Block shows a lock in its header.</p>
+    <p class="sub">"Protect…" in a Block's menu, also for a Page or a Source, stops it from inheriting rights, so only the Roles allowed on it may change it (ADR-0235); it needs Manage. Reading still follows the area. Protection controls who may change it in Liquid, not who holds it: in M3 every authorized device holds the complete Workspace, so content that must stay off other people's devices belongs in a separate Workspace, as the dialog says. A protected Block shows a lock in its header.</p>
     <div class="stage"><div class="scaler"><div class="win" id="w-prot" data-w="1240"></div></div></div>
   </section>
   <section>
@@ -278,7 +278,7 @@ h4.qh{margin:14px 0 6px;font-size:13px}
     <h4 class="qh">Decided (ADR-0235)</h4>
     <ol class="qs">
       <li>History is a sequence of Actions plus save points; Revert records a new reversing Action; Restore version returns a Page to an earlier point, also when later changes conflict; ⌘Z appears as Undo.</li>
-      <li>Roles stay allow-only; a protected Page, Block or Source stops inheriting rights; a Block's rights follow its home, not the Page showing a View; read secrecy holds only per area.</li>
+      <li>Roles stay allow-only; a protected Page, Block or Source stops inheriting rights; a Block's rights follow its home, not the Page showing a View; read access is never finer than an area, and in M3 the Workspace is the confidentiality boundary.</li>
       <li>M3a assigns Roles to Automations.</li>
     </ol>
     <h4 class="qh">Approved with these mockups (2026-11-01)</h4>
@@ -457,7 +457,7 @@ const protDlg=`<div class="scrim"></div><div style="position:absolute;inset:0;di
 <div class="frow"><span class="cb on" style="opacity:.6">✓</span>Full access<span class="r">always</span></div>
 <div class="frow"><span class="cb on">✓</span>Budget editor<span class="r">Read, Apply</span></div>
 <div class="frow"><span class="cb"></span>Can edit<span class="r">loses Apply here</span></div></div>
-<p>Reading still follows the area. To keep it secret, move it to an area of its own.</p>
+<p>Reading still follows the area, and every device in this Workspace holds its content. To keep it off other people's devices, put it in a separate Workspace.</p>
 <div class="acts"><span class="btn pri">Protect <kbd>⏎</kbd></span><span class="sp"></span><span class="btn">Cancel <kbd>esc</kbd></span></div></div></div>`;
 frame('w-prot',{h:560,head:bgHead,main:`<div class="pg"><div class="col"><div class="ttl"><span class="tic">💰</span>Household budget</div>
 <div class="bh"><span class="ico">${I.db}</span><b>Expenses</b><span class="chip">Table ⌄</span><span class="prot">${I.lock} protected</span><span class="end"><span class="cap">Synced · on 2 Pages</span><span class="ib">${I.more}</span></span></div>${dbTable()}</div></div>`,over:protDlg});
@@ -469,7 +469,7 @@ frame('w-set',{h:540,side:{sel:'set'},head:bgHead,main:bgPage,over:modal('Settin
 <h2 style="font-size:16px;line-height:22px;margin-top:8px">Areas<span class="btn">${I.plus}New area</span></h2>
 <div class="tbl" style="max-width:640px"><div class="tr" style="--cols:1fr 120px 40px"><span>${I.area} Private</span><span class="inh">6 Pages, 2 Sources</span><span>${I.more}</span></div>
 <div class="tr" style="--cols:1fr 120px 40px;box-shadow:none"><span>${I.area} Acme API</span><span class="inh">2 Pages, 1 Source</span><span>${I.more}</span></div></div>
-<div class="cap" style="max-width:640px">An area groups Pages and Sources for Roles; with sync it also decides which devices receive them and which key encrypts them.</div>
+<div class="cap" style="max-width:640px">An area groups Pages and Sources for Roles and encryption keys. Every authorized device still receives the whole Workspace; deciding per area which devices receive it follows later.</div>
 </div></div>`,{w:1080})});
 
 let mode='system',fit=true;const mq=matchMedia('(prefers-color-scheme: dark)');

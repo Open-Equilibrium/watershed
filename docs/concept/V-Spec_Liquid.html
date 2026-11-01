@@ -159,7 +159,7 @@ Liquid        = local-first workspace and App platform</code></pre>
         <li>Agents may receive narrower per-session authority than their reusable agent profile.</li>
         <li>Every Workspace write uses the same mutation pipeline and records actor, origin, permission result and reversible change in History.</li>
         <li>Visibility, View placement, Connection existence and sync access never imply execution authority.</li>
-        <li>Rights inherit from an area to its Pages and Blocks. A <strong>protected</strong> Page, Block or Source stops inheriting them, so only Roles allowed on it may change it. A Block's rights follow its home, never the Page that shows a View of it. Read secrecy holds only per area (ADR-0235).</li>
+        <li>Rights inherit from an area to its Pages and Blocks. A <strong>protected</strong> Page, Block or Source stops inheriting them, so only Roles allowed on it may change it. A Block's rights follow its home, never the Page that shows a View of it. Read access is never finer than an area; in M3 every authorized device holds the complete Workspace, so the Workspace stays the confidentiality boundary (ADR-0235).</li>
         <li>M3a assigns Roles to Automations; people follow with sync and agent profiles with M3b (ADR-0235).</li>
       </ul>
       <h3>How an agent changes Workspace data</h3>
