@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::time::{Duration, SystemTime};
 
-use crate::{StoredSession, recent_sessions, session_title, titled_session};
+use crate::{StoredSession, recent_sessions, session_title, session_title_of};
 
 /// Writes a pi session file started in `cwd` with `lines` after its header, modified at `at`.
 fn session(dir: &Path, name: &str, cwd: &str, lines: &[&str], at: u64) {
@@ -213,18 +213,18 @@ fn names_a_session_by_its_id() {
     session(&dir, "s4", "/work/acme-api", &[], 3_000);
     let project = Path::new("/work/acme-api");
     assert_eq!(
-        titled_session(&dir, project, "s2").as_deref(),
+        session_title_of(&dir, project, "s2").as_deref(),
         Some("Fix flaky sync test")
     );
     assert_eq!(
-        titled_session(&dir, project, "s3"),
+        session_title_of(&dir, project, "s3"),
         None,
         "another project's"
     );
     assert_eq!(
-        titled_session(&dir, project, "s4").as_deref(),
+        session_title_of(&dir, project, "s4").as_deref(),
         Some("Untitled session")
     );
-    assert_eq!(titled_session(&dir, project, "s9"), None);
+    assert_eq!(session_title_of(&dir, project, "s9"), None);
     let _ = std::fs::remove_dir_all(&dir);
 }

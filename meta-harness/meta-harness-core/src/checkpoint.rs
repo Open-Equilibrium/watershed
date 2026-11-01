@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 
 use tokio::sync::watch;
 
-use crate::checkout::{Checkout, Running};
+use crate::checkout::Running;
 use crate::diff::{ChangeStatus, DiffError, FileChange, Whitespace, WorkingTree};
 
 /// Longest one Git command on the project may take; Git is then stopped with the programs it
@@ -90,6 +90,9 @@ pub struct RevertFile {
     pub edited: bool,
     /// When the file was last written, in Unix milliseconds, if it exists.
     pub modified_ms: Option<u64>,
+    /// Whether Git ignores it and the revert deletes it only because a restored file needs its
+    /// place; such a folder's path ends in `/`.
+    pub ignored: bool,
 }
 
 /// A session's checkpoints in its project.
@@ -150,12 +153,19 @@ impl Checkpoints {
         let reference = checkpoint.reference()?;
         let tree = self.tree().await?;
         if checkpoint.phase == Phase::Start {
+            // A start whose run never settled ends that mark first, so it removes no name the
+            // new one holds.
+            self.running.lock().expect("running lock").take();
             let running = self
-                .until_closed(
-                    Checkout::new(tree.locks().to_owned()).run(&checkpoint.session, self.timeout),
-                )
+                .until_closed(tree.checkout().run(&checkpoint.session))
                 .await?;
-            *self.running.lock().expect("running lock") = Some(running);
+            let mut slot = self.running.lock().expect("running lock");
+            // Closing empties the slot after telling it closed, so a mark that arrives later
+            // drops here instead of outliving the session.
+            if *self.closed.borrow() {
+                return Err(DiffError::Closed);
+            }
+            *slot = Some(running);
         }
         let captured = async {
             let _turn = self
@@ -193,21 +203,29 @@ impl Checkpoints {
                 .collect(),
             None => Default::default(),
         };
-        let files = self
-            .bounded(tree.changes(&now, &target, Whitespace::Shown))
-            .await?
+        let changes = self.bounded(tree.revertable(&now, &target)).await?;
+        let in_the_way = tree.in_the_way(&changes);
+        let mut files: Vec<RevertFile> = changes
             .into_iter()
-            .filter(|change| tree.within(&change.path))
             .map(|change| RevertFile {
                 edited: edited.contains(&change.path),
                 modified_ms: modified_ms(&tree.file(&change.path)),
                 path: change.path,
                 status: change.status,
+                ignored: false,
             })
+            .chain(in_the_way.into_iter().map(|path| RevertFile {
+                edited: false,
+                modified_ms: modified_ms(&tree.file(&path)),
+                path,
+                status: ChangeStatus::Deleted,
+                ignored: true,
+            }))
             .collect();
+        files.sort_by(|a, b| a.path.cmp(&b.path));
         Ok(RevertPlan {
             files,
-            running: Checkout::new(tree.locks().to_owned()).running(),
+            running: tree.checkout().running(),
             branch: self.bounded(tree.branch()).await?,
         })
     }
@@ -219,7 +237,7 @@ impl Checkpoints {
         let tree = self.tree().await?;
         let target = self.read(&tree, to).await?;
         // Held alone, so no turn starts in the checkout until the files are back.
-        let _alone = Checkout::new(tree.locks().to_owned()).alone()?;
+        let _alone = tree.checkout().alone()?;
         let _turn = self
             .until_closed(async { Ok(self.captures.lock().await) })
             .await?;

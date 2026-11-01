@@ -1003,3 +1003,208 @@ fn a_turn_that_starts_during_a_revert_waits_until_the_files_are_back() {
             .expect("captured");
     });
 }
+
+#[test]
+fn a_revert_leaves_submodules_and_their_work_alone() {
+    run(async {
+        let sub = Repo::new("revert-submodule-inner");
+        let repo = Repo::new("revert-submodule-outer");
+        repo.git(&[
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            "-q",
+            &sub.path().display().to_string(),
+            "sub",
+        ]);
+        repo.git(&["commit", "-q", "-m", "submodule"]);
+        // A common setting that makes `git restore` check submodules out too.
+        repo.git(&["config", "submodule.recurse", "true"]);
+        let inner = repo.path().join("sub");
+        let git_in = |args: &[&str]| {
+            let output = Command::new("git")
+                .args(["-c", "user.name=Test", "-c", "user.email=test@example.com"])
+                .args(args)
+                .current_dir(&inner)
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .output()
+                .expect("git runs");
+            assert!(output.status.success(), "{args:?}");
+            String::from_utf8(output.stdout).expect("UTF-8")
+        };
+        let checkpoints = Checkpoints::new(repo.path());
+        turn(&checkpoints, "t1", || {
+            std::fs::write(inner.join("a.txt"), "committed\n").expect("file");
+            git_in(&["commit", "-q", "-am", "inner change"]);
+            repo.write("a.txt", "new\n");
+        })
+        .await;
+        std::fs::write(inner.join("a.txt"), "uncommitted\n").expect("file");
+        let head = git_in(&["rev-parse", "HEAD"]);
+
+        let plan = checkpoints
+            .revert_plan(&at("t1", Phase::Start), None)
+            .await
+            .expect("plan");
+        let paths: Vec<_> = plan.files.iter().map(|file| file.path.as_str()).collect();
+        assert_eq!(paths, ["a.txt"], "a submodule is not reverted");
+        checkpoints
+            .revert(&at("t1", Phase::Start))
+            .await
+            .expect("reverted");
+        assert_eq!(
+            std::fs::read_to_string(repo.path().join("a.txt")).expect("a"),
+            "old\n"
+        );
+        assert_eq!(git_in(&["rev-parse", "HEAD"]), head);
+        assert_eq!(
+            std::fs::read_to_string(inner.join("a.txt")).expect("inner"),
+            "uncommitted\n"
+        );
+    });
+}
+
+#[test]
+fn a_revert_that_git_could_not_finish_names_the_files_left() {
+    use std::os::unix::fs::PermissionsExt;
+    run(async {
+        let repo = Repo::new("revert-stuck");
+        std::fs::create_dir_all(repo.path().join("ro")).expect("folder");
+        repo.write("ro/kept.txt", "kept\n");
+        repo.git(&["add", "."]);
+        repo.git(&["commit", "-q", "-m", "folder"]);
+        let checkpoints = Checkpoints::new(repo.path());
+        turn(&checkpoints, "t1", || {
+            repo.write("a.txt", "new\n");
+            repo.write("ro/new.txt", "new\n");
+        })
+        .await;
+        // Git cannot delete a file in a folder it may not write, but still exits with 0.
+        let folder = repo.path().join("ro");
+        std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o555)).expect("mode");
+        let reverted = checkpoints.revert(&at("t1", Phase::Start)).await;
+        std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o755)).expect("mode");
+        assert!(
+            matches!(&reverted, Err(DiffError::NotReverted(left)) if left == &["ro/new.txt"]),
+            "{reverted:?}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(repo.path().join("a.txt")).expect("a"),
+            "old\n"
+        );
+    });
+}
+
+#[test]
+fn a_revert_lists_ignored_files_in_the_way_of_restored_ones() {
+    run(async {
+        let repo = Repo::new("revert-ignored");
+        repo.write(".gitignore", "data/\n");
+        repo.write("data", "a file\n");
+        repo.git(&["add", ".gitignore", "data"]);
+        repo.git(&["commit", "-q", "-m", "files"]);
+        let checkpoints = Checkpoints::new(repo.path());
+        turn(&checkpoints, "t1", || {
+            // The file `data` becomes an ignored folder.
+            std::fs::remove_file(repo.path().join("data")).expect("removed");
+            std::fs::create_dir_all(repo.path().join("data")).expect("folder");
+            repo.write("data/db.sqlite", "ignored\n");
+        })
+        .await;
+        let plan = checkpoints
+            .revert_plan(&at("t1", Phase::Start), None)
+            .await
+            .expect("plan");
+        let listed: Vec<_> = plan
+            .files
+            .iter()
+            .map(|file| (file.path.as_str(), file.status, file.ignored))
+            .collect();
+        assert_eq!(
+            listed,
+            [
+                ("data", ChangeStatus::Added, false),
+                ("data/", ChangeStatus::Deleted, true),
+            ]
+        );
+    });
+}
+
+#[test]
+fn a_pipe_among_the_locks_holds_up_no_revert() {
+    run(async {
+        let repo = Repo::new("revert-fifo");
+        let checkpoints = Checkpoints::new(repo.path());
+        turn(&checkpoints, "t1", || repo.write("a.txt", "new\n")).await;
+        let running = repo.path().join(".git/watershed/running");
+        std::fs::create_dir_all(&running).expect("folder");
+        let made = Command::new("mkfifo")
+            .arg(running.join("pipe"))
+            .status()
+            .expect("mkfifo runs");
+        assert!(made.success());
+        let plan = tokio::time::timeout(
+            Duration::from_secs(5),
+            checkpoints.revert_plan(&at("t1", Phase::Start), None),
+        )
+        .await
+        .expect("the plan does not open the pipe")
+        .expect("plan");
+        assert!(plan.running.is_empty());
+    });
+}
+
+#[test]
+fn a_session_that_starts_turns_without_ends_still_counts_as_running() {
+    run(async {
+        let repo = Repo::new("revert-restart");
+        let checkpoints = Checkpoints::new(repo.path());
+        checkpoints
+            .capture(&at("t1", Phase::Start))
+            .await
+            .expect("started");
+        // pi never settled the first run; the next one starts.
+        checkpoints
+            .capture(&at("t2", Phase::Start))
+            .await
+            .expect("started");
+        let plan = checkpoints
+            .revert_plan(&at("t1", Phase::Start), None)
+            .await
+            .expect("plan");
+        assert_eq!(plan.running, ["s1"]);
+    });
+}
+
+#[test]
+fn a_turn_waits_for_a_revert_past_the_time_limit_of_one_git() {
+    run(async {
+        let repo = Repo::new("revert-long");
+        let checkpoints = std::sync::Arc::new(Checkpoints::with_timeout(
+            repo.path(),
+            Duration::from_millis(100),
+        ));
+        assert!(matches!(checkpoints.in_repository().await, Ok(true)));
+        let reverting = crate::checkout::Checkout::new(repo.path().join(".git/watershed"))
+            .alone()
+            .expect("nothing runs");
+        let starting = tokio::spawn({
+            let checkpoints = checkpoints.clone();
+            async move { checkpoints.capture(&at("t1", Phase::Start)).await }
+        });
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        assert!(!starting.is_finished(), "the turn still waits");
+        drop(reverting);
+        tokio::time::timeout(Duration::from_secs(5), starting)
+            .await
+            .expect("the turn starts")
+            .expect("joined")
+            .expect("captured");
+        let plan = checkpoints
+            .revert_plan(&at("t1", Phase::Start), None)
+            .await
+            .expect("plan");
+        assert_eq!(plan.running, ["s1"], "and it counts as running");
+    });
+}

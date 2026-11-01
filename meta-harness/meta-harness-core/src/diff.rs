@@ -98,8 +98,12 @@ pub enum DiffError {
     InvalidCheckpoint(String),
     /// The session ended while Git read the project.
     Closed,
-    /// Agents of these sessions run in the checkout, so its files must not be reverted.
+    /// Agents of these sessions run in the checkout, so its files must not be reverted; none
+    /// named while a turn starts or another revert runs.
     AgentRunning(Vec<String>),
+    /// Git left these files below the working folder unreverted, such as one in a folder it
+    /// may not write.
+    NotReverted(Vec<String>),
 }
 
 impl fmt::Display for DiffError {
@@ -121,9 +125,11 @@ impl fmt::Display for DiffError {
             Self::NoCheckpoint => f.write_str("the checkpoint no longer exists"),
             Self::InvalidCheckpoint(id) => write!(f, "{id:?} cannot name a checkpoint"),
             Self::Closed => f.write_str("the session ended"),
-            Self::AgentRunning(sessions) => {
-                write!(f, "an agent runs in this checkout: {}", sessions.join(", "))
+            Self::AgentRunning(sessions) if sessions.is_empty() => {
+                f.write_str("a turn or another revert is starting in this checkout")
             }
+            Self::AgentRunning(_) => f.write_str("an agent runs in this checkout"),
+            Self::NotReverted(paths) => write!(f, "Git could not revert {}", paths.join(", ")),
         }
     }
 }
@@ -225,9 +231,74 @@ impl WorkingTree {
         self.root.join(path)
     }
 
-    /// The checkout's `watershed` folder in its Git directory.
-    pub(crate) fn locks(&self) -> &Path {
-        &self.locks
+    /// The locks that tell which agents run in the checkout.
+    pub(crate) fn checkout(&self) -> crate::checkout::Checkout {
+        crate::checkout::Checkout::new(self.locks.clone())
+    }
+
+    /// The changes from `from` to `to` a revert to `to` makes: those below the working folder,
+    /// without submodules and nested repositories, whose files a revert leaves alone.
+    pub async fn revertable(
+        &self,
+        from: &Snapshot,
+        to: &Snapshot,
+    ) -> Result<Vec<FileChange>, DiffError> {
+        let repositories = self.repositories(from, to).await?;
+        Ok(self
+            .changes(from, to, Whitespace::Shown)
+            .await?
+            .into_iter()
+            .filter(|change| self.within(&change.path) && !repositories.contains(&change.path))
+            .collect())
+    }
+
+    /// The submodules and nested repositories that differ from `from` to `to`.
+    async fn repositories(
+        &self,
+        from: &Snapshot,
+        to: &Snapshot,
+    ) -> Result<HashSet<String>, DiffError> {
+        // `--raw` gives each side's mode; Git records a repository as mode 160000.
+        let raw = self.diff(&["--raw", "-z", &from.0, &to.0]).await?;
+        let mut fields = raw.split('\0');
+        let mut repositories = HashSet::new();
+        while let (Some(record), Some(path)) = (fields.next(), fields.next()) {
+            if record
+                .split(' ')
+                .take(2)
+                .any(|mode| mode.ends_with("160000"))
+            {
+                repositories.insert(path.to_owned());
+            }
+        }
+        Ok(repositories)
+    }
+
+    /// The files Git ignores that a revert of `changes` would delete because a restored file
+    /// needs their place: a folder where a file returns, ending in `/`, or a file where a
+    /// restored file's folder goes.
+    pub fn in_the_way(&self, changes: &[FileChange]) -> Vec<String> {
+        let listed: HashSet<&str> = changes.iter().map(|change| change.path.as_str()).collect();
+        let mut found = std::collections::BTreeSet::new();
+        for change in changes
+            .iter()
+            .filter(|change| change.status == ChangeStatus::Added)
+        {
+            let is_dir = |path: &str| {
+                std::fs::symlink_metadata(self.root.join(path)).map(|meta| meta.is_dir())
+            };
+            if matches!(is_dir(&change.path), Ok(true)) {
+                found.insert(format!("{}/", change.path));
+            }
+            let mut folder = change.path.as_str();
+            while let Some((parent, _)) = folder.rsplit_once('/') {
+                folder = parent;
+                if matches!(is_dir(folder), Ok(false)) && !listed.contains(folder) {
+                    found.insert(folder.to_owned());
+                }
+            }
+        }
+        found.into_iter().collect()
     }
 
     /// The branch checked out, or none when HEAD names a commit.
@@ -254,8 +325,7 @@ impl WorkingTree {
         // The private index then lists the current files, so `git restore` deletes those `to`
         // lacks, and a file that was untracked before the turn returns untracked.
         let now = Snapshot(self.capture().await?);
-        let changes = self.changes(&now, to, Whitespace::Shown).await?;
-        if !changes.iter().any(|change| self.within(&change.path)) {
+        if self.revertable(&now, to).await?.is_empty() {
             return Ok(());
         }
         let below = if self.prefix.is_empty() {
@@ -263,16 +333,34 @@ impl WorkingTree {
         } else {
             format!(":(top,literal){}", self.prefix)
         };
+        // A repository's files are its own, so a project's `submodule.recurse` checks none out.
+        let args = [
+            "restore",
+            "--no-recurse-submodules",
+            "--source",
+            &to.0,
+            "--worktree",
+            "--",
+            &below,
+        ];
         let env = self.env(&self.store.0.join("index"));
-        let restored = git(
-            &self.root,
-            &env,
-            &["restore", "--source", &to.0, "--worktree", "--", &below],
-        )
-        .await;
+        let restored = git(&self.root, &env, &args).await;
         // Deleting its last file can remove the working folder, where the agent still runs.
         let _ = std::fs::create_dir_all(&self.work);
-        restored.map(drop)
+        restored?;
+        // Git only warns when it cannot delete a file, so the result is checked.
+        let after = Snapshot(self.capture().await?);
+        let left: Vec<String> = self
+            .revertable(&after, to)
+            .await?
+            .into_iter()
+            .map(|change| change.path)
+            .collect();
+        if left.is_empty() {
+            Ok(())
+        } else {
+            Err(DiffError::NotReverted(left))
+        }
     }
 
     /// Captures the current state as a commit under `reference`, with the project's HEAD as its
