@@ -38,7 +38,7 @@ String trajectoryKeys(ShortcutSettings keys) => [
 /// Keys while comparing two branches.
 String compareKeys(ShortcutSettings keys) => [
   '${Fixed.moveInTree.display} tree',
-  keys.hint(Command.selectBranch, 'select branch'),
+  keys.hint(Command.selectBranch, 'select session branch'),
   keys.hint(Command.compare, 'leave compare'),
 ].where((part) => part.isNotEmpty).join(' · ');
 
@@ -516,7 +516,10 @@ class _TrajectoryViewState extends State<TrajectoryView> {
     final first = _graph.branchOf(_shownTip);
     final other = branches.where((branch) => branch != first).lastOrNull;
     if (first == null || other == null) {
-      widget.state.notify(BridgeLevel.info, 'Comparing needs a second branch.');
+      widget.state.notify(
+        BridgeLevel.info,
+        'Comparing needs a second session branch.',
+      );
       return;
     }
     widget.comparing.value = true;
@@ -769,7 +772,7 @@ class _TrajectoryViewState extends State<TrajectoryView> {
     final matches = _matches();
     final matching = matches?.where((match) => match).length;
     return [
-      branch == null ? 'new branch' : 'branch ${branch.ref}',
+      branch == null ? 'new session branch' : 'session branch ${branch.ref}',
       '${_records.length} steps',
       formatDuration(_history?.trajectories.firstOrNull?.durationMs ?? 0),
       if (matching != null)

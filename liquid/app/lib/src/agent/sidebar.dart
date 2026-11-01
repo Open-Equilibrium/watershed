@@ -221,10 +221,19 @@ class Sidebar extends StatelessWidget {
                       ),
                       Padding(
                         padding: const EdgeInsets.only(left: 15),
-                        child: Text(
-                          [info.harness, info.device].join(' · '),
-                          style: small,
-                          overflow: TextOverflow.ellipsis,
+                        // The checkout's branch, live (approved Git mockups).
+                        child: ValueListenableBuilder(
+                          valueListenable: state.git.status,
+                          builder: (context, git, _) => Text(
+                            [
+                              info.harness,
+                              ?(git?.branch ?? git?.commit),
+                              info.device,
+                            ].join(' · '),
+                            style: small,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
                       ),
                     ],

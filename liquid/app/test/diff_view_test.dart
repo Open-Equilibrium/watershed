@@ -8,6 +8,7 @@ import 'package:liquid/src/diff/diff_view.dart';
 import 'package:liquid/src/diff/turn_scope.dart';
 import 'package:liquid/src/format.dart';
 import 'package:liquid/src/rust/api/events.dart';
+import 'package:liquid/src/rust/api/git.dart';
 import 'package:liquid/src/rust/api/history.dart';
 import 'package:liquid/src/session/session_state.dart';
 import 'package:liquid/src/theme/theme.dart';
@@ -203,7 +204,10 @@ void main() {
       'T1..T2',
       reason: 'the first turn\'s start to the last end',
     );
-    expect(find.textContaining('All turns of this branch'), findsOneWidget);
+    expect(
+      find.textContaining('All turns of this session branch'),
+      findsOneWidget,
+    );
   });
 
   testWidgets('never shows a turn\'s patch under another turn', (tester) async {
@@ -932,8 +936,8 @@ void main() {
       );
       expect(
         find.text(
-          'The session continues on a new branch from before turn 3, and turn 3’s prompt '
-          'returns to the input area. Turn 3 stays on its own branch in the session tree.',
+          'The session continues on a new session branch from before turn 3, and turn 3’s '
+          'prompt returns to the input area. Turn 3 stays on its own session branch.',
         ),
         findsOneWidget,
       );
@@ -1054,5 +1058,56 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Revert files to before this turn…'), findsNothing);
     });
+  });
+
+  testWidgets('shows the branch’s stashed changes with Restore and Discard', (
+    tester,
+  ) async {
+    final left = DateTime(2026, 11, 1, 10, 41).millisecondsSinceEpoch;
+    final backend = FakeBackend()
+      ..stashed = BridgeStash(
+        createdMs: left,
+        files: [
+          BridgeFileChange(
+            path: 'notes/todo.md',
+            shown: 'notes/todo.md',
+            status: BridgeChangeStatus.added,
+            added: 1,
+            removed: 0,
+          ),
+        ],
+      )
+      ..patches = {'notes/todo.md': '@@ -0,0 +1 @@\n+Ship it\n'};
+    final state = await show(tester, backend);
+    await state.git.refresh();
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Turn 1'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Stashed changes'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Stashed changes'), findsOneWidget);
+    expect(find.textContaining('Left on main at 10:41'), findsOneWidget);
+    expect(backend.calls, contains('stash patch notes/todo.md'));
+    expect(find.textContaining('Ship it', findRichText: true), findsOneWidget);
+
+    await tester.tap(find.text('Discard…'));
+    await tester.pumpAndSettle();
+    expect(
+      find.text(
+        'The 1 file stashed on main at 10:41 are deleted and cannot be restored. Your '
+        'uncommitted changes, commits and branches stay.',
+      ),
+      findsOneWidget,
+    );
+    await tester.tap(find.text('Discard'));
+    await tester.pumpAndSettle();
+    expect(backend.calls, contains('discard stash'));
+
+    await tester.tap(find.text('Restore'));
+    await tester.pumpAndSettle();
+    expect(backend.calls.last, 'restore stash');
+    await tester.pump(const Duration(seconds: 7));
   });
 }

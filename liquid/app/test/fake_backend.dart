@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:liquid/src/rust/api/events.dart';
+import 'package:liquid/src/rust/api/git.dart';
 import 'package:liquid/src/rust/api/history.dart';
 import 'package:liquid/src/rust/api/session.dart';
 import 'package:liquid/src/session/backend.dart';
@@ -262,6 +263,70 @@ class FakeBackend implements SessionBackend {
     calls.add('context $entry');
     if (contextError case final error?) throw error;
     return contexts[entry];
+  }
+
+  /// The checkout's Git state; null outside Git.
+  BridgeGitStatus? git = gitStatusOf();
+  Object? gitError;
+  BridgeBranches branches = const BridgeBranches(branches: [], running: []);
+  BridgeStash? stashed;
+
+  /// What each Git write returns, until it is set otherwise.
+  BridgeGitOutcome outcome = outcomeOf(BridgeGitOutcomeKind.done);
+
+  /// What fetching fails with.
+  Object? fetchError;
+
+  @override
+  Future<BridgeGitStatus?> gitStatus() async {
+    if (gitError case final error?) throw error;
+    return git;
+  }
+
+  @override
+  Future<BridgeBranches> gitBranches() async => branches;
+
+  @override
+  Future<BridgeGitOutcome> switchBranch(
+    BridgeBranch branch, {
+    required bool leaveChanges,
+  }) async {
+    calls.add('switch ${branch.name}${leaveChanges ? ' leaving changes' : ''}');
+    return outcome;
+  }
+
+  @override
+  Future<BridgeGitOutcome> createBranch(String name) async {
+    calls.add('create $name');
+    return outcome;
+  }
+
+  @override
+  Future<BridgeStash?> gitStash() async => stashed;
+
+  @override
+  Future<String> stashPatch(String path, {required bool hideWhitespace}) async {
+    calls.add('stash patch $path');
+    return patches[path] ?? '';
+  }
+
+  @override
+  Future<BridgeGitOutcome> restoreStash() async {
+    calls.add('restore stash');
+    return outcome;
+  }
+
+  @override
+  Future<BridgeGitOutcome> discardStash() async {
+    calls.add('discard stash');
+    return outcome;
+  }
+
+  @override
+  Future<bool> fetch() async {
+    calls.add('fetch');
+    if (fetchError case final error?) throw error;
+    return true;
   }
 
   /// What reverting to before a turn would change.
@@ -552,3 +617,38 @@ BridgeTurn turnOf(
   added: added,
   removed: removed,
 );
+
+BridgeGitStatus gitStatusOf({
+  String? branch = 'main',
+  String? upstream = 'origin/main',
+  int ahead = 0,
+  int behind = 0,
+  int changed = 0,
+}) => BridgeGitStatus(
+  branch: branch,
+  commit: '1a2b3c4',
+  upstream: upstream,
+  ahead: ahead,
+  behind: behind,
+  changed: changed,
+);
+
+BridgeBranch branchOf(
+  String name, {
+  bool remote = false,
+  bool current = false,
+  bool stashed = false,
+}) => BridgeBranch(
+  name: name,
+  shown: name,
+  remote: remote,
+  committedMs: 0,
+  current: current,
+  stashed: stashed,
+);
+
+BridgeGitOutcome outcomeOf(
+  BridgeGitOutcomeKind kind, {
+  List<String> files = const [],
+  List<BridgeRunningAgent> running = const [],
+}) => BridgeGitOutcome(kind: kind, files: files, running: running);

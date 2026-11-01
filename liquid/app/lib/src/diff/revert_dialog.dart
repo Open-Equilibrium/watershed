@@ -99,9 +99,9 @@ class _RevertDialog extends StatelessWidget {
             style: muted,
           ),
           Text(
-            'The session continues on a new branch from before $name, and '
+            'The session continues on a new session branch from before $name, and '
             '$name’s prompt returns to the input area. Turn ${turn.number} stays '
-            'on its own branch in the session tree.',
+            'on its own session branch.',
             style: muted,
           ),
         ],
@@ -218,18 +218,8 @@ class _Running extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ws = context.ws;
-    final first = running.first;
-    final name = switch ((first.own, first.title)) {
-      (true, _) => 'This session’s agent',
-      (false, final title?) => '“$title”',
-      (false, null) => 'Another agent session',
-    };
-    final more = running.length - 1;
-    final text = more == 0
-        ? '$name is running${first.own ? '' : ' in this checkout'}. Stop it or wait until '
-              'it finishes, then revert the files.'
-        : '$name and $more more are running in this checkout. Stop them or wait until they '
-              'finish, then revert the files.';
+    final text =
+        '${whoRuns(running)}. ${stopFirst(running)}, then revert the files.';
     return Container(
       padding: const EdgeInsets.symmetric(
         horizontal: WsMetrics.space4,

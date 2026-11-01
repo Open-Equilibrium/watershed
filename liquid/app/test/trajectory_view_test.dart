@@ -156,7 +156,7 @@ void main() {
     tester,
   ) async {
     await show(tester, historyOf(branchA));
-    expect(find.text('branch A · 7 steps · 24.5 s'), findsOneWidget);
+    expect(find.text('session branch A · 7 steps · 24.5 s'), findsOneWidget);
     expect(
       find.descendant(
         of: find.byKey(const ValueKey('start')),
@@ -511,7 +511,7 @@ void main() {
   ) async {
     await show(tester, historyOf(branchA));
     double row(Finder finder) => tester.getCenter(finder).dy;
-    final summary = find.text('branch A · 7 steps · 24.5 s');
+    final summary = find.text('session branch A · 7 steps · 24.5 s');
     expect(find.text('Fold turns'), findsNothing);
     for (final control in ['Real time', 'Compare']) {
       expect(
@@ -610,7 +610,7 @@ void main() {
       'Could not read the session history: the session file is gone',
     ]);
     expect(
-      find.text('branch A · 7 steps · 24.5 s'),
+      find.text('session branch A · 7 steps · 24.5 s'),
       findsOneWidget,
       reason: 'the last history stays',
     );
@@ -999,7 +999,10 @@ void main() {
   testWidgets('says why compare or branch does nothing', (tester) async {
     await show(tester, historyOf(branchA));
     await press(tester, LogicalKeyboardKey.keyC);
-    expect(state.notice.value?.text, 'Comparing needs a second branch.');
+    expect(
+      state.notice.value?.text,
+      'Comparing needs a second session branch.',
+    );
 
     backend.controller.add(event(BridgeEventKind.turnStarted));
     await tester.pumpAndSettle();
@@ -1116,7 +1119,7 @@ void main() {
       leaf: 'b2',
       others: [branchB],
     );
-    expect(find.text('branch B · 5 steps · 1m 01s'), findsOneWidget);
+    expect(find.text('session branch B · 5 steps · 1m 01s'), findsOneWidget);
     await press(tester, LogicalKeyboardKey.arrowDown);
     await press(tester, LogicalKeyboardKey.enter);
     expect(find.byKey(const Key('inspector')), findsOneWidget);
@@ -1137,7 +1140,7 @@ void main() {
     await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
     await tester.pump(const Duration(milliseconds: 700));
     expect(
-      find.text('⌥↑↓ tree · Space select branch · C leave compare'),
+      find.text('⌥↑↓ tree · Space select session branch · C leave compare'),
       findsOneWidget,
     );
     await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);

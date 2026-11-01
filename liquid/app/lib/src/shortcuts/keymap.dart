@@ -202,7 +202,7 @@ enum Fixed {
     Keys(LogicalKeyboardKey.arrowLeft),
     Keys(LogicalKeyboardKey.arrowRight),
   ]),
-  moveInTree('Move in the branch tree', Area.trajectory, '⌥↑↓', [
+  moveInTree('Move in the session tree', Area.trajectory, '⌥↑↓', [
     Keys(LogicalKeyboardKey.arrowUp, alt: true),
     Keys(LogicalKeyboardKey.arrowDown, alt: true),
   ]),
@@ -338,9 +338,13 @@ enum Command {
     Area.trajectory,
     Keys(LogicalKeyboardKey.keyB),
   ),
-  compare('Compare branches', Area.trajectory, Keys(LogicalKeyboardKey.keyC)),
+  compare(
+    'Compare session branches',
+    Area.trajectory,
+    Keys(LogicalKeyboardKey.keyC),
+  ),
   selectBranch(
-    'Select a branch to compare',
+    'Select a session branch to compare',
     Area.trajectory,
     Keys(LogicalKeyboardKey.space),
   );

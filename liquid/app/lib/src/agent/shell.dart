@@ -20,6 +20,7 @@ import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import '../trajectory/trajectory_view.dart';
 import 'action_area.dart';
+import 'branch_menu.dart';
 import 'chat_view.dart';
 import 'input_lane.dart';
 import 'sidebar.dart';
@@ -86,12 +87,23 @@ class _AgentShellState extends State<AgentShell> {
     widget.state.draft.addListener(_applyDraft);
     widget.state.requests.addListener(_requestsChanged);
     unawaited(widget.state.loadStart());
+    widget.state.git.watch();
     // A reopened Trajectory tab starts outside the comparison.
     _tab.addListener(() => _comparing.value = false);
     _shortcuts.report = (problem) =>
         widget.state.notify(BridgeLevel.error, problem);
     if (_shortcuts.firstStart) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _askProfile());
+    }
+  }
+
+  @override
+  void didUpdateWidget(AgentShell oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Only the shown session's checkout is fetched.
+    if (oldWidget.state != widget.state) {
+      oldWidget.state.git.stop();
+      widget.state.git.watch();
     }
   }
 
@@ -140,6 +152,7 @@ class _AgentShellState extends State<AgentShell> {
 
   @override
   void dispose() {
+    widget.state.git.stop();
     _lifecycle.dispose();
     widget.state.draft.removeListener(_applyDraft);
     widget.state.requests.removeListener(_requestsChanged);
@@ -357,8 +370,8 @@ class _AgentShellState extends State<AgentShell> {
   }
 }
 
-/// The session's title with its project and model as chips (approved look mockup); the
-/// branch joins them with the Git slice.
+/// The session's title with its project and model as chips (approved look mockup), and at the
+/// right the checkout's branch (approved Git mockups).
 class _Header extends StatelessWidget {
   const _Header({required this.state, required this.project});
 
@@ -404,6 +417,8 @@ class _Header extends StatelessWidget {
                   : chip(model.substring(model.indexOf('/') + 1)),
             ),
           ),
+          const Spacer(),
+          Flexible(child: BranchChip(state: state)),
         ],
       ),
     );

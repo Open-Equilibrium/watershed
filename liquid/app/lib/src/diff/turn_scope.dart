@@ -28,6 +28,11 @@ class AllTurns extends DiffScope {
   const AllTurns();
 }
 
+/// The stashed changes of the branch checked out (approved Git mockups).
+class StashedChanges extends DiffScope {
+  const StashedChanges();
+}
+
 /// The checkpoints a scope compares: the start of `from` and the end of `to`.
 typedef Compared = ({BridgeTurn from, BridgeTurn to});
 
@@ -53,6 +58,7 @@ Compared? compared(List<BridgeTurn> turns, DiffScope scope) {
           ].firstOrNull ??
           latest,
     AllTurns() => (from: turns.first, to: ended.last),
+    StashedChanges() => null,
   };
 }
 

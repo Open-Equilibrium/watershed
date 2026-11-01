@@ -8,6 +8,7 @@ import '../agent/input_lane.dart';
 import '../controls.dart';
 import '../format.dart';
 import '../rust/api/events.dart';
+import '../rust/api/git.dart';
 import '../rust/api/history.dart';
 import '../session/session_state.dart';
 import '../shortcuts/keymap.dart';
@@ -81,6 +82,7 @@ class _DiffViewState extends State<DiffView> {
     widget.state.changed.addListener(_show);
     widget.state.shown.addListener(_rebuild);
     widget.state.shownScope.addListener(_rebuild);
+    widget.state.git.stash.addListener(_rebuild);
     // Opening the tab reads the turns again, so it shows the latest one.
     unawaited(widget.state.readChanges());
     // It also shows the last list at once and moves the keyboard to it.
@@ -96,6 +98,7 @@ class _DiffViewState extends State<DiffView> {
     widget.state.changed.removeListener(_show);
     widget.state.shown.removeListener(_rebuild);
     widget.state.shownScope.removeListener(_rebuild);
+    widget.state.git.stash.removeListener(_rebuild);
     _focus.dispose();
     _scroll.dispose();
     super.dispose();
@@ -171,7 +174,9 @@ class _DiffViewState extends State<DiffView> {
   /// What the shown patch compares: the turns and whether whitespace is hidden.
   String get _comparison {
     final shown = widget.state.shown.value;
-    return '${shown?.from.id}..${shown?.to.id} ${widget.state.hideWhitespace.value}';
+    final scope = widget.state.shownScope.value;
+    return '${scope.runtimeType} ${shown?.from.id}..${shown?.to.id} '
+        '${widget.state.hideWhitespace.value}';
   }
 
   /// Whether a folded folder hides `row`.
@@ -307,11 +312,13 @@ class _DiffViewState extends State<DiffView> {
     ),
   );
 
-  /// The turn menu and what the shown turns are, once a turn ended.
+  /// The turn menu and what the shown turns are, once a turn ended or while the branch has
+  /// stashed changes.
   Widget? _header() {
     final shown = widget.state.shown.value;
-    if (shown == null) return null;
+    final stash = widget.state.git.stash.value;
     final scope = widget.state.shownScope.value;
+    if (shown == null && stash == null) return null;
     final files = widget.state.changed.value;
     return _TurnHeader(
       menuKey: _turnMenu,
@@ -328,12 +335,42 @@ class _DiffViewState extends State<DiffView> {
             )
           : null,
       shown: shown,
+      stash: stash,
+      branch: widget.state.git.status.value?.branch,
       onSelect: (scope) => unawaited(widget.state.showTurns(scope)),
       // Reverting applies to the turn shown, not to all turns.
-      onRevert: scope is AllTurns
-          ? null
-          : () => unawaited(confirmRevert(context, widget.state, shown.to)),
+      onRevert: switch ((scope, shown)) {
+        (OneTurn() || LatestTurn(), final shown?) => () => unawaited(
+          confirmRevert(context, widget.state, shown.to),
+        ),
+        _ => null,
+      },
+      onRestore: () => unawaited(widget.state.git.restoreStash()),
+      onDiscard: () => unawaited(_confirmDiscard(stash)),
     );
+  }
+
+  /// Asks before deleting the stashed changes, then deletes them.
+  Future<void> _confirmDiscard(BridgeStash? stash) async {
+    if (stash == null) return;
+    final count = stash.files.length;
+    final branch = widget.state.git.status.value?.branch;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => DangerDialog(
+        title: 'Discard stashed changes?',
+        action: 'Discard',
+        children: [
+          Text(
+            'The $count ${count == 1 ? 'file' : 'files'} stashed on $branch at '
+            '${formatClockMs(stash.createdMs)} are deleted and cannot be restored. Your '
+            'uncommitted changes, commits and branches stay.',
+            style: DangerDialog.text(context),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) await widget.state.git.discardStash();
   }
 
   /// Says why nothing is shown, below the turn menu when a turn ended.
@@ -939,7 +976,8 @@ TextSpan highlight(BuildContext context, String code) {
 }
 
 /// The turn menu with what the shown turns are: their prompt, their time and what they are
-/// compared with (approved checkpoint mockups).
+/// compared with (approved checkpoint mockups), or the branch's stashed changes with Restore
+/// and Discard (approved Git mockups).
 class _TurnHeader extends StatelessWidget {
   const _TurnHeader({
     required this.menuKey,
@@ -947,8 +985,12 @@ class _TurnHeader extends StatelessWidget {
     required this.scope,
     required this.allLines,
     required this.shown,
+    required this.stash,
+    required this.branch,
     required this.onSelect,
     required this.onRevert,
+    required this.onRestore,
+    required this.onDiscard,
   });
 
   final GlobalKey<PopupMenuButtonState<DiffScope>> menuKey;
@@ -957,26 +999,48 @@ class _TurnHeader extends StatelessWidget {
 
   /// The lines all turns added and removed, once read.
   final ({int added, int removed})? allLines;
-  final Compared shown;
+
+  /// The turns shown; none before a turn ended.
+  final Compared? shown;
+  final BridgeStash? stash;
+  final String? branch;
   final ValueChanged<DiffScope> onSelect;
 
   /// Asks to revert the files to before the shown turn; none for all turns.
   final VoidCallback? onRevert;
+  final VoidCallback onRestore;
+  final VoidCallback onDiscard;
 
   @override
   Widget build(BuildContext context) {
     final ws = context.ws;
+    final shown = this.shown;
+    final stash = this.stash;
+    final stashed = scope is StashedChanges && stash != null;
     final all = scope is AllTurns;
-    final turn = shown.to;
     final ended = finished(turns);
-    final started = shown.from.startedMs;
-    final since = started == null ? '' : formatClockMs(started);
-    final until = turn.endedMs == null ? '' : formatClockMs(turn.endedMs!);
-    final about = all
-        ? 'All turns of this branch · since $since · compared with the project when the first '
-              'turn started'
-        : '“${turn.prompt}” · $since–$until · compared with the project when the turn '
-              'started';
+    final String about;
+    final String label;
+    if (stashed) {
+      label = 'Stashed changes';
+      about =
+          'Left on $branch at ${formatClockMs(stash.createdMs)} · Restore moves the stashed '
+          'files back to your uncommitted changes';
+    } else if (shown != null) {
+      final turn = shown.to;
+      final started = shown.from.startedMs;
+      final since = started == null ? '' : formatClockMs(started);
+      final until = turn.endedMs == null ? '' : formatClockMs(turn.endedMs!);
+      label = all ? 'All turns' : turnName(turn);
+      about = all
+          ? 'All turns of this session branch · since $since · compared with the project '
+                'when the first turn started'
+          : '“${turn.prompt}” · $since–$until · compared with the project when the turn '
+                'started';
+    } else {
+      label = 'No finished turn yet';
+      about = 'This menu shows the branch’s stashed changes.';
+    }
     final small = TextStyle(color: ws.textFaint, fontSize: WsMetrics.fsSmall);
     String counts(BridgeTurn turn) => [
       if (turn.endedMs case final at?) formatClockMs(at),
@@ -1006,28 +1070,39 @@ class _TurnHeader extends StatelessWidget {
       initialValue: scope,
       onSelected: onSelect,
       itemBuilder: (context) => [
-        PopupMenuItem(
-          enabled: false,
-          height: 24,
-          child: Text('Turns of this branch', style: small),
-        ),
-        item(
-          const LatestTurn(),
-          'Latest turn · ${turnName(ended.last)}',
-          counts(ended.last),
-        ),
-        for (final older in ended.reversed.skip(1))
-          item(OneTurn(older.id), turnName(older), counts(older)),
-        const PopupMenuDivider(),
-        item(
-          const AllTurns(),
-          'All turns',
-          [
-            if (turns.first.startedMs case final at?)
-              'since ${formatClockMs(at)}',
-            if (allLines case final lines?) '+${lines.added} −${lines.removed}',
-          ].join(' · '),
-        ),
+        if (ended.isNotEmpty) ...[
+          PopupMenuItem(
+            enabled: false,
+            height: 24,
+            child: Text('Turns of this session branch', style: small),
+          ),
+          item(
+            const LatestTurn(),
+            'Latest turn · ${turnName(ended.last)}',
+            counts(ended.last),
+          ),
+          for (final older in ended.reversed.skip(1))
+            item(OneTurn(older.id), turnName(older), counts(older)),
+          const PopupMenuDivider(),
+          item(
+            const AllTurns(),
+            'All turns',
+            [
+              if (turns.first.startedMs case final at?)
+                'since ${formatClockMs(at)}',
+              if (allLines case final lines?)
+                '+${lines.added} −${lines.removed}',
+            ].join(' · '),
+          ),
+        ],
+        if (stash != null) ...[
+          if (ended.isNotEmpty) const PopupMenuDivider(),
+          item(
+            const StashedChanges(),
+            'Stashed changes',
+            'left at ${formatClockMs(stash.createdMs)}',
+          ),
+        ],
       ],
       child: Container(
         height: 28,
@@ -1040,7 +1115,7 @@ class _TurnHeader extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(
-              all ? 'All turns' : turnName(turn),
+              label,
               style: Theme.of(context).textTheme.labelMedium
                   ?.copyWith(fontWeight: WsMetrics.fwSemibold),
             ),
@@ -1057,7 +1132,18 @@ class _TurnHeader extends StatelessWidget {
           children: [
             menu,
             // A narrow tab shortens the label rather than the menu.
-            if (onRevert case final revert?)
+            if (stashed)
+              Expanded(
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  spacing: WsMetrics.space3,
+                  children: [
+                    PrimaryButton(label: 'Restore', onPressed: onRestore),
+                    SecondaryButton(label: 'Discard…', onPressed: onDiscard),
+                  ],
+                ),
+              )
+            else if (onRevert case final revert?)
               Expanded(
                 child: Align(
                   alignment: Alignment.centerRight,
