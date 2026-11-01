@@ -392,6 +392,36 @@ impl WorkingTree {
         }
     }
 
+    /// The refs whose names start with `prefix`.
+    pub(crate) async fn references(&self, prefix: &str) -> Result<Vec<String>, DiffError> {
+        let listed = git(
+            &self.root,
+            &[],
+            &["for-each-ref", "--format=%(refname)", prefix],
+        )
+        .await?;
+        Ok(listed.lines().map(str::to_owned).collect())
+    }
+
+    /// Deletes `references` in one transaction, so either all or none go.
+    pub(crate) async fn delete_references(&self, references: &[String]) -> Result<(), DiffError> {
+        if references.is_empty() {
+            return Ok(());
+        }
+        let input: String = references
+            .iter()
+            .map(|reference| format!("delete {reference}\n"))
+            .collect();
+        let args = ["update-ref", "--no-deref", "--stdin"];
+        self.git_input(
+            &[],
+            &args,
+            input.as_bytes(),
+            "could not remove the checkpoints",
+        )
+        .await
+    }
+
     /// The branch checked out, or none when HEAD names a commit.
     pub async fn branch(&self) -> Result<Option<String>, DiffError> {
         match git(

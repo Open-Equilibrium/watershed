@@ -7,8 +7,8 @@ use std::path::{Path, PathBuf};
 
 use meta_harness_core::{
     AgentCommand, Answer, Checkpoint, Checkpoints, CommandError, Delivery, DiffError, Phase,
-    RequestId, Session, SessionEvent, TurnCheckpoints, Whitespace, recent_sessions, session_title,
-    session_title_of, visible_lines, visible_name,
+    RequestId, Session, SessionEvent, TurnCheckpoints, Whitespace, recent_sessions, session_id,
+    session_title, session_title_of, visible_lines, visible_name,
 };
 use tokio::runtime::Runtime;
 use tokio::sync::{Mutex, mpsc};
@@ -52,6 +52,16 @@ pub struct BridgeStoredSession {
     pub title: String,
     /// When pi last wrote it, in Unix milliseconds.
     pub modified_ms: i64,
+}
+
+/// A session with checkpoints in the project's repository.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgeCheckpointSession {
+    /// Its title, as the start page names stored sessions; "Unknown session" when no session
+    /// of this project is stored with its id.
+    pub title: String,
+    /// Its turns with checkpoints.
+    pub turns: i64,
 }
 
 /// A model the agent can use.
@@ -386,6 +396,83 @@ impl AgentSession {
                 )
             })
         })
+    }
+
+    /// The sessions with checkpoints in the project's repository, sorted by their ids.
+    pub fn checkpoint_sessions(&self) -> Result<Vec<BridgeCheckpointSession>, String> {
+        RUNTIME.block_on(async {
+            let sessions = self.checkpoints.sessions().await.map_err(shown)?;
+            let dir = session_dir(&mut *self.session.lock().await).await;
+            Ok(sessions
+                .into_iter()
+                .map(|(id, turns)| BridgeCheckpointSession {
+                    title: dir
+                        .as_deref()
+                        .and_then(|dir| session_title_of(dir, &self.cwd, &id))
+                        .unwrap_or_else(|| "Unknown session".to_owned()),
+                    turns: i64::try_from(turns).unwrap_or(i64::MAX),
+                })
+                .collect())
+        })
+    }
+
+    /// Removes every checkpoint in the project's repository; refused while an agent runs in the
+    /// checkout.
+    pub fn remove_all_checkpoints(&self) -> Result<(), String> {
+        RUNTIME
+            .block_on(self.checkpoints.remove_all())
+            .map_err(shown)
+    }
+
+    /// The turns with checkpoints of the stored session in `path`.
+    pub fn stored_turns(&self, path: String) -> Result<i64, String> {
+        RUNTIME.block_on(async {
+            let id = self.stored_session(&path).await?;
+            let sessions = self.checkpoints.sessions().await.map_err(shown)?;
+            let turns = sessions
+                .into_iter()
+                .find(|(session, _)| *session == id)
+                .map_or(0, |(_, turns)| turns);
+            Ok(i64::try_from(turns).unwrap_or(i64::MAX))
+        })
+    }
+
+    /// Deletes the session stored in `path`, a session of this project in pi's session
+    /// directory other than the open one, with its checkpoints first; refused while its agent
+    /// runs in the checkout. Neither comes back.
+    pub fn delete_session(&self, path: String) -> Result<(), String> {
+        RUNTIME.block_on(async {
+            let id = self.stored_session(&path).await?;
+            match self.checkpoints.remove_session(&id).await {
+                Ok(()) | Err(DiffError::NotARepository) => {}
+                Err(error) => return Err(shown(error)),
+            }
+            std::fs::remove_file(&path).map_err(|error| error.to_string())
+        })
+    }
+
+    /// The id of the session stored in `path`, which must be a session of this project in pi's
+    /// session directory and not the open one, so Dart never names another file.
+    async fn stored_session(&self, path: &str) -> Result<String, String> {
+        let path = Path::new(path);
+        let current = {
+            let mut session = self.session.lock().await;
+            open(&mut session)?
+                .state()
+                .await
+                .map_err(describe)?
+                .session_file
+        };
+        let Some(current) = current else {
+            return Err("pi keeps this session in memory and stores no others".to_owned());
+        };
+        if path == current {
+            return Err("the open session cannot be deleted from inside it".to_owned());
+        }
+        if path.parent() != current.parent() {
+            return Err("only sessions in pi's session directory can be deleted".to_owned());
+        }
+        session_id(path, &self.cwd).ok_or_else(|| "no session of this project".to_owned())
     }
 
     /// Reads the session's branch tree and the Trajectory of each branch ending at an entry in

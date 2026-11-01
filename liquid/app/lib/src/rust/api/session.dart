@@ -9,8 +9,8 @@ import 'history.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `answer`, `branch_turns`, `checkpoint`, `checkpoints_of`, `left_unreverted`, `open`, `session_dir`, `shown`, `turn_of`, `unread`, `whitespace`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`
+// These functions are ignored because they are not marked as `pub`: `answer`, `branch_turns`, `checkpoint`, `checkpoints_of`, `left_unreverted`, `open`, `session_dir`, `shown`, `stored_session`, `turn_of`, `unread`, `whitespace`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`
 // These functions are ignored (category: IgnoreBecauseExplicitAttribute): `forward`, `launch`
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<AgentSession>>
@@ -31,6 +31,9 @@ abstract class AgentSession implements RustOpaqueInterface {
   /// Continues the session from `entry`; the next prompt starts a new branch there.
   Future<void> branch({required String entry});
 
+  /// The sessions with checkpoints in the project's repository, sorted by their ids.
+  Future<List<BridgeCheckpointSession>> checkpointSessions();
+
   /// Removes the messages waiting for the running agent and returns them.
   Future<BridgeQueue> clearQueue();
 
@@ -46,6 +49,11 @@ abstract class AgentSession implements RustOpaqueInterface {
     required String request,
     required BridgeDecision decision,
   });
+
+  /// Deletes the session stored in `path`, a session of this project in pi's session
+  /// directory other than the open one, with its checkpoints first; refused while its agent
+  /// runs in the checkout. Neither comes back.
+  Future<void> deleteSession({required String path});
 
   /// Dismisses a question.
   Future<void> dismiss({required String request});
@@ -68,6 +76,10 @@ abstract class AgentSession implements RustOpaqueInterface {
 
   /// Up to `limit` stored sessions of this project, newest first, without the current one.
   Future<List<BridgeStoredSession>> recentSessions({required int limit});
+
+  /// Removes every checkpoint in the project's repository; refused while an agent runs in the
+  /// checkout.
+  Future<void> removeAllCheckpoints();
 
   /// What reverting the files to before turn `turn` of the current branch would change;
   /// files changed after the branch's last turn ended are marked.
@@ -97,6 +109,9 @@ abstract class AgentSession implements RustOpaqueInterface {
   /// Starts pi; subscribe with [`AgentSession::events`].
   static Future<AgentSession> start({required SessionConfig config}) =>
       RustLib.instance.api.crateApiSessionAgentSessionStart(config: config);
+
+  /// The turns with checkpoints of the stored session in `path`.
+  Future<PlatformInt64> storedTurns({required String path});
 
   /// Continues the session stored in `path`; `false` when an extension cancelled it.
   Future<bool> switchSession({required String path});
@@ -142,6 +157,29 @@ enum BridgeApprovalMode {
 
   /// Allow every call.
   fullAccess,
+}
+
+/// A session with checkpoints in the project's repository.
+class BridgeCheckpointSession {
+  /// Its title, as the start page names stored sessions; "Unknown session" when no session
+  /// of this project is stored with its id.
+  final String title;
+
+  /// Its turns with checkpoints.
+  final PlatformInt64 turns;
+
+  const BridgeCheckpointSession({required this.title, required this.turns});
+
+  @override
+  int get hashCode => title.hashCode ^ turns.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeCheckpointSession &&
+          runtimeType == other.runtimeType &&
+          title == other.title &&
+          turns == other.turns;
 }
 
 /// A model the agent can use.

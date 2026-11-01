@@ -72,6 +72,12 @@ pub fn session_title(file: &Path, project: &Path) -> Option<String> {
     head(file, &canonical(project))?.title
 }
 
+/// The id of the session stored in `file`; none for a file that is no session started in
+/// `project`.
+pub fn session_id(file: &Path, project: &Path) -> Option<String> {
+    Some(head(file, &canonical(project))?.id).filter(|id| !id.is_empty())
+}
+
 /// The title of the session with the id `id` in pi's session directory `dir` that started in
 /// `project`, as [`recent_sessions`] gives it.
 pub fn session_title_of(dir: &Path, project: &Path, id: &str) -> Option<String> {

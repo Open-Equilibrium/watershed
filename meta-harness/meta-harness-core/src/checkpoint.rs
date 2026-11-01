@@ -50,19 +50,26 @@ impl Checkpoint {
     /// Its ref. Ids come from the agent, so only letters, digits, `-` and `_` may name a ref.
     fn reference(&self) -> Result<String, DiffError> {
         for id in [&self.session, &self.turn] {
-            let valid = (1..=MAX_ID_BYTES).contains(&id.len())
-                && id
-                    .bytes()
-                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_');
-            if !valid {
-                return Err(DiffError::InvalidCheckpoint(id.clone()));
-            }
+            valid_id(id)?;
         }
         let phase = match self.phase {
             Phase::Start => "start",
             Phase::End => "end",
         };
         Ok(format!("{REFS}{}/{}/{phase}", self.session, self.turn))
+    }
+}
+
+/// Refuses an id that could leave Watershed's refs.
+fn valid_id(id: &str) -> Result<(), DiffError> {
+    let valid = (1..=MAX_ID_BYTES).contains(&id.len())
+        && id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_');
+    if valid {
+        Ok(())
+    } else {
+        Err(DiffError::InvalidCheckpoint(id.to_owned()))
     }
 }
 
@@ -307,6 +314,55 @@ impl Checkpoints {
         let tree = self.tree().await?;
         let (from, to) = (self.read(&tree, from).await?, self.read(&tree, to).await?);
         self.bounded(tree.patch(&from, &to, path, whitespace)).await
+    }
+
+    /// The sessions with checkpoints in the project's repository, by id, each with its number
+    /// of turns, sorted by id.
+    pub async fn sessions(&self) -> Result<Vec<(String, usize)>, DiffError> {
+        let tree = self.tree().await?;
+        let mut turns: std::collections::BTreeMap<String, std::collections::BTreeSet<String>> =
+            Default::default();
+        for reference in self.bounded(tree.references(REFS)).await? {
+            let mut ids = reference.trim_start_matches(REFS).split('/');
+            if let (Some(session), Some(turn)) = (ids.next(), ids.next()) {
+                turns
+                    .entry(session.to_owned())
+                    .or_default()
+                    .insert(turn.to_owned());
+            }
+        }
+        Ok(turns
+            .into_iter()
+            .map(|(session, turns)| (session, turns.len()))
+            .collect())
+    }
+
+    /// Removes the checkpoints of `session`, refused while its agent runs in the checkout. Git
+    /// frees their space at its next cleanup.
+    pub async fn remove_session(&self, session: &str) -> Result<(), DiffError> {
+        valid_id(session)?;
+        let tree = self.tree().await?;
+        if tree
+            .checkout()
+            .running()
+            .iter()
+            .any(|running| running == session)
+        {
+            return Err(DiffError::AgentRunning(vec![session.to_owned()]));
+        }
+        let references = self
+            .bounded(tree.references(&format!("{REFS}{session}/")))
+            .await?;
+        self.bounded(tree.delete_references(&references)).await
+    }
+
+    /// Removes every checkpoint in the project's repository, refused while an agent runs in the
+    /// checkout.
+    pub async fn remove_all(&self) -> Result<(), DiffError> {
+        let tree = self.tree().await?;
+        let _alone = tree.checkout().alone()?;
+        let references = self.bounded(tree.references(REFS)).await?;
+        self.bounded(tree.delete_references(&references)).await
     }
 
     /// Stops commands in progress and removes the private index.

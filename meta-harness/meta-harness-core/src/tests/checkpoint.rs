@@ -1689,3 +1689,66 @@ fn a_turns_end_releases_only_its_own_turn() {
         );
     });
 }
+
+#[test]
+fn checkpoints_are_listed_and_removed_by_session_or_all() {
+    run(async {
+        let repo = Repo::new("remove");
+        let mine = Checkpoints::new(repo.path());
+        turn(&mine, "t1", || repo.write("a.txt", "one\n")).await;
+        turn(&mine, "t2", || repo.write("a.txt", "two\n")).await;
+        let other = Checkpoints::new(repo.path());
+        let theirs = |turn: &str, phase| Checkpoint {
+            session: "s2".to_owned(),
+            turn: turn.to_owned(),
+            phase,
+        };
+        other
+            .capture(&theirs("u1", Phase::Start))
+            .await
+            .expect("started");
+        other
+            .capture(&theirs("u1", Phase::End))
+            .await
+            .expect("ended");
+        assert_eq!(
+            mine.sessions().await.expect("listed"),
+            [("s1".to_owned(), 2), ("s2".to_owned(), 1)]
+        );
+
+        // A session whose agent runs keeps its checkpoints; the others may go.
+        other
+            .capture(&theirs("u2", Phase::Start))
+            .await
+            .expect("started");
+        assert!(matches!(
+            mine.remove_session("s2").await,
+            Err(DiffError::AgentRunning(running)) if running == ["s2"]
+        ));
+        assert!(matches!(
+            mine.remove_all().await,
+            Err(DiffError::AgentRunning(_))
+        ));
+        mine.remove_session("s1").await.expect("removed");
+        assert_eq!(
+            mine.sessions().await.expect("listed"),
+            [("s2".to_owned(), 2)]
+        );
+        assert!(matches!(
+            changes_of(&mine, "t1").await,
+            Err(DiffError::NoCheckpoint)
+        ));
+
+        other
+            .capture(&theirs("u2", Phase::End))
+            .await
+            .expect("ended");
+        mine.remove_all().await.expect("removed");
+        assert!(mine.sessions().await.expect("listed").is_empty());
+        assert_eq!(repo.git(&["for-each-ref", "refs/watershed"]), "");
+        assert!(matches!(
+            mine.remove_session("../x").await,
+            Err(DiffError::InvalidCheckpoint(_))
+        ));
+    });
+}

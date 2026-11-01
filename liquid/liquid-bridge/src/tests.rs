@@ -17,7 +17,8 @@ use crate::api::history::{
     BridgeTurn, BridgeTurnChanges,
 };
 use crate::api::session::{
-    AgentSession, BridgeApprovalMode, BridgeModel, BridgeStoredSession, SessionConfig,
+    AgentSession, BridgeApprovalMode, BridgeCheckpointSession, BridgeModel, BridgeStoredSession,
+    SessionConfig,
 };
 use crate::convert::describe;
 use crate::stream::{gather, push};
@@ -955,6 +956,105 @@ fn writes_out_what_hides_in_gits_errors() {
         crate::api::session::unread(meta_harness_core::DiffError::NoCheckpoint),
         Ok(BridgeChangesState::Removed)
     );
+}
+
+/// Answers a `get_state` with the session stored in `file`.
+fn state_with(id: u32, file: &std::path::Path) -> String {
+    format!(
+        "IFS= read -r line\ncase \"$line\" in *'\"type\":\"get_state\"'*) ;; *) exit 9 ;; esac\nprintf '%s\\n' '{{\"id\":\"{id}\",\"type\":\"response\",\"command\":\"get_state\",\"success\":true,\"data\":{{\"sessionId\":\"s1\",\"isStreaming\":false,\"sessionFile\":\"{}\"}}}}'\n",
+        file.display()
+    )
+}
+
+#[test]
+fn deletes_a_stored_session_with_its_checkpoints_and_removes_all_checkpoints() {
+    let repo = repository("delete");
+    let sessions = repo.join(".git/pi-sessions");
+    std::fs::create_dir_all(&sessions).expect("sessions");
+    let header = |id: &str| {
+        format!(
+            r#"{{"type":"session","version":3,"id":"{id}","cwd":"{}"}}"#,
+            repo.display()
+        )
+    };
+    let current = sessions.join("current.jsonl");
+    let old = sessions.join("old.jsonl");
+    std::fs::write(&current, header("s1") + "\n").expect("current");
+    std::fs::write(
+        &old,
+        header("s9")
+            + "\n"
+            + r#"{"type":"session_info","id":"i1","parentId":null,"name":"Old work"}"#
+            + "\n",
+    )
+    .expect("old");
+    let checkpoints = meta_harness_core::Checkpoints::new(&repo);
+    for session in ["s1", "s9"] {
+        for phase in [
+            meta_harness_core::Phase::Start,
+            meta_harness_core::Phase::End,
+        ] {
+            call(checkpoints.capture(&meta_harness_core::Checkpoint {
+                session: session.to_owned(),
+                turn: "t1".to_owned(),
+                phase,
+            }))
+            .expect("captured");
+        }
+    }
+    let script = [
+        state_with(2, &current),
+        state_with(3, &current),
+        state_with(4, &current),
+        state_with(5, &current),
+        state_with(6, &current),
+        "IFS= read -r line || exit 0".to_owned(),
+    ]
+    .concat();
+    let session = launch(gated(&script), repo.display().to_string()).expect("agent starts");
+    assert_eq!(
+        session.checkpoint_sessions(),
+        Ok(vec![
+            BridgeCheckpointSession {
+                title: "Untitled session".to_owned(),
+                turns: 1,
+            },
+            BridgeCheckpointSession {
+                title: "Old work".to_owned(),
+                turns: 1,
+            },
+        ])
+    );
+    assert_eq!(session.stored_turns(old.display().to_string()), Ok(1));
+    assert!(
+        session
+            .delete_session(current.display().to_string())
+            .is_err(),
+        "the open session is switched away from first"
+    );
+    let outside = repo.join("a.txt");
+    assert!(
+        session
+            .delete_session(outside.display().to_string())
+            .is_err()
+    );
+    assert!(outside.exists());
+    assert_eq!(session.delete_session(old.display().to_string()), Ok(()));
+    assert!(!old.exists());
+    let refs = std::process::Command::new("git")
+        .args(["for-each-ref", "--format=%(refname)", "refs/watershed"])
+        .current_dir(&repo)
+        .output()
+        .expect("git runs");
+    assert_eq!(
+        String::from_utf8_lossy(&refs.stdout),
+        "refs/watershed/checkpoints/s1/t1/end\nrefs/watershed/checkpoints/s1/t1/start\n"
+    );
+    assert_eq!(session.remove_all_checkpoints(), Ok(()));
+    assert_eq!(call(checkpoints.sessions()).expect("listed"), []);
+    call(checkpoints.close());
+    assert!(call(session.shutdown()));
+    let _ = std::fs::remove_dir_all(&repo);
 }
 
 #[test]

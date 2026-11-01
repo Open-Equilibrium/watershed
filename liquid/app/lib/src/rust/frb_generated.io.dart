@@ -126,6 +126,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeChangesState dco_decode_bridge_changes_state(dynamic raw);
 
   @protected
+  BridgeCheckpointSession dco_decode_bridge_checkpoint_session(dynamic raw);
+
+  @protected
   BridgeContextDetail dco_decode_bridge_context_detail(dynamic raw);
 
   @protected
@@ -244,6 +247,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<String> dco_decode_list_String(dynamic raw);
+
+  @protected
+  List<BridgeCheckpointSession> dco_decode_list_bridge_checkpoint_session(
+    dynamic raw,
+  );
 
   @protected
   List<BridgeContextMessage> dco_decode_list_bridge_context_message(
@@ -490,6 +498,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeCheckpointSession sse_decode_bridge_checkpoint_session(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   BridgeContextDetail sse_decode_bridge_context_detail(
     SseDeserializer deserializer,
   );
@@ -630,6 +643,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<String> sse_decode_list_String(SseDeserializer deserializer);
+
+  @protected
+  List<BridgeCheckpointSession> sse_decode_list_bridge_checkpoint_session(
+    SseDeserializer deserializer,
+  );
 
   @protected
   List<BridgeContextMessage> sse_decode_list_bridge_context_message(
@@ -961,6 +979,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_bridge_checkpoint_session(
+    BridgeCheckpointSession self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_bridge_context_detail(
     BridgeContextDetail self,
     SseSerializer serializer,
@@ -1151,6 +1175,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_list_String(List<String> self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_bridge_checkpoint_session(
+    List<BridgeCheckpointSession> self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_list_bridge_context_message(
