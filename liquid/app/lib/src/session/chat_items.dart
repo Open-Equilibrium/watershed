@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 
 import '../format.dart';
 import '../rust/api/events.dart';
+import '../rust/api/history.dart';
 import '../trajectory/trajectory_model.dart';
 
 /// One entry of the chat timeline. Its text grows in place while it streams, so only the widget
@@ -14,6 +15,7 @@ class ItemView {
     this.target,
     this.entry,
     this.marker,
+    this.turnEnd,
   });
 
   final int id;
@@ -28,6 +30,9 @@ class ItemView {
 
   /// Set on the row that marks where the current branch leaves the others.
   final BranchMarker? marker;
+
+  /// Set on the row after a turn that says what the turn changed.
+  final BridgeTurn? turnEnd;
   final ValueNotifier<String> text = ValueNotifier('');
 
   /// How the item ended, once it has; observable apart from its text.

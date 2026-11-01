@@ -5,10 +5,11 @@ use std::collections::{HashMap, VecDeque};
 
 use serde_json::Value;
 
+use super::ChangeCount;
 use super::outcome::{exit_code, patch_lines, test_counts};
 use crate::pi::{PATH_ARGUMENTS, content_text, item_kind, usage, written_lines};
 use crate::visible::visible_name;
-use crate::{ItemKind, ToolOutcome, Usage};
+use crate::{ItemKind, Phase, ToolOutcome, Usage};
 
 /// Longest text kept per prompt or response, in characters.
 const TEXT_CHARS: usize = 64 * 1024;
@@ -16,6 +17,8 @@ const TEXT_CHARS: usize = 64 * 1024;
 const ARGUMENT_BYTES: usize = 4 * 1024;
 /// Longest string kept per argument when the arguments are too long as a whole.
 const ARGUMENT_CHARS: usize = 200;
+/// Longest reason kept for a checkpoint that could not be taken, in characters.
+const ERROR_CHARS: usize = 1024;
 
 /// One stored entry of a session.
 #[derive(Debug, Clone)]
@@ -73,6 +76,16 @@ pub(crate) enum Body {
         tool: String,
         decision: String,
         waited_ms: Option<u64>,
+    },
+    /// A checkpoint Watershed's extension recorded at a turn's start or end, or why it could not
+    /// be taken.
+    Checkpoint {
+        session: String,
+        turn: String,
+        phase: Phase,
+        error: Option<String>,
+        /// What the turn changed, as counted at its end.
+        changed: Option<ChangeCount>,
     },
     /// Another extension's custom entry.
     Custom,
@@ -392,6 +405,29 @@ fn custom(kind: String, data: Option<&Value>) -> Body {
             },
             _ => Body::Custom,
         },
+        "watershed.checkpoint" => {
+            let phase = match text("phase").as_str() {
+                "start" => Phase::Start,
+                "end" => Phase::End,
+                _ => return Body::Custom,
+            };
+            Body::Checkpoint {
+                session: text("session"),
+                turn: text("turn"),
+                phase,
+                error: data
+                    .and_then(|d| d.get("error"))
+                    .and_then(Value::as_str)
+                    .map(|error| bounded(error.to_owned(), ERROR_CHARS)),
+                changed: (|| {
+                    Some(ChangeCount {
+                        files: millis("files")?,
+                        added: millis("added")?,
+                        removed: millis("removed")?,
+                    })
+                })(),
+            }
+        }
         "watershed.approval" => Body::Approval {
             tool: visible_name(&text("tool")),
             decision: text("decision"),

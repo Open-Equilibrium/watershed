@@ -26,3 +26,11 @@ String formatCost(int microUsd) =>
 /// A count in thousands once it reaches them, such as `6.1k`.
 String formatCompact(int count) =>
     count >= 1000 ? '${(count / 1000).toStringAsFixed(1)}k' : '$count';
+
+/// A local time of day, such as `10:58`.
+String formatClock(DateTime at) =>
+    '${at.hour.toString().padLeft(2, '0')}:${at.minute.toString().padLeft(2, '0')}';
+
+/// A local time of day from Unix milliseconds.
+String formatClockMs(int ms) =>
+    formatClock(DateTime.fromMillisecondsSinceEpoch(ms));

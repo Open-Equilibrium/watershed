@@ -5,7 +5,10 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/diff/diff_settings.dart';
 import 'package:liquid/src/diff/diff_view.dart';
+import 'package:liquid/src/diff/turn_scope.dart';
+import 'package:liquid/src/format.dart';
 import 'package:liquid/src/rust/api/events.dart';
+import 'package:liquid/src/rust/api/history.dart';
 import 'package:liquid/src/session/session_state.dart';
 import 'package:liquid/src/theme/theme.dart';
 
@@ -104,21 +107,242 @@ void main() {
     },
   );
 
-  testWidgets('says when no run started yet and when a run changed nothing', (
+  testWidgets('says when no turn ended yet and when a turn changed nothing', (
     tester,
   ) async {
-    final backend = FakeBackend();
+    final backend = FakeBackend()
+      ..turnList = [turnOf('T1', number: 1, ended: false)];
     await show(tester, backend);
+    expect(find.text('No finished turn yet'), findsOneWidget);
     expect(
-      find.text('No run since Liquid opened this session'),
+      find.text('A turn’s changes appear here when it ends.'),
       findsOneWidget,
-      reason: 'a continued session\'s earlier runs are not compared',
     );
 
+    backend.turnList = [turnOf('T1', number: 1)];
     backend.controller.add(event(BridgeEventKind.turnStarted));
     backend.controller.add(event(BridgeEventKind.turnCompleted));
     await tester.pumpAndSettle();
-    expect(find.text('No changes in this run'), findsOneWidget);
+    expect(find.text('No changes in this turn'), findsOneWidget);
+    expect(find.text('Turn 1'), findsOneWidget, reason: 'the turn menu stays');
+  });
+
+  testWidgets('says why a turn has no checkpoint', (tester) async {
+    final backend = FakeBackend()
+      ..turnList = [
+        turnOf('T1', number: 1, failure: 'git did not finish within 60 s'),
+      ];
+    await show(tester, backend);
+    expect(find.text('No checkpoint'), findsOneWidget);
+    expect(
+      find.text(
+        'Liquid could not capture the project: git did not finish within 60 s',
+      ),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('chooses a turn or all turns from the turn menu and with T', (
+    tester,
+  ) async {
+    final backend = FakeBackend()
+      ..changed = [
+        BridgeFileChange(
+          path: 'a.ts',
+          shown: 'a.ts',
+          status: BridgeChangeStatus.modified,
+          added: 1,
+          removed: 0,
+        ),
+      ]
+      ..turnList = [
+        turnOf(
+          'T1',
+          number: 1,
+          prompt: 'Add rate limiting',
+          added: 59,
+          removed: 5,
+        ),
+        turnOf(
+          'T2',
+          number: 3,
+          prompt: 'Return 429',
+          startedMs: 1793527800000,
+          added: 12,
+          removed: 1,
+        ),
+        // Still running: its changes are not shown yet.
+        turnOf('T3', number: 4, ended: false, startedMs: 1793528400000),
+      ];
+    await show(tester, backend);
+    expect(
+      backend.compared.last,
+      'T2..T2',
+      reason: 'the latest turn that ended',
+    );
+    expect(find.text('Turn 3'), findsOneWidget);
+    expect(find.textContaining('“Return 429”'), findsOneWidget);
+
+    await press(tester, LogicalKeyboardKey.keyT);
+    expect(find.text('Latest turn · Turn 3'), findsOneWidget);
+    expect(
+      find.text('Turn 4'),
+      findsNothing,
+      reason: 'a running turn is not offered',
+    );
+    await tester.tap(find.text('Turn 1'));
+    await tester.pumpAndSettle();
+    expect(backend.compared.last, 'T1..T1');
+    expect(find.textContaining('“Add rate limiting”'), findsOneWidget);
+
+    await press(tester, LogicalKeyboardKey.keyT);
+    await tester.tap(find.text('All turns'));
+    await tester.pumpAndSettle();
+    expect(
+      backend.compared.last,
+      'T1..T2',
+      reason: 'the first turn\'s start to the last end',
+    );
+    expect(find.textContaining('All turns of this branch'), findsOneWidget);
+  });
+
+  testWidgets('never shows a turn\'s patch under another turn', (tester) async {
+    final backend = FakeBackend()
+      ..changed = [
+        BridgeFileChange(
+          path: 'a.ts',
+          shown: 'a.ts',
+          status: BridgeChangeStatus.modified,
+          added: 1,
+          removed: 1,
+        ),
+      ]
+      ..turnList = [
+        turnOf('T1', number: 1, added: 1, removed: 1),
+        turnOf('T2', number: 2, startedMs: 1793527800000, added: 1, removed: 1),
+      ]
+      ..turnPatches = {
+        'T1..T1': {'a.ts': '@@ -1 +1 @@\n-one\n+first turn\n'},
+        'T2..T2': {'a.ts': '@@ -1 +1 @@\n-two\n+second turn\n'},
+      }
+      // Turn 2's patch is still loading when the user picks Turn 1.
+      ..patchGate = Completer();
+    await show(tester, backend);
+    await press(tester, LogicalKeyboardKey.keyT);
+    await tester.tap(find.text('Turn 1'));
+    await tester.pump();
+    backend.patchGate!.complete();
+    await tester.pumpAndSettle();
+    expect(find.text('Turn 1'), findsOneWidget);
+    expect(
+      find.textContaining('first turn', findRichText: true),
+      findsOneWidget,
+    );
+    expect(
+      find.textContaining('second turn', findRichText: true),
+      findsNothing,
+    );
+  });
+
+  testWidgets('shows a new turn\'s heading only with its files', (
+    tester,
+  ) async {
+    final backend = FakeBackend()
+      ..changed = [
+        BridgeFileChange(
+          path: 'a.ts',
+          shown: 'a.ts',
+          status: BridgeChangeStatus.modified,
+          added: 1,
+          removed: 1,
+        ),
+      ]
+      ..turnList = [
+        turnOf('T1', number: 1, added: 1, removed: 1),
+        turnOf('T2', number: 2, startedMs: 1793527800000, added: 1, removed: 1),
+      ]
+      ..turnPatches = {
+        'T2..T2': {'a.ts': '@@ -1 +1 @@\n-two\n+second turn\n'},
+      };
+    await show(tester, backend);
+    expect(
+      find.textContaining('second turn', findRichText: true),
+      findsOneWidget,
+    );
+    // Turn 1's files take a while to read.
+    backend.changesGate = Completer();
+    await press(tester, LogicalKeyboardKey.keyT);
+    await tester.tap(find.text('Turn 1'));
+    // The menu closes while the files are still read.
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Turn 1'),
+      findsNothing,
+      reason: 'Turn 2\'s patch must not stand under Turn 1\'s heading',
+    );
+    backend.changesGate!.complete();
+    await tester.pumpAndSettle();
+    expect(find.text('Turn 1'), findsOneWidget);
+  });
+
+  testWidgets('names all turns only once their files arrived', (tester) async {
+    final backend = FakeBackend()
+      ..changed = [
+        BridgeFileChange(
+          path: 'a.ts',
+          shown: 'a.ts',
+          status: BridgeChangeStatus.modified,
+          added: 1,
+          removed: 1,
+        ),
+      ]
+      ..turnList = [
+        turnOf('T1', number: 1, added: 1, removed: 1),
+        turnOf('T2', number: 2, startedMs: 1793527800000, added: 1, removed: 1),
+      ];
+    await show(tester, backend);
+    backend.changesGate = Completer();
+    await press(tester, LogicalKeyboardKey.keyT);
+    await tester.tap(find.text('All turns'));
+    await tester.pumpAndSettle();
+    // Another layout rebuilds the tab while all turns' files still load.
+    await press(tester, LogicalKeyboardKey.keyU);
+    expect(find.text('All turns'), findsNothing);
+    expect(find.text('Turn 2'), findsOneWidget);
+    backend.changesGate!.complete();
+    await tester.pumpAndSettle();
+    expect(find.text('All turns'), findsOneWidget);
+  });
+
+  testWidgets('compares all turns although the first turn\'s end failed', (
+    tester,
+  ) async {
+    final backend = FakeBackend()
+      ..changed = [
+        BridgeFileChange(
+          path: 'a.ts',
+          shown: 'a.ts',
+          status: BridgeChangeStatus.modified,
+          added: 1,
+          removed: 0,
+        ),
+      ]
+      ..turnList = [
+        turnOf('T1', number: 1, failure: 'git did not finish within 60 s'),
+        turnOf('T2', number: 2, startedMs: 1793527800000, added: 1, removed: 0),
+      ];
+    await show(tester, backend);
+    await press(tester, LogicalKeyboardKey.keyT);
+    await tester.tap(find.text('All turns'));
+    await tester.pumpAndSettle();
+    expect(find.text('No checkpoint'), findsNothing);
+    expect(find.text('a.ts'), findsWidgets);
+  });
+
+  testWidgets('says when the checkpoints were removed', (tester) async {
+    final backend = FakeBackend()..checkpointsRemoved = true;
+    await show(tester, backend);
+    expect(find.text('Checkpoints removed'), findsOneWidget);
   });
 
   testWidgets('shows a file\'s name with hiding characters written out', (
@@ -299,15 +523,120 @@ void main() {
   });
 
   testWidgets('says when the project is not in Git', (tester) async {
-    final backend = FakeBackend()..changed = null;
+    // Outside Git every checkpoint fails, and the core says why.
+    final backend = FakeBackend()
+      ..changed = null
+      ..turnList = [
+        turnOf('T1', number: 1, failure: 'not inside a Git working tree'),
+      ];
     final state = await show(tester, backend);
+    expect(find.text('Not a Git repository'), findsOneWidget);
     expect(
       find.text(
-        'This project is not in Git, so Liquid cannot show what a run changed.',
+        'This project has no Git repository, so Liquid keeps no checkpoints and shows no '
+        'turn changes.',
       ),
       findsOneWidget,
     );
     expect(state.notices.value, isEmpty, reason: 'nothing failed');
+  });
+
+  testWidgets('says the project is not in Git before any turn ended', (
+    tester,
+  ) async {
+    final backend = FakeBackend()
+      ..inRepository = false
+      ..turnList = const [];
+    await show(tester, backend);
+    expect(find.text('Not a Git repository'), findsOneWidget);
+  });
+
+  testWidgets('counts all turns\' lines in the turn menu once read', (
+    tester,
+  ) async {
+    BridgeFileChange change(String path, int added, int removed) =>
+        BridgeFileChange(
+          path: path,
+          shown: path,
+          status: BridgeChangeStatus.modified,
+          added: added,
+          removed: removed,
+        );
+    final backend = FakeBackend()
+      ..changed = [change('a.ts', 1, 0), change('b.ts', 2, 1)]
+      ..turnList = [
+        turnOf('T1', number: 1, added: 1, removed: 0),
+        turnOf('T2', number: 2, startedMs: 1793527800000, added: 2, removed: 1),
+      ];
+    await show(tester, backend);
+    await press(tester, LogicalKeyboardKey.keyT);
+    await tester.tap(find.text('All turns'));
+    await tester.pumpAndSettle();
+    await press(tester, LogicalKeyboardKey.keyT);
+    expect(
+      find.textContaining(RegExp(r'^since \d\d:\d\d · \+3 −1$')),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('leaves all turns\' lines out when they could not be read', (
+    tester,
+  ) async {
+    final backend = FakeBackend()
+      ..changed = null
+      ..turnList = [
+        turnOf('T1', number: 1, failure: 'not inside a Git working tree'),
+      ];
+    await show(tester, backend);
+    await press(tester, LogicalKeyboardKey.keyT);
+    await tester.tap(find.text('All turns'));
+    await tester.pumpAndSettle();
+    expect(find.text('Not a Git repository'), findsOneWidget);
+    expect(
+      find.text('All turns'),
+      findsOneWidget,
+      reason: 'the heading follows',
+    );
+    await press(tester, LogicalKeyboardKey.keyT);
+    expect(find.textContaining('+0 −0'), findsNothing);
+  });
+
+  testWidgets('keeps a turn whose checkpoint failed and says why', (
+    tester,
+  ) async {
+    final backend = FakeBackend()
+      ..changed = [
+        BridgeFileChange(
+          path: 'a.ts',
+          shown: 'a.ts',
+          status: BridgeChangeStatus.modified,
+          added: 1,
+          removed: 0,
+        ),
+      ]
+      ..turnList = [
+        turnOf('T1', number: 1, added: 1, removed: 0),
+        turnOf(
+          'T2',
+          number: 2,
+          startedMs: 1793527800000,
+          failure: 'git did not finish within 60 s',
+        ),
+      ];
+    await show(tester, backend);
+    expect(find.text('Turn 2'), findsOneWidget, reason: 'the latest turn');
+    expect(find.text('No checkpoint'), findsOneWidget);
+    expect(
+      find.text(
+        'Liquid could not capture the project: git did not finish within 60 s',
+      ),
+      findsOneWidget,
+    );
+    await press(tester, LogicalKeyboardKey.keyT);
+    expect(find.textContaining('failed'), findsOneWidget);
+    await tester.tap(find.text('Turn 1'));
+    await tester.pumpAndSettle();
+    expect(find.text('a.ts'), findsWidgets);
   });
 
   testWidgets('reports a lasting failure to read the changes once', (
@@ -516,5 +845,214 @@ void main() {
     });
     final palette = tester.element(code('const max = 10;␍')).ws;
     expect(mark?.style?.color, palette.textFaint);
+  });
+
+  group('reverting to before a turn', () {
+    const started = 1793527800000;
+    const edited = 1793528520000;
+    FakeBackend turns() => FakeBackend()
+      ..turnList = [
+        turnOf('T1', number: 1, added: 1, removed: 1),
+        turnOf('T2', number: 3, startedMs: started, added: 2, removed: 0),
+      ]
+      ..revertPlanned = revertPlanOf(
+        files: [
+          revertedFile('docs/old.md', BridgeChangeStatus.added),
+          revertedFile(
+            'src/login.ts',
+            BridgeChangeStatus.modified,
+            edited: true,
+            modifiedMs: edited,
+          ),
+          revertedFile('src/limits.json', BridgeChangeStatus.deleted),
+          const BridgeRevertFile(
+            path: 'vendor/lib',
+            shown: 'vendor/lib',
+            status: BridgeChangeStatus.modified,
+            edited: false,
+            ignored: false,
+            kept: true,
+          ),
+          const BridgeRevertFile(
+            path: 'config.local',
+            shown: 'config.local',
+            status: BridgeChangeStatus.added,
+            edited: false,
+            ignored: true,
+            kept: false,
+          ),
+          const BridgeRevertFile(
+            path: 'tmp/',
+            shown: 'tmp/',
+            status: BridgeChangeStatus.deleted,
+            edited: false,
+            ignored: true,
+            kept: false,
+          ),
+        ],
+      );
+
+    Future<void> open(WidgetTester tester) async {
+      await tester.tap(find.text('Revert files to before this turn…'));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('lists every file it changes and reverts on a new branch', (
+      tester,
+    ) async {
+      final backend = turns();
+      await show(tester, backend);
+      await open(tester);
+      expect(backend.calls, contains('revert plan T2'));
+      expect(find.text('Revert to before turn 3?'), findsOneWidget);
+      expect(
+        find.text(
+          'These 5 files and folders revert to how they were when turn 3 started.',
+        ),
+        findsOneWidget,
+      );
+      final back = 'back to ${formatClockMs(started)}';
+      expect(find.text('deleted since then, restored'), findsOneWidget);
+      expect(
+        find.text('$back · also your edit at ${formatClockMs(edited)}'),
+        findsOneWidget,
+      );
+      expect(find.text('new since then, deleted'), findsOneWidget);
+      expect(
+        find.text('holds files Git ignores, in the way, deleted'),
+        findsOneWidget,
+      );
+      expect(find.text('restored over a file Git ignores'), findsOneWidget);
+      expect(find.text('a repository is here, left alone'), findsOneWidget);
+      expect(
+        find.text(
+          'Commits, the branch main and other files Git ignores stay as they are.',
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.text(
+          'The session continues on a new branch from before turn 3, and turn 3’s prompt '
+          'returns to the input area. Turn 3 stays on its own branch in the session tree.',
+        ),
+        findsOneWidget,
+      );
+
+      await tester.tap(find.text('Revert and branch'));
+      await tester.pumpAndSettle();
+      expect(backend.calls, contains('revert T2'));
+      expect(find.text('Revert to before turn 3?'), findsNothing);
+    });
+
+    testWidgets('is refused while an agent runs in the checkout', (
+      tester,
+    ) async {
+      final backend = turns()
+        ..revertPlanned = revertPlanOf(
+          files: [revertedFile('src/login.ts', BridgeChangeStatus.modified)],
+          running: [
+            const BridgeRunningAgent(own: false, title: 'Fix flaky sync test'),
+          ],
+        );
+      await show(tester, backend);
+      await open(tester);
+      expect(
+        find.text('This file reverts to how it was when turn 3 started.'),
+        findsOneWidget,
+        reason: 'the files still show',
+      );
+      expect(
+        find.text(
+          '“Fix flaky sync test” is running in this checkout. Stop it or wait until it '
+          'finishes, then revert the files.',
+        ),
+        findsOneWidget,
+      );
+      await tester.tap(find.text('Revert and branch'));
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      expect(backend.calls, isNot(contains('revert T2')));
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      expect(find.text('Revert to before turn 3?'), findsNothing);
+
+      backend.revertPlanned = revertPlanOf(
+        running: [const BridgeRunningAgent(own: true, title: null)],
+      );
+      await open(tester);
+      expect(
+        find.text(
+          'This session’s agent is running. Stop it or wait until it finishes, then revert '
+          'the files.',
+        ),
+        findsOneWidget,
+      );
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+
+      backend.revertPlanned = revertPlanOf(
+        running: [
+          const BridgeRunningAgent(own: false, title: 'Fix flaky sync test'),
+          const BridgeRunningAgent(own: false, title: null),
+        ],
+      );
+      await open(tester);
+      expect(
+        find.text(
+          '“Fix flaky sync test” and 1 more are running in this checkout. Stop them or wait '
+          'until they finish, then revert the files.',
+        ),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('says when only files near a repository differ', (
+      tester,
+    ) async {
+      final backend = turns()
+        ..revertPlanned = revertPlanOf(
+          files: [
+            const BridgeRevertFile(
+              path: 'vendor/lib',
+              shown: 'vendor/lib',
+              status: BridgeChangeStatus.modified,
+              edited: true,
+              ignored: false,
+              kept: true,
+            ),
+          ],
+        );
+      await show(tester, backend);
+      await open(tester);
+      expect(
+        find.text(
+          'No file reverts: a revert leaves repositories inside the project alone.',
+        ),
+        findsOneWidget,
+      );
+      expect(find.text('a repository is here, left alone'), findsOneWidget);
+    });
+
+    testWidgets('reports a revert that failed', (tester) async {
+      final backend = turns()..revertError = 'git failed: disk full';
+      final state = await show(tester, backend);
+      await open(tester);
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      expect(backend.calls, contains('revert T2'));
+      expect(
+        state.notice.value?.text,
+        'Could not revert and branch. Git failed: disk full',
+      );
+    });
+
+    testWidgets('is offered for one turn, not for all turns', (tester) async {
+      final backend = turns();
+      final state = await show(tester, backend);
+      expect(find.text('Revert files to before this turn…'), findsOneWidget);
+      await state.showTurns(const AllTurns());
+      await tester.pumpAndSettle();
+      expect(find.text('Revert files to before this turn…'), findsNothing);
+    });
   });
 }

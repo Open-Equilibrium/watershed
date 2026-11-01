@@ -53,7 +53,7 @@ The [M1.2 startup evidence](flow-agent/benchmarks/M1_2_STARTUP_EVIDENCE.md) owns
 
 Control and monitoring should feel immediate when they are not waiting on a model, Tool or network. Keep configuration resolution incremental, event normalization bounded and AgentPulse ingestion proportional to active sessions. Add fixed observational workloads with each implemented surface that introduces a meaningful cost center.
 
-The durability journal writes in short group commits, never once per token, and per-turn checkpoints run off the UI path (ADR-0220, ADR-0229). Each gets a fixed observational workload when implemented: token streaming with the journal on, and checkpoint time in a large repository.
+The durability journal writes in short group commits, never once per token, and per-turn checkpoints run off the UI path (ADR-0220, ADR-0229). Checkpoint time in a large repository is recorded in [CHECKPOINT_EVIDENCE.md](meta-harness/benchmarks/CHECKPOINT_EVIDENCE.md); token streaming with the journal on gets its workload when the journal is implemented.
 
 ## Liquid
 

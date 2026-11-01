@@ -42,6 +42,8 @@ class ChatHistory {
     _version++;
     _start = null;
     _pendingMark = null;
+    _ended.clear();
+    _boundaries.clear();
     more.value = false;
   }
 
@@ -63,9 +65,11 @@ class ChatHistory {
     final before = items.value;
     final BridgeTranscript page;
     final BridgeHistory history;
+    final List<BridgeTurn> turns;
     try {
       page = await _backend.transcript(null);
       history = await _backend.history(const []);
+      turns = await _backend.turns();
     } on Object catch (error) {
       notify(BridgeLevel.error, 'Could not restore the chat: $error');
       return;
@@ -75,15 +79,32 @@ class ChatHistory {
     totals.value = const SessionTotals().add(history.usage);
     final rebuilt = _stored(page.items);
     _pendingMark = null;
+    _path = _pathIndex(history.tree, history.leaf);
+    _turns = turns;
+    // Turns that ended before the restore get their rows from it, not from a live end.
+    _ended
+      ..clear()
+      ..addAll([
+        for (final turn in turns)
+          if (turn.endEntry != null) turn.id,
+      ]);
+    _boundaries.clear();
     if (branchMarker(history.tree, history.leaf) case final marker?) {
-      final path = _pathIndex(history.tree, history.leaf);
-      final mark = (marker: marker, path: path, fork: path[marker.fork] ?? -1);
+      final mark = (
+        marker: marker,
+        path: _path,
+        fork: _path[marker.fork] ?? -1,
+      );
       if (!_placeMark(rebuilt, mark, complete: !page.more)) _pendingMark = mark;
     }
+    _placeTurnEnds(rebuilt);
     // Only live items arrived meanwhile; items another restore rebuilt are replaced.
     final arrived = items.value.where(
       (view) =>
-          !before.contains(view) && view.entry == null && view.marker == null,
+          !before.contains(view) &&
+          view.entry == null &&
+          view.marker == null &&
+          view.turnEnd == null,
     );
     items.value = [...rebuilt, ...arrived];
     _start = page.start;
@@ -93,6 +114,80 @@ class ChatHistory {
 
   /// The branch mark until the chat shows where the branch leaves the others.
   _Mark? _pendingMark;
+
+  /// Each entry's position on the current branch, and the branch's turns, as last restored.
+  Map<String, int> _path = const {};
+  List<BridgeTurn> _turns = const [];
+
+  /// Puts a row after each restored turn that changed files, below the turn's last item `views`
+  /// show; rows of turns that ended live stay where they are. Returns `views`.
+  List<ItemView> _placeTurnEnds(List<ItemView> views) {
+    int? at(String? entry) => entry == null ? null : _path[entry];
+    final placeable = {
+      for (final turn in _turns)
+        if (at(turn.startEntry) != null && at(turn.endEntry) != null) turn.id,
+    };
+    views.removeWhere((view) => placeable.contains(view.turnEnd?.id));
+    final places = <(int, BridgeTurn)>[];
+    for (final turn in _turns) {
+      final (start, end) = (at(turn.startEntry), at(turn.endEntry));
+      if (start == null || end == null || !_changedFiles(turn)) continue;
+      final last = views.lastIndexWhere((view) {
+        final position = at(view.entry) ?? -1;
+        return position > start && position < end;
+      });
+      if (last >= 0) places.add((last + 1, turn));
+    }
+    for (final (at, turn) in places.reversed) {
+      views.insert(at, _turnEnd(turn));
+    }
+    return views;
+  }
+
+  /// Turns whose end the chat placed or passed over, so none is placed twice.
+  final _ended = <String>{};
+
+  /// Where the chat stood when each turn ended live, oldest first, until the turn is read.
+  final _boundaries = <int>[];
+
+  /// A turn ended live: its row goes here, after its items and before any of the next turn.
+  void turnCompleted() => _boundaries.add(items.value.length);
+
+  /// Places the rows of turns that ended live, oldest first, each where its turn ended.
+  void endTurns(List<BridgeTurn> turns) {
+    final views = [...items.value];
+    var inserted = 0;
+    for (final turn in turns) {
+      if (turn.endEntry == null || _ended.contains(turn.id)) continue;
+      if (_boundaries.isEmpty) break;
+      // Rows inserted before it already moved the remaining places.
+      final at = _boundaries.removeAt(0);
+      _ended.add(turn.id);
+      if (!_changedFiles(turn)) continue;
+      views.insert(at.clamp(0, views.length), _turnEnd(turn));
+      inserted++;
+      for (var index = 0; index < _boundaries.length; index++) {
+        _boundaries[index]++;
+      }
+    }
+    if (inserted > 0) items.value = views;
+  }
+
+  /// Moves the places of live turns' rows after `count` items were added before them.
+  void _shift(int count) {
+    for (var index = 0; index < _boundaries.length; index++) {
+      _boundaries[index] += count;
+    }
+  }
+
+  static bool _changedFiles(BridgeTurn turn) =>
+      turn.ended && (turn.files ?? 0) > 0;
+
+  ItemView _turnEnd(BridgeTurn turn) => ItemView(
+    id: _nextId--,
+    kind: BridgeItemKind.dynamicToolCall,
+    turnEnd: turn,
+  );
 
   /// Counts restores and session changes; reads for a replaced chat are dropped.
   int _version = 0;
@@ -133,11 +228,16 @@ class ChatHistory {
         // A page that does not move back ends the reading, so it cannot repeat forever.
         more.value = page.more && page.start != before;
         if (page.items.isNotEmpty) {
-          final shown = [..._stored(page.items), ...items.value];
+          final shown = _placeTurnEnds([
+            ..._stored(page.items),
+            ...items.value,
+          ]);
           if (_pendingMark case final mark?
               when _placeMark(shown, mark, complete: !more.value)) {
             _pendingMark = null;
           }
+          // Counted once the mark is in, which also goes before the live turns.
+          _shift(shown.length - items.value.length);
           items.value = shown;
           return;
         }
@@ -147,6 +247,7 @@ class ChatHistory {
         final shown = [...items.value];
         _placeMark(shown, mark, complete: true);
         _pendingMark = null;
+        _shift(shown.length - items.value.length);
         items.value = shown;
       }
     } on Object catch (error) {

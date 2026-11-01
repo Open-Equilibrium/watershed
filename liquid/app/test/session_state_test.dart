@@ -236,6 +236,40 @@ void main() {
   });
 
   test(
+    'a revert continues the chat and the Diff tab on the new branch',
+    () async {
+      final turn = turnOf('T2', number: 2);
+      backend.turnList = [turnOf('T1', number: 1), turn];
+      await state.readChanges();
+      final changes = <int>[];
+      state.stored.addListener(() => changes.add(state.stored.value));
+      // pi continues before the turn's prompt, so the new branch holds only the earlier turn.
+      backend.turnList = [turnOf('T1', number: 1)];
+
+      expect(await state.revert(turn), isTrue);
+      expect(backend.calls, containsAllInOrder(['revert T2', 'transcript']));
+      expect(changes, [1], reason: 'the stored history changed');
+      expect(state.turns.value.map((turn) => turn.id), ['T1']);
+      expect(state.shown.value?.to.id, 'T1');
+
+      // The files changed, but the session stayed on its branch: the Diff tab still rereads.
+      backend
+        ..revertError =
+            'the files were reverted, but the session could not continue from before the '
+            'turn: the agent has exited'
+        ..turnList = [turnOf('T0', number: 1)];
+      expect(await state.revert(turnOf('T1', number: 1)), isFalse);
+      expect(
+        state.notice.value?.text,
+        'Could not revert and branch. The files were reverted, but the session could '
+        'not continue from before the turn: the agent has exited',
+      );
+      expect(changes, [1]);
+      expect(state.turns.value.map((turn) => turn.id), ['T0']);
+    },
+  );
+
+  test(
     'rebuilds the chat of the current branch with its branch mark',
     () async {
       backend.stored = historyOf(
@@ -300,6 +334,176 @@ void main() {
       expect(state.chatMore.value, isFalse);
     },
   );
+
+  test('says below each turn what it changed, restored and live', () async {
+    BridgeTreeNode node(String id, String? parent, BridgeEntryKind kind) =>
+        BridgeTreeNode(
+          failed: false,
+          id: id,
+          parent: parent,
+          kind: kind,
+          preview: id,
+        );
+    backend.stored = historyOf(
+      [],
+      tree: [
+        node('c1', null, BridgeEntryKind.custom),
+        node('u1', 'c1', BridgeEntryKind.user),
+        node('a1', 'u1', BridgeEntryKind.assistant),
+        node('c2', 'a1', BridgeEntryKind.custom),
+        node('c3', 'c2', BridgeEntryKind.custom),
+        node('u2', 'c3', BridgeEntryKind.user),
+        node('a2', 'u2', BridgeEntryKind.assistant),
+      ],
+      leaf: 'a2',
+    );
+    backend.transcripts[''] = BridgeTranscript(
+      items: [
+        chatItem('u1', BridgeItemKind.userMessage, text: 'Go'),
+        chatItem('a1', BridgeItemKind.assistantMessage, text: 'Looked'),
+        chatItem('u2', BridgeItemKind.userMessage, text: 'Again'),
+        chatItem('a2', BridgeItemKind.assistantMessage, text: 'Running'),
+      ],
+      more: false,
+    );
+    final first = turnOf(
+      'T1',
+      number: 1,
+      startEntry: 'c1',
+      endEntry: 'c2',
+      files: 3,
+      added: 12,
+      removed: 1,
+    );
+    backend.turnList = [
+      first,
+      turnOf('T2', number: 2, ended: false, startEntry: 'c3'),
+    ];
+    await state.loadChat();
+    String describe(ItemView view) => switch (view.turnEnd) {
+      final turn? => '${turn.id}: ${turn.files} files',
+      null => view.text.value,
+    };
+    expect(state.items.value.map(describe), [
+      'Go',
+      'Looked',
+      'T1: 3 files',
+      'Again',
+      'Running',
+    ]);
+
+    // The running turn ends; what it changed follows its live items.
+    backend.turnList = [
+      first,
+      turnOf(
+        'T2',
+        number: 2,
+        startEntry: 'c3',
+        endEntry: 'c4',
+        added: 1,
+        removed: 0,
+      ),
+    ];
+    backend.controller.add(event(BridgeEventKind.turnCompleted));
+    await pumpEventQueue();
+    expect(state.items.value.map(describe).last, 'T2: 1 files');
+    // Ending it again, as after a second read, adds nothing.
+    backend.controller.add(event(BridgeEventKind.turnCompleted));
+    await pumpEventQueue();
+    expect(
+      state.items.value.where((view) => view.turnEnd != null),
+      hasLength(2),
+    );
+  });
+
+  test('keeps the row of a live turn when earlier messages load', () async {
+    backend.transcripts[''] = BridgeTranscript(
+      items: [chatItem('u1', BridgeItemKind.userMessage, text: 'Go')],
+      more: true,
+      start: 'u1',
+    );
+    backend.transcripts['u1'] = BridgeTranscript(
+      items: [chatItem('u0', BridgeItemKind.userMessage, text: 'Earlier')],
+      more: false,
+      start: 'u0',
+    );
+    backend.turnList = const [];
+    await state.loadChat();
+    backend.turnList = [turnOf('T1', number: 1, added: 2, removed: 0)];
+    backend.controller.add(event(BridgeEventKind.turnCompleted));
+    await pumpEventQueue();
+    await state.loadEarlier();
+    expect(
+      state.items.value.map((view) => view.turnEnd?.id ?? view.text.value),
+      ['Earlier', 'Go', 'T1'],
+    );
+  });
+
+  test(
+    'puts a turn\'s row where the turn ended, also once the next began',
+    () async {
+      backend.turnList = const [];
+      backend.turnsGate = Completer();
+      backend.controller.add(event(BridgeEventKind.turnCompleted));
+      // The next turn begins before the ended one was read.
+      backend.controller.add(
+        event(
+          BridgeEventKind.itemStarted,
+          item: item(7, kind: BridgeItemKind.userMessage),
+        ),
+      );
+      await pumpEventQueue();
+      backend.turnList = [
+        turnOf('T1', number: 1, added: 2, removed: 0),
+        turnOf('T2', number: 2, ended: false),
+      ];
+      backend.turnsGate!.complete();
+      await pumpEventQueue();
+      expect(
+        state.items.value.map((view) => view.turnEnd?.id ?? '${view.id}'),
+        ['T1', '7'],
+      );
+    },
+  );
+
+  test('puts each of two turns read together where it ended', () async {
+    backend.turnList = const [];
+    backend.turnsGate = Completer();
+    for (final id in [1, 2, 3]) {
+      backend.controller.add(
+        event(
+          BridgeEventKind.itemStarted,
+          item: item(id, kind: BridgeItemKind.userMessage),
+        ),
+      );
+      // Turns 1 and 2 end before their read returns; turn 3 is running.
+      if (id < 3) backend.controller.add(event(BridgeEventKind.turnCompleted));
+    }
+    await pumpEventQueue();
+    backend.turnList = [
+      turnOf('T1', number: 1, added: 1, removed: 0),
+      turnOf('T2', number: 2, added: 1, removed: 0),
+      turnOf('T3', number: 3, ended: false),
+    ];
+    backend.turnsGate!.complete();
+    await pumpEventQueue();
+    expect(state.items.value.map((view) => view.turnEnd?.id ?? '${view.id}'), [
+      '1',
+      'T1',
+      '2',
+      'T2',
+      '3',
+    ]);
+  });
+
+  test('says nothing below a turn that changed no file', () async {
+    backend.turnList = [
+      turnOf('T1', number: 1, files: 0, added: 0, removed: 0),
+    ];
+    backend.controller.add(event(BridgeEventKind.turnCompleted));
+    await pumpEventQueue();
+    expect(state.items.value.where((view) => view.turnEnd != null), isEmpty);
+  });
 
   group('the rebuilt chat', () {
     const tree = [
@@ -430,6 +634,92 @@ void main() {
       ]);
     });
   });
+
+  test(
+    'places a live turn\'s row after a branch mark an earlier page adds',
+    () async {
+      const tree = [
+        BridgeTreeNode(
+          failed: false,
+          id: 'u1',
+          kind: BridgeEntryKind.user,
+          preview: 'Go',
+        ),
+        BridgeTreeNode(
+          failed: false,
+          id: 'a1',
+          parent: 'u1',
+          kind: BridgeEntryKind.assistant,
+          preview: 'Looked',
+        ),
+        BridgeTreeNode(
+          failed: false,
+          id: 'a2',
+          parent: 'a1',
+          kind: BridgeEntryKind.assistant,
+          preview: 'Done',
+        ),
+        BridgeTreeNode(
+          failed: false,
+          id: 'b1',
+          parent: 'a1',
+          kind: BridgeEntryKind.user,
+          preview: 'Instead',
+        ),
+        BridgeTreeNode(
+          failed: false,
+          id: 'b2',
+          parent: 'b1',
+          kind: BridgeEntryKind.assistant,
+          preview: 'B2',
+        ),
+      ];
+      backend.stored = historyOf([], tree: tree, leaf: 'b2');
+      backend.transcripts[''] = BridgeTranscript(
+        items: [chatItem('b2', BridgeItemKind.assistantMessage, text: 'B2')],
+        more: true,
+        start: 'b2',
+      );
+      backend.transcripts['b2'] = BridgeTranscript(
+        items: [
+          chatItem('u1', BridgeItemKind.userMessage, text: 'Go'),
+          chatItem('a1', BridgeItemKind.assistantMessage, text: 'Looked'),
+          chatItem('b1', BridgeItemKind.userMessage, text: 'Instead'),
+        ],
+        more: false,
+        start: 'u1',
+      );
+      backend.turnList = const [];
+      await state.loadChat();
+      // A live turn ends while its read waits; meanwhile the earlier page adds the mark.
+      backend.controller.add(
+        event(
+          BridgeEventKind.itemStarted,
+          item: item(9, kind: BridgeItemKind.userMessage),
+        ),
+      );
+      backend.turnsGate = Completer();
+      backend.controller.add(event(BridgeEventKind.turnCompleted));
+      await pumpEventQueue();
+      await state.loadEarlier();
+      backend.turnList = [turnOf('T9', number: 3, added: 1, removed: 0)];
+      backend.turnsGate!.complete();
+      await pumpEventQueue();
+      String name(ItemView view) =>
+          view.turnEnd?.id ??
+          (view.marker != null ? 'marker' : null) ??
+          (view.entry == null ? '${view.id}' : view.text.value);
+      expect(state.items.value.map(name), [
+        'Go',
+        'Looked',
+        'marker',
+        'Instead',
+        'B2',
+        '9',
+        'T9',
+      ]);
+    },
+  );
 
   group('what goes wrong does not lose messages', () {
     test('a waiting message that cannot be sent again comes back', () async {

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'shortcuts/keymap.dart';
 import 'shortcuts/shortcut_reveal.dart';
 import 'theme/theme.dart';
 import 'theme/tokens.g.dart';
@@ -107,7 +108,9 @@ class _Button extends StatelessWidget {
 
   final String label;
   final String? shortcut;
-  final VoidCallback onPressed;
+
+  /// None shows the button disabled.
+  final VoidCallback? onPressed;
   final Color foreground;
   final Color background;
   final Color? outline;
@@ -157,6 +160,7 @@ class _Button extends StatelessWidget {
         ),
       ),
     );
+    if (onPressed == null) return Opacity(opacity: 0.45, child: button);
     final hint = shortcut;
     if (hint == null || hint.isEmpty || !ShortcutReveal.shown(context)) {
       return button;
@@ -209,6 +213,113 @@ class PrimaryButton extends StatelessWidget {
     foreground: context.ws.onAccent,
     background: context.ws.accent,
   );
+}
+
+/// The primary action when it cannot be undone from Liquid, such as reverting files.
+class DangerButton extends StatelessWidget {
+  const DangerButton({
+    super.key,
+    required this.label,
+    required this.onPressed,
+    this.shortcut,
+  });
+
+  final String label;
+  final String? shortcut;
+
+  /// None shows the button disabled.
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) => _Button(
+    label: label,
+    shortcut: shortcut,
+    onPressed: onPressed,
+    foreground: context.ws.onAccent,
+    background: context.ws.danger,
+  );
+}
+
+/// Asks before an action Liquid cannot undo (approved checkpoint mockups): ⏎ confirms while
+/// it is allowed and esc cancels; it closes with `true` when confirmed. Without `action` it
+/// only says why nothing can be done.
+class DangerDialog extends StatelessWidget {
+  const DangerDialog({
+    super.key,
+    required this.title,
+    required this.children,
+    this.action,
+    this.allowed = true,
+  });
+
+  final String title;
+  final List<Widget> children;
+  final String? action;
+  final bool allowed;
+
+  /// The style of a dialog's text.
+  static TextStyle text(BuildContext context) => TextStyle(
+    color: context.ws.textMuted,
+    fontSize: WsMetrics.fsCompact,
+    height: WsMetrics.lhCompact / WsMetrics.fsCompact,
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    final ws = context.ws;
+    final confirm = action != null && allowed;
+    void confirmed() => Navigator.of(context).pop(true);
+    return CallbackShortcuts(
+      bindings: {
+        if (confirm) const Keys(LogicalKeyboardKey.enter).activator: confirmed,
+      },
+      child: Focus(
+        autofocus: true,
+        child: Dialog(
+          backgroundColor: ws.surface,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(WsMetrics.radiusXl),
+          ),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 520),
+            child: Padding(
+              padding: const EdgeInsets.all(WsMetrics.space5),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                spacing: WsMetrics.space4,
+                children: [
+                  Text(
+                    title,
+                    style: Theme.of(context).textTheme.titleSmall
+                        ?.copyWith(fontWeight: WsMetrics.fwSemibold),
+                  ),
+                  ...children,
+                  Row(
+                    spacing: WsMetrics.space3,
+                    children: [
+                      if (action case final label?)
+                        DangerButton(
+                          label: label,
+                          shortcut: confirm ? '⏎' : null,
+                          onPressed: confirm ? confirmed : null,
+                        ),
+                      const Spacer(),
+                      SecondaryButton(
+                        label: 'Cancel',
+                        shortcut: 'esc',
+                        onPressed: () => Navigator.of(context).pop(false),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class SecondaryButton extends StatelessWidget {

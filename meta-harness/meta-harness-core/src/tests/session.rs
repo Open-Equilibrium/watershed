@@ -624,6 +624,287 @@ fn approval_with(id: &str, tool: &str, arguments: &str) -> String {
     )
 }
 
+/// A throwaway Git project with one commit, for an agent that works in it.
+fn git_project(name: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("meta-harness-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("project");
+    std::fs::write(dir.join("a.txt"), "a\n").expect("file");
+    for args in [
+        &["init", "-q"][..],
+        &["add", "."],
+        &[
+            "-c",
+            "user.name=T",
+            "-c",
+            "user.email=t@t",
+            "commit",
+            "-q",
+            "-m",
+            "base",
+        ],
+    ] {
+        let status = std::process::Command::new("git")
+            .args(args)
+            .current_dir(&dir)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .status()
+            .expect("git runs");
+        assert!(status.success(), "git {args:?}");
+    }
+    dir
+}
+
+#[test]
+fn takes_the_checkpoints_the_extension_asks_for_without_asking_the_user() {
+    run(async {
+        let project = git_project("checkpoints");
+        let request = |id: &str, turn: &str, phase: &str| {
+            format!(
+                r#"printf '%s\n' '{{"type":"extension_ui_request","id":"{id}","method":"input","title":"watershed.checkpoint {{\"session\":\"s1\",\"turn\":\"{turn}\",\"phase\":\"{phase}\"}}","placeholder":""}}'
+"#
+            )
+        };
+        let script = [
+            request("c1", "t1", "start"),
+            expect_response(&[r#""id":"c1""#, r#"\"ok\":true"#]),
+            // The turn changed one file between its checkpoints.
+            "printf 'b\\n' > a.txt\n".to_owned(),
+            request("c2", "t1", "end"),
+            expect_response(&[
+                r#""id":"c2""#,
+                r#"\"ok\":true"#,
+                r#"\"files\":1"#,
+                r#"\"added\":1"#,
+                r#"\"removed\":1"#,
+            ]),
+            // An id that could leave Watershed's refs is refused, and pi learns why.
+            request("c3", "../x", "start"),
+            expect_response(&[r#""id":"c3""#, "cannot name a checkpoint"]),
+        ]
+        .concat();
+        let command = AgentCommand {
+            program: "/bin/sh".into(),
+            args: vec!["-c".into(), script.into()],
+            extension: EXTENSION.into(),
+            session: None,
+            cwd: project.clone(),
+        };
+        let (_session, mut events) = Session::start(&command).expect("fake agent starts");
+        assert_eq!(
+            next(&mut events).await,
+            exited(true),
+            "no question reached the user"
+        );
+        let refs = std::process::Command::new("git")
+            .args(["for-each-ref", "--format=%(refname)", "refs/watershed"])
+            .current_dir(&project)
+            .output()
+            .expect("git runs");
+        assert_eq!(
+            String::from_utf8_lossy(&refs.stdout),
+            "refs/watershed/checkpoints/s1/t1/end\nrefs/watershed/checkpoints/s1/t1/start\n"
+        );
+        let _ = std::fs::remove_dir_all(&project);
+    });
+}
+
+#[test]
+fn a_turn_that_waits_for_a_revert_says_so_in_the_status() {
+    run(async {
+        let project = git_project("checkpoint-waits");
+        // Another window reverts the checkout.
+        let reverting = crate::checkout::Checkout::new(
+            project.join(".git/watershed"),
+            project.join(".git/watershed"),
+        )
+        .alone()
+        .await
+        .expect("nothing runs");
+        let script = [
+            r#"printf '%s\n' '{"type":"extension_ui_request","id":"c1","method":"input","title":"watershed.checkpoint {\"session\":\"s1\",\"turn\":\"t1\",\"phase\":\"start\"}","placeholder":""}'
+"#
+            .to_owned(),
+            expect_response(&[r#""id":"c1""#, r#"\"ok\":true"#]),
+        ]
+        .concat();
+        let command = AgentCommand {
+            program: "/bin/sh".into(),
+            args: vec!["-c".into(), script.into()],
+            extension: EXTENSION.into(),
+            session: None,
+            cwd: project.clone(),
+        };
+        let (_session, mut events) = Session::start(&command).expect("fake agent starts");
+        let status = |text: Option<&str>| {
+            SessionEvent::Agent(AgentEvent::StatusChanged {
+                key: "watershed.revert".to_owned(),
+                text: text.map(str::to_owned),
+            })
+        };
+        assert_eq!(
+            next(&mut events).await,
+            status(Some("Waiting for a revert in this checkout to finish"))
+        );
+        drop(reverting);
+        assert_eq!(next(&mut events).await, status(None));
+        assert_eq!(next(&mut events).await, exited(true));
+        let _ = std::fs::remove_dir_all(&project);
+    });
+}
+
+#[test]
+fn an_agent_that_exits_stops_the_checkpoint_it_asked_for() {
+    run(async {
+        let project = git_project("checkpoint-exit");
+        // The project's clean filter says it runs, then holds the capture far longer than the
+        // test; Git runs it at the top of the work tree.
+        let config = project.join(".git/config");
+        let mut text = std::fs::read_to_string(&config).expect("config");
+        text.push_str(
+            "[filter \"slow\"]\n\tclean = \"echo $$ > .git/filter-pid; sleep 30; cat\"\n",
+        );
+        std::fs::write(&config, text).expect("config");
+        std::fs::write(project.join(".gitattributes"), "*.txt filter=slow\n").expect("attributes");
+        std::fs::write(project.join("a.txt"), "changed\n").expect("file");
+        let script = r#"printf '%s\n' '{"type":"extension_ui_request","id":"c1","method":"input","title":"watershed.checkpoint {\"session\":\"s1\",\"turn\":\"t1\",\"phase\":\"start\"}","placeholder":""}'
+until [ -e .git/filter-pid ]; do sleep 0.05; done"#;
+        let command = AgentCommand {
+            program: "/bin/sh".into(),
+            args: vec!["-c".into(), script.into()],
+            extension: EXTENSION.into(),
+            session: None,
+            cwd: project.clone(),
+        };
+        let (_session, mut events) = Session::start(&command).expect("fake agent starts");
+        assert_eq!(next(&mut events).await, exited(true));
+        let pid = std::fs::read_to_string(project.join(".git/filter-pid")).expect("the filter ran");
+        let alive = std::process::Command::new("kill")
+            .args(["-0", pid.trim()])
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success());
+        if alive {
+            let _ = std::process::Command::new("kill")
+                .args(["-9", pid.trim()])
+                .status();
+        }
+        assert!(!alive, "the capture's Git outlived the agent");
+        let _ = std::fs::remove_dir_all(&project);
+    });
+}
+
+#[test]
+fn an_agent_that_exits_stops_its_checkpoint_while_a_descendant_holds_its_output() {
+    run(async {
+        let project = git_project("checkpoint-held");
+        let config = project.join(".git/config");
+        let mut text = std::fs::read_to_string(&config).expect("config");
+        text.push_str(
+            "[filter \"slow\"]\n\tclean = \"echo $$ > .git/filter-pid; sleep 30; cat\"\n",
+        );
+        std::fs::write(&config, text).expect("config");
+        std::fs::write(project.join(".gitattributes"), "*.txt filter=slow\n").expect("attributes");
+        std::fs::write(project.join("a.txt"), "changed\n").expect("file");
+        // A program the agent left behind keeps its output open after the agent exits.
+        let script = r#"sleep 30 & echo $! > .git/holder-pid
+printf '%s\n' '{"type":"extension_ui_request","id":"c1","method":"input","title":"watershed.checkpoint {\"session\":\"s1\",\"turn\":\"t1\",\"phase\":\"start\"}","placeholder":""}'
+until [ -e .git/filter-pid ]; do sleep 0.05; done"#;
+        let command = AgentCommand {
+            program: "/bin/sh".into(),
+            args: vec!["-c".into(), script.into()],
+            extension: EXTENSION.into(),
+            session: None,
+            cwd: project.clone(),
+        };
+        let (_session, _events) = Session::start(&command).expect("fake agent starts");
+        let filter = project.join(".git/filter-pid");
+        timeout(WAIT, async {
+            while !filter.exists() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("the filter runs");
+        let alive = |pid: &str| {
+            std::process::Command::new("kill")
+                .args(["-0", pid.trim()])
+                .stderr(std::process::Stdio::null())
+                .status()
+                .is_ok_and(|status| status.success())
+        };
+        let pid = std::fs::read_to_string(&filter).expect("the filter's id");
+        let started = std::time::Instant::now();
+        while alive(&pid) && started.elapsed() < Duration::from_secs(3) {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        let survived = alive(&pid);
+        for program in [
+            pid.clone(),
+            std::fs::read_to_string(project.join(".git/holder-pid")).unwrap_or_default(),
+        ] {
+            let _ = std::process::Command::new("kill")
+                .args(["-9", program.trim()])
+                .status();
+        }
+        assert!(!survived, "the capture's Git outlived the agent");
+        let _ = std::fs::remove_dir_all(&project);
+    });
+}
+
+#[test]
+fn an_agent_that_exits_stops_its_checkpoint_while_its_events_wait() {
+    run(async {
+        let project = git_project("checkpoint-backpressure");
+        let config = project.join(".git/config");
+        let mut text = std::fs::read_to_string(&config).expect("config");
+        text.push_str(
+            "[filter \"slow\"]\n\tclean = \"echo $$ > .git/filter-pid; sleep 30; cat\"\n",
+        );
+        std::fs::write(&config, text).expect("config");
+        std::fs::write(project.join(".gitattributes"), "*.txt filter=slow\n").expect("attributes");
+        std::fs::write(project.join("a.txt"), "changed\n").expect("file");
+        // More events than the session buffers, which nobody reads, then the agent exits.
+        let script = r#"printf '%s\n' '{"type":"extension_ui_request","id":"c1","method":"input","title":"watershed.checkpoint {\"session\":\"s1\",\"turn\":\"t1\",\"phase\":\"start\"}","placeholder":""}'
+until [ -e .git/filter-pid ]; do sleep 0.05; done
+i=0; while [ $i -lt 300 ]; do printf '%s\n' '{"type":"queue_update","steering":[],"followUp":[]}'; i=$((i+1)); done"#;
+        let command = AgentCommand {
+            program: "/bin/sh".into(),
+            args: vec!["-c".into(), script.into()],
+            extension: EXTENSION.into(),
+            session: None,
+            cwd: project.clone(),
+        };
+        let (_session, _events) = Session::start(&command).expect("fake agent starts");
+        let filter = project.join(".git/filter-pid");
+        timeout(WAIT, async {
+            while !filter.exists() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("the filter runs");
+        let pid = std::fs::read_to_string(&filter).expect("the filter's id");
+        let alive = || {
+            std::process::Command::new("kill")
+                .args(["-0", pid.trim()])
+                .stderr(std::process::Stdio::null())
+                .status()
+                .is_ok_and(|status| status.success())
+        };
+        let started = std::time::Instant::now();
+        while alive() && started.elapsed() < Duration::from_secs(3) {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        let survived = alive();
+        let _ = std::process::Command::new("kill")
+            .args(["-9", pid.trim()])
+            .status();
+        assert!(!survived, "the capture's Git outlived the agent");
+        let _ = std::fs::remove_dir_all(&project);
+    });
+}
+
 #[test]
 fn answers_extension_questions() {
     run(async {
@@ -1407,5 +1688,21 @@ exit 0"#,
             Ok(None),
             "the event stream ends instead of waiting ten minutes"
         );
+    });
+}
+
+#[test]
+fn kept_checkpoints_keep_no_event_stream_open_after_the_exit() {
+    run(async {
+        let (session, mut events) = fake_agent("exit 0");
+        let checkpoints = session.checkpoints();
+        assert_eq!(next(&mut events).await, exited(true));
+        drop(session);
+        assert_eq!(
+            timeout(WAIT, events.recv()).await,
+            Ok(None),
+            "the event stream ends while the checkpoints are still held"
+        );
+        drop(checkpoints);
     });
 }

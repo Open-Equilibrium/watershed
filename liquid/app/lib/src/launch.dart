@@ -68,7 +68,12 @@ Future<Launch> launchFromEnvironment(Map<String, String> environment) async {
     unawaited(state.loadChat());
     return Launch.session(
       state,
-      SessionInfo(project: name, harness: 'pi', device: Platform.localHostname),
+      SessionInfo(
+        project: name,
+        harness: 'pi',
+        device: Platform.localHostname,
+        path: Directory(project).absolute.path,
+      ),
     );
   } on Object catch (error) {
     return Launch.problem('pi did not start: $error');

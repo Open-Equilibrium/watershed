@@ -11,6 +11,9 @@ import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'sidebar.dart';
 
+/// The status entry the session sets while a turn waits for a revert in its checkout.
+const revertWaitKey = 'watershed.revert';
+
 /// Run status, tokens, cost and extension status entries. A notification takes the status
 /// slot (approved session-flow mockup); a click lists the latest ones.
 class StatusBar extends StatefulWidget {
@@ -160,8 +163,11 @@ class _StatusBarState extends State<StatusBar> {
                 Flexible(
                   child: Text(
                     [
+                      // Watershed's own entry needs no key to tell it apart.
                       for (final entry in state.statuses.value.entries)
-                        '${entry.key} ${entry.value}',
+                        entry.key == revertWaitKey
+                            ? entry.value
+                            : '${entry.key} ${entry.value}',
                     ].join(' · '),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
@@ -312,8 +318,7 @@ class _NoticeListState extends State<_NoticeList> {
                                           ),
                                         ),
                                         Text(
-                                          '${notice.at.hour.toString().padLeft(2, '0')}:'
-                                          '${notice.at.minute.toString().padLeft(2, '0')}',
+                                          formatClock(notice.at),
                                           style: small,
                                         ),
                                         const SizedBox(width: WsMetrics.space2),

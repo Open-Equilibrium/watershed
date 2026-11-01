@@ -68,6 +68,59 @@ void main() {
     ),
   );
 
+  testWidgets('a turn\'s end in the chat offers to revert its files', (
+    tester,
+  ) async {
+    await show(tester);
+    BridgeTreeNode node(String id, String? parent, BridgeEntryKind kind) =>
+        BridgeTreeNode(
+          failed: false,
+          id: id,
+          parent: parent,
+          kind: kind,
+          preview: id,
+        );
+    backend
+      ..stored = historyOf(
+        [],
+        tree: [
+          node('c1', null, BridgeEntryKind.custom),
+          node('u1', 'c1', BridgeEntryKind.user),
+          node('a1', 'u1', BridgeEntryKind.assistant),
+          node('c2', 'a1', BridgeEntryKind.custom),
+        ],
+        leaf: 'c2',
+      )
+      ..transcripts[''] = BridgeTranscript(
+        items: [
+          chatItem('u1', BridgeItemKind.userMessage, text: 'Go'),
+          chatItem('a1', BridgeItemKind.assistantMessage, text: 'Done'),
+        ],
+        more: false,
+      )
+      ..turnList = [
+        turnOf(
+          'T1',
+          number: 1,
+          startEntry: 'c1',
+          endEntry: 'c2',
+          added: 2,
+          removed: 1,
+        ),
+      ]
+      ..revertPlanned = revertPlanOf(
+        files: [revertedFile('a.txt', BridgeChangeStatus.modified)],
+      );
+    await state.loadChat();
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Revert files to before this turn…'));
+    await tester.pumpAndSettle();
+    expect(find.text('Revert to before turn 1?'), findsOneWidget);
+    await tester.tap(find.text('Revert and branch'));
+    await tester.pumpAndSettle();
+    expect(backend.calls, contains('revert T1'));
+  });
+
   testWidgets(
     'the input area floats at the bottom of each tab\'s main column',
     (tester) async {
@@ -171,7 +224,7 @@ void main() {
     );
   });
 
-  testWidgets('the Diff tab counts the files the latest run changed', (
+  testWidgets('the Diff tab counts the files the shown turn changed', (
     tester,
   ) async {
     await show(tester);
@@ -1032,6 +1085,34 @@ void main() {
     expect(backend.calls.last, 'answer q2 Fixed');
   });
 
+  testWidgets('names extension statuses but not Watershed\'s own', (
+    tester,
+  ) async {
+    await show(tester);
+    for (final (key, text) in [
+      ('watershed.revert', 'Waiting for a revert in this checkout to finish'),
+      ('todo', '2 left'),
+      // An extension's key that only looks like Watershed's still shows.
+      ('watershed.other', 'busy'),
+    ]) {
+      await emit(
+        tester,
+        event(
+          BridgeEventKind.statusChanged,
+          display: BridgeDisplay(key: key, lines: const []),
+          text: text,
+        ),
+      );
+    }
+    expect(
+      find.text(
+        'Waiting for a revert in this checkout to finish · todo 2 left · '
+        'watershed.other busy',
+      ),
+      findsOneWidget,
+    );
+  });
+
   testWidgets('fits many extension statuses and a long tool name', (
     tester,
   ) async {
@@ -1804,7 +1885,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 700));
     expect(
       find.text(
-        '↑↓ file · ←→ folder · ⌥↑↓ hunk · U unified/split · W whitespace',
+        'T turn · ↑↓ file · ←→ folder · ⌥↑↓ hunk · U unified/split · W whitespace',
       ),
       findsOneWidget,
     );

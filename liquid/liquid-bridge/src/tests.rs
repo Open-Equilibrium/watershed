@@ -12,9 +12,13 @@ use crate::api::events::{
 use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
-use crate::api::history::{BridgeEntryKind, BridgeRecordKind};
+use crate::api::history::{
+    BridgeChangesState, BridgeEntryKind, BridgeRecordKind, BridgeRevertFile, BridgeRunningAgent,
+    BridgeTurn, BridgeTurnChanges,
+};
 use crate::api::session::{
-    AgentSession, BridgeApprovalMode, BridgeModel, BridgeStoredSession, SessionConfig,
+    AgentSession, BridgeApprovalMode, BridgeCheckpointSession, BridgeModel, BridgeStoredSession,
+    SessionConfig,
 };
 use crate::convert::describe;
 use crate::stream::{gather, push};
@@ -671,118 +675,473 @@ fn git(repo: &std::path::Path, args: &[&str]) {
     assert!(status.success(), "git {args:?}");
 }
 
+/// Asks for a checkpoint as Watershed's extension does and checks that the core took it.
+fn checkpoint(id: &str, turn: &str, phase: &str, answer: &str) -> String {
+    format!(
+        r#"printf '%s\n' '{{"type":"extension_ui_request","id":"{id}","method":"input","title":"watershed.checkpoint {{\"session\":\"s1\",\"turn\":\"{turn}\",\"phase\":\"{phase}\"}}","placeholder":""}}'
+IFS= read -r line
+case "$line" in *'"id":"{id}"'*'{answer}'*) ;; *) exit 9 ;; esac
+"#
+    )
+}
+
+/// Answers a history read with `entries`, the first time after its `get_state`.
+fn entries(id: u32, entries: &str) -> String {
+    entries_at(id, entries, "c2")
+}
+
+/// Answers a history read with `entries` and the session's leaf at `leaf`.
+fn entries_at(id: u32, entries: &str, leaf: &str) -> String {
+    format!(
+        "IFS= read -r line\ncase \"$line\" in *'\"type\":\"get_entries\"'*) ;; *) exit 9 ;; esac\nprintf '%s\\n' '{{\"id\":\"{id}\",\"type\":\"response\",\"command\":\"get_entries\",\"success\":true,\"data\":{{\"entries\":[{entries}],\"leafId\":\"{leaf}\"}}}}'\n"
+    )
+}
+
+/// The entries of turn `T1`: its start checkpoint, its prompt and its end checkpoint.
+const TURN: &str = r#"{"type":"custom","id":"c1","parentId":null,"timestamp":"2026-11-01T10:00:00.000Z","customType":"watershed.checkpoint","data":{"session":"s1","turn":"T1","phase":"start"}},{"type":"message","id":"u1","parentId":"c1","timestamp":"2026-11-01T10:00:00.100Z","message":{"role":"user","content":"edit"}},{"type":"custom","id":"c2","parentId":"u1","timestamp":"2026-11-01T10:00:05.000Z","customType":"watershed.checkpoint","data":{"session":"s1","turn":"T1","phase":"end","files":1,"added":1,"removed":1}}"#;
+
+/// Waits until the stand-in agent created `marker`.
+fn reached(marker: &std::path::Path) {
+    let started = std::time::Instant::now();
+    while !marker.exists() {
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "the agent got there"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
 #[test]
-fn diffs_what_a_run_changed_in_its_project() {
+fn diffs_each_turn_between_its_checkpoints() {
     let repo = repository("diff");
-    // The stand-in agent edits the project only after the prompt arrives, writing a character
-    // that reorders the line.
+    // The stand-in agent asks for its turn's checkpoints and edits the project in between,
+    // writing a character that reorders the line.
     let script = [
-        gate(2),
-        r#"IFS= read -r line
-printf 'new\342\200\256\n' > a.txt
-printf '%s\n' '{"id":"3","type":"response","command":"prompt","success":true,"data":{"disposition":"started"}}'
-"#
-        .to_owned(),
-        gate(4),
-        r#"IFS= read -r line
-printf '%s\n' '{"id":"5","type":"response","command":"prompt","success":false,"error":"busy"}'
-"#
-        .to_owned(),
-        gate(6),
-        r#"IFS= read -r line
-printf '%s\n' '{"id":"7","type":"response","command":"prompt","success":true,"data":{"disposition":"handled"}}'
-IFS= read -r line || exit 0"#
-            .to_owned(),
+        checkpoint("q1", "T1", "start", r#"\"ok\":true"#),
+        "printf 'new\\342\\200\\256\\n' > a.txt\n".to_owned(),
+        checkpoint("q2", "T1", "end", r#"\"files\":1"#),
+        "touch .git/checkpointed\n".to_owned(),
+        no_session_file(2),
+        entries(3, TURN),
+        entries(4, ""),
+        entries(5, ""),
+        entries(6, ""),
+        "IFS= read -r line || exit 0".to_owned(),
     ]
     .concat();
     let session = launch(gated(&script), repo.display().to_string()).expect("agent starts");
-    assert_eq!(session.changes(false), Ok(Some(Vec::new())), "no run yet");
-    assert_eq!(session.send("edit".to_owned(), false), Ok(()));
-    let changes = session.changes(false).expect("changes");
+    reached(&repo.join(".git/checkpointed"));
+    assert_eq!(session.in_repository(), Ok(true));
     assert_eq!(
-        changes,
-        Some(vec![BridgeFileChange {
-            path: "a.txt".to_owned(),
-            shown: "a.txt".to_owned(),
-            status: BridgeChangeStatus::Modified,
-            added: 1,
-            removed: 1,
+        session.turns(),
+        Ok(vec![BridgeTurn {
+            id: "T1".to_owned(),
+            start_entry: "c1".to_owned(),
+            end_entry: Some("c2".to_owned()),
+            number: 1,
+            prompt_entry: Some("u1".to_owned()),
+            prompt: "edit".to_owned(),
+            started_ms: Some(1_793_527_200_000),
+            ended_ms: Some(1_793_527_205_000),
+            ended: true,
+            failure: None,
+            files: Some(1),
+            added: Some(1),
+            removed: Some(1),
         }])
     );
-    let patch = session.patch("a.txt".to_owned(), false).expect("patch");
+    assert_eq!(
+        session.turn_changes("T1".to_owned(), "T1".to_owned(), false),
+        Ok(BridgeTurnChanges {
+            state: BridgeChangesState::Shown,
+            files: vec![BridgeFileChange {
+                path: "a.txt".to_owned(),
+                shown: "a.txt".to_owned(),
+                status: BridgeChangeStatus::Modified,
+                added: 1,
+                removed: 1,
+            }],
+        })
+    );
+    let patch = session
+        .turn_patch("T1".to_owned(), "T1".to_owned(), "a.txt".to_owned(), false)
+        .expect("patch");
     assert!(
         patch.contains("-old\n") && patch.contains("+new<U+202E>\n"),
         "{patch}"
     );
-    // A prompt the agent rejects starts no run, so the last run's changes stay in view.
-    assert!(session.send("again".to_owned(), false).is_err());
-    assert_eq!(session.changes(false).expect("changes"), changes);
-    // Nor does one that pi handles itself, such as a command.
-    assert_eq!(session.send("/name tidy".to_owned(), false), Ok(()));
-    assert_eq!(session.changes(false).expect("changes"), changes);
-    assert!(call(session.shutdown()));
-    assert_eq!(
-        session.changes(false),
-        Ok(Some(Vec::new())),
-        "shutting down removes the snapshots"
+    // Removed checkpoints say so instead of showing no changes.
+    git(
+        &repo,
+        &["update-ref", "-d", "refs/watershed/checkpoints/s1/T1/end"],
     );
+    assert_eq!(
+        session
+            .turn_changes("T1".to_owned(), "T1".to_owned(), false)
+            .map(|changes| changes.state),
+        Ok(BridgeChangesState::Removed)
+    );
+    assert!(call(session.shutdown()));
     let _ = std::fs::remove_dir_all(&repo);
 }
 
 #[test]
-fn a_run_started_by_a_message_sent_while_the_previous_ran_is_not_captured() {
-    let repo = repository("uncaptured");
-    // The first run edits `a.txt` and is still running when the next message is sent; the
-    // agent settles it on reading that message, which then starts a run that adds `b.txt`.
+fn reverts_a_turns_files_and_continues_from_before_its_prompt() {
+    let repo = repository("revert");
     let script = [
-        gate(2),
+        checkpoint("q1", "T1", "start", r#"\"ok\":true"#),
+        "printf 'new\\n' > a.txt\n".to_owned(),
+        checkpoint("q2", "T1", "end", r#"\"files\":1"#),
+        "touch .git/checkpointed\n".to_owned(),
+        no_session_file(2),
+        entries(3, TURN),
+        // The plan looks for pi's session directory to name the other agent's session.
+        no_session_file(4),
+        entries(5, ""),
+        entries(6, ""),
+        gate(7),
         r#"IFS= read -r line
-printf 'first\n' > a.txt
-printf '%s\n' '{"type":"agent_start"}' '{"id":"3","type":"response","command":"prompt","success":true,"data":{"disposition":"started"}}'
+case "$line" in *'"message":"/watershed-branch u1"'*) ;; *) exit 9 ;; esac
+printf '%s\n' '{"id":"8","type":"response","command":"prompt","success":true,"data":{"disposition":"handled"}}'
 "#
         .to_owned(),
+        // pi now continues before the turn's prompt.
+        entries_at(9, "", "c1"),
+        "IFS= read -r line || exit 0".to_owned(),
+    ]
+    .concat();
+    let session = launch(gated(&script), repo.display().to_string()).expect("agent starts");
+    reached(&repo.join(".git/checkpointed"));
+    // Another window's agent runs a turn in the same checkout.
+    let other = meta_harness_core::Checkpoints::new(&repo);
+    let theirs = |phase| meta_harness_core::Checkpoint {
+        session: "s2".to_owned(),
+        turn: "u1".to_owned(),
+        phase,
+    };
+    call(other.capture(&theirs(meta_harness_core::Phase::Start))).expect("started");
+
+    let plan = session.revert_plan("T1".to_owned()).expect("plan");
+    assert_eq!(plan.state, BridgeChangesState::Shown);
+    assert_eq!(
+        plan.files,
+        [BridgeRevertFile {
+            path: "a.txt".to_owned(),
+            shown: "a.txt".to_owned(),
+            status: BridgeChangeStatus::Modified,
+            edited: false,
+            modified_ms: plan.files[0].modified_ms,
+            ignored: false,
+            kept: false,
+        }]
+    );
+    assert!(plan.files[0].modified_ms.is_some());
+    assert_eq!(
+        plan.running,
+        [BridgeRunningAgent {
+            own: false,
+            title: None,
+        }]
+    );
+    assert!(plan.branch.is_some());
+    assert!(
+        matches!(session.revert_to_turn("T1".to_owned()), Err(error) if error.contains("an agent runs in this checkout")),
+        "refused"
+    );
+    assert_eq!(
+        std::fs::read_to_string(repo.join("a.txt")).expect("a"),
+        "new\n"
+    );
+
+    call(other.capture(&theirs(meta_harness_core::Phase::End))).expect("ended");
+    assert_eq!(session.revert_to_turn("T1".to_owned()), Ok(()));
+    assert_eq!(
+        std::fs::read_to_string(repo.join("a.txt")).expect("a"),
+        "old\n"
+    );
+    call(other.close());
+    assert!(call(session.shutdown()));
+    let _ = std::fs::remove_dir_all(&repo);
+}
+
+#[test]
+fn says_when_pi_handled_the_branch_but_stayed_on_the_turn() {
+    let repo = repository("revert-stayed");
+    let script = [
+        checkpoint("q1", "T1", "start", r#"\"ok\":true"#),
+        "printf 'new\\n' > a.txt\n".to_owned(),
+        checkpoint("q2", "T1", "end", r#"\"files\":1"#),
+        "touch .git/checkpointed\n".to_owned(),
+        no_session_file(2),
+        entries(3, TURN),
+        gate(4),
+        // An extension cancelled the navigation; pi still reports the command handled.
+        r#"IFS= read -r line
+printf '%s\n' '{"id":"5","type":"response","command":"prompt","success":true,"data":{"disposition":"handled"}}'
+"#
+        .to_owned(),
+        entries(6, ""),
+        "IFS= read -r line || exit 0".to_owned(),
+    ]
+    .concat();
+    let session = launch(gated(&script), repo.display().to_string()).expect("agent starts");
+    reached(&repo.join(".git/checkpointed"));
+    let reverted = session.revert_to_turn("T1".to_owned());
+    assert!(
+        matches!(&reverted, Err(error) if error.starts_with("the files were reverted, but the session could not continue")),
+        "{reverted:?}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(repo.join("a.txt")).expect("a"),
+        "old\n"
+    );
+    assert!(call(session.shutdown()));
+    let _ = std::fs::remove_dir_all(&repo);
+}
+
+#[test]
+fn says_when_the_files_were_reverted_but_the_session_did_not_branch() {
+    let repo = repository("revert-unbranched");
+    let script = [
+        checkpoint("q1", "T1", "start", r#"\"ok\":true"#),
+        "printf 'new\\n' > a.txt\n".to_owned(),
+        checkpoint("q2", "T1", "end", r#"\"files\":1"#),
+        "touch .git/checkpointed\n".to_owned(),
+        no_session_file(2),
+        entries(3, TURN),
         gate(4),
         r#"IFS= read -r line
-printf '%s\n' '{"type":"agent_settled","aborted":false}'
-printf 'second\n' > b.txt
-printf '%s\n' '{"type":"agent_start"}' '{"id":"5","type":"response","command":"prompt","success":true,"data":{"disposition":"started"}}'
+printf '%s\n' '{"id":"5","type":"response","command":"prompt","success":false,"error":"Agent is busy"}'
 IFS= read -r line || exit 0"#
             .to_owned(),
     ]
     .concat();
     let session = launch(gated(&script), repo.display().to_string()).expect("agent starts");
-    assert_eq!(session.send("first".to_owned(), false), Ok(()));
-    assert_eq!(session.send("second".to_owned(), false), Ok(()));
-    // The first run's baseline would also count its edit of `a.txt` as the second run's.
-    let changes = session.changes(false);
+    reached(&repo.join(".git/checkpointed"));
+    let reverted = session.revert_to_turn("T1".to_owned());
     assert!(
-        changes
-            .as_ref()
-            .is_err_and(|error| error.starts_with("the project could not be captured")),
-        "{changes:?}"
+        matches!(&reverted, Err(error) if error.starts_with("the files were reverted, but the session could not continue")),
+        "{reverted:?}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(repo.join("a.txt")).expect("a"),
+        "old\n"
     );
     assert!(call(session.shutdown()));
     let _ = std::fs::remove_dir_all(&repo);
 }
 
 #[test]
-fn shuts_down_while_a_slow_project_is_captured() {
+fn names_a_few_files_git_left_unreverted_as_liquid_shows_them() {
+    let paths: Vec<String> = ["a\u{202e}.txt", "b.txt", "c.txt", "d.txt", "e.txt"]
+        .map(str::to_owned)
+        .to_vec();
+    assert_eq!(
+        crate::api::session::left_unreverted(&paths),
+        "the other files were reverted and the session stays on its branch; Git could not \
+         revert a<U+202E>.txt, b.txt, c.txt, 2 more"
+    );
+}
+
+#[test]
+fn writes_out_what_hides_in_gits_errors() {
+    assert_eq!(
+        crate::api::session::unread(meta_harness_core::DiffError::Git(
+            "cannot read 'a\u{202e}txt.exe'".to_owned()
+        )),
+        Err("git failed: cannot read 'a<U+202E>txt.exe'".to_owned())
+    );
+    assert_eq!(
+        crate::api::session::unread(meta_harness_core::DiffError::NoCheckpoint),
+        Ok(BridgeChangesState::Removed)
+    );
+}
+
+/// Answers a `get_state` with the session stored in `file`.
+fn state_with(id: u32, file: &std::path::Path) -> String {
+    format!(
+        "IFS= read -r line\ncase \"$line\" in *'\"type\":\"get_state\"'*) ;; *) exit 9 ;; esac\nprintf '%s\\n' '{{\"id\":\"{id}\",\"type\":\"response\",\"command\":\"get_state\",\"success\":true,\"data\":{{\"sessionId\":\"s1\",\"isStreaming\":false,\"sessionFile\":\"{}\"}}}}'\n",
+        file.display()
+    )
+}
+
+#[test]
+fn deletes_a_stored_session_with_its_checkpoints_and_removes_all_checkpoints() {
+    let repo = repository("delete");
+    let sessions = repo.join(".git/pi-sessions");
+    std::fs::create_dir_all(&sessions).expect("sessions");
+    let header = |id: &str| {
+        format!(
+            r#"{{"type":"session","version":3,"id":"{id}","cwd":"{}"}}"#,
+            repo.display()
+        )
+    };
+    let current = sessions.join("current.jsonl");
+    let old = sessions.join("old.jsonl");
+    std::fs::write(&current, header("s1") + "\n").expect("current");
+    std::fs::write(
+        &old,
+        header("s9")
+            + "\n"
+            + r#"{"type":"session_info","id":"i1","parentId":null,"name":"Old work"}"#
+            + "\n",
+    )
+    .expect("old");
+    let checkpoints = meta_harness_core::Checkpoints::new(&repo);
+    for session in ["s1", "s9"] {
+        for phase in [
+            meta_harness_core::Phase::Start,
+            meta_harness_core::Phase::End,
+        ] {
+            call(checkpoints.capture(&meta_harness_core::Checkpoint {
+                session: session.to_owned(),
+                turn: "t1".to_owned(),
+                phase,
+            }))
+            .expect("captured");
+        }
+    }
+    let script = [
+        (2..=10).map(|id| state_with(id, &current)).collect(),
+        "IFS= read -r line || exit 0".to_owned(),
+    ]
+    .concat();
+    let session = launch(gated(&script), repo.display().to_string()).expect("agent starts");
+    assert_eq!(
+        session.checkpoint_sessions(),
+        Ok(vec![
+            BridgeCheckpointSession {
+                title: "Untitled session".to_owned(),
+                turns: 1,
+            },
+            BridgeCheckpointSession {
+                title: "Old work".to_owned(),
+                turns: 1,
+            },
+        ])
+    );
+    assert_eq!(session.stored_turns(old.display().to_string()), Ok(1));
+    assert_eq!(session.stored_turns(current.display().to_string()), Ok(1));
+    assert!(
+        session
+            .delete_session(current.display().to_string())
+            .is_err(),
+        "the open session is switched away from first"
+    );
+    let outside = repo.join("a.txt");
+    assert!(
+        session
+            .delete_session(outside.display().to_string())
+            .is_err()
+    );
+    assert!(outside.exists());
+    // A copy of the open session under another name is the open session.
+    let twin = sessions.join("twin.jsonl");
+    std::fs::copy(&current, &twin).expect("twin");
+    assert!(session.delete_session(twin.display().to_string()).is_err());
+    assert!(twin.exists());
+    let notes = sessions.join("notes.txt");
+    std::fs::copy(&old, &notes).expect("notes");
+    assert!(session.delete_session(notes.display().to_string()).is_err());
+    assert!(notes.exists());
+    // A session pi never stored leaves nothing to delete.
+    assert_eq!(
+        session.delete_session(sessions.join("never.jsonl").display().to_string()),
+        Ok(())
+    );
+    assert_eq!(session.delete_session(old.display().to_string()), Ok(()));
+    assert!(!old.exists());
+    let refs = std::process::Command::new("git")
+        .args(["for-each-ref", "--format=%(refname)", "refs/watershed"])
+        .current_dir(&repo)
+        .output()
+        .expect("git runs");
+    assert_eq!(
+        String::from_utf8_lossy(&refs.stdout),
+        "refs/watershed/checkpoints/s1/t1/end\nrefs/watershed/checkpoints/s1/t1/start\n"
+    );
+    assert_eq!(session.remove_all_checkpoints(), Ok(()));
+    assert_eq!(call(checkpoints.sessions()).expect("listed"), []);
+    call(checkpoints.close());
+    assert!(call(session.shutdown()));
+    let _ = std::fs::remove_dir_all(&repo);
+}
+
+#[test]
+fn deletes_a_session_of_a_project_outside_git() {
+    let dir = std::env::temp_dir().join(format!(
+        "liquid-bridge-delete-no-git-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    let sessions = dir.join("sessions");
+    std::fs::create_dir_all(&sessions).expect("sessions");
+    let header = |id: &str| {
+        format!(
+            r#"{{"type":"session","version":3,"id":"{id}","cwd":"{}"}}"#,
+            dir.display()
+        ) + "\n"
+    };
+    let current = sessions.join("current.jsonl");
+    let old = sessions.join("old.jsonl");
+    std::fs::write(&current, header("s1")).expect("current");
+    std::fs::write(&old, header("s9")).expect("old");
+    let script = [
+        state_with(2, &current),
+        state_with(3, &current),
+        "IFS= read -r line || exit 0".to_owned(),
+    ]
+    .concat();
+    let session = launch(gated(&script), dir.display().to_string()).expect("agent starts");
+    assert_eq!(session.checkpoint_sessions(), Ok(vec![]));
+    assert_eq!(session.stored_turns(old.display().to_string()), Ok(0));
+    assert_eq!(session.delete_session(old.display().to_string()), Ok(()));
+    assert!(!old.exists());
+    assert_eq!(session.remove_all_checkpoints(), Ok(()));
+    assert!(call(session.shutdown()));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_project_outside_git_has_no_checkpoints_and_says_so() {
+    let dir = std::env::temp_dir().join(format!("liquid-bridge-no-git-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("directory");
+    let script = [
+        checkpoint("q1", "T1", "start", "not inside a Git working tree"),
+        "touch checkpointed\n".to_owned(),
+        no_session_file(2),
+        entries(3, TURN),
+        entries(4, ""),
+        "IFS= read -r line || exit 0".to_owned(),
+    ]
+    .concat();
+    let session = launch(gated(&script), dir.display().to_string()).expect("agent starts");
+    reached(&dir.join("checkpointed"));
+    assert_eq!(session.in_repository(), Ok(false));
+    assert_eq!(session.turns().map(|turns| turns.len()), Ok(1));
+    assert_eq!(
+        session
+            .turn_changes("T1".to_owned(), "T1".to_owned(), false)
+            .map(|changes| changes.state),
+        Ok(BridgeChangesState::OutsideGit)
+    );
+    assert!(call(session.shutdown()));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn shuts_down_while_a_slow_project_is_checkpointed() {
     let repo = repository("slow");
-    // A clean filter runs while the project is captured; this one holds the capture up.
+    // A clean filter runs while the project is checkpointed; this one holds the capture up.
     git(&repo, &["config", "filter.slow.clean", "sleep 10; cat"]);
     std::fs::write(repo.join(".gitattributes"), "*.txt filter=slow\n").expect("attributes");
     std::fs::write(repo.join("a.txt"), "new\n").expect("file");
-    let session = Arc::new(
-        launch(
-            gated("IFS= read -r line || exit 0"),
-            repo.display().to_string(),
-        )
-        .expect("agent starts"),
-    );
-    {
-        let session = Arc::clone(&session);
-        std::thread::spawn(move || session.send("edit".to_owned(), false));
-    }
+    let script = r#"printf '%s\n' '{"type":"extension_ui_request","id":"q1","method":"input","title":"watershed.checkpoint {\"session\":\"s1\",\"turn\":\"T1\",\"phase\":\"start\"}","placeholder":""}'
+IFS= read -r line || exit 0"#;
+    let session =
+        Arc::new(launch(gated(script), repo.display().to_string()).expect("agent starts"));
     std::thread::sleep(Duration::from_millis(300));
     let (stopped, stop) = mpsc::channel();
     {
@@ -791,7 +1150,7 @@ fn shuts_down_while_a_slow_project_is_captured() {
     }
     assert!(
         stop.recv_timeout(Duration::from_secs(5)).is_ok(),
-        "the capture does not hold up shutdown"
+        "the checkpoint does not hold up shutdown"
     );
     let _ = std::fs::remove_dir_all(&repo);
 }

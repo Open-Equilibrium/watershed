@@ -1,8 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../controls.dart';
+import '../diff/revert_dialog.dart';
 import '../format.dart';
 import '../rust/api/events.dart';
+import '../rust/api/history.dart';
 import '../session/session_state.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
@@ -23,9 +27,13 @@ class ChatView extends StatelessWidget {
     required this.state,
     required this.info,
     this.input,
+    this.onOpenDiff,
   });
 
   final SessionState state;
+
+  /// Shows the Diff tab with a turn's changes, by the turn's id.
+  final ValueChanged<String>? onOpenDiff;
 
   /// The session's project, harness and device, as the start page greets with them.
   final SessionInfo info;
@@ -77,9 +85,20 @@ class ChatView extends StatelessWidget {
                               bottom: WsMetrics.space4,
                             ),
                             child: RepaintBoundary(
-                              child: switch (item.marker) {
-                                final marker? => BranchMark(marker: marker),
-                                null => ItemTile(item: item, state: state),
+                              child: switch ((item.marker, item.turnEnd)) {
+                                (final marker?, _) => BranchMark(
+                                  marker: marker,
+                                ),
+                                (_, final turn?) => TurnChanges(
+                                  turn: turn,
+                                  onOpenDiff: onOpenDiff == null
+                                      ? null
+                                      : () => onOpenDiff!(turn.id),
+                                  onRevert: () => unawaited(
+                                    confirmRevert(context, state, turn),
+                                  ),
+                                ),
+                                _ => ItemTile(item: item, state: state),
                               },
                             ),
                           ),
@@ -90,6 +109,53 @@ class ChatView extends StatelessWidget {
                 ),
         ),
       ),
+    );
+  }
+}
+
+/// What a turn changed, below its last item (approved checkpoint mockups).
+class TurnChanges extends StatelessWidget {
+  const TurnChanges({
+    super.key,
+    required this.turn,
+    this.onOpenDiff,
+    this.onRevert,
+  });
+
+  final BridgeTurn turn;
+  final VoidCallback? onOpenDiff;
+
+  /// Asks to revert the files to before the turn.
+  final VoidCallback? onRevert;
+
+  @override
+  Widget build(BuildContext context) {
+    final ws = context.ws;
+    final files = turn.files ?? 0;
+    final style = TextStyle(color: ws.textMuted, fontSize: WsMetrics.fsCompact);
+    return Row(
+      children: [
+        Text('$files changed file${files == 1 ? '' : 's'}', style: style),
+        const SizedBox(width: WsMetrics.space4),
+        Text('+${turn.added ?? 0}', style: style.copyWith(color: ws.success)),
+        const SizedBox(width: WsMetrics.space2),
+        Text('−${turn.removed ?? 0}', style: style.copyWith(color: ws.danger)),
+        if (onOpenDiff case final open?) ...[
+          const SizedBox(width: WsMetrics.space3),
+          GhostButton(label: 'Open diff', onPressed: open),
+        ],
+        if (onRevert case final revert?) ...[
+          const SizedBox(width: WsMetrics.space1),
+          // A narrow window shortens its label rather than the counts.
+          Flexible(
+            child: GhostButton(
+              label: 'Revert files to before this turn…',
+              icon: LucideIcons.undo2,
+              onPressed: revert,
+            ),
+          ),
+        ],
+      ],
     );
   }
 }

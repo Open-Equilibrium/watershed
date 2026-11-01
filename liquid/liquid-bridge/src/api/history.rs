@@ -220,3 +220,99 @@ pub struct BridgeTranscriptItem {
     /// The lines a file change removed.
     pub removed: Option<i64>,
 }
+
+/// A turn of the current branch, as the Diff tab lists it (ADR-0234).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgeTurn {
+    /// The turn's checkpoint id.
+    pub id: String,
+    /// The entry that recorded its start checkpoint; the chat places its changes after the
+    /// turn's entries.
+    pub start_entry: String,
+    /// The entry that recorded its end checkpoint, once it ended.
+    pub end_entry: Option<String>,
+    /// The Trajectory's turn of its first prompt; 0 before a prompt was stored.
+    pub number: i64,
+    /// The entry of its first prompt, before which a revert continues the session.
+    pub prompt_entry: Option<String>,
+    /// The first line of its first prompt.
+    pub prompt: String,
+    /// Unix milliseconds when it started, if known.
+    pub started_ms: Option<i64>,
+    /// Unix milliseconds when it ended, if it did.
+    pub ended_ms: Option<i64>,
+    /// Whether its end checkpoint was taken, so its changes can be shown.
+    pub ended: bool,
+    /// Why one of its checkpoints could not be taken.
+    pub failure: Option<String>,
+    /// Files it changed, counted at its end.
+    pub files: Option<i64>,
+    /// Lines it added, counted at its end.
+    pub added: Option<i64>,
+    /// Lines it removed, counted at its end.
+    pub removed: Option<i64>,
+}
+
+/// Whether the changes between two checkpoints could be read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BridgeChangesState {
+    /// The changes are listed.
+    Shown,
+    /// The project is not in a Git repository, so it has no checkpoints.
+    OutsideGit,
+    /// A checkpoint was removed.
+    Removed,
+}
+
+/// The files that changed between two checkpoints.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgeTurnChanges {
+    /// Whether they could be read.
+    pub state: BridgeChangesState,
+    /// The changed files; empty unless shown.
+    pub files: Vec<crate::api::events::BridgeFileChange>,
+}
+
+/// What reverting the files to before a turn would change.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgeRevertPlan {
+    /// Whether the turn's start checkpoint could be read.
+    pub state: BridgeChangesState,
+    /// The files below the working folder that would change, sorted by path.
+    pub files: Vec<BridgeRevertFile>,
+    /// The agents running in the checkout, which refuse the revert.
+    pub running: Vec<BridgeRunningAgent>,
+    /// The branch checked out, as Liquid shows it, or none when HEAD names a commit.
+    pub branch: Option<String>,
+}
+
+/// One file a revert would change.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgeRevertFile {
+    /// The path relative to the root of the Git repository.
+    pub path: String,
+    /// The path as Liquid shows it, with characters that could hide or reorder it written out.
+    pub shown: String,
+    /// How the revert changes it: `Added` writes back a file deleted since the turn started,
+    /// `Deleted` deletes a file new since then.
+    pub status: crate::api::events::BridgeChangeStatus,
+    /// Whether it changed after the last turn ended, so the revert also undoes that edit.
+    pub edited: bool,
+    /// Unix milliseconds when it was last written, if it exists.
+    pub modified_ms: Option<i64>,
+    /// Whether the revert deletes or overwrites something Git ignores, only because a restored
+    /// file needs its place; such a folder's path ends in `/`.
+    pub ignored: bool,
+    /// Whether the revert leaves it alone because it is inside, at or above a submodule or
+    /// nested repository.
+    pub kept: bool,
+}
+
+/// An agent that runs a turn in the checkout.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgeRunningAgent {
+    /// Whether it is this session's agent.
+    pub own: bool,
+    /// Its session's title, when its session file is found.
+    pub title: Option<String>,
+}

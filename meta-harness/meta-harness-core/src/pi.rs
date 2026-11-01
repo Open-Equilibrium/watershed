@@ -4,6 +4,7 @@ use std::collections::HashMap;
 
 use serde_json::{Map, Value};
 
+use crate::checkpoint::{Checkpoint, Phase};
 use crate::event::{
     AgentEvent, ChangedLines, Decision, EditChange, EditPreview, ItemDetail, ItemId, ItemKind,
     ItemStatus, NotificationLevel, Queue, RequestId, RequestKind, TurnId, Usage, UserInput,
@@ -13,6 +14,41 @@ use crate::visible::{visible, visible_name};
 
 /// Title prefix of the select dialog Watershed's pi extension uses to ask for an approval.
 pub(crate) const APPROVAL_PREFIX: &str = "watershed.approval ";
+
+/// Title prefix of the input dialog Watershed's pi extension uses to ask for a checkpoint at a
+/// turn's start or end (ADR-0234); the core answers it with `{"ok":true}` or `{"error":…}`.
+pub(crate) const CHECKPOINT_PREFIX: &str = "watershed.checkpoint ";
+
+/// The checkpoint an extension dialog asks for, or why its request is unreadable; `None` for
+/// any other record.
+pub(crate) fn checkpoint_request(
+    record: &Map<String, Value>,
+) -> Option<(RequestId, Result<Checkpoint, String>)> {
+    if str_field(record, "type") != "extension_ui_request" || str_field(record, "method") != "input"
+    {
+        return None;
+    }
+    let payload = str_field(record, "title").strip_prefix(CHECKPOINT_PREFIX)?;
+    let request = RequestId(str_field(record, "id").to_owned());
+    let checkpoint = serde_json::from_str::<Value>(payload)
+        .ok()
+        .and_then(|payload| {
+            let field = |name| payload.get(name).and_then(Value::as_str);
+            Some(Checkpoint {
+                session: field("session")?.to_owned(),
+                turn: field("turn")?.to_owned(),
+                phase: match field("phase")? {
+                    "start" => Phase::Start,
+                    "end" => Phase::End,
+                    _ => return None,
+                },
+            })
+        });
+    Some((
+        request,
+        checkpoint.ok_or_else(|| "the checkpoint request is unreadable".to_owned()),
+    ))
+}
 
 /// Translates pi RPC records into agent events, one session at a time.
 #[derive(Debug, Default)]

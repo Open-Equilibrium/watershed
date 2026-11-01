@@ -15,7 +15,10 @@ use tokio::sync::{mpsc, oneshot};
 use super::{CommandError, MAX_RECORD_BYTES, SessionEvent, State, Write, switched, ui_response};
 use crate::approval::{Allowance, needs_user};
 use crate::framing::keep_end;
-use crate::{AgentEvent, Frame, LineFramer, NotificationLevel, PiAdapter, RequestId};
+use crate::pi::checkpoint_request;
+use crate::{
+    AgentEvent, Checkpoint, Checkpoints, Frame, LineFramer, NotificationLevel, PiAdapter, RequestId,
+};
 
 const READ_BUFFER: usize = 64 * 1024;
 
@@ -39,7 +42,14 @@ pub(super) struct Supervisor {
     /// The end of the agent's error output so far, and the task that reads it.
     pub(super) error_output: Arc<Mutex<Vec<u8>>>,
     pub(super) error_reader: tokio::task::JoinHandle<()>,
+    /// Checkpoint requests, taken one after another in the order the agent asked.
+    pub(super) captures: mpsc::Sender<CheckpointRequest>,
+    /// Closed once the agent is gone, so no capture outlives it.
+    pub(super) checkpoints: Arc<Checkpoints>,
 }
+
+/// A checkpoint the agent asked for, or why its request is unreadable.
+pub(super) type CheckpointRequest = (RequestId, Result<Checkpoint, String>);
 
 impl Supervisor {
     pub(super) async fn run(
@@ -50,8 +60,17 @@ impl Supervisor {
     ) {
         let mut framer = LineFramer::new(MAX_RECORD_BYTES);
         let mut buffer = vec![0; READ_BUFFER];
+        let mut exited = false;
+        let checkpoints = self.checkpoints.clone();
         let failure = 'read: loop {
-            let Some(read) = self.unless_killed(stdout.read(&mut buffer)).await else {
+            let read = watching(
+                self.unless_killed(stdout.read(&mut buffer)),
+                &mut child,
+                &mut exited,
+                &checkpoints,
+            )
+            .await;
+            let Some(read) = read else {
                 break None;
             };
             let frames = match read {
@@ -62,7 +81,9 @@ impl Supervisor {
                 let record = match frame {
                     Frame::Record(record) => record,
                     Frame::Oversized { start, .. } => {
-                        if !self.skip(&start).await {
+                        let skipped =
+                            watching(self.skip(&start), &mut child, &mut exited, &checkpoints);
+                        if !skipped.await {
                             break 'read None;
                         }
                         continue;
@@ -71,7 +92,7 @@ impl Supervisor {
                 let Ok(Value::Object(record)) = serde_json::from_slice::<Value>(&record) else {
                     break 'read Some("agent wrote a record that is not a JSON object".to_owned());
                 };
-                if !self.handle(record).await {
+                if !watching(self.handle(record), &mut child, &mut exited, &checkpoints).await {
                     break 'read None;
                 }
             }
@@ -87,6 +108,9 @@ impl Supervisor {
             }
             shared.approvals.clear();
         }
+        // A capture in progress stops with its Git and the programs Git started, before the
+        // exit is reported.
+        self.checkpoints.close().await;
         let stop = failure.is_some() || self.kill_requested;
         if let Some(reason) = failure {
             // A full event buffer must not keep a kill from ending the agent.
@@ -136,6 +160,11 @@ impl Supervisor {
         if record.get("type").and_then(Value::as_str) == Some("response") {
             self.answer_command(record);
             return true;
+        }
+        // The core answers checkpoint requests itself; the user never sees them.
+        if let Some(request) = checkpoint_request(&record) {
+            let captures = self.captures.clone();
+            return self.unless_killed(captures.send(request)).await.is_some();
         }
         for event in self.adapter.translate(&record) {
             let mut expiry = None;
@@ -368,6 +397,36 @@ impl Supervisor {
         self.kill_requested = outcome.is_none();
         outcome
     }
+}
+
+/// Runs `work` while watching for the agent's exit. Once the agent exited, the checkpoints close
+/// at once, so no capture outlives it, and `work` goes on: reading output a program the agent
+/// left behind still holds, or handing an event to a full buffer.
+async fn watching<F: Future>(
+    work: F,
+    child: &mut Child,
+    exited: &mut bool,
+    checkpoints: &Checkpoints,
+) -> F::Output {
+    let mut work = pin!(work);
+    if !*exited {
+        let done = {
+            let mut waiting = pin!(child.wait());
+            poll_fn(|context| {
+                if let Poll::Ready(output) = work.as_mut().poll(context) {
+                    return Poll::Ready(Some(output));
+                }
+                waiting.as_mut().poll(context).map(|_| None)
+            })
+            .await
+        };
+        if let Some(output) = done {
+            return output;
+        }
+        *exited = true;
+        checkpoints.close().await;
+    }
+    work.await
 }
 
 /// Reads `reader` to its end and keeps the last [`MAX_ERROR_OUTPUT`] bytes in `kept`.

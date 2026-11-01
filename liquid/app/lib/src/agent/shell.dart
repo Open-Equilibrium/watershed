@@ -8,6 +8,7 @@ import '../appearance.dart';
 import '../controls.dart';
 import '../diff/diff_settings.dart';
 import '../diff/diff_view.dart';
+import '../diff/turn_scope.dart';
 import '../rust/api/events.dart';
 import '../session/session_state.dart';
 import '../shortcuts/first_start.dart';
@@ -259,6 +260,7 @@ class _AgentShellState extends State<AgentShell> {
                     state: widget.state,
                     info: widget.info,
                     onSettings: _toggleSettings,
+                    onNewSession: _newSession,
                   ),
                   Expanded(
                     child: ValueListenableBuilder(
@@ -305,6 +307,12 @@ class _AgentShellState extends State<AgentShell> {
                                     state: widget.state,
                                     info: widget.info,
                                     input: input,
+                                    onOpenDiff: (turn) {
+                                      widget.state.diffScope.value = OneTurn(
+                                        turn,
+                                      );
+                                      _tab.value = AgentTab.diff;
+                                    },
                                   ),
                                   AgentTab.diff => DiffView(
                                     state: widget.state,
@@ -402,7 +410,8 @@ class _Header extends StatelessWidget {
   }
 }
 
-/// How many files the latest run changed, beside the Diff tab's name (approved mockup).
+/// How many files the Diff tab shows, beside its name (approved mockup): the shown turns',
+/// the latest by default, counted as the whitespace choice says.
 class _ChangedFiles extends StatelessWidget {
   const _ChangedFiles({required this.state});
 

@@ -1,5 +1,6 @@
 //! pi's stored session files, read only as far as a listing needs.
 
+use std::collections::HashMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
@@ -39,15 +40,7 @@ pub fn recent_sessions(
     exclude: Option<&Path>,
     limit: usize,
 ) -> std::io::Result<Vec<StoredSession>> {
-    let mut files: Vec<(u64, PathBuf)> = std::fs::read_dir(dir)?
-        .flatten()
-        .map(|entry| entry.path())
-        // A pipe or device would block the read; pi writes plain files, perhaps linked.
-        .filter(|path| path.metadata().is_ok_and(|metadata| metadata.is_file()))
-        .filter(|path| {
-            path.extension()
-                .is_some_and(|extension| extension == "jsonl")
-        })
+    let mut files: Vec<(u64, PathBuf)> = session_files(dir)?
         .filter(|path| Some(path.as_path()) != exclude)
         .filter_map(|path| {
             let modified = path.metadata().ok()?.modified().ok()?;
@@ -61,7 +54,9 @@ pub fn recent_sessions(
         .into_iter()
         .filter_map(|(modified_ms, path)| {
             // A session named by nothing in the part read still shows, so it can continue.
-            let title = head(&path, &project)?.unwrap_or_else(|| UNTITLED.to_owned());
+            let title = head(&path, &project)?
+                .title
+                .unwrap_or_else(|| UNTITLED.to_owned());
             Some(StoredSession {
                 path,
                 title,
@@ -75,12 +70,59 @@ pub fn recent_sessions(
 /// The title of the session stored in `file`, as [`recent_sessions`] gives it; none before the
 /// session has a name or a prompt, or for a session of another project.
 pub fn session_title(file: &Path, project: &Path) -> Option<String> {
-    head(file, &canonical(project))?
+    head(file, &canonical(project))?.title
 }
 
-/// The title the start of a session file gives, if any; `None` when the file is not a session
-/// started in `project`.
-fn head(path: &Path, project: &Path) -> Option<Option<String>> {
+/// The id of the session stored in `file`; none for a file that is no session started in
+/// `project`.
+pub fn session_id(file: &Path, project: &Path) -> Option<String> {
+    Some(head(file, &canonical(project))?.id).filter(|id| !id.is_empty())
+}
+
+/// The title of the session with the id `id` in pi's session directory `dir` that started in
+/// `project`, as [`recent_sessions`] gives it.
+pub fn session_title_of(dir: &Path, project: &Path, id: &str) -> Option<String> {
+    let project = canonical(project);
+    session_files(dir).ok()?.find_map(|path| {
+        let head = head(&path, &project)?;
+        (head.id == id).then(|| head.title.unwrap_or_else(|| UNTITLED.to_owned()))
+    })
+}
+
+/// The titles of the sessions in pi's session directory `dir` that started in `project`, by
+/// session id, as [`recent_sessions`] gives them; one pass over the directory.
+pub fn session_titles(dir: &Path, project: &Path) -> HashMap<String, String> {
+    let project = canonical(project);
+    session_files(dir)
+        .into_iter()
+        .flatten()
+        .filter_map(|path| head(&path, &project))
+        .map(|head| (head.id, head.title.unwrap_or_else(|| UNTITLED.to_owned())))
+        .collect()
+}
+
+/// The session files in `dir`.
+fn session_files(dir: &Path) -> std::io::Result<impl Iterator<Item = PathBuf>> {
+    Ok(std::fs::read_dir(dir)?
+        .flatten()
+        .map(|entry| entry.path())
+        // A pipe or device would block the read; pi writes plain files, perhaps linked.
+        .filter(|path| path.metadata().is_ok_and(|metadata| metadata.is_file()))
+        .filter(|path| {
+            path.extension()
+                .is_some_and(|extension| extension == "jsonl")
+        }))
+}
+
+/// What the start of a session file says about it.
+struct Head {
+    id: String,
+    /// Its name or first prompt, if any.
+    title: Option<String>,
+}
+
+/// The start of a session file; `None` when the file is not a session started in `project`.
+fn head(path: &Path, project: &Path) -> Option<Head> {
     let mut start = Vec::new();
     std::fs::File::open(path)
         .ok()?
@@ -96,6 +138,11 @@ fn head(path: &Path, project: &Path) -> Option<Option<String>> {
         });
     let header = lines.next()?;
     let cwd = header.get("cwd").and_then(Value::as_str)?;
+    let id = header
+        .get("id")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
     if header.get("type").and_then(Value::as_str) != Some("session")
         || canonical(Path::new(cwd)) != project
     {
@@ -120,7 +167,10 @@ fn head(path: &Path, project: &Path) -> Option<Option<String>> {
             _ => {}
         }
     }
-    Some(name.or(prompt).filter(|title: &String| !title.is_empty()))
+    Some(Head {
+        id,
+        title: name.or(prompt).filter(|title: &String| !title.is_empty()),
+    })
 }
 
 /// The path with links resolved, or as given when it does not exist here.

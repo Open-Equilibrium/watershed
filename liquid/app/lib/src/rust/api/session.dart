@@ -9,8 +9,9 @@ import 'history.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `answer`, `open`, `switched`, `whitespace`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`
+// These functions are ignored because they are not marked as `pub`: `answer`, `branch_turns`, `checkpoint_ids`, `checkpoint`, `checkpoints_of`, `left_unreverted`, `open`, `session_dir`, `shown`, `stored_session`, `turn_of`, `unread`, `whitespace`
+// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `Open`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`
 // These functions are ignored (category: IgnoreBecauseExplicitAttribute): `forward`, `launch`
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<AgentSession>>
@@ -31,9 +32,8 @@ abstract class AgentSession implements RustOpaqueInterface {
   /// Continues the session from `entry`; the next prompt starts a new branch there.
   Future<void> branch({required String entry});
 
-  /// Files the latest run changed, compared with the project before it; none outside Git.
-  /// With `hide_whitespace`, changes that are only whitespace are left out.
-  Future<List<BridgeFileChange>?> changes({required bool hideWhitespace});
+  /// The sessions with checkpoints in the project's repository, sorted by their ids.
+  Future<List<BridgeCheckpointSession>> checkpointSessions();
 
   /// Removes the messages waiting for the running agent and returns them.
   Future<BridgeQueue> clearQueue();
@@ -51,6 +51,12 @@ abstract class AgentSession implements RustOpaqueInterface {
     required BridgeDecision decision,
   });
 
+  /// Deletes the session stored in `path`, a session of this project in pi's session
+  /// directory other than the open one, with its checkpoints first; refused while an agent
+  /// runs in any worktree of the repository. Neither comes back. A session pi never stored
+  /// leaves nothing to delete.
+  Future<void> deleteSession({required String path});
+
   /// Dismisses a question.
   Future<void> dismiss({required String request});
 
@@ -61,24 +67,39 @@ abstract class AgentSession implements RustOpaqueInterface {
   /// `leaves`, or of the current branch when `leaves` is empty.
   Future<BridgeHistory> history({required List<String> leaves});
 
+  /// Whether the project is in a Git repository, so its turns can have checkpoints.
+  Future<bool> inRepository();
+
   /// The models the agent can use.
   Future<List<BridgeModel>> models();
 
   /// Starts a new session in the same agent; `false` when an extension cancelled it.
   Future<bool> newSession();
 
-  /// The unified diff of one file as the latest list of changes compared it; characters
-  /// that could hide or reorder its lines are written out, as in the file's shown name, but
-  /// for the carriage returns of Windows line ends, which the Diff tab marks.
-  Future<String> patch({required String path, required bool hideWhitespace});
-
   /// Up to `limit` stored sessions of this project, newest first, without the current one.
   Future<List<BridgeStoredSession>> recentSessions({required int limit});
 
+  /// Removes every checkpoint in the project's repository; refused while an agent runs in any
+  /// of its worktrees. Outside Git there is nothing to remove.
+  Future<void> removeAllCheckpoints();
+
+  /// What reverting the files to before turn `turn` of the current branch would change;
+  /// files changed after the branch's last turn ended are marked.
+  Future<BridgeRevertPlan> revertPlan({required String turn});
+
+  /// Reverts the files to before turn `turn` of the current branch and continues the session
+  /// from before its prompt, which returns to the input area; the undone turns keep their
+  /// branch. Refused while an agent runs in the checkout. Each error says whether the files
+  /// changed.
+  Future<void> revertToTurn({required String turn});
+
   /// Sends a message: an idle agent starts a run with it, a running one takes it before its
-  /// next model request or, with `follow_up`, once it is done. A new run first captures the
-  /// project, so the diff view shows what the run changes.
+  /// next model request or, with `follow_up`, once it is done. Each run's start and end are
+  /// checkpointed, so the Diff tab shows what it changed.
   Future<void> send({required String message, required bool followUp});
+
+  /// The file pi stores the open session in, unless it keeps the session in memory.
+  Future<String?> sessionFile();
 
   /// Changes which tool calls need the user's approval.
   Future<void> setApprovalMode({required BridgeApprovalMode mode});
@@ -94,6 +115,10 @@ abstract class AgentSession implements RustOpaqueInterface {
   static Future<AgentSession> start({required SessionConfig config}) =>
       RustLib.instance.api.crateApiSessionAgentSessionStart(config: config);
 
+  /// The turns with checkpoints of the session stored in `path`, the open one too; none
+  /// outside Git or before pi stored the session.
+  Future<PlatformInt64> storedTurns({required String path});
+
   /// Continues the session stored in `path`; `false` when an extension cancelled it.
   Future<bool> switchSession({required String path});
 
@@ -104,6 +129,28 @@ abstract class AgentSession implements RustOpaqueInterface {
   /// The chat of the current branch: the items of up to `limit` stored entries before
   /// `before`, or of the newest ones.
   Future<BridgeTranscript> transcript({String? before, required int limit});
+
+  /// The files that changed from the start of turn `from` to the end of turn `to`, both on
+  /// the current branch; with `hide_whitespace`, changes that are only whitespace are left
+  /// out.
+  Future<BridgeTurnChanges> turnChanges({
+    required String from,
+    required String to,
+    required bool hideWhitespace,
+  });
+
+  /// The unified diff of one file from the start of turn `from` to the end of turn `to`;
+  /// characters that could hide or reorder its lines are written out, as in the file's shown
+  /// name, but for the carriage returns of Windows line ends, which the Diff tab marks.
+  Future<String> turnPatch({
+    required String from,
+    required String to,
+    required String path,
+    required bool hideWhitespace,
+  });
+
+  /// The turns of the current branch, oldest first, with what each changed.
+  Future<List<BridgeTurn>> turns();
 }
 
 /// How much an agent may do without asking.
@@ -116,6 +163,29 @@ enum BridgeApprovalMode {
 
   /// Allow every call.
   fullAccess,
+}
+
+/// A session with checkpoints in the project's repository.
+class BridgeCheckpointSession {
+  /// Its title, as the start page names stored sessions; "Unknown session" when no session
+  /// of this project is stored with its id.
+  final String title;
+
+  /// Its turns with checkpoints.
+  final PlatformInt64 turns;
+
+  const BridgeCheckpointSession({required this.title, required this.turns});
+
+  @override
+  int get hashCode => title.hashCode ^ turns.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeCheckpointSession &&
+          runtimeType == other.runtimeType &&
+          title == other.title &&
+          turns == other.turns;
 }
 
 /// A model the agent can use.

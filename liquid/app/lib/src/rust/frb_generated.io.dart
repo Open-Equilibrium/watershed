@@ -123,6 +123,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeChangeStatus dco_decode_bridge_change_status(dynamic raw);
 
   @protected
+  BridgeChangesState dco_decode_bridge_changes_state(dynamic raw);
+
+  @protected
+  BridgeCheckpointSession dco_decode_bridge_checkpoint_session(dynamic raw);
+
+  @protected
   BridgeContextDetail dco_decode_bridge_context_detail(dynamic raw);
 
   @protected
@@ -192,6 +198,15 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeRequestKind dco_decode_bridge_request_kind(dynamic raw);
 
   @protected
+  BridgeRevertFile dco_decode_bridge_revert_file(dynamic raw);
+
+  @protected
+  BridgeRevertPlan dco_decode_bridge_revert_plan(dynamic raw);
+
+  @protected
+  BridgeRunningAgent dco_decode_bridge_running_agent(dynamic raw);
+
+  @protected
   BridgeStep dco_decode_bridge_step(dynamic raw);
 
   @protected
@@ -216,6 +231,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeTreeNode dco_decode_bridge_tree_node(dynamic raw);
 
   @protected
+  BridgeTurn dco_decode_bridge_turn(dynamic raw);
+
+  @protected
+  BridgeTurnChanges dco_decode_bridge_turn_changes(dynamic raw);
+
+  @protected
   BridgeUsage dco_decode_bridge_usage(dynamic raw);
 
   @protected
@@ -226,6 +247,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<String> dco_decode_list_String(dynamic raw);
+
+  @protected
+  List<BridgeCheckpointSession> dco_decode_list_bridge_checkpoint_session(
+    dynamic raw,
+  );
 
   @protected
   List<BridgeContextMessage> dco_decode_list_bridge_context_message(
@@ -248,6 +274,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<BridgeRecord> dco_decode_list_bridge_record(dynamic raw);
 
   @protected
+  List<BridgeRevertFile> dco_decode_list_bridge_revert_file(dynamic raw);
+
+  @protected
+  List<BridgeRunningAgent> dco_decode_list_bridge_running_agent(dynamic raw);
+
+  @protected
   List<BridgeStoredSession> dco_decode_list_bridge_stored_session(dynamic raw);
 
   @protected
@@ -260,6 +292,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<BridgeTreeNode> dco_decode_list_bridge_tree_node(dynamic raw);
+
+  @protected
+  List<BridgeTurn> dco_decode_list_bridge_turn(dynamic raw);
 
   @protected
   Uint8List dco_decode_list_prim_u_8_strict(dynamic raw);
@@ -324,9 +359,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<String>? dco_decode_opt_list_String(dynamic raw);
-
-  @protected
-  List<BridgeFileChange>? dco_decode_opt_list_bridge_file_change(dynamic raw);
 
   @protected
   SessionConfig dco_decode_session_config(dynamic raw);
@@ -461,6 +493,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeChangesState sse_decode_bridge_changes_state(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeCheckpointSession sse_decode_bridge_checkpoint_session(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   BridgeContextDetail sse_decode_bridge_context_detail(
     SseDeserializer deserializer,
   );
@@ -540,6 +582,17 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeRevertFile sse_decode_bridge_revert_file(SseDeserializer deserializer);
+
+  @protected
+  BridgeRevertPlan sse_decode_bridge_revert_plan(SseDeserializer deserializer);
+
+  @protected
+  BridgeRunningAgent sse_decode_bridge_running_agent(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   BridgeStep sse_decode_bridge_step(SseDeserializer deserializer);
 
   @protected
@@ -572,6 +625,14 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeTreeNode sse_decode_bridge_tree_node(SseDeserializer deserializer);
 
   @protected
+  BridgeTurn sse_decode_bridge_turn(SseDeserializer deserializer);
+
+  @protected
+  BridgeTurnChanges sse_decode_bridge_turn_changes(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   BridgeUsage sse_decode_bridge_usage(SseDeserializer deserializer);
 
   @protected
@@ -582,6 +643,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<String> sse_decode_list_String(SseDeserializer deserializer);
+
+  @protected
+  List<BridgeCheckpointSession> sse_decode_list_bridge_checkpoint_session(
+    SseDeserializer deserializer,
+  );
 
   @protected
   List<BridgeContextMessage> sse_decode_list_bridge_context_message(
@@ -612,6 +678,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  List<BridgeRevertFile> sse_decode_list_bridge_revert_file(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<BridgeRunningAgent> sse_decode_list_bridge_running_agent(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   List<BridgeStoredSession> sse_decode_list_bridge_stored_session(
     SseDeserializer deserializer,
   );
@@ -630,6 +706,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<BridgeTreeNode> sse_decode_list_bridge_tree_node(
     SseDeserializer deserializer,
   );
+
+  @protected
+  List<BridgeTurn> sse_decode_list_bridge_turn(SseDeserializer deserializer);
 
   @protected
   Uint8List sse_decode_list_prim_u_8_strict(SseDeserializer deserializer);
@@ -718,11 +797,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<String>? sse_decode_opt_list_String(SseDeserializer deserializer);
-
-  @protected
-  List<BridgeFileChange>? sse_decode_opt_list_bridge_file_change(
-    SseDeserializer deserializer,
-  );
 
   @protected
   SessionConfig sse_decode_session_config(SseDeserializer deserializer);
@@ -899,6 +973,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_bridge_changes_state(
+    BridgeChangesState self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_checkpoint_session(
+    BridgeCheckpointSession self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_bridge_context_detail(
     BridgeContextDetail self,
     SseSerializer serializer,
@@ -1007,6 +1093,24 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_bridge_revert_file(
+    BridgeRevertFile self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_revert_plan(
+    BridgeRevertPlan self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_running_agent(
+    BridgeRunningAgent self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_bridge_step(BridgeStep self, SseSerializer serializer);
 
   @protected
@@ -1052,6 +1156,15 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_bridge_turn(BridgeTurn self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_bridge_turn_changes(
+    BridgeTurnChanges self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_bridge_usage(BridgeUsage self, SseSerializer serializer);
 
   @protected
@@ -1062,6 +1175,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_list_String(List<String> self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_bridge_checkpoint_session(
+    List<BridgeCheckpointSession> self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_list_bridge_context_message(
@@ -1100,6 +1219,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_list_bridge_revert_file(
+    List<BridgeRevertFile> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_bridge_running_agent(
+    List<BridgeRunningAgent> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_list_bridge_stored_session(
     List<BridgeStoredSession> self,
     SseSerializer serializer,
@@ -1120,6 +1251,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_list_bridge_tree_node(
     List<BridgeTreeNode> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_bridge_turn(
+    List<BridgeTurn> self,
     SseSerializer serializer,
   );
 
@@ -1230,12 +1367,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_opt_list_String(List<String>? self, SseSerializer serializer);
-
-  @protected
-  void sse_encode_opt_list_bridge_file_change(
-    List<BridgeFileChange>? self,
-    SseSerializer serializer,
-  );
 
   @protected
   void sse_encode_session_config(SessionConfig self, SseSerializer serializer);

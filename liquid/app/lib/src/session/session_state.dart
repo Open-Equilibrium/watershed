@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import '../diff/turn_scope.dart';
 import '../rust/api/events.dart';
 import '../rust/api/history.dart';
 import '../rust/api/session.dart';
@@ -193,8 +194,11 @@ class SessionState {
     _generation++;
     _failing.clear();
     sessionTitle.value = null;
-    // The previous session's run no longer applies.
-    ran.value = false;
+    // The previous session's turns no longer apply.
+    turns.value = const [];
+    diffScope.value = const LatestTurn();
+    shownScope.value = const LatestTurn();
+    shown.value = null;
     changed.value = const [];
     changesProblem.value = null;
     _byId.clear();
@@ -347,26 +351,40 @@ class SessionState {
     }
   }
 
-  /// The files the latest run changed, as last read; null before the first read. The Diff tab
+  /// The turns of the current branch, oldest first, with what each changed.
+  final turns = ValueNotifier<List<BridgeTurn>>(const []);
+
+  /// Which turns the Diff tab compares.
+  final diffScope = ValueNotifier<DiffScope>(const LatestTurn());
+
+  /// The checkpoints the Diff tab compares, as last read; null while no turn ended.
+  final shown = ValueNotifier<Compared?>(null);
+
+  /// The turns the Diff tab shows, set with [shown] and their files; [diffScope] holds the
+  /// choice still being read.
+  final shownScope = ValueNotifier<DiffScope>(const LatestTurn());
+
+  /// The files the shown turns changed, as last read; null before the first read. The Diff tab
   /// and its count show them.
   final changed = ValueNotifier<List<BridgeFileChange>?>(null);
 
-  /// Why the latest read of the changes failed; null after one that worked.
-  final changesProblem = ValueNotifier<String?>(null);
-
-  /// Whether a run started in this session since Liquid opened it; the Diff tab compares only
-  /// such a run with the project before it.
-  final ran = ValueNotifier(false);
+  /// Why the Diff tab shows no files, with its heading; null while it shows a list.
+  final changesProblem = ValueNotifier<({String title, String text})?>(null);
 
   /// Whether the changes leave out what is only whitespace; a change reads them
   /// again.
   final hideWhitespace = ValueNotifier(false);
 
-  /// Reads what the latest run changed. A failed read is reported once, and the Diff tab says
-  /// so instead of showing an earlier run's changes.
+  /// Shows `scope` in the Diff tab.
+  Future<void> showTurns(DiffScope scope) {
+    diffScope.value = scope;
+    return readChanges();
+  }
+
+  /// Reads the branch's turns and what the shown ones changed between their checkpoints. A
+  /// failed read is reported once, and the Diff tab says so instead of showing earlier changes.
   Future<void> readChanges() {
-    // Each read takes a snapshot of the project, so a read asked for meanwhile runs once after
-    // the current one instead of queueing.
+    // A read asked for meanwhile runs once after the current one instead of queueing.
     if (_readingChanges case final reading?) {
       _changesAgain = true;
       return reading;
@@ -391,25 +409,97 @@ class SessionState {
   Future<void> _readChangesOnce() async {
     final generation = _generation;
     try {
-      final read = await _backend.changes(hideWhitespace: hideWhitespace.value);
+      final read = await _backend.turns();
+      if (generation != _generation) return;
+      turns.value = read;
+      final scope = diffScope.value;
+      final pair = compared(read, scope);
+      if (pair == null) {
+        // Outside Git no turn can have checkpoints, so say so before one ends.
+        final inRepository = await _backend.isInRepository();
+        if (generation != _generation) return;
+        reportRead('changes', null);
+        shownScope.value = scope;
+        shown.value = null;
+        changesProblem.value = !inRepository
+            ? _outsideGit
+            : switch (read.lastOrNull?.failure) {
+                final failure? => _noCheckpoint(failure),
+                null => (
+                  title: 'No finished turn yet',
+                  text: 'A turn’s changes appear here when it ends.',
+                ),
+              };
+        changed.value = const [];
+        return;
+      }
+      final changes = await _backend.turnChanges(
+        pair.from.id,
+        pair.to.id,
+        hideWhitespace: hideWhitespace.value,
+      );
       if (generation != _generation) return;
       reportRead('changes', null);
-      changesProblem.value = read == null
-          ? 'This project is not in Git, so Liquid cannot show what a run changed.'
-          : null;
-      changed.value = read;
+      // The heading changes only with its files, so no patch stands under another turn.
+      shownScope.value = scope;
+      shown.value = pair;
+      // A missing checkpoint of a turn that failed says why; outside Git every checkpoint
+      // fails, and the project's own state says so first.
+      final failure = pair.to.failure ?? pair.from.failure;
+      changesProblem.value = switch (changes.state) {
+        BridgeChangesState.removed when failure != null => _noCheckpoint(
+          failure,
+        ),
+        BridgeChangesState.shown => null,
+        BridgeChangesState.outsideGit => _outsideGit,
+        BridgeChangesState.removed => (
+          title: 'Checkpoints removed',
+          text:
+              'This session’s checkpoints were removed, so these turns show no '
+              'changes.',
+        ),
+      };
+      changed.value = changes.files;
     } on Object catch (error) {
       if (generation != _generation) return;
       final problem = 'Could not show the changes: $error';
       reportRead('changes', problem);
-      changesProblem.value = problem;
+      changesProblem.value = (title: 'No changes shown', text: problem);
       changed.value = null;
     }
   }
 
-  /// One file's unified diff as the latest list of changes compared it.
-  Future<String> patch(String path) =>
-      _backend.patch(path, hideWhitespace: hideWhitespace.value);
+  /// Reads the turns that ended and adds what each changed where it ended in the chat.
+  Future<void> _endTurn() async {
+    final generation = _generation;
+    await readChanges();
+    if (generation != _generation) return;
+    _chat.endTurns(turns.value);
+  }
+
+  static const _outsideGit = (
+    title: 'Not a Git repository',
+    text:
+        'This project has no Git repository, so Liquid keeps no checkpoints '
+        'and shows no turn changes.',
+  );
+
+  static ({String title, String text}) _noCheckpoint(String failure) => (
+    title: 'No checkpoint',
+    text: 'Liquid could not capture the project: $failure',
+  );
+
+  /// One file's unified diff between the shown checkpoints.
+  Future<String> patch(String path) {
+    final pair = shown.value;
+    if (pair == null) return Future.value('');
+    return _backend.turnPatch(
+      pair.from.id,
+      pair.to.id,
+      path,
+      hideWhitespace: hideWhitespace.value,
+    );
+  }
 
   /// The branch tree and the Trajectory of each branch ending at an entry in `leaves`, or of
   /// the current branch.
@@ -439,11 +529,126 @@ class SessionState {
 
   Future<bool>? _branching;
 
+  /// The sessions with checkpoints in the project's repository.
+  Future<List<BridgeCheckpointSession>> checkpointSessions() =>
+      _backend.checkpointSessions();
+
+  /// Removes every checkpoint of the project; returns whether it did, and says why not.
+  Future<bool> removeAllCheckpoints() async {
+    try {
+      await _backend.removeAllCheckpoints();
+    } on Object catch (error) {
+      notify(BridgeLevel.error, 'Could not remove the checkpoints: $error');
+      return false;
+    }
+    await readChanges();
+    return true;
+  }
+
+  /// The file pi stores the open session in, unless it keeps it in memory.
+  Future<String?> sessionFile() => _backend.sessionFile();
+
+  /// The turns with checkpoints of the session stored at `path`.
+  Future<int> storedTurns(String path) => _backend.storedTurns(path);
+
+  /// Deletes the session stored at `path` with its checkpoints (approved checkpoint mockups).
+  /// The open session's agent stops and a new session takes its place first, as T3 Code moves
+  /// on after deleting the active thread. Returns whether it deleted, and says why not.
+  Future<bool> deleteSession(String path) async {
+    try {
+      if (path == await _backend.sessionFile()) {
+        if (status.value case RunStatus.running || RunStatus.waitingForYou) {
+          await stop();
+          await _settled();
+        }
+        await newSession();
+        if (path == await _backend.sessionFile()) {
+          notify(
+            BridgeLevel.info,
+            'The session stayed open, so it was not deleted.',
+          );
+          return false;
+        }
+      }
+      await _backend.deleteSession(path);
+    } on Object catch (error) {
+      notify(BridgeLevel.error, 'Could not delete the session: $error');
+      return false;
+    }
+    await loadStart();
+    return true;
+  }
+
+  /// Waits, up to a few seconds, until the stopped agent no longer runs.
+  Future<void> _settled() async {
+    bool busy() => switch (status.value) {
+      RunStatus.running || RunStatus.waitingForYou => true,
+      _ => false,
+    };
+    if (!busy()) return;
+    final settled = Completer<void>();
+    void check() {
+      if (!busy() && !settled.isCompleted) settled.complete();
+    }
+
+    status.addListener(check);
+    try {
+      await settled.future.timeout(
+        const Duration(seconds: 5),
+        onTimeout: () {},
+      );
+    } finally {
+      status.removeListener(check);
+    }
+  }
+
+  /// What reverting the files to before `turn` would change.
+  Future<BridgeRevertPlan> revertPlan(BridgeTurn turn) =>
+      _backend.revertPlan(turn.id);
+
+  /// Reverts the files to before `turn` and continues the session on a new branch from before
+  /// its prompt, which returns to the input area (ADR-0234). Returns whether it reverted; a
+  /// failure is reported.
+  Future<bool> revert(BridgeTurn turn) async {
+    if (_branching != null || _switching != null) {
+      notify(
+        BridgeLevel.info,
+        'The session is changing, so the files were not reverted.',
+      );
+      return false;
+    }
+    final reverting = _backend.revertToTurn(turn.id).then((_) => true);
+    _branching = reverting;
+    try {
+      await reverting;
+    } on Object catch (error) {
+      // The error says whether the files changed; the Diff tab shows them either way.
+      final said = '$error';
+      notify(
+        BridgeLevel.error,
+        'Could not revert and branch. '
+        '${said.isEmpty ? '' : '${said[0].toUpperCase()}${said.substring(1)}'}',
+      );
+      await readChanges();
+      return false;
+    } finally {
+      _branching = null;
+    }
+    await _branched();
+    await readChanges();
+    return true;
+  }
+
   Future<bool> _branch(String entry) async {
     await _backend.branch(entry);
+    await _branched();
+    return true;
+  }
+
+  /// Shows the branch the session now continues.
+  Future<void> _branched() async {
     stored.value++;
     await loadChat();
-    return true;
   }
 
   /// Rebuilds the chat from the session's current branch, as the model sees it, and marks
@@ -521,14 +726,14 @@ class SessionState {
     switch (event.kind) {
       case BridgeEventKind.turnStarted:
         _turnActive = true;
-        ran.value = true;
         _stopping = false;
       case BridgeEventKind.turnCompleted || BridgeEventKind.turnAborted:
         _turnActive = false;
         _stopping = false;
         stored.value++;
         unawaited(loadTitle());
-        unawaited(readChanges());
+        _chat.turnCompleted();
+        unawaited(_endTurn());
       case BridgeEventKind.itemStarted:
         final started = event.item!;
         final view = ItemView(

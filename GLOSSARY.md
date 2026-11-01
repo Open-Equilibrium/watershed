@@ -156,7 +156,7 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **Grant** — What a person signs to let an agent act for them in a Workspace: an area, actions and an expiry, never more than that person may do; revoking it makes the Sync Server refuse the agent's changes (ADR-0223).
 - **Agent-sessions area** — The area where Meta-Harness mirrors agent session records at turn boundaries, so another of the person's hosts can continue a session (ADR-0229).
 - **Replay-safe** — A tool that may run again after a crash without a second effect, such as pi's own reading tools or a Flow Agent Tool declared so; other tools report "interrupted" instead (ADR-0229).
-- **Checkpoint ref** — A Git ref under Meta-Harness's own namespace that points at a commit of the agent project's files at a turn, to show the turn's changes and to return to it (ADR-0220).
+- **Checkpoint ref** — A Git ref under Meta-Harness's own namespace, `refs/watershed/checkpoints/<session>/<turn>/<start|end>`, that points at a commit of the agent project's files at a turn's start or end, to show the turn's changes and to revert the files to it (ADR-0220, ADR-0234).
 - **Team agent** — A planned agent whose grant comes from a Role instead of one person; only people who hold that grant's rights themselves may steer it (ADR-0232).
 - **Context track** — The Trajectory's column that draws each step's context against the model's window: exact at each request's prompt tokens, estimated between them, with pi's compaction point.
 - **Compliance replica** — A replica a company runs with its own key for search, legal hold and data-loss checks (ADR-0228).

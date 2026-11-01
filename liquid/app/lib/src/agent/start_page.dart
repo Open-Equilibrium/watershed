@@ -9,6 +9,7 @@ import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'input_lane.dart';
+import 'session_menus.dart';
 import 'sidebar.dart';
 
 /// The device a local session runs on, as the start page's device chip names it.
@@ -99,31 +100,45 @@ class _RecentRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ws = context.ws;
-    return InkWell(
-      onTap: () => state.continueSession(session.path),
-      borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
-      child: Container(
-        height: 30,
-        padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space3),
-        child: Row(
-          children: [
-            Icon(LucideIcons.clock, size: 14, color: ws.textFaint),
-            const SizedBox(width: WsMetrics.space3),
-            Expanded(
-              child: Text(
-                session.title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+    return RowMenu(
+      actions: [
+        RowAction(
+          'Delete session…',
+          () => confirmDeleteSession(
+            context,
+            state,
+            path: session.path,
+            title: session.title,
+          ),
+          danger: true,
+        ),
+      ],
+      child: InkWell(
+        onTap: () => state.continueSession(session.path),
+        borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
+        child: Container(
+          height: 30,
+          padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space3),
+          child: Row(
+            children: [
+              Icon(LucideIcons.clock, size: 14, color: ws.textFaint),
+              const SizedBox(width: WsMetrics.space3),
+              Expanded(
+                child: Text(
+                  session.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
-            ),
-            Text(
-              'continue · ${ago(session.modifiedMs)}',
-              style: TextStyle(
-                color: ws.textFaint,
-                fontSize: WsMetrics.fsSmall,
+              Text(
+                'continue · ${ago(session.modifiedMs)}',
+                style: TextStyle(
+                  color: ws.textFaint,
+                  fontSize: WsMetrics.fsSmall,
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
