@@ -304,8 +304,7 @@ impl WorkingTree {
         known: &BTreeSet<String>,
         budget: &mut usize,
     ) -> Option<String> {
-        let mut folders = path.match_indices('/').map(|(end, _)| &path[..end]);
-        for folder in folders.by_ref() {
+        for folder in path.match_indices('/').map(|(end, _)| &path[..end]) {
             // A repository either state records stays whole, whatever is on disk now.
             if known.contains(folder) {
                 return Some(folder.to_owned());
@@ -378,7 +377,6 @@ impl WorkingTree {
         let mut listing = Git::spawn(git_command(&self.root, &[], &args).stderr(Stdio::null()))?;
         let mut stdout = listing.child.stdout.take().expect("stdout is piped");
         let mut first = [0; 1];
-        let unreadable = |error: std::io::Error| DiffError::Git(error.to_string());
         if stdout.read(&mut first).await.map_err(unreadable)? > 0 {
             // Dropped unread, the listing ends with its process group.
             return Ok(true);
@@ -697,34 +695,43 @@ impl WorkingTree {
         env: &[(&'static str, OsString)],
         paths: &[String],
     ) -> Result<(), DiffError> {
+        let mut listed = Vec::new();
+        for path in paths {
+            listed.extend_from_slice(format!(":(top,literal){path}").as_bytes());
+            listed.push(0);
+        }
         let args = [
             "add",
             "--force",
             "--pathspec-from-file=-",
             "--pathspec-file-nul",
         ];
-        let mut command = git_command(&self.root, env, &args);
-        let mut adding = Git::spawn(
+        self.git_input(env, &args, &listed, "could not read the reverted files")
+            .await
+    }
+
+    /// Runs Git with `input` as its input and nothing read back; `failed` says why it failed.
+    async fn git_input(
+        &self,
+        env: &[(&'static str, OsString)],
+        args: &[&str],
+        input: &[u8],
+        failed: &str,
+    ) -> Result<(), DiffError> {
+        let mut command = git_command(&self.root, env, args);
+        let mut running = Git::spawn(
             command
                 .stdin(Stdio::piped())
                 .stdout(Stdio::null())
                 .stderr(Stdio::null()),
         )?;
-        let mut listed = Vec::new();
-        for path in paths {
-            listed.extend_from_slice(format!(":(top,literal){path}").as_bytes());
-            listed.push(0);
-        }
-        let failed = |error: std::io::Error| DiffError::Git(error.to_string());
-        let mut input = adding.child.stdin.take().expect("stdin is piped");
-        input.write_all(&listed).await.map_err(failed)?;
-        drop(input);
-        if adding.wait().await.map_err(failed)?.success() {
+        let mut writer = running.child.stdin.take().expect("stdin is piped");
+        writer.write_all(input).await.map_err(unreadable)?;
+        drop(writer);
+        if running.wait().await.map_err(unreadable)?.success() {
             Ok(())
         } else {
-            Err(DiffError::Git(
-                "could not read the reverted files".to_owned(),
-            ))
+            Err(DiffError::Git(failed.to_owned()))
         }
     }
 
@@ -769,7 +776,6 @@ impl WorkingTree {
         let stdout = listing.child.stdout.take().expect("stdout is piped");
         let mut entries = BufReader::new(stdout).split(0);
         let mut marked = Vec::new();
-        let unreadable = |error: std::io::Error| DiffError::Git(error.to_string());
         while let Some(entry) = entries.next_segment().await.map_err(unreadable)? {
             // `ls-files -v` tags a file assumed unchanged with a lowercase letter and one
             // outside the work with `S`.
@@ -789,22 +795,9 @@ impl WorkingTree {
             return Ok(());
         }
         for mark in ["--no-assume-unchanged", "--no-skip-worktree"] {
-            let mut command =
-                git_command(&self.root, env, &["update-index", mark, "-z", "--stdin"]);
-            let mut clearing = Git::spawn(
-                command
-                    .stdin(Stdio::piped())
-                    .stdout(Stdio::null())
-                    .stderr(Stdio::null()),
-            )?;
-            let mut input = clearing.child.stdin.take().expect("stdin is piped");
-            input.write_all(&marked).await.map_err(unreadable)?;
-            drop(input);
-            if !clearing.wait().await.map_err(unreadable)?.success() {
-                return Err(DiffError::Git(
-                    "could not read the files the project marks as skipped".to_owned(),
-                ));
-            }
+            let args = ["update-index", mark, "-z", "--stdin"];
+            let failed = "could not read the files the project marks as skipped";
+            self.git_input(env, &args, &marked, failed).await?;
         }
         Ok(())
     }
@@ -923,6 +916,11 @@ fn git_command(dir: &Path, env: &[(&str, OsString)], args: &[&str]) -> Command {
         .stderr(Stdio::piped())
         .kill_on_drop(true);
     command
+}
+
+/// A failed read of Git's output or write of its input.
+fn unreadable(error: std::io::Error) -> DiffError {
+    DiffError::Git(error.to_string())
 }
 
 /// Whether a repository is at or below the folder at `dir`, found as Git finds one: by

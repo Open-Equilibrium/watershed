@@ -554,7 +554,7 @@ class SessionState {
       notify(
         BridgeLevel.error,
         'Could not revert and branch. '
-        '${said.isEmpty ? '' : said[0].toUpperCase()}${said.isEmpty ? '' : said.substring(1)}',
+        '${said.isEmpty ? '' : '${said[0].toUpperCase()}${said.substring(1)}'}',
       );
       await readChanges();
       return false;

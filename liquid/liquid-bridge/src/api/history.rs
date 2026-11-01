@@ -303,7 +303,7 @@ pub struct BridgeRevertFile {
     /// Whether the revert deletes or overwrites something Git ignores, only because a restored
     /// file needs its place; such a folder's path ends in `/`.
     pub ignored: bool,
-    /// Whether the revert leaves it as it is, as it is inside, at or above a submodule or
+    /// Whether the revert leaves it alone because it is inside, at or above a submodule or
     /// nested repository.
     pub kept: bool,
 }

@@ -95,7 +95,7 @@ pub struct RevertFile {
     /// file needs its place: a file already at a restored path, or a folder (its path ends in
     /// `/`) or file in the way of one.
     pub ignored: bool,
-    /// Whether the revert leaves it as it is, as it is inside, at or above a submodule or
+    /// Whether the revert leaves it alone because it is inside, at or above a submodule or
     /// nested repository, whose files are their own.
     pub kept: bool,
 }

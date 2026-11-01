@@ -340,7 +340,7 @@ class BridgeRevertFile {
   /// file needs its place; such a folder's path ends in `/`.
   final bool ignored;
 
-  /// Whether the revert leaves it as it is, as it is inside, at or above a submodule or
+  /// Whether the revert leaves it alone because it is inside, at or above a submodule or
   /// nested repository.
   final bool kept;
 
