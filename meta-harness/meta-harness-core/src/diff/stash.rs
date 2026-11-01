@@ -147,8 +147,18 @@ impl WorkingTree {
         for tree in [&index, &tracked] {
             let changes = self.changes(&current, tree, Whitespace::Shown).await?;
             let (replaced, removed) = self.in_the_way(&changes).await?;
-            in_the_way.extend(replaced);
-            in_the_way.extend(removed);
+            for path in replaced.into_iter().chain(removed) {
+                // A case-only rename can alias a tracked file on disk. Only actual ignored
+                // paths block it; a directory ending in / already holds ignored contents.
+                if !path.ends_with('/') {
+                    match git(&self.root, &[], &["check-ignore", "--quiet", "--", &path]).await {
+                        Ok(_) => {}
+                        Err(DiffError::Git(reason)) if reason.is_empty() => continue,
+                        Err(error) => return Err(error),
+                    }
+                }
+                in_the_way.insert(path);
+            }
         }
         if self.resolve(&format!("{id}^3")).await?.is_some() {
             let untracked = git(

@@ -859,6 +859,34 @@ fn no_restore_runs_over_uncommitted_changes_or_ignored_files_in_the_way() {
 }
 
 #[test]
+fn a_stashed_case_only_rename_restores_without_an_ignored_obstruction() {
+    run(async {
+        let repo = Repo::new("stash-case-only");
+        let main = repo.git(&["branch", "--show-current"]).trim().to_owned();
+        repo.git(&["branch", "other"]);
+        repo.git(&["mv", "a.txt", "A.txt"]);
+        let checkpoints = Checkpoints::new(repo.path());
+        checkpoints
+            .switch_branch(&local("other"), leave_on(&checkpoints).await)
+            .await
+            .expect("left");
+        checkpoints
+            .switch_branch(&local(&main), Changes::Bring)
+            .await
+            .expect("back");
+
+        checkpoints
+            .restore_stash(&stash_of(&checkpoints).await)
+            .await
+            .expect("the tracked file's other spelling is no ignored obstruction");
+
+        assert_eq!(read(&repo, "A.txt"), "old\n");
+        assert_eq!(repo.git(&["ls-files"]), "A.txt\n");
+        assert!(checkpoints.stash().await.expect("stash").is_none());
+    });
+}
+
+#[test]
 fn no_restore_overwrites_ignored_paths_from_the_stashed_index_or_working_tree() {
     run(async {
         for saved in ["staged", "index-only", "deleted-since-stash"] {
