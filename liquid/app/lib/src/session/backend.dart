@@ -21,6 +21,9 @@ abstract interface class SessionBackend {
   Future<void> dismiss(String request);
   Future<bool> shutdown();
 
+  /// Whether the project is in a Git repository, so its turns can have checkpoints.
+  Future<bool> isInRepository();
+
   /// The turns of the current branch, oldest first, with what each changed.
   Future<List<BridgeTurn>> turns();
 
@@ -91,6 +94,8 @@ class RustSessionBackend implements SessionBackend {
   Future<void> dismiss(String request) => _session.dismiss(request: request);
   @override
   Future<bool> shutdown() => _session.shutdown();
+  @override
+  Future<bool> isInRepository() => _session.inRepository();
   @override
   Future<List<BridgeTurn>> turns() => _session.turns();
   @override

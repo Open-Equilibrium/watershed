@@ -725,6 +725,7 @@ fn diffs_each_turn_between_its_checkpoints() {
     .concat();
     let session = launch(gated(&script), repo.display().to_string()).expect("agent starts");
     reached(&repo.join(".git/checkpointed"));
+    assert_eq!(session.in_repository(), Ok(true));
     assert_eq!(
         session.turns(),
         Ok(vec![BridgeTurn {
@@ -793,6 +794,7 @@ fn a_project_outside_git_has_no_checkpoints_and_says_so() {
     .concat();
     let session = launch(gated(&script), dir.display().to_string()).expect("agent starts");
     reached(&dir.join("checkpointed"));
+    assert_eq!(session.in_repository(), Ok(false));
     assert_eq!(session.turns().map(|turns| turns.len()), Ok(1));
     assert_eq!(
         session

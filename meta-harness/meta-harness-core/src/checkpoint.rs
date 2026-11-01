@@ -104,6 +104,15 @@ impl Checkpoints {
         }
     }
 
+    /// Whether the project is in a Git working tree, so it can have checkpoints.
+    pub async fn in_repository(&self) -> Result<bool, DiffError> {
+        match self.tree().await {
+            Ok(_) => Ok(true),
+            Err(DiffError::NotARepository) => Ok(false),
+            Err(error) => Err(error),
+        }
+    }
+
     /// Takes `checkpoint` of the project as it is now. It can take a while in a large project.
     pub async fn capture(&self, checkpoint: &Checkpoint) -> Result<(), DiffError> {
         let reference = checkpoint.reference()?;

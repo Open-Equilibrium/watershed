@@ -57,6 +57,9 @@ abstract class AgentSession implements RustOpaqueInterface {
   /// `leaves`, or of the current branch when `leaves` is empty.
   Future<BridgeHistory> history({required List<String> leaves});
 
+  /// Whether the project is in a Git repository, so its turns can have checkpoints.
+  Future<bool> inRepository();
+
   /// The models the agent can use.
   Future<List<BridgeModel>> models();
 

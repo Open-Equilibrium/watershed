@@ -11,7 +11,7 @@ class FakeBackend implements SessionBackend {
   final controller = StreamController<BridgeEvent>();
   final calls = <String>[];
 
-  /// The files the latest run changed; none outside Git.
+  /// The files the shown turns changed; none outside Git.
   List<BridgeFileChange>? changed = const [];
   Map<String, String> patches = const {};
   BridgeHistory stored = historyOf([]);
@@ -96,6 +96,12 @@ class FakeBackend implements SessionBackend {
 
   /// The checkpoints each read compared, as `from..to`.
   final compared = <String>[];
+
+  /// Whether the project is in a Git repository.
+  bool inRepository = true;
+
+  @override
+  Future<bool> isInRepository() async => inRepository;
 
   @override
   Future<List<BridgeTurn>> turns() async {

@@ -409,7 +409,8 @@ class _Header extends StatelessWidget {
   }
 }
 
-/// How many files the latest run changed, beside the Diff tab's name (approved mockup).
+/// How many files the Diff tab shows, beside its name (approved mockup): the latest turn's
+/// unless another turn was chosen, counted as the whitespace choice says.
 class _ChangedFiles extends StatelessWidget {
   const _ChangedFiles({required this.state});
 

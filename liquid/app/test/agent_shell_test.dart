@@ -171,7 +171,7 @@ void main() {
     );
   });
 
-  testWidgets('the Diff tab counts the files the latest run changed', (
+  testWidgets('the Diff tab counts the files the shown turn changed', (
     tester,
   ) async {
     await show(tester);

@@ -11,11 +11,11 @@ Observational evidence for the checkpoints of the [Liquid Git slice](../../PLAN.
 
 | Workload | Command | Input | Exclusions |
 | --- | --- | --- | --- |
-| Checkpoints in a large project | `/usr/bin/time -l target/release/examples/checkpoint_observe` after `cargo build --release -p meta-harness-core --example checkpoint_observe` | A Git project of 20,000 committed files of 1 KiB in 200 folders, written by a second run of the example; 20 samples, each one turn: its start checkpoint, ten changed files and one new file, its end checkpoint and the list of what it changed. The first start also copies the project's index | No agent; writing the project |
+| Checkpoints in a large project | `/usr/bin/time -l target/release/examples/checkpoint_observe` after `cargo build --release -p meta-harness-core --example checkpoint_observe` | A Git project of 20,000 committed files of 1 KiB in 200 folders, written by a second run of the example; 20 samples, each one turn: its start checkpoint, ten changed files and one new file, its end checkpoint and the list of what it changed. The first start also opens the project | No agent; writing the project |
 
 ## Observations
 
-A start checkpoint takes 87.8 ms p50 (104.8 ms p95), an end checkpoint 87.7 ms p50 (107.0 ms p95), listing a turn's changes 25.9 ms p50; the first start took 71.2 ms. Since `6aa5178` every checkpoint starts from a fresh copy of the project's index, so a file the project ignores since an earlier checkpoint drops out; at `21a6cbd`, which reused the private index, a start took 80.5 ms p50 and an end 82.4 ms p50 on the same machine. A checkpoint rereads only the files whose index entries changed, so its time grows with the project's file count rather than its size. Peak memory footprint 2.3 MB; `/usr/bin/time` reports 10.2 MB maximum resident set size, which includes the waited-for writer run.
+A start checkpoint takes 87.8 ms p50 (104.8 ms p95), an end checkpoint 87.7 ms p50 (107.0 ms p95), listing a turn's changes 25.9 ms p50; the first start, which also opens the project, took 71.2 ms. Since `6aa5178` every checkpoint starts from a fresh copy of the project's index, so a file the project ignores since an earlier checkpoint drops out; at `21a6cbd`, which reused the private index, a start took 80.5 ms p50 and an end 82.4 ms p50 on the same machine. A checkpoint rereads only the files whose index entries changed, so its time grows with the project's file count rather than its size. Peak memory footprint 2.3 MB; `/usr/bin/time` reports 10.2 MB maximum resident set size, which includes the waited-for writer run.
 
 ### Raw output
 

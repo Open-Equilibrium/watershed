@@ -308,10 +308,19 @@ class _DiffViewState extends State<DiffView> {
   Widget? _header() {
     final shown = widget.state.shown.value;
     if (shown == null) return null;
+    final scope = widget.state.shownScope.value;
+    final files = widget.state.changed.value;
     return _TurnHeader(
       menuKey: _turnMenu,
       turns: widget.state.turns.value,
-      scope: widget.state.shownScope.value,
+      scope: scope,
+      // What all turns changed is known once they were read.
+      allLines: scope is AllTurns && files != null
+          ? (
+              added: files.fold(0, (sum, file) => sum + file.added),
+              removed: files.fold(0, (sum, file) => sum + file.removed),
+            )
+          : null,
       shown: shown,
       onSelect: (scope) => unawaited(widget.state.showTurns(scope)),
     );
@@ -926,6 +935,7 @@ class _TurnHeader extends StatelessWidget {
     required this.menuKey,
     required this.turns,
     required this.scope,
+    required this.allLines,
     required this.shown,
     required this.onSelect,
   });
@@ -933,6 +943,9 @@ class _TurnHeader extends StatelessWidget {
   final GlobalKey<PopupMenuButtonState<DiffScope>> menuKey;
   final List<BridgeTurn> turns;
   final DiffScope scope;
+
+  /// The lines all turns added and removed, once read.
+  final ({int added, int removed})? allLines;
   final Compared shown;
   final ValueChanged<DiffScope> onSelect;
 
@@ -979,7 +992,7 @@ class _TurnHeader extends StatelessWidget {
         PopupMenuButton<DiffScope>(
           key: menuKey,
           tooltip: 'Choose the turn',
-          initialValue: scope is LatestTurn ? const LatestTurn() : scope,
+          initialValue: scope,
           onSelected: onSelect,
           itemBuilder: (context) => [
             PopupMenuItem(
@@ -998,9 +1011,12 @@ class _TurnHeader extends StatelessWidget {
             item(
               const AllTurns(),
               'All turns',
-              turns.first.startedMs == null
-                  ? ''
-                  : 'since ${formatClockMs(turns.first.startedMs!)}',
+              [
+                if (turns.first.startedMs case final at?)
+                  'since ${formatClockMs(at)}',
+                if (allLines case final lines?)
+                  '+${lines.added} −${lines.removed}',
+              ].join(' · '),
             ),
           ],
           child: Container(

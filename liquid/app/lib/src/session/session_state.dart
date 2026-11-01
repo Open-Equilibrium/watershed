@@ -415,19 +415,21 @@ class SessionState {
       final scope = diffScope.value;
       final pair = compared(read, scope);
       if (pair == null) {
+        // Outside Git no turn can have checkpoints, so say so before one ends.
+        final inRepository = await _backend.isInRepository();
+        if (generation != _generation) return;
+        reportRead('changes', null);
         shownScope.value = scope;
         shown.value = null;
-        reportRead('changes', null);
-        changesProblem.value = switch (read.lastOrNull?.failure) {
-          final failure? => (
-            title: 'No checkpoint',
-            text: 'Liquid could not capture the project: $failure',
-          ),
-          null => (
-            title: 'No finished turn yet',
-            text: 'A turn’s changes appear here when it ends.',
-          ),
-        };
+        changesProblem.value = !inRepository
+            ? _outsideGit
+            : switch (read.lastOrNull?.failure) {
+                final failure? => _noCheckpoint(failure),
+                null => (
+                  title: 'No finished turn yet',
+                  text: 'A turn’s changes appear here when it ends.',
+                ),
+              };
         changed.value = const [];
         return;
       }
@@ -445,17 +447,11 @@ class SessionState {
       // fails, and the project's own state says so first.
       final failure = pair.to.failure ?? pair.from.failure;
       changesProblem.value = switch (changes.state) {
-        BridgeChangesState.removed when failure != null => (
-          title: 'No checkpoint',
-          text: 'Liquid could not capture the project: $failure',
+        BridgeChangesState.removed when failure != null => _noCheckpoint(
+          failure,
         ),
         BridgeChangesState.shown => null,
-        BridgeChangesState.outsideGit => (
-          title: 'Not a Git repository',
-          text:
-              'This project has no Git repository, so Liquid keeps no checkpoints '
-              'and shows no turn changes.',
-        ),
+        BridgeChangesState.outsideGit => _outsideGit,
         BridgeChangesState.removed => (
           title: 'Checkpoints removed',
           text:
@@ -480,6 +476,18 @@ class SessionState {
     if (generation != _generation) return;
     _chat.endTurns(turns.value);
   }
+
+  static const _outsideGit = (
+    title: 'Not a Git repository',
+    text:
+        'This project has no Git repository, so Liquid keeps no checkpoints '
+        'and shows no turn changes.',
+  );
+
+  static ({String title, String text}) _noCheckpoint(String failure) => (
+    title: 'No checkpoint',
+    text: 'Liquid could not capture the project: $failure',
+  );
 
   /// One file's unified diff between the shown checkpoints.
   Future<String> patch(String path) {

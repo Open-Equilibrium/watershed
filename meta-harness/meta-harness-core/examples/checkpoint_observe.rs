@@ -1,7 +1,7 @@
 //! Observation workload for checkpoints in a large project (PERFORMANCE.md, Meta-Harness): a Git
 //! project of 20,000 committed files of 1 KiB in 200 folders. Each sample is one turn: its start
 //! checkpoint, ten changed files and one new file, its end checkpoint and the list of what it
-//! changed. The first sample's start also copies the project's index. The project is written by
+//! changed. The first sample's start also opens the project. The project is written by
 //! a second run of this example, so building it adds nothing to the measured process. It prints
 //! one JSON line per sample and a summary and never compares with a threshold. Run from the
 //! repository root:
@@ -138,7 +138,7 @@ async fn observe(dir: &Path) {
         lists.push(list_ms);
     }
     checkpoints.close().await;
-    // The first start also copies the project's index, so the summary leaves it out.
+    // The first start also opens the project, so the summary leaves it out.
     let summary = |values: &mut Vec<f64>| {
         values.sort_by(f64::total_cmp);
         let at = |share: f64| values[((values.len() - 1) as f64 * share).round() as usize];

@@ -215,6 +215,13 @@ impl AgentSession {
         })
     }
 
+    /// Whether the project is in a Git repository, so its turns can have checkpoints.
+    pub fn in_repository(&self) -> Result<bool, String> {
+        RUNTIME
+            .block_on(self.checkpoints.in_repository())
+            .map_err(|error| error.to_string())
+    }
+
     /// The turns of the current branch, oldest first, with what each changed.
     pub fn turns(&self) -> Result<Vec<BridgeTurn>, String> {
         RUNTIME.block_on(async {

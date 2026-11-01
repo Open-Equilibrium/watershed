@@ -538,6 +538,44 @@ void main() {
     expect(state.notices.value, isEmpty, reason: 'nothing failed');
   });
 
+  testWidgets('says the project is not in Git before any turn ended', (
+    tester,
+  ) async {
+    final backend = FakeBackend()
+      ..inRepository = false
+      ..turnList = const [];
+    await show(tester, backend);
+    expect(find.text('Not a Git repository'), findsOneWidget);
+  });
+
+  testWidgets('counts all turns\' lines in the turn menu once read', (
+    tester,
+  ) async {
+    BridgeFileChange change(String path, int added, int removed) =>
+        BridgeFileChange(
+          path: path,
+          shown: path,
+          status: BridgeChangeStatus.modified,
+          added: added,
+          removed: removed,
+        );
+    final backend = FakeBackend()
+      ..changed = [change('a.ts', 1, 0), change('b.ts', 2, 1)]
+      ..turnList = [
+        turnOf('T1', number: 1, added: 1, removed: 0),
+        turnOf('T2', number: 2, startedMs: 1793527800000, added: 2, removed: 1),
+      ];
+    await show(tester, backend);
+    await press(tester, LogicalKeyboardKey.keyT);
+    await tester.tap(find.text('All turns'));
+    await tester.pumpAndSettle();
+    await press(tester, LogicalKeyboardKey.keyT);
+    expect(
+      find.textContaining(RegExp(r'^since \d\d:\d\d · \+3 −1$')),
+      findsOneWidget,
+    );
+  });
+
   testWidgets('keeps a turn whose checkpoint failed and says why', (
     tester,
   ) async {

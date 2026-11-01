@@ -116,6 +116,7 @@ fn a_turn_compares_its_end_with_its_start() {
     run(async {
         let repo = Repo::new("turns");
         let checkpoints = Checkpoints::new(repo.path());
+        assert!(matches!(checkpoints.in_repository().await, Ok(true)));
         turn(&checkpoints, "t1", || repo.write("a.txt", "new\n")).await;
         // Later changes belong to no turn yet.
         repo.write("a.txt", "newer\n");
@@ -537,6 +538,7 @@ fn a_project_outside_git_says_so_instead_of_showing_no_changes() {
         ));
         std::fs::create_dir_all(&dir).expect("directory");
         let checkpoints = Checkpoints::new(&dir);
+        assert!(matches!(checkpoints.in_repository().await, Ok(false)));
         assert!(matches!(
             checkpoints.capture(&at("t1", Phase::Start)).await,
             Err(DiffError::NotARepository)
