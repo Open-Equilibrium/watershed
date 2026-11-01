@@ -205,7 +205,7 @@ A macOS Liquid app, built ahead of M2 and M3a, that controls pi through an embed
 
 #### Liquid Git integration — next slice
 
-Completes the Git integration for the agent's Git project (ADR-0190, ADR-0191): branches, commits, push, pull requests and worktrees, plus per-turn checkpoints that the Diff tab shows and a user can revert the files to (ADR-0220, ADR-0234; [mockups](docs/design/mockups/liquid-checkpoints.html)). Meta-Harness runs the host's `git` and `gh`; Liquid provides the UI. Pull requests in order: checkpoints and the Diff tab on them (done), revert to a turn (done), deleting a session and removing all checkpoints (done), then branches and commits, pull requests and worktrees.
+Completes the Git integration for the agent's Git project (ADR-0190, ADR-0191): branches, commits, push, pull requests and worktrees, plus per-turn checkpoints that the Diff tab shows and a user can revert the files to (ADR-0220, ADR-0234; [mockups](docs/design/mockups/liquid-checkpoints.html)). Meta-Harness runs the host's `git` and `gh`; Liquid provides the UI. Pull requests in order: checkpoints and the Diff tab on them (done), revert to a turn (done), deleting a session and removing all checkpoints (done), the branch in the header with a background fetch, switching and creating branches and stashing changes as GitHub Desktop does (done; [mockups](docs/design/mockups/liquid-git-branches.html)), then commits, push and pull, pull requests and worktrees.
 
 #### Agent sandbox write boundary — slice after Git
 
