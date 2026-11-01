@@ -371,6 +371,73 @@ fn a_background_fetch_leaves_tags_alone_despite_pruning_settings() {
 }
 
 #[test]
+fn fetching_never_waits_for_an_ssh_passphrase_on_the_terminal() {
+    const CHILD: &str = "WATERSHED_SSH_PROMPT_TEST";
+    if std::env::var_os(CHILD).is_none() {
+        // Run this case with a controlling terminal, as Liquid launched by flutter run has.
+        let executable = std::env::current_exe().expect("test executable");
+        let name = "tests::branches::fetching_never_waits_for_an_ssh_passphrase_on_the_terminal";
+        let mut terminal = Command::new("script");
+        terminal.arg("-q");
+        #[cfg(target_os = "macos")]
+        terminal
+            .arg("/dev/null")
+            .arg(&executable)
+            .arg("--exact")
+            .arg(name);
+        #[cfg(not(target_os = "macos"))]
+        terminal
+            .args(["-e", "-c"])
+            .arg(format!(
+                "{} --exact {name}",
+                super::shell_word(executable.to_str().expect("test path"))
+            ))
+            .arg("/dev/null");
+        let output = terminal.env(CHILD, "1").output().expect("terminal starts");
+        let output = String::from_utf8_lossy(&output.stdout);
+        assert!(output.contains("1 passed; 0 failed"), "{output}");
+        return;
+    }
+    run(async {
+        let clone = Clone::new("fetch-ssh-prompt");
+        let repo = &clone.repo;
+        // An ephemeral test fixture, never an identity used to authenticate anywhere.
+        let key = repo.path().join(".git/prompt-fixture");
+        assert!(
+            Command::new("ssh-keygen")
+                .args(["-q", "-t", "ed25519", "-N", "test-passphrase", "-f"])
+                .arg(&key)
+                .status()
+                .expect("fixture generated")
+                .success()
+        );
+        repo.git(&[
+            "remote",
+            "set-url",
+            "origin",
+            "ssh://example.invalid/repository",
+        ]);
+        // OpenSSH's key reader uses the same terminal/askpass policy as its SSH client.
+        repo.git(&[
+            "config",
+            "core.sshCommand",
+            &format!(
+                "sh -c {}",
+                super::shell_word(format!(
+                    "exec ssh-keygen -y -f {}",
+                    super::shell_word(key.to_str().unwrap())
+                ))
+            ),
+        ]);
+        let checkpoints = Checkpoints::with_timeout(repo.path(), Duration::from_secs(2));
+
+        let fetched = checkpoints.fetch().await;
+
+        assert!(matches!(fetched, Err(DiffError::Git(_))), "{fetched:?}");
+    });
+}
+
+#[test]
 fn a_failed_fetch_keeps_credentials_out_of_its_error() {
     run(async {
         let repo = Repo::new("fetch-secret");

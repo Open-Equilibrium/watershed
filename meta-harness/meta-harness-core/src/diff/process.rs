@@ -42,7 +42,8 @@ pub(super) const NO_PROMPTS: [(&str, &str); 5] = [
     ("GIT_TERMINAL_PROMPT", "0"),
     ("GIT_ASKPASS", ""),
     ("SSH_ASKPASS", ""),
-    ("SSH_ASKPASS_REQUIRE", "never"),
+    // Force the empty helper even with a controlling terminal, so SSH cannot prompt there.
+    ("SSH_ASKPASS_REQUIRE", "force"),
     ("GCM_INTERACTIVE", "never"),
 ];
 
