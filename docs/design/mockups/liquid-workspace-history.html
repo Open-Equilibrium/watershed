@@ -1,0 +1,484 @@
+<!doctype html>
+<html lang="en"><head><title>Liquid: Workspace History and Roles mockups</title>
+<link rel="stylesheet" href="../tokens.css"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+.chrome{--foreground:var(--ws-text);--muted-foreground:var(--ws-text-muted);--muted:var(--ws-subtle);--border:var(--ws-border-strong);--secondary:var(--ws-hover);--radius:8px;background:var(--ws-canvas);padding:24px}
+body{margin:0;font-family:var(--ws-font-ui);color:var(--foreground)}
+.page{display:flex;flex-direction:column;gap:28px;max-width:1400px}
+.toolbar{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;font-size:13px;color:var(--muted-foreground)}
+.toolbar>div{display:flex;gap:8px;align-items:center}
+.seg{display:inline-flex;border:1px solid var(--border);border-radius:6px;overflow:hidden}
+.seg button{all:unset;cursor:pointer;padding:4px 10px;font-size:12.5px;color:var(--muted-foreground)}
+.seg button.on{background:var(--secondary);color:var(--foreground)}
+h1{margin:0 0 6px;font-size:var(--ws-fs-h1);line-height:var(--ws-lh-h1)}
+h3.sec{margin:0 0 4px;font-size:15px;font-weight:600}
+p.sub{margin:0 0 10px;font-size:13px;color:var(--muted-foreground);line-height:1.5;max-width:900px}
+.stage{padding:16px;border-radius:8px;background:var(--muted);overflow:hidden}
+.scaler{position:relative}
+.scaler>.win{position:absolute;top:0;left:0;transform-origin:0 0}
+.win{font-family:var(--ws-font-ui);color:var(--ws-text);font-size:var(--ws-fs-ui);line-height:var(--ws-lh-ui);-webkit-font-smoothing:antialiased;background:var(--ws-canvas);border-radius:var(--ws-radius-xl);overflow:hidden;box-shadow:var(--ws-shadow)}
+.win code,.win kbd,.mono{font-family:var(--ws-font-mono)}
+.win.bare{background:transparent;box-shadow:none;overflow:visible;border-radius:0}
+.tbar{height:38px;background:var(--ws-titlebar);display:flex;align-items:center;padding:0 14px}
+.lights{display:flex;gap:8px}.lights i{width:12px;height:12px;border-radius:50%;display:block}
+.body{display:flex;height:var(--h);position:relative}
+.side{width:280px;flex:none;overflow:hidden;background:var(--ws-subtle);padding:4px 8px 8px;display:flex;flex-direction:column;gap:1px;box-shadow:inset -1px 0 0 var(--ws-border);box-sizing:border-box}
+.wsw{display:flex;align-items:center;gap:8px;height:var(--ws-row-nav);padding:0 8px;font-weight:500;border-radius:6px}
+.av{width:22px;height:22px;border-radius:4px;background:var(--ws-accent);color:var(--ws-on-accent);display:grid;place-items:center;font-size:12px;font-weight:600;flex:none}
+.srch{height:var(--ws-row-nav);display:flex;align-items:center;gap:8px;padding:0 8px;border-radius:6px;color:var(--ws-text-muted)}
+.srch kbd{margin-left:auto}
+.side h6{font-size:12px;line-height:16px;color:var(--ws-text-faint);font-weight:500;margin:14px 8px 4px;display:flex;justify-content:space-between;align-items:center}
+.side h6 span.a{display:flex;gap:10px}
+.nav{flex:none;display:flex;align-items:center;gap:8px;height:var(--ws-row-nav);padding:0 8px 0 calc(8px + var(--d,0) * 18px);border-radius:6px;color:var(--ws-text-muted);white-space:nowrap;overflow:hidden;box-sizing:border-box}
+.nav.on{background:var(--ws-selected);color:var(--ws-text)}
+.nav .tw{width:12px;flex:none;color:var(--ws-text-faint);font-size:11px;text-align:center}
+.nav .r{margin-left:auto;font-size:12px;color:var(--ws-text-faint)}
+.nav .r.warn{color:var(--ws-warning)}
+.ico{width:18px;flex:none;display:inline-flex;justify-content:center;color:var(--ws-text-faint)}
+.em{font-size:15px;line-height:1}
+.tic{display:inline-block;margin-right:10px;font-size:30px;vertical-align:-2px}
+.tic.add{font-size:15px;font-weight:400;color:var(--ws-text-faint);vertical-align:6px;margin-right:12px}
+.modal{position:absolute;left:50%;top:28px;bottom:28px;transform:translateX(-50%);z-index:4;background:var(--ws-canvas);border-radius:12px;box-shadow:var(--ws-shadow);display:flex;flex-direction:column;overflow:hidden}
+.mh{height:48px;flex:none;display:flex;align-items:center;gap:8px;padding:0 12px 0 20px;font-size:15px;font-weight:600;box-shadow:inset 0 -1px 0 var(--ws-border)}
+.mh .end{margin-left:auto;display:flex;gap:6px;align-items:center;font-weight:400}
+.mb{flex:1;display:flex;min-height:0}
+.pbfoot{display:flex;gap:16px;padding:8px 16px;font-size:12px;color:var(--ws-text-faint);box-shadow:inset 0 1px 0 var(--ws-border)}
+.pbfoot b{font-family:var(--ws-font-mono);color:var(--ws-text-muted);font-weight:500;margin-right:4px}
+.ipick{width:360px;padding:0;overflow:hidden}
+.ipick .tabs2{display:flex;gap:14px;padding:0 12px;height:38px;align-items:center;font-size:13px;color:var(--ws-text-muted);box-shadow:inset 0 -1px 0 var(--ws-border)}
+.ipick .tabs2 .on{color:var(--ws-text);font-weight:500;box-shadow:inset 0 -2px 0 var(--ws-text);height:100%;display:flex;align-items:center}
+.ipick .tabs2 .end{margin-left:auto}
+.egrid{display:grid;grid-template-columns:repeat(9,1fr);gap:2px;padding:4px 10px 10px;font-size:20px;text-align:center}
+.egrid span{height:34px;display:grid;place-items:center;border-radius:6px}
+.egrid span.on{background:var(--ws-hover)}
+.foot{margin-top:auto;padding-top:6px;box-shadow:inset 0 1px 0 var(--ws-border)}
+.main{flex:1;display:flex;flex-direction:column;min-width:0;position:relative}
+.head{height:44px;flex:none;display:flex;align-items:center;gap:8px;padding:0 16px 0 24px;font-size:14px}
+.crumb{color:var(--ws-text-muted);display:flex;gap:6px;align-items:center;white-space:nowrap}
+.crumb b{color:var(--ws-text);font-weight:500}
+.head .end{margin-left:auto;display:flex;gap:4px;align-items:center}
+.ib{height:28px;min-width:28px;padding:0 6px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;gap:6px;color:var(--ws-text-muted);font-size:13px;box-sizing:border-box}
+.ib.on{background:var(--ws-accent-subtle);color:var(--ws-accent)}
+kbd{font-size:11px;padding:0 4px;border-radius:4px;border:1px solid currentColor;opacity:.6;line-height:16px;font-weight:400}
+.btn{height:28px;padding:0 10px;border-radius:6px;background:var(--ws-canvas);box-shadow:inset 0 0 0 1px var(--ws-border-strong);color:var(--ws-text);font-size:13px;display:inline-flex;align-items:center;gap:8px;font-weight:500;white-space:nowrap}
+.btn.pri{background:var(--ws-accent);color:var(--ws-on-accent);box-shadow:none}
+.btn.ghost{box-shadow:none;background:transparent;color:var(--ws-text-muted)}
+.pg{flex:1;overflow:hidden;padding:28px 0 0;-webkit-mask-image:linear-gradient(to top,transparent 0,#000 40px);mask-image:linear-gradient(to top,transparent 0,#000 40px)}
+.col{width:740px;margin:0 auto;display:flex;flex-direction:column;gap:14px}
+.ttl{font-size:var(--ws-fs-display);line-height:var(--ws-lh-display);font-weight:var(--ws-fw-bold);margin:0 0 6px}
+.ttl.ph{color:var(--ws-text-faint)}
+.prose{font-size:var(--ws-fs-prose);line-height:var(--ws-lh-prose)}
+.prose p{margin:0 0 8px}
+.prose h2{font-size:var(--ws-fs-h2);line-height:var(--ws-lh-h2);margin:6px 0 6px;font-weight:600}
+.hint{color:var(--ws-text-faint);font-size:var(--ws-fs-prose);line-height:var(--ws-lh-prose);display:flex;align-items:center;gap:2px}
+.caret{display:inline-block;width:1.5px;height:20px;background:var(--ws-text);margin-right:6px;vertical-align:middle}
+.blk{position:relative}
+.gut{position:absolute;left:-52px;top:2px;display:flex;gap:2px;color:var(--ws-text-faint)}
+.gut span{width:22px;height:24px;display:grid;place-items:center;border-radius:4px}
+.gut span.on{background:var(--ws-hover);color:var(--ws-text-muted)}
+.bh{display:flex;align-items:center;gap:8px;height:30px;font-size:14px;color:var(--ws-text-muted)}
+.bh b{color:var(--ws-text);font-weight:600}
+.bh .end{margin-left:auto;display:flex;gap:6px;align-items:center}
+.chip{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 8px;border-radius:6px;color:var(--ws-text-muted);font-size:13px;white-space:nowrap;background:var(--ws-subtle)}
+.tag{display:inline-block;font-size:12px;font-weight:500;padding:0 6px;border-radius:4px;line-height:20px}
+.t1{background:var(--ws-accent-subtle);color:var(--ws-accent)}.t2{background:color-mix(in srgb,var(--ws-data-2) 14%,transparent);color:var(--ws-data-2)}.t3{background:var(--ws-success-subtle);color:var(--ws-success)}.t4{background:var(--ws-warning-subtle);color:var(--ws-warning)}
+.tbl{border-radius:8px;box-shadow:0 0 0 1px var(--ws-border);overflow:hidden;font-size:14px}
+.tr{display:grid;grid-template-columns:var(--cols);height:var(--ws-row-table);align-items:center;box-shadow:inset 0 -1px 0 var(--ws-border);white-space:nowrap}
+.tr>span{padding:0 10px;overflow:hidden;text-overflow:ellipsis}
+.tr>span+span{box-shadow:inset 1px 0 0 var(--ws-border);height:100%;display:flex;align-items:center}
+.tr.hd{color:var(--ws-text-faint);font-size:13px;height:30px;background:var(--ws-subtle)}
+.tr.add{color:var(--ws-text-faint);font-size:13px;box-shadow:none}
+.tr.add>span+span{box-shadow:none}
+.num{justify-content:flex-end;font-variant-numeric:tabular-nums}
+.tr.sum{color:var(--ws-text-muted);font-size:13px;box-shadow:none;background:var(--ws-subtle)}
+.card{border-radius:8px;box-shadow:0 0 0 1px var(--ws-border);padding:12px 14px;background:var(--ws-canvas)}
+.cap{font-size:12px;line-height:18px;color:var(--ws-text-faint)}
+.fx{font-family:var(--ws-font-mono);font-size:13px;color:var(--ws-text-muted)}
+.ref{display:inline-flex;align-items:center;gap:4px;height:20px;padding:0 6px;border-radius:4px;background:var(--ws-accent-subtle);color:var(--ws-accent);font-family:var(--ws-font-ui);font-size:12px;font-weight:500;vertical-align:middle}
+.big{font-size:var(--ws-fs-h1);line-height:var(--ws-lh-h1);font-weight:600;font-variant-numeric:tabular-nums}
+.pop{position:absolute;z-index:3;border-radius:8px;background:var(--ws-surface);box-shadow:var(--ws-shadow);padding:6px;display:flex;flex-direction:column;gap:1px;font-size:14px}
+.pop .lbl{font-size:12px;color:var(--ws-text-faint);padding:6px 8px 2px}
+.pop .it{display:flex;gap:10px;align-items:center;min-height:32px;padding:0 8px;border-radius:6px;white-space:nowrap;color:var(--ws-text)}
+.pop .it.on{background:var(--ws-hover)}
+.pop .it .d{color:var(--ws-text-faint);font-size:12px}
+.pop .it .r{margin-left:auto;color:var(--ws-text-faint);font-size:12px}
+.pop .it .bi{width:28px;height:28px;border-radius:6px;box-shadow:inset 0 0 0 1px var(--ws-border);display:grid;place-items:center;color:var(--ws-text-muted);flex:none}
+.pop .it .tx{display:flex;flex-direction:column;line-height:18px;padding:4px 0}
+.pop hr{border:0;height:1px;background:var(--ws-border);margin:4px 2px}
+.pb{position:absolute;left:50%;top:70px;transform:translateX(-50%);width:640px;border-radius:12px;background:var(--ws-surface);box-shadow:var(--ws-shadow);z-index:4;overflow:hidden}
+.pb .in{height:52px;display:flex;align-items:center;gap:10px;padding:0 16px;font-size:16px;box-shadow:inset 0 -1px 0 var(--ws-border)}
+.pb .in .ph{color:var(--ws-text-faint)}
+.pb .in .back{height:24px;padding:0 8px;border-radius:6px;background:var(--ws-hover);font-size:13px;display:inline-flex;align-items:center;gap:6px;color:var(--ws-text-muted)}
+.pb .ls{padding:6px;display:flex;flex-direction:column;gap:1px;font-size:14px}
+.pb .lbl{font-size:12px;color:var(--ws-text-faint);padding:8px 10px 4px}
+.pb .it{display:flex;gap:10px;align-items:center;height:36px;padding:0 10px;border-radius:6px;white-space:nowrap}
+.pb .it.on{background:var(--ws-hover)}
+.pb .it .d{color:var(--ws-text-faint);font-size:13px;overflow:hidden;text-overflow:ellipsis}
+.pb .it .r{margin-left:auto;color:var(--ws-text-faint);font-size:12px}
+.pb mark{background:none;color:var(--ws-text);font-weight:600}
+.scrim{position:absolute;inset:0;background:rgba(15,15,15,.24);z-index:2}
+.grid12{position:relative;display:grid;grid-template-columns:repeat(12,1fr);gap:16px;align-items:start}
+.grid12.lines::before{content:"";position:absolute;inset:-8px 0;background:repeating-linear-gradient(to right,color-mix(in srgb,var(--ws-accent) 6%,transparent) 0,color-mix(in srgb,var(--ws-accent) 6%,transparent) calc((100% - 176px)/12),transparent calc((100% - 176px)/12),transparent calc((100% - 176px)/12 + 16px));pointer-events:none;border-radius:4px}
+.tile{position:relative;border-radius:8px;padding:10px 12px;background:var(--ws-canvas);box-shadow:0 0 0 1px var(--ws-border-strong);min-width:0}
+.tile.sel{box-shadow:0 0 0 2px var(--ws-accent)}
+.tile .mv{position:absolute;top:-11px;left:50%;transform:translateX(-50%);height:18px;padding:0 6px;border-radius:4px;background:var(--ws-surface);box-shadow:0 0 0 1px var(--ws-border-strong);font-size:11px;color:var(--ws-text-faint);display:flex;align-items:center;letter-spacing:1px}
+.tile.sel .mv{background:var(--ws-accent);color:var(--ws-on-accent);box-shadow:none}
+.tile .rs{position:absolute;right:-5px;top:50%;width:8px;height:28px;margin-top:-14px;border-radius:4px;background:var(--ws-surface);box-shadow:0 0 0 1px var(--ws-border-strong)}
+.tile.sel .rs{background:var(--ws-accent);box-shadow:none}
+.tile .span{position:absolute;right:10px;bottom:-11px;font-size:11px;line-height:18px;padding:0 6px;border-radius:4px;background:var(--ws-accent);color:var(--ws-on-accent)}
+.armode{height:44px;flex:none;display:flex;align-items:center;gap:12px;padding:0 16px 0 24px;background:var(--ws-accent-subtle);font-size:13px;color:var(--ws-accent)}
+.armode b{font-weight:600}
+.armode .end{margin-left:auto;display:flex;gap:8px;align-items:center}
+.sg2{display:inline-flex;background:var(--ws-canvas);border-radius:6px;padding:2px;font-size:13px;box-shadow:inset 0 0 0 1px var(--ws-border)}
+.sg2 span{padding:1px 10px;color:var(--ws-text-muted);border-radius:4px;line-height:22px}.sg2 span.on{background:var(--ws-hover);color:var(--ws-text)}
+.bars{display:flex;align-items:flex-end;gap:14px;height:120px;padding:4px 4px 0;box-shadow:inset 0 -1px 0 var(--ws-border)}
+.bars div{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:4px;height:100%;font-size:11px;color:var(--ws-text-faint);font-variant-numeric:tabular-nums}
+.bars i{display:block;width:100%;background:var(--ws-data-1);border-radius:3px 3px 0 0}
+.blab{display:flex;gap:14px;padding:4px 4px 0;font-size:11px;color:var(--ws-text-faint)}.blab span{flex:1;text-align:center}
+.code{background:var(--ws-code);border-radius:8px;padding:10px 14px;font-family:var(--ws-font-mono);font-size:13px;line-height:20px;white-space:pre;overflow:hidden}
+i.kw{font-style:normal;color:var(--ws-syn-kw)}i.st{font-style:normal;color:var(--ws-syn-str)}i.cm{font-style:italic;color:var(--ws-syn-com)}i.nu{font-style:normal;color:var(--ws-syn-num)}
+.img{height:150px;border-radius:8px;background:linear-gradient(135deg,color-mix(in srgb,var(--ws-data-1) 30%,var(--ws-subtle)),color-mix(in srgb,var(--ws-data-3) 35%,var(--ws-subtle)));position:relative}
+.img::after{content:"";position:absolute;left:18%;bottom:0;width:0;height:0;border-left:60px solid transparent;border-right:60px solid transparent;border-bottom:70px solid color-mix(in srgb,var(--ws-data-3) 55%,var(--ws-subtle))}
+.bm{display:flex;gap:12px;align-items:center;border-radius:8px;box-shadow:0 0 0 1px var(--ws-border);padding:10px 12px;font-size:14px}
+.bm .u{color:var(--ws-text-faint);font-size:12px}
+.emb{border-radius:8px;background:var(--ws-subtle);height:120px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;font-size:13px;color:var(--ws-text-muted);text-align:center;padding:0 20px}
+.wb{height:150px;border-radius:8px;box-shadow:0 0 0 1px var(--ws-border);background-image:radial-gradient(var(--ws-border-strong) 1px,transparent 1px);background-size:16px 16px;position:relative;overflow:hidden}
+.wb svg{position:absolute;inset:0}
+.todo{display:flex;gap:8px;align-items:center}
+.cb{width:14px;height:14px;border-radius:3px;box-shadow:inset 0 0 0 1.5px var(--ws-border-strong);display:inline-grid;place-items:center;font-size:10px;flex:none}
+.cb.on{background:var(--ws-accent);box-shadow:none;color:var(--ws-on-accent)}
+.toggle{display:flex;gap:6px;align-items:center}
+.quote{box-shadow:inset 3px 0 0 var(--ws-text);padding-left:14px}
+.gal{display:grid;align-items:start;grid-template-columns:repeat(auto-fill,minmax(min(100%,380px),1fr));gap:16px}
+.gcell{padding:14px 16px 16px;border-radius:12px;background:var(--ws-canvas);box-shadow:var(--ws-shadow);display:flex;flex-direction:column;gap:8px;font-family:var(--ws-font-ui);color:var(--ws-text);font-size:14px;line-height:20px}
+.gcell h4{margin:0;font-size:13px;font-weight:600;display:flex;gap:8px;align-items:center}
+.gcell h4 span{font-weight:400;color:var(--ws-text-faint)}
+.gcell .cap{margin-top:auto}
+.maps{border-collapse:collapse;font-size:13px;line-height:1.5;width:100%;max-width:900px}
+.maps td,.maps th{padding:6px 10px;text-align:left;vertical-align:top;border-bottom:1px solid var(--ws-border)}
+.maps th{color:var(--muted-foreground);font-weight:500;font-size:12px}
+.maps code{font-family:var(--ws-font-mono);font-size:12.5px;background:var(--ws-subtle);padding:0 4px;border-radius:4px}
+.wrapx{overflow-x:auto;max-width:100%}
+.phone{width:390px;border-radius:28px;overflow:hidden;background:var(--ws-canvas);box-shadow:var(--ws-shadow);font-size:15px;line-height:22px}
+.phone .sb{height:44px;display:flex;align-items:center;justify-content:space-between;padding:0 22px;font-size:13px;font-weight:600}
+.phone .ph{height:44px;display:flex;align-items:center;gap:10px;padding:0 16px;font-size:14px;color:var(--ws-text-muted)}
+.phone .st{display:flex;flex-direction:column;gap:12px;padding:6px 16px 20px}
+.opn{display:flex;justify-content:space-between;align-items:center;font-size:13px;color:var(--ws-accent);padding-top:6px}
+.notes{font-size:13px;line-height:1.6;margin:0;padding-left:18px;max-width:900px}.notes li{margin:0 0 6px}
+.qs{font-size:13px;line-height:1.6;margin:0;padding-left:18px;max-width:900px}.qs li{margin:0 0 8px}
+h4.qh{margin:14px 0 6px;font-size:13px}
+.dlg{width:540px;box-sizing:border-box;border-radius:12px;background:var(--ws-surface);box-shadow:var(--ws-shadow);padding:16px;display:flex;flex-direction:column;gap:12px;font-size:13px;line-height:20px}
+.dlg h4{margin:0;font-size:16px;line-height:22px;font-weight:600}
+.dlg p{margin:0;color:var(--ws-text-muted)}
+.dlg .acts{display:flex;gap:8px;align-items:center}.dlg .acts .sp{flex:1}
+.flist{border-radius:8px;background:var(--ws-subtle);padding:6px;display:flex;flex-direction:column;gap:1px}
+.frow{display:flex;gap:8px;align-items:center;min-height:28px;padding:0 6px;border-radius:6px;font-size:13px;white-space:nowrap}
+.frow .r{margin-left:auto;font-size:12px;color:var(--ws-text-faint)}
+.frow .r.warn{color:var(--ws-warning)}
+.frow.h{min-height:22px;padding-top:4px;font-size:12px;color:var(--ws-text-faint)}
+.btn.dngp{background:var(--ws-danger);color:var(--ws-on-accent);box-shadow:none}
+.toast{position:absolute;left:50%;bottom:20px;transform:translateX(-50%);display:flex;gap:14px;align-items:center;padding:8px 10px 8px 14px;border-radius:8px;background:var(--ws-text);color:var(--ws-canvas);font-size:13px;box-shadow:var(--ws-shadow);white-space:nowrap;z-index:3}
+.toast b{font-weight:600}
+.toast .u{color:var(--ws-canvas);opacity:.75}
+.hist{display:flex;flex:1;min-height:0}
+.hl{width:430px;flex:none;box-shadow:inset -1px 0 0 var(--ws-border);display:flex;flex-direction:column;min-height:0}
+.flt{display:flex;gap:6px;padding:10px 12px;flex-wrap:wrap;box-shadow:inset 0 -1px 0 var(--ws-border)}
+.flt .sel{height:26px;font-size:13px;color:var(--ws-text-muted)}
+.hday{font-size:12px;color:var(--ws-text-faint);padding:10px 16px 4px}
+.he{display:grid;grid-template-columns:44px 1fr;gap:2px 8px;padding:7px 12px 7px 16px;font-size:14px;line-height:20px;box-shadow:inset 0 -1px 0 var(--ws-border)}
+.he.on{background:var(--ws-selected)}
+.he .t{color:var(--ws-text-faint);font-size:12px;font-variant-numeric:tabular-nums}
+.he .m{grid-column:2;font-size:12px;line-height:18px;color:var(--ws-text-faint);display:flex;gap:6px;align-items:center;white-space:nowrap;overflow:hidden}
+.org{font-size:11px;line-height:16px;padding:0 5px;border-radius:4px;background:var(--ws-hover);color:var(--ws-text-muted)}
+.org.auto{background:color-mix(in srgb,var(--ws-data-2) 14%,transparent);color:var(--ws-data-2)}
+.hd2{flex:1;min-width:0;padding:16px 24px;display:flex;flex-direction:column;gap:14px;overflow:hidden;font-size:14px}
+.hd2 h2{margin:0;font-size:var(--ws-fs-h2);line-height:var(--ws-lh-h2);font-weight:600}
+.kv{display:grid;grid-template-columns:110px 1fr;gap:4px 12px;font-size:13px}
+.kv .l{color:var(--ws-text-faint)}
+.chg{display:flex;flex-direction:column;gap:1px;border-radius:8px;background:var(--ws-subtle);padding:6px}
+.chg div{display:flex;gap:8px;align-items:center;min-height:28px;padding:0 6px;font-size:13px}
+.chg .r{margin-left:auto;font-size:12px;color:var(--ws-text-faint)}
+.chg .d{color:var(--ws-danger);font-weight:600;width:12px}.chg .w{color:var(--ws-warning);font-weight:600;width:12px}
+.tr.gone{background:var(--ws-diff-del)}
+.tr.gone>span{text-decoration:line-through;color:var(--ws-text-muted)}
+.tr.new{background:var(--ws-diff-add)}
+.vers{width:300px;flex:none;box-shadow:inset 1px 0 0 var(--ws-border);padding:12px 10px;display:flex;flex-direction:column;gap:1px;font-size:14px}
+.vers h5{margin:0 6px 8px;font-size:12px;font-weight:500;color:var(--ws-text-faint)}
+.vr{padding:6px 8px;border-radius:6px;line-height:20px}
+.vr.on{background:var(--ws-selected)}
+.vr span{display:block;font-size:12px;line-height:18px;color:var(--ws-text-faint)}
+.vban{display:flex;align-items:center;gap:10px;height:44px;flex:none;padding:0 16px 0 24px;background:var(--ws-subtle);font-size:13px;color:var(--ws-text-muted);box-shadow:inset 0 -1px 0 var(--ws-border)}
+.vban .end{margin-left:auto;display:flex;gap:8px}
+.mark-add{background:var(--ws-diff-add);border-radius:3px}
+.mark-del{background:var(--ws-diff-del);text-decoration:line-through;border-radius:3px}
+.sett{display:flex;flex:1;min-height:0}
+.snav{width:180px;flex:none;padding:16px 8px;display:flex;flex-direction:column;gap:1px;box-shadow:inset -1px 0 0 var(--ws-border)}
+.snav .h{font-size:12px;color:var(--ws-text-faint);padding:10px 10px 4px}
+.snav .it{height:var(--ws-row-nav);display:flex;align-items:center;padding:0 10px;border-radius:6px;color:var(--ws-text-muted);font-size:14px}
+.snav .it.on{background:var(--ws-selected);color:var(--ws-text)}
+.sc{flex:1;min-width:0;padding:20px 28px;display:flex;flex-direction:column;gap:14px;overflow:hidden;font-size:14px}
+.sc h2{margin:0;font-size:var(--ws-fs-h2);line-height:var(--ws-lh-h2);font-weight:600;display:flex;align-items:center;gap:10px}
+.sc h2 .btn{margin-left:auto}
+.roles{display:grid;grid-template-columns:180px 1fr;gap:20px;min-height:0}
+.rl{display:flex;flex-direction:column;gap:1px}
+.rr{display:flex;align-items:center;gap:8px;height:36px;padding:0 10px;border-radius:6px;font-size:14px}
+.rr.on{background:var(--ws-selected)}
+.rr .r{margin-left:auto;font-size:12px;color:var(--ws-text-faint)}
+.perm .tr{--cols:1fr 58px 64px 58px 64px 64px;font-size:14px}.perm .tr.hd>span{padding:0 4px;font-size:12px}.perm .tr{font-size:14px}
+.perm .tr>span+span{justify-content:center}
+.inh{font-size:12px;color:var(--ws-text-faint)}
+.asg{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.asg .chip{background:var(--ws-subtle)}
+.prot{display:inline-flex;gap:4px;align-items:center;font-size:12px;color:var(--ws-text-muted);padding:0 6px;border-radius:4px;background:var(--ws-hover);line-height:20px}
+.fieldrow{display:grid;grid-template-columns:110px 1fr;gap:8px 16px;align-items:center;max-width:640px}
+.fieldrow .l{color:var(--ws-text-muted)}
+.inp{height:32px;border-radius:6px;box-shadow:inset 0 0 0 1px var(--ws-border-strong);display:flex;align-items:center;padding:0 10px}
+</style></head><body class="theme-light chrome">
+<div class="page">
+  <div class="toolbar">
+    <div>Theme <span class="seg" id="theme"><button data-v="light">Light</button><button data-v="dark">Dark</button><button data-v="system" class="on">System</button></span></div>
+    <div>Size <span class="seg" id="size"><button data-v="fit" class="on">Fit</button><button data-v="full">100 %</button></span></div>
+  </div>
+  <section>
+    <h1>Liquid Workspace: History and Roles</h1>
+    <p class="sub">Mockups for the M3a slice in <a href="../../../PLAN.md#m3a--local-workspace-foundation">PLAN.md</a>, approved by the maintainer on 2026-11-01: one History over the Workspace, revert and Restore version, allow-only Roles with protected Blocks, and Workspace settings. They follow the <a href="../../concept/V-Spec_Liquid.html#history">V-Spec</a>, ADR-0235 and <a href="../guidelines.md">guidelines.md</a>; the shell is the one in the <a href="liquid-workspace-pages.html">Pages mockups</a>.</p>
+  </section>
+  <section>
+    <h3 class="sec">1 · History</h3>
+    <p class="sub">"History" at the Explorer's foot opens a dialog over the current Page or Source; closing it shows that Page again. It lists every Action of the Workspace, newest first: who made it, from where, and what it changed. Filters narrow it to a Page or Block, an actor or an origin; "Page history" and "Block history" open it already filtered. Typing is grouped into one entry per pause. ⌘Z reverts your last Action and appears as an Undo entry. The selected entry shows each object it changed and a preview of the change.</p>
+    <div class="stage"><div class="scaler"><div class="win" id="w-hist" data-w="1240"></div></div></div>
+  </section>
+  <section>
+    <h3 class="sec">2 · Revert</h3>
+    <p class="sub">Revert records a new Action that undoes the selected one, as <code>git revert</code> does; the original stays in History (ADR-0235). Reverting the deletion brings back the Block, its Views, Connections and Automation, and turns the Workspace Automation on again.</p>
+    <div class="stage"><div class="scaler"><div class="win bare" id="w-rev" data-w="1240"></div></div></div>
+  </section>
+  <section>
+    <h3 class="sec">3 · Restore version</h3>
+    <p class="sub">The clock in the Page header opens "Page history" as a dialog, as Notion does. It shows the Page's versions: save points, plus one before each change made by an Automation or by someone else. Choosing one previews the Page as it was, with what changed since marked. Restore version returns the whole Page, also when later changes block a revert, and is itself one Action. A Block that other Pages show changes there too, and the banner says so.</p>
+    <div class="stage"><div class="scaler"><div class="win" id="w-ver" data-w="1240"></div></div></div>
+  </section>
+  <section>
+    <h3 class="sec">4 · Roles</h3>
+    <p class="sub">Settings opens from the Explorer's foot or with ⌘, as a dialog over the current Page, like Notion's Settings; Roles is one of its sections. A Role allows capabilities on areas, Pages, Blocks and Sources; anything it does not list is denied. Rights inherit from an area to everything in it, and the table shows where a right comes from. Three editable templates follow Notion's levels: Can view, Can edit and Full access. In M3a a Role is assigned to Automations; people join with sync and agent profiles with agents (ADR-0235).</p>
+    <div class="stage"><div class="scaler"><div class="win" id="w-roles" data-w="1240"></div></div></div>
+  </section>
+  <section>
+    <h3 class="sec">5 · Protecting a Block</h3>
+    <p class="sub">"Protect…" in a Block's menu, also for a Page or a Source, stops it from inheriting rights, so only the Roles allowed on it may change it (ADR-0235); it needs Manage. Reading still follows the area. Protection controls who may change it in Liquid, not who holds it: in M3 every authorized device holds the complete Workspace, so content that must stay off other people's devices belongs in a separate Workspace, as the dialog says. A protected Block shows a lock in its header.</p>
+    <div class="stage"><div class="scaler"><div class="win" id="w-prot" data-w="1240"></div></div></div>
+  </section>
+  <section>
+    <h3 class="sec">6 · Workspace settings</h3>
+    <p class="sub">The Settings dialog keeps the approved App sections and adds a Workspace group: General, with the name and the areas, and Roles. Each area's menu in the Explorer also renames it.</p>
+    <div class="stage"><div class="scaler"><div class="win" id="w-set" data-w="1240"></div></div></div>
+  </section>
+  <section>
+    <h3 class="sec">Decisions</h3>
+    <h4 class="qh">Decided (ADR-0235)</h4>
+    <ol class="qs">
+      <li>History is a sequence of Actions plus save points; Revert records a new reversing Action; Restore version returns a Page to an earlier point, also when later changes conflict; ⌘Z appears as Undo.</li>
+      <li>Roles stay allow-only; a protected Page, Block or Source stops inheriting rights; a Block's rights follow its home, not the Page showing a View; read access is never finer than an area, and in M3 the Workspace is the confidentiality boundary.</li>
+      <li>M3a assigns Roles to Automations.</li>
+    </ol>
+    <h4 class="qh">Approved with these mockups (2026-11-01)</h4>
+    <ol class="qs">
+      <li>History is a list with a detail pane, like the Diff tab; typing groups into one entry per pause of a few seconds.</li>
+      <li>Capabilities appear as the columns Read, Propose, Apply, Approve and Manage; templates are Can view (Read), Can edit (Read, Apply) and Full access (all).</li>
+      <li>The person who creates a Workspace holds Full access, which a protected Block always keeps, so nothing can lock its owner out.</li>
+      <li>Workspace settings: General with name and areas, and Roles.</li>
+    </ol>
+    <h4 class="qh">Added on request, approved the same day</h4>
+    <ol class="qs">
+      <li>History, Page history and Settings open as dialogs over the current Page or Source; closing one shows it again. Settings sits at the Explorer's foot beside Automations and History. This replaces the approved Settings page that took over the main area.</li>
+    </ol>
+  </section>
+</div>
+<script>
+const DW=1240;
+const sv=(p,w=14)=>`<svg viewBox="0 0 16 16" width="${w}" height="${w}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
+const I={
+page:sv('<path d="M4 2h5l3 3v9H4z"/><path d="M9 2v3h3"/>'),
+file:sv('<path d="M4 2h5l3 3v9H4z"/><path d="M6 9h4M6 11.5h4"/>'),
+dir:sv('<path d="M1.8 4.2c0-.6.4-1 1-1h3.4l1.4 1.6h5.6c.6 0 1 .4 1 1v6.9c0 .6-.4 1-1 1H2.8c-.6 0-1-.4-1-1z"/>'),
+srch:sv('<circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5l3 3"/>'),
+zap:sv('<path d="M9 1.5L3 9h4.5L7 14.5 13 7H8.5z"/>'),
+clock:sv('<circle cx="8" cy="8" r="6"/><path d="M8 4.5V8l2.5 1.5"/>'),
+grid:sv('<rect x="2" y="2" width="5" height="5" rx="1"/><rect x="9" y="2" width="5" height="5" rx="1"/><rect x="2" y="9" width="5" height="5" rx="1"/><rect x="9" y="9" width="5" height="5" rx="1"/>'),
+more:sv('<circle cx="3.5" cy="8" r=".8"/><circle cx="8" cy="8" r=".8"/><circle cx="12.5" cy="8" r=".8"/>'),
+drag:sv('<circle cx="6" cy="4" r=".8"/><circle cx="10" cy="4" r=".8"/><circle cx="6" cy="8" r=".8"/><circle cx="10" cy="8" r=".8"/><circle cx="6" cy="12" r=".8"/><circle cx="10" cy="12" r=".8"/>'),
+plus:sv('<path d="M8 3v10M3 8h10"/>'),
+text:sv('<path d="M3 3.5h10M8 3.5V13"/>'),
+db:sv('<rect x="2" y="2.5" width="12" height="11" rx="1.5"/><path d="M2 6h12M6 6v7.5"/>'),
+chart:sv('<path d="M2.5 13.5h11"/><path d="M4.5 11V8M8 11V4M11.5 11V6.5"/>'),
+code:sv('<path d="M5.5 4.5L2 8l3.5 3.5M10.5 4.5L14 8l-3.5 3.5"/>'),
+fx:sv('<path d="M11.5 3H5.5l4 5-4 5h6"/>'),
+img:sv('<rect x="2" y="2.5" width="12" height="11" rx="1.5"/><circle cx="6" cy="6.5" r="1.2"/><path d="M2.5 12l3.5-3.5 2.5 2.5 2-2 3 3"/>'),
+pen:sv('<path d="M10.5 2.5l3 3L6 13H3v-3z"/>'),
+link:sv('<path d="M6.5 9.5l3-3"/><path d="M7 4.5l1-1a2.5 2.5 0 013.5 3.5l-1 1M9 11.5l-1 1A2.5 2.5 0 014.5 9l1-1"/>'),
+copy:sv('<rect x="5" y="5" width="8.5" height="8.5" rx="1.5"/><path d="M11 5V3.5c0-.6-.4-1-1-1H3.5c-.6 0-1 .4-1 1V10c0 .6.4 1 1 1H5"/>'),
+tpl:sv('<rect x="2" y="2" width="12" height="12" rx="1.5"/><path d="M2 6h12M6 6v8"/>'),
+cog:sv('<circle cx="8" cy="8" r="2"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4"/>'),
+reload:sv('<path d="M13 8a5 5 0 11-1.5-3.5"/><path d="M13 2.5V5h-2.5"/>'),
+back:sv('<path d="M10 3.5L5.5 8l4.5 4.5"/>'),
+};
+const E={budget:'💰',review:'📊',trip:'🧳',road:'🗺️',api:'🧩',plan:'🗓️'};
+const em=e=>`<span class="em">${e}</span>`;
+const modal=(title,body,o={})=>`<div class="scrim"></div><div class="modal" style="width:${o.w||1000}px"><div class="mh">${title}<span class="end">${o.right||''}<span class="ib">✕</span></span></div><div class="mb">${body}</div></div>`;
+const nav=(d,ic,label,o={})=>`<div class="nav ${o.on?'on':''}" style="--d:${d}"><span class="tw">${o.tw||''}</span><span class="ico">${ic}</span><span>${label}</span>${o.r?`<span class="r ${o.warn?'warn':''}">${o.r}</span>`:''}</div>`;
+function side(o={}){const s=o.sel||'budget';const e=(k)=>s==k;
+return `<div class="side"><div class="wsw"><span class="av">B</span>Benni's Workspace<span style="margin-left:auto;color:var(--ws-text-faint)">⌄</span></div>
+<div class="srch">${I.srch}<span>Search or run a command</span><kbd>⌘K</kbd></div>
+<h6>Private<span class="a">${o.plus?'<span style="color:var(--ws-text-muted)">···  ＋</span>':''}</span></h6>
+${nav(0,em(E.budget),'Household budget',{tw:'⌄',on:e('budget')})}
+${nav(1,em(E.review),'Monthly review',{on:e('review')})}
+${o.newp?nav(0,o.newp=='Untitled'?I.page:em(E.plan),o.newp,{on:e('new')}):''}
+${nav(0,em(E.trip),'Trip to Lisbon',{tw:'›',on:e('trip')})}
+${nav(0,I.file,'bank-export.csv',{on:e('csv')})}
+<h6>Acme API</h6>
+${nav(0,em(E.road),'Roadmap',{on:e('road')})}
+${nav(0,em(E.api),'API design',{on:e('api')})}
+${nav(0,I.dir,'docs',{tw:'›',on:e('docs')})}
+<h6>Agent sessions <kbd>⌘N</kbd></h6>
+${nav(0,I.dir,'acme-api <span style="color:var(--ws-text-faint);font-size:12px">2 sessions</span>',{tw:'›'})}
+<div class="foot">${nav(0,I.zap,'Automations',Object.assign({on:e('auto')},o.att?{r:'⚠ 1',warn:true}:{}))}${nav(0,I.clock,'History',{on:e('hist')})}${nav(0,I.cog,'Settings',{on:e('set')})}</div>
+${o.menu||''}</div>`}
+function head(crumb,o={}){return `<div class="head"><span class="crumb">${crumb}</span><span class="end">${o.right!==undefined?o.right:`<span class="ib ${o.arr?'on':''}">${I.grid}Arrange</span><span class="ib" title="Page history">${I.clock}</span><span class="ib">${I.more}</span>`}</span></div>`}
+function frame(id,o){document.getElementById(id).innerHTML=`<div class="tbar"><div class="lights"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></div></div>
+<div class="body" style="--h:${o.h}px">${side(o.side||{})}<div class="main">${o.head||''}${o.main}</div>${o.over||''}</div>`}
+
+const rows=[['1 Nov','Groceries','Food','t1','84.20'],['30 Oct','Electricity','Home','t2','96.00'],['28 Oct','Train to Porto','Travel','t3','42.50'],['27 Oct','Rent','Home','t2','950.00'],['25 Oct','Cinema','Leisure','t4','111.80']];
+const dbTable=(o={})=>`<div class="tbl" style="--cols:96px 1fr 120px 110px"><div class="tr hd"><span>Date</span><span>Item</span><span>Category</span><span class="num">Amount</span></div>
+${rows.slice(0,o.n||5).map(r=>`<div class="tr"><span>${r[0]}</span><span>${r[1]}</span><span><span class="tag ${r[3]}">${r[2]}</span></span><span class="num">€ ${r[4]}</span></div>`).join('')}
+<div class="tr sum"><span>5 rows</span><span></span><span></span><span class="num">Sum € 1,284.50</span></div></div>`;
+const dbHead=(o={})=>`<div class="bh"><span class="ico">${I.db}</span><b>Expenses</b><span class="chip">Table ⌄</span><span class="end">${o.synced?'<span class="cap">Synced · on 2 Pages</span>':''}<span class="ib">${I.more}</span></span></div>`;
+const chart=(h=120)=>`<div class="bars" style="height:${h}px">${[['Home',1046],['Leisure',112],['Food',84],['Travel',43]].map(([k,v])=>`<div><span>€ ${v}</span><i style="height:${Math.max(4,v/1046*(h-30))}px"></i></div>`).join('')}</div><div class="blab"><span>Home</span><span>Leisure</span><span>Food</span><span>Travel</span></div>`;
+const chartBlk=`<div class="bh"><span class="ico">${I.chart}</span><b>Spending by category</b><span class="chip">Bar ⌄</span><span class="end"><span class="cap">from Expenses</span></span></div>${chart()}`;
+const fxBlk=(o={})=>`<div class="card"><div class="cap">Left this month</div><div class="big">€ 715.50</div>${o.f!==false?`<div class="fx" style="margin-top:4px">= 2000 − SUM(<span class="ref">${I.db} Expenses › Amount</span>)</div>`:''}</div>`;
+
+Object.assign(I,{
+lock:sv('<rect x="3.5" y="7" width="9" height="7" rx="1.2"/><path d="M5.5 7V5a2.5 2.5 0 015 0v2"/>'),
+undo:sv('<path d="M5 3L2 6l3 3"/><path d="M2 6h7.5a4 4 0 010 8H7"/>'),
+area:sv('<rect x="2" y="3" width="12" height="10" rx="1.5"/><path d="M2 6.5h12"/>'),
+});
+const bgPage=`<div class="pg"><div class="col"><div class="ttl"><span class="tic">💰</span>Household budget</div><div class="prose"><p>October is almost done.</p></div>${dbHead({synced:true})}${dbTable()}</div></div>`;
+const bgHead=head('Private <span>›</span> <b>💰 Household budget</b>');
+const he=(t,title,meta,on)=>`<div class="he ${on?'on':''}"><span class="t">${t}</span><span>${title}</span><span class="m">${meta}</span></div>`;
+const you='<span class="av" style="width:16px;height:16px;font-size:10px;border-radius:3px">B</span>You';
+const auto=`<span style="color:var(--ws-data-2)">${I.zap}</span>Flag large expenses`;
+const hlist=`<div class="hl"><div class="flt"><span class="sel">All Pages<span class="c">⌄</span></span><span class="sel">Anyone<span class="c">⌄</span></span><span class="sel">Any origin<span class="c">⌄</span></span></div>
+<div style="overflow:hidden;flex:1;-webkit-mask-image:linear-gradient(to top,transparent 0,#000 40px);mask-image:linear-gradient(to top,transparent 0,#000 40px)">
+<div class="hday">Today</div>
+${he('11:02','Deleted Block “Expenses”',`${you}<span>·</span><span class="org">App</span><span>Household budget · 4 dependents</span>`,1)}
+${he('10:50','Changed Category of “Rent” to Home',`${you}<span>·</span><span class="org">App</span><span>Expenses</span>`)}
+${he('10:42','Set Category of “Rent” to Review',`${auto}<span>·</span><span class="org auto">Automation</span><span>as Budget editor</span>`)}
+${he('10:41','Added a row to Expenses',`${you}<span>·</span><span class="org">App</span><span>Household budget</span>`)}
+${he('10:30','Edited text',`${you}<span>·</span><span class="org">App</span><span>Household budget · 3 paragraphs</span>`)}
+${he('10:12',`<span style="display:inline-flex;gap:6px;align-items:center">${I.undo}Undo: Moved Chart above Expenses</span>`,`${you}<span>·</span><span class="org">App</span><span>⌘Z</span>`)}
+<div class="hday">Yesterday</div>
+${he('18:05','Created Page “Monthly review” from Budget',`${you}<span>·</span><span class="org">App</span>`)}
+${he('17:50','Protected Block “Expenses”',`${you}<span>·</span><span class="org">App</span>`)}
+</div></div>`;
+const hdetail=`<div class="hd2"><div style="display:flex;align-items:center;gap:10px"><h2>Deleted Block “Expenses”</h2><span style="margin-left:auto" class="btn">${I.undo}Revert…</span></div>
+<div class="kv"><span class="l">By</span><span>You, in the app</span><span class="l">When</span><span>Today 11:02</span><span class="l">Allowed by</span><span>Full access in Private</span></div>
+<div class="chg">
+<div><span class="d">−</span>${I.db}Expenses<span class="r">Database Block, 5 rows</span></div>
+<div><span class="d">−</span>${I.page}View on Household budget<span class="r">its last View</span></div>
+<div><span class="d">−</span>${I.link}Connection to Spending by category<span class="r">Chart</span></div>
+<div><span class="d">−</span>${I.link}Connection to Left this month<span class="r">Formula</span></div>
+<div><span class="d">−</span>${I.zap}Flag large expenses<span class="r">its own Automation</span></div>
+<div><span class="w">⚠</span>${I.zap}Monthly summary<span class="r">turned off</span></div></div>
+<div class="cap">Before</div>
+<div class="tbl" style="--cols:96px 1fr 120px 110px"><div class="tr hd"><span>Date</span><span>Item</span><span>Category</span><span class="num">Amount</span></div>
+${rows.slice(0,4).map(r=>`<div class="tr gone"><span>${r[0]}</span><span>${r[1]}</span><span>${r[2]}</span><span class="num">€ ${r[4]}</span></div>`).join('')}</div></div>`;
+frame('w-hist',{h:700,side:{sel:'hist',att:true},head:bgHead,main:bgPage,over:modal('History',`<div class="hist">${hlist}${hdetail}</div>`,{w:1060,right:`<span class="ib">${I.srch}</span>`})});
+
+// 2 · Revert
+const revDlg=`<div class="dlg" style="flex:none"><h4>Revert “Deleted Block Expenses”?</h4>
+<p>This adds a new Action that brings back what the deletion removed. The deletion stays in History.</p>
+<div class="flist">
+<div class="frow"><span class="ico">${I.db}</span>Expenses with 5 rows<span class="r">on Household budget</span></div>
+<div class="frow"><span class="ico">${I.link}</span>2 Connections<span class="r">Chart, Formula</span></div>
+<div class="frow"><span class="ico">${I.zap}</span>Flag large expenses<span class="r">its own Automation</span></div>
+<div class="frow"><span class="ico">${I.zap}</span>Monthly summary<span class="r">turned on again</span></div></div>
+<div class="acts"><span class="btn pri">Revert <kbd>⏎</kbd></span><span class="sp"></span><span class="btn">Cancel <kbd>esc</kbd></span></div></div>`;
+const confDlg=`<div class="dlg" style="flex:none"><h4>Revert “Set Category of Rent to Review”?</h4>
+<p>It cannot be reverted cleanly: a later change touched the same field.</p>
+<div class="flist"><div class="frow"><span class="ico">${I.db}</span>Category of “Rent”<span class="r">changed by you at 10:50</span></div></div>
+<p>Restore version returns Household budget to how it was before 10:42; your change at 10:50 is undone too, and stays in History.</p>
+<div class="acts"><span class="btn pri">Restore version…</span><span class="btn">Show the later change</span><span class="sp"></span><span class="btn">Cancel <kbd>esc</kbd></span></div></div>`;
+document.getElementById('w-rev').innerHTML=`<div style="display:flex;gap:40px;align-items:flex-start">${revDlg}${confDlg}</div>`;
+
+// 3 · Restore version
+const vlist=`<div class="vers"><h5>Versions of Household budget</h5>
+<div class="vr">Today 10:50<span>You</span></div>
+<div class="vr">Today 10:42<span>Flag large expenses · Automation</span></div>
+<div class="vr">Today 10:41<span>You</span></div>
+<div class="vr on">Today 09:15<span>Save point</span></div>
+<div class="vr">Yesterday 18:05<span>You</span></div>
+<div class="vr">30 Oct<span>Save point</span></div></div>`;
+frame('w-ver',{h:660,head:bgHead,main:bgPage,over:modal('Page history <span style="font-weight:400;color:var(--ws-text-muted)">· 💰 Household budget</span>',`<div style="flex:1;display:flex;flex-direction:column;min-width:0"><div class="vban">Version from today 09:15 · read-only<span class="end"><span class="btn pri">Restore version</span></span></div>
+<div style="display:flex;flex:1;min-height:0"><div class="pg"><div class="col" style="width:600px">
+<div class="ttl"><span class="tic">💰</span>Household budget</div>
+<div class="prose"><p>October is almost done. Rent is the largest share, as every month<span class="mark-del">; the trip to Porto stayed under € 50</span>.</p></div>
+<div class="notice" style="padding:8px 10px;border-radius:6px;background:var(--ws-warning-subtle);color:var(--ws-warning);font-size:13px">Expenses is also on Monthly review; restoring changes it there too.</div>
+${dbHead({synced:true})}<div class="tbl" style="--cols:96px 1fr 120px 110px"><div class="tr hd"><span>Date</span><span>Item</span><span>Category</span><span class="num">Amount</span></div>
+<div class="tr gone"><span>1 Nov</span><span>Groceries</span><span>Food</span><span class="num">€ 84.20</span></div>
+${rows.slice(1,4).map(r=>`<div class="tr"><span>${r[0]}</span><span>${r[1]}</span><span><span class="tag ${r[3]}">${r[2]}</span></span><span class="num">€ ${r[4]}</span></div>`).join('')}</div>
+<div class="cap">Struck through: added since this version; restoring removes it.</div>
+</div></div>${vlist}</div></div>`,{w:1080})});
+
+// 4 · Roles
+const snav=(on)=>`<div class="snav"><div class="h">App</div><div class="it">Appearance</div><div class="it">Shortcuts</div><div class="it">Diff</div><div class="h">Workspace</div><div class="it ${on=='gen'?'on':''}">General</div><div class="it ${on=='roles'?'on':''}">Roles</div></div>`;
+const cb=(v)=>v=='y'?'<span class="cb on">✓</span>':v=='i'?'<span class="cb on" style="opacity:.45">✓</span>':'<span class="cb"></span>';
+const prow=(ic,name,sub,vals)=>`<div class="tr"><span style="display:flex;gap:8px;align-items:center"><span class="ico">${ic}</span>${name}${sub?`<span class="inh">${sub}</span>`:''}</span>${vals.split('').map(v=>`<span>${cb(v)}</span>`).join('')}</div>`;
+frame('w-roles',{h:680,side:{sel:'set'},head:bgHead,main:bgPage,over:modal('Settings',`<div class="sett">${snav('roles')}<div class="sc"><h2>Roles<span class="btn">${I.plus}New Role</span></h2>
+<div class="roles"><div class="rl">
+<div class="rr">Full access<span class="r">template · you</span></div>
+<div class="rr">Can edit<span class="r">template · 2</span></div>
+<div class="rr">Can view<span class="r">template</span></div>
+<div class="rr on">Budget editor<span class="r">1</span></div></div>
+<div style="display:flex;flex-direction:column;gap:12px;min-width:0">
+<div class="fieldrow"><span class="l">Name</span><span class="inp">Budget editor</span>
+<span class="l">Assigned to</span><span class="asg"><span class="chip">${I.zap} Flag large expenses ×</span><span class="btn ghost">${I.plus}Assign…</span></span></div>
+<div class="tbl perm"><div class="tr hd"><span>Allowed on</span><span>Read</span><span>Propose</span><span>Apply</span><span>Approve</span><span>Manage</span></div>
+${prow(I.area,'Private','area','y    ')}
+${prow(em(E.budget),'Household budget','','i    ')}
+${prow(I.db,'Expenses','<span class="prot">'+I.lock+' protected</span>','y y  ')}
+${prow(I.file,'bank-export.csv','','i    ')}
+<div class="tr add"><span>${I.plus} Add an area, Page, Block or Source</span><span></span><span></span><span></span><span></span><span></span></div></div>
+<div class="cap">Anything not listed is denied. Faint marks are inherited from the area. Propose and Approve matter once agents act; Manage covers rights, protection and deletion of what it lists.</div>
+</div></div></div></div>`,{w:1080})});
+
+// 5 · Protect
+const protDlg=`<div class="scrim"></div><div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:4"><div class="dlg"><h4>Protect “Expenses”?</h4>
+<p>It stops inheriting rights from Private and Household budget. Only the Roles chosen here may change it.</p>
+<div class="flist">
+<div class="frow"><span class="cb on" style="opacity:.6">✓</span>Full access<span class="r">always</span></div>
+<div class="frow"><span class="cb on">✓</span>Budget editor<span class="r">Read, Apply</span></div>
+<div class="frow"><span class="cb"></span>Can edit<span class="r">loses Apply here</span></div></div>
+<p>Reading still follows the area, and every device in this Workspace holds its content. To keep it off other people's devices, put it in a separate Workspace.</p>
+<div class="acts"><span class="btn pri">Protect <kbd>⏎</kbd></span><span class="sp"></span><span class="btn">Cancel <kbd>esc</kbd></span></div></div></div>`;
+frame('w-prot',{h:560,head:bgHead,main:`<div class="pg"><div class="col"><div class="ttl"><span class="tic">💰</span>Household budget</div>
+<div class="bh"><span class="ico">${I.db}</span><b>Expenses</b><span class="chip">Table ⌄</span><span class="prot">${I.lock} protected</span><span class="end"><span class="cap">Synced · on 2 Pages</span><span class="ib">${I.more}</span></span></div>${dbTable()}</div></div>`,over:protDlg});
+
+// 6 · Settings
+frame('w-set',{h:540,side:{sel:'set'},head:bgHead,main:bgPage,over:modal('Settings',`<div class="sett">${snav('gen')}<div class="sc"><h2>General</h2>
+<div class="fieldrow"><span class="l">Workspace name</span><span class="inp">Benni's Workspace</span>
+<span class="l">Icon</span><span><span class="av">B</span></span></div>
+<h2 style="font-size:16px;line-height:22px;margin-top:8px">Areas<span class="btn">${I.plus}New area</span></h2>
+<div class="tbl" style="max-width:640px"><div class="tr" style="--cols:1fr 120px 40px"><span>${I.area} Private</span><span class="inh">6 Pages, 2 Sources</span><span>${I.more}</span></div>
+<div class="tr" style="--cols:1fr 120px 40px;box-shadow:none"><span>${I.area} Acme API</span><span class="inh">2 Pages, 1 Source</span><span>${I.more}</span></div></div>
+<div class="cap" style="max-width:640px">An area groups Pages and Sources for Roles and encryption keys. Every authorized device still receives the whole Workspace; deciding per area which devices receive it follows later.</div>
+</div></div>`,{w:1080})});
+
+let mode='system',fit=true;const mq=matchMedia('(prefers-color-scheme: dark)');
+function hostDark(){const v=getComputedStyle(document.documentElement).getPropertyValue('--background').trim();if(!v)return mq.matches;const c=document.createElement('canvas');c.width=c.height=1;const x=c.getContext('2d');x.fillStyle='#808080';x.fillStyle=v;x.fillRect(0,0,1,1);const d=x.getImageData(0,0,1,1).data;return .2126*d[0]+.7152*d[1]+.0722*d[2]<128}
+function applyTheme(){const dark=mode=='dark'||(mode=='system'&&hostDark());document.querySelectorAll('.win,.maps,.stage').forEach(w=>{w.classList.toggle('theme-dark',dark);w.classList.toggle('theme-light',!dark)});document.body.classList.toggle('theme-dark',dark);document.body.classList.toggle('theme-light',!dark);document.querySelectorAll('#theme button').forEach(b=>b.classList.toggle('on',b.dataset.v==mode))}
+function layout(){document.querySelectorAll('.stage').forEach(st=>{const sc=st.querySelector('.scaler'),w=sc.firstElementChild;const W=+(w.dataset.w||DW);w.style.width=W+'px';const s=fit?Math.min(1,(st.clientWidth-32)/W):1;w.style.transform=`scale(${s})`;sc.style.width=W*s+'px';sc.style.height=w.offsetHeight*s+'px';st.style.overflowX=fit?'hidden':'auto'});document.querySelectorAll('#size button').forEach(b=>b.classList.toggle('on',(b.dataset.v=='fit')==fit))}
+document.querySelectorAll('#theme button').forEach(b=>b.onclick=()=>{mode=b.dataset.v;applyTheme()});
+document.querySelectorAll('#size button').forEach(b=>b.onclick=()=>{fit=b.dataset.v=='fit';layout()});
+mq.addEventListener('change',applyTheme);addEventListener('resize',layout);setInterval(()=>{if(mode=='system')applyTheme()},1500);
+applyTheme();layout();
+</script>
+</body></html>

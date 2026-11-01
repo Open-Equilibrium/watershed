@@ -1,6 +1,6 @@
 # Liquid client architecture
 
-This document turns the accepted Liquid client stack (Flutter UI over a Rust Liquid core) and its performance and stability invariants (ADR-0182) into implementation rules. Product behavior is canonical in the [Liquid V-Spec](V-Spec_Liquid.html), targets in [`PLATFORMS.md`](../../PLATFORMS.md), performance evidence in [`PERFORMANCE.md`](../../PERFORMANCE.md#liquid), security in [`SECURITY.md`](../../SECURITY.md) and pass/fail evidence in [`TESTING.md`](../../TESTING.md). The bridge is flutter_rust_bridge v2 (ADR-0186); the History model, storage engine and CRDT library remain [D-028](../decisions/open-decisions.html#d-028), [D-029](../decisions/open-decisions.html#d-029) and [D-035](../decisions/open-decisions.html#d-035).
+This document turns the accepted Liquid client stack (Flutter UI over a Rust Liquid core) and its performance and stability invariants (ADR-0182) into implementation rules. Product behavior is canonical in the [Liquid V-Spec](V-Spec_Liquid.html), targets in [`PLATFORMS.md`](../../PLATFORMS.md), performance evidence in [`PERFORMANCE.md`](../../PERFORMANCE.md#liquid), security in [`SECURITY.md`](../../SECURITY.md) and pass/fail evidence in [`TESTING.md`](../../TESTING.md). The bridge is flutter_rust_bridge v2 (ADR-0186); the History model is ADR-0235, the storage engine ADR-0237 and the CRDT library Automerge 3 (ADR-0238).
 
 ## Priority
 
@@ -12,8 +12,8 @@ Input responsiveness and zero loss of acknowledged local changes take precedence
 flowchart TD
   UI["Flutter UI<br/>main isolate: input, layout, paint"] -->|"async intents"| BR["Bridge (flutter_rust_bridge v2)"]
   BR --> CORE["Rust Liquid core<br/>mutation pipeline, History, queries"]
-  CORE --> ST["Local replica<br/>durable store (D-029)"]
-  CORE --> SY["Sync client<br/>committed changes, CRDT merge (D-035)"]
+  CORE --> ST["Local replica<br/>SQLite with SQLCipher"]
+  CORE --> SY["Sync client<br/>committed changes, Automerge merge"]
   SY <--> SS["Sync Server"]
   CORE -->|"bounded deltas"| BR
   BR -->|"per-Block streams"| UI
@@ -42,7 +42,7 @@ flowchart TD
 
 9. A local change is acknowledged only after the core has durably committed it, together with its History Action, to the local replica. The editor may group consecutive keystrokes into one commit; only unacknowledged input can be lost in a crash.
 10. Sync sends only durably committed changes and tracks its progress in the local replica. A committed change that awaits sync is never rewritten or dropped; later edits are new changes. Network state never gates or delays the local commit.
-11. Sync uses the established CRDT library selected by D-035; Liquid adds no custom conflict-resolution algorithm. Remote changes merge through that library; sync never resets local state to a remote snapshot or drops unsynced local changes outside that merge.
+11. Sync uses Automerge 3 (ADR-0238); Liquid adds no custom conflict-resolution algorithm. Remote changes merge through that library; sync never resets local state to a remote snapshot or drops unsynced local changes outside that merge.
 12. Connection loss, suspension or termination by the OS, including Android background limits, leaves committed changes and sync progress intact. When the app is paused the UI hands the focused edit to the core; on resume the sync client retries from its durable cursor.
 
 ### Resources
@@ -50,8 +50,11 @@ flowchart TD
 13. Database Views read windowed pages sized to the viewport. Sorting, filtering, grouping and aggregation run in Rust against indexes; Charts and Formulas receive computed results, not source rows.
 14. Every stream subscription, native handle and Dart listener has exactly one owner, normally the View widget, and is released when that owner is disposed or its Page closes. Cancelling a Dart stream drops the corresponding Rust producer.
 
+### Storage
+
+15. The local replica is SQLite in write-ahead-log mode, encrypted with SQLCipher, with FTS5 for PowerBar search (ADR-0237). Its key lives in the operating system's keystore and is released only to Liquid (ADR-0229); attachments are encrypted blobs outside the database (ADR-0228). SQL stays inside `liquid-storage` behind typed reads and writes, so no other crate depends on the engine and replacing it touches only that crate and a one-time migration.
+
 ## Risks against the current V-Spec
 
-- **CRDT merge versus Roles:** every replica applies received changes through its own mutation pipeline ([`SECURITY.md`](../../SECURITY.md)), so a change one replica rejects and another accepts breaks convergence. D-035 requires proof that Roles reject such a change identically on every replica.
-- **CRDT history versus Liquid History:** CRDT libraries keep their own change history; D-028 decides whether Liquid History derives from it or is stored separately.
+- **CRDT merge versus Roles:** every replica applies received changes through its own mutation pipeline ([`SECURITY.md`](../../SECURITY.md)), so a change one replica rejects and another accepts breaks convergence. ADR-0238's spike must prove that Roles reject such a change identically on every replica.
 - **Variable-height virtualization:** Views whose height is unknown until built cause scroll jumps; rule 5's persisted heights are the mitigation and need observational evidence.
