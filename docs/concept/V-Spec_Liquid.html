@@ -73,7 +73,7 @@ Liquid        = local-first workspace and App platform</code></pre>
         <li>The Explorer shows each area under its own heading, as Notion shows teamspaces; each holds a tree of nested Pages with Sources among them (ADR-0235).</li>
         <li>In M3a a Source is a local file or folder, read-only, because History cannot revert writes outside Workspace data (ADR-0235). Web links follow after M3a as read-only Sources that load only when opened and show in a built-in browser (ADR-0236).</li>
         <li>Media come from local attachments; a web link is a bookmark that fetches nothing, and an embed loads remote content only after a click (ADR-0235).</li>
-        <li>The PowerBar finds Workspace objects, creates Blocks and invokes permitted Workspace or agent actions.</li>
+        <li>The PowerBar finds Workspace objects, creates Blocks and invokes permitted Workspace or agent actions. Without a prefix it searches and jumps; <code>/</code> adds a Block and <code>&gt;</code> lists actions; <code>@</code> is kept for people (ADR-0236, <a href="../design/mockups/liquid-workspace-pages.html">Pages mockups</a>).</li>
       </ul>
     </div></section>
 
@@ -160,7 +160,7 @@ Liquid        = local-first workspace and App platform</code></pre>
         <li>Every Workspace write uses the same mutation pipeline and records actor, origin, permission result and reversible change in History.</li>
         <li>Visibility, View placement, Connection existence and sync access never imply execution authority.</li>
         <li>Rights inherit from an area to its Pages and Blocks. A <strong>protected</strong> Page, Block or Source stops inheriting them, so only Roles allowed on it may change it. A Block's rights follow its home, never the Page that shows a View of it. Read access is never finer than an area; in M3 every authorized device holds the complete Workspace, so the Workspace stays the confidentiality boundary (ADR-0235).</li>
-        <li>M3a assigns Roles to Automations; people follow with sync and agent profiles with M3b (ADR-0235).</li>
+        <li>M3a assigns Roles to Automations; people follow with sync and agent profiles with M3b (ADR-0235). Three editable Role templates follow Notion's access levels: Can view (read), Can edit (read and apply) and Full access (every capability). The person who creates a Workspace holds Full access, which protection never removes, so no one can lock the owner out (<a href="../design/mockups/liquid-workspace-history.html">History and Roles mockups</a>).</li>
       </ul>
       <h3>How an agent changes Workspace data</h3>
       <div class="flow">
