@@ -705,6 +705,21 @@ impl WorkingTree {
         let copy = self.store.0.join("index.new");
         match std::fs::copy(&self.index, &copy) {
             Ok(_) => {
+                // Git rereads a file changed in the clock tick its index was written in only while
+                // the index is not newer than the file, so the copy keeps the index's time; Git
+                // itself keeps that guard when it rewrites the copy.
+                let kept = std::fs::metadata(&self.index)
+                    .and_then(|meta| meta.modified())
+                    .and_then(|time| {
+                        std::fs::File::options()
+                            .write(true)
+                            .open(&copy)?
+                            .set_modified(time)
+                    });
+                if let Err(error) = kept {
+                    let _ = std::fs::remove_file(&copy);
+                    return Err(DiffError::Io(error));
+                }
                 let cleared = self.unmark(&self.env(&copy)).await;
                 if let Err(error) =
                     cleared.and_then(|()| std::fs::rename(&copy, &index).map_err(DiffError::Io))
