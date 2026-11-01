@@ -79,6 +79,7 @@ class _DiffViewState extends State<DiffView> {
     super.initState();
     widget.state.changed.addListener(_show);
     widget.state.shown.addListener(_rebuild);
+    widget.state.shownScope.addListener(_rebuild);
     // Opening the tab reads the turns again, so it shows the latest one.
     unawaited(widget.state.readChanges());
     // It also shows the last list at once and moves the keyboard to it.
@@ -93,6 +94,7 @@ class _DiffViewState extends State<DiffView> {
   void dispose() {
     widget.state.changed.removeListener(_show);
     widget.state.shown.removeListener(_rebuild);
+    widget.state.shownScope.removeListener(_rebuild);
     _focus.dispose();
     _scroll.dispose();
     super.dispose();
@@ -315,7 +317,10 @@ class _DiffViewState extends State<DiffView> {
       turns: widget.state.turns.value,
       scope: scope,
       // What all turns changed is known once they were read.
-      allLines: scope is AllTurns && files != null
+      allLines:
+          scope is AllTurns &&
+              files != null &&
+              widget.state.changesProblem.value == null
           ? (
               added: files.fold(0, (sum, file) => sum + file.added),
               removed: files.fold(0, (sum, file) => sum + file.removed),

@@ -576,6 +576,28 @@ void main() {
     );
   });
 
+  testWidgets('leaves all turns\' lines out when they could not be read', (
+    tester,
+  ) async {
+    final backend = FakeBackend()
+      ..changed = null
+      ..turnList = [
+        turnOf('T1', number: 1, failure: 'not inside a Git working tree'),
+      ];
+    await show(tester, backend);
+    await press(tester, LogicalKeyboardKey.keyT);
+    await tester.tap(find.text('All turns'));
+    await tester.pumpAndSettle();
+    expect(find.text('Not a Git repository'), findsOneWidget);
+    expect(
+      find.text('All turns'),
+      findsOneWidget,
+      reason: 'the heading follows',
+    );
+    await press(tester, LogicalKeyboardKey.keyT);
+    expect(find.textContaining('+0 −0'), findsNothing);
+  });
+
   testWidgets('keeps a turn whose checkpoint failed and says why', (
     tester,
   ) async {
