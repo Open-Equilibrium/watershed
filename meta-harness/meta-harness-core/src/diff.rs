@@ -2,7 +2,7 @@
 //! commits go into the project's object database, refs only under Watershed's own namespace
 //! (ADR-0220); the project's index, HEAD and branches stay untouched.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::ffi::OsString;
 use std::fmt;
 use std::fs::DirBuilder;
@@ -11,7 +11,7 @@ use std::io::ErrorKind;
 use std::os::unix::fs::DirBuilderExt;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
@@ -104,6 +104,8 @@ pub enum DiffError {
     /// Git left these files below the working folder unreverted, such as one in a folder it
     /// may not write.
     NotReverted(Vec<String>),
+    /// Git failed or was stopped while it wrote the files back, so some may be reverted.
+    PartlyReverted(Box<DiffError>),
 }
 
 impl fmt::Display for DiffError {
@@ -130,6 +132,7 @@ impl fmt::Display for DiffError {
             }
             Self::AgentRunning(_) => f.write_str("an agent runs in this checkout"),
             Self::NotReverted(paths) => write!(f, "Git could not revert {}", paths.join(", ")),
+            Self::PartlyReverted(error) => write!(f, "the files may be partly reverted: {error}"),
         }
     }
 }
@@ -236,69 +239,114 @@ impl WorkingTree {
         crate::checkout::Checkout::new(self.locks.clone())
     }
 
-    /// The changes from `from` to `to` a revert to `to` makes: those below the working folder,
-    /// without submodules and nested repositories, whose files a revert leaves alone.
+    /// The changes from `from` to `to` a revert to `to` makes, and the repositories it leaves
+    /// alone. It changes only files below the working folder and nothing at or below a
+    /// submodule or nested repository, whether either state records it or it is on disk now.
     pub async fn revertable(
         &self,
         from: &Snapshot,
         to: &Snapshot,
-    ) -> Result<Vec<FileChange>, DiffError> {
-        let repositories = self.repositories(from, to).await?;
-        Ok(self
-            .changes(from, to, Whitespace::Shown)
-            .await?
-            .into_iter()
-            .filter(|change| self.within(&change.path) && !repositories.contains(&change.path))
-            .collect())
-    }
-
-    /// The submodules and nested repositories that differ from `from` to `to`.
-    async fn repositories(
-        &self,
-        from: &Snapshot,
-        to: &Snapshot,
-    ) -> Result<HashSet<String>, DiffError> {
-        // `--raw` gives each side's mode; Git records a repository as mode 160000.
-        let raw = self.diff(&["--raw", "-z", &from.0, &to.0]).await?;
-        let mut fields = raw.split('\0');
-        let mut repositories = HashSet::new();
-        while let (Some(record), Some(path)) = (fields.next(), fields.next()) {
-            if record
-                .split(' ')
-                .take(2)
-                .any(|mode| mode.ends_with("160000"))
-            {
-                repositories.insert(path.to_owned());
+    ) -> Result<(Vec<FileChange>, BTreeSet<String>), DiffError> {
+        let mut repositories = BTreeSet::new();
+        let mut changes = Vec::new();
+        for (change, repository) in self.listed(from, to, Whitespace::Shown).await? {
+            if !self.within(&change.path) {
+                continue;
+            }
+            if repository {
+                repositories.insert(change.path);
+            } else {
+                changes.push(change);
             }
         }
-        Ok(repositories)
+        let mut below = Vec::new();
+        changes.retain(
+            |change| match self.repository_above(&change.path, &repositories) {
+                Some(repository) => {
+                    below.push(repository);
+                    false
+                }
+                None => true,
+            },
+        );
+        repositories.extend(below);
+        Ok((changes, repositories))
     }
 
-    /// The files Git ignores that a revert of `changes` would delete because a restored file
-    /// needs their place: a folder where a file returns, ending in `/`, or a file where a
-    /// restored file's folder goes.
-    pub fn in_the_way(&self, changes: &[FileChange]) -> Vec<String> {
+    /// The nearest folder above the repository path `path` that is a repository: one of `known`
+    /// or one with `.git` on disk.
+    fn repository_above(&self, path: &str, known: &BTreeSet<String>) -> Option<String> {
+        let mut folder = path;
+        while let Some((parent, _)) = folder.rsplit_once('/') {
+            folder = parent;
+            if known.contains(folder)
+                || std::fs::symlink_metadata(self.root.join(folder).join(".git")).is_ok()
+            {
+                return Some(folder.to_owned());
+            }
+        }
+        None
+    }
+
+    /// What Git ignores in the place of files `changes` restores, which a revert deletes or
+    /// overwrites: the restored paths with something already there, and the folders holding
+    /// ignored files where a file returns, ending in `/`, or files where a restored file's
+    /// folder goes.
+    pub async fn in_the_way(
+        &self,
+        changes: &[FileChange],
+    ) -> Result<(HashSet<String>, BTreeSet<String>), DiffError> {
         let listed: HashSet<&str> = changes.iter().map(|change| change.path.as_str()).collect();
-        let mut found = std::collections::BTreeSet::new();
+        let is_dir =
+            |path: &str| std::fs::symlink_metadata(self.root.join(path)).map(|meta| meta.is_dir());
+        let (mut replaced, mut removed) = (HashSet::new(), BTreeSet::new());
         for change in changes
             .iter()
             .filter(|change| change.status == ChangeStatus::Added)
         {
-            let is_dir = |path: &str| {
-                std::fs::symlink_metadata(self.root.join(path)).map(|meta| meta.is_dir())
-            };
-            if matches!(is_dir(&change.path), Ok(true)) {
-                found.insert(format!("{}/", change.path));
+            match is_dir(&change.path) {
+                Ok(true) if self.ignores_below(&change.path).await? => {
+                    removed.insert(format!("{}/", change.path));
+                }
+                // Not in the current state, so Git ignores it.
+                Ok(false) => {
+                    replaced.insert(change.path.clone());
+                }
+                _ => {}
             }
             let mut folder = change.path.as_str();
             while let Some((parent, _)) = folder.rsplit_once('/') {
                 folder = parent;
                 if matches!(is_dir(folder), Ok(false)) && !listed.contains(folder) {
-                    found.insert(folder.to_owned());
+                    removed.insert(folder.to_owned());
                 }
             }
         }
-        found.into_iter().collect()
+        Ok((replaced, removed))
+    }
+
+    /// Whether the folder at the repository path `folder` holds files Git ignores. Only the
+    /// first byte of the listing is read, so a large ignored folder lists no further.
+    async fn ignores_below(&self, folder: &str) -> Result<bool, DiffError> {
+        let below = format!(":(top,literal){folder}/");
+        let args = [
+            "ls-files",
+            "-z",
+            "--others",
+            "--ignored",
+            "--exclude-standard",
+            "--",
+            &below,
+        ];
+        let mut listing = Git::spawn(git_command(&self.root, &[], &args).stderr(Stdio::null()))?;
+        let mut stdout = listing.child.stdout.take().expect("stdout is piped");
+        let mut first = [0; 1];
+        let read = stdout
+            .read(&mut first)
+            .await
+            .map_err(|error| DiffError::Git(error.to_string()))?;
+        // Dropped unread, the listing ends with its process group.
+        Ok(read > 0)
     }
 
     /// The branch checked out, or none when HEAD names a commit.
@@ -319,13 +367,15 @@ impl WorkingTree {
 
     /// Reverts the files below the working folder to `to`, as T3 Code's revert does with
     /// `git restore` and `git clean`: files `to` holds are written back and the others Git does
-    /// not ignore are deleted. The project's index, HEAD and ignored files stay.
-    pub async fn restore(&self, to: &Snapshot) -> Result<(), DiffError> {
+    /// not ignore are deleted, but for repositories (see [`Self::revertable`]). The project's
+    /// index and HEAD stay. `started` tells when files may have been written.
+    pub async fn restore(&self, to: &Snapshot, started: &AtomicBool) -> Result<(), DiffError> {
         let _busy = self.busy.lock().await;
         // The private index then lists the current files, so `git restore` deletes those `to`
         // lacks, and a file that was untracked before the turn returns untracked.
-        let now = Snapshot(self.capture().await?);
-        if self.revertable(&now, to).await?.is_empty() {
+        let now = Snapshot(self.capture(&[]).await?);
+        let (changes, repositories) = self.revertable(&now, to).await?;
+        if changes.is_empty() {
             return Ok(());
         }
         let below = if self.prefix.is_empty() {
@@ -333,8 +383,12 @@ impl WorkingTree {
         } else {
             format!(":(top,literal){}", self.prefix)
         };
+        let left_alone: Vec<String> = repositories
+            .iter()
+            .map(|path| format!(":(exclude,top,literal){path}"))
+            .collect();
         // A repository's files are its own, so a project's `submodule.recurse` checks none out.
-        let args = [
+        let mut args = vec![
             "restore",
             "--no-recurse-submodules",
             "--source",
@@ -343,23 +397,28 @@ impl WorkingTree {
             "--",
             &below,
         ];
+        args.extend(left_alone.iter().map(String::as_str));
         let env = self.env(&self.store.0.join("index"));
+        started.store(true, Ordering::Relaxed);
         let restored = git(&self.root, &env, &args).await;
         // Deleting its last file can remove the working folder, where the agent still runs.
         let _ = std::fs::create_dir_all(&self.work);
         restored?;
-        // Git only warns when it cannot delete a file, so the result is checked.
-        let after = Snapshot(self.capture().await?);
-        let left: Vec<String> = self
-            .revertable(&after, to)
-            .await?
+        // Git only warns when it cannot delete a file, so the result is checked; a restored file
+        // Git now ignores counts too.
+        let written: Vec<String> = changes
             .into_iter()
             .map(|change| change.path)
+            .filter(|path| std::fs::symlink_metadata(self.root.join(path)).is_ok())
             .collect();
+        let after = Snapshot(self.capture(&written).await?);
+        let (left, _) = self.revertable(&after, to).await?;
         if left.is_empty() {
             Ok(())
         } else {
-            Err(DiffError::NotReverted(left))
+            Err(DiffError::NotReverted(
+                left.into_iter().map(|change| change.path).collect(),
+            ))
         }
     }
 
@@ -430,6 +489,22 @@ impl WorkingTree {
         to: &Snapshot,
         whitespace: Whitespace,
     ) -> Result<Vec<FileChange>, DiffError> {
+        Ok(self
+            .listed(from, to, whitespace)
+            .await?
+            .into_iter()
+            .map(|(change, _)| change)
+            .collect())
+    }
+
+    /// The files that changed from `from` to `to`, each with whether either side records it as
+    /// a submodule or nested repository.
+    async fn listed(
+        &self,
+        from: &Snapshot,
+        to: &Snapshot,
+        whitespace: Whitespace,
+    ) -> Result<Vec<(FileChange, bool)>, DiffError> {
         let counted = |whitespace: Whitespace| {
             let mut args = vec!["--numstat", "-z", from.0.as_str(), to.0.as_str()];
             args.extend(whitespace.option());
@@ -448,25 +523,32 @@ impl WorkingTree {
         } else {
             HashSet::new()
         };
-        let statuses = self.diff(&["--name-status", "-z", &from.0, &to.0]).await?;
-        let mut statuses = statuses.split('\0');
+        // Each record is `:<mode> <mode> <object> <object> <status>`; Git records a repository
+        // as mode 160000.
+        let records = self.diff(&["--raw", "-z", &from.0, &to.0]).await?;
+        let mut records = records.split('\0');
         let mut changes = Vec::new();
-        while let (Some(status), Some(path)) = (statuses.next(), statuses.next()) {
-            let status = match status {
-                "A" => ChangeStatus::Added,
-                "D" => ChangeStatus::Deleted,
+        while let (Some(record), Some(path)) = (records.next(), records.next()) {
+            let status = match record.rsplit(' ').next() {
+                Some("A") => ChangeStatus::Added,
+                Some("D") => ChangeStatus::Deleted,
                 _ => ChangeStatus::Modified,
             };
             if status == ChangeStatus::Modified && whitespace_only.contains(path) {
                 continue;
             }
+            let repository = record
+                .split(' ')
+                .take(2)
+                .any(|mode| mode.ends_with("160000"));
             let (added, removed) = counts.get(path).copied().unwrap_or_default();
-            changes.push(FileChange {
+            let change = FileChange {
                 path: path.to_owned(),
                 status,
                 added,
                 removed,
-            });
+            };
+            changes.push((change, repository));
         }
         Ok(changes)
     }
@@ -505,11 +587,12 @@ impl WorkingTree {
     /// Writes the working tree into the private store and returns its tree id.
     async fn write_tree(&self) -> Result<String, DiffError> {
         let _busy = self.busy.lock().await;
-        self.capture().await
+        self.capture(&[]).await
     }
 
-    /// [`Self::write_tree`] while the private index is held.
-    async fn capture(&self) -> Result<String, DiffError> {
+    /// [`Self::write_tree`] while the private index is held; files at the repository paths
+    /// `forced` count even where Git ignores them.
+    async fn capture(&self, forced: &[String]) -> Result<String, DiffError> {
         // A Git stopped at its time limit leaves its lock; no other Git uses this index now.
         let _ = std::fs::remove_file(self.store.0.join("index.lock"));
         let _ = std::fs::remove_file(self.store.0.join("index.new.lock"));
@@ -548,6 +631,16 @@ impl WorkingTree {
             }
             let mut args = vec!["add", "--all", "--", "."];
             args.extend(skipped.iter().map(String::as_str));
+            git(&self.root, &env, &args).await?;
+        }
+        // In parts, so no command line grows past the system's limit.
+        for part in forced.chunks(256) {
+            let paths: Vec<String> = part
+                .iter()
+                .map(|path| format!(":(top,literal){path}"))
+                .collect();
+            let mut args = vec!["add", "--force", "--"];
+            args.extend(paths.iter().map(String::as_str));
             git(&self.root, &env, &args).await?;
         }
         Ok(git(&self.root, &env, &["write-tree"])

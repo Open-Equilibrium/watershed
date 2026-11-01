@@ -90,8 +90,9 @@ pub struct RevertFile {
     pub edited: bool,
     /// When the file was last written, in Unix milliseconds, if it exists.
     pub modified_ms: Option<u64>,
-    /// Whether Git ignores it and the revert deletes it only because a restored file needs its
-    /// place; such a folder's path ends in `/`.
+    /// Whether the revert deletes or overwrites something Git ignores, only because a restored
+    /// file needs its place: a file already at a restored path, or a folder, whose path ends in
+    /// `/`, or file in the way of one.
     pub ignored: bool,
 }
 
@@ -215,18 +216,18 @@ impl Checkpoints {
                 .collect(),
             None => Default::default(),
         };
-        let changes = self.bounded(tree.revertable(&now, &target)).await?;
-        let in_the_way = tree.in_the_way(&changes);
+        let (changes, _) = self.bounded(tree.revertable(&now, &target)).await?;
+        let (replaced, removed) = self.bounded(tree.in_the_way(&changes)).await?;
         let mut files: Vec<RevertFile> = changes
             .into_iter()
             .map(|change| RevertFile {
                 edited: edited.contains(&change.path),
                 modified_ms: modified_ms(&tree.file(&change.path)),
+                ignored: replaced.contains(&change.path),
                 path: change.path,
                 status: change.status,
-                ignored: false,
             })
-            .chain(in_the_way.into_iter().map(|path| RevertFile {
+            .chain(removed.into_iter().map(|path| RevertFile {
                 edited: false,
                 modified_ms: modified_ms(&tree.file(&path)),
                 path,
@@ -253,7 +254,15 @@ impl Checkpoints {
         let _turn = self
             .until_closed(async { Ok(self.captures.lock().await) })
             .await?;
-        self.bounded(tree.restore(&target)).await
+        let started = std::sync::atomic::AtomicBool::new(false);
+        match self.bounded(tree.restore(&target, &started)).await {
+            Err(error @ DiffError::NotReverted(_)) => Err(error),
+            // A time limit or a close can stop Git midway too.
+            Err(error) if started.load(std::sync::atomic::Ordering::Relaxed) => {
+                Err(DiffError::PartlyReverted(Box::new(error)))
+            }
+            result => result,
+        }
     }
 
     /// The files that changed from checkpoint `from` to `to`.

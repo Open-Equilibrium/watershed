@@ -27,15 +27,14 @@ pub(crate) struct Checkout {
 pub(crate) struct Running {
     _checkout: File,
     name: PathBuf,
-    _named: File,
-    /// Whether this holder locked the name; only then it removes it.
-    named: bool,
+    /// The name's lock, when this holder has it; only then it removes the name.
+    name_lock: Option<File>,
 }
 
 impl Drop for Running {
     fn drop(&mut self) {
         // Removed before its lock drops with the field, so no file outlives its holder.
-        if self.named {
+        if self.name_lock.is_some() {
             let _ = std::fs::remove_file(&self.name);
         }
     }
@@ -75,28 +74,30 @@ impl Checkout {
                 Err(TryLockError::Error(error)) => return Err(DiffError::Io(error)),
             }
         }
-        std::fs::create_dir_all(self.running_dir()).map_err(DiffError::Io)?;
+        // The turn counts as running from here, even if its name cannot be kept.
         let name = self.running_dir().join(session);
-        let file = open(&name)?;
-        // A listing reads the name briefly; the same session in another process holds it as
-        // long as it runs there, and this one still runs then.
-        let mut named = false;
-        for _ in 0..NAME_TRIES {
-            match file.try_lock() {
-                Ok(()) => {
-                    named = true;
-                    break;
-                }
-                Err(TryLockError::WouldBlock) => tokio::time::sleep(RETRY / 10).await,
-                Err(TryLockError::Error(error)) => return Err(DiffError::Io(error)),
-            }
-        }
+        let name_lock = self.name_lock(&name).await;
         Ok(Running {
             _checkout: checkout,
             name,
-            _named: file,
-            named,
+            name_lock,
         })
+    }
+
+    /// The lock on the name file `name`, unless it cannot be had: a listing reads the name
+    /// briefly, the same session in another process holds it as long as it runs there, and a
+    /// writer of the Git directory can put something else there.
+    async fn name_lock(&self, name: &Path) -> Option<File> {
+        std::fs::create_dir_all(self.running_dir()).ok()?;
+        let file = open(name, true).ok()?;
+        for _ in 0..NAME_TRIES {
+            match file.try_lock() {
+                Ok(()) => return Some(file),
+                Err(TryLockError::WouldBlock) => tokio::time::sleep(RETRY / 10).await,
+                Err(TryLockError::Error(_)) => return None,
+            }
+        }
+        None
     }
 
     /// Holds the checkout alone, or names the sessions whose agents run there.
@@ -119,7 +120,7 @@ impl Checkout {
         let mut running: Vec<String> = entries
             .flatten()
             .filter(|entry| {
-                open(&entry.path()).is_ok_and(|file| {
+                open(&entry.path(), false).is_ok_and(|file| {
                     matches!(file.try_lock_shared(), Err(TryLockError::WouldBlock))
                 })
             })
@@ -131,7 +132,7 @@ impl Checkout {
 
     fn lock_file(&self) -> Result<File, DiffError> {
         std::fs::create_dir_all(&self.dir).map_err(DiffError::Io)?;
-        open(&self.dir.join("checkout.lock"))
+        open(&self.dir.join("checkout.lock"), true)
     }
 
     fn running_dir(&self) -> PathBuf {
@@ -139,14 +140,15 @@ impl Checkout {
     }
 }
 
-/// Opens or creates the lock file at `path`. Anyone who can write the Git directory can put
-/// something else there, so a link is refused and a pipe opens without waiting and is refused
-/// as no plain file.
-fn open(path: &Path) -> Result<File, DiffError> {
+/// Opens the lock file at `path`, creating it with `create`. Anyone who can write the Git
+/// directory can put something else there, so a link is refused and a pipe opens without
+/// waiting and is refused as no plain file.
+fn open(path: &Path, create: bool) -> Result<File, DiffError> {
     let file = OpenOptions::new()
-        .create(true)
+        .create(create)
         .truncate(false)
-        .write(true)
+        .read(true)
+        .write(create)
         .custom_flags((rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK).bits() as i32)
         .open(path)
         .map_err(DiffError::Io)?;

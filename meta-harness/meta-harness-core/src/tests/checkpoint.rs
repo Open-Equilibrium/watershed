@@ -1181,9 +1181,10 @@ fn a_session_that_starts_turns_without_ends_still_counts_as_running() {
 fn a_turn_waits_for_a_revert_past_the_time_limit_of_one_git() {
     run(async {
         let repo = Repo::new("revert-long");
+        // Long enough for one capture's Git under a busy test run, short beside the wait.
         let checkpoints = std::sync::Arc::new(Checkpoints::with_timeout(
             repo.path(),
-            Duration::from_millis(100),
+            Duration::from_secs(1),
         ));
         assert!(matches!(checkpoints.in_repository().await, Ok(true)));
         let reverting = crate::checkout::Checkout::new(repo.path().join(".git/watershed"))
@@ -1193,7 +1194,7 @@ fn a_turn_waits_for_a_revert_past_the_time_limit_of_one_git() {
             let checkpoints = checkpoints.clone();
             async move { checkpoints.capture(&at("t1", Phase::Start)).await }
         });
-        tokio::time::sleep(Duration::from_millis(400)).await;
+        tokio::time::sleep(Duration::from_millis(1500)).await;
         assert!(!starting.is_finished(), "the turn still waits");
         drop(reverting);
         tokio::time::timeout(Duration::from_secs(5), starting)
@@ -1206,5 +1207,181 @@ fn a_turn_waits_for_a_revert_past_the_time_limit_of_one_git() {
             .await
             .expect("plan");
         assert_eq!(plan.running, ["s1"], "and it counts as running");
+    });
+}
+
+/// Runs `git` in `dir` as the tests' user.
+fn git_at(dir: &Path, args: &[&str]) {
+    let output = Command::new("git")
+        .args(["-c", "user.name=Test", "-c", "user.email=test@example.com"])
+        .args(args)
+        .current_dir(dir)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .output()
+        .expect("git runs");
+    assert!(
+        output.status.success(),
+        "git {args:?}: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn a_revert_never_writes_into_a_repository_a_turn_made() {
+    run(async {
+        let repo = Repo::new("revert-repositories");
+        repo.write("foo", "a file\n");
+        repo.git(&["add", "foo"]);
+        repo.git(&["commit", "-q", "-m", "foo"]);
+        std::fs::create_dir_all(repo.path().join("lib")).expect("folder");
+        repo.write("lib/x.txt", "draft\n");
+        let checkpoints = Checkpoints::new(repo.path());
+        turn(&checkpoints, "t1", || {
+            // The file `foo` becomes a repository with a commit, and the untracked folder `lib`
+            // a repository without one.
+            std::fs::remove_file(repo.path().join("foo")).expect("removed");
+            std::fs::create_dir_all(repo.path().join("foo")).expect("folder");
+            git_at(&repo.path().join("foo"), &["init", "-q"]);
+            repo.write("foo/inner.txt", "inner\n");
+            git_at(&repo.path().join("foo"), &["add", "."]);
+            git_at(&repo.path().join("foo"), &["commit", "-q", "-m", "inner"]);
+            git_at(&repo.path().join("lib"), &["init", "-q"]);
+            repo.write("a.txt", "new\n");
+        })
+        .await;
+        repo.write("lib/x.txt", "my work\n");
+
+        let plan = checkpoints
+            .revert_plan(&at("t1", Phase::Start), None)
+            .await
+            .expect("plan");
+        let paths: Vec<_> = plan.files.iter().map(|file| file.path.as_str()).collect();
+        assert_eq!(paths, ["a.txt"], "{plan:?}");
+        checkpoints
+            .revert(&at("t1", Phase::Start))
+            .await
+            .expect("reverted");
+        let read = |path: &str| std::fs::read_to_string(repo.path().join(path)).ok();
+        assert_eq!(read("a.txt").as_deref(), Some("old\n"));
+        assert_eq!(read("foo/inner.txt").as_deref(), Some("inner\n"));
+        assert!(repo.path().join("foo/.git").exists(), "its history stays");
+        assert_eq!(read("lib/x.txt").as_deref(), Some("my work\n"));
+    });
+}
+
+#[test]
+fn a_restored_file_git_now_ignores_counts_as_reverted() {
+    run(async {
+        let repo = Repo::new("revert-newly-ignored");
+        repo.write("notes.txt", "notes\n");
+        let checkpoints = Checkpoints::new(repo.path());
+        turn(&checkpoints, "t1", || {
+            std::fs::remove_file(repo.path().join("notes.txt")).expect("removed");
+            std::fs::write(repo.path().join(".git/info/exclude"), "notes.txt\n").expect("exclude");
+        })
+        .await;
+        checkpoints
+            .revert(&at("t1", Phase::Start))
+            .await
+            .expect("reverted");
+        assert_eq!(
+            std::fs::read_to_string(repo.path().join("notes.txt")).expect("notes"),
+            "notes\n"
+        );
+    });
+}
+
+#[test]
+fn a_revert_lists_what_git_ignores_where_it_restores_a_file() {
+    run(async {
+        let repo = Repo::new("revert-ignored-in-place");
+        repo.write("config.local", "draft\n");
+        repo.write("data", "a file\n");
+        repo.git(&["add", "data"]);
+        repo.git(&["commit", "-q", "-m", "data"]);
+        let checkpoints = Checkpoints::new(repo.path());
+        turn(&checkpoints, "t1", || {
+            // Now ignored and changed, so it is in no checkpoint since.
+            repo.write(".gitignore", "config.local\n");
+            repo.write("config.local", "secret\n");
+            // A folder of files Git does not ignore, which the plan lists themselves.
+            std::fs::remove_file(repo.path().join("data")).expect("removed");
+            std::fs::create_dir_all(repo.path().join("data")).expect("folder");
+            repo.write("data/x.txt", "tracked later\n");
+        })
+        .await;
+        let plan = checkpoints
+            .revert_plan(&at("t1", Phase::Start), None)
+            .await
+            .expect("plan");
+        let listed: Vec<_> = plan
+            .files
+            .iter()
+            .map(|file| (file.path.as_str(), file.status, file.ignored))
+            .collect();
+        assert_eq!(
+            listed,
+            [
+                (".gitignore", ChangeStatus::Deleted, false),
+                ("config.local", ChangeStatus::Added, true),
+                ("data", ChangeStatus::Added, false),
+                ("data/x.txt", ChangeStatus::Deleted, false),
+            ]
+        );
+    });
+}
+
+#[test]
+fn a_turn_whose_name_cannot_be_written_still_holds_reverts_off() {
+    run(async {
+        let repo = Repo::new("revert-unnamed");
+        let mine = Checkpoints::new(repo.path());
+        turn(&mine, "t1", || repo.write("a.txt", "new\n")).await;
+        let running = repo.path().join(".git/watershed/running");
+        std::fs::create_dir_all(&running).expect("folder");
+        let made = Command::new("mkfifo")
+            .arg(running.join("s2"))
+            .status()
+            .expect("mkfifo runs");
+        assert!(made.success());
+        let other = Checkpoints::new(repo.path());
+        other
+            .capture(&Checkpoint {
+                session: "s2".to_owned(),
+                turn: "u1".to_owned(),
+                phase: Phase::Start,
+            })
+            .await
+            .expect("started");
+        assert!(matches!(
+            mine.revert(&at("t1", Phase::Start)).await,
+            Err(DiffError::AgentRunning(running)) if running.is_empty()
+        ));
+    });
+}
+
+#[test]
+fn a_revert_that_git_stopped_midway_says_the_files_may_be_partly_reverted() {
+    use std::os::unix::fs::PermissionsExt;
+    run(async {
+        let repo = Repo::new("revert-partly");
+        std::fs::create_dir_all(repo.path().join("ro")).expect("folder");
+        repo.write("ro/kept.txt", "kept\n");
+        repo.git(&["add", "."]);
+        repo.git(&["commit", "-q", "-m", "folder"]);
+        let checkpoints = Checkpoints::new(repo.path());
+        turn(&checkpoints, "t1", || {
+            repo.write("ro/kept.txt", "changed\n")
+        })
+        .await;
+        // Git cannot replace a file in a folder it may not write, and fails.
+        let folder = repo.path().join("ro");
+        std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o555)).expect("mode");
+        let reverted = checkpoints.revert(&at("t1", Phase::Start)).await;
+        std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o755)).expect("mode");
+        assert!(
+            matches!(reverted, Err(DiffError::PartlyReverted(_))),
+            "{reverted:?}"
+        );
     });
 }
