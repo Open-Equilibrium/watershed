@@ -34,7 +34,7 @@ pub use session::{
     AgentCommand, CommandError, MAX_RECORD_BYTES, Model, Pending, Session, SessionEvent,
     SessionState, Stopper,
 };
-pub use stored::{StoredSession, recent_sessions, session_title};
+pub use stored::{StoredSession, recent_sessions, session_title, titled_session};
 pub use visible::{visible_lines, visible_name};
 
 #[cfg(test)]

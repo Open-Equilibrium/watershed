@@ -13,7 +13,8 @@ use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
 use crate::api::history::{
-    BridgeChangesState, BridgeEntryKind, BridgeRecordKind, BridgeTurn, BridgeTurnChanges,
+    BridgeChangesState, BridgeEntryKind, BridgeRecordKind, BridgeRevertFile, BridgeRunningAgent,
+    BridgeTurn, BridgeTurnChanges,
 };
 use crate::api::session::{
     AgentSession, BridgeApprovalMode, BridgeModel, BridgeStoredSession, SessionConfig,
@@ -733,6 +734,7 @@ fn diffs_each_turn_between_its_checkpoints() {
             start_entry: "c1".to_owned(),
             end_entry: Some("c2".to_owned()),
             number: 1,
+            prompt_entry: Some("u1".to_owned()),
             prompt: "edit".to_owned(),
             started_ms: Some(1_793_527_200_000),
             ended_ms: Some(1_793_527_205_000),
@@ -774,6 +776,80 @@ fn diffs_each_turn_between_its_checkpoints() {
             .map(|changes| changes.state),
         Ok(BridgeChangesState::Removed)
     );
+    assert!(call(session.shutdown()));
+    let _ = std::fs::remove_dir_all(&repo);
+}
+
+#[test]
+fn reverts_a_turns_files_and_continues_from_before_its_prompt() {
+    let repo = repository("revert");
+    let script = [
+        checkpoint("q1", "T1", "start", r#"\"ok\":true"#),
+        "printf 'new\\n' > a.txt\n".to_owned(),
+        checkpoint("q2", "T1", "end", r#"\"files\":1"#),
+        "touch .git/checkpointed\n".to_owned(),
+        no_session_file(2),
+        entries(3, TURN),
+        // The plan looks for pi's session directory to name the other agent's session.
+        no_session_file(4),
+        entries(5, ""),
+        entries(6, ""),
+        gate(7),
+        r#"IFS= read -r line
+case "$line" in *'"message":"/watershed-branch u1"'*) ;; *) exit 9 ;; esac
+printf '%s\n' '{"id":"8","type":"response","command":"prompt","success":true,"data":{"disposition":"handled"}}'
+IFS= read -r line || exit 0"#
+            .to_owned(),
+    ]
+    .concat();
+    let session = launch(gated(&script), repo.display().to_string()).expect("agent starts");
+    reached(&repo.join(".git/checkpointed"));
+    // Another window's agent runs a turn in the same checkout.
+    let other = meta_harness_core::Checkpoints::new(&repo);
+    let theirs = |phase| meta_harness_core::Checkpoint {
+        session: "s2".to_owned(),
+        turn: "u1".to_owned(),
+        phase,
+    };
+    call(other.capture(&theirs(meta_harness_core::Phase::Start))).expect("started");
+
+    let plan = session.revert_plan("T1".to_owned()).expect("plan");
+    assert_eq!(plan.state, BridgeChangesState::Shown);
+    assert_eq!(
+        plan.files,
+        [BridgeRevertFile {
+            path: "a.txt".to_owned(),
+            shown: "a.txt".to_owned(),
+            status: BridgeChangeStatus::Modified,
+            edited: false,
+            modified_ms: plan.files[0].modified_ms,
+        }]
+    );
+    assert!(plan.files[0].modified_ms.is_some());
+    assert_eq!(
+        plan.running,
+        [BridgeRunningAgent {
+            own: false,
+            title: None,
+        }]
+    );
+    assert!(plan.branch.is_some());
+    assert!(
+        matches!(session.revert_to_turn("T1".to_owned()), Err(error) if error.contains("an agent runs in this checkout")),
+        "refused"
+    );
+    assert_eq!(
+        std::fs::read_to_string(repo.join("a.txt")).expect("a"),
+        "new\n"
+    );
+
+    call(other.capture(&theirs(meta_harness_core::Phase::End))).expect("ended");
+    assert_eq!(session.revert_to_turn("T1".to_owned()), Ok(()));
+    assert_eq!(
+        std::fs::read_to_string(repo.join("a.txt")).expect("a"),
+        "old\n"
+    );
+    call(other.close());
     assert!(call(session.shutdown()));
     let _ = std::fs::remove_dir_all(&repo);
 }

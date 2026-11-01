@@ -195,6 +195,15 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeRequestKind dco_decode_bridge_request_kind(dynamic raw);
 
   @protected
+  BridgeRevertFile dco_decode_bridge_revert_file(dynamic raw);
+
+  @protected
+  BridgeRevertPlan dco_decode_bridge_revert_plan(dynamic raw);
+
+  @protected
+  BridgeRunningAgent dco_decode_bridge_running_agent(dynamic raw);
+
+  @protected
   BridgeStep dco_decode_bridge_step(dynamic raw);
 
   @protected
@@ -255,6 +264,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<BridgeRecord> dco_decode_list_bridge_record(dynamic raw);
+
+  @protected
+  List<BridgeRevertFile> dco_decode_list_bridge_revert_file(dynamic raw);
+
+  @protected
+  List<BridgeRunningAgent> dco_decode_list_bridge_running_agent(dynamic raw);
 
   @protected
   List<BridgeStoredSession> dco_decode_list_bridge_stored_session(dynamic raw);
@@ -554,6 +569,17 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeRevertFile sse_decode_bridge_revert_file(SseDeserializer deserializer);
+
+  @protected
+  BridgeRevertPlan sse_decode_bridge_revert_plan(SseDeserializer deserializer);
+
+  @protected
+  BridgeRunningAgent sse_decode_bridge_running_agent(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   BridgeStep sse_decode_bridge_step(SseDeserializer deserializer);
 
   @protected
@@ -630,6 +656,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<BridgeRecord> sse_decode_list_bridge_record(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<BridgeRevertFile> sse_decode_list_bridge_revert_file(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<BridgeRunningAgent> sse_decode_list_bridge_running_agent(
     SseDeserializer deserializer,
   );
 
@@ -1033,6 +1069,24 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_bridge_revert_file(
+    BridgeRevertFile self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_revert_plan(
+    BridgeRevertPlan self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_running_agent(
+    BridgeRunningAgent self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_bridge_step(BridgeStep self, SseSerializer serializer);
 
   @protected
@@ -1131,6 +1185,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_list_bridge_record(
     List<BridgeRecord> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_bridge_revert_file(
+    List<BridgeRevertFile> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_bridge_running_agent(
+    List<BridgeRunningAgent> self,
     SseSerializer serializer,
   );
 

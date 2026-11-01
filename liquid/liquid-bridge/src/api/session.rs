@@ -7,15 +7,16 @@ use std::path::{Path, PathBuf};
 
 use meta_harness_core::{
     AgentCommand, Answer, Checkpoint, Checkpoints, CommandError, Delivery, DiffError, Phase,
-    RequestId, Session, SessionEvent, Whitespace, recent_sessions, session_title, visible_lines,
+    RequestId, Session, SessionEvent, TurnCheckpoints, Whitespace, recent_sessions, session_title,
+    titled_session, visible_lines,
 };
 use tokio::runtime::Runtime;
 use tokio::sync::{Mutex, mpsc};
 
 use crate::api::events::{BridgeDecision, BridgeEvent, BridgeQueue};
 use crate::api::history::{
-    BridgeChangesState, BridgeContextDetail, BridgeHistory, BridgeTranscript, BridgeTurn,
-    BridgeTurnChanges,
+    BridgeChangesState, BridgeContextDetail, BridgeHistory, BridgeRevertPlan, BridgeRunningAgent,
+    BridgeTranscript, BridgeTurn, BridgeTurnChanges,
 };
 use crate::convert::describe;
 use crate::frb_generated::StreamSink;
@@ -286,26 +287,102 @@ impl AgentSession {
         from: &str,
         to: &str,
     ) -> Result<(Checkpoint, Checkpoint), String> {
-        let turns = {
-            let mut session = self.session.lock().await;
-            open(&mut session)?
-                .history()
-                .await
-                .map_err(describe)?
-                .turns(None)
-        };
-        let point = |id: &str, phase| {
-            turns
+        let turns = self.branch_turns().await?;
+        Ok((
+            checkpoint_of(&turns, from, Phase::Start)?,
+            checkpoint_of(&turns, to, Phase::End)?,
+        ))
+    }
+
+    async fn branch_turns(&self) -> Result<Vec<TurnCheckpoints>, String> {
+        let mut session = self.session.lock().await;
+        Ok(open(&mut session)?
+            .history()
+            .await
+            .map_err(describe)?
+            .turns(None))
+    }
+
+    /// What reverting the files to before turn `turn` of the current branch would change;
+    /// files changed after the branch's last turn ended are marked.
+    pub fn revert_plan(&self, turn: String) -> Result<BridgeRevertPlan, String> {
+        RUNTIME.block_on(async {
+            let turns = self.branch_turns().await?;
+            let to = checkpoint_of(&turns, &turn, Phase::Start)?;
+            let since = turns
                 .iter()
-                .find(|turn| turn.turn == id)
+                .rev()
+                .find(|turn| turn.ended)
                 .map(|turn| Checkpoint {
                     session: turn.session.clone(),
                     turn: turn.turn.clone(),
-                    phase,
+                    phase: Phase::End,
+                });
+            let plan = match self.checkpoints.revert_plan(&to, since.as_ref()).await {
+                Ok(plan) => plan,
+                Err(error @ (DiffError::NotARepository | DiffError::NoCheckpoint)) => {
+                    return Ok(BridgeRevertPlan {
+                        state: if matches!(error, DiffError::NotARepository) {
+                            BridgeChangesState::OutsideGit
+                        } else {
+                            BridgeChangesState::Removed
+                        },
+                        files: Vec::new(),
+                        running: Vec::new(),
+                        branch: None,
+                    });
+                }
+                Err(error) => return Err(error.to_string()),
+            };
+            let dir = self.session_dir().await;
+            let running = plan
+                .running
+                .iter()
+                .map(|session| BridgeRunningAgent {
+                    own: *session == to.session,
+                    title: dir
+                        .as_deref()
+                        .and_then(|dir| titled_session(dir, &self.cwd, session)),
                 })
-                .ok_or_else(|| format!("no turn {id} on the current branch"))
-        };
-        Ok((point(from, Phase::Start)?, point(to, Phase::End)?))
+                .collect();
+            Ok(BridgeRevertPlan {
+                state: BridgeChangesState::Shown,
+                files: plan.files.into_iter().map(Into::into).collect(),
+                running,
+                branch: plan.branch,
+            })
+        })
+    }
+
+    /// Reverts the files to before turn `turn` of the current branch and continues the session
+    /// from before its prompt, which returns to the input area; the undone turns keep their
+    /// branch. Refused while an agent runs in the checkout.
+    pub fn revert_to_turn(&self, turn: String) -> Result<(), String> {
+        RUNTIME.block_on(async {
+            let turns = self.branch_turns().await?;
+            let to = checkpoint_of(&turns, &turn, Phase::Start)?;
+            let prompt = turns
+                .iter()
+                .find(|found| found.turn == turn)
+                .and_then(|found| found.prompt_entry.clone())
+                .ok_or_else(|| format!("turn {turn} has no prompt to continue before"))?;
+            self.checkpoints
+                .revert(&to)
+                .await
+                .map_err(|error| error.to_string())?;
+            let pending = open(&mut *self.session.lock().await)?
+                .branch(&prompt, None)
+                .await
+                .map_err(describe)?;
+            pending.accepted().await.map_err(describe)
+        })
+    }
+
+    /// pi's session directory, unless pi keeps the session in memory.
+    async fn session_dir(&self) -> Option<PathBuf> {
+        let mut session = self.session.lock().await;
+        let file = open(&mut session).ok()?.state().await.ok()?.session_file?;
+        file.parent().map(Path::to_owned)
     }
 
     /// Reads the session's branch tree and the Trajectory of each branch ending at an entry in
@@ -546,4 +623,17 @@ fn whitespace(hide: bool) -> Whitespace {
     } else {
         Whitespace::Shown
     }
+}
+
+/// The checkpoint at `phase` of turn `id` among `turns`.
+fn checkpoint_of(turns: &[TurnCheckpoints], id: &str, phase: Phase) -> Result<Checkpoint, String> {
+    turns
+        .iter()
+        .find(|turn| turn.turn == id)
+        .map(|turn| Checkpoint {
+            session: turn.session.clone(),
+            turn: turn.turn.clone(),
+            phase,
+        })
+        .ok_or_else(|| format!("no turn {id} on the current branch"))
 }

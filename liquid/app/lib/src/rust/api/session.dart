@@ -9,7 +9,7 @@ import 'history.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `answer`, `checkpoints_of`, `open`, `whitespace`
+// These functions are ignored because they are not marked as `pub`: `answer`, `branch_turns`, `checkpoint_of`, `checkpoints_of`, `open`, `session_dir`, `whitespace`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`
 // These functions are ignored (category: IgnoreBecauseExplicitAttribute): `forward`, `launch`
 
@@ -68,6 +68,15 @@ abstract class AgentSession implements RustOpaqueInterface {
 
   /// Up to `limit` stored sessions of this project, newest first, without the current one.
   Future<List<BridgeStoredSession>> recentSessions({required int limit});
+
+  /// What reverting the files to before turn `turn` of the current branch would change;
+  /// files changed after the branch's last turn ended are marked.
+  Future<BridgeRevertPlan> revertPlan({required String turn});
+
+  /// Reverts the files to before turn `turn` of the current branch and continues the session
+  /// from before its prompt, which returns to the input area; the undone turns keep their
+  /// branch. Refused while an agent runs in the checkout.
+  Future<void> revertToTurn({required String turn});
 
   /// Sends a message: an idle agent starts a run with it, a running one takes it before its
   /// next model request or, with `follow_up`, once it is done. Each run's start and end are

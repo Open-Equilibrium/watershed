@@ -22,6 +22,8 @@ pub struct TurnCheckpoints {
     /// The Trajectory's turn of its first prompt, counted from 1 on the branch; 0 before a
     /// prompt was stored.
     pub number: u64,
+    /// The entry of its first prompt; continuing the session from it hands the prompt back.
+    pub prompt_entry: Option<String>,
     /// The first line of its first prompt.
     pub prompt: String,
     /// When its start checkpoint was recorded, in Unix milliseconds.
@@ -60,6 +62,7 @@ pub(super) fn turns(entries: &[Entry], leaf: Option<&str>) -> Vec<TurnCheckpoint
                     && turn.ended_ms.is_none()
                 {
                     turn.number = prompts;
+                    turn.prompt_entry = Some(entry.id.clone());
                     turn.prompt = first_line(text, PROMPT_CHARS);
                 }
             }
@@ -75,6 +78,7 @@ pub(super) fn turns(entries: &[Entry], leaf: Option<&str>) -> Vec<TurnCheckpoint
                 start_entry: entry.id.clone(),
                 end_entry: None,
                 number: 0,
+                prompt_entry: None,
                 prompt: String::new(),
                 started_ms: entry.at_ms,
                 ended_ms: None,

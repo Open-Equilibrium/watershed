@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::time::{Duration, SystemTime};
 
-use crate::{StoredSession, recent_sessions, session_title};
+use crate::{StoredSession, recent_sessions, session_title, titled_session};
 
 /// Writes a pi session file started in `cwd` with `lines` after its header, modified at `at`.
 fn session(dir: &Path, name: &str, cwd: &str, lines: &[&str], at: u64) {
@@ -200,4 +200,31 @@ fn lists_a_session_whose_first_prompt_comes_late() {
             modified_ms: 1_000,
         }]
     );
+}
+
+#[test]
+fn names_a_session_by_its_id() {
+    let dir = std::env::temp_dir().join(format!("watershed-stored-id-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("directory");
+    let named = r#"{"type":"session_info","id":"i1","parentId":null,"name":"Fix flaky sync test"}"#;
+    session(&dir, "s2", "/work/acme-api", &[named], 1_000);
+    session(&dir, "s3", "/work/web-shop", &[named], 2_000);
+    session(&dir, "s4", "/work/acme-api", &[], 3_000);
+    let project = Path::new("/work/acme-api");
+    assert_eq!(
+        titled_session(&dir, project, "s2").as_deref(),
+        Some("Fix flaky sync test")
+    );
+    assert_eq!(
+        titled_session(&dir, project, "s3"),
+        None,
+        "another project's"
+    );
+    assert_eq!(
+        titled_session(&dir, project, "s4").as_deref(),
+        Some("Untitled session")
+    );
+    assert_eq!(titled_session(&dir, project, "s9"), None);
+    let _ = std::fs::remove_dir_all(&dir);
 }
