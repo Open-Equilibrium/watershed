@@ -95,6 +95,7 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **Run bundle** — One Run's event/context/recovery segments, Run Log including its definition metadata, and immutable objects.
 - **Conversation bundle** — One conversation history plus all owned Run bundles.
 - **Host-local session ownership leases** — Exclusive operating-system file leases in the private user-global Workspace store. `PROTOCOL.md` defines their ownership and acquisition contract. Process exit releases leases; none is durable or transferable across hosts.
+- **Session branch** — One path through a pi session's tree of entries, which "Branch from here" and a revert start; not a Git branch, which keeps the name "branch" in Liquid.
 - **Session marker** — The persistent `session.lock` observability leaf inside a run directory. It is not ownership authority and cannot grant or revoke the lease.
 - **Reservation orphan** — An empty run artifact retained and inventoried when rollback cannot prove identity-bound deletion. Its cleanup failure remains visible, and compare-then-unlink never removes it.
 - **Event segment** — One append-only canonical JSONL file within a run bundle; rotation bounds individual I/O without starting a new run or resetting sequence/budgets.

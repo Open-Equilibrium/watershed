@@ -17,11 +17,15 @@ use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWriteExt, BufRead
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 
+mod process;
+mod revert;
+
+use process::{Git, git, git_command, git_path, unreadable};
+#[cfg(test)]
+pub(crate) use revert::holds_repository;
+
 /// Largest Git output read for one file list or patch; longer output is cut off.
 const MAX_OUTPUT_BYTES: u64 = 4 * 1024 * 1024;
-
-/// Most folder entries one revert reads to find repositories in returning files' places.
-const MAX_SEARCHED_ENTRIES: usize = 100_000;
 
 /// Largest part of Git's error output kept for an error message.
 const MAX_ERROR_BYTES: usize = 64 * 1024;
@@ -30,17 +34,6 @@ static STORES: AtomicU64 = AtomicU64::new(0);
 
 /// The e-mail address checkpoint commits carry.
 const CHECKPOINT_EMAIL: &str = "checkpoints@watershed.invalid";
-
-/// What a revert changes and what it leaves alone near repositories.
-#[derive(Debug, Default)]
-pub struct Revertable {
-    /// The changes it makes.
-    pub changes: Vec<FileChange>,
-    /// The changes it leaves alone, as they are inside, at or above a repository.
-    pub kept: Vec<FileChange>,
-    /// The paths it leaves alone, which `git restore` is told to skip.
-    left_alone: BTreeSet<String>,
-}
 
 /// A project state captured as a Git tree in the project's object database.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -278,145 +271,6 @@ impl WorkingTree {
             .collect())
     }
 
-    /// The changes from `from` to `to` a revert to `to` makes, and the repositories it leaves
-    /// alone. It changes only files below the working folder, and no path inside, at or above
-    /// a submodule or nested repository that either state records or that is on disk now:
-    /// `git restore` deletes what is at a path it writes, a folder with all it holds.
-    pub async fn revertable(
-        &self,
-        from: &Snapshot,
-        to: &Snapshot,
-    ) -> Result<Revertable, DiffError> {
-        let mut revertable = Revertable::default();
-        let mut changes = Vec::new();
-        for (change, repository) in self.listed(from, to, Whitespace::Shown).await? {
-            if !self.within(&change.path) {
-                continue;
-            }
-            if repository {
-                revertable.left_alone.insert(change.path.clone());
-                revertable.kept.push(change);
-            } else {
-                changes.push(change);
-            }
-        }
-        // Sorted, a folder's path comes before those below it, whatever order a project's
-        // settings give Git's listing, so a path left alone is known when the ones below it
-        // come, and they are left alone too.
-        changes.sort_by(|a, b| a.path.cmp(&b.path));
-        let mut budget = MAX_SEARCHED_ENTRIES;
-        for change in changes {
-            match self.repository_near(&change.path, &revertable.left_alone, &mut budget) {
-                Some(path) => {
-                    revertable.left_alone.insert(path);
-                    revertable.kept.push(change);
-                }
-                None => revertable.changes.push(change),
-            }
-        }
-        Ok(revertable)
-    }
-
-    /// The path a revert must leave alone so it writes nothing into a repository near the
-    /// repository path `path`: the outermost folder above it that is one of `known` or a
-    /// repository on disk, or `path` itself when one of `known` or a repository on disk is at
-    /// or below it. A repository either state records always counts. The disk is read as
-    /// `git restore` writes it: from the top and without following links, so below a link or a
-    /// file in place of a folder no repository on disk counts, as Git replaces it. Searches
-    /// below `path` share `budget`, in entries read.
-    fn repository_near(
-        &self,
-        path: &str,
-        known: &BTreeSet<String>,
-        budget: &mut usize,
-    ) -> Option<String> {
-        for folder in path.match_indices('/').map(|(end, _)| &path[..end]) {
-            // A repository either state records stays whole, whatever is on disk now.
-            if known.contains(folder) {
-                return Some(folder.to_owned());
-            }
-            let on_disk = self.root.join(folder);
-            if !std::fs::symlink_metadata(&on_disk).is_ok_and(|meta| meta.is_dir()) {
-                return None;
-            }
-            if is_repository(&on_disk) {
-                return Some(folder.to_owned());
-            }
-        }
-        let below = format!("{path}/");
-        let known_below = known
-            .iter()
-            .any(|repository| repository.starts_with(&below));
-        (known_below || holds_repository(&self.root.join(path), budget)).then(|| path.to_owned())
-    }
-
-    /// What Git ignores in the place of files `changes` restores, which a revert deletes or
-    /// overwrites: the restored paths with something already there, and the folders holding
-    /// ignored files where a file returns, ending in `/`, or files where a restored file's
-    /// folder goes.
-    pub async fn in_the_way(
-        &self,
-        changes: &[FileChange],
-    ) -> Result<(HashSet<String>, BTreeSet<String>), DiffError> {
-        let listed: HashSet<&str> = changes.iter().map(|change| change.path.as_str()).collect();
-        let is_dir =
-            |path: &str| std::fs::symlink_metadata(self.root.join(path)).map(|meta| meta.is_dir());
-        let (mut replaced, mut removed) = (HashSet::new(), BTreeSet::new());
-        for change in changes
-            .iter()
-            .filter(|change| change.status == ChangeStatus::Added)
-        {
-            match is_dir(&change.path) {
-                Ok(true) if self.ignores_below(&change.path).await? => {
-                    removed.insert(format!("{}/", change.path));
-                }
-                // Not in the current state, so Git ignores it.
-                Ok(false) => {
-                    replaced.insert(change.path.clone());
-                }
-                _ => {}
-            }
-            let mut folder = change.path.as_str();
-            while let Some((parent, _)) = folder.rsplit_once('/') {
-                folder = parent;
-                if matches!(is_dir(folder), Ok(false)) && !listed.contains(folder) {
-                    removed.insert(folder.to_owned());
-                }
-            }
-        }
-        Ok((replaced, removed))
-    }
-
-    /// Whether the folder at the repository path `folder` holds files Git ignores. Only the
-    /// first byte of the listing is read, so a large ignored folder lists no further.
-    async fn ignores_below(&self, folder: &str) -> Result<bool, DiffError> {
-        let below = format!(":(top,literal){folder}/");
-        let args = [
-            "ls-files",
-            "-z",
-            "--others",
-            "--ignored",
-            "--exclude-standard",
-            "--",
-            &below,
-        ];
-        let mut listing = Git::spawn(git_command(&self.root, &[], &args).stderr(Stdio::null()))?;
-        let mut stdout = listing.child.stdout.take().expect("stdout is piped");
-        let mut first = [0; 1];
-        if stdout.read(&mut first).await.map_err(unreadable)? > 0 {
-            // Dropped unread, the listing ends with its process group.
-            return Ok(true);
-        }
-        // An empty listing counts only from a Git that succeeded.
-        if listing.wait().await.map_err(unreadable)?.success() {
-            Ok(false)
-        } else {
-            Err(DiffError::Git(format!(
-                "could not list the files Git ignores in {folder}"
-            )))
-        }
-    }
-
     /// The refs whose names start with `prefix`.
     pub(crate) async fn references(&self, prefix: &str) -> Result<Vec<String>, DiffError> {
         let listed = git(
@@ -460,67 +314,6 @@ impl WorkingTree {
             // `--quiet` fails silently only when HEAD names no branch.
             Err(DiffError::Git(reason)) if reason.is_empty() => Ok(None),
             Err(error) => Err(error),
-        }
-    }
-
-    /// Reverts the files below the working folder to `to`, as T3 Code's revert does with
-    /// `git restore` and `git clean`: files `to` holds are written back and the others Git does
-    /// not ignore are deleted, but for repositories (see [`Self::revertable`]). The project's
-    /// index and HEAD stay. `started` tells when files may have been written.
-    pub async fn restore(&self, to: &Snapshot, started: &AtomicBool) -> Result<(), DiffError> {
-        let _busy = self.busy.lock().await;
-        // The private index then lists the current files, so `git restore` deletes those `to`
-        // lacks, and a file that was untracked before the turn returns untracked.
-        let now = Snapshot(self.capture(&[]).await?);
-        let Revertable {
-            changes,
-            left_alone,
-            ..
-        } = self.revertable(&now, to).await?;
-        if changes.is_empty() {
-            return Ok(());
-        }
-        let below = if self.prefix.is_empty() {
-            ":/".to_owned()
-        } else {
-            format!(":(top,literal){}", self.prefix)
-        };
-        let left_alone: Vec<String> = left_alone
-            .iter()
-            .map(|path| format!(":(exclude,top,literal){path}"))
-            .collect();
-        // A repository's files are its own, so a project's `submodule.recurse` checks none out.
-        let mut args = vec![
-            "restore",
-            "--no-recurse-submodules",
-            "--source",
-            &to.0,
-            "--worktree",
-            "--",
-            &below,
-        ];
-        args.extend(left_alone.iter().map(String::as_str));
-        let env = self.env(&self.store.0.join("index"));
-        started.store(true, Ordering::Relaxed);
-        let restored = git(&self.root, &env, &args).await;
-        // Deleting its last file can remove the working folder, where the agent still runs.
-        let _ = std::fs::create_dir_all(&self.work);
-        restored?;
-        // Git only warns when it cannot delete a file, so the result is checked; a restored file
-        // Git now ignores counts too.
-        let written: Vec<String> = changes
-            .into_iter()
-            .map(|change| change.path)
-            .filter(|path| std::fs::symlink_metadata(self.root.join(path)).is_ok())
-            .collect();
-        let after = Snapshot(self.capture(&written).await?);
-        let left = self.revertable(&after, to).await?.changes;
-        if left.is_empty() {
-            Ok(())
-        } else {
-            Err(DiffError::NotReverted(
-                left.into_iter().map(|change| change.path).collect(),
-            ))
         }
     }
 
@@ -888,153 +681,6 @@ impl WorkingTree {
     }
 }
 
-/// The one path a `git rev-parse` query in `dir` prints. A path may hold line breaks, so only
-/// the single trailing one is taken off; splitting the output into lines could name another
-/// repository.
-async fn git_path(dir: &Path, args: &[&str]) -> Result<String, DiffError> {
-    let output = git(dir, &[], args).await.map_err(|error| match error {
-        DiffError::Git(reason) if reason.contains("not a git repository") => {
-            DiffError::NotARepository
-        }
-        error => error,
-    })?;
-    match output.strip_suffix('\n') {
-        Some(path) if !path.is_empty() => Ok(path.to_owned()),
-        _ => Err(DiffError::NotARepository),
-    }
-}
-
-/// Runs the host's `git` in `dir` and returns at most [`MAX_OUTPUT_BYTES`] of its output.
-async fn git(dir: &Path, env: &[(&str, OsString)], args: &[&str]) -> Result<String, DiffError> {
-    let mut child = Git::spawn(&mut git_command(dir, env, args))?;
-    // Git's warnings drain meanwhile, so a full error pipe never blocks it; dropped, the set ends
-    // the drain.
-    let stderr = child.child.stderr.take().expect("stderr is piped");
-    let mut errors = tokio::task::JoinSet::new();
-    errors.spawn(keep_start(stderr, MAX_ERROR_BYTES));
-    let mut output = Vec::new();
-    // Reading one byte past the limit tells a cut-off output apart; dropping the child then
-    // stops Git instead of buffering unbounded output.
-    let stdout = child.child.stdout.take().expect("stdout is piped");
-    stdout
-        .take(MAX_OUTPUT_BYTES + 1)
-        .read_to_end(&mut output)
-        .await
-        .map_err(|error| DiffError::Git(error.to_string()))?;
-    if output.len() as u64 > MAX_OUTPUT_BYTES {
-        return Err(DiffError::TooLarge);
-    }
-    // A program Git started can hold its error output after Git ended. Git is reaped only once
-    // that output ended too, so until then its time limit still ends such programs with it.
-    let errors = errors
-        .join_next()
-        .await
-        .and_then(Result::ok)
-        .unwrap_or_default();
-    let status = child
-        .wait()
-        .await
-        .map_err(|error| DiffError::Git(error.to_string()))?;
-    if !status.success() {
-        return Err(DiffError::Git(
-            String::from_utf8_lossy(&errors).trim().to_owned(),
-        ));
-    }
-    Ok(String::from_utf8_lossy(&output).into_owned())
-}
-
-/// The host's `git` in `dir` with its output piped. Project settings that would run something
-/// or let Git skip a changed file are overridden.
-fn git_command(dir: &Path, env: &[(&str, OsString)], args: &[&str]) -> Command {
-    let mut command = Command::new("git");
-    command
-        .args([
-            // Reading the project runs none of its hooks or file monitors, which could change it.
-            "-c",
-            "core.hooksPath=/dev/null",
-            "-c",
-            "core.fsmonitor=false",
-            // Every file's state is checked in full, so no setting hides a change.
-            "-c",
-            "core.ignoreStat=false",
-            "-c",
-            "core.checkStat=default",
-            "-c",
-            "core.trustctime=true",
-            "-c",
-            "core.fileMode=true",
-            "-c",
-            "core.sparseCheckout=false",
-            // No split index lands in the project's Git directory, and a submodule's diff runs
-            // none of its commands.
-            "-c",
-            "core.splitIndex=false",
-            "-c",
-            "diff.submodule=short",
-            // Blank context lines keep their leading space, which Liquid reads as context.
-            "-c",
-            "diff.suppressBlankEmpty=false",
-        ])
-        .args(args)
-        .current_dir(dir)
-        // A group of its own, so Git ends with the programs it starts (see [`Git`]).
-        .process_group(0)
-        // Git's messages in English, as Liquid shows them and reads one.
-        .env("LC_ALL", "C")
-        .envs(env.iter().map(|(name, value)| (name, value)))
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true);
-    command
-}
-
-/// Whether the folder `folder` is a repository as Git finds one: it holds `.git`, a folder or
-/// a file pointing elsewhere, which a file system without capitals also finds as `.GIT`; or
-/// it is itself a repository's Git folder, as a bare clone is, with `HEAD`, `objects` and
-/// `refs`. Links are not followed.
-fn is_repository(folder: &Path) -> bool {
-    let entry = |name: &str| std::fs::symlink_metadata(folder.join(name));
-    entry(".git").is_ok()
-        || (entry("HEAD").is_ok()
-            && entry("objects").is_ok_and(|meta| meta.is_dir())
-            && entry("refs").is_ok_and(|meta| meta.is_dir()))
-}
-
-/// A failed read of Git's output or write of its input.
-fn unreadable(error: std::io::Error) -> DiffError {
-    DiffError::Git(error.to_string())
-}
-
-/// Whether a repository is at or below the folder at `dir`, found as Git finds one (see
-/// [`is_repository`]). Links are not followed. Each entry read costs one of `budget`; once it is spent the
-/// folder counts as holding one, so a revert leaves vast folders alone rather than read them
-/// all.
-pub(crate) fn holds_repository(dir: &Path, budget: &mut usize) -> bool {
-    if !std::fs::symlink_metadata(dir).is_ok_and(|meta| meta.is_dir()) {
-        return false;
-    }
-    let mut folders = vec![dir.to_owned()];
-    while let Some(folder) = folders.pop() {
-        if is_repository(&folder) {
-            return true;
-        }
-        let Ok(entries) = std::fs::read_dir(&folder) else {
-            continue;
-        };
-        for entry in entries.flatten() {
-            let Some(left) = budget.checked_sub(1) else {
-                return true;
-            };
-            *budget = left;
-            if entry.file_type().is_ok_and(|kind| kind.is_dir()) {
-                folders.push(entry.path());
-            }
-        }
-    }
-    false
-}
-
 /// Each file's added and removed lines from `git diff --numstat -z`; a binary file counts none.
 fn line_counts(numstat: &str) -> HashMap<String, (u64, u64)> {
     numstat
@@ -1046,50 +692,4 @@ fn line_counts(numstat: &str) -> HashMap<String, (u64, u64)> {
             Some((path.to_owned(), (count(added), count(removed))))
         })
         .collect()
-}
-
-/// A running Git. Dropped before it ended, as at its time limit, it ends with the programs it
-/// started that stay in its process group, such as a project's clean filter (ADR-0210).
-struct Git {
-    child: Child,
-    /// Git's process group; `None` once Git was reaped, since its id may then be reused.
-    group: Option<rustix::process::Pid>,
-}
-
-impl Git {
-    fn spawn(command: &mut Command) -> Result<Self, DiffError> {
-        let child = crate::spawn(command).map_err(DiffError::GitStart)?;
-        let group = child
-            .id()
-            .and_then(|id| i32::try_from(id).ok())
-            .and_then(rustix::process::Pid::from_raw);
-        Ok(Self { child, group })
-    }
-
-    async fn wait(&mut self) -> std::io::Result<std::process::ExitStatus> {
-        let status = self.child.wait().await;
-        if status.is_ok() {
-            self.group = None;
-        }
-        status
-    }
-}
-
-impl Drop for Git {
-    fn drop(&mut self) {
-        if let Some(group) = self.group {
-            let _ = rustix::process::kill_process_group(group, rustix::process::Signal::KILL);
-        }
-    }
-}
-
-/// Reads `reader` to its end and keeps at most `limit` bytes from its start.
-async fn keep_start(mut reader: impl AsyncRead + Unpin, limit: usize) -> Vec<u8> {
-    let mut kept = Vec::new();
-    let mut chunk = [0; 8192];
-    while let Ok(read @ 1..) = reader.read(&mut chunk).await {
-        let room = limit.saturating_sub(kept.len());
-        kept.extend_from_slice(&chunk[..read.min(room)]);
-    }
-    kept
 }
