@@ -184,8 +184,18 @@ impl WorkingTree {
     /// come along or stay in the branch's stash, which replaces its earlier one once switched.
     pub async fn switch(&self, to: &BranchTarget, changes: Changes) -> Result<(), DiffError> {
         let args = match to {
-            BranchTarget::Local(name) => ["switch", "--no-guess", branch_name(name)?],
-            BranchTarget::Remote(name) => ["switch", "--track", branch_name(name)?],
+            BranchTarget::Local(name) => [
+                "switch",
+                "--no-overwrite-ignore",
+                "--no-guess",
+                branch_name(name)?,
+            ],
+            BranchTarget::Remote(name) => [
+                "switch",
+                "--no-overwrite-ignore",
+                "--track",
+                branch_name(name)?,
+            ],
         };
         let _stash = if matches!(changes, Changes::Leave { .. }) {
             Some(self.checkout().stash_alone().await?)

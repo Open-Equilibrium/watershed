@@ -237,6 +237,54 @@ fn switching_carries_uncommitted_changes_and_a_remote_branch_gets_a_local_one_tr
 }
 
 #[test]
+fn switching_never_overwrites_ignored_files_in_the_destination_branch() {
+    run(async {
+        for remote in [false, true] {
+            for leave in [false, true] {
+                let clone = Clone::new(&format!("switch-ignored-{remote}-{leave}"));
+                clone.origin.git(&["switch", "-q", "-c", "release"]);
+                clone.origin.write("private.txt", "committed\n");
+                clone.origin.git(&["add", "private.txt"]);
+                clone.origin.git(&["commit", "-qm", "add destination file"]);
+                let repo = &clone.repo;
+                repo.git(&["fetch", "-q"]);
+                let target = if remote {
+                    BranchTarget::Remote("origin/release".to_owned())
+                } else {
+                    repo.git(&["branch", "--track", "release", "origin/release"]);
+                    local("release")
+                };
+                repo.write(".git/info/exclude", "private.txt\n");
+                repo.write("private.txt", "unsaved ignored contents\n");
+                repo.write("a.txt", "edited\n");
+                let index = repo.git(&["write-tree"]);
+                let checkpoints = Checkpoints::new(repo.path());
+                let changes = if leave {
+                    leave_on(&checkpoints).await
+                } else {
+                    Changes::Bring
+                };
+
+                let switched = checkpoints.switch_branch(&target, changes).await;
+
+                assert!(
+                    matches!(switched, Err(DiffError::WouldOverwrite(ref paths)) if paths == &["private.txt"]),
+                    "remote={remote}, leave={leave}: {switched:?}"
+                );
+                assert_eq!(repo.git(&["branch", "--show-current"]), "main\n");
+                assert_eq!(read(repo, "private.txt"), "unsaved ignored contents\n");
+                assert_eq!(read(repo, "a.txt"), "edited\n");
+                assert_eq!(repo.git(&["write-tree"]), index);
+                assert_eq!(repo.git(&["stash", "list"]), "");
+                if remote {
+                    assert_eq!(repo.git(&["branch", "--list", "release"]), "");
+                }
+            }
+        }
+    });
+}
+
+#[test]
 fn git_refusing_a_switch_over_uncommitted_changes_names_the_files_and_changes_nothing() {
     run(async {
         let repo = Repo::new("switch-refused");
