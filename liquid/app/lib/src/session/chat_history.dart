@@ -160,7 +160,8 @@ class ChatHistory {
     for (final turn in turns) {
       if (turn.endEntry == null || _ended.contains(turn.id)) continue;
       if (_boundaries.isEmpty) break;
-      final at = _boundaries.removeAt(0) + inserted;
+      // Rows inserted before it already moved the remaining places.
+      final at = _boundaries.removeAt(0);
       _ended.add(turn.id);
       if (!_changedFiles(turn)) continue;
       views.insert(at.clamp(0, views.length), _turnEnd(turn));
@@ -231,11 +232,12 @@ class ChatHistory {
             ..._stored(page.items),
             ...items.value,
           ]);
-          _shift(shown.length - items.value.length);
           if (_pendingMark case final mark?
               when _placeMark(shown, mark, complete: !more.value)) {
             _pendingMark = null;
           }
+          // Counted once the mark is in, which also goes before the live turns.
+          _shift(shown.length - items.value.length);
           items.value = shown;
           return;
         }

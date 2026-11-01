@@ -119,6 +119,17 @@ class FakeBackend implements SessionBackend {
     final files = hideWhitespace
         ? changedWithoutWhitespace ?? changed
         : changed;
+    // A failed turn has no checkpoint at the end the comparison needs, as in the core.
+    String? failureOf(String id) =>
+        turnList.where((turn) => turn.id == id).firstOrNull?.failure;
+    final missing =
+        failureOf(to) != null || (from == to && failureOf(from) != null);
+    if (missing && files != null) {
+      return const BridgeTurnChanges(
+        state: BridgeChangesState.removed,
+        files: [],
+      );
+    }
     return BridgeTurnChanges(
       state: files == null
           ? BridgeChangesState.outsideGit

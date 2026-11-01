@@ -408,8 +408,8 @@ class SessionState {
       if (generation != _generation) return;
       turns.value = read;
       final pair = compared(read, diffScope.value);
-      shown.value = pair;
       if (pair == null) {
+        shown.value = null;
         reportRead('changes', null);
         changesProblem.value = switch (read.lastOrNull?.failure) {
           final failure? => (
@@ -431,10 +431,12 @@ class SessionState {
       );
       if (generation != _generation) return;
       reportRead('changes', null);
-      // Outside Git every checkpoint fails; the project's own state says so first.
-      final failure = pair.from.failure ?? pair.to.failure;
+      // The heading changes only with its files, so no patch stands under another turn.
+      shown.value = pair;
+      // A missing checkpoint of a turn that failed says why; outside Git every checkpoint
+      // fails, and the project's own state says so first.
+      final failure = pair.to.failure ?? pair.from.failure;
       changesProblem.value = switch (changes.state) {
-        BridgeChangesState.shown ||
         BridgeChangesState.removed when failure != null => (
           title: 'No checkpoint',
           text: 'Liquid could not capture the project: $failure',

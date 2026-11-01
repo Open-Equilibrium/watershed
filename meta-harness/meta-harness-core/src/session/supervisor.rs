@@ -60,8 +60,34 @@ impl Supervisor {
     ) {
         let mut framer = LineFramer::new(MAX_RECORD_BYTES);
         let mut buffer = vec![0; READ_BUFFER];
+        let mut exited = false;
         let failure = 'read: loop {
-            let Some(read) = self.unless_killed(stdout.read(&mut buffer)).await else {
+            let read = if exited {
+                self.unless_killed(stdout.read(&mut buffer)).await
+            } else {
+                // A program the agent left behind can hold its output open after it exited;
+                // no capture outlives the agent either way.
+                let mut reading = pin!(stdout.read(&mut buffer));
+                let mut waiting = pin!(child.wait());
+                let first = self
+                    .unless_killed(poll_fn(|context| {
+                        if let Poll::Ready(read) = reading.as_mut().poll(context) {
+                            return Poll::Ready(Some(read));
+                        }
+                        waiting.as_mut().poll(context).map(|_| None)
+                    }))
+                    .await;
+                match first {
+                    Some(None) => {
+                        exited = true;
+                        self.checkpoints.close().await;
+                        continue;
+                    }
+                    Some(Some(read)) => Some(read),
+                    None => None,
+                }
+            };
+            let Some(read) = read else {
                 break None;
             };
             let frames = match read {

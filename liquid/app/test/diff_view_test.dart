@@ -241,6 +241,72 @@ void main() {
     );
   });
 
+  testWidgets('shows a new turn\'s heading only with its files', (
+    tester,
+  ) async {
+    final backend = FakeBackend()
+      ..changed = [
+        BridgeFileChange(
+          path: 'a.ts',
+          shown: 'a.ts',
+          status: BridgeChangeStatus.modified,
+          added: 1,
+          removed: 1,
+        ),
+      ]
+      ..turnList = [
+        turnOf('T1', number: 1, added: 1, removed: 1),
+        turnOf('T2', number: 2, startedMs: 1793527800000, added: 1, removed: 1),
+      ]
+      ..turnPatches = {
+        'T2..T2': {'a.ts': '@@ -1 +1 @@\n-two\n+second turn\n'},
+      };
+    await show(tester, backend);
+    expect(
+      find.textContaining('second turn', findRichText: true),
+      findsOneWidget,
+    );
+    // Turn 1's files take a while to read.
+    backend.changesGate = Completer();
+    await press(tester, LogicalKeyboardKey.keyT);
+    await tester.tap(find.text('Turn 1'));
+    // The menu closes while the files are still read.
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Turn 1'),
+      findsNothing,
+      reason: 'Turn 2\'s patch must not stand under Turn 1\'s heading',
+    );
+    backend.changesGate!.complete();
+    await tester.pumpAndSettle();
+    expect(find.text('Turn 1'), findsOneWidget);
+  });
+
+  testWidgets('compares all turns although the first turn\'s end failed', (
+    tester,
+  ) async {
+    final backend = FakeBackend()
+      ..changed = [
+        BridgeFileChange(
+          path: 'a.ts',
+          shown: 'a.ts',
+          status: BridgeChangeStatus.modified,
+          added: 1,
+          removed: 0,
+        ),
+      ]
+      ..turnList = [
+        turnOf('T1', number: 1, failure: 'git did not finish within 60 s'),
+        turnOf('T2', number: 2, startedMs: 1793527800000, added: 1, removed: 0),
+      ];
+    await show(tester, backend);
+    await press(tester, LogicalKeyboardKey.keyT);
+    await tester.tap(find.text('All turns'));
+    await tester.pumpAndSettle();
+    expect(find.text('No checkpoint'), findsNothing);
+    expect(find.text('a.ts'), findsWidgets);
+  });
+
   testWidgets('says when the checkpoints were removed', (tester) async {
     final backend = FakeBackend()..checkpointsRemoved = true;
     await show(tester, backend);
