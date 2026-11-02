@@ -101,6 +101,19 @@ summary{cursor:pointer}summary h3{display:inline;margin:0}summary:focus-visible{
         <p><strong>Recommendation:</strong> B, which matches the background service <a href="#d-021">D-021</a> recommends: agents survive the window, and the operating system supervises the service instead of our own restart code.</p>
         <p><strong>Acceptance criterion:</strong> The ADR log names who starts and stops the service, and tests show Liquid connecting to a running service and reporting one it cannot reach.</p>
       </details>
+      <details id="d-079" class="decision" style="grid-column:1/-1">
+        <summary><h3>D-079 - External Git Writes During Stash Operations</h3></summary>
+        <p><strong>Status:</strong> Open; blocks closeout of the branch/stash slice. The <a href="../design/mockups/liquid-git-branches.html">approved stash behavior</a>, including leaving other stashes untouched, remains decided.</p>
+        <p><strong>Problem:</strong> Git stores stashes in one numbered list shared by all worktrees. <code>drop_stash</code> and <code>pop</code> in <code>meta-harness/meta-harness-core/src/diff/stash.rs</code> find the requested commit's position, then pass that position to another Git process. An external Git command can change the list between those steps. Liquid's repository lock coordinates Liquid writers, but external Git does not take it.</p>
+        <p><strong>Verified example:</strong> On Git 2.54.0, find stash A at <code>stash@{0}</code>, insert unrelated stash B externally, then drop the saved position: B is deleted and A remains. Git rejects <code>stash drop &lt;commit-id&gt;</code>; its deletion interface takes a list position without an expected commit ID. Restore uses the same positional lookup and can therefore apply changes whose ownership, base tree and paths were not checked. No runtime fix has been made.</p>
+        <p><strong>Question:</strong> Must Liquid safely coexist with uncoordinated external stash writers during its operations, or must every supported writer participate in the same coordination?</p>
+        <ul>
+          <li><strong>A - Require coordinated writers.</strong> Pro: retains the existing host-Git integration and common lock. Con: ordinary external Git commands do not participate; the unsupported overlap and its data-loss risk must be explicit, and the lock cannot enforce that restriction.</li>
+          <li><strong>B - Support uncoordinated external writers with an atomic host-Git mechanism.</strong> Pro: preserves the requested stash's identity and leaves unrelated stashes untouched during overlap. Con: a supported mechanism for deleting only the confirmed entry must be selected and demonstrated; the current positional Git commands do not provide it. Dependency or integration changes require maintainer approval and must respect the <a href="../../SECURITY.md#mvp-vcs-boundary">VCS boundary</a>.</li>
+        </ul>
+        <p><strong>Recommendation:</strong> B, preserving the decided protection of unrelated stashes. Keep closeout blocked until the maintainer approves the concurrency contract and an implementable host-Git mechanism; do not invent a reflog/history engine or silently accept A.</p>
+        <p><strong>Acceptance criterion:</strong> Record the selected contract and mechanism in the ADR log and canonical security documentation. Apply by the confirmed commit ID. Deterministic insertion and deletion barriers between lookup, application and removal must prove that only the confirmed stash can be applied or removed and that unrelated entries survive, across linked worktrees. If A is chosen instead, explicitly approve its external-writer exclusion and prove serialization of every admitted writer; do not claim safety for uncoordinated Git commands. Resume the complete closeout only after that decision.</p>
+      </details>
     </div>
   </section>
 
