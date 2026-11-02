@@ -183,6 +183,11 @@ impl<S: Store> Workspace<S> {
         ))
     }
 
+    /// Whether a Page's document is in memory.
+    pub fn is_loaded(&self, page: &PageId) -> bool {
+        self.docs.contains_key(&Document::Page(page.clone()))
+    }
+
     /// Releases a Page's document and View order from memory; the next read loads them
     /// again from the store. A Page holds no uncommitted writes between requests.
     pub fn close_page(&mut self, page: &PageId) {

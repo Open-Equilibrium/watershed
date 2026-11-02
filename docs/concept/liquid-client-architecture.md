@@ -48,7 +48,7 @@ flowchart TD
 ### Resources
 
 13. Database Views read windowed pages sized to the viewport. Sorting, filtering, grouping and aggregation run in Rust against indexes; Charts and Formulas receive computed results, not source rows.
-14. Every stream subscription, native handle and Dart listener has exactly one owner, normally the View widget, and is released when that owner is disposed or its Page closes. Cancelling a Dart stream drops the corresponding Rust producer.
+14. Every stream subscription, native handle and Dart listener has exactly one owner, normally the View widget, and is released when that owner is disposed or its Page closes. Cancelling a Dart stream drops the corresponding Rust producer; for the Workspace calls, `follow` in the app closes the subscription. A Page that no subscription follows leaves memory after each call, so the app follows the Pages it shows and edits.
 
 ### Storage
 

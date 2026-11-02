@@ -288,6 +288,27 @@ impl BridgeMutation {
 }
 
 impl BridgeResource {
+    /// The resource with only the parts its kind uses, which must name identities, so it
+    /// equals the resource a change reports.
+    fn normalized(&self) -> Result<Self, String> {
+        let area = || id(&self.area, AreaId::parse, "area").map(|area| Some(area.to_string()));
+        let page = || id(&self.page, PageId::parse, "page").map(|page| Some(page.to_string()));
+        let block =
+            || id(&self.block, BlockId::parse, "block").map(|block| Some(block.to_string()));
+        let (area, page, block) = match self.kind {
+            BridgeResourceKind::Areas => (None, None, None),
+            BridgeResourceKind::Pages => (area()?, None, None),
+            BridgeResourceKind::Views => (None, page()?, None),
+            BridgeResourceKind::Block => (None, page()?, block()?),
+        };
+        Ok(Self {
+            kind: self.kind,
+            area,
+            page,
+            block,
+        })
+    }
+
     fn of(changed: &Changed) -> Self {
         let (kind, area, page, block) = match changed {
             Changed::Areas => (BridgeResourceKind::Areas, None, None, None),
@@ -398,6 +419,12 @@ impl LiquidWorkspace {
     /// subscribers of every resource it changed.
     pub fn apply(&self, mutation: BridgeMutation) -> Result<BridgeApplied, String> {
         let mutation = mutation.to_core()?;
+        let mutation_page = match &mutation {
+            Mutation::AddTextBlock { page, .. }
+            | Mutation::EditText { page, .. }
+            | Mutation::RemoveView { page, .. } => Some(page.clone()),
+            _ => None,
+        };
         let mut inner = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
         let actor = Actor::Person(inner.workspace.owner().clone());
         let applied = inner
@@ -410,6 +437,12 @@ impl LiquidWorkspace {
             .map_err(message)?;
         for changed in &applied.changed {
             inner.notify(BridgeResource::of(changed));
+        }
+        if let Some(page) = mutation_page.as_ref().or(match &applied.created {
+            Some(Created::Page(page)) => Some(page),
+            _ => None,
+        }) {
+            inner.release_page(page);
         }
         let mut answer = BridgeApplied {
             action: applied.action.to_string(),
@@ -433,8 +466,22 @@ impl LiquidWorkspace {
     /// Reads one bounded window or one Block's text.
     pub fn query(&self, query: BridgeQuery) -> Result<BridgeAnswer, String> {
         let mut inner = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
-        let workspace = &mut inner.workspace;
         let (start, limit) = window(query.start, query.limit)?;
+        let mut read = None;
+        let result = Self::read(&mut inner.workspace, &query, start, limit, &mut read);
+        if let Some(page) = read {
+            inner.release_page(&page);
+        }
+        result
+    }
+
+    fn read(
+        workspace: &mut Workspace<Sqlite>,
+        query: &BridgeQuery,
+        start: usize,
+        limit: usize,
+        read: &mut Option<PageId>,
+    ) -> Result<BridgeAnswer, String> {
         let mut answer = BridgeAnswer {
             areas: Vec::new(),
             pages: Vec::new(),
@@ -474,6 +521,7 @@ impl LiquidWorkspace {
             }
             BridgeQueryKind::Views => {
                 let page = id(&query.page, PageId::parse, "page")?;
+                *read = Some(page.clone());
                 answer.count = workspace.view_count(&page).map_err(message)? as i64;
                 answer.views = workspace
                     .views(&page, start, limit)
@@ -487,6 +535,7 @@ impl LiquidWorkspace {
             }
             BridgeQueryKind::Text => {
                 let page = id(&query.page, PageId::parse, "page")?;
+                *read = Some(page.clone());
                 let block = id(&query.block, BlockId::parse, "block")?;
                 answer.text = workspace.text(&page, &block).map_err(message)?;
             }
@@ -518,10 +567,12 @@ impl LiquidWorkspace {
         resource: BridgeResource,
         deliver: impl FnMut(BridgeChange) -> bool + Send + 'static,
     ) -> Result<(), String> {
+        let resource = resource.normalized()?;
         let mut deliver = deliver;
         let mut inner = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
+        // Dart cancelled it before it arrived, which is a normal end, not an error.
         if inner.closed.remove(&subscription) {
-            return Err(format!("subscription {subscription} is already closed"));
+            return Ok(());
         }
         if inner.subscriptions.contains_key(&subscription) {
             return Err(format!("subscription {subscription} is already open"));
@@ -552,6 +603,14 @@ impl LiquidWorkspace {
     }
 }
 
+#[cfg(test)]
+impl LiquidWorkspace {
+    pub(crate) fn is_loaded(&self, page: &PageId) -> bool {
+        let inner = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
+        inner.workspace.is_loaded(page)
+    }
+}
+
 impl Inner {
     /// Counts a change of `resource` and tells its subscribers, ending those whose Dart
     /// stream is gone.
@@ -577,15 +636,20 @@ impl Inner {
 
     /// Closes the Page `resource` reads once no other subscription follows it.
     fn release(&mut self, resource: &BridgeResource) {
-        let Some(page) = resource.page() else {
-            return;
-        };
+        if let Some(page) = resource.page().and_then(PageId::parse) {
+            self.release_page(&page);
+        }
+    }
+
+    /// Closes `page` unless a subscription follows it, so a Page that a call loaded for
+    /// nobody does not stay in memory.
+    fn release_page(&mut self, page: &PageId) {
         let followed = self
             .subscriptions
             .values()
-            .any(|(other, _)| other.page() == Some(page));
-        if let (false, Some(page)) = (followed, PageId::parse(page)) {
-            self.workspace.close_page(&page);
+            .any(|(other, _)| other.page() == Some(page.as_str()));
+        if !followed {
+            self.workspace.close_page(page);
         }
     }
 }
