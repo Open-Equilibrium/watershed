@@ -3,8 +3,8 @@
 
 use super::*;
 use std::future::{Future, poll_fn};
+use std::os::fd::AsFd;
 use std::pin::pin;
-use std::task::Poll;
 
 /// The one path a `git rev-parse` query in `dir` prints. A path may hold line breaks, so only
 /// the single trailing one is taken off; splitting the output into lines could name another
@@ -68,16 +68,23 @@ pub(super) fn timestamp_ms(seconds: &str) -> Result<i64, DiffError> {
 pub(super) async fn user_git(dir: &Path, args: &[&str]) -> Result<String, DiffError> {
     let mut command = Command::new("git");
     command.args(args).current_dir(dir);
-    let mut child = Git::spawn(&mut piped(command, &NO_PROMPTS))?;
-    let stdout = child.child.stdout.take().expect("stdout is piped");
-    let stderr = child.child.stderr.take().expect("stderr is piped");
+    user_output(Git::spawn(&mut piped(command, &NO_PROMPTS))?).await
+}
+
+async fn user_output(mut child: Git) -> Result<String, DiffError> {
+    let mut stdout = child.child.stdout.take().expect("stdout is piped");
+    let mut stderr = child.child.stderr.take().expect("stderr is piped");
     let mut output = Vec::new();
     let mut errors = Vec::new();
     let status = {
         // Retain bounded diagnostics but drain everything while Git and its synchronous hooks
         // run. Unlike a query, excessive output must never interrupt an explicit write.
-        let mut stdout = pin!(keep_into(stdout, MAX_OUTPUT_BYTES as usize, &mut output));
-        let mut stderr = pin!(keep_into(stderr, MAX_ERROR_BYTES, &mut errors));
+        let mut stdout = pin!(keep_into(
+            &mut stdout,
+            MAX_OUTPUT_BYTES as usize,
+            &mut output
+        ));
+        let mut stderr = pin!(keep_into(&mut stderr, MAX_ERROR_BYTES, &mut errors));
         let mut ended = [false; 2];
         let mut drain = |context: &mut std::task::Context<'_>| {
             if !ended[0] {
@@ -88,21 +95,17 @@ pub(super) async fn user_git(dir: &Path, args: &[&str]) -> Result<String, DiffEr
             }
         };
         let mut wait = pin!(child.wait());
-        let status = poll_fn(|context| {
+        poll_fn(|context| {
             drain(context);
             wait.as_mut().poll(context)
         })
-        .await;
-        // Consume output already available after exit, then close the pipes. A background
-        // hook descendant cannot keep a completed write's checkout lock.
-        poll_fn(|context| {
-            drain(context);
-            Poll::Ready(())
-        })
-        .await;
-        status
+        .await
     }
     .map_err(unreadable)?;
+    // Read bytes already in the nonblocking pipes even if the reactor has not delivered
+    // their readiness yet. Never wait for a background hook descendant to close them.
+    keep_ready(&stdout, MAX_OUTPUT_BYTES as usize, &mut output).map_err(unreadable)?;
+    keep_ready(&stderr, MAX_ERROR_BYTES, &mut errors).map_err(unreadable)?;
     if !status.success() {
         return Err(DiffError::Git(
             String::from_utf8_lossy(&errors).trim().to_owned(),
@@ -270,6 +273,61 @@ async fn keep_into(mut reader: impl AsyncRead + Unpin, limit: usize, kept: &mut 
         let room = limit.saturating_sub(kept.len());
         kept.extend_from_slice(&chunk[..read.min(room)]);
     }
+}
+
+/// Keeps only immediately available bytes from a Tokio pipe, within the remaining budget.
+fn keep_ready(reader: impl AsFd, limit: usize, kept: &mut Vec<u8>) -> std::io::Result<()> {
+    if kept.len() >= limit {
+        return Ok(());
+    }
+    // Duplication preserves O_NONBLOCK; converting Tokio's pipe into an owned fd clears it.
+    let mut reader = std::fs::File::from(reader.as_fd().try_clone_to_owned()?);
+    let mut chunk = [0; 8192];
+    while kept.len() < limit {
+        let room = chunk.len().min(limit - kept.len());
+        match std::io::Read::read(&mut reader, &mut chunk[..room]) {
+            Ok(read @ 1..) => kept.extend_from_slice(&chunk[..read]),
+            Ok(_) => break,
+            Err(error) if error.kind() == ErrorKind::WouldBlock => break,
+            Err(error) if error.kind() == ErrorKind::Interrupted => continue,
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+#[test]
+fn explicit_git_retains_output_when_the_child_exits_before_the_first_poll() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+    runtime.block_on(async {
+        for exit in [0, 1] {
+            let mut command = Command::new("sh");
+            command.args([
+                "-c",
+                &format!("printf retained; printf diagnostic >&2; exit {exit}"),
+            ]);
+            let mut child = Git::spawn(&mut piped(command, &NO_PROMPTS)).expect("child");
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            // Keep the reactor from running until the direct child has exited. Its pipe
+            // data is available even though no async readiness has been delivered yet.
+            while child.child.try_wait().expect("child status").is_none() {
+                assert!(std::time::Instant::now() < deadline, "child did not exit");
+                std::thread::yield_now();
+            }
+            let result = user_output(child).await;
+            match exit {
+                0 => assert_eq!(result.expect("successful child"), "retained"),
+                _ => assert!(
+                    matches!(result, Err(DiffError::Git(ref text)) if text == "diagnostic"),
+                    "{result:?}"
+                ),
+            }
+        }
+    });
 }
 
 #[cfg(test)]
