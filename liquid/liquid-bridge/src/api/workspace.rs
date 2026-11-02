@@ -293,6 +293,7 @@ fn message(error: Error) -> String {
         Error::NotFound => "not found".into(),
         Error::OutOfRange => "text position out of range".into(),
         Error::NoChange => "the write changes nothing".into(),
+        Error::SectionBoundary => "the Text Block starts a Section".into(),
         Error::Random => "the random source failed".into(),
         Error::Document(message) | Error::Storage(message) => message,
     }

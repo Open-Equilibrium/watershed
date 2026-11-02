@@ -569,13 +569,25 @@ fn text_blocks_split_join_restyle_and_start_sections_through_the_bridge() {
         [false, true]
     );
 
+    // ⌫ below the divider removes it; only then does ⌫ join the Text Blocks.
+    let join = || BridgeMutation {
+        page: Some(page.clone()),
+        view: Some(rest_view.clone()),
+        ..mutation(BridgeMutationKind::JoinTextBlock)
+    };
+    assert_eq!(
+        workspace.apply(join()).unwrap_err(),
+        "the Text Block starts a Section"
+    );
     workspace
         .apply(BridgeMutation {
             page: Some(page.clone()),
-            view: Some(rest_view),
-            ..mutation(BridgeMutationKind::JoinTextBlock)
+            view: Some(rest_view.clone()),
+            boundary: false,
+            ..mutation(BridgeMutationKind::SetSectionBoundary)
         })
         .unwrap();
+    workspace.apply(join()).unwrap();
     assert_eq!(read(&block).0, Some("Five days".into()));
     assert_eq!(read(&rest), (None, None));
 }

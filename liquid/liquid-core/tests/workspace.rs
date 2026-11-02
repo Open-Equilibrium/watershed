@@ -507,3 +507,71 @@ fn styles_and_section_boundaries_are_set_and_read_back() {
     apply(&mut workspace, boundary(false));
     assert!(!workspace.views(&lisbon, 1, 1).unwrap()[0].boundary);
 }
+
+#[test]
+fn enter_at_a_text_block_s_start_adds_an_empty_one_above() {
+    let mut workspace = workspace();
+    let trips = area(&mut workspace, "Trips");
+    let lisbon = page(&mut workspace, &trips, None, "Lisbon");
+    let (plan, plan_view) = text_block(&mut workspace, &lisbon, None, "Plan");
+    apply(
+        &mut workspace,
+        Mutation::SetTextStyle {
+            page: lisbon.clone(),
+            block: plan.clone(),
+            style: TextStyle::Heading(1),
+        },
+    );
+    let split = Mutation::SplitTextBlock {
+        page: lisbon.clone(),
+        block: plan.clone(),
+        view: plan_view,
+        at: 0,
+        style: TextStyle::Paragraph,
+    };
+    let Some(liquid_core::Created::Block { block: empty, .. }) =
+        apply(&mut workspace, split).created
+    else {
+        panic!("a Block")
+    };
+    assert_eq!(texts(&mut workspace, &lisbon), ["", "Plan"]);
+    assert_eq!(
+        workspace.views(&lisbon, 1, 1).unwrap()[0].block,
+        plan,
+        "the text keeps its Block"
+    );
+    assert_eq!(
+        workspace.style(&lisbon, &plan).unwrap(),
+        Some(TextStyle::Heading(1))
+    );
+    assert_eq!(
+        workspace.style(&lisbon, &empty).unwrap(),
+        Some(TextStyle::Paragraph)
+    );
+}
+
+#[test]
+fn backspace_never_joins_across_a_section_boundary() {
+    let mut workspace = workspace();
+    let trips = area(&mut workspace, "Trips");
+    let lisbon = page(&mut workspace, &trips, None, "Lisbon");
+    let (_, plan_view) = text_block(&mut workspace, &lisbon, None, "Plan");
+    let (_, day_view) = text_block(&mut workspace, &lisbon, Some(&plan_view), "Day one");
+    apply(
+        &mut workspace,
+        Mutation::SetSectionBoundary {
+            page: lisbon.clone(),
+            view: day_view.clone(),
+            boundary: true,
+        },
+    );
+    let join = Mutation::JoinTextBlock {
+        page: lisbon.clone(),
+        view: day_view,
+    };
+    assert_eq!(
+        edit(&mut workspace, join).unwrap_err(),
+        Error::SectionBoundary
+    );
+    assert_eq!(texts(&mut workspace, &lisbon), ["Plan", "Day one"]);
+}

@@ -97,7 +97,8 @@ pub enum Mutation {
         view: ViewId,
     },
     /// Ends a Text Block at `at`, as ⏎ does: its text from there moves to a new Text Block of
-    /// `style`, shown right after `view`.
+    /// `style`, shown right after `view`. At the very start, as in Notion, the text stays in
+    /// its Block and the new, empty Text Block goes above it.
     SplitTextBlock {
         /// The Block's home Page, which `view` is on.
         page: PageId,
@@ -111,7 +112,7 @@ pub enum Mutation {
         style: TextStyle,
     },
     /// Appends a Text Block to the one above, as ⌫ at its start does, and removes its View;
-    /// the Block goes with its last View.
+    /// the Block goes with its last View. A View that starts a Section joins nothing.
     JoinTextBlock {
         /// The Page.
         page: PageId,
@@ -128,7 +129,9 @@ pub enum Mutation {
         style: TextStyle,
     },
     /// Starts or stops a Section at a View, as `---` and ⌫ below a divider do. A boundary
-    /// belongs to the View, so a Text Block shown on two Pages joins each Page's Sections.
+    /// belongs to the View, so a Text Block shown on two Pages joins each Page's Sections. At
+    /// the Page's start or after a Block of another type a boundary already exists, so one set
+    /// there changes nothing visible.
     SetSectionBoundary {
         /// The Page.
         page: PageId,
@@ -201,6 +204,9 @@ pub enum Error {
     OutOfRange,
     /// The edit would change nothing.
     NoChange,
+    /// A Text Block that starts a Section joins no Text Block above it; ⌫ there removes
+    /// the boundary instead.
+    SectionBoundary,
     /// The system's random source failed, so no new identity could be made.
     Random,
     /// The CRDT library failed; the message is its own.

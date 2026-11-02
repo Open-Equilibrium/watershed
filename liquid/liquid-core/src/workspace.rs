@@ -339,10 +339,15 @@ impl<S: Store> Workspace<S> {
                 }
                 let text = doc.text(&content)?;
                 let tail = text[utf8_offset(&text, *at)..].to_string();
-                let length =
-                    isize::try_from(doc.length(&content) - at).map_err(|_| Error::OutOfRange)?;
-                doc.splice_text(&content, *at, length, "")?;
-                let (new_block, new_view) = add_text_block(doc, order, Some(view), &tail, *style)?;
+                let (new_block, new_view) = if *at == 0 {
+                    let above = order.above(view).map(|above| above.id.clone());
+                    add_text_block(doc, order, above.as_ref(), "", *style)?
+                } else {
+                    let length = isize::try_from(doc.length(&content) - at)
+                        .map_err(|_| Error::OutOfRange)?;
+                    doc.splice_text(&content, *at, length, "")?;
+                    add_text_block(doc, order, Some(view), &tail, *style)?
+                };
                 let mut written =
                     Written::new(Document::Page(page.clone()), Changed::Views(page.clone()));
                 written
@@ -357,6 +362,9 @@ impl<S: Store> Workspace<S> {
             Mutation::JoinTextBlock { page, view } => {
                 let (doc, order) = self.page(page)?;
                 let joining = order.view(view).ok_or(Error::NotFound)?.clone();
+                if joining.boundary {
+                    return Err(Error::SectionBoundary);
+                }
                 let above = order.above(view).ok_or(Error::NotFound)?.clone();
                 let text = model::text(doc, joining.block.as_str()).ok_or(Error::NotFound)?;
                 let target = text_of(doc, &above.block)?;
