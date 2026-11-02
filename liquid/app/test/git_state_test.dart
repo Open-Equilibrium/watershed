@@ -24,6 +24,67 @@ void main() {
 
   int fetches() => backend.calls.where((call) => call == 'fetch').length;
 
+  testWidgets('a pending fetch leaves checkout polling active', (tester) async {
+    final pending = _PendingFetchBackend();
+    final state = GitState(
+      pending,
+      notify: (level, text) => notices.add((level, text)),
+    );
+    addTearDown(state.stop);
+    state.watch();
+    await tester.pump();
+    await tester.pump(fetchEvery);
+    expect(pending.calls.where((call) => call == 'fetch'), hasLength(1));
+    pending.git = gitStatusOf(branch: 'other', changed: 2);
+    pending.stashed = stashOf();
+    for (var tick = 0; tick < 3; tick++) {
+      await tester.pump(fetchEvery);
+      expect(state.status.value?.branch, 'other');
+      expect(state.status.value?.changed, 2);
+      expect(state.stash.value?.id, 's1');
+    }
+    expect(pending.calls.where((call) => call == 'fetch'), hasLength(1));
+    state.stop();
+    pending.fetched.completeError('fetch ended after stop');
+    await tester.pump();
+    expect(
+      notices.where((notice) => notice.$2.contains('Could not fetch')),
+      isEmpty,
+    );
+  });
+
+  testWidgets('overlapping writes each publish their switch and arrival', (
+    tester,
+  ) async {
+    final pending = _PendingWritesBackend();
+    final state = GitState(
+      pending,
+      notify: (level, text) => notices.add((level, text)),
+    );
+    await state.refresh();
+    Future<BridgeGitOutcome?> switchTo(String name) => state.switchTo(
+      branchOf(name),
+      leaveChanges: false,
+      fromBranch: null,
+      replacingStash: null,
+    );
+    final first = switchTo('one');
+    final second = switchTo('two');
+    await tester.pump();
+    pending.writes['one']!.complete();
+    await tester.pump();
+    await first;
+    pending.writes['two']!.complete();
+    await tester.pump();
+    await second;
+    expect(notices.map((notice) => notice.$2), [
+      'Switched to one.',
+      'one has stashed changes from 10:41; the Diff tab shows them.',
+      'Switched to two.',
+      'two has stashed changes from 10:41; the Diff tab shows them.',
+    ]);
+  });
+
   testWidgets('a write waits for the latest read to publish its own switch', (
     tester,
   ) async {
@@ -385,3 +446,35 @@ BridgeFileChange change(String path) => BridgeFileChange(
   added: 1,
   removed: 0,
 );
+
+class _PendingFetchBackend extends FakeBackend {
+  final fetched = Completer<bool>();
+
+  @override
+  Future<bool> fetch() {
+    calls.add('fetch');
+    return fetched.future;
+  }
+}
+
+class _PendingWritesBackend extends FakeBackend {
+  final writes = {'one': Completer<void>(), 'two': Completer<void>()};
+
+  @override
+  Future<BridgeGitOutcome> switchBranch(
+    BridgeBranch branch, {
+    required bool leaveChanges,
+    required String? fromBranch,
+    required String? replacingStash,
+  }) async {
+    await writes[branch.name]!.future;
+    git = gitStatusOf(branch: branch.name);
+    stashed = BridgeStash(
+      current: true,
+      id: branch.name,
+      createdMs: DateTime(2026, 11, 1, 10, 41).millisecondsSinceEpoch,
+      files: const [],
+    );
+    return outcome;
+  }
+}

@@ -439,18 +439,24 @@ class _DiffViewState extends State<DiffView> {
       return InputLane(input: widget.input, child: const SizedBox.expand());
     }
     if (_changes.isEmpty) {
-      final all = widget.state.shownScope.value is AllTurns;
+      final scope = widget.state.shownScope.value;
+      final all = scope is AllTurns;
       final turns = all ? 'these turns' : 'this turn';
+      final title = scope is StashedChanges
+          ? 'No stashed changes'
+          : 'No changes in $turns';
       return widget.settings.value.hideWhitespace
           ? _empty(
               context,
-              'No changes in $turns with whitespace hidden',
+              '$title with whitespace hidden',
               '${Fixed.hideWhitespace.display} shows them.',
             )
           : _empty(
               context,
-              'No changes in $turns',
-              'The project was the same at its end as at its start.',
+              title,
+              scope is StashedChanges
+                  ? 'The stash contains no changed files.'
+                  : 'The project was the same at its end as at its start.',
             );
     }
     final added = _changes.fold(0, (sum, change) => sum + change.added);

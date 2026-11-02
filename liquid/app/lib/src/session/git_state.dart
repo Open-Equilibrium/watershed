@@ -43,6 +43,7 @@ class GitState {
   bool _watching = false;
   int _failures = 0;
   DateTime? _fetched;
+  bool _fetching = false;
 
   /// Reads of the state left until the next fetch; the state is read every [fetchEvery]
   /// regardless.
@@ -55,6 +56,7 @@ class GitState {
   /// Whether a Git write of this window is running, so its own switch is not reported as one
   /// outside Liquid.
   bool _writing = false;
+  Future<void> _pendingWrite = Future<void>.value();
 
   /// What a write of this window tells after its own notice: the stash of the branch it
   /// switched to.
@@ -78,30 +80,43 @@ class GitState {
 
   Future<void> _tick(int watch) async {
     final upstream = status.value?.upstream;
-    if (upstream != null && --_untilFetch <= 0) {
-      try {
-        await _backend.fetch();
-        _failures = 0;
-        _fetched = DateTime.now();
-      } on Object catch (error) {
-        // A streak of failures tells once.
-        if (_failures++ == 0) {
-          final remote = upstream.split('/').first;
-          final since = switch (_fetched) {
-            final at? =>
-              ' The ahead and behind counts are from ${formatClockMs(at.millisecondsSinceEpoch)}.',
-            null => '',
-          };
-          notify(
-            BridgeLevel.warning,
-            'Could not fetch from $remote: $error.$since',
-          );
-        }
-      }
-      _untilFetch = fetchWait(_failures).inSeconds ~/ fetchEvery.inSeconds;
+    if (!_fetching && upstream != null && --_untilFetch <= 0) {
+      unawaited(_fetch(watch, upstream));
     }
     await refresh();
     if (watch == _watches) _next = Timer(fetchEvery, () => _tick(watch));
+  }
+
+  /// Fetching can wait on a remote while checkout polling continues.
+  Future<void> _fetch(int watch, String upstream) async {
+    _fetching = true;
+    try {
+      await _backend.fetch();
+      if (watch != _watches) return;
+      _failures = 0;
+      _fetched = DateTime.now();
+      await refresh();
+    } on Object catch (error) {
+      if (watch != _watches) return;
+      // A streak of failures tells once.
+      if (_failures++ == 0) {
+        final remote = upstream.split('/').first;
+        final since = switch (_fetched) {
+          final at? =>
+            ' The ahead and behind counts are from ${formatClockMs(at.millisecondsSinceEpoch)}.',
+          null => '',
+        };
+        notify(
+          BridgeLevel.warning,
+          'Could not fetch from $remote: $error.$since',
+        );
+      }
+    } finally {
+      _fetching = false;
+      if (watch == _watches) {
+        _untilFetch = fetchWait(_failures).inSeconds ~/ fetchEvery.inSeconds;
+      }
+    }
   }
 
   /// Reads the branch, its counts and its stash again.
@@ -220,6 +235,10 @@ class GitState {
     Future<BridgeGitOutcome> Function() run, {
     required String Function(BridgeGitStatus? now) done,
   }) async {
+    final previous = _pendingWrite;
+    final finished = Completer<void>();
+    _pendingWrite = finished.future;
+    await previous;
     _writing = true;
     try {
       final BridgeGitOutcome outcome;
@@ -288,6 +307,7 @@ class GitState {
     } finally {
       _writing = false;
       _arrived = null;
+      finished.complete();
     }
   }
 }

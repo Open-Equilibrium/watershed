@@ -403,10 +403,15 @@ fn tracking_a_local_branch_keeps_both_local_branches_in_the_list() {
 fn switching_carries_uncommitted_changes_and_a_remote_branch_gets_a_local_one_tracking_it() {
     run(async {
         let clone = Clone::new("switch");
+        clone.origin.write("release.txt", "release only\n");
+        clone.origin.git(&["add", "release.txt"]);
+        clone.origin.git(&["commit", "-qm", "release file"]);
         clone.origin.git(&["branch", "release"]);
         let repo = &clone.repo;
         repo.git(&["fetch", "-q"]);
         repo.git(&["branch", "feature"]);
+        repo.git(&["branch", "origin/release"]);
+        let remote = repo.git(&["rev-parse", "refs/remotes/origin/release"]);
         repo.write("a.txt", "edited\n");
         let checkpoints = Checkpoints::new(repo.path());
 
@@ -425,9 +430,11 @@ fn switching_carries_uncommitted_changes_and_a_remote_branch_gets_a_local_one_tr
             .await
             .expect("switched");
         assert_eq!(repo.git(&["branch", "--show-current"]), "release\n");
+        assert_eq!(repo.git(&["rev-parse", "HEAD"]), remote);
+        assert_eq!(read(repo, "release.txt"), "release only\n");
         assert_eq!(
-            repo.git(&["rev-parse", "--abbrev-ref", "release@{upstream}"]),
-            "origin/release\n"
+            repo.git(&["rev-parse", "--symbolic-full-name", "release@{upstream}"]),
+            "refs/remotes/origin/release\n"
         );
     });
 }
@@ -684,6 +691,7 @@ fn fetching_updates_only_the_upstreams_remote_tracking_branches() {
     run(async {
         let clone = Clone::new("fetch");
         let repo = &clone.repo;
+        repo.git(&["config", "fetch.writeCommitGraph", "true"]);
         let checkpoints = Checkpoints::new(repo.path());
         clone.commit_upstream("theirs\n");
         clone.origin.git(&["tag", "v1"]);
@@ -695,6 +703,8 @@ fn fetching_updates_only_the_upstreams_remote_tracking_branches() {
         assert_eq!(read(repo, "a.txt"), "old\n", "the files stay");
         assert_eq!(repo.git(&["tag", "--list"]), "", "no tags arrive");
         assert!(!repo.path().join(".git/FETCH_HEAD").exists());
+        assert!(!repo.path().join(".git/objects/info/commit-graph").exists());
+        assert!(!repo.path().join(".git/objects/info/commit-graphs").exists());
 
         repo.git(&["switch", "-q", "-c", "local"]);
         assert!(
@@ -2456,9 +2466,9 @@ fn stashed_changes_restore_only_on_the_tree_they_were_left_on() {
 #[test]
 fn leaving_refuses_a_submodule_commit_git_cannot_stash() {
     run(async {
-        for staged in [false, true] {
-            let sub = Repo::new(&format!("stash-submodule-inner-{staged}"));
-            let repo = Repo::new(&format!("stash-submodule-outer-{staged}"));
+        for state in ["working", "staged", "deleted"] {
+            let sub = Repo::new(&format!("stash-submodule-inner-{state}"));
+            let repo = Repo::new(&format!("stash-submodule-outer-{state}"));
             repo.git(&[
                 "-c",
                 "protocol.file.allow=always",
@@ -2473,8 +2483,10 @@ fn leaving_refuses_a_submodule_commit_git_cannot_stash() {
             let inner = Repo(repo.path().join("sub"));
             inner.write("a.txt", "moved\n");
             inner.git(&["commit", "-q", "-am", "moved"]);
-            if staged {
+            if state == "staged" {
                 repo.git(&["add", "sub"]);
+            } else if state == "deleted" {
+                repo.git(&["rm", "--cached", "sub"]);
             }
             let moved = inner.git(&["rev-parse", "HEAD"]);
             let current = repo.git(&["branch", "--show-current"]);
@@ -2791,6 +2803,153 @@ fn non_utf8_refs_never_collide_with_replacement_character_branches() {
         assert_eq!(
             std::fs::read(repo.path().join(".git/HEAD")).expect("HEAD bytes"),
             b"ref: refs/heads/bad-\xff\n"
+        );
+    });
+}
+
+#[test]
+fn leaving_changes_never_resets_a_directory_holding_a_repository() {
+    run(async {
+        let repo = Repo::new("stash-repository-below-reset");
+        repo.git(&["branch", "-M", "main"]);
+        repo.write("slot", "tracked\n");
+        repo.git(&["add", "slot"]);
+        repo.git(&["commit", "-qm", "track slot"]);
+        repo.git(&["branch", "other"]);
+        std::fs::remove_file(repo.path().join("slot")).expect("remove file");
+        let nested = Repo::at(repo.path().join("slot/nested"));
+        nested.write("a.txt", "nested edits\n");
+        let nested_head = nested.git(&["rev-parse", "HEAD"]);
+        repo.write("a.txt", "parent edits\n");
+        let before = repo.git(&["status", "--porcelain"]);
+        let index = repo.git(&["write-tree"]);
+        // A branch operation affects the whole checkout, even from a working subfolder.
+        std::fs::create_dir(repo.path().join("work")).expect("working folder");
+        let checkpoints = Checkpoints::new(&repo.path().join("work"));
+
+        let switched = checkpoints
+            .switch_branch(&local("other"), leave_on(&checkpoints).await)
+            .await;
+
+        assert!(
+            matches!(switched, Err(DiffError::WouldOverwrite(ref paths)) if paths.iter().any(|path| path == "slot")),
+            "{switched:?}"
+        );
+        assert_eq!(repo.git(&["branch", "--show-current"]), "main\n");
+        assert_eq!(read(&nested, "a.txt"), "nested edits\n");
+        assert_eq!(nested.git(&["rev-parse", "HEAD"]), nested_head);
+        nested.git(&["cat-file", "-e", nested_head.trim()]);
+        assert_eq!(read(&repo, "a.txt"), "parent edits\n");
+        assert_eq!(repo.git(&["status", "--porcelain"]), before);
+        assert_eq!(repo.git(&["write-tree"]), index);
+        assert!(repo.git(&["stash", "list"]).is_empty());
+    });
+}
+
+#[test]
+fn stash_identity_and_drop_repair_use_utf8_despite_log_settings() {
+    run(async {
+        let repo = Repo::new("stash-log-encoding");
+        repo.git(&["branch", "-M", "main"]);
+        repo.git(&["branch", "other"]);
+        repo.git(&["config", "i18n.logOutputEncoding", "ISO-8859-1"]);
+        repo.write("a.txt", "indexed\n");
+        repo.git(&["add", "a.txt"]);
+        let index = repo.git(&["write-tree"]);
+        repo.write("a.txt", "working\n");
+        repo.write("new.txt", "untracked\n");
+        let checkpoints = Checkpoints::new(repo.path());
+        checkpoints
+            .switch_branch(&local("other"), leave_on(&checkpoints).await)
+            .await
+            .expect("saved and switched");
+        checkpoints
+            .switch_branch(&local("main"), Changes::Bring)
+            .await
+            .expect("back");
+        let mine = stash_of(&checkpoints).await;
+        repo.write("a.txt", "theirs\n");
+        let theirs = repo
+            .git(&["stash", "create", "théirs · note"])
+            .trim()
+            .to_owned();
+        repo.git(&["checkout", "--", "a.txt"]);
+        let subject = repo.git(&["log", "-1", "--encoding=UTF-8", "--format=%s", &theirs]);
+        let root = repo.path().to_owned();
+        let stored = theirs.clone();
+        let label = subject.clone();
+        crate::diff::before_drop(repo.path(), move || {
+            let external = Repo(root);
+            external.git(&["stash", "store", "-m", label.trim_end(), &stored]);
+            std::mem::forget(external);
+        });
+
+        checkpoints.restore_stash(&mine).await.expect("restored");
+
+        assert_eq!(read(&repo, "a.txt"), "working\n");
+        assert_eq!(read(&repo, "new.txt"), "untracked\n");
+        assert_eq!(repo.git(&["write-tree"]), index);
+        assert_eq!(
+            repo.git(&["stash", "list", "--format=%H"]),
+            format!("{theirs}\n")
+        );
+        assert_eq!(
+            repo.git(&["stash", "list", "--encoding=UTF-8", "--format=%gs"]),
+            subject
+        );
+    });
+}
+
+#[test]
+fn an_external_commit_during_a_refused_switch_preserves_both_stashes() {
+    run(async {
+        let repo = Repo::new("switch-external-advance");
+        repo.git(&["branch", "-M", "main"]);
+        let other = Repo(repo.path().with_extension("worktree"));
+        let _ = std::fs::remove_dir_all(other.path());
+        repo.git(&[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "other",
+            other.path().to_str().unwrap(),
+        ]);
+        repo.write("a.txt", "earlier\n");
+        repo.git(&["stash", "push", "-qm", "Liquid: changes left on main"]);
+        let earlier = repo.git(&["rev-parse", "refs/stash"]).trim().to_owned();
+        let start = repo.git(&["rev-parse", "HEAD"]);
+        repo.write("a.txt", "new changes\n");
+        let checkpoints = Checkpoints::new(repo.path());
+        let root = repo.path().to_owned();
+        crate::diff::before_stash_identity(repo.path(), move || {
+            let external = Repo(root);
+            external.git(&["commit", "--allow-empty", "-qm", "external advance"]);
+            std::mem::forget(external);
+        });
+
+        let switched = checkpoints
+            .switch_branch(&local("other"), leave_on(&checkpoints).await)
+            .await;
+
+        assert!(matches!(switched, Err(DiffError::Git(_))), "{switched:?}");
+        assert_eq!(repo.git(&["branch", "--show-current"]), "main\n");
+        assert_ne!(repo.git(&["rev-parse", "HEAD"]), start);
+        let listed = repo.git(&["stash", "list", "--format=%H"]);
+        let ids: Vec<&str> = listed.lines().collect();
+        assert_eq!(
+            ids.len(),
+            2,
+            "both saves survive uncertain checkout movement"
+        );
+        assert_eq!(ids[1], earlier);
+        assert_eq!(
+            repo.git(&["show", &format!("{}:a.txt", ids[0])]),
+            "new changes\n"
+        );
+        assert_eq!(
+            repo.git(&["show", &format!("{earlier}:a.txt")]),
+            "earlier\n"
         );
     });
 }

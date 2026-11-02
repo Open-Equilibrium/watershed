@@ -848,6 +848,30 @@ void main() {
     expect(state.changed.value!.first.removed, 1);
   });
 
+  testWidgets('an empty filtered stash identifies stashed changes', (
+    tester,
+  ) async {
+    final backend = FakeBackend()
+      ..stashed = BridgeStash(
+        current: true,
+        id: 's1',
+        createdMs: 1,
+        files: [modified('spaced.ts', 1, 1)],
+      )
+      ..changedWithoutWhitespace = [];
+    final state = await show(tester, backend);
+    await state.showTurns(const StashedChanges());
+    await tester.pumpAndSettle();
+
+    await press(tester, LogicalKeyboardKey.keyW);
+
+    expect(
+      find.text('No stashed changes with whitespace hidden'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('this turn'), findsNothing);
+  });
+
   testWidgets('opens with the Diff settings kept from before', (tester) async {
     final backend = FakeBackend()
       ..changed = [modified('code.ts', 2, 1), modified('spaced.ts', 1, 1)]

@@ -197,6 +197,7 @@ impl WorkingTree {
     /// Switches to `to`; a remote branch gets a local branch that tracks it. Uncommitted changes
     /// come along or stay in the branch's stash, which replaces its earlier one once switched.
     pub async fn switch(&self, to: &BranchTarget, changes: Changes) -> Result<(), DiffError> {
+        let remote;
         let args = match to {
             BranchTarget::Local(name) => [
                 "switch",
@@ -204,12 +205,10 @@ impl WorkingTree {
                 "--no-guess",
                 branch_name(name)?,
             ],
-            BranchTarget::Remote(name) => [
-                "switch",
-                "--no-overwrite-ignore",
-                "--track",
-                branch_name(name)?,
-            ],
+            BranchTarget::Remote(name) => {
+                remote = format!("refs/remotes/{}", branch_name(name)?);
+                ["switch", "--no-overwrite-ignore", "--track", &remote]
+            }
         };
         let _stash = if matches!(changes, Changes::Leave { .. }) {
             Some(self.checkout().stash_alone().await?)
@@ -229,10 +228,17 @@ impl WorkingTree {
             }
             left = self.push_stash().await?;
         }
-        let switched = self.switching(&args, &start).await;
+        let switched = self.switching(&args, &start, to).await;
         let moved =
             !matches!(switched, Err(ref error) if !matches!(error, DiffError::HookFailed(_)));
         if let (false, Some(left)) = (moved, &left) {
+            if self.head().await? != start {
+                return Err(DiffError::Git(
+                    "The checkout changed while Git refused the switch. All stashes were kept; \
+                     use Git to recover the saved changes before switching again."
+                        .to_owned(),
+                ));
+            }
             // Git did not switch, so the changes go back where they were.
             if earlier.as_ref() == Some(left) {
                 // An identical save reused the existing stash and added no reflog entry.
@@ -259,20 +265,41 @@ impl WorkingTree {
             .await
             .map_err(|_| DiffError::InvalidBranch(name.to_owned()))?;
         let start = self.head().await?;
-        self.switching(&["switch", "-c", name], &start).await
+        self.switching(
+            &["switch", "-c", name],
+            &start,
+            &BranchTarget::Local(name.to_owned()),
+        )
+        .await
     }
 
     /// Runs the switch `args` from HEAD `start`. Git exits with a failing `post-checkout` hook's
-    /// status after it switched, so a failure counts as one only while HEAD stays at `start`.
+    /// status after it switched. Only arrival on the requested branch identifies that case;
+    /// another Git may have moved HEAD during a refused switch.
     async fn switching(
         &self,
         args: &[&str],
         start: &(String, Option<String>),
+        to: &BranchTarget,
     ) -> Result<(), DiffError> {
         let Err(error) = user_git(&self.root, args).await else {
             return Ok(());
         };
-        if self.head().await? != *start {
+        let current = self.head().await?;
+        let arrived = current.0 != start.0
+            && match to {
+                BranchTarget::Local(name) => current.0 == format!("refs/heads/{name}"),
+                BranchTarget::Remote(name) => {
+                    git_ref_output(
+                        &self.root,
+                        &["for-each-ref", "--format=%(upstream)", &current.0],
+                    )
+                    .await?
+                    .trim_end_matches('\n')
+                        == format!("refs/remotes/{name}")
+                }
+            };
+        if arrived {
             return Err(DiffError::HookFailed(match error {
                 DiffError::Git(reason) => reason,
                 error => error.to_string(),
@@ -391,6 +418,7 @@ impl WorkingTree {
                 // Pruning settings otherwise add a tag refspec even with `--no-tags`.
                 "--no-prune-tags",
                 "--no-auto-gc",
+                "--no-write-commit-graph",
                 "--no-write-fetch-head",
                 "--no-recurse-submodules",
                 "--",

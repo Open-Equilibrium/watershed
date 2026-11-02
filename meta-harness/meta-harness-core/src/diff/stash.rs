@@ -227,9 +227,10 @@ impl WorkingTree {
             self.tree_paths(&now).await?;
             self.tree_paths(&head).await?;
             let reset = self.changes(&now, &head, Whitespace::Shown).await?;
-            let ignored = self.ignored_in_the_way(&reset, &self.env(&index)).await?;
-            if !ignored.is_empty() {
-                return Err(DiffError::WouldOverwrite(ignored.into_iter().collect()));
+            let mut blocked = self.ignored_in_the_way(&reset, &self.env(&index)).await?;
+            blocked.extend(self.repositories_in_the_way(&reset));
+            if !blocked.is_empty() {
+                return Err(DiffError::WouldOverwrite(blocked.into_iter().collect()));
             }
         }
         let branch = self.branch().await?.ok_or(DiffError::NoBranch)?;
@@ -283,21 +284,34 @@ impl WorkingTree {
         while let Some(record) = records.next() {
             // `SC` names an unstaged commit change. A staged gitlink instead has index mode
             // 160000 and different HEAD/index object names. Renames also have an old path.
-            let fields: Vec<&str> = record.splitn(9, ' ').collect();
-            let changed = |fields: &[&str], at: usize| {
-                (fields.get(2).is_some_and(|sub| sub.starts_with("SC"))
-                    || (fields.get(4) == Some(&"160000") && fields.get(6) != fields.get(7)))
-                .then(|| fields.get(at).map(|path| (*path).to_owned()))
-                .flatten()
+            let count = match record.as_bytes().first() {
+                Some(b'1') => 9,
+                Some(b'2') => 10,
+                _ => continue,
             };
-            match fields.first() {
-                Some(&"1") => moved.extend(changed(&fields, 8)),
-                Some(&"2") => {
-                    let fields: Vec<&str> = record.splitn(10, ' ').collect();
-                    moved.extend(changed(&fields, 9));
-                    records.next();
+            let fields: Vec<&str> = record.splitn(count, ' ').collect();
+            let old = (count == 10).then(|| records.next()).flatten();
+            let Some(path) = fields.get(count - 1) else {
+                continue;
+            };
+            let mut changed = fields.get(2).is_some_and(|sub| sub.starts_with("SC"))
+                || (fields.get(4) == Some(&"160000") && fields.get(6) != fields.get(7));
+            // Deleting or replacing the staged gitlink hides the checked-out commit from
+            // porcelain's submodule field. Compare the repository still at its HEAD path.
+            if fields.get(3) == Some(&"160000") && fields.get(4) != Some(&"160000") {
+                let folder = old.unwrap_or(path);
+                let root = self.root.join(folder);
+                if std::fs::symlink_metadata(&root).is_ok_and(|meta| meta.is_dir()) {
+                    let head =
+                        git_ref_output(&root, &["rev-parse", "--show-prefix", "--verify", "HEAD"])
+                            .await?;
+                    if let Some(head) = head.strip_prefix('\n') {
+                        changed |= fields.get(6).copied() != Some(head.trim_end_matches('\n'));
+                    }
                 }
-                _ => {}
+            }
+            if changed {
+                moved.push((*path).to_owned());
             }
         }
         Ok(moved)
@@ -327,7 +341,12 @@ impl WorkingTree {
                 )));
             }
             // Its own subject is what the list showed for it.
-            let subject = git(&self.root, &[], &["log", "-1", "--format=%s", dropped]).await?;
+            let subject = git(
+                &self.root,
+                &[],
+                &["log", "-1", "--encoding=UTF-8", "--format=%s", dropped],
+            )
+            .await?;
             user_git(
                 &self.root,
                 &["stash", "store", "-m", subject.trim_end(), dropped],
@@ -522,7 +541,12 @@ impl WorkingTree {
         let listed = git(
             &self.root,
             &[],
-            &["stash", "list", "--format=%H%x00%gd%x00%ct%x00%gs"],
+            &[
+                "stash",
+                "list",
+                "--encoding=UTF-8",
+                "--format=%H%x00%gd%x00%ct%x00%gs",
+            ],
         )
         .await?;
         listed
