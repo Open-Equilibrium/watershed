@@ -546,6 +546,57 @@ fn automatic_fetch_never_expands_a_remote_group_into_unchecked_destinations() {
 }
 
 #[test]
+fn automatic_fetch_refuses_legacy_remote_definitions() {
+    run(async {
+        for (directory, linked) in [("remotes", false), ("branches", false), ("remotes", true)] {
+            let clone = Clone::new(&format!("fetch-legacy-{directory}-{linked}"));
+            let repo = &clone.repo;
+            repo.git(&["branch", "release"]);
+            repo.git(&["config", "--unset-all", "remote.origin.url"]);
+            let definitions = repo.path().join(".git").join(directory);
+            std::fs::create_dir(&definitions).expect("legacy definitions directory");
+            let definition = if directory == "remotes" {
+                format!(
+                    "URL: {}\nPull: +refs/heads/main:refs/remotes/origin/main\nPull: +refs/heads/main:refs/heads/release\n",
+                    clone.origin.path().display()
+                )
+            } else {
+                format!("{}#main\n", clone.origin.path().display())
+            };
+            std::fs::write(definitions.join("origin"), definition).expect("legacy definition");
+            let working = if linked {
+                let path = repo.path().join("linked");
+                repo.git(&[
+                    "worktree",
+                    "add",
+                    "-q",
+                    "--track",
+                    "-b",
+                    "linked",
+                    path.to_str().expect("worktree path"),
+                    "origin/main",
+                ]);
+                path
+            } else {
+                repo.path().to_owned()
+            };
+            let before = repo.git(&["show-ref"]);
+            clone.commit_upstream("theirs\n");
+            let checkpoints = Checkpoints::new(&working);
+
+            let fetched = checkpoints.fetch().await;
+
+            assert!(
+                matches!(fetched, Err(DiffError::Git(_))),
+                "{directory}: {fetched:?}"
+            );
+            assert_eq!(repo.git(&["show-ref"]), before, "{directory}");
+            assert_eq!(read(repo, "a.txt"), "old\n", "{directory}");
+        }
+    });
+}
+
+#[test]
 fn automatic_fetch_refuses_incomplete_configuration_reads() {
     use std::io::Write;
 

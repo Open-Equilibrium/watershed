@@ -307,6 +307,23 @@ impl WorkingTree {
         if remote.is_empty() || remote == "." {
             return Ok(false);
         }
+        // Legacy remote files can add mappings absent from Git configuration. Refuse their
+        // presence without reading URLs; both locations are shared by linked worktrees.
+        if remote != ".." && !remote.contains('/') {
+            for directory in ["remotes", "branches"] {
+                match std::fs::symlink_metadata(self.common.join(directory).join(remote)) {
+                    Ok(_) => {
+                        return Err(DiffError::Git(
+                            "Automatic fetch cannot use legacy remote definitions. Configure \
+                             this remote in Git configuration instead."
+                                .to_owned(),
+                        ));
+                    }
+                    Err(error) if error.kind() == ErrorKind::NotFound => {}
+                    Err(error) => return Err(DiffError::Io(error)),
+                }
+            }
+        }
         // Git expands a group with multiple members before using the named remote's refspecs.
         let group = format!("remotes.{remote}");
         let groups = git_config(&self.root, &["--null", "--get-regexp", "^remotes\\."]).await?;
