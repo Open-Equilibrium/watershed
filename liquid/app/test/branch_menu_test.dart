@@ -198,6 +198,72 @@ void main() {
     await tester.pump(const Duration(seconds: 7));
   });
 
+  testWidgets(
+    'leaving refuses a branch list inconsistent with the displayed source',
+    (tester) async {
+      await show(tester);
+      backend.branches = BridgeBranches(
+        branches: [
+          branchOf('main'),
+          branchOf('other', current: true, stashed: true),
+          branchOf('feature/token-bucket'),
+        ],
+        running: const [],
+      );
+      backend.stashed = const BridgeStash(
+        id: 'other-stash',
+        createdMs: 1,
+        files: [],
+      );
+      await openMenu(tester);
+      await tester.tap(find.text('feature/token-bucket'));
+      await tester.pumpAndSettle();
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+
+      expect(
+        backend.calls.where((call) => call.startsWith('switch ')),
+        isEmpty,
+      );
+      expect(
+        find.textContaining('The checkout branch or stash changed.'),
+        findsOneWidget,
+      );
+      await tester.pump(const Duration(seconds: 7));
+    },
+  );
+
+  testWidgets('leaving confirms the raw branch behind its displayed name', (
+    tester,
+  ) async {
+    const raw = 'feature/\u202e';
+    const shown = 'feature/<U+202E>';
+    await show(tester, git: gitStatusOf(branch: shown, changed: 1));
+    backend.branches = BridgeBranches(
+      branches: [
+        const BridgeBranch(
+          name: raw,
+          shown: shown,
+          remote: false,
+          committedMs: 0,
+          current: true,
+          stashed: false,
+        ),
+        branchOf('feature/token-bucket'),
+      ],
+      running: const [],
+    );
+    await openMenu(tester);
+    await tester.tap(find.text('feature/token-bucket'));
+    await tester.pumpAndSettle();
+    expect(find.text('Leave my changes on $shown'), findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+
+    expect(backend.switchConfirmation, (branch: raw, stash: null));
+    await tester.pump(const Duration(seconds: 7));
+  });
+
   testWidgets('Git refusing to bring the changes offers to leave them', (
     tester,
   ) async {

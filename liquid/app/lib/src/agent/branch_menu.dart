@@ -169,13 +169,11 @@ Future<void> _switch(
   final left = git.status.value?.branch;
   final changed = git.status.value?.changed ?? 0;
   final stashed = git.stash.value;
-  final from = branches.branches
-      .where((branch) => branch.current)
-      .firstOrNull
-      ?.name;
+  final from = branches.branches.where((branch) => branch.current).firstOrNull;
   Future<BridgeGitOutcome?> switchTo(bool leave) async {
     if (leave &&
-        (left != git.status.value?.branch ||
+        (left != from?.shown ||
+            left != git.status.value?.branch ||
             stashed?.id != git.stash.value?.id)) {
       state.notify(
         BridgeLevel.warning,
@@ -186,7 +184,7 @@ Future<void> _switch(
     return git.switchTo(
       branch,
       leaveChanges: leave,
-      fromBranch: from,
+      fromBranch: from?.name,
       replacingStash: stashed?.id,
     );
   }
