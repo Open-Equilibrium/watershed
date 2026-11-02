@@ -184,3 +184,17 @@ fn a_long_edited_document_loads_from_a_snapshot() {
     let text = workspace.text(&page, &block).unwrap().unwrap();
     assert_eq!(text, format!("{}Five days in Lisbon", "x".repeat(1_200)));
 }
+
+#[test]
+fn one_session_at_a_time_holds_the_replica() {
+    let scratch = Scratch::new("exclusive");
+    lisbon(&scratch.db());
+    let first = Workspace::open(Sqlite::open(&scratch.db(), &KEY).unwrap()).unwrap();
+
+    let Err(Error::Storage(second)) = Sqlite::open(&scratch.db(), &KEY) else {
+        panic!("a second session opened the replica")
+    };
+    assert_eq!(second, "another Liquid session holds this replica");
+    drop(first);
+    assert!(Sqlite::open(&scratch.db(), &KEY).is_ok());
+}

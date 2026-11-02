@@ -12,7 +12,7 @@ use std::fmt::Write as _;
 use std::path::Path;
 
 use liquid_core::{Action, ActionId, Commit, Document, Error, Store, Write};
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, ErrorCode, OptionalExtension, params};
 
 /// The schema version this crate writes; [`Sqlite::open`] migrates older databases to it.
 const VERSION: i64 = 1;
@@ -40,9 +40,15 @@ fn failed(error: impl std::fmt::Display) -> Error {
     Error::Storage(error.to_string())
 }
 
+fn held() -> Error {
+    Error::Storage("another Liquid session holds this replica".into())
+}
+
 impl Sqlite {
     /// Opens the database at `path`, creating it if it does not exist, with the 256-bit
-    /// `key` that the operating system's keystore holds. A wrong key is refused.
+    /// `key` that the operating system's keystore holds. A wrong key is refused, and so is
+    /// a database another session holds: each session keeps its documents in memory, so
+    /// one session at a time owns the replica until it is dropped.
     pub fn open(path: &Path, key: &[u8; 32]) -> Result<Self, Error> {
         let connection = Connection::open(path).map_err(failed)?;
         let mut hex = String::with_capacity(64);
@@ -50,11 +56,23 @@ impl Sqlite {
             let _ = write!(hex, "{byte:02x}");
         }
         connection
-            .execute_batch(&format!("PRAGMA key = \"x'{hex}'\";"))
+            .execute_batch(&format!(
+                "PRAGMA key = \"x'{hex}'\"; PRAGMA locking_mode = EXCLUSIVE;"
+            ))
             .map_err(failed)?;
         let version: i64 = connection
             .query_row("PRAGMA user_version", [], |row| row.get(0))
-            .map_err(|_| Error::Storage("wrong key, or not a Liquid database".into()))?;
+            .map_err(|error| match error.sqlite_error_code() {
+                Some(ErrorCode::DatabaseBusy) => held(),
+                _ => Error::Storage("wrong key, or not a Liquid database".into()),
+            })?;
+        // The first write takes the exclusive lock, which the connection keeps.
+        connection
+            .execute_batch("BEGIN EXCLUSIVE; COMMIT;")
+            .map_err(|error| match error.sqlite_error_code() {
+                Some(ErrorCode::DatabaseBusy) => held(),
+                _ => failed(error),
+            })?;
         let mode: String = connection
             .query_row("PRAGMA journal_mode = WAL", [], |row| row.get(0))
             .map_err(failed)?;
