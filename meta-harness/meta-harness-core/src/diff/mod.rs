@@ -269,7 +269,7 @@ impl WorkingTree {
         let index = git_path(dir, &["rev-parse", "--git-path", "index"]).await?;
         let locks = git_path(dir, &["rev-parse", "--git-path", "watershed"]).await?;
         let common = git_path(dir, &["rev-parse", "--git-common-dir"]).await?;
-        let prefix = git(dir, &[], &["rev-parse", "--show-prefix"]).await?;
+        let prefix = git_path_output(dir, &[], &["rev-parse", "--show-prefix"]).await?;
         let prefix = prefix.strip_suffix('\n').unwrap_or(&prefix).to_owned();
         let absolute = |path: &str| {
             let path = Path::new(path);

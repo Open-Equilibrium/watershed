@@ -100,6 +100,66 @@ fn an_unrepresentable_repository_path_never_selects_its_replacement_sibling() {
 }
 
 #[test]
+fn an_undecodable_working_prefix_never_selects_its_replacement_sibling() {
+    const CHILD: &str = "WATERSHED_PREFIX_BYTES_TEST";
+    if std::env::var_os(CHILD).is_none() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let driver = Repo::new("prefix-driver");
+        let host_git = Command::new("sh")
+            .args(["-c", "command -v git"])
+            .output()
+            .expect("Git path");
+        assert!(host_git.status.success());
+        let host_git = String::from_utf8(host_git.stdout).expect("Git path text");
+        // This filesystem rejects invalid pathname bytes. Supply the exact prefix Git
+        // reports on hosts that can hold them, delegating every other command to real Git.
+        let wrapper = driver.path().join("git");
+        std::fs::write(
+            &wrapper,
+            format!(
+                "#!/bin/sh\nfor arg do\n  if [ \"$arg\" = --show-prefix ]; then printf 'folder-\\377/\\n'; exit 0; fi\ndone\nexec {} \"$@\"\n",
+                super::shell_word(host_git.trim())
+            ),
+        ).expect("Git wrapper");
+        std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755))
+            .expect("executable");
+        let path = std::env::join_paths(std::iter::once(driver.path().to_owned()).chain(
+            std::env::split_paths(&std::env::var_os("PATH").expect("PATH")),
+        ))
+        .expect("test PATH");
+        let output = Command::new(std::env::current_exe().expect("test executable"))
+            .args([
+                "--exact",
+                "tests::diff::an_undecodable_working_prefix_never_selects_its_replacement_sibling",
+            ])
+            .env(CHILD, "1")
+            .env("PATH", path)
+            .output()
+            .expect("isolated test");
+        assert!(
+            output.status.success(),
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return;
+    }
+    run(async {
+        let repo = Repo::new("prefix-bytes");
+        std::fs::create_dir(repo.path().join("folder-\u{fffd}")).expect("sibling");
+        repo.write("folder-\u{fffd}/victim", "unchanged\n");
+        let opened = WorkingTree::open(repo.path()).await;
+        assert!(matches!(opened, Err(DiffError::Git(reason)) if reason.contains("UTF-8")));
+        assert_eq!(
+            std::fs::read_to_string(repo.path().join("folder-\u{fffd}/victim"))
+                .expect("sibling file"),
+            "unchanged\n"
+        );
+    });
+}
+
+#[test]
 fn diff_listings_never_alias_an_undecodable_path_to_its_replacement_sibling() {
     use std::io::Write;
     use std::process::Stdio;
