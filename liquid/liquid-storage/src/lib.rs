@@ -3,8 +3,8 @@
 //! architecture rule 15).
 //!
 //! The database holds each document's chunks, Automerge changes and snapshots, and every
-//! recorded Action. A commit is one transaction with full synchronization, so an
-//! acknowledged write survives the app being killed.
+//! recorded Action. A commit is one transaction that reaches the storage medium, so an
+//! acknowledged write survives the app being killed and a power loss.
 
 #![deny(missing_docs)]
 
@@ -61,8 +61,12 @@ impl Sqlite {
         if mode != "wal" {
             return Err(Error::Storage(format!("journal mode {mode}, not WAL")));
         }
+        // Full synchronization, and on Apple systems F_FULLFSYNC, so a commit reaches the
+        // storage medium rather than the drive's cache and survives a power loss.
         connection
-            .execute_batch("PRAGMA synchronous = FULL;")
+            .execute_batch(
+                "PRAGMA synchronous = FULL; PRAGMA fullfsync = ON; PRAGMA checkpoint_fullfsync = ON;",
+            )
             .map_err(failed)?;
         match version {
             0 => connection
