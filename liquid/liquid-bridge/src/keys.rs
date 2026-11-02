@@ -1,6 +1,6 @@
 //! Where the replica's database key lives: the operating system's keychain, through the
 //! `keyring` crate (ADR-0237). On macOS the item belongs to the app that created it, so the key
-//! is released only to Liquid (ADR-0229); Linux and Windows wait for D-077.
+//! is released only to Liquid (ADR-0229); Linux and Windows wait for D-083.
 
 use std::path::Path;
 

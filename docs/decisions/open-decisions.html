@@ -114,8 +114,8 @@ summary{cursor:pointer}summary h3{display:inline;margin:0}summary:focus-visible{
         <ul><li><strong>A:</strong> A small set of resource-specific commands and action schemas. Pro: compact for agents, easy to test and restrict. Con: new capabilities need explicit additions.</li><li><strong>B:</strong> One broad document interface. Pro: flexible. Con: harder to secure, discover efficiently and change safely.</li></ul>
         <p><strong>Recommendation:</strong> A.</p>
       </details>
-      <details id="d-077" class="decision">
-        <summary><h3>D-077 - Who May Read The Replica Key On Linux And Windows</h3></summary>
+      <details id="d-083" class="decision">
+        <summary><h3>D-083 - Who May Read The Replica Key On Linux And Windows</h3></summary>
         <p><strong>Status:</strong> Open before the Linux and Windows Liquid clients. On macOS the keychain item belongs to Liquid, as ADR-0229 requires.</p>
         <p><strong>Question:</strong> ADR-0229 says Liquid's database key is released only to Liquid. The Secret Service on Linux and the Credential Manager on Windows release a stored secret to any program of the same user, so what must hold there?</p>
         <ul><li><strong>A: Agents are kept away from the store, other programs of the person are not.</strong> The agent sandbox blocks the session bus that the Secret Service uses, and agents on Windows run in WSL, which may not start Windows programs (ADR-0229). Pro: no new mechanism, and it matches the M3 boundary, where the device owner and their own programs can read the complete replica anyway (ADR-0141). Con: any program the person runs outside the sandbox can read the key.</li><li><strong>B: Bind the key to Liquid as macOS does</strong>, for example with a per-app secret through the Flatpak portal on Linux and a Liquid-only protection on Windows. Pro: closer to macOS. Con: neither system offers this for every installation, and it adds code per platform.</li><li><strong>C: State the weaker guarantee and do nothing more.</strong> Pro: simplest. Con: leaves agents a path to the key unless their sandbox closes it by chance.</li></ul>
