@@ -130,3 +130,56 @@ Status and stash reads take 78.4 ms p50 (101.4 ms p95), compared with 44.7 ms p5
          15807969411  cycles elapsed
              7094680  peak memory footprint
 ```
+
+### Batched commit attribution
+
+Observed on 2026-11-02 in the KPI-fix working tree over `0c794c4`, in the same environment with the same expanded workload and exclusions above. Rebuilt with `cargo build --release -p meta-harness-core --example checkpoint_observe`, then ran `/usr/bin/time -l target/release/examples/checkpoint_observe`; no other builds or tests ran during measurement.
+
+Commit plans take 147.8 ms for one turn and 128.8 ms for twenty, with 124.8 ms p50, 147.8 ms p95 and 154.1 ms maximum across the twenty samples, compared with 550.9 ms p50 and 1024.9 ms p95 above. Checkpoint refs are read once and all tree pairs use one bounded `diff-tree --stdin` process; attribution has a separate deadline and returns the file list without labels if it times out or exceeds its byte bound. Uncommitted reads take 66.3 ms p50 (81.7 ms p95); status and stash take 58.9 ms p50 (64.0 ms p95), with no default-branch query for an untracked branch. The complete workload takes 24.53 seconds wall time; peak memory footprint is 7,324,080 bytes and maximum resident set size 12,664,832 bytes, including the writer run.
+
+#### Raw output
+
+```json
+{"attributed_turns":1,"commit_plan_ms":147.787,"end_ms":83.035,"files":11,"list_ms":28.838,"plan_ms":97.45,"poll_ms":64.037,"revert_ms":198.445,"sample":0,"start_ms":108.176,"uncommitted_ms":81.722}
+{"attributed_turns":2,"commit_plan_ms":136.213,"end_ms":80.66,"files":11,"list_ms":26.863,"plan_ms":96.32,"poll_ms":63.637,"revert_ms":193.735,"sample":1,"start_ms":74.74,"uncommitted_ms":76.317}
+{"attributed_turns":3,"commit_plan_ms":125.426,"end_ms":80.932,"files":11,"list_ms":25.955,"plan_ms":90.699,"poll_ms":62.127,"revert_ms":201.862,"sample":2,"start_ms":71.315,"uncommitted_ms":72.121}
+{"attributed_turns":4,"commit_plan_ms":154.052,"end_ms":100.554,"files":11,"list_ms":30.194,"plan_ms":109.521,"poll_ms":72.696,"revert_ms":183.575,"sample":3,"start_ms":81.173,"uncommitted_ms":83.027}
+{"attributed_turns":5,"commit_plan_ms":117.356,"end_ms":69.748,"files":11,"list_ms":23.487,"plan_ms":87.719,"poll_ms":59.879,"revert_ms":166.063,"sample":4,"start_ms":67.548,"uncommitted_ms":66.366}
+{"attributed_turns":6,"commit_plan_ms":121.069,"end_ms":66.996,"files":11,"list_ms":23.353,"plan_ms":83.738,"poll_ms":58.948,"revert_ms":164.552,"sample":5,"start_ms":61.949,"uncommitted_ms":64.608}
+{"attributed_turns":7,"commit_plan_ms":117.761,"end_ms":65.736,"files":11,"list_ms":23.038,"plan_ms":86.078,"poll_ms":58.468,"revert_ms":165.866,"sample":6,"start_ms":61.209,"uncommitted_ms":65.715}
+{"attributed_turns":8,"commit_plan_ms":118.86,"end_ms":66.29,"files":11,"list_ms":23.227,"plan_ms":86.783,"poll_ms":58.495,"revert_ms":171.051,"sample":7,"start_ms":62.184,"uncommitted_ms":64.815}
+{"attributed_turns":9,"commit_plan_ms":120.899,"end_ms":73.08,"files":11,"list_ms":23.46,"plan_ms":83.282,"poll_ms":59.988,"revert_ms":164.067,"sample":8,"start_ms":68.36,"uncommitted_ms":66.57}
+{"attributed_turns":10,"commit_plan_ms":119.484,"end_ms":66.637,"files":11,"list_ms":23.382,"plan_ms":85.897,"poll_ms":58.631,"revert_ms":210.402,"sample":9,"start_ms":61.161,"uncommitted_ms":66.071}
+{"attributed_turns":11,"commit_plan_ms":121.834,"end_ms":66.621,"files":11,"list_ms":23.212,"plan_ms":83.406,"poll_ms":58.996,"revert_ms":165.741,"sample":10,"start_ms":62.042,"uncommitted_ms":65.982}
+{"attributed_turns":12,"commit_plan_ms":121.828,"end_ms":66.341,"files":11,"list_ms":23.22,"plan_ms":85.132,"poll_ms":58.51,"revert_ms":168.991,"sample":11,"start_ms":62.186,"uncommitted_ms":66.276}
+{"attributed_turns":13,"commit_plan_ms":122.355,"end_ms":66.41,"files":11,"list_ms":23.11,"plan_ms":84.576,"poll_ms":58.006,"revert_ms":174.357,"sample":12,"start_ms":61.22,"uncommitted_ms":64.415}
+{"attributed_turns":14,"commit_plan_ms":124.529,"end_ms":65.726,"files":11,"list_ms":23.251,"plan_ms":84.06,"poll_ms":58.439,"revert_ms":165.742,"sample":13,"start_ms":62.147,"uncommitted_ms":66.275}
+{"attributed_turns":15,"commit_plan_ms":125.936,"end_ms":66.546,"files":11,"list_ms":23.9,"plan_ms":82.934,"poll_ms":61.883,"revert_ms":165.09,"sample":14,"start_ms":61.756,"uncommitted_ms":66.374}
+{"attributed_turns":16,"commit_plan_ms":124.819,"end_ms":65.73,"files":11,"list_ms":23.18,"plan_ms":84.393,"poll_ms":58.609,"revert_ms":167.564,"sample":15,"start_ms":61.441,"uncommitted_ms":65.85}
+{"attributed_turns":17,"commit_plan_ms":125.559,"end_ms":66.117,"files":11,"list_ms":23.07,"plan_ms":84.996,"poll_ms":58.472,"revert_ms":164.893,"sample":16,"start_ms":62.157,"uncommitted_ms":65.84}
+{"attributed_turns":18,"commit_plan_ms":126.981,"end_ms":66.19,"files":11,"list_ms":23.277,"plan_ms":84.716,"poll_ms":58.931,"revert_ms":171.558,"sample":17,"start_ms":60.717,"uncommitted_ms":67.517}
+{"attributed_turns":19,"commit_plan_ms":127.191,"end_ms":66.436,"files":11,"list_ms":24.467,"plan_ms":84.593,"poll_ms":61.39,"revert_ms":165.242,"sample":18,"start_ms":65.714,"uncommitted_ms":67.076}
+{"attributed_turns":20,"commit_plan_ms":128.84,"end_ms":66.782,"files":11,"list_ms":23.253,"plan_ms":85.747,"poll_ms":58.285,"revert_ms":166.283,"sample":19,"start_ms":62.012,"uncommitted_ms":62.753}
+{"commit_plan":{"max_ms":154.052,"p50_ms":124.819,"p95_ms":147.787},"end":{"max_ms":100.554,"p50_ms":66.621,"p95_ms":83.035},"files":20000,"first_start_ms":108.176,"list":{"max_ms":30.194,"p50_ms":23.353,"p95_ms":28.838},"list_sessions_ms":6.84,"plan":{"max_ms":109.521,"p50_ms":85.132,"p95_ms":97.45},"plan_with_folders_in_place_ms":888.3,"poll":{"max_ms":72.696,"p50_ms":58.948,"p95_ms":64.037},"remove_all_ms":17.434,"revert":{"max_ms":210.402,"p50_ms":167.564,"p95_ms":201.862},"samples":20,"start":{"max_ms":81.173,"p50_ms":62.147,"p95_ms":74.74},"summary":"checkpoints","uncommitted":{"max_ms":83.027,"p50_ms":66.276,"p95_ms":81.722}}
+```
+
+```text
+       24.53 real         6.60 user        33.72 sys
+            12664832  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+             1223648  page reclaims
+               26506  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                1288  messages sent
+                1288  messages received
+                1288  signals received
+                2039  voluntary context switches
+               64802  involuntary context switches
+         56762227327  instructions retired
+         13240989986  cycles elapsed
+             7324080  peak memory footprint
+```
