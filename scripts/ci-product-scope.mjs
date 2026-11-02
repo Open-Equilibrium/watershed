@@ -65,7 +65,7 @@ if (process.env.GITHUB_EVENT_NAME !== "workflow_dispatch") {
   selected = new Set(paths.filter((path) => !DOCUMENTATION.test(path)).flatMap(owners));
 }
 // Flow Agent's gates test the whole workspace; the others test the Liquid stack.
-const packages = selected.has("flow_agent") ? "--workspace" : "-p meta-harness-core -p liquid_bridge";
+const packages = selected.has("flow_agent") ? "--workspace" : "-p meta-harness-core -p liquid_bridge -p liquid-core";
 const outputs = [
   `docs=${docs}`,
   `product=${selected.size > 0}`,

@@ -8,6 +8,7 @@ Native targets and current availability follow [PLATFORMS.md](../PLATFORMS.md).
 
 - `app/` — the Flutter app. Its exact Flutter release is pinned in `app/pubspec.yaml`, which CI reads.
 - `liquid-bridge/` — the Rust side of the flutter_rust_bridge bindings (ADR-0186). It embeds the Meta-Harness core (ADR-0184), which never depends on the bridge; `app/hook/build.dart` compiles it into the app (ADR-0213).
+- `liquid-core/` — the Workspace core: object model, mutation pipeline and History over Automerge (ADR-0235, ADR-0238), in memory until `liquid-storage` follows.
 
 After changing `liquid-bridge/src/api`, run `flutter_rust_bridge_codegen generate` in `app/` and then `cargo fmt --all`. The generator's version is the `flutter_rust_bridge` version in `app/pubspec.yaml` (`cargo install --locked flutter_rust_bridge_codegen@<version>`). The generated files are committed without web bindings, and CI regenerates them to check they match.
 

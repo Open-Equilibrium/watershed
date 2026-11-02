@@ -6,6 +6,7 @@ members = [
     "flow-agent/flow-agent-core",
     "flow-agent/flow-agent-executor",
     "liquid/liquid-bridge",
+    "liquid/liquid-core",
     "meta-harness/meta-harness-core",
     "proto/proto",
 ]
@@ -20,12 +21,14 @@ repository = "https://github.com/Open-Equilibrium/watershed"
 publish = false
 
 [workspace.dependencies]
+automerge = { version = "=0.12.0", default-features = false }
 cap-fs-ext = { version = "=4.0.3", default-features = false, features = ["std"] }
 cap-std = { version = "=4.0.3", default-features = false }
 core-policy = { path = "core/core-policy", version = "0.0.0" }
 core-script = { path = "core/core-script", version = "0.0.0" }
 flow-agent-core = { path = "flow-agent/flow-agent-core", version = "0.0.0" }
 flutter_rust_bridge = "=2.13.0"
+getrandom = { version = "=0.4.3", default-features = false, features = ["std"] }
 meta-harness-core = { path = "meta-harness/meta-harness-core", version = "0.0.0" }
 noyalib = { version = "=0.0.53", default-features = false, features = ["std"] }
 proto = { path = "proto/proto", version = "0.0.0" }

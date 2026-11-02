@@ -1,0 +1,15 @@
+[package]
+name = "liquid-core"
+description = "Liquid Workspace core: object model, mutation pipeline and History (ADR-0235, ADR-0238)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+automerge.workspace = true
+getrandom.workspace = true
+serde.workspace = true
+serde_json.workspace = true

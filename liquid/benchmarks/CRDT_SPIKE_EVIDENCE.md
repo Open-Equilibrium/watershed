@@ -52,7 +52,7 @@ The Role check decides how the check must be built. Trying each received change 
 6. Ask the other replica for the changes after the newest changes both already share, not after this replica's own heads: Automerge ignores heads it does not know and would send its whole history whenever the receiver has unsent edits.
 7. Loro merges a device's commits within 1,000 s into one change by default; per-change Role checks need that merging off.
 
-Not yet observed: the other Liquid targets in [`PLATFORMS.md`](../../PLATFORMS.md) and the libraries inside the Flutter app. They follow with `liquid-core`, whose CI runs on Linux and macOS.
+Not yet observed: the other Liquid targets in [`PLATFORMS.md`](../../PLATFORMS.md) and the libraries inside the Flutter app. `liquid-core`'s CI runs Automerge on Linux and macOS; Windows and Android follow with their clients.
 
 ### Raw output
 
