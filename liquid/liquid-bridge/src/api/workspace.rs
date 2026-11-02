@@ -584,9 +584,18 @@ impl LiquidWorkspace {
         resource: BridgeResource,
         deliver: impl FnMut(BridgeChange) -> bool + Send + 'static,
     ) -> Result<(), String> {
-        let resource = resource.normalized()?;
         let mut deliver = deliver;
         let mut inner = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
+        // A refused registration ends the subscription like any other end.
+        let resource = match resource.normalized() {
+            Ok(resource) => resource,
+            Err(error) => {
+                if !inner.closed.remove(&subscription) {
+                    inner.ended.insert(subscription);
+                }
+                return Err(error);
+            }
+        };
         // Dart cancelled it before it arrived, which is a normal end, not an error.
         if inner.closed.remove(&subscription) {
             return Ok(());

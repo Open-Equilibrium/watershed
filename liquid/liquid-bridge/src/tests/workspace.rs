@@ -493,6 +493,12 @@ fn every_way_a_subscription_ends_leaves_nothing_behind() {
     // Dart closed it after it arrived.
     workspace.watch(4, areas(), |_| true).unwrap();
     workspace.close(4);
+    // Rust refused it, before and after Dart closed it.
+    let nameless = || resource(BridgeResourceKind::Views);
+    assert!(workspace.watch(5, nameless(), |_| true).is_err());
+    workspace.close(5);
+    workspace.close(6);
+    assert!(workspace.watch(6, nameless(), |_| true).is_err());
 
     assert_eq!(workspace.lifecycle_markers(), 0);
 }
