@@ -25,7 +25,14 @@ pub(super) async fn git(
     env: &[(&str, OsString)],
     args: &[&str],
 ) -> Result<String, DiffError> {
-    Ok(String::from_utf8_lossy(&output(git_command(dir, env, args)).await?).into_owned())
+    Ok(String::from_utf8_lossy(&output(git_command(dir, env, args), false).await?).into_owned())
+}
+
+/// Reads Git configuration, treating only its silent missing-key exit as empty output.
+pub(super) async fn git_config(dir: &Path, args: &[&str]) -> Result<String, DiffError> {
+    let mut command = git_command(dir, &[], &["config"]);
+    command.args(args);
+    Ok(String::from_utf8_lossy(&output(command, true).await?).into_owned())
 }
 
 /// Reads pathname output without replacing bytes that the String-based path API cannot name.
@@ -34,7 +41,7 @@ pub(super) async fn git_path_output(
     env: &[(&str, OsString)],
     args: &[&str],
 ) -> Result<String, DiffError> {
-    String::from_utf8(output(git_command(dir, env, args)).await?)
+    String::from_utf8(output(git_command(dir, env, args), false).await?)
         .map_err(|_| DiffError::Git("Git returned a pathname that is not valid UTF-8".to_owned()))
 }
 
@@ -43,7 +50,7 @@ pub(super) async fn git_path_output(
 pub(super) async fn user_git(dir: &Path, args: &[&str]) -> Result<String, DiffError> {
     let mut command = Command::new("git");
     command.args(args).current_dir(dir);
-    Ok(String::from_utf8_lossy(&output(piped(command, &NO_PROMPTS)).await?).into_owned())
+    Ok(String::from_utf8_lossy(&output(piped(command, &NO_PROMPTS), false).await?).into_owned())
 }
 
 /// Keeps Git and its credential helpers from asking on a terminal or in a window, as T3 Code
@@ -58,7 +65,7 @@ pub(super) const NO_PROMPTS: [(&str, &str); 5] = [
 ];
 
 /// Runs `command` and returns at most [`MAX_OUTPUT_BYTES`] of its output.
-async fn output(mut command: Command) -> Result<Vec<u8>, DiffError> {
+async fn output(mut command: Command, missing_config: bool) -> Result<Vec<u8>, DiffError> {
     let mut child = Git::spawn(&mut command)?;
     // Git's warnings drain meanwhile, so a full error pipe never blocks it; dropped, the set ends
     // the drain.
@@ -89,6 +96,9 @@ async fn output(mut command: Command) -> Result<Vec<u8>, DiffError> {
         .await
         .map_err(|error| DiffError::Git(error.to_string()))?;
     if !status.success() {
+        if missing_config && status.code() == Some(1) && errors.is_empty() {
+            return Ok(Vec::new());
+        }
         return Err(DiffError::Git(
             String::from_utf8_lossy(&errors).trim().to_owned(),
         ));

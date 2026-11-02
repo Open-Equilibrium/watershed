@@ -546,6 +546,44 @@ fn automatic_fetch_never_expands_a_remote_group_into_unchecked_destinations() {
 }
 
 #[test]
+fn automatic_fetch_refuses_incomplete_configuration_reads() {
+    use std::io::Write;
+
+    run(async {
+        for (case, section, key, prefix) in [
+            ("refspecs", "remote \"origin\"", "fetch", "^refs/heads/"),
+            ("groups", "remotes", "unrelated", ""),
+        ] {
+            let clone = Clone::new(&format!("fetch-config-limit-{case}"));
+            let repo = &clone.repo;
+            let mut config = std::fs::OpenOptions::new()
+                .append(true)
+                .open(repo.path().join(".git/config"))
+                .expect("test configuration opened for append");
+            writeln!(
+                config,
+                "\n[{section}]\n{key} = {prefix}{}",
+                "x".repeat(4 * 1024 * 1024)
+            )
+            .expect("large validation input");
+            drop(config);
+            let before = repo.git(&["show-ref"]);
+            clone.commit_upstream("theirs\n");
+            let checkpoints = Checkpoints::new(repo.path());
+
+            let fetched = checkpoints.fetch().await;
+
+            assert!(
+                matches!(fetched, Err(DiffError::TooLarge)),
+                "{case}: {fetched:?}"
+            );
+            assert_eq!(repo.git(&["show-ref"]), before, "{case}");
+            assert_eq!(read(repo, "a.txt"), "old\n", "{case}");
+        }
+    });
+}
+
+#[test]
 fn a_background_fetch_leaves_tags_alone_despite_pruning_settings() {
     run(async {
         for scope in ["fetch", "remote.origin"] {

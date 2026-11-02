@@ -1,7 +1,7 @@
 //! The checkout's branch and its upstream, listing, switching and creating branches, and
 //! fetching the upstream's remote ([mockups](../../../../docs/design/mockups/liquid-git-branches.html)).
 
-use super::process::{NO_PROMPTS, user_git};
+use super::process::{NO_PROMPTS, git_config, user_git};
 use super::stash::listed_files;
 use super::*;
 
@@ -309,13 +309,7 @@ impl WorkingTree {
         }
         // Git expands a group with multiple members before using the named remote's refspecs.
         let group = format!("remotes.{remote}");
-        let groups = git(
-            &self.root,
-            &[],
-            &["config", "--null", "--get-regexp", "^remotes\\."],
-        )
-        .await
-        .unwrap_or_default();
+        let groups = git_config(&self.root, &["--null", "--get-regexp", "^remotes\\."]).await?;
         let members = groups
             .split('\0')
             .filter_map(|entry| entry.split_once('\n'))
@@ -331,9 +325,7 @@ impl WorkingTree {
         }
         // A fetch writes where the remote's refspecs say, which can be a local branch.
         let key = format!("remote.{remote}.fetch");
-        let specs = git(&self.root, &[], &["config", "--get-all", &key])
-            .await
-            .unwrap_or_default();
+        let specs = git_config(&self.root, &["--get-all", &key]).await?;
         for spec in specs.lines() {
             let destination = spec.split_once(':').map_or("", |(_, to)| to);
             if spec.starts_with('^') || destination.is_empty() {
