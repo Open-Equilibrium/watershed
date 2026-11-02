@@ -779,3 +779,83 @@ fn commit_accepts_excluded_edits_after_the_plan() {
         );
     });
 }
+
+#[test]
+fn commit_preserves_staged_only_paths_conflicting_with_the_selection() {
+    run(async {
+        for reverse in [false, true] {
+            let repo = Repo::new("commit-staged-overlap");
+            identity(&repo);
+            let (staged, selected) = if reverse {
+                ("foo/bar", "foo")
+            } else {
+                ("foo", "foo/bar")
+            };
+            if reverse {
+                std::fs::create_dir(repo.path().join("foo")).unwrap();
+            }
+            repo.write(staged, "excluded staging\n");
+            repo.git(&["add", staged]);
+            if reverse {
+                std::fs::remove_dir_all(repo.path().join("foo")).unwrap();
+            } else {
+                std::fs::remove_file(repo.path().join("foo")).unwrap();
+                std::fs::create_dir(repo.path().join("foo")).unwrap();
+            }
+            repo.write(selected, "selected\n");
+            let index = std::fs::read(repo.path().join(".git/index")).unwrap();
+            let head = repo.git(&["rev-parse", "HEAD"]);
+            let result = Checkpoints::new(repo.path())
+                .commit_current(&[selected.into()], "Selection", None)
+                .await;
+            assert!(result.is_err(), "{result:?}");
+            assert_eq!(
+                std::fs::read(repo.path().join(".git/index")).unwrap(),
+                index
+            );
+            assert_eq!(repo.git(&["rev-parse", "HEAD"]), head);
+            assert_eq!(
+                repo.git(&["show", &format!(":{staged}")]),
+                "excluded staging\n"
+            );
+        }
+    });
+}
+
+#[test]
+fn commit_accepts_complete_file_directory_replacements() {
+    run(async {
+        for reverse in [false, true] {
+            let repo = Repo::new("commit-complete-overlap");
+            identity(&repo);
+            let (old, new) = if reverse {
+                ("foo/bar", "foo")
+            } else {
+                ("foo", "foo/bar")
+            };
+            if reverse {
+                std::fs::create_dir(repo.path().join("foo")).unwrap();
+            }
+            repo.write(old, "old\n");
+            repo.git(&["add", old]);
+            repo.git(&["commit", "-m", "Before replacement"]);
+            repo.write("excluded", "excluded staging\n");
+            repo.git(&["add", "excluded"]);
+            if reverse {
+                std::fs::remove_dir_all(repo.path().join("foo")).unwrap();
+            } else {
+                std::fs::remove_file(repo.path().join("foo")).unwrap();
+                std::fs::create_dir(repo.path().join("foo")).unwrap();
+            }
+            repo.write(new, "replacement\n");
+            Checkpoints::new(repo.path())
+                .commit_current(&[old.into(), new.into()], "Replacement", None)
+                .await
+                .unwrap();
+            assert_eq!(repo.git(&["show", &format!("HEAD:{new}")]), "replacement\n");
+            assert_eq!(repo.git(&["show", ":excluded"]), "excluded staging\n");
+            assert_eq!(repo.git(&["diff", "--name-only"]), "");
+            assert_eq!(repo.git(&["diff", "--cached", "--name-only"]), "excluded\n");
+        }
+    });
+}

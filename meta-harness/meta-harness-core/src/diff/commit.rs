@@ -192,15 +192,34 @@ impl WorkingTree {
         if selected.len() != paths.len() || selected.iter().any(|path| !changes.contains(*path)) {
             return Err(stale());
         }
-        if selected.iter().any(|path| {
-            changes.iter().any(|other| {
-                !selected.contains(other.as_str())
-                    && (path.starts_with(&format!("{other}/"))
-                        || other.starts_with(&format!("{path}/")))
+        let entries = nul_paths(
+            &process::git_path_output(&self.root, &[], &["ls-files", "--cached", "-v", "-z"])
+                .await?,
+        );
+        let tracked: HashSet<_> = entries
+            .iter()
+            .filter_map(|entry| entry.split_once(' ').map(|(_, path)| path))
+            .collect();
+        if changes
+            .iter()
+            .map(String::as_str)
+            .chain(tracked.iter().copied())
+            .any(|other| {
+                if selected.contains(other) {
+                    return false;
+                }
+                let prefix = format!("{other}/");
+                selected
+                    .range(prefix.as_str()..)
+                    .next()
+                    .is_some_and(|path| path.starts_with(&prefix))
+                    || other
+                        .match_indices('/')
+                        .any(|(end, _)| selected.contains(&other[..end]))
             })
-        }) {
+        {
             return Err(DiffError::Git(
-                "Select both sides of a file and directory replacement.".to_owned(),
+                "Select both sides of a file and directory replacement; resolve conflicting excluded staging in Git first.".to_owned(),
             ));
         }
         if !matches!(snapshot.len(), 40 | 64) || !snapshot.bytes().all(|c| c.is_ascii_hexdigit()) {
@@ -242,14 +261,6 @@ impl WorkingTree {
             let path_arg = format!("--pathspec-from-file={}", path_file.display());
             // An untracked file must first be known to Git for --only. Intent-to-add leaves its
             // content unstaged, also if the user's hook refuses the commit.
-            let entries = nul_paths(
-                &process::git_path_output(&self.root, &[], &["ls-files", "--cached", "-v", "-z"])
-                    .await?,
-            );
-            let tracked: HashSet<_> = entries
-                .iter()
-                .filter_map(|entry| entry.split_once(' ').map(|(_, path)| path))
-                .collect();
             let mut marked = Vec::new();
             for entry in &entries {
                 if let [tag, b' ', path @ ..] = entry.as_bytes()
@@ -285,7 +296,27 @@ impl WorkingTree {
                 )
                 .await?;
             }
-            write_paths(selected.iter().copied().collect())?;
+            // A selected deleted file whose place is now a directory must not be handed to
+            // --only: Git would try to add that directory as a gitlink. Adding its selected
+            // descendants removes the conflicting old index entry and records the deletion.
+            write_paths(
+                selected
+                    .iter()
+                    .copied()
+                    .filter(|path| {
+                        if !std::fs::symlink_metadata(self.root.join(path))
+                            .is_ok_and(|meta| meta.is_dir())
+                        {
+                            return true;
+                        }
+                        let prefix = format!("{path}/");
+                        !selected
+                            .range(prefix.as_str()..)
+                            .next()
+                            .is_some_and(|other| other.starts_with(&prefix))
+                    })
+                    .collect(),
+            )?;
             std::fs::write(&message_file, message).map_err(DiffError::Io)?;
             let message_arg = format!("--file={}", message_file.display());
             if let Err(error) = user_git(
