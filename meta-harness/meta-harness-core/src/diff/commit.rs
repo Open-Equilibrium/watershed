@@ -3,6 +3,7 @@
 
 use super::process::{paths as nul_paths, user_git, user_git_input};
 use super::*;
+use std::collections::BTreeMap;
 
 /// A completed user commit.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -189,11 +190,15 @@ impl WorkingTree {
         // Validate exact file identities against the displayed whole-file list. Literal
         // pathspecs below also keep names such as '*' from selecting other files.
         let (_, before, files) = self.uncommitted_paths(Whitespace::Shown).await?;
-        let changes: BTreeSet<String> = files.into_iter().map(|file| file.path).collect();
+        let changes: BTreeMap<String, ChangeStatus> = files
+            .into_iter()
+            .map(|file| (file.path, file.status))
+            .collect();
         let selected: BTreeSet<&str> = paths.iter().map(String::as_str).collect();
         let stale =
             || DiffError::Git("The selected files changed. Open Commit changes again.".to_owned());
-        if selected.len() != paths.len() || selected.iter().any(|path| !changes.contains(*path)) {
+        if selected.len() != paths.len() || selected.iter().any(|path| !changes.contains_key(*path))
+        {
             return Err(stale());
         }
         let entries = nul_paths(
@@ -205,7 +210,7 @@ impl WorkingTree {
             .filter_map(|entry| entry.split_once(' ').map(|(_, path)| path))
             .collect();
         if changes
-            .iter()
+            .keys()
             .map(String::as_str)
             .chain(tracked.iter().copied())
             .any(|other| {
@@ -264,7 +269,8 @@ impl WorkingTree {
             };
             let path_arg = format!("--pathspec-from-file={}", path_file.display());
             // An untracked file must first be known to Git for --only. Intent-to-add leaves its
-            // content unstaged, also if the user's hook refuses the commit.
+            // content unstaged, also if the user's hook refuses the commit. Staged deletions
+            // are absent from the index too; --only records them without adding a missing path.
             let mut marked = Vec::new();
             for entry in &entries {
                 if let [tag, b' ', path @ ..] = entry.as_bytes()
@@ -290,7 +296,7 @@ impl WorkingTree {
             let new: Vec<&str> = selected
                 .iter()
                 .copied()
-                .filter(|path| !tracked.contains(*path))
+                .filter(|path| !tracked.contains(*path) && changes[*path] != ChangeStatus::Deleted)
                 .collect();
             if !new.is_empty() {
                 write_paths(new)?;

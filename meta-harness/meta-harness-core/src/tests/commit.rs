@@ -160,6 +160,46 @@ fn commit_creates_and_switches_a_branch_and_commits_deletions() {
 }
 
 #[test]
+fn commit_staged_deletions_and_renames_preserve_excluded_staging() {
+    run(async {
+        for rename in [false, true] {
+            let repo = Repo::new("commit-staged-deletion");
+            identity(&repo);
+            repo.write("excluded.txt", "staged excluded\n");
+            repo.git(&["add", "excluded.txt"]);
+            repo.write("excluded.txt", "unstaged excluded\n");
+            let mut selected = vec!["a.txt".into()];
+            if rename {
+                repo.git(&["mv", "a.txt", "renamed.txt"]);
+                selected.push("renamed.txt".into());
+            } else {
+                repo.git(&["rm", "a.txt"]);
+            }
+            Checkpoints::new(repo.path())
+                .commit_current(&selected, "Remove or rename file", None)
+                .await
+                .unwrap();
+            assert_eq!(
+                repo.git(&["ls-tree", "--name-only", "HEAD"]),
+                if rename { "renamed.txt\n" } else { "" }
+            );
+            if rename {
+                assert_eq!(repo.git(&["show", "HEAD:renamed.txt"]), "old\n");
+            }
+            assert_eq!(repo.git(&["show", ":excluded.txt"]), "staged excluded\n");
+            assert_eq!(
+                repo.git(&["diff", "--cached", "--name-only"]),
+                "excluded.txt\n"
+            );
+            assert_eq!(
+                std::fs::read_to_string(repo.path().join("excluded.txt")).unwrap(),
+                "unstaged excluded\n"
+            );
+        }
+    });
+}
+
+#[test]
 fn commits_require_message_files_branch_and_no_merge_or_running_agent() {
     run(async {
         let repo = Repo::new("commit-refusals");
@@ -873,7 +913,7 @@ fn commit_preserves_staged_only_paths_conflicting_with_the_selection() {
 #[test]
 fn commit_accepts_complete_file_directory_replacements() {
     run(async {
-        for reverse in [false, true] {
+        for (reverse, staged) in [(false, false), (false, true), (true, false), (true, true)] {
             let repo = Repo::new("commit-complete-overlap");
             identity(&repo);
             let (old, new) = if reverse {
@@ -896,6 +936,9 @@ fn commit_accepts_complete_file_directory_replacements() {
                 std::fs::create_dir(repo.path().join("foo")).unwrap();
             }
             repo.write(new, "replacement\n");
+            if staged {
+                repo.git(&["add", "--all", "--", "foo"]);
+            }
             Checkpoints::new(repo.path())
                 .commit_current(&[old.into(), new.into()], "Replacement", None)
                 .await
