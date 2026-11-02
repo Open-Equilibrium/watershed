@@ -111,8 +111,8 @@ impl WorkingTree {
     /// Stashes the uncommitted changes, untracked files included, for the branch checked out;
     /// returns the new stash, none when there was nothing to stash.
     pub(super) async fn push_stash(&self) -> Result<Option<String>, DiffError> {
-        // A stash records a submodule's new commit but leaves it checked out, so the change
-        // would come along; Liquid refuses rather than say it was left.
+        // A stash records a submodule's new commit but leaves it checked out, whether staged
+        // or not, so the change would come along; Liquid refuses rather than say it was left.
         let moved = self.moved_submodules().await?;
         if !moved.is_empty() {
             return Err(DiffError::SubmoduleChanged(moved));
@@ -175,7 +175,7 @@ impl WorkingTree {
         Ok(after.filter(|after| Some(after) != before.as_ref()))
     }
 
-    /// The submodules checked out at another commit than the index records.
+    /// The submodules with changed checked-out or staged commits.
     async fn moved_submodules(&self) -> Result<Vec<String>, DiffError> {
         let output = git(
             &self.root,
@@ -191,15 +191,14 @@ impl WorkingTree {
         let mut moved = Vec::new();
         let mut records = output.split('\0');
         while let Some(record) = records.next() {
-            // `1 XY <sub> ...` and `2 XY <sub> ...` name a submodule whose commit changed
-            // with `SC`; a rename's record is followed by its old path.
+            // `SC` names an unstaged commit change. A staged gitlink instead has index mode
+            // 160000 and different HEAD/index object names. Renames also have an old path.
             let fields: Vec<&str> = record.splitn(9, ' ').collect();
             let changed = |fields: &[&str], at: usize| {
-                fields
-                    .get(2)
-                    .is_some_and(|sub| sub.starts_with("SC"))
-                    .then(|| fields.get(at).map(|path| (*path).to_owned()))
-                    .flatten()
+                (fields.get(2).is_some_and(|sub| sub.starts_with("SC"))
+                    || (fields.get(4) == Some(&"160000") && fields.get(6) != fields.get(7)))
+                .then(|| fields.get(at).map(|path| (*path).to_owned()))
+                .flatten()
             };
             match fields.first() {
                 Some(&"1") => moved.extend(changed(&fields, 8)),

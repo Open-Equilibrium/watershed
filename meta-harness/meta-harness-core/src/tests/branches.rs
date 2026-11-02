@@ -1962,34 +1962,41 @@ fn stashed_changes_restore_only_on_the_tree_they_were_left_on() {
 #[test]
 fn leaving_refuses_a_submodule_commit_git_cannot_stash() {
     run(async {
-        let sub = Repo::new("stash-submodule-inner");
-        let repo = Repo::new("stash-submodule-outer");
-        repo.git(&[
-            "-c",
-            "protocol.file.allow=always",
-            "submodule",
-            "add",
-            "-q",
-            &sub.path().display().to_string(),
-            "sub",
-        ]);
-        repo.git(&["commit", "-q", "-m", "submodule"]);
-        repo.git(&["branch", "other"]);
-        let inner = Repo(repo.path().join("sub"));
-        inner.write("a.txt", "moved\n");
-        inner.git(&["commit", "-q", "-am", "moved"]);
-        let moved = inner.git(&["rev-parse", "HEAD"]);
-        let current = repo.git(&["branch", "--show-current"]);
-        let checkpoints = Checkpoints::new(repo.path());
+        for staged in [false, true] {
+            let sub = Repo::new(&format!("stash-submodule-inner-{staged}"));
+            let repo = Repo::new(&format!("stash-submodule-outer-{staged}"));
+            repo.git(&[
+                "-c",
+                "protocol.file.allow=always",
+                "submodule",
+                "add",
+                "-q",
+                &sub.path().display().to_string(),
+                "sub",
+            ]);
+            repo.git(&["commit", "-q", "-m", "submodule"]);
+            repo.git(&["branch", "other"]);
+            let inner = Repo(repo.path().join("sub"));
+            inner.write("a.txt", "moved\n");
+            inner.git(&["commit", "-q", "-am", "moved"]);
+            if staged {
+                repo.git(&["add", "sub"]);
+            }
+            let moved = inner.git(&["rev-parse", "HEAD"]);
+            let current = repo.git(&["branch", "--show-current"]);
+            let index = repo.git(&["ls-files", "--stage"]);
+            let checkpoints = Checkpoints::new(repo.path());
 
-        assert!(matches!(
-            checkpoints.switch_branch(&local("other"), leave_on(&checkpoints).await).await,
-            Err(DiffError::SubmoduleChanged(paths)) if paths == ["sub"]
-        ));
-        assert_eq!(repo.git(&["branch", "--show-current"]), current);
-        assert_eq!(inner.git(&["rev-parse", "HEAD"]), moved);
-        assert_eq!(repo.git(&["stash", "list"]), "");
-        // The inner repository belongs to the outer one's temporary folder.
-        std::mem::forget(inner);
+            assert!(matches!(
+                checkpoints.switch_branch(&local("other"), leave_on(&checkpoints).await).await,
+                Err(DiffError::SubmoduleChanged(paths)) if paths == ["sub"]
+            ));
+            assert_eq!(repo.git(&["branch", "--show-current"]), current);
+            assert_eq!(inner.git(&["rev-parse", "HEAD"]), moved);
+            assert_eq!(repo.git(&["ls-files", "--stage"]), index);
+            assert_eq!(repo.git(&["stash", "list"]), "");
+            // The inner repository belongs to the outer one's temporary folder.
+            std::mem::forget(inner);
+        }
     });
 }
