@@ -313,7 +313,11 @@ class ActionDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => CallbackShortcuts(
-    bindings: bindings,
+    bindings: {
+      ...bindings,
+      const Keys(LogicalKeyboardKey.escape).activator: () =>
+          Navigator.of(context).pop(cancelled),
+    },
     child: Focus(
       autofocus: true,
       child: Dialog(

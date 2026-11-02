@@ -3,6 +3,7 @@ import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/appearance.dart';
+import 'package:liquid/src/controls.dart';
 import 'package:liquid/src/agent/shell.dart';
 import 'package:liquid/src/agent/sidebar.dart';
 import 'package:liquid/src/rust/api/events.dart';
@@ -18,6 +19,37 @@ const info = SessionInfo(project: 'acme-api', harness: 'pi', device: 'MacBook');
 void main() {
   late FakeBackend backend;
   late SessionState state;
+
+  testWidgets('Escape and Cancel return the configured dialog result', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: liquidTheme(Brightness.light),
+        home: const Scaffold(body: SizedBox()),
+      ),
+    );
+    final context = tester.element(find.byType(Scaffold));
+    for (final escape in [false, true]) {
+      final result = showDialog<String>(
+        context: context,
+        builder: (_) => const ActionDialog(
+          title: 'Confirm',
+          cancelled: 'cancelled',
+          actions: [Text('Proceed')],
+          children: [Text('Choose an action.')],
+        ),
+      );
+      await tester.pumpAndSettle();
+      if (escape) {
+        await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      } else {
+        await tester.tap(find.text('Cancel'));
+      }
+      await tester.pumpAndSettle();
+      expect(await result, 'cancelled');
+    }
+  });
 
   Future<void> show(
     WidgetTester tester, {
