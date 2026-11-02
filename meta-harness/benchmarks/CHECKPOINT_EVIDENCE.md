@@ -183,3 +183,57 @@ Commit plans take 147.8 ms for one turn and 128.8 ms for twenty, with 124.8 ms p
          13240989986  cycles elapsed
              7324080  peak memory footprint
 ```
+
+
+### Live uncommitted refresh
+
+Observed on 2026-11-02 in the refresh-fix working tree over `f725997`, with the same expanded workload, environment, commands and exclusions above; no other builds or tests ran during measurement. Uncommitted reads take 65.5 ms p50 (81.8 ms p95), compared with 66.3 ms p50 above; commit plans take 123.9 ms p50 (138.6 ms p95). Wall time is 24.28 seconds, maximum resident set size 12,681,216 bytes and peak memory footprint 7,356,848 bytes.
+
+Each successful status poll now also reads uncommitted changes while that scope is selected and refreshes the commit plan while the dialog is open, even when summary counts match. Uncommitted reads return the two already captured tree identities without another Git process; equal identities preserve the displayed patch and scroll position. These per-read observations exclude Flutter polling and rendering; status, uncommitted and plan work is serial within each observation sample.
+
+#### Raw output
+
+```json
+{"attributed_turns":1,"commit_plan_ms":116.147,"end_ms":75.128,"files":11,"list_ms":27.807,"plan_ms":101.246,"poll_ms":63.881,"revert_ms":226.96,"sample":0,"start_ms":92.243,"uncommitted_ms":73.213}
+{"attributed_turns":2,"commit_plan_ms":138.598,"end_ms":104.329,"files":11,"list_ms":33.348,"plan_ms":97.267,"poll_ms":82.773,"revert_ms":199.339,"sample":1,"start_ms":83.745,"uncommitted_ms":84.16}
+{"attributed_turns":3,"commit_plan_ms":133.381,"end_ms":78.821,"files":11,"list_ms":25.984,"plan_ms":92.091,"poll_ms":62.058,"revert_ms":198.414,"sample":2,"start_ms":72.002,"uncommitted_ms":72.112}
+{"attributed_turns":4,"commit_plan_ms":149.301,"end_ms":91.3,"files":11,"list_ms":29.417,"plan_ms":104.728,"poll_ms":76.045,"revert_ms":201.265,"sample":3,"start_ms":77.056,"uncommitted_ms":81.791}
+{"attributed_turns":5,"commit_plan_ms":117.134,"end_ms":68.173,"files":11,"list_ms":23.196,"plan_ms":86.211,"poll_ms":58.474,"revert_ms":164.666,"sample":4,"start_ms":67.848,"uncommitted_ms":65.84}
+{"attributed_turns":6,"commit_plan_ms":121.151,"end_ms":66.125,"files":11,"list_ms":23.107,"plan_ms":84.052,"poll_ms":58.851,"revert_ms":162.901,"sample":5,"start_ms":62.001,"uncommitted_ms":63.725}
+{"attributed_turns":7,"commit_plan_ms":128.056,"end_ms":65.75,"files":11,"list_ms":23.11,"plan_ms":93.784,"poll_ms":57.981,"revert_ms":163.6,"sample":6,"start_ms":60.98,"uncommitted_ms":65.43}
+{"attributed_turns":8,"commit_plan_ms":119.651,"end_ms":66.978,"files":11,"list_ms":23.309,"plan_ms":85.548,"poll_ms":58.924,"revert_ms":162.176,"sample":7,"start_ms":61.51,"uncommitted_ms":66.289}
+{"attributed_turns":9,"commit_plan_ms":119.327,"end_ms":65.946,"files":11,"list_ms":23.156,"plan_ms":83.683,"poll_ms":58.39,"revert_ms":161.178,"sample":8,"start_ms":60.973,"uncommitted_ms":65.267}
+{"attributed_turns":10,"commit_plan_ms":119.813,"end_ms":65.401,"files":11,"list_ms":22.986,"plan_ms":84.007,"poll_ms":58.125,"revert_ms":185.465,"sample":9,"start_ms":60.832,"uncommitted_ms":65.427}
+{"attributed_turns":11,"commit_plan_ms":120.283,"end_ms":65.303,"files":11,"list_ms":23.064,"plan_ms":84.157,"poll_ms":58.221,"revert_ms":163.284,"sample":10,"start_ms":61.358,"uncommitted_ms":63.95}
+{"attributed_turns":12,"commit_plan_ms":121.812,"end_ms":69.031,"files":11,"list_ms":23.063,"plan_ms":83.956,"poll_ms":58.342,"revert_ms":164.962,"sample":11,"start_ms":62.463,"uncommitted_ms":65.225}
+{"attributed_turns":13,"commit_plan_ms":121.716,"end_ms":65.28,"files":11,"list_ms":23.075,"plan_ms":83.75,"poll_ms":58.365,"revert_ms":162.553,"sample":12,"start_ms":60.817,"uncommitted_ms":65.265}
+{"attributed_turns":14,"commit_plan_ms":123.465,"end_ms":65.619,"files":11,"list_ms":23.22,"plan_ms":83.773,"poll_ms":58.349,"revert_ms":167.421,"sample":13,"start_ms":63.226,"uncommitted_ms":68.528}
+{"attributed_turns":15,"commit_plan_ms":123.865,"end_ms":65.76,"files":11,"list_ms":23.12,"plan_ms":81.693,"poll_ms":58.271,"revert_ms":162.296,"sample":14,"start_ms":61.235,"uncommitted_ms":62.021}
+{"attributed_turns":16,"commit_plan_ms":124.086,"end_ms":65.361,"files":11,"list_ms":23.095,"plan_ms":84.871,"poll_ms":58.22,"revert_ms":161.97,"sample":15,"start_ms":61.299,"uncommitted_ms":65.665}
+{"attributed_turns":17,"commit_plan_ms":125.274,"end_ms":65.77,"files":11,"list_ms":23.024,"plan_ms":82.663,"poll_ms":58.092,"revert_ms":163.353,"sample":16,"start_ms":62.161,"uncommitted_ms":65.486}
+{"attributed_turns":18,"commit_plan_ms":125.657,"end_ms":65.371,"files":11,"list_ms":23.087,"plan_ms":84.262,"poll_ms":57.908,"revert_ms":165.039,"sample":17,"start_ms":61.395,"uncommitted_ms":65.8}
+{"attributed_turns":19,"commit_plan_ms":126.108,"end_ms":65.357,"files":11,"list_ms":23.287,"plan_ms":83.832,"poll_ms":58.449,"revert_ms":162.727,"sample":18,"start_ms":61.095,"uncommitted_ms":62.503}
+{"attributed_turns":20,"commit_plan_ms":127.401,"end_ms":66.449,"files":11,"list_ms":23.211,"plan_ms":84.568,"poll_ms":58.211,"revert_ms":164.24,"sample":19,"start_ms":61.852,"uncommitted_ms":65.504}
+{"commit_plan":{"max_ms":149.301,"p50_ms":123.865,"p95_ms":138.598},"end":{"max_ms":104.329,"p50_ms":65.946,"p95_ms":91.3},"files":20000,"first_start_ms":92.243,"list":{"max_ms":33.348,"p50_ms":23.156,"p95_ms":29.417},"list_sessions_ms":6.718,"plan":{"max_ms":104.728,"p50_ms":84.262,"p95_ms":101.246},"plan_with_folders_in_place_ms":861.031,"poll":{"max_ms":82.773,"p50_ms":58.365,"p95_ms":76.045},"remove_all_ms":16.792,"revert":{"max_ms":226.96,"p50_ms":164.24,"p95_ms":201.265},"samples":20,"start":{"max_ms":83.745,"p50_ms":61.51,"p95_ms":77.056},"summary":"checkpoints","uncommitted":{"max_ms":84.16,"p50_ms":65.504,"p95_ms":81.791}}
+```
+
+```text
+       24.28 real         6.53 user        33.88 sys
+            12681216  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+             1223579  page reclaims
+               26503  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                1288  messages sent
+                1288  messages received
+                1288  signals received
+                1090  voluntary context switches
+               64730  involuntary context switches
+         56840746823  instructions retired
+         13120249312  cycles elapsed
+             7356848  peak memory footprint
+```

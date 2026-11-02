@@ -215,8 +215,8 @@ abstract class AgentSession implements RustOpaqueInterface {
   /// The turns of the current branch, oldest first, with what each changed.
   Future<List<BridgeTurn>> turns();
 
-  /// Uncommitted tracked and untracked files compared with the checkout's last commit.
-  Future<List<BridgeFileChange>> uncommittedChanges({
+  /// Compared tree identities and uncommitted tracked and untracked files.
+  Future<(String, List<BridgeFileChange>)> uncommittedChanges({
     required bool hideWhitespace,
   });
 

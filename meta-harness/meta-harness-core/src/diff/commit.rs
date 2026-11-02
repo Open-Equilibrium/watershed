@@ -129,25 +129,25 @@ impl WorkingTree {
         ))
     }
 
-    /// Whole files as they are now, including new files Git does not ignore.
+    /// The compared tree identities and whole files, including new files Git does not ignore.
     pub async fn uncommitted_changes(
         &self,
         whitespace: Whitespace,
-    ) -> Result<Vec<FileChange>, DiffError> {
+    ) -> Result<(String, Vec<FileChange>), DiffError> {
         self.uncommitted_paths(whitespace)
             .await
-            .map(|(_, files)| files)
+            .map(|(from, to, files)| (format!("{}..{}", from.0, to.0), files))
     }
 
     /// The captured checkout and its changed whole files against HEAD.
     pub(crate) async fn uncommitted_paths(
         &self,
         whitespace: Whitespace,
-    ) -> Result<(Snapshot, Vec<FileChange>), DiffError> {
+    ) -> Result<(Snapshot, Snapshot, Vec<FileChange>), DiffError> {
         let from = self.committed("HEAD").await?;
         let to = self.snapshot().await?;
         let files = self.changes(&from, &to, whitespace).await?;
-        Ok((to, files))
+        Ok((from, to, files))
     }
 
     /// One current whole file compared with the last commit.
@@ -184,7 +184,7 @@ impl WorkingTree {
         }
         // Validate exact file identities against the displayed whole-file list. Literal
         // pathspecs below also keep names such as '*' from selecting other files.
-        let (before, files) = self.uncommitted_paths(Whitespace::Shown).await?;
+        let (_, before, files) = self.uncommitted_paths(Whitespace::Shown).await?;
         let changes: BTreeSet<String> = files.into_iter().map(|file| file.path).collect();
         let selected: BTreeSet<&str> = paths.iter().map(String::as_str).collect();
         let stale =
@@ -310,7 +310,7 @@ impl WorkingTree {
                 .await?
                 .trim_end_matches('\n')
                 .to_owned();
-            let (after, uncommitted) = self.uncommitted_paths(Whitespace::Shown).await?;
+            let (_, after, uncommitted) = self.uncommitted_paths(Whitespace::Shown).await?;
             let uncommitted: HashSet<_> = uncommitted.into_iter().map(|file| file.path).collect();
             let hook_changed = self
                 .changes(&before, &after, Whitespace::Shown)

@@ -187,6 +187,36 @@ void main() {
   );
 
   testWidgets(
+    'another session stopping refreshes the plan with equal Git status',
+    (tester) async {
+      await show(tester);
+      backend.commitPlanned = BridgeCommitPlan(
+        snapshot: 'snapshot',
+        files: backend.commitPlanned.files,
+        running: const [BridgeRunningAgent(own: false, title: 'Other session')],
+      );
+      await open(tester);
+      await message(tester);
+      expect(find.text('Commit on new branch…'), findsNothing);
+      backend.commitPlanned = BridgeCommitPlan(
+        snapshot: 'snapshot',
+        files: backend.commitPlanned.files,
+        running: const [],
+      );
+      await state.git.refresh();
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Other session'), findsNothing);
+      expect(
+        tester
+            .widget<PrimaryButton>(find.widgetWithText(PrimaryButton, 'Commit'))
+            .onPressed,
+        isNotNull,
+      );
+      expect(find.text('Return 429\n\nExplain the change.'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
     'turn end refreshes an open commit plan without a status change',
     (tester) async {
       await show(tester);

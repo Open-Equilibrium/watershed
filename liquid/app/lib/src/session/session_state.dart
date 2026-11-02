@@ -40,7 +40,7 @@ class SessionState {
   SessionState(this._backend) {
     _subscription = _backend.events().listen(_apply);
     hideWhitespace.addListener(() => unawaited(readChanges()));
-    git.status.addListener(() {
+    git.refreshed.addListener(() {
       if (diffScope.value is UncommittedChanges) unawaited(readChanges());
     });
     // Stashed changes restored or discarded leave the Diff tab.
@@ -390,6 +390,9 @@ class SessionState {
   /// and its count show them.
   final changed = ValueNotifier<List<BridgeFileChange>?>(null);
 
+  /// Equal polls keep the shown patch, but content, baseline or display changes reload it.
+  (String, BridgeGitStatus?, bool)? _uncommittedRead;
+
   /// Why the Diff tab shows no files, with its heading; null while it shows a list.
   final changesProblem = ValueNotifier<({String title, String text})?>(null);
 
@@ -438,15 +441,23 @@ class SessionState {
       if (generation != _generation) return;
       turns.value = read;
       if (diffScope.value is UncommittedChanges) {
-        final files = await _backend.uncommittedChanges(
-          hideWhitespace: hideWhitespace.value,
+        final whitespace = hideWhitespace.value;
+        final (revision, files) = await _backend.uncommittedChanges(
+          hideWhitespace: whitespace,
         );
         if (generation != _generation) return;
+        final identity = (revision, git.status.value, whitespace);
+        final publish =
+            _uncommittedRead != identity ||
+            shownScope.value is! UncommittedChanges ||
+            changesProblem.value != null ||
+            changed.value == null;
+        _uncommittedRead = identity;
         reportRead('changes', null);
         shownScope.value = const UncommittedChanges();
         shown.value = null;
         changesProblem.value = null;
-        changed.value = files;
+        if (publish) changed.value = files;
         return;
       }
       if (diffScope.value is StashedChanges) {

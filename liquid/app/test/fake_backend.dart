@@ -382,17 +382,22 @@ class FakeBackend implements SessionBackend {
     return outcome;
   }
 
+  String uncommittedRevision = 'uncommitted';
+
   @override
-  Future<List<BridgeFileChange>> uncommittedChanges({
+  Future<(String, List<BridgeFileChange>)> uncommittedChanges({
     required bool hideWhitespace,
   }) async {
     calls.add(
       'uncommitted changes${hideWhitespace ? ' without whitespace' : ''}',
     );
-    return List.of(
-      hideWhitespace
-          ? changedWithoutWhitespace ?? changed ?? []
-          : changed ?? [],
+    return (
+      uncommittedRevision,
+      List<BridgeFileChange>.of(
+        hideWhitespace
+            ? changedWithoutWhitespace ?? changed ?? []
+            : changed ?? [],
+      ),
     );
   }
 

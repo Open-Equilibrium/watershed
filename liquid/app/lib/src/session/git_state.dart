@@ -33,6 +33,9 @@ class GitState {
   /// Whether a status read has completed, distinguishing startup from outside Git.
   final loaded = ValueNotifier(false);
 
+  /// Successful reads, including equal summaries whose contents or agent locks changed.
+  final refreshed = ValueNotifier(0);
+
   /// Whether a Git write is queued or running in this window.
   final writing = ValueNotifier(false);
   int _writes = 0;
@@ -146,6 +149,7 @@ class GitState {
           stashed?.current != stash.value?.current) {
         stash.value = stashed;
       }
+      refreshed.value++;
       final after = now?.branch;
       if (before == null || after == null || after == before) return;
       if (!_writing) {

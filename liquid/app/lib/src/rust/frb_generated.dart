@@ -309,7 +309,8 @@ abstract class RustLibApi extends BaseApi {
     required AgentSession that,
   });
 
-  Future<List<BridgeFileChange>> crateApiSessionAgentSessionUncommittedChanges({
+  Future<(String, List<BridgeFileChange>)>
+  crateApiSessionAgentSessionUncommittedChanges({
     required AgentSession that,
     required bool hideWhitespace,
   });
@@ -2125,7 +2126,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(debugName: "AgentSession_turns", argNames: ["that"]);
 
   @override
-  Future<List<BridgeFileChange>> crateApiSessionAgentSessionUncommittedChanges({
+  Future<(String, List<BridgeFileChange>)>
+  crateApiSessionAgentSessionUncommittedChanges({
     required AgentSession that,
     required bool hideWhitespace,
   }) {
@@ -2146,7 +2148,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           );
         },
         codec: SseCodec(
-          decodeSuccessData: sse_decode_list_bridge_file_change,
+          decodeSuccessData: sse_decode_record_string_list_bridge_file_change,
           decodeErrorData: sse_decode_String,
         ),
         constMeta: kCrateApiSessionAgentSessionUncommittedChangesConstMeta,
@@ -3821,6 +3823,20 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   List<String>? dco_decode_opt_list_String(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw == null ? null : dco_decode_list_String(raw);
+  }
+
+  @protected
+  (String, List<BridgeFileChange>)
+  dco_decode_record_string_list_bridge_file_change(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 2) {
+      throw Exception('Expected 2 elements, got ${arr.length}');
+    }
+    return (
+      dco_decode_String(arr[0]),
+      dco_decode_list_bridge_file_change(arr[1]),
+    );
   }
 
   @protected
@@ -5616,6 +5632,17 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  (String, List<BridgeFileChange>)
+  sse_decode_record_string_list_bridge_file_change(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_field0 = sse_decode_String(deserializer);
+    var var_field1 = sse_decode_list_bridge_file_change(deserializer);
+    return (var_field0, var_field1);
+  }
+
+  @protected
   SessionConfig sse_decode_session_config(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_program = sse_decode_String(deserializer);
@@ -7224,6 +7251,16 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_record_string_list_bridge_file_change(
+    (String, List<BridgeFileChange>) self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.$1, serializer);
+    sse_encode_list_bridge_file_change(self.$2, serializer);
+  }
+
+  @protected
   void sse_encode_session_config(SessionConfig self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_String(self.program, serializer);
@@ -7584,8 +7621,8 @@ class AgentSessionImpl extends RustOpaque implements AgentSession {
   Future<List<BridgeTurn>> turns() =>
       RustLib.instance.api.crateApiSessionAgentSessionTurns(that: this);
 
-  /// Uncommitted tracked and untracked files compared with the checkout's last commit.
-  Future<List<BridgeFileChange>> uncommittedChanges({
+  /// Compared tree identities and uncommitted tracked and untracked files.
+  Future<(String, List<BridgeFileChange>)> uncommittedChanges({
     required bool hideWhitespace,
   }) => RustLib.instance.api.crateApiSessionAgentSessionUncommittedChanges(
     that: this,

@@ -227,7 +227,7 @@ fn uncommitted_scope_includes_untracked_honors_whitespace_and_keeps_index() {
         repo.write(".git/info/exclude", "ignored.txt\n");
         repo.write("ignored.txt", "ignored\n");
         let index = std::fs::read(repo.path().join(".git/index")).unwrap();
-        let files = checkpoints
+        let (_, files) = checkpoints
             .uncommitted_changes(Whitespace::Shown)
             .await
             .unwrap();
@@ -240,6 +240,7 @@ fn uncommitted_scope_includes_untracked_honors_whitespace_and_keeps_index() {
                 .uncommitted_changes(Whitespace::Hidden)
                 .await
                 .unwrap()
+                .1
                 .len(),
             1
         );
@@ -254,6 +255,48 @@ fn uncommitted_scope_includes_untracked_honors_whitespace_and_keeps_index() {
             std::fs::read(repo.path().join(".git/index")).unwrap(),
             index
         );
+    });
+}
+
+#[test]
+fn uncommitted_identity_tracks_content_and_the_committed_baseline() {
+    run(async {
+        let repo = Repo::new("uncommitted-identity");
+        identity(&repo);
+        let checkpoints = Checkpoints::new(repo.path());
+        repo.write("a.txt", "first edit\n");
+        let first = checkpoints
+            .uncommitted_changes(Whitespace::Shown)
+            .await
+            .unwrap();
+        assert_eq!(
+            checkpoints
+                .uncommitted_changes(Whitespace::Shown)
+                .await
+                .unwrap(),
+            first
+        );
+        repo.write("a.txt", "other edit\n");
+        let other = checkpoints
+            .uncommitted_changes(Whitespace::Shown)
+            .await
+            .unwrap();
+        assert_eq!(
+            other.1, first.1,
+            "the same files and counts do not identify their contents"
+        );
+        assert_ne!(other.0, first.0);
+        repo.git(&["add", "a.txt"]);
+        repo.git(&["commit", "-m", "Updated baseline"]);
+        let committed = checkpoints
+            .uncommitted_changes(Whitespace::Shown)
+            .await
+            .unwrap();
+        assert_ne!(
+            committed.0, other.0,
+            "the unchanged checkout now has a different baseline"
+        );
+        assert!(committed.1.is_empty());
     });
 }
 
@@ -275,6 +318,7 @@ fn initialize_git_reopens_checkpoint_store_and_starts_with_next_turn() {
                 .uncommitted_changes(Whitespace::Shown)
                 .await
                 .unwrap()
+                .1
                 .len(),
             1
         );

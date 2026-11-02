@@ -1493,7 +1493,10 @@ fn commit_bridge_exposes_attribution_whole_files_and_safe_notices() {
     assert_eq!(plan.files[0].turns, [1]);
     assert!(!plan.files[0].edited);
     assert!(plan.running.is_empty());
-    assert_eq!(session.uncommitted_changes(false).unwrap()[0].path, "a.txt");
+    assert_eq!(
+        session.uncommitted_changes(false).unwrap().1[0].path,
+        "a.txt"
+    );
     assert!(
         session
             .uncommitted_patch("a.txt".into(), false)
@@ -1514,7 +1517,7 @@ fn commit_bridge_exposes_attribution_whole_files_and_safe_notices() {
         Some("Subject<U+202E>")
     );
     assert_eq!(result.commit.as_ref().unwrap().count, 1);
-    assert!(session.uncommitted_changes(false).unwrap().is_empty());
+    assert!(session.uncommitted_changes(false).unwrap().1.is_empty());
     use std::os::unix::fs::PermissionsExt;
     let hook = repo.join(".git/hooks/pre-commit");
     std::fs::write(repo.join("a.txt"), "next\n").unwrap();
@@ -1541,7 +1544,7 @@ fn commit_bridge_exposes_attribution_whole_files_and_safe_notices() {
         .unwrap();
     assert_eq!(result.kind, BridgeGitOutcomeKind::HookChanged);
     assert_eq!(result.files, ["a.txt"]);
-    assert_eq!(session.uncommitted_changes(false).unwrap().len(), 1);
+    assert_eq!(session.uncommitted_changes(false).unwrap().1.len(), 1);
     assert!(call(session.shutdown()));
     let _ = std::fs::remove_dir_all(repo);
 }

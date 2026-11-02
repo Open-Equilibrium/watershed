@@ -159,7 +159,8 @@ async fn observe(dir: &Path) {
         let files = checkpoints
             .uncommitted_changes(Whitespace::Shown)
             .await
-            .expect("uncommitted");
+            .expect("uncommitted")
+            .1;
         let uncommitted_ms = ms(started);
         assert_eq!(files.len(), changes.len());
         let started = Instant::now();

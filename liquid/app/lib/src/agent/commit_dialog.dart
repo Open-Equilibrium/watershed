@@ -41,7 +41,7 @@ class _CommitDialogState extends State<_CommitDialog> {
   void initState() {
     super.initState();
     _messageFocus.addListener(_rebuild);
-    widget.state.git.status.addListener(_refreshPlan);
+    widget.state.git.refreshed.addListener(_refreshPlan);
     widget.state.status.addListener(_turnChanged);
   }
 
@@ -95,7 +95,7 @@ class _CommitDialogState extends State<_CommitDialog> {
       _message.text.trim().isNotEmpty;
   @override
   void dispose() {
-    widget.state.git.status.removeListener(_refreshPlan);
+    widget.state.git.refreshed.removeListener(_refreshPlan);
     widget.state.status.removeListener(_turnChanged);
     _messageFocus.dispose();
     _message.dispose();

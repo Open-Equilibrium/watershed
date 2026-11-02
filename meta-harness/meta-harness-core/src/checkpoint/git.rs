@@ -30,11 +30,11 @@ pub struct CommitPlan {
 }
 
 impl Checkpoints {
-    /// Files compared with the last commit, including untracked files.
+    /// Compared tree identities and files, including untracked files.
     pub async fn uncommitted_changes(
         &self,
         whitespace: Whitespace,
-    ) -> Result<Vec<FileChange>, DiffError> {
+    ) -> Result<(String, Vec<FileChange>), DiffError> {
         let tree = self.tree().await?;
         self.bounded(tree.uncommitted_changes(whitespace)).await
     }
@@ -55,7 +55,7 @@ impl Checkpoints {
         let tree = self.tree().await?;
         let (current, mut files) = self
             .bounded(async {
-                let (current, changes) = tree.uncommitted_paths(Whitespace::Shown).await?;
+                let (_, current, changes) = tree.uncommitted_paths(Whitespace::Shown).await?;
                 let staged = tree.staged_paths().await?;
                 let unstaged = tree.unstaged_paths().await?;
                 let files: BTreeMap<String, CommitFile> = changes

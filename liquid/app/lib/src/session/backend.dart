@@ -111,8 +111,8 @@ abstract interface class SessionBackend {
   /// Initializes Git only while no turn runs in this project folder.
   Future<BridgeGitOutcome> initializeGit();
 
-  /// Reads whole-file changes against HEAD, including untracked files.
-  Future<List<BridgeFileChange>> uncommittedChanges({
+  /// Reads compared tree identities and whole-file changes against HEAD.
+  Future<(String, List<BridgeFileChange>)> uncommittedChanges({
     required bool hideWhitespace,
   });
 
@@ -275,7 +275,7 @@ class RustSessionBackend implements SessionBackend {
   @override
   Future<BridgeGitOutcome> initializeGit() => _session.initializeGit();
   @override
-  Future<List<BridgeFileChange>> uncommittedChanges({
+  Future<(String, List<BridgeFileChange>)> uncommittedChanges({
     required bool hideWhitespace,
   }) => _session.uncommittedChanges(hideWhitespace: hideWhitespace);
   @override

@@ -241,16 +241,16 @@ impl AgentSession {
         })
     }
 
-    /// Uncommitted tracked and untracked files compared with the checkout's last commit.
+    /// Compared tree identities and uncommitted tracked and untracked files.
     pub fn uncommitted_changes(
         &self,
         hide_whitespace: bool,
-    ) -> Result<Vec<BridgeFileChange>, String> {
+    ) -> Result<(String, Vec<BridgeFileChange>), String> {
         RUNTIME.block_on(async {
             self.checkpoints
                 .uncommitted_changes(whitespace(hide_whitespace))
                 .await
-                .map(|files| files.into_iter().map(Into::into).collect())
+                .map(|(revision, files)| (revision, files.into_iter().map(Into::into).collect()))
                 .map_err(shown)
         })
     }
