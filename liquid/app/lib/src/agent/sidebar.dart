@@ -55,9 +55,6 @@ class SessionTitle extends StatelessWidget {
 /// No Page is open without a Workspace.
 final _noPage = ValueNotifier<OpenPage?>(null);
 
-/// Width of the sidebar at the default text size (approved look mockup).
-const sidebarWidth = 280.0;
-
 /// The Explorer above the agent sessions with project, harness and device per session, and
 /// Settings in its footer (approved look and Pages mockups).
 class Sidebar extends StatelessWidget {
@@ -254,7 +251,7 @@ class Sidebar extends StatelessWidget {
       height: WsMetrics.lhSmall / WsMetrics.fsSmall,
     );
     return Container(
-      width: sidebarWidth,
+      width: WsMetrics.widthSide,
       decoration: BoxDecoration(
         color: ws.subtle,
         border: Border(right: BorderSide(color: ws.border)),
@@ -307,7 +304,7 @@ class Sidebar extends StatelessWidget {
                   onTap: onSettings,
                   borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
                   child: Container(
-                    height: WsMetrics.rowNav,
+                    height: WsMetrics.rowSide,
                     padding: const EdgeInsets.symmetric(
                       horizontal: WsMetrics.space3,
                     ),

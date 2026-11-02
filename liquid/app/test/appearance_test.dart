@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/agent/sidebar.dart';
+import 'package:liquid/src/theme/tokens.g.dart';
 import 'package:liquid/src/app.dart';
 import 'package:liquid/src/appearance.dart';
 import 'package:liquid/src/launch.dart';
@@ -64,11 +65,11 @@ void main() {
       );
       await tester.pumpAndSettle();
       double sidebar() => tester.getRect(find.byType(Sidebar)).width;
-      expect(sidebar(), 280, reason: 'the default size');
+      expect(sidebar(), WsMetrics.widthSide, reason: 'the default size');
       expect(
         tester.getSize(find.byTooltip('Settings')).height,
-        32,
-        reason: 'navigation rows at the default size',
+        WsMetrics.rowSide,
+        reason: 'sidebar rows at the default size',
       );
 
       await tester.tap(find.byTooltip('Settings'));
@@ -84,7 +85,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(
         sidebar(),
-        closeTo(280 * 17 / 15, 1),
+        closeTo(WsMetrics.widthSide * 17 / 15, 1),
         reason: 'text and rows grow together',
       );
       expect(appearance.value.textSize, TextSize.large);

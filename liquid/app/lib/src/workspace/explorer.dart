@@ -241,7 +241,7 @@ class _PageRow extends StatelessWidget {
             onTap: onOpen,
             borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
             child: Container(
-              height: WsMetrics.rowNav,
+              height: WsMetrics.rowSide,
               padding: EdgeInsets.only(
                 left: WsMetrics.space3 + depth * 18,
                 right: WsMetrics.space3,
@@ -288,6 +288,8 @@ class _PageRow extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         color: selected ? ws.text : ws.textMuted,
+                        fontSize: WsMetrics.fsSide,
+                        height: WsMetrics.lhSide / WsMetrics.fsSide,
                       ),
                     ),
                   ),
