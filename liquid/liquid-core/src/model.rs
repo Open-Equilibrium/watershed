@@ -1,0 +1,261 @@
+//! The document schema: where each object lives and how it is read.
+//!
+//! ```text
+//! Workspace document  { owner, areas: { <area>: { name, sort, deleted } } }
+//! area document       { pages: { <page>: { title, parent?, sort, deleted } } }
+//! Page document       { blocks: { <block>: { kind, text, deleted } },
+//!                       views: { <view>: { block, sort, deleted } } }
+//! ```
+
+use std::collections::{HashMap, HashSet};
+
+use automerge::transaction::Transactable;
+use automerge::{
+    ActorId, AutoCommit, ObjId, ObjType, ROOT, ReadDoc, ScalarValue, ScalarValueRef, TextEncoding,
+    Value, ValueRef,
+};
+
+use crate::{AreaId, BlockId, Error, PageId, ViewId};
+
+pub(crate) const OWNER: &str = "owner";
+pub(crate) const AREAS: &str = "areas";
+pub(crate) const PAGES: &str = "pages";
+pub(crate) const BLOCKS: &str = "blocks";
+pub(crate) const VIEWS: &str = "views";
+pub(crate) const NAME: &str = "name";
+pub(crate) const TITLE: &str = "title";
+pub(crate) const PARENT: &str = "parent";
+pub(crate) const SORT: &str = "sort";
+pub(crate) const DELETED: &str = "deleted";
+pub(crate) const KIND: &str = "kind";
+pub(crate) const TEXT: &str = "text";
+pub(crate) const BLOCK: &str = "block";
+
+/// An area as the Explorer lists it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Area {
+    /// Its identity.
+    pub id: AreaId,
+    /// Its name.
+    pub name: String,
+}
+
+/// A Page in an area's tree.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PageEntry {
+    /// Its identity.
+    pub id: PageId,
+    /// The Page it nests under.
+    pub parent: Option<PageId>,
+    /// Its title.
+    pub title: String,
+}
+
+/// A View on a Page.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct View {
+    /// Its identity.
+    pub id: ViewId,
+    /// The Block it shows.
+    pub block: BlockId,
+}
+
+/// A new document for this device. Text positions count UTF-16 code units; loading a
+/// saved document must ask for the same encoding.
+pub(crate) fn document(device: &ActorId) -> AutoCommit {
+    AutoCommit::new_with_encoding(TextEncoding::Utf16CodeUnit).with_actor(device.clone())
+}
+
+/// Creates the empty top-level maps of a new document.
+pub(crate) fn create_maps(doc: &mut AutoCommit, keys: &[&str]) -> Result<(), Error> {
+    for key in keys {
+        doc.put_object(ROOT, *key, ObjType::Map)?;
+    }
+    Ok(())
+}
+
+/// Adds `id` to the top-level map `map` as a live object.
+pub(crate) fn insert(
+    doc: &mut AutoCommit,
+    map: &str,
+    id: &str,
+    fields: &[(&str, &str)],
+) -> Result<ObjId, Error> {
+    let entry = doc.put_object(top(doc, map)?, id, ObjType::Map)?;
+    for (key, value) in fields {
+        doc.put(&entry, *key, *value)?;
+    }
+    doc.put(&entry, DELETED, false)?;
+    Ok(entry)
+}
+
+fn top(doc: &AutoCommit, map: &str) -> Result<ObjId, Error> {
+    child(doc, &ROOT, map).ok_or_else(|| Error::Document(format!("no top-level map {map}")))
+}
+
+pub(crate) fn child(doc: &AutoCommit, parent: &ObjId, key: &str) -> Option<ObjId> {
+    match doc.get(parent, key).ok()? {
+        Some((Value::Object(_), id)) => Some(id),
+        _ => None,
+    }
+}
+
+pub(crate) fn string(doc: &AutoCommit, obj: &ObjId, key: &str) -> Option<String> {
+    match doc.get(obj, key).ok()? {
+        Some((Value::Scalar(value), _)) => match value.as_ref() {
+            ScalarValue::Str(text) => Some(text.to_string()),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn deleted(doc: &AutoCommit, obj: &ObjId) -> bool {
+    !matches!(
+        doc.get(obj, DELETED),
+        Ok(Some((Value::Scalar(value), _))) if value.as_ref() == &ScalarValue::Boolean(false)
+    )
+}
+
+/// The live object `id` in the top-level map `map`.
+pub(crate) fn live(doc: &AutoCommit, map: &str, id: &str) -> Option<ObjId> {
+    let obj = child(doc, &child(doc, &ROOT, map)?, id)?;
+    (!deleted(doc, &obj)).then_some(obj)
+}
+
+/// A live object of a top-level map with its text fields, read in one pass: Automerge reads
+/// a whole map faster than it looks up its keys one by one.
+pub(crate) struct Entry {
+    pub id: String,
+    fields: Vec<(String, String)>,
+}
+
+impl Entry {
+    pub(crate) fn get(&self, key: &str) -> Option<&str> {
+        self.fields
+            .iter()
+            .find(|(field, _)| field == key)
+            .map(|(_, value)| value.as_str())
+    }
+}
+
+/// The live objects in the top-level map `map`, ordered by sort key, then identity.
+pub(crate) fn sorted(doc: &AutoCommit, map: &str) -> Vec<Entry> {
+    let Some(top) = child(doc, &ROOT, map) else {
+        return Vec::new();
+    };
+    let mut entries: Vec<Entry> = doc
+        .map_range(&top, ..)
+        .filter(|item| matches!(item.value, ValueRef::Object(ObjType::Map)))
+        .filter_map(|item| {
+            let obj = item.id();
+            let mut live = false;
+            let mut fields = Vec::new();
+            for field in doc.map_range(&obj, ..) {
+                match field.value {
+                    ValueRef::Scalar(ScalarValueRef::Str(value)) => {
+                        fields.push((field.key.to_string(), value.to_string()));
+                    }
+                    ValueRef::Scalar(ScalarValueRef::Boolean(false)) if field.key == DELETED => {
+                        live = true;
+                    }
+                    _ => {}
+                }
+            }
+            live.then(|| Entry {
+                id: item.key.to_string(),
+                fields,
+            })
+        })
+        .collect();
+    entries.sort_by(|a, b| (a.get(SORT), &a.id).cmp(&(b.get(SORT), &b.id)));
+    entries
+}
+
+pub(crate) fn mark_deleted(doc: &mut AutoCommit, obj: &ObjId) -> Result<(), Error> {
+    Ok(doc.put(obj, DELETED, true)?)
+}
+
+/// The sort key for an object placed after `after` among `siblings`, or first.
+pub(crate) fn sort_after(siblings: &[Entry], after: Option<&str>) -> Result<String, Error> {
+    let index = match after {
+        None => 0,
+        Some(after) => {
+            siblings
+                .iter()
+                .position(|entry| entry.id == after)
+                .ok_or(Error::NotFound)?
+                + 1
+        }
+    };
+    let key = |i: usize| siblings.get(i).and_then(|entry| entry.get(SORT));
+    Ok(crate::sort_key::between(
+        index.checked_sub(1).and_then(key),
+        key(index),
+    ))
+}
+
+pub(crate) fn areas(doc: &AutoCommit) -> Vec<Area> {
+    sorted(doc, AREAS)
+        .into_iter()
+        .map(|entry| Area {
+            id: AreaId::stored(&entry.id),
+            name: entry.get(NAME).unwrap_or_default().to_string(),
+        })
+        .collect()
+}
+
+/// An area's live Pages, each followed by its descendants. A Page under a removed Page is
+/// hidden with it.
+pub(crate) fn pages(doc: &AutoCommit) -> Vec<PageEntry> {
+    let mut children: HashMap<Option<String>, Vec<PageEntry>> = HashMap::new();
+    for entry in sorted(doc, PAGES) {
+        let parent = entry.get(PARENT).map(str::to_string);
+        children.entry(parent.clone()).or_default().push(PageEntry {
+            id: PageId::stored(&entry.id),
+            parent: parent.as_deref().map(PageId::stored),
+            title: entry.get(TITLE).unwrap_or_default().to_string(),
+        });
+    }
+    let mut tree = Vec::new();
+    let mut pending: Vec<PageEntry> = children.remove(&None).unwrap_or_default();
+    pending.reverse();
+    while let Some(entry) = pending.pop() {
+        if let Some(mut nested) = children.remove(&Some(entry.id.as_str().to_string())) {
+            nested.reverse();
+            pending.extend(nested);
+        }
+        tree.push(entry);
+    }
+    tree
+}
+
+pub(crate) fn views(doc: &AutoCommit) -> Vec<View> {
+    let blocks: HashSet<String> = sorted(doc, BLOCKS)
+        .into_iter()
+        .map(|entry| entry.id)
+        .collect();
+    sorted(doc, VIEWS)
+        .into_iter()
+        .filter_map(|entry| {
+            let block = entry.get(BLOCK).filter(|block| blocks.contains(*block))?;
+            Some(View {
+                id: ViewId::stored(&entry.id),
+                block: BlockId::stored(block),
+            })
+        })
+        .collect()
+}
+
+pub(crate) fn text(doc: &AutoCommit, block: &str) -> Option<String> {
+    let text = child(doc, &live(doc, BLOCKS, block)?, TEXT)?;
+    doc.text(&text).ok()
+}
+
+/// Whether `at` lies at an end of `text` or between two of its characters, in UTF-16
+/// units: inside a character both neighboring units belong to the same element.
+pub(crate) fn on_boundary(doc: &AutoCommit, text: &ObjId, at: usize) -> bool {
+    let element = |unit: usize| doc.get(text, unit).ok().flatten().map(|(_, id)| id);
+    let length = doc.length(text);
+    at == 0 || at == length || (at < length && element(at - 1) != element(at))
+}
