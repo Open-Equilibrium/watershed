@@ -715,6 +715,42 @@ fn fetching_updates_only_the_upstreams_remote_tracking_branches() {
 }
 
 #[test]
+fn automatic_fetch_never_imports_configured_bundles() {
+    run(async {
+        for symbolic in [true, false] {
+            let clone = Clone::new(&format!("fetch-bundle-{symbolic}"));
+            let repo = &clone.repo;
+            clone.commit_upstream("theirs\n");
+            let bundle = clone.origin.path().join(".git/fetch.bundle");
+            clone.origin.git(&[
+                "bundle",
+                "create",
+                bundle.to_str().expect("bundle path"),
+                "main",
+            ]);
+            repo.git(&[
+                "config",
+                "fetch.bundleURI",
+                bundle.to_str().expect("bundle path"),
+            ]);
+            if symbolic {
+                repo.git(&["symbolic-ref", "refs/bundles/heads/main", "refs/heads/main"]);
+            }
+            let head = repo.git(&["rev-parse", "HEAD"]);
+            let bundles = repo.git(&["for-each-ref", "refs/bundles"]);
+            let checkpoints = Checkpoints::new(repo.path());
+
+            assert!(checkpoints.fetch().await.expect("remote fetched"));
+
+            assert_eq!(repo.git(&["rev-parse", "HEAD"]), head, "{symbolic}");
+            assert_eq!(repo.git(&["for-each-ref", "refs/bundles"]), bundles);
+            assert_eq!(read(repo, "a.txt"), "old\n", "the files stay");
+            assert_eq!(checkpoints.status().await.expect("status").behind, 1);
+        }
+    });
+}
+
+#[test]
 fn automatic_fetch_never_expands_a_remote_group_into_unchecked_destinations() {
     run(async {
         for (case, members) in [

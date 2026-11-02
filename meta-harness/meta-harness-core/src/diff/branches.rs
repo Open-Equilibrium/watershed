@@ -418,6 +418,9 @@ impl WorkingTree {
             &self.root,
             &env,
             &[
+                // Bundle imports write refs outside the checked remote refspecs.
+                "-c",
+                "fetch.bundleURI=",
                 "fetch",
                 "--quiet",
                 "--no-tags",
