@@ -401,23 +401,28 @@ class _Header extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space7),
       child: Row(
         children: [
-          Flexible(
-            child: SessionTitle(
-              state: state,
-              style: Theme.of(context).textTheme.labelMedium
-                  ?.copyWith(fontWeight: WsMetrics.fwSemibold),
+          Expanded(
+            child: Row(
+              children: [
+                Flexible(
+                  child: SessionTitle(
+                    state: state,
+                    style: Theme.of(context).textTheme.labelMedium
+                        ?.copyWith(fontWeight: WsMetrics.fwSemibold),
+                  ),
+                ),
+                Flexible(child: chip(project)),
+                Flexible(
+                  child: ValueListenableBuilder(
+                    valueListenable: state.model,
+                    builder: (context, model, _) => model == null
+                        ? const SizedBox.shrink()
+                        : chip(model.substring(model.indexOf('/') + 1)),
+                  ),
+                ),
+              ],
             ),
           ),
-          Flexible(child: chip(project)),
-          Flexible(
-            child: ValueListenableBuilder(
-              valueListenable: state.model,
-              builder: (context, model, _) => model == null
-                  ? const SizedBox.shrink()
-                  : chip(model.substring(model.indexOf('/') + 1)),
-            ),
-          ),
-          const Spacer(),
           Flexible(child: BranchChip(state: state)),
         ],
       ),

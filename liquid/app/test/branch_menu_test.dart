@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:liquid/src/appearance.dart';
 import 'package:liquid/src/agent/shell.dart';
 import 'package:liquid/src/agent/sidebar.dart';
 import 'package:liquid/src/rust/api/events.dart';
@@ -18,8 +19,13 @@ void main() {
   late FakeBackend backend;
   late SessionState state;
 
-  Future<void> show(WidgetTester tester, {BridgeGitStatus? git}) async {
-    await tester.binding.setSurfaceSize(const Size(1600, 900));
+  Future<void> show(
+    WidgetTester tester, {
+    BridgeGitStatus? git,
+    Size size = const Size(1600, 900),
+    TextSize textSize = TextSize.standard,
+  }) async {
+    await tester.binding.setSurfaceSize(size);
     backend = FakeBackend()
       ..git = git ?? gitStatusOf(ahead: 1, changed: 4)
       ..branches = BridgeBranches(
@@ -35,6 +41,8 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         theme: liquidTheme(Brightness.light),
+        builder: (context, child) =>
+            UiScale(scale: textSize.scale, child: child!),
         home: AgentShell(state: state, info: info),
       ),
     );
@@ -59,6 +67,26 @@ void main() {
     expect(find.text('↑1'), findsOneWidget);
     expect(find.text('↓3'), findsOneWidget);
     expect(find.text('pi · main · MacBook'), findsOneWidget);
+  });
+
+  testWidgets('the branch chip fits the minimum window with Large text', (
+    tester,
+  ) async {
+    await show(
+      tester,
+      git: gitStatusOf(upstream: null),
+      size: const Size(1050, 900),
+      textSize: TextSize.large,
+    );
+    expect(tester.takeException(), isNull);
+    expect(tester.getSize(chipText('main')).width, greaterThan(0));
+    expect(chipText('no upstream'), findsOneWidget);
+
+    backend.gitError = 'git could not start: No such file or directory';
+    await state.git.refresh();
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(find.text('Git unavailable'), findsOneWidget);
   });
 
   testWidgets('a detached HEAD shows its commit, broken Git says so', (
