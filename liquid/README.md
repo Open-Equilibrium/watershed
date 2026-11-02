@@ -15,9 +15,9 @@ After changing `liquid-bridge/src/api`, run `flutter_rust_bridge_codegen generat
 
 ## Run
 
-The app starts pi for the project named in the environment and opens the start page, where recent sessions continue and the first message starts a new one. It needs pi 1.3.0 with a configured model. `flutter run -d macos` in `app/` needs Xcode and rustup ([build hosts](../TESTING.md#development-toolchain)). The project signs development builds ad hoc; release builds are to be signed with Developer ID, hardened and notarized, and to run without the App Sandbox (ADR-0200).
+The app opens the Workspace, whose replica lives in `~/Library/Application Support/Liquid/Workspace/` with its key in the keychain. With the project named in the environment it also starts pi and opens the start page, where recent sessions continue and the first message starts a new one; without one, it opens the Workspace's first Page and says why on stderr. It needs pi 1.3.0 with a configured model. `flutter run -d macos` in `app/` needs Xcode and rustup ([build hosts](../TESTING.md#development-toolchain)). The project signs development builds ad hoc; release builds are to be signed with Developer ID, hardened and notarized, and to run without the App Sandbox (ADR-0200).
 
-- `LIQUID_PROJECT` — the agent's project directory (required).
+- `LIQUID_PROJECT` — the agent's project directory (required for an agent session).
 - `LIQUID_PI_EXTENSION` — the absolute path of `meta-harness/pi-extension/watershed.ts` (required: pi would run tools without approvals, so Liquid does not start a session unless this extension is loaded).
 - `LIQUID_PI` — the pi executable, a name looked up on `PATH` or an absolute path; defaults to `pi`.
 - `LIQUID_PI_SESSION` — the absolute path of a stored pi session file to reopen, with its Trajectory and branches.
