@@ -29,7 +29,7 @@ mod workspace;
 pub use history::{Action, Document, Operation, Permission};
 pub use id::{ActionId, AreaId, BlockId, PageId, PersonId, ViewId};
 pub use model::{Area, PageEntry, View};
-pub use mutation::{Actor, Applied, Changed, Created, Error, Mutation, Origin, Request};
+pub use mutation::{Actor, Applied, Changed, Created, Error, Mutation, Origin, Request, TextStyle};
 pub use store::{Commit, MemoryStore, Store, Write};
 pub use workspace::Workspace;
 

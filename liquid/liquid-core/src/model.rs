@@ -15,7 +15,7 @@ use automerge::{
     TextEncoding, Value, ValueRef,
 };
 
-use crate::{AreaId, BlockId, Error, PageId, ViewId};
+use crate::{AreaId, BlockId, Error, PageId, TextStyle, ViewId};
 
 pub(crate) const OWNER: &str = "owner";
 pub(crate) const AREAS: &str = "areas";
@@ -30,6 +30,8 @@ pub(crate) const DELETED: &str = "deleted";
 pub(crate) const KIND: &str = "kind";
 pub(crate) const TEXT: &str = "text";
 pub(crate) const BLOCK: &str = "block";
+pub(crate) const STYLE: &str = "style";
+pub(crate) const BOUNDARY: &str = "boundary";
 
 /// An area as the Explorer lists it.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -58,6 +60,8 @@ pub struct View {
     pub id: ViewId,
     /// The Block it shows.
     pub block: BlockId,
+    /// Whether a Section starts here.
+    pub boundary: bool,
 }
 
 /// A new document for this device. Text positions count UTF-16 code units, also when
@@ -165,6 +169,9 @@ pub(crate) fn sorted(doc: &AutoCommit, map: &str) -> Vec<Entry> {
                     ValueRef::Scalar(ScalarValueRef::Boolean(false)) if field.key == DELETED => {
                         live = true;
                     }
+                    ValueRef::Scalar(ScalarValueRef::Boolean(value)) => {
+                        fields.push((field.key.to_string(), value.to_string()));
+                    }
                     _ => {}
                 }
             }
@@ -247,4 +254,34 @@ pub(crate) fn on_boundary(doc: &AutoCommit, text: &ObjId, at: usize) -> bool {
     let element = |unit: usize| doc.get(text, unit).ok().flatten().map(|(_, id)| id);
     let length = doc.length(text);
     at == 0 || at == length || (at < length && element(at - 1) != element(at))
+}
+
+/// A style as a Text Block stores it.
+pub(crate) fn style_name(style: TextStyle) -> Result<String, Error> {
+    Ok(match style {
+        TextStyle::Paragraph => "paragraph".into(),
+        TextStyle::Heading(level @ 1..=3) => format!("heading{level}"),
+        TextStyle::Heading(_) => return Err(Error::OutOfRange),
+        TextStyle::Bullet => "bullet".into(),
+        TextStyle::Numbered => "numbered".into(),
+        TextStyle::Todo { done: false } => "todo".into(),
+        TextStyle::Todo { done: true } => "done".into(),
+        TextStyle::Quote => "quote".into(),
+    })
+}
+
+/// A stored style; a Text Block without one, or with one this version does not know, reads
+/// as a paragraph.
+pub(crate) fn style(name: Option<&str>) -> TextStyle {
+    match name {
+        Some("heading1") => TextStyle::Heading(1),
+        Some("heading2") => TextStyle::Heading(2),
+        Some("heading3") => TextStyle::Heading(3),
+        Some("bullet") => TextStyle::Bullet,
+        Some("numbered") => TextStyle::Numbered,
+        Some("todo") => TextStyle::Todo { done: false },
+        Some("done") => TextStyle::Todo { done: true },
+        Some("quote") => TextStyle::Quote,
+        _ => TextStyle::Paragraph,
+    }
 }
