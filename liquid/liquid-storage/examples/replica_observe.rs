@@ -1,15 +1,15 @@
-//! Observation workload for the local replica (PERFORMANCE.md, Liquid): typing with one
-//! durable commit per keystroke, then a new process reopening a long Page from the encrypted
-//! database. It
-//! prints a summary and never compares with a threshold. Run from the repository root:
+//! Observation workload for the local replica (PERFORMANCE.md, Liquid). A first run types with
+//! one durable commit per keystroke, builds a long Page and prints the replica's path; a second
+//! run, a new process as when Liquid starts again, reopens that Page and removes the replica.
+//! It prints a summary and never compares with a threshold. Run from the repository root:
 //!
 //! ```sh
 //! cargo build --release -p liquid-storage --example replica_observe
 //! /usr/bin/time -l target/release/examples/replica_observe
+//! /usr/bin/time -l target/release/examples/replica_observe <printed path>
 //! ```
 
 use std::path::Path;
-use std::process::Command;
 use std::time::{Duration, Instant};
 
 use liquid_core::{Actor, Created, Mutation, Origin, PageId, PersonId, Request, Workspace};
@@ -130,16 +130,11 @@ fn main() {
         "database with its log after both: {:.1} MiB",
         size as f64 / 1_048_576.0
     );
-    // A new session in a new process, as when Liquid starts again.
-    let reopened = Command::new(std::env::current_exe().unwrap())
-        .arg(&path)
-        .status()
-        .unwrap();
-    assert!(reopened.success());
-    std::fs::remove_dir_all(&dir).unwrap();
+    println!("replica: {}", path.display());
 }
 
-/// Opens the replica at `path` and reads its first Page's Views, as the Explorer opens it.
+/// Opens the replica at `path`, reads its first Page's Views as the Explorer opens it, and
+/// removes the replica.
 fn reopen(path: &Path) {
     let start = Instant::now();
     let mut workspace = Workspace::open(Sqlite::open(path, &KEY).unwrap()).unwrap();
@@ -151,4 +146,6 @@ fn reopen(path: &Path) {
         views.len(),
         start.elapsed().as_secs_f64() * 1e3
     );
+    drop(workspace);
+    std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
 }
