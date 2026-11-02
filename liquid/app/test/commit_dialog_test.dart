@@ -22,6 +22,7 @@ void main() {
     WidgetTester tester, {
     BridgeGitStatus? status,
     FakeBackend? using,
+    bool dialogOnly = false,
   }) async {
     await tester.binding.setSurfaceSize(const Size(1600, 1000));
     backend = (using ?? FakeBackend())
@@ -51,16 +52,27 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         theme: liquidTheme(Brightness.light),
-        home: AgentShell(
-          state: state,
-          info: const SessionInfo(
-            project: 'acme-api',
-            harness: 'pi',
-            device: 'MacBook',
-          ),
-        ),
+        home: dialogOnly
+            ? Builder(
+                builder: (context) => Scaffold(
+                  body: TextButton(
+                    key: const Key('git-next'),
+                    onPressed: () => showCommitDialog(context, state),
+                    child: const Text('Open commit'),
+                  ),
+                ),
+              )
+            : AgentShell(
+                state: state,
+                info: const SessionInfo(
+                  project: 'acme-api',
+                  harness: 'pi',
+                  device: 'MacBook',
+                ),
+              ),
       ),
     );
+    if (dialogOnly) await state.git.refresh();
     await tester.pumpAndSettle();
   }
 
@@ -118,6 +130,96 @@ void main() {
         'Committed 4 files on main: “Return 429”',
       );
       await tester.pump(const Duration(seconds: 7));
+    },
+  );
+
+  testWidgets(
+    'unavailable attribution omits its label and keeps counts and commit',
+    (tester) async {
+      await show(tester, dialogOnly: true);
+      backend.commitPlanned = BridgeCommitPlan(
+        snapshot: 'snapshot',
+        files: [
+          commitFileOf(
+            'unavailable.txt',
+            attributionAvailable: false,
+            added: 8,
+            removed: 2,
+          ),
+          commitFileOf('outside.txt', added: 6),
+        ],
+        running: const [],
+      );
+      await open(tester);
+      expect(find.text('unavailable.txt'), findsOneWidget);
+      expect(find.text('not this session'), findsOneWidget);
+      final row = find
+          .ancestor(
+            of: find.text('unavailable.txt'),
+            matching: find.byType(Row),
+          )
+          .first;
+      expect(
+        find.descendant(of: row, matching: find.text('not this session')),
+        findsNothing,
+      );
+      expect(find.descendant(of: row, matching: find.text('·')), findsNothing);
+      expect(
+        find.descendant(of: row, matching: find.text('+8')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: row, matching: find.text('−2')),
+        findsOneWidget,
+      );
+      await tester.binding.setSurfaceSize(const Size(480, 1000));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expect(find.text('not this session'), findsOneWidget);
+      await message(tester);
+      await tester.tap(find.widgetWithText(PrimaryButton, 'Commit'));
+      await tester.pumpAndSettle();
+      expect(backend.committedPaths, ['unavailable.txt', 'outside.txt']);
+      await tester.pump(const Duration(seconds: 7));
+    },
+  );
+
+  testWidgets(
+    'long attribution truncates with a tooltip and prioritizes the filename at narrow width',
+    (tester) async {
+      await show(tester, dialogOnly: true);
+      final turns = List.generate(100, (i) => i + 1);
+      final label = 'turns ${turns.join(', ')} and you';
+      backend.commitPlanned = BridgeCommitPlan(
+        snapshot: 'snapshot',
+        files: [
+          commitFileOf('src/login.ts', turns: turns, edited: true, added: 4),
+        ],
+        running: const [],
+      );
+      await open(tester);
+      for (final width in [1600.0, 480.0]) {
+        await tester.binding.setSurfaceSize(Size(width, 1000));
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        final attribution = find.text(label);
+        expect(
+          tester.widget<Text>(attribution).overflow,
+          TextOverflow.ellipsis,
+        );
+        expect(tester.widget<Text>(attribution).maxLines, 1);
+        expect(find.byTooltip(label), findsOneWidget);
+        expect(
+          tester.getSize(find.text('src/login.ts')).width,
+          greaterThan(tester.getSize(attribution).width),
+        );
+        await tester.longPress(attribution);
+        await tester.pumpAndSettle();
+        expect(find.text(label), findsNWidgets(2));
+        await tester.tap(find.text('Commit changes'));
+        await tester.pumpAndSettle();
+      }
+      await tester.binding.setSurfaceSize(null);
     },
   );
 

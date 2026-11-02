@@ -357,6 +357,7 @@ class _CommitDialogState extends State<_CommitDialog> {
             style: small.copyWith(color: selected ? color : ws.textFaint),
           ),
           Expanded(
+            flex: 2,
             child: Text(
               change.shown,
               style: monoStyle(
@@ -369,8 +370,18 @@ class _CommitDialogState extends State<_CommitDialog> {
           if (!selected)
             Text('Excluded', style: small)
           else ...[
-            if (!_editing) ...[
-              Text(attribution, style: small),
+            if (!_editing && file.attributionAvailable) ...[
+              Flexible(
+                child: Tooltip(
+                  message: attribution,
+                  child: Text(
+                    attribution,
+                    style: small,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ),
               Text('·', style: small),
             ],
             Text('+${change.added}', style: small.copyWith(color: ws.success)),

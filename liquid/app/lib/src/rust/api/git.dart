@@ -10,7 +10,7 @@ import 'history.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 // These functions are ignored because they are not marked as `pub`: `count`, `outcome`, `running_agents`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`
 
 /// A local or remote branch.
 class BridgeBranch {
@@ -116,6 +116,9 @@ class BridgeCommitFile {
   /// The whole-file status and line counts.
   final BridgeFileChange change;
 
+  /// The attribution lookup completed within its bounds.
+  final bool attributionAvailable;
+
   /// Session turns that changed it.
   final Int64List turns;
 
@@ -127,6 +130,7 @@ class BridgeCommitFile {
 
   const BridgeCommitFile({
     required this.change,
+    required this.attributionAvailable,
     required this.turns,
     required this.edited,
     required this.stagedPartly,
@@ -135,6 +139,7 @@ class BridgeCommitFile {
   @override
   int get hashCode =>
       change.hashCode ^
+      attributionAvailable.hashCode ^
       turns.hashCode ^
       edited.hashCode ^
       stagedPartly.hashCode;
@@ -145,6 +150,7 @@ class BridgeCommitFile {
       other is BridgeCommitFile &&
           runtimeType == other.runtimeType &&
           change == other.change &&
+          attributionAvailable == other.attributionAvailable &&
           turns == other.turns &&
           edited == other.edited &&
           stagedPartly == other.stagedPartly;

@@ -10,6 +10,8 @@ use std::collections::BTreeMap;
 pub struct CommitFile {
     /// Status and line counts.
     pub change: FileChange,
+    /// The attribution lookup completed within its bounds.
+    pub attribution_available: bool,
     /// Session turn numbers that changed this file.
     pub turns: Vec<u64>,
     /// Checkpoints observed a change outside the session's turns.
@@ -67,6 +69,7 @@ impl Checkpoints {
                             change.path.clone(),
                             CommitFile {
                                 change,
+                                attribution_available: true,
                                 turns: Vec::new(),
                                 edited: false,
                                 staged_partly,
@@ -92,6 +95,7 @@ impl Checkpoints {
             Ok(()) => {}
             Err(DiffError::TimedOut(_) | DiffError::TooLarge) => {
                 for file in files.values_mut() {
+                    file.attribution_available = false;
                     file.turns.clear();
                     file.edited = false;
                 }

@@ -794,6 +794,7 @@ BridgeGitOutcome outcomeOf(
 
 BridgeCommitFile commitFileOf(
   String path, {
+  bool attributionAvailable = true,
   List<int> turns = const [],
   bool edited = false,
   bool stagedPartly = false,
@@ -809,6 +810,7 @@ BridgeCommitFile commitFileOf(
     removed: removed,
   ),
   turns: Int64List.fromList(turns),
+  attributionAvailable: attributionAvailable,
   edited: edited,
   stagedPartly: stagedPartly,
 );

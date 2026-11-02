@@ -2872,13 +2872,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeCommitFile dco_decode_bridge_commit_file(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 4)
-      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
+    if (arr.length != 5)
+      throw Exception('unexpected arr length: expect 5 but see ${arr.length}');
     return BridgeCommitFile(
       change: dco_decode_bridge_file_change(arr[0]),
-      turns: dco_decode_list_prim_i_64_strict(arr[1]),
-      edited: dco_decode_bool(arr[2]),
-      stagedPartly: dco_decode_bool(arr[3]),
+      attributionAvailable: dco_decode_bool(arr[1]),
+      turns: dco_decode_list_prim_i_64_strict(arr[2]),
+      edited: dco_decode_bool(arr[3]),
+      stagedPartly: dco_decode_bool(arr[4]),
     );
   }
 
@@ -4313,11 +4314,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeCommitFile sse_decode_bridge_commit_file(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_change = sse_decode_bridge_file_change(deserializer);
+    var var_attributionAvailable = sse_decode_bool(deserializer);
     var var_turns = sse_decode_list_prim_i_64_strict(deserializer);
     var var_edited = sse_decode_bool(deserializer);
     var var_stagedPartly = sse_decode_bool(deserializer);
     return BridgeCommitFile(
       change: var_change,
+      attributionAvailable: var_attributionAvailable,
       turns: var_turns,
       edited: var_edited,
       stagedPartly: var_stagedPartly,
@@ -6143,6 +6146,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_bridge_file_change(self.change, serializer);
+    sse_encode_bool(self.attributionAvailable, serializer);
     sse_encode_list_prim_i_64_strict(self.turns, serializer);
     sse_encode_bool(self.edited, serializer);
     sse_encode_bool(self.stagedPartly, serializer);

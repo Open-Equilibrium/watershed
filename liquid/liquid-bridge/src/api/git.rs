@@ -144,12 +144,26 @@ pub struct BridgeCommitPlan {
 pub struct BridgeCommitFile {
     /// The whole-file status and line counts.
     pub change: BridgeFileChange,
+    /// The attribution lookup completed within its bounds.
+    pub attribution_available: bool,
     /// Session turns that changed it.
     pub turns: Vec<i64>,
     /// A checkpoint gap or the current checkout also changed it.
     pub edited: bool,
     /// The user staged only part of it.
     pub staged_partly: bool,
+}
+
+impl From<meta_harness_core::CommitFile> for BridgeCommitFile {
+    fn from(file: meta_harness_core::CommitFile) -> Self {
+        Self {
+            change: file.change.into(),
+            attribution_available: file.attribution_available,
+            turns: file.turns.into_iter().map(count).collect(),
+            edited: file.edited,
+            staged_partly: file.staged_partly,
+        }
+    }
 }
 
 impl AgentSession {
@@ -187,16 +201,7 @@ impl AgentSession {
             let plan = self.checkpoints.commit_plan(&turns).await.map_err(shown)?;
             Ok(BridgeCommitPlan {
                 snapshot: plan.snapshot,
-                files: plan
-                    .files
-                    .into_iter()
-                    .map(|file| BridgeCommitFile {
-                        change: file.change.into(),
-                        turns: file.turns.into_iter().map(count).collect(),
-                        edited: file.edited,
-                        staged_partly: file.staged_partly,
-                    })
-                    .collect(),
+                files: plan.files.into_iter().map(Into::into).collect(),
                 running: self.running_agents(&plan.running).await,
             })
         })

@@ -1490,6 +1490,7 @@ fn commit_bridge_exposes_attribution_whole_files_and_safe_notices() {
     reached(&repo.join(".git/ready"));
     let plan = session.commit_plan().unwrap();
     assert_eq!(plan.files.len(), 1);
+    assert!(plan.files[0].attribution_available);
     assert_eq!(plan.files[0].turns, [1]);
     assert!(!plan.files[0].edited);
     assert!(plan.running.is_empty());
@@ -1547,6 +1548,29 @@ fn commit_bridge_exposes_attribution_whole_files_and_safe_notices() {
     assert_eq!(session.uncommitted_changes(false).unwrap().1.len(), 1);
     assert!(call(session.shutdown()));
     let _ = std::fs::remove_dir_all(repo);
+}
+
+#[test]
+fn commit_bridge_distinguishes_unavailable_attribution_from_no_session_changes() {
+    use crate::api::git::BridgeCommitFile;
+    for available in [false, true] {
+        let file = BridgeCommitFile::from(meta_harness_core::CommitFile {
+            change: meta_harness_core::FileChange {
+                path: "outside.txt".into(),
+                status: meta_harness_core::ChangeStatus::Added,
+                added: 6,
+                removed: 0,
+            },
+            attribution_available: available,
+            turns: Vec::new(),
+            edited: false,
+            staged_partly: false,
+        });
+        assert_eq!(file.attribution_available, available);
+        assert!(file.turns.is_empty());
+        assert_eq!(file.change.path, "outside.txt");
+        assert_eq!(file.change.added, 6);
+    }
 }
 
 #[test]

@@ -471,6 +471,7 @@ fn commit_plan_attributes_turns_outside_edits_and_partial_staging() {
         repo.write("a.txt", "turn three and you\n");
         repo.write("outside.txt", "outside\n");
         let plan = checkpoints.commit_plan(&turns).await.unwrap();
+        assert!(plan.files.iter().all(|file| file.attribution_available));
         let a = plan
             .files
             .iter()
@@ -794,7 +795,7 @@ impl Checkpoints {
 }
 
 #[test]
-fn attribution_timeout_keeps_files_without_partial_labels() {
+fn attribution_bounds_keep_files_without_partial_labels() {
     use crate::TurnCheckpoints;
     run(async {
         let repo = Repo::new("attribution-timeout");
@@ -802,6 +803,7 @@ fn attribution_timeout_keeps_files_without_partial_labels() {
         checkpoints.capture(&at("t1", Phase::Start)).await.unwrap();
         repo.write("a.txt", "turn change\n");
         checkpoints.capture(&at("t1", Phase::End)).await.unwrap();
+        repo.write("outside.txt", "your change\n");
         let turn = TurnCheckpoints {
             session: "s1".into(),
             turn: "t1".into(),
@@ -816,20 +818,40 @@ fn attribution_timeout_keeps_files_without_partial_labels() {
             failure: None,
             changed: None,
         };
-        assert_eq!(
-            checkpoints
-                .commit_plan(std::slice::from_ref(&turn))
-                .await
-                .unwrap()
-                .files[0]
-                .turns,
-            [1]
-        );
-        checkpoints.set_attribution_timeout(std::time::Duration::ZERO);
-        let plan = checkpoints.commit_plan(&[turn]).await.unwrap();
-        assert_eq!(plan.files[0].change.path, "a.txt");
-        assert!(plan.files[0].turns.is_empty());
-        assert!(!plan.files[0].edited);
+        let complete = checkpoints
+            .commit_plan(std::slice::from_ref(&turn))
+            .await
+            .unwrap();
+        assert!(complete.files[0].attribution_available);
+        assert_eq!(complete.files[0].turns, [1]);
+        assert!(checkpoints.commit_plan(&[]).await.unwrap().files[0].attribution_available);
+        // Reusing captured tree pairs reaches the batch's 4 MiB bound without
+        // thousands of separate checkpoint writes.
+        for (deadline, turns) in [
+            (std::time::Duration::ZERO, vec![turn.clone()]),
+            (std::time::Duration::from_secs(60), vec![turn; 26_000]),
+        ] {
+            checkpoints.set_attribution_timeout(deadline);
+            let plan = checkpoints.commit_plan(&turns).await.unwrap();
+            assert_eq!(plan.files.len(), 2);
+            for (file, original) in plan.files.iter().zip(&complete.files) {
+                assert_eq!(file.change, original.change);
+                assert!(!file.attribution_available);
+                assert!(file.turns.is_empty());
+                assert!(!file.edited);
+            }
+        }
+        identity(&repo);
+        checkpoints
+            .commit(
+                &complete.snapshot,
+                &["a.txt".into()],
+                "Commit without attribution",
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(repo.git(&["show", "HEAD:a.txt"]), "turn change\n");
     });
 }
 

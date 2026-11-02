@@ -107,24 +107,6 @@ summary{cursor:pointer}summary h3{display:inline;margin:0}summary:focus-visible{
   <section id="m3">
     <h2>M3 - Liquid</h2>
     <div class="grid">
-      <details id="d-078" class="decision" style="grid-column:1/-1">
-        <summary><h3>D-078 - Commit File Attribution When History Is Incomplete Or Long</h3></summary>
-        <p><strong>Status:</strong> Blocks Liquid Git commit closeout. The <a href="../design/mockups/liquid-git-branches.html">approved commit mockup</a> shows successful, short attribution; approve these cases there before implementation.</p>
-        <p><strong>Problem:</strong> If looking up which turns changed a file takes too long or returns too much data, the file stays listed but currently says &ldquo;not this session&rdquo;, even when this session changed it. A file changed by many turns has another problem: its turn list can take the entire row, hiding the filename and overflowing the dialog.</p>
-        <h4>When attribution is unavailable</h4>
-        <ul>
-          <li><strong>A: Omit the attribution label; keep the filename, line counts and commit action.</strong> Pro: no false claim and no new wording. Con: the user cannot tell why the label is absent.</li>
-          <li><strong>B: Show &ldquo;Attribution unavailable&rdquo;.</strong> Pro: explains the missing information. Con: adds a label and needs room in the row.</li>
-          <li><strong>C: Refuse to open the commit dialog until attribution succeeds.</strong> Pro: every listed file has attribution. Con: optional history can prevent otherwise valid commits.</li>
-        </ul>
-        <h4>When the turn list is long</h4>
-        <ul>
-          <li><strong>A: Limit its width, use an ellipsis and expose the complete list in a tooltip.</strong> Pro: preserves the compact row and reserves room for the filename. Con: reading the full list requires another interaction.</li>
-          <li><strong>B: Wrap attribution below the filename.</strong> Pro: every turn stays visible. Con: rows become taller and long histories require more scrolling.</li>
-        </ul>
-        <p><strong>Recommendation:</strong> A for each question: keep attribution optional, distinguish an incomplete lookup from a successful lookup with no session changes, and preserve the compact approved layout.</p>
-        <p><strong>Acceptance criterion:</strong> Record the chosen unavailable state and long-list presentation in the ADR log and approved HTML mockup. Tests must distinguish completed attribution from timeout/output-limit fallback, retain every uncommitted file, preserve the chosen commit availability, and show an identifiable filename without overflow for a file changed across at least 100 turns in the supported small dialog.</p>
-      </details>
       <details id="d-027" class="decision">
         <summary><h3>D-027 - Liquid CLI/API Surface</h3></summary>
         <p><strong>Status:</strong> Open before external-agent Liquid edits.</p>

@@ -3231,11 +3231,13 @@ impl SseDecode for crate::api::git::BridgeCommitFile {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut var_change = <crate::api::events::BridgeFileChange>::sse_decode(deserializer);
+        let mut var_attributionAvailable = <bool>::sse_decode(deserializer);
         let mut var_turns = <Vec<i64>>::sse_decode(deserializer);
         let mut var_edited = <bool>::sse_decode(deserializer);
         let mut var_stagedPartly = <bool>::sse_decode(deserializer);
         return crate::api::git::BridgeCommitFile {
             change: var_change,
+            attribution_available: var_attributionAvailable,
             turns: var_turns,
             edited: var_edited,
             staged_partly: var_stagedPartly,
@@ -5361,6 +5363,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::git::BridgeCommitFile {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
             self.change.into_into_dart().into_dart(),
+            self.attribution_available.into_into_dart().into_dart(),
             self.turns.into_into_dart().into_dart(),
             self.edited.into_into_dart().into_dart(),
             self.staged_partly.into_into_dart().into_dart(),
@@ -6839,6 +6842,7 @@ impl SseEncode for crate::api::git::BridgeCommitFile {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <crate::api::events::BridgeFileChange>::sse_encode(self.change, serializer);
+        <bool>::sse_encode(self.attribution_available, serializer);
         <Vec<i64>>::sse_encode(self.turns, serializer);
         <bool>::sse_encode(self.edited, serializer);
         <bool>::sse_encode(self.staged_partly, serializer);
