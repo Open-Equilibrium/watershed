@@ -7,10 +7,10 @@ use crate::{
 };
 
 /// A throwaway Git repository with one committed file, `a.txt`.
-struct Repo(PathBuf);
+pub(super) struct Repo(pub(super) PathBuf);
 
 impl Repo {
-    fn new(name: &str) -> Self {
+    pub(super) fn new(name: &str) -> Self {
         Self::at(std::env::temp_dir().join(format!(
             "watershed-checkpoint-{name}-{}",
             std::process::id()
@@ -18,7 +18,7 @@ impl Repo {
     }
 
     /// A repository at `dir` with `a.txt` committed as `old`.
-    fn at(dir: PathBuf) -> Self {
+    pub(super) fn at(dir: PathBuf) -> Self {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("repository directory");
         let repo = Self(dir);
@@ -29,7 +29,7 @@ impl Repo {
         repo
     }
 
-    fn git(&self, args: &[&str]) -> String {
+    pub(super) fn git(&self, args: &[&str]) -> String {
         let output = Command::new("git")
             .args([
                 "-c",
@@ -53,11 +53,11 @@ impl Repo {
         String::from_utf8(output.stdout).expect("UTF-8 output")
     }
 
-    fn write(&self, path: &str, text: &str) {
+    pub(super) fn write(&self, path: &str, text: &str) {
         std::fs::write(self.0.join(path), text).expect("file written");
     }
 
-    fn path(&self) -> &Path {
+    pub(super) fn path(&self) -> &Path {
         &self.0
     }
 }
@@ -68,7 +68,7 @@ impl Drop for Repo {
     }
 }
 
-fn run<F: std::future::Future>(test: F) -> F::Output {
+pub(super) fn run<F: std::future::Future>(test: F) -> F::Output {
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -86,7 +86,7 @@ fn modified(path: &str) -> FileChange {
 }
 
 /// Turn `turn`'s checkpoint at `phase` in the session `s1`.
-fn at(turn: &str, phase: Phase) -> Checkpoint {
+pub(super) fn at(turn: &str, phase: Phase) -> Checkpoint {
     Checkpoint {
         session: "s1".to_owned(),
         turn: turn.to_owned(),

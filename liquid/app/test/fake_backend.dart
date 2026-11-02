@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:liquid/src/rust/api/events.dart';
+import 'package:liquid/src/rust/api/git.dart';
 import 'package:liquid/src/rust/api/history.dart';
 import 'package:liquid/src/rust/api/session.dart';
 import 'package:liquid/src/session/backend.dart';
@@ -262,6 +263,102 @@ class FakeBackend implements SessionBackend {
     calls.add('context $entry');
     if (contextError case final error?) throw error;
     return contexts[entry];
+  }
+
+  /// The checkout's Git state; null outside Git.
+  BridgeGitStatus? git = gitStatusOf();
+  Object? gitError;
+  BridgeBranches branches = const BridgeBranches(branches: [], running: []);
+  BridgeStash? stashed;
+  ({String? branch, String? stash})? switchConfirmation;
+  Map<String, Map<String, String>> stashPatches = const {};
+
+  /// What each Git write returns, until it is set otherwise.
+  BridgeGitOutcome outcome = outcomeOf(BridgeGitOutcomeKind.done);
+
+  /// What fetching fails with.
+  Object? fetchError;
+
+  int statusReads = 0;
+
+  @override
+  Future<BridgeGitStatus?> gitStatus() async {
+    statusReads++;
+    if (gitError case final error?) throw error;
+    final now = git;
+    return now == null
+        ? null
+        : BridgeGitStatus(
+            branch: now.branch,
+            commit: now.commit,
+            upstream: now.upstream,
+            ahead: now.ahead,
+            behind: now.behind,
+            changed: now.changed,
+            stash: stashed,
+          );
+  }
+
+  @override
+  Future<BridgeBranches> gitBranches() async => branches;
+
+  @override
+  Future<BridgeGitOutcome> switchBranch(
+    BridgeBranch branch, {
+    required bool leaveChanges,
+    required String? fromBranch,
+    required String? replacingStash,
+  }) async {
+    calls.add('switch ${branch.name}${leaveChanges ? ' leaving changes' : ''}');
+    switchConfirmation = (branch: fromBranch, stash: replacingStash);
+    return outcome;
+  }
+
+  @override
+  Future<BridgeGitOutcome> createBranch(String name) async {
+    calls.add('create $name');
+    return outcome;
+  }
+
+  @override
+  Future<BridgeStash?> gitStash() async => stashed;
+
+  @override
+  Future<List<BridgeFileChange>> stashChanges(
+    String id, {
+    required bool hideWhitespace,
+  }) async => hideWhitespace
+      ? changedWithoutWhitespace ?? stashed?.files ?? const []
+      : stashed?.files ?? const [];
+
+  @override
+  Future<String> stashPatch(
+    String id,
+    String path, {
+    required bool hideWhitespace,
+  }) async {
+    calls.add('stash patch $path');
+    await patchGate?.future;
+    return stashPatches[id]?[path] ?? patches[path] ?? '';
+  }
+
+  @override
+  Future<BridgeGitOutcome> restoreStash(String id) async {
+    calls.add('restore stash $id');
+    return outcome;
+  }
+
+  @override
+  Future<BridgeGitOutcome> discardStash(String id) async {
+    calls.add('discard stash $id');
+    return outcome;
+  }
+
+  @override
+  Future<bool> fetch() async {
+    calls.add('fetch');
+    if (fetchError case final error?) throw error;
+    return true;
   }
 
   /// What reverting to before a turn would change.
@@ -551,4 +648,46 @@ BridgeTurn turnOf(
   files: files ?? (added == null ? null : 1),
   added: added,
   removed: removed,
+);
+
+BridgeGitStatus gitStatusOf({
+  String? branch = 'main',
+  String? upstream = 'origin/main',
+  int ahead = 0,
+  int behind = 0,
+  int changed = 0,
+}) => BridgeGitStatus(
+  branch: branch,
+  commit: '1a2b3c4',
+  upstream: upstream,
+  ahead: ahead,
+  behind: behind,
+  changed: changed,
+  stash: null,
+);
+
+BridgeBranch branchOf(
+  String name, {
+  bool remote = false,
+  bool current = false,
+  bool stashed = false,
+}) => BridgeBranch(
+  name: name,
+  shown: name,
+  remote: remote,
+  committedMs: 0,
+  current: current,
+  stashed: stashed,
+);
+
+BridgeGitOutcome outcomeOf(
+  BridgeGitOutcomeKind kind, {
+  List<String> files = const [],
+  List<BridgeRunningAgent> running = const [],
+  String detail = '',
+}) => BridgeGitOutcome(
+  kind: kind,
+  files: files,
+  running: running,
+  detail: detail,
 );

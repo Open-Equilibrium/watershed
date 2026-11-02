@@ -70,6 +70,155 @@ fn run<F: std::future::Future>(test: F) -> F::Output {
 }
 
 #[test]
+fn an_unrepresentable_repository_path_never_selects_its_replacement_sibling() {
+    use std::io::Write;
+
+    run(async {
+        let parent = Repo::new("root-bytes");
+        let sibling = Repo::at(parent.path().join("repo-\u{fffd}"));
+        sibling.git(&["symbolic-ref", "HEAD", "refs/heads/sibling"]);
+        let mut config = std::fs::OpenOptions::new()
+            .append(true)
+            .open(parent.path().join(".git/config"))
+            .expect("fixture config");
+        writeln!(config, "\n[core]").expect("core section");
+        write!(config, "worktree = {}/repo-", parent.path().display()).expect("worktree prefix");
+        config.write_all(b"\xff\n").expect("raw worktree path");
+
+        let opened = WorkingTree::open(parent.path()).await;
+
+        match opened {
+            Err(DiffError::Git(reason)) => assert!(reason.contains("UTF-8"), "{reason}"),
+            Err(error) => panic!("unexpected error: {error}"),
+            Ok(_) => panic!("opened an unrepresentable repository path"),
+        }
+        assert_eq!(
+            sibling.git(&["symbolic-ref", "HEAD"]),
+            "refs/heads/sibling\n"
+        );
+    });
+}
+
+#[test]
+fn an_undecodable_working_prefix_never_selects_its_replacement_sibling() {
+    const CHILD: &str = "WATERSHED_PREFIX_BYTES_TEST";
+    if std::env::var_os(CHILD).is_none() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let driver = Repo::new("prefix-driver");
+        let host_git = Command::new("sh")
+            .args(["-c", "command -v git"])
+            .output()
+            .expect("Git path");
+        assert!(host_git.status.success());
+        let host_git = String::from_utf8(host_git.stdout).expect("Git path text");
+        // This filesystem rejects invalid pathname bytes. Supply the exact prefix Git
+        // reports on hosts that can hold them, delegating every other command to real Git.
+        let wrapper = driver.path().join("git");
+        std::fs::write(
+            &wrapper,
+            format!(
+                "#!/bin/sh\nfor arg do\n  if [ \"$arg\" = --show-prefix ]; then printf 'folder-\\377/\\n'; exit 0; fi\ndone\nexec {} \"$@\"\n",
+                super::shell_word(host_git.trim())
+            ),
+        ).expect("Git wrapper");
+        std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755))
+            .expect("executable");
+        let path = std::env::join_paths(std::iter::once(driver.path().to_owned()).chain(
+            std::env::split_paths(&std::env::var_os("PATH").expect("PATH")),
+        ))
+        .expect("test PATH");
+        let output = Command::new(std::env::current_exe().expect("test executable"))
+            .args([
+                "--exact",
+                "tests::diff::an_undecodable_working_prefix_never_selects_its_replacement_sibling",
+            ])
+            .env(CHILD, "1")
+            .env("PATH", path)
+            .output()
+            .expect("isolated test");
+        assert!(
+            output.status.success(),
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return;
+    }
+    run(async {
+        let repo = Repo::new("prefix-bytes");
+        std::fs::create_dir(repo.path().join("folder-\u{fffd}")).expect("sibling");
+        repo.write("folder-\u{fffd}/victim", "unchanged\n");
+        let opened = WorkingTree::open(repo.path()).await;
+        assert!(matches!(opened, Err(DiffError::Git(reason)) if reason.contains("UTF-8")));
+        assert_eq!(
+            std::fs::read_to_string(repo.path().join("folder-\u{fffd}/victim"))
+                .expect("sibling file"),
+            "unchanged\n"
+        );
+    });
+}
+
+#[test]
+fn diff_listings_never_alias_an_undecodable_path_to_its_replacement_sibling() {
+    use std::io::Write;
+    use std::process::Stdio;
+
+    run(async {
+        let repo = Repo::new("diff-path-bytes");
+        repo.write("base", "base\n");
+        repo.git(&["add", "."]);
+        repo.git(&["commit", "-q", "-m", "base"]);
+        let tree = WorkingTree::open(repo.path()).await.expect("repository");
+        let before = tree.snapshot().await.expect("before");
+        repo.write("file-\u{fffd}", "replacement sibling\n");
+        let sibling = repo.git(&["hash-object", "-w", "file-\u{fffd}"]);
+        let invalid = repo.git(&["hash-object", "-w", "base"]);
+        // Git trees can hold pathname bytes that this host's filesystem cannot create.
+        let mut make_tree = Command::new("git")
+            .args(["mktree", "-z"])
+            .current_dir(repo.path())
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("mktree runs");
+        let mut input = make_tree.stdin.take().expect("stdin");
+        input
+            .write_all(format!("100644 blob {}\tfile-\u{fffd}\0", sibling.trim()).as_bytes())
+            .expect("sibling");
+        input
+            .write_all(format!("100644 blob {}\tfile-", invalid.trim()).as_bytes())
+            .expect("invalid entry");
+        input.write_all(b"\xff\0").expect("raw pathname");
+        drop(input);
+        let made = make_tree.wait_with_output().expect("tree");
+        assert!(made.status.success());
+        let id = String::from_utf8(made.stdout).expect("tree id");
+        let after = tree
+            .checkpointed(id.trim())
+            .await
+            .expect("tree lookup")
+            .expect("tree exists");
+
+        for whitespace in [Whitespace::Shown, Whitespace::Hidden] {
+            let result = tree.changes(&before, &after, whitespace).await;
+            assert!(
+                matches!(result, Err(DiffError::Git(ref reason)) if reason.contains("UTF-8")),
+                "unsupported pathname was exposed: {result:?}"
+            );
+        }
+        let patch = tree
+            .patch(&before, &after, "file-\u{fffd}", Whitespace::Shown)
+            .await
+            .expect("valid sibling patch");
+        assert!(patch.contains("+replacement sibling\n"), "{patch}");
+        assert!(!patch.contains("+base\n"), "{patch}");
+    });
+}
+
+#[test]
 fn diffs_a_run_against_its_snapshot_without_touching_the_projects_index() {
     run(async {
         let repo = Repo::new("run");

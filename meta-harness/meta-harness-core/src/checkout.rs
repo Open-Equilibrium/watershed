@@ -2,8 +2,8 @@
 //! (ADR-0234). Each running agent holds a shared lock on its checkout, one on the repository its
 //! worktrees share, and a lock on a file named after its session in `<git-dir>/watershed`; a
 //! revert holds the checkout alone, and removing checkpoints, which all worktrees share, holds
-//! the repository alone. The system drops the locks of a process that ends, so a crash leaves
-//! no agent running.
+//! the repository alone. Stash writes hold a separate repository lock across lookup and mutation.
+//! The system drops the locks of a process that ends, so a crash leaves no agent running.
 
 use std::fs::{File, OpenOptions, TryLockError};
 use std::os::unix::fs::OpenOptionsExt;
@@ -116,6 +116,19 @@ impl Checkout {
     /// Holds the checkout alone, or names the sessions whose agents run there.
     pub(crate) async fn alone(&self) -> Result<Alone, DiffError> {
         hold_alone(lock_file(&self.dir, "checkout.lock")?, || self.running()).await
+    }
+
+    /// Holds Git's shared stash list across worktrees. Keep it from the first lookup through
+    /// the last mutation, since a push changes the positions used by pop and drop.
+    pub(crate) async fn stash_alone(&self) -> Result<Alone, DiffError> {
+        let lock = lock_file(&self.repository, "stash.lock")?;
+        loop {
+            match lock.try_lock() {
+                Ok(()) => return Ok(Alone { _lock: lock }),
+                Err(TryLockError::WouldBlock) => tokio::time::sleep(RETRY).await,
+                Err(TryLockError::Error(error)) => return Err(DiffError::Io(error)),
+            }
+        }
     }
 
     /// Holds the repository alone, so no turn runs or starts in any of its worktrees, or names

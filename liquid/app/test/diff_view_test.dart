@@ -8,6 +8,7 @@ import 'package:liquid/src/diff/diff_view.dart';
 import 'package:liquid/src/diff/turn_scope.dart';
 import 'package:liquid/src/format.dart';
 import 'package:liquid/src/rust/api/events.dart';
+import 'package:liquid/src/rust/api/git.dart';
 import 'package:liquid/src/rust/api/history.dart';
 import 'package:liquid/src/session/session_state.dart';
 import 'package:liquid/src/theme/theme.dart';
@@ -203,7 +204,10 @@ void main() {
       'T1..T2',
       reason: 'the first turn\'s start to the last end',
     );
-    expect(find.textContaining('All turns of this branch'), findsOneWidget);
+    expect(
+      find.textContaining('All turns of this session branch'),
+      findsOneWidget,
+    );
   });
 
   testWidgets('never shows a turn\'s patch under another turn', (tester) async {
@@ -810,6 +814,64 @@ void main() {
     expect(find.text('spaced.ts'), findsOneWidget);
   });
 
+  testWidgets('hides whitespace in the stash file list and line counts', (
+    tester,
+  ) async {
+    final backend = FakeBackend()
+      ..stashed = BridgeStash(
+        current: true,
+        id: 's1',
+        createdMs: 1,
+        files: [modified('code.ts', 2, 1), modified('spaced.ts', 1, 1)],
+      )
+      ..changedWithoutWhitespace = [modified('code.ts', 1, 0)]
+      ..stashPatches = {
+        's1': {'code.ts': '@@ -1 +1,2 @@\n keep\n+added\n'},
+      };
+    final settings = DiffSettingsController();
+    final state = await show(tester, backend, settings: settings);
+    await state.showTurns(const StashedChanges());
+    await tester.pumpAndSettle();
+    expect(find.text('spaced.ts'), findsOneWidget);
+
+    await press(tester, LogicalKeyboardKey.keyW);
+
+    expect(find.text('spaced.ts'), findsNothing);
+    expect(state.changed.value!.single.path, 'code.ts');
+    expect(state.changed.value!.single.added, 1);
+    expect(state.changed.value!.single.removed, 0);
+    expect(state.shownStash.value?.stash.id, 's1');
+    await tester.tap(find.text('Hide whitespace'));
+    await tester.pumpAndSettle();
+    expect(find.text('spaced.ts'), findsOneWidget);
+    expect(state.changed.value!.first.added, 2);
+    expect(state.changed.value!.first.removed, 1);
+  });
+
+  testWidgets('an empty filtered stash identifies stashed changes', (
+    tester,
+  ) async {
+    final backend = FakeBackend()
+      ..stashed = BridgeStash(
+        current: true,
+        id: 's1',
+        createdMs: 1,
+        files: [modified('spaced.ts', 1, 1)],
+      )
+      ..changedWithoutWhitespace = [];
+    final state = await show(tester, backend);
+    await state.showTurns(const StashedChanges());
+    await tester.pumpAndSettle();
+
+    await press(tester, LogicalKeyboardKey.keyW);
+
+    expect(
+      find.text('No stashed changes with whitespace hidden'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('this turn'), findsNothing);
+  });
+
   testWidgets('opens with the Diff settings kept from before', (tester) async {
     final backend = FakeBackend()
       ..changed = [modified('code.ts', 2, 1), modified('spaced.ts', 1, 1)]
@@ -932,8 +994,8 @@ void main() {
       );
       expect(
         find.text(
-          'The session continues on a new branch from before turn 3, and turn 3’s prompt '
-          'returns to the input area. Turn 3 stays on its own branch in the session tree.',
+          'The session continues on a new session branch from before turn 3, and turn 3’s '
+          'prompt returns to the input area. Turn 3 stays on its own session branch.',
         ),
         findsOneWidget,
       );
@@ -1054,5 +1116,213 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Revert files to before this turn…'), findsNothing);
     });
+  });
+
+  testWidgets(
+    'keeps the stash files, patch, heading and actions on the same read',
+    (tester) async {
+      BridgeStash stash(String id, int minute) => BridgeStash(
+        current: true,
+        id: id,
+        createdMs: DateTime(2026, 11, 1, 10, minute).millisecondsSinceEpoch,
+        files: [
+          BridgeFileChange(
+            path: '$id.txt',
+            shown: '$id.txt',
+            status: BridgeChangeStatus.added,
+            added: 1,
+            removed: 0,
+          ),
+        ],
+      );
+      final backend = FakeBackend()
+        ..stashed = stash('s1', 41)
+        ..stashPatches = {
+          's1': {'s1.txt': '@@ -0,0 +1 @@\n+first stash\n'},
+          's2': {'s2.txt': '@@ -0,0 +1 @@\n+second stash\n'},
+          's3': {'s3.txt': '@@ -0,0 +1 @@\n+third stash\n'},
+        };
+      final state = await show(tester, backend);
+      await state.git.refresh();
+      // An external switch happened after the last poll but before choosing the stash.
+      backend.git = gitStatusOf(branch: 'feature');
+      backend.stashed = stash('s2', 42);
+      await state.showTurns(const StashedChanges());
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Left on feature at 10:42'), findsOneWidget);
+      expect(
+        find.textContaining('second stash', findRichText: true),
+        findsOneWidget,
+      );
+      expect(find.text('s2.txt'), findsWidgets);
+
+      // The next refresh must not retarget the old file list while its replacement loads.
+      backend.turnsGate = Completer();
+      backend.git = gitStatusOf(branch: 'third');
+      backend.stashed = stash('s3', 43);
+      await state.git.refresh();
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Left on feature at 10:42'), findsOneWidget);
+      await tester.tap(find.text('Restore'));
+      await tester.pumpAndSettle();
+      expect(backend.calls, isNot(contains('restore stash s2')));
+      await tester.tap(find.text('Discard…'));
+      await tester.pumpAndSettle();
+      expect(
+        find.textContaining('stashed on feature at 10:42'),
+        findsOneWidget,
+      );
+      await tester.tap(find.text('Discard'));
+      await tester.pumpAndSettle();
+      expect(backend.calls, contains('discard stash s2'));
+      expect(backend.calls, isNot(contains('discard stash s3')));
+
+      backend.turnsGate!.complete();
+      await state.readChanges();
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Left on third at 10:43'), findsOneWidget);
+      expect(
+        find.textContaining('third stash', findRichText: true),
+        findsOneWidget,
+      );
+      expect(find.text('s3.txt'), findsWidgets);
+      expect(find.text('s2.txt'), findsNothing);
+      await tester.tap(find.text('Restore'));
+      await tester.pumpAndSettle();
+      expect(backend.calls, contains('restore stash s3'));
+      expect(backend.calls, isNot(contains('restore stash s1')));
+      await tester.pump(const Duration(seconds: 7));
+    },
+  );
+
+  testWidgets(
+    'drops an obsolete patch when the stash changes with the same file',
+    (tester) async {
+      final files = [
+        BridgeFileChange(
+          path: 'notes/todo.md',
+          shown: 'notes/todo.md',
+          status: BridgeChangeStatus.added,
+          added: 1,
+          removed: 0,
+        ),
+      ];
+      final backend = FakeBackend()
+        ..stashed = BridgeStash(
+          current: true,
+          id: 's1',
+          createdMs: 1,
+          files: files,
+        )
+        ..stashPatches = {
+          's1': {'notes/todo.md': '@@ -0,0 +1 @@\n+old stash\n'},
+          's2': {'notes/todo.md': '@@ -0,0 +1 @@\n+fresh stash\n'},
+        };
+      final state = await show(tester, backend);
+      await state.git.refresh();
+      backend.patchGate = Completer();
+      await state.showTurns(const StashedChanges());
+      await tester.pumpAndSettle();
+
+      backend.stashed = BridgeStash(
+        current: true,
+        id: 's2',
+        createdMs: 2,
+        files: files,
+      );
+      await state.git.refresh();
+      await tester.pumpAndSettle();
+      backend.patchGate!.complete();
+      await tester.pumpAndSettle();
+
+      expect(find.text('Stashed changes'), findsOneWidget);
+      expect(
+        find.textContaining('fresh stash', findRichText: true),
+        findsOneWidget,
+      );
+      expect(
+        find.textContaining('old stash', findRichText: true),
+        findsNothing,
+      );
+    },
+  );
+
+  testWidgets('shows the branch’s stashed changes with Restore and Discard', (
+    tester,
+  ) async {
+    final left = DateTime(2026, 11, 1, 10, 41).millisecondsSinceEpoch;
+    final backend = FakeBackend()
+      ..stashed = BridgeStash(
+        current: true,
+        id: 's1',
+        createdMs: left,
+        files: [
+          BridgeFileChange(
+            path: 'notes/todo.md',
+            shown: 'notes/todo.md',
+            status: BridgeChangeStatus.added,
+            added: 1,
+            removed: 0,
+          ),
+        ],
+      )
+      ..patches = {'notes/todo.md': '@@ -0,0 +1 @@\n+Ship it\n'};
+    final state = await show(tester, backend);
+    await state.git.refresh();
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Turn 1'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Stashed changes'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Stashed changes'), findsOneWidget);
+    expect(find.textContaining('Left on main at 10:41'), findsOneWidget);
+    expect(backend.calls, contains('stash patch notes/todo.md'));
+    expect(find.textContaining('Ship it', findRichText: true), findsOneWidget);
+
+    await tester.tap(find.text('Discard…'));
+    await tester.pumpAndSettle();
+    expect(
+      find.text(
+        'The 1 file stashed on main at 10:41 are deleted and cannot be restored. Your '
+        'uncommitted changes, commits and branches stay.',
+      ),
+      findsOneWidget,
+    );
+    await tester.tap(find.text('Discard'));
+    await tester.pumpAndSettle();
+    expect(backend.calls, contains('discard stash s1'));
+
+    // As GitHub Desktop, no restore into a checkout with changes.
+    backend.git = gitStatusOf(changed: 2);
+    await state.git.refresh();
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Restore'));
+    await tester.pumpAndSettle();
+    expect(backend.calls, isNot(contains('restore stash s1')));
+
+    // Nor onto a branch with new commits, where Git would merge.
+    backend.git = gitStatusOf();
+    final saved = backend.stashed!;
+    backend.stashed = BridgeStash(
+      current: false,
+      id: saved.id,
+      createdMs: saved.createdMs,
+      files: saved.files,
+    );
+    await state.git.refresh();
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Restore'));
+    await tester.pumpAndSettle();
+    expect(backend.calls, isNot(contains('restore stash s1')));
+
+    backend.stashed = saved;
+    await state.git.refresh();
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Restore'));
+    await tester.pumpAndSettle();
+    expect(backend.calls.last, 'restore stash s1');
+    await tester.pump(const Duration(seconds: 7));
   });
 }

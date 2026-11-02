@@ -656,6 +656,108 @@ fn git_project(name: &str) -> std::path::PathBuf {
 }
 
 #[test]
+fn checkpoint_start_distinguishes_missing_guards_from_failed_snapshots() {
+    run(async {
+        use super::checkpoint::{Repo, at};
+        use crate::{BranchTarget, Changes, Checkpoints, DiffError, Phase};
+
+        for failure in ["opening", "registration", "snapshot", "outside"] {
+            let repo = Repo::new(&format!("start-guard-{failure}"));
+            repo.git(&["branch", "other"]);
+            let independent = Checkpoints::new(repo.path());
+            independent
+                .capture(&at("base", Phase::Start))
+                .await
+                .expect("base");
+            independent
+                .capture(&at("base", Phase::End))
+                .await
+                .expect("end");
+            let config = repo.path().join(".git/config");
+            let saved = std::fs::read(&config).expect("fixture config");
+            match failure {
+                "opening" => std::fs::write(&config, b"[broken\n").expect("break config"),
+                "registration" => {
+                    let lock = repo.path().join(".git/watershed/checkout.lock");
+                    std::fs::remove_file(&lock).expect("remove fixture lock");
+                    std::fs::create_dir(&lock).expect("break lock");
+                }
+                "snapshot" => {
+                    repo.git(&["config", "filter.fail.clean", "false"]);
+                    repo.git(&["config", "filter.fail.required", "true"]);
+                    repo.write(".gitattributes", "*.txt filter=fail\n");
+                    repo.write("a.txt", "changed\n");
+                }
+                "outside" => {
+                    std::fs::rename(repo.path().join(".git"), repo.path().join("saved-git"))
+                        .expect("hide Git")
+                }
+                _ => unreachable!(),
+            }
+            let response = repo.path().join("answer");
+            let script = format!(
+                r#"printf '%s\n' '{{"type":"extension_ui_request","id":"c1","method":"input","title":"watershed.checkpoint {{\"session\":\"s1\",\"turn\":\"t1\",\"phase\":\"start\"}}"}}'
+IFS= read -r line
+printf '%s' "$line" > '{response}.tmp'
+mv '{response}.tmp' '{response}'
+IFS= read -r line
+"#,
+                response = response.display()
+            );
+            let command = AgentCommand {
+                program: "/bin/sh".into(),
+                args: vec!["-c".into(), script.into()],
+                extension: EXTENSION.into(),
+                session: None,
+                cwd: repo.path().to_owned(),
+            };
+            let (session, _events) = Session::start(&command).expect("session");
+            timeout(WAIT, async {
+                while !response.exists() {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .expect("checkpoint answer");
+            let answer: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(&response).expect("response")).expect("JSON");
+            let outcome: serde_json::Value =
+                serde_json::from_str(answer["value"].as_str().expect("answer value"))
+                    .expect("outcome");
+            // Repair while pi is still awaiting the run, before any settled event.
+            if failure == "outside" {
+                std::fs::rename(repo.path().join("saved-git"), repo.path().join(".git"))
+                    .expect("restore Git");
+            } else {
+                std::fs::write(&config, &saved).expect("repair config");
+            }
+            if failure == "registration" {
+                std::fs::remove_dir(repo.path().join(".git/watershed/checkout.lock"))
+                    .expect("repair lock");
+            }
+            let can_run = failure == "snapshot" || failure == "outside";
+            assert_eq!(outcome["canRun"], can_run, "{failure}: {outcome}");
+            if failure == "snapshot" {
+                for result in [
+                    independent
+                        .switch_branch(&BranchTarget::Local("other".to_owned()), Changes::Bring)
+                        .await,
+                    independent.revert(&at("base", Phase::Start)).await,
+                    independent.restore_stash("missing").await,
+                    independent.discard_stash("missing").await,
+                ] {
+                    assert!(
+                        matches!(result, Err(DiffError::AgentRunning(_))),
+                        "{result:?}"
+                    );
+                }
+            }
+            session.shutdown(Duration::from_secs(1)).await;
+        }
+    });
+}
+
+#[test]
 fn takes_the_checkpoints_the_extension_asks_for_without_asking_the_user() {
     run(async {
         let project = git_project("checkpoints");

@@ -47,8 +47,10 @@ function context(
   const notes: string[] = [];
   const branches: unknown[][] = [];
   const drafts: string[] = [];
+  const aborted: boolean[] = [];
   const ctx = {
     mode,
+    abort: () => aborted.push(true),
     cwd: "/work/acme",
     ui: {
       select: async (title: string, options: string[]) => {
@@ -72,7 +74,7 @@ function context(
       return session.navigate ? session.navigate() : { cancelled: false };
     },
   };
-  return { ctx, questions, notes, branches, drafts, asked };
+  return { ctx, questions, notes, branches, drafts, asked, aborted };
 }
 
 test("asks the core before every tool call and records user decisions", async () => {
@@ -287,9 +289,9 @@ test("records how long an approval waited for the user", async () => {
 test("takes a checkpoint at each run's start and end and records it in the session", async () => {
   const { handlers, entries } = load();
   const answers = [
-    '{"ok":true}',
+    '{"ok":true,"canRun":true}',
     '{"ok":true,"files":3,"added":12,"removed":1}',
-    '{"ok":true}',
+    '{"ok":true,"canRun":true}',
     '{"error":"git did not finish within 60 s"}',
   ];
   const { ctx, asked } = context(undefined, "rpc", {}, answers);
@@ -324,17 +326,59 @@ test("takes a checkpoint at each run's start and end and records it in the sessi
 
 test("records a checkpoint the core did not answer as failed and asks nothing outside RPC", async () => {
   const { handlers, entries } = load();
-  const { ctx } = context(undefined, "rpc", {}, [undefined, "not JSON"]);
+  const { ctx, aborted } = context(undefined, "rpc", {}, [undefined]);
   await handlers.get("before_agent_start")!({ type: "before_agent_start", prompt: "Hi" }, ctx);
   await handlers.get("agent_settled")!({ type: "agent_settled", aborted: true }, ctx);
   assert.deepEqual(
     entries.map(({ data }) => (data as { error?: string }).error),
-    ["No answer from Watershed", "No answer from Watershed"],
+    ["No answer from Watershed"],
   );
+  assert.deepEqual(aborted, [true]);
 
   const outside = load();
   const interactive = context(undefined, "interactive");
   await outside.handlers.get("before_agent_start")!({ type: "before_agent_start", prompt: "Hi" }, interactive.ctx);
   await outside.handlers.get("agent_settled")!({ type: "agent_settled", aborted: false }, interactive.ctx);
   assert.deepEqual([outside.entries, interactive.asked], [[], []]);
+});
+
+test("refuses an unguarded start and tells why, even if the project is repaired before settling", async () => {
+  for (const answer of [
+    '{"error":"bad config","canRun":false}',
+    '{"error":"checkout lock unavailable","canRun":false}',
+    '{"error":"unknown guard state"}',
+    'not JSON',
+    '{"ok":true}',
+  ]) {
+    const { handlers } = load();
+    const { ctx, aborted, notes, asked } = context(undefined, "rpc", {}, [answer]);
+    await handlers.get("before_agent_start")!({}, ctx);
+    assert.deepEqual(aborted, [true], answer);
+    assert.match(notes[0], /^Could not start:/);
+    // Repairing the core cannot revive this run or ask for an end checkpoint.
+    await handlers.get("agent_settled")!({}, ctx);
+    assert.equal(asked.length, 1);
+  }
+});
+
+test("keeps running after a guarded snapshot failure or outside Git", async () => {
+  for (const error of ["snapshot failed", "not inside a Git working tree"]) {
+    const { handlers } = load();
+    const { ctx, aborted, asked } = context(undefined, "rpc", {}, [
+      JSON.stringify({ error, canRun: true }), '{"error":"no snapshot"}',
+    ]);
+    await handlers.get("before_agent_start")!({}, ctx);
+    assert.deepEqual(aborted, []);
+    await handlers.get("agent_settled")!({}, ctx);
+    assert.equal(asked.length, 2);
+  }
+});
+
+test("refuses startup when the checkpoint dialog rejects", async () => {
+  const { handlers } = load();
+  const { ctx, aborted, notes } = context(undefined);
+  ctx.ui.input = async () => { throw new Error("core disconnected"); };
+  await handlers.get("before_agent_start")!({}, ctx);
+  assert.deepEqual(aborted, [true]);
+  assert.deepEqual(notes, ["Could not start: core disconnected"]);
 });

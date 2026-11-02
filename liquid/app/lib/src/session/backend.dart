@@ -1,4 +1,5 @@
 import '../rust/api/events.dart';
+import '../rust/api/git.dart';
 import '../rust/api/history.dart';
 import '../rust/api/session.dart';
 
@@ -77,6 +78,45 @@ abstract interface class SessionBackend {
   /// Starts a new session or continues a stored one; `false` when an extension cancelled it.
   Future<bool> newSession();
   Future<bool> switchSession(String path);
+
+  /// The checkout's branch, upstream and uncommitted files; null outside Git.
+  Future<BridgeGitStatus?> gitStatus();
+
+  /// The checkout's branches and the agents running there.
+  Future<BridgeBranches> gitBranches();
+
+  /// Switches to `branch`; with `leaveChanges`, uncommitted changes stay in the stash of the
+  /// branch left.
+  Future<BridgeGitOutcome> switchBranch(
+    BridgeBranch branch, {
+    required bool leaveChanges,
+    required String? fromBranch,
+    required String? replacingStash,
+  });
+
+  /// Creates the branch `name` at the current commit and switches to it.
+  Future<BridgeGitOutcome> createBranch(String name);
+
+  /// The stashed changes of the branch checked out, if any.
+  Future<BridgeStash?> gitStash();
+
+  /// The files and line counts of stash `id`, with the chosen whitespace setting.
+  Future<List<BridgeFileChange>> stashChanges(
+    String id, {
+    required bool hideWhitespace,
+  });
+
+  /// One file's unified diff in the stash `id`.
+  Future<String> stashPatch(
+    String id,
+    String path, {
+    required bool hideWhitespace,
+  });
+  Future<BridgeGitOutcome> restoreStash(String id);
+  Future<BridgeGitOutcome> discardStash(String id);
+
+  /// Fetches the upstream's remote; whether there was one.
+  Future<bool> fetch();
 
   Future<List<BridgeModel>> models();
 
@@ -176,6 +216,47 @@ class RustSessionBackend implements SessionBackend {
   Future<bool> newSession() => _session.newSession();
   @override
   Future<bool> switchSession(String path) => _session.switchSession(path: path);
+  @override
+  Future<BridgeGitStatus?> gitStatus() => _session.gitStatus();
+  @override
+  Future<BridgeBranches> gitBranches() => _session.gitBranches();
+  @override
+  Future<BridgeGitOutcome> switchBranch(
+    BridgeBranch branch, {
+    required bool leaveChanges,
+    required String? fromBranch,
+    required String? replacingStash,
+  }) => _session.switchBranch(
+    name: branch.name,
+    remote: branch.remote,
+    leaveChanges: leaveChanges,
+    fromBranch: fromBranch,
+    replacingStash: replacingStash,
+  );
+  @override
+  Future<BridgeGitOutcome> createBranch(String name) =>
+      _session.createBranch(name: name);
+  @override
+  Future<BridgeStash?> gitStash() => _session.gitStash();
+  @override
+  Future<List<BridgeFileChange>> stashChanges(
+    String id, {
+    required bool hideWhitespace,
+  }) => _session.stashChanges(id: id, hideWhitespace: hideWhitespace);
+  @override
+  Future<String> stashPatch(
+    String id,
+    String path, {
+    required bool hideWhitespace,
+  }) => _session.stashPatch(id: id, path: path, hideWhitespace: hideWhitespace);
+  @override
+  Future<BridgeGitOutcome> restoreStash(String id) =>
+      _session.restoreStash(id: id);
+  @override
+  Future<BridgeGitOutcome> discardStash(String id) =>
+      _session.discardStash(id: id);
+  @override
+  Future<bool> fetch() => _session.fetch();
   @override
   Future<List<BridgeModel>> models() => _session.models();
   @override

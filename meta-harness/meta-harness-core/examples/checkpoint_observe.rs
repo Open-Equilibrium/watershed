@@ -1,6 +1,7 @@
 //! Observation workload for checkpoints in a large project (PERFORMANCE.md, Meta-Harness): a Git
 //! project of 20,000 committed files of 1 KiB in 200 folders. Each sample is one turn: its start
-//! checkpoint, ten changed files and one new file, its end checkpoint, the list of what it
+//! checkpoint, ten changed files and one new file, its end checkpoint, the status and stash
+//! Liquid reads after each fetch and turn, the list of what it
 //! changed, the plan of a revert to its start and that revert. The first sample's start also
 //! opens the project. A last turn replaces a file with a folder of 20,000 folders, which the
 //! plan searches for repositories before it would write the file back. Last, the sessions with
@@ -97,6 +98,7 @@ async fn observe(dir: &Path) {
     let mut lists = Vec::new();
     let mut plans = Vec::new();
     let mut reverts = Vec::new();
+    let mut polls = Vec::new();
     for sample in 0..SAMPLES {
         let at = |phase| Checkpoint {
             session: "observe".to_owned(),
@@ -123,6 +125,12 @@ async fn observe(dir: &Path) {
             .await
             .expect("end captured");
         let end_ms = ms(started);
+        // What Liquid reads after each fetch and turn: the branch's counts and its stash.
+        let started = Instant::now();
+        let status = checkpoints.status().await.expect("status");
+        checkpoints.stash().await.expect("stash");
+        let poll_ms = ms(started);
+        assert_eq!(status.changed, CHANGED_PER_TURN as u64 + 1);
         let started = Instant::now();
         let changes = checkpoints
             .changes(&at(Phase::Start), &at(Phase::End), Whitespace::Shown)
@@ -155,6 +163,7 @@ async fn observe(dir: &Path) {
                 "list_ms": round(list_ms),
                 "plan_ms": round(plan_ms),
                 "revert_ms": round(revert_ms),
+                "poll_ms": round(poll_ms),
                 "files": changes.len(),
             })
         );
@@ -163,6 +172,7 @@ async fn observe(dir: &Path) {
         lists.push(list_ms);
         plans.push(plan_ms);
         reverts.push(revert_ms);
+        polls.push(poll_ms);
     }
     let in_place = |phase| Checkpoint {
         session: "observe".to_owned(),
@@ -217,6 +227,7 @@ async fn observe(dir: &Path) {
             "list": summary(&mut lists),
             "plan": summary(&mut plans),
             "revert": summary(&mut reverts),
+            "poll": summary(&mut polls),
         })
     );
 }

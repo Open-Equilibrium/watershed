@@ -34,3 +34,19 @@ String formatClock(DateTime at) =>
 /// A local time of day from Unix milliseconds.
 String formatClockMs(int ms) =>
     formatClock(DateTime.fromMillisecondsSinceEpoch(ms));
+
+/// How long before `now` the Unix millisecond time `ms` was, such as `5 h ago`.
+String formatAgo(int ms, DateTime now) {
+  final ago = now.difference(DateTime.fromMillisecondsSinceEpoch(ms));
+  String count(int value, String unit) =>
+      '$value $unit${value == 1 || unit == 'h' || unit == 'min' ? '' : 's'} ago';
+  return switch (ago.inMinutes) {
+    < 1 => 'now',
+    < 60 => count(ago.inMinutes, 'min'),
+    < 60 * 24 => count(ago.inHours, 'h'),
+    < 60 * 24 * 14 => count(ago.inDays, 'day'),
+    < 60 * 24 * 60 => count(ago.inDays ~/ 7, 'week'),
+    < 60 * 24 * 365 => count(ago.inDays ~/ 30, 'month'),
+    _ => count(ago.inDays ~/ 365, 'year'),
+  };
+}
