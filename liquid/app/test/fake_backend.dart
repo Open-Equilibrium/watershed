@@ -274,6 +274,7 @@ class FakeBackend implements SessionBackend {
   Object? gitError;
   Completer<BridgeGitStatus?>? statusGate;
   Completer<BridgeCommitPlan>? planGate;
+  Completer<void>? commitGate;
   Completer<BridgeGitOutcome>? initializeGate;
   BridgeBranches branches = const BridgeBranches(branches: [], running: []);
   BridgeStash? stashed;
@@ -358,6 +359,7 @@ class FakeBackend implements SessionBackend {
     committedPaths = paths;
     committedMessage = message;
     committedBranch = branch;
+    await commitGate?.future;
     return outcome.kind == BridgeGitOutcomeKind.done && outcome.commit == null
         ? BridgeGitOutcome(
             kind: BridgeGitOutcomeKind.done,

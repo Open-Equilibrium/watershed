@@ -117,7 +117,7 @@ class _CommitDialogState extends State<_CommitDialog> {
       snapshot: _plan.snapshot,
       branch: branch,
     );
-    if (!mounted) return;
+    if (!mounted || ModalRoute.of(context)?.isCurrent != true) return;
     if (result?.kind == BridgeGitOutcomeKind.done ||
         result?.kind == BridgeGitOutcomeKind.hookChanged) {
       Navigator.of(context).pop();

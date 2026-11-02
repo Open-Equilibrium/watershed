@@ -122,6 +122,43 @@ void main() {
   );
 
   testWidgets(
+    'a commit finishing during dismissal preserves the underlying screen',
+    (tester) async {
+      final pending = FakeBackend()..commitGate = Completer<void>();
+      await show(tester, using: pending);
+      final navigator = Navigator.of(tester.element(find.byType(AgentShell)));
+      unawaited(
+        navigator.push(
+          MaterialPageRoute<void>(
+            builder: (_) => const Scaffold(body: Text('Project details')),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      unawaited(
+        showCommitDialog(tester.element(find.text('Project details')), state),
+      );
+      await tester.pumpAndSettle();
+      await message(tester);
+      await tester.tap(find.widgetWithText(PrimaryButton, 'Commit'));
+      await tester.pump();
+      expect(pending.committedPaths, isNotNull);
+
+      await tester.tap(find.text('Cancel'));
+      await tester.pump(const Duration(milliseconds: 50));
+      pending.commitGate!.complete();
+      await tester.pump();
+      await tester.pumpAndSettle();
+      expect(find.text('Project details'), findsOneWidget);
+      expect(navigator.canPop(), isTrue);
+      expect(state.notices.value.first.text, startsWith('Committed 4 files'));
+      await tester.pump(const Duration(seconds: 7));
+      navigator.pop();
+      await tester.pumpAndSettle();
+    },
+  );
+
+  testWidgets(
     'Enter in the message field keeps a multiline draft without committing',
     (tester) async {
       await show(tester);
