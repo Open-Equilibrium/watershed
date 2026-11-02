@@ -407,7 +407,9 @@ class FakeBackend implements SessionBackend {
     required bool hideWhitespace,
   }) async {
     calls.add('uncommitted patch $path');
-    return patches[path] ?? '';
+    final patch = patches[path] ?? '';
+    await patchGate?.future;
+    return patch;
   }
 
   @override

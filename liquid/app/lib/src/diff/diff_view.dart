@@ -146,6 +146,7 @@ class _DiffViewState extends State<DiffView> {
       while (mounted) {
         final wanted = _selected;
         final comparison = _comparison;
+        final revision = _revision;
         if (wanted == null) return;
         // Why the file shows no lines: a diff that could not be read, such as one over Git's
         // output limit, or a change without text.
@@ -164,8 +165,11 @@ class _DiffViewState extends State<DiffView> {
             'Could not show the changes of ${wanted.shown}: $error',
           );
         }
-        // A file or turn chosen meanwhile, even with the same name and counts, reads again.
-        if (!mounted || _selected != wanted || _comparison != comparison) {
+        // A newer selection, comparison or uncommitted revision reads again.
+        if (!mounted ||
+            _selected != wanted ||
+            _comparison != comparison ||
+            _revision != revision) {
           continue;
         }
         final keepPosition =
@@ -184,6 +188,10 @@ class _DiffViewState extends State<DiffView> {
       _loading = false;
     }
   }
+
+  String? get _revision => widget.state.shownScope.value is UncommittedChanges
+      ? widget.state.uncommittedRevision
+      : null;
 
   /// What the shown patch compares: the turns or stash and whether whitespace is hidden.
   String get _comparison {

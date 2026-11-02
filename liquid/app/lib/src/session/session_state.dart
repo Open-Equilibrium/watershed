@@ -393,6 +393,9 @@ class SessionState {
   /// Equal polls keep the shown patch, but content, baseline or display changes reload it.
   (String, BridgeGitStatus?, bool)? _uncommittedRead;
 
+  /// Tree identities of the published uncommitted list, also validating pending patches.
+  String? get uncommittedRevision => _uncommittedRead?.$1;
+
   /// Why the Diff tab shows no files, with its heading; null while it shows a list.
   final changesProblem = ValueNotifier<({String title, String text})?>(null);
 

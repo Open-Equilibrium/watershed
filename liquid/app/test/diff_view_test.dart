@@ -95,6 +95,39 @@ void main() {
     expect(scroll.offset, 400);
   });
 
+  testWidgets('an edited uncommitted revision replaces a pending older patch', (
+    tester,
+  ) async {
+    final backend = FakeBackend()
+      ..git = gitStatusOf(changed: 1)
+      ..changed = [
+        const BridgeFileChange(
+          path: 'a.txt',
+          shown: 'a.txt',
+          status: BridgeChangeStatus.modified,
+          added: 1,
+          removed: 1,
+        ),
+      ]
+      ..patches = {'a.txt': '@@ -1 +1 @@\n-old\n+before\n'};
+    final state = await show(tester, backend);
+    backend.patchGate = Completer<void>();
+    await state.showTurns(const UncommittedChanges());
+    await tester.pump();
+    backend
+      ..uncommittedRevision = 'edited'
+      ..patches = {'a.txt': '@@ -1 +1 @@\n-old\n+after\n'};
+    await state.git.refresh();
+    await tester.pump();
+    backend.patchGate!.complete();
+    await tester.pumpAndSettle();
+    expect(find.textContaining('before', findRichText: true), findsNothing);
+    expect(find.textContaining('after', findRichText: true), findsWidgets);
+    await state.git.refresh();
+    await tester.pumpAndSettle();
+    expect(find.textContaining('after', findRichText: true), findsWidgets);
+  });
+
   testWidgets('equal Git summaries refresh edited uncommitted contents', (
     tester,
   ) async {
