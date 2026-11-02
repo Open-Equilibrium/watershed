@@ -9,7 +9,7 @@ use automerge::{
     ActorId, AutoCommit, ChangeHash, ObjId, ObjType, ROOT, ReadDoc, ScalarValue, Value,
 };
 
-use crate::{Policy, Rejected, Replica, sorted_order};
+use crate::{Automation, Policy, Rejected, Replica, sorted_order};
 
 pub struct Am {
     pub doc: AutoCommit,
@@ -106,6 +106,24 @@ impl Am {
     fn text_obj(&self, id: &str) -> Option<ObjId> {
         let block = self.child(&self.root("blocks"), id)?;
         self.child(&block, "text")
+    }
+
+    /// The newest of this replica's changes that `other` already has. Automerge ignores
+    /// heads it does not know, so asking `other` for changes after this replica's own heads
+    /// would rebuild its whole history whenever this replica has unsent local edits.
+    fn known_to(&mut self, other: &mut AutoCommit) -> Vec<ChangeHash> {
+        let (mut known, mut seen, mut pending) = (Vec::new(), HashSet::new(), self.doc.get_heads());
+        while let Some(hash) = pending.pop() {
+            if !seen.insert(hash) {
+                continue;
+            }
+            if other.get_change_by_hash(&hash).is_some() {
+                known.push(hash);
+            } else if let Some(change) = self.doc.get_change_by_hash(&hash) {
+                pending.extend(change.deps().iter().copied());
+            }
+        }
+        known
     }
 
     fn index_new_changes(&mut self) {
@@ -292,7 +310,8 @@ impl Replica for Am {
         self.index_new_changes();
         let mut rejected = Vec::new();
         let mut refused = HashSet::new();
-        for change in other.doc.get_changes(&self.doc.get_heads()) {
+        let known = self.known_to(&mut other.doc);
+        for change in other.doc.get_changes(&known) {
             if self.doc.get_change_by_hash(&change.hash()).is_some() {
                 continue;
             }
@@ -341,6 +360,33 @@ impl Replica for Am {
             })
             .collect();
         sorted_order(keys)
+    }
+
+    fn connections(&mut self) -> Vec<(String, String, String)> {
+        let connections = self.root("connections");
+        let keys: Vec<String> = self.doc.keys(&connections).collect();
+        keys.into_iter()
+            .filter_map(|id| {
+                let obj = self.child(&connections, &id)?;
+                Some((id, self.get_str(&obj, "from")?, self.get_str(&obj, "to")?))
+            })
+            .collect()
+    }
+
+    fn automations(&mut self) -> Vec<Automation> {
+        let automations = self.root("automations");
+        let keys: Vec<String> = self.doc.keys(&automations).collect();
+        keys.into_iter()
+            .filter_map(|id| {
+                let obj = self.child(&automations, &id)?;
+                Some(Automation {
+                    owner: self.get_str(&obj, "owner"),
+                    uses: self.get_str(&obj, "uses")?,
+                    enabled: self.get_str(&obj, "enabled").as_deref() == Some("true"),
+                    id,
+                })
+            })
+            .collect()
     }
 
     fn text(&mut self, id: &str) -> Option<String> {

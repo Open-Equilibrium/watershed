@@ -1,6 +1,8 @@
 //! ADR-0238 acceptance: the same merge cases on Automerge and Loro.
 
-use liquid_crdt_spike::{Policy, Replica, am::Am, dangling_connections, lo::Lo};
+use liquid_crdt_spike::{
+    AutomationState, Policy, Replica, am::Am, dangling_connections, effective_automations, lo::Lo,
+};
 
 fn sync<R: Replica>(a: &mut R, b: &mut R) {
     a.pull(b);
@@ -118,9 +120,8 @@ macro_rules! suite {
                     !a.canonical().contains("chart:"),
                     "the deletion removed its Connection"
                 );
-                let late = [("late", "notes", "plan")];
-                assert_eq!(dangling_connections(&mut a, &late), ["late"]);
-                assert_eq!(dangling_connections(&mut b, &late), ["late"]);
+                assert_eq!(dangling_connections(&mut a), ["late"]);
+                assert_eq!(dangling_connections(&mut b), ["late"]);
                 assert!(!a.canonical().contains("flag:"));
                 assert!(a.canonical().contains("enabled:false"));
             }
@@ -135,6 +136,24 @@ macro_rules! suite {
                 sync(&mut a, &mut b);
                 assert_eq!(a.canonical(), b.canonical());
                 assert_eq!(a.order(), ["notes", "ideas"]);
+            }
+
+            #[test]
+            fn automations_created_concurrently_with_the_deletion_follow_it() {
+                let mut seed: R = page();
+                let (mut a, mut b) = (seed.fork_as(1), seed.fork_as(2));
+                a.delete_block("plan");
+                b.add_automation("late", None, "plan");
+                b.add_automation("late-own", Some("plan"), "notes");
+                b.commit();
+                sync(&mut a, &mut b);
+                assert_eq!(a.canonical(), b.canonical());
+                let expected = vec![
+                    ("late".to_string(), AutomationState::NeedsAttention),
+                    ("summary".to_string(), AutomationState::NeedsAttention),
+                ];
+                assert_eq!(effective_automations(&mut a), expected);
+                assert_eq!(effective_automations(&mut b), expected);
             }
 
             #[test]

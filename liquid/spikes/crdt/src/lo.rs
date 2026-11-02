@@ -8,7 +8,7 @@ use loro::{
     LoroMap, LoroText, LoroValue, StyleConfig, ValueOrContainer, VersionVector, json::MapOp,
 };
 
-use crate::{Policy, Rejected, Replica, sorted_order};
+use crate::{Automation, Policy, Rejected, Replica, sorted_order};
 
 pub struct Lo {
     pub doc: LoroDoc,
@@ -352,6 +352,33 @@ impl Replica for Lo {
             })
             .collect();
         sorted_order(keys)
+    }
+
+    fn connections(&mut self) -> Vec<(String, String, String)> {
+        let connections = self.root("connections");
+        let keys: Vec<String> = connections.keys().map(|k| k.to_string()).collect();
+        keys.into_iter()
+            .filter_map(|id| {
+                let obj = Self::child_map(&connections, &id)?;
+                Some((id, Self::get_str(&obj, "from")?, Self::get_str(&obj, "to")?))
+            })
+            .collect()
+    }
+
+    fn automations(&mut self) -> Vec<Automation> {
+        let automations = self.root("automations");
+        let keys: Vec<String> = automations.keys().map(|k| k.to_string()).collect();
+        keys.into_iter()
+            .filter_map(|id| {
+                let obj = Self::child_map(&automations, &id)?;
+                Some(Automation {
+                    owner: Self::get_str(&obj, "owner"),
+                    uses: Self::get_str(&obj, "uses")?,
+                    enabled: Self::get_str(&obj, "enabled").as_deref() == Some("true"),
+                    id,
+                })
+            })
+            .collect()
     }
 
     fn text(&mut self, id: &str) -> Option<String> {

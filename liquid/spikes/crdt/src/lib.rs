@@ -45,6 +45,10 @@ pub trait Replica: Sized {
     /// Block ids in View order.
     fn order(&mut self) -> Vec<String>;
     fn text(&mut self, id: &str) -> Option<String>;
+    /// Every stored Connection as (id, from, to).
+    fn connections(&mut self) -> Vec<(String, String, String)>;
+    /// Every stored Automation.
+    fn automations(&mut self) -> Vec<Automation>;
     /// A canonical rendering of the whole Page, equal on two replicas exactly when their
     /// visible state is equal.
     fn canonical(&mut self) -> String;
@@ -52,17 +56,58 @@ pub trait Replica: Sized {
     fn load(bytes: &[u8]) -> Self;
 }
 
-/// Connections whose ends name a Block that no longer exists, as a concurrent edit can
-/// leave them after a deletion; a deterministic read rule hides them on every replica.
-pub fn dangling_connections<R: Replica>(
-    replica: &mut R,
-    connections: &[(&str, &str, &str)],
-) -> Vec<String> {
-    connections
-        .iter()
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Automation {
+    pub id: String,
+    pub owner: Option<String>,
+    pub uses: String,
+    pub enabled: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AutomationState {
+    On,
+    Off,
+    NeedsAttention,
+}
+
+/// The read rule after a merge, the same on every replica: a deletion's cascade cannot see
+/// what another device creates concurrently, so a Connection whose end names a deleted
+/// Block is dangling and hidden.
+pub fn dangling_connections<R: Replica>(replica: &mut R) -> Vec<String> {
+    let mut dangling: Vec<String> = replica
+        .connections()
+        .into_iter()
         .filter(|(_, from, to)| replica.text(from).is_none() || replica.text(to).is_none())
-        .map(|(id, _, _)| (*id).to_string())
-        .collect()
+        .map(|(id, _, _)| id)
+        .collect();
+    dangling.sort();
+    dangling
+}
+
+/// The same read rule for Automations: one whose owning Block is deleted counts as deleted
+/// with it and is left out; one that uses a deleted Block needs attention.
+pub fn effective_automations<R: Replica>(replica: &mut R) -> Vec<(String, AutomationState)> {
+    let mut states = Vec::new();
+    for automation in replica.automations() {
+        if automation
+            .owner
+            .as_ref()
+            .is_some_and(|owner| replica.text(owner).is_none())
+        {
+            continue;
+        }
+        let state = if replica.text(&automation.uses).is_none() {
+            AutomationState::NeedsAttention
+        } else if automation.enabled {
+            AutomationState::On
+        } else {
+            AutomationState::Off
+        };
+        states.push((automation.id, state));
+    }
+    states.sort_by(|x, y| x.0.cmp(&y.0));
+    states
 }
 
 pub(crate) fn sorted_order(mut keys: Vec<(String, String)>) -> Vec<String> {

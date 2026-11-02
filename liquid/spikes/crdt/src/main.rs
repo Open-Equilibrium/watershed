@@ -115,6 +115,9 @@ fn run<R: Replica>(name: &str) {
     let start = Instant::now();
     assert!(a.pull_checked(&mut b, policy).is_empty());
     let index_build = start.elapsed();
+    // The receiver has its own unsent edit, as during concurrent editing.
+    a.edit_text("b1", 0, 0, "L");
+    a.commit();
     for i in 0..LARGE_CHECKED {
         b.edit_text("b0", i, 0, "z");
         b.commit();
@@ -137,7 +140,7 @@ fn run<R: Replica>(name: &str) {
         mib(loaded_heap)
     );
     println!(
-        "| {name} | Role-checked receive on that Page, {LARGE_CHECKED} changes | {} per change, after indexing the Page's history once in {:.0} ms |",
+        "| {name} | Role-checked receive on that Page, {LARGE_CHECKED} changes, receiver with an unsent edit | {} per change, after indexing the Page's history once in {:.0} ms |",
         micros(large_checked),
         index_build.as_secs_f64() * 1e3
     );
@@ -162,6 +165,8 @@ fn run<R: Replica>(name: &str) {
     // Role-checked receive: the editing peer may not change rows, so every one of its text
     // edits runs the full operation check and is allowed.
     let (mut a, mut b) = (seed.fork_as(1), seed.fork_as(2));
+    a.edit_text("t", 0, 0, "L");
+    a.commit();
     for i in 0..CHECKED {
         b.edit_text("t", 5 + i, 0, "z");
         b.commit();
@@ -175,7 +180,7 @@ fn run<R: Replica>(name: &str) {
     );
     assert!(refused.is_empty());
     println!(
-        "| {name} | Role-checked receive, {CHECKED} changes | {} per change |",
+        "| {name} | Role-checked receive, {CHECKED} changes, receiver with an unsent edit | {} per change |",
         micros(start.elapsed() / CHECKED as u32)
     );
 }
