@@ -471,3 +471,28 @@ fn a_subscription_follows_its_resource_whatever_else_it_names() {
     let nameless = workspace.watch(2, resource(BridgeResourceKind::Views), |_| true);
     assert_eq!(nameless.unwrap_err(), "page is missing or no identity");
 }
+
+#[test]
+fn every_way_a_subscription_ends_leaves_nothing_behind() {
+    let folder = Folder::new("ends");
+    let workspace = LiquidWorkspace::open_with(&folder.0, &Memory::default()).unwrap();
+    let areas = || resource(BridgeResourceKind::Areas);
+    // Its stream was gone at registration, then Dart closed it.
+    workspace.watch(1, areas(), |_| false).unwrap();
+    workspace.close(1);
+    // Its stream went away with a change, then Dart closed it.
+    let mut first = true;
+    workspace
+        .watch(2, areas(), move |_| std::mem::take(&mut first))
+        .unwrap();
+    lisbon(&workspace);
+    workspace.close(2);
+    // Dart closed it before it arrived.
+    workspace.close(3);
+    workspace.watch(3, areas(), |_| true).unwrap();
+    // Dart closed it after it arrived.
+    workspace.watch(4, areas(), |_| true).unwrap();
+    workspace.close(4);
+
+    assert_eq!(workspace.lifecycle_markers(), 0);
+}

@@ -202,6 +202,8 @@ struct Inner {
     /// Subscriptions whose close arrived before their registration, which calls on
     /// flutter_rust_bridge's worker threads may do.
     closed: HashSet<i64>,
+    /// Subscriptions that ended because their stream was gone, until Dart's close arrives.
+    ended: HashSet<i64>,
     /// Each changed resource's change count.
     seqs: HashMap<BridgeResource, i64>,
 }
@@ -409,6 +411,7 @@ impl LiquidWorkspace {
                 workspace,
                 subscriptions: HashMap::new(),
                 closed: HashSet::new(),
+                ended: HashSet::new(),
                 seqs: HashMap::new(),
             }),
             _lock: lock,
@@ -571,10 +574,11 @@ impl LiquidWorkspace {
         Ok(())
     }
 
-    /// Hands `resource`'s changes to `deliver` until it returns `false`; Rust-side consumers
-    /// such as tests use it instead of a Dart stream.
+    /// Hands `resource`'s changes to `deliver` until it returns `false`; tests use it instead
+    /// of a Dart stream. `deliver` runs while the Workspace is locked, so it must not call
+    /// the Workspace, as a stream sink never does.
     #[flutter_rust_bridge::frb(ignore)]
-    pub fn watch(
+    pub(crate) fn watch(
         &self,
         subscription: i64,
         resource: BridgeResource,
@@ -599,6 +603,8 @@ impl LiquidWorkspace {
             inner
                 .subscriptions
                 .insert(subscription, (resource, Box::new(deliver)));
+        } else {
+            inner.ended.insert(subscription);
         }
         Ok(())
     }
@@ -609,6 +615,7 @@ impl LiquidWorkspace {
         let mut inner = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
         match inner.subscriptions.remove(&subscription) {
             Some((resource, _)) => inner.release(&resource),
+            None if inner.ended.remove(&subscription) => {}
             None => {
                 inner.closed.insert(subscription);
             }
@@ -621,6 +628,12 @@ impl LiquidWorkspace {
     pub(crate) fn is_loaded(&self, page: &PageId) -> bool {
         let inner = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
         inner.workspace.is_loaded(page)
+    }
+
+    /// How many subscription identities wait for their other end: a registration or a close.
+    pub(crate) fn lifecycle_markers(&self) -> usize {
+        let inner = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
+        inner.closed.len() + inner.ended.len()
     }
 }
 
@@ -642,6 +655,7 @@ impl Inner {
         }
         for id in gone {
             if let Some((resource, _)) = self.subscriptions.remove(&id) {
+                self.ended.insert(id);
                 self.release(&resource);
             }
         }
