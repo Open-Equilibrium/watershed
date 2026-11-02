@@ -52,6 +52,48 @@ fn commit_whole_selected_files_preserves_excluded_staging_and_checkpoints() {
 }
 
 #[test]
+fn commit_includes_selected_files_hidden_by_index_marks() {
+    run(async {
+        for mark in ["--skip-worktree", "--assume-unchanged"] {
+            let repo = Repo::new("commit-marked-files");
+            identity(&repo);
+            repo.write("ordinary.txt", "old\n");
+            repo.write("excluded.txt", "old excluded\n");
+            repo.git(&["add", "."]);
+            repo.git(&["commit", "-m", "Initial files"]);
+            repo.write("excluded.txt", "staged excluded\n");
+            repo.git(&["add", "excluded.txt"]);
+            repo.git(&["update-index", mark, "a.txt", "excluded.txt"]);
+            repo.write("a.txt", "selected hidden edit\n");
+            repo.write("ordinary.txt", "ordinary edit\n");
+            repo.write("excluded.txt", "unstaged excluded\n");
+            let excluded_mark = repo.git(&["ls-files", "-v", "excluded.txt"]);
+            Checkpoints::new(repo.path())
+                .commit_current(
+                    &["a.txt".into(), "ordinary.txt".into()],
+                    "Selected files",
+                    None,
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                repo.git(&["show", "HEAD:a.txt"]),
+                "selected hidden edit\n",
+                "{mark}"
+            );
+            assert_eq!(repo.git(&["show", "HEAD:ordinary.txt"]), "ordinary edit\n");
+            assert_eq!(repo.git(&["show", "HEAD:excluded.txt"]), "old excluded\n");
+            assert_eq!(repo.git(&["show", ":excluded.txt"]), "staged excluded\n");
+            assert_eq!(repo.git(&["ls-files", "-v", "excluded.txt"]), excluded_mark);
+            assert_eq!(
+                std::fs::read_to_string(repo.path().join("excluded.txt")).unwrap(),
+                "unstaged excluded\n"
+            );
+        }
+    });
+}
+
+#[test]
 fn commit_creates_and_switches_a_branch_and_commits_deletions() {
     run(async {
         let repo = Repo::new("commit-new-branch");

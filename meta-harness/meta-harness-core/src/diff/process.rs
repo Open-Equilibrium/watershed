@@ -92,6 +92,28 @@ pub(super) async fn user_git(dir: &Path, args: &[&str]) -> Result<String, DiffEr
     user_output(Git::spawn(&mut piped(command, &NO_PROMPTS))?).await
 }
 
+/// Feeds literal NUL-delimited paths to an explicit write while draining its output to completion.
+pub(super) async fn user_git_input(
+    dir: &Path,
+    args: &[&str],
+    input: &[u8],
+) -> Result<String, DiffError> {
+    let mut command = Command::new("git");
+    command.args(args).current_dir(dir);
+    let mut command = piped(command, &NO_PROMPTS);
+    let mut child = Git::spawn(command.stdin(Stdio::piped()))?;
+    let mut stdin = child.child.stdin.take().expect("stdin is piped");
+    let input = input.to_owned();
+    let writing = tokio::spawn(async move { stdin.write_all(&input).await });
+    let output = user_output(child).await;
+    let written = writing.await;
+    let output = output?;
+    written
+        .map_err(|error| DiffError::Io(std::io::Error::other(error)))?
+        .map_err(unreadable)?;
+    Ok(output)
+}
+
 async fn user_output(mut child: Git) -> Result<String, DiffError> {
     let mut stdout = child.child.stdout.take().expect("stdout is piped");
     let mut stderr = child.child.stderr.take().expect("stderr is piped");

@@ -1,7 +1,7 @@
 //! Whole-file commits and the checkout compared with its last commit. Explicit writes use
 //! the user's Git and hooks; snapshots keep the user's index intact.
 
-use super::process::{paths as nul_paths, user_git};
+use super::process::{paths as nul_paths, user_git, user_git_input};
 use super::*;
 
 /// A completed user commit.
@@ -242,11 +242,36 @@ impl WorkingTree {
             let path_arg = format!("--pathspec-from-file={}", path_file.display());
             // An untracked file must first be known to Git for --only. Intent-to-add leaves its
             // content unstaged, also if the user's hook refuses the commit.
-            let tracked: HashSet<_> = nul_paths(
-                &process::git_path_output(&self.root, &[], &["ls-files", "--cached", "-z"]).await?,
-            )
-            .into_iter()
-            .collect();
+            let entries = nul_paths(
+                &process::git_path_output(&self.root, &[], &["ls-files", "--cached", "-v", "-z"])
+                    .await?,
+            );
+            let tracked: HashSet<_> = entries
+                .iter()
+                .filter_map(|entry| entry.split_once(' ').map(|(_, path)| path))
+                .collect();
+            let mut marked = Vec::new();
+            for entry in &entries {
+                if let [tag, b' ', path @ ..] = entry.as_bytes()
+                    && (tag.is_ascii_lowercase() || *tag == b'S')
+                    && selected.contains(std::str::from_utf8(path).expect("decoded pathname"))
+                {
+                    marked.extend_from_slice(path);
+                    marked.push(0);
+                }
+            }
+            // The dialog includes hidden edits; --only would silently skip marked files.
+            // Clear only selected marks, leaving excluded index entries and flags intact.
+            if !marked.is_empty() {
+                for mark in ["--no-assume-unchanged", "--no-skip-worktree"] {
+                    user_git_input(
+                        &self.root,
+                        &["update-index", mark, "-z", "--stdin"],
+                        &marked,
+                    )
+                    .await?;
+                }
+            }
             let new: Vec<&str> = selected
                 .iter()
                 .copied()
