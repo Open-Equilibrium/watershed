@@ -2,6 +2,9 @@
 //! it.
 
 use super::*;
+use std::future::{Future, poll_fn};
+use std::pin::pin;
+use std::task::Poll;
 
 /// The one path a `git rev-parse` query in `dir` prints. A path may hold line breaks, so only
 /// the single trailing one is taken off; splitting the output into lines could name another
@@ -65,7 +68,47 @@ pub(super) fn timestamp_ms(seconds: &str) -> Result<i64, DiffError> {
 pub(super) async fn user_git(dir: &Path, args: &[&str]) -> Result<String, DiffError> {
     let mut command = Command::new("git");
     command.args(args).current_dir(dir);
-    Ok(String::from_utf8_lossy(&output(piped(command, &NO_PROMPTS), false).await?).into_owned())
+    let mut child = Git::spawn(&mut piped(command, &NO_PROMPTS))?;
+    let stdout = child.child.stdout.take().expect("stdout is piped");
+    let stderr = child.child.stderr.take().expect("stderr is piped");
+    let mut output = Vec::new();
+    let mut errors = Vec::new();
+    let status = {
+        // Retain bounded diagnostics but drain everything while Git and its synchronous hooks
+        // run. Unlike a query, excessive output must never interrupt an explicit write.
+        let mut stdout = pin!(keep_into(stdout, MAX_OUTPUT_BYTES as usize, &mut output));
+        let mut stderr = pin!(keep_into(stderr, MAX_ERROR_BYTES, &mut errors));
+        let mut ended = [false; 2];
+        let mut drain = |context: &mut std::task::Context<'_>| {
+            if !ended[0] {
+                ended[0] = stdout.as_mut().poll(context).is_ready();
+            }
+            if !ended[1] {
+                ended[1] = stderr.as_mut().poll(context).is_ready();
+            }
+        };
+        let mut wait = pin!(child.wait());
+        let status = poll_fn(|context| {
+            drain(context);
+            wait.as_mut().poll(context)
+        })
+        .await;
+        // Consume output already available after exit, then close the pipes. A background
+        // hook descendant cannot keep a completed write's checkout lock.
+        poll_fn(|context| {
+            drain(context);
+            Poll::Ready(())
+        })
+        .await;
+        status
+    }
+    .map_err(unreadable)?;
+    if !status.success() {
+        return Err(DiffError::Git(
+            String::from_utf8_lossy(&errors).trim().to_owned(),
+        ));
+    }
+    Ok(String::from_utf8_lossy(&output).into_owned())
 }
 
 /// Keeps Git and its credential helpers from asking on a terminal or in a window, as T3 Code
@@ -214,12 +257,49 @@ impl Drop for Git {
 }
 
 /// Reads `reader` to its end and keeps at most `limit` bytes from its start.
-async fn keep_start(mut reader: impl AsyncRead + Unpin, limit: usize) -> Vec<u8> {
+async fn keep_start(reader: impl AsyncRead + Unpin, limit: usize) -> Vec<u8> {
     let mut kept = Vec::new();
+    keep_into(reader, limit, &mut kept).await;
+    kept
+}
+
+/// Drains a pipe, retaining only its bounded start even if its future is later cancelled.
+async fn keep_into(mut reader: impl AsyncRead + Unpin, limit: usize, kept: &mut Vec<u8>) {
     let mut chunk = [0; 8192];
     while let Ok(read @ 1..) = reader.read(&mut chunk).await {
         let room = limit.saturating_sub(kept.len());
         kept.extend_from_slice(&chunk[..read.min(room)]);
     }
-    kept
+}
+
+#[cfg(test)]
+#[test]
+fn explicit_git_writes_drain_stdout_past_the_retained_limit() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+    runtime.block_on(async {
+        let dir =
+            std::env::temp_dir().join(format!("watershed-user-output-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("fixture directory");
+        // Git forwards hook stdout to stderr. A shell alias exercises its actual stdout pipe
+        // and writes a completion marker only if every output byte was accepted.
+        let result = user_git(
+            &dir,
+            &[
+                "-c",
+                "alias.noisy=!head -c 5242880 /dev/zero && touch finished",
+                "noisy",
+            ],
+        )
+        .await;
+        let finished = dir.join("finished").exists();
+        std::fs::remove_dir_all(&dir).expect("cleanup");
+        assert!(finished, "explicit write was interrupted");
+        assert_eq!(
+            result.expect("write succeeded").len() as u64,
+            MAX_OUTPUT_BYTES
+        );
+    });
 }

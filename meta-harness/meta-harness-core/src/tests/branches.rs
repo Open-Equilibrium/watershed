@@ -1234,6 +1234,99 @@ fn a_detached_head_cannot_leave_changes_on_a_branch() {
 }
 
 #[test]
+fn explicit_writes_finish_hooks_with_oversized_output() {
+    use std::os::unix::fs::PermissionsExt;
+    run(async {
+        for exit in [0, 1] {
+            let repo = Repo::new(&format!("hook-output-{exit}"));
+            repo.git(&["branch", "other"]);
+            let path = repo.path().join(".git/hooks/post-checkout");
+            std::fs::write(&path, format!(
+                "#!/bin/sh\nprintf 'hook diagnostic' >&2\nhead -c 5242880 /dev/zero\ntouch .git/hook-finished\nexit {exit}\n"
+            )).expect("hook");
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
+                .expect("executable");
+            let checkpoints = Checkpoints::new(repo.path());
+            let switched = checkpoints
+                .switch_branch(&local("other"), Changes::Bring)
+                .await;
+            assert!(
+                repo.path().join(".git/hook-finished").exists(),
+                "hook was interrupted: {switched:?}"
+            );
+            if exit == 0 {
+                switched.expect("switched");
+            } else {
+                assert!(
+                    matches!(&switched, Err(DiffError::HookFailed(reason)) if reason.contains("hook diagnostic")),
+                    "expected the retained hook diagnostic"
+                );
+            }
+            assert_eq!(repo.git(&["branch", "--show-current"]), "other\n");
+            checkpoints
+                .capture(&at("after", Phase::Start))
+                .await
+                .expect("checkout lock released");
+        }
+    });
+}
+
+#[test]
+fn a_background_hook_child_cannot_hold_a_completed_writes_checkout_lock() {
+    use std::os::unix::fs::PermissionsExt;
+    run(async {
+        let repo = Repo::new("hook-background");
+        repo.git(&["branch", "other"]);
+        let gate = repo.path().join(".git/hook-gate");
+        assert!(
+            Command::new("mkfifo")
+                .arg(&gate)
+                .status()
+                .expect("fifo")
+                .success()
+        );
+        let path = repo.path().join(".git/hooks/post-checkout");
+        // The background reader inherits both pipes but never completes until released.
+        std::fs::write(
+            &path,
+            "#!/bin/sh\n(read line < .git/hook-gate) &\necho $! > .git/hook-child\nexit 0\n",
+        )
+        .expect("hook");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
+            .expect("executable");
+        let checkpoints = Checkpoints::new(repo.path());
+        let switched = tokio::time::timeout(
+            Duration::from_secs(3),
+            checkpoints.switch_branch(&local("other"), Changes::Bring),
+        )
+        .await;
+        // Always clean up the child, including on a regression failure.
+        let pid = std::fs::read_to_string(repo.path().join(".git/hook-child")).expect("child pid");
+        let lock = if switched.is_ok() {
+            Some(
+                tokio::time::timeout(
+                    Duration::from_secs(3),
+                    Checkpoints::new(repo.path()).capture(&at("after", Phase::Start)),
+                )
+                .await,
+            )
+        } else {
+            None
+        };
+        Command::new("kill")
+            .arg(pid.trim())
+            .status()
+            .expect("cleanup");
+        switched
+            .expect("switch completes while its background child waits")
+            .expect("switched");
+        lock.expect("lock checked")
+            .expect("checkout guard available")
+            .expect("guard acquired");
+    });
+}
+
+#[test]
 fn a_hook_failing_after_git_switched_keeps_the_changes_left_on_the_branch() {
     run(async {
         let repo = Repo::new("switch-hook");
