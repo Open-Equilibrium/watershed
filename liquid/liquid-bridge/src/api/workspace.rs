@@ -8,7 +8,8 @@
 //! resource and that resource's sequence number; the reader then queries the bounded window
 //! it shows (rule 3).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::fs::{File, TryLockError};
 use std::path::Path;
 use std::sync::{Mutex, PoisonError};
 
@@ -198,6 +199,9 @@ struct Inner {
     workspace: Workspace<Sqlite>,
     /// Open subscriptions by the identity Dart chose.
     subscriptions: HashMap<i64, (BridgeResource, Deliver)>,
+    /// Subscriptions whose close arrived before their registration, which calls on
+    /// flutter_rust_bridge's worker threads may do.
+    closed: HashSet<i64>,
     /// Each changed resource's change count.
     seqs: HashMap<BridgeResource, i64>,
 }
@@ -206,6 +210,8 @@ struct Inner {
 #[flutter_rust_bridge::frb(opaque)]
 pub struct LiquidWorkspace {
     inner: Mutex<Inner>,
+    /// The replica folder's lock, held while the Workspace is open.
+    _lock: File,
 }
 
 fn message(error: Error) -> String {
@@ -345,6 +351,16 @@ impl LiquidWorkspace {
     #[flutter_rust_bridge::frb(ignore)]
     pub(crate) fn open_with(dir: &Path, keys: &dyn Keys) -> Result<LiquidWorkspace, String> {
         std::fs::create_dir_all(dir).map_err(|error| error.to_string())?;
+        // Taken before the key is read or made, so two sessions opening a new folder at once
+        // cannot each store a key of their own.
+        let lock = File::create(dir.join("replica.lock")).map_err(|error| error.to_string())?;
+        match lock.try_lock() {
+            Ok(()) => {}
+            Err(TryLockError::WouldBlock) => {
+                return Err("another Liquid session holds this replica".into());
+            }
+            Err(TryLockError::Error(error)) => return Err(error.to_string()),
+        }
         let path = dir.join("replica.db");
         let key = match keys.read()? {
             Some(key) => key,
@@ -371,8 +387,10 @@ impl LiquidWorkspace {
             inner: Mutex::new(Inner {
                 workspace,
                 subscriptions: HashMap::new(),
+                closed: HashSet::new(),
                 seqs: HashMap::new(),
             }),
+            _lock: lock,
         })
     }
 
@@ -477,7 +495,9 @@ impl LiquidWorkspace {
     }
 
     /// Streams `resource`'s changes to Dart under the identity `subscription`, which Dart
-    /// chooses and passes to [`LiquidWorkspace::close`]; cancelling the Dart stream ends it too.
+    /// chooses and passes to [`LiquidWorkspace::close`] when it cancels the stream. The first
+    /// change carries the resource's current count and marks the registration: a reader queries
+    /// after it, so it misses no later change.
     pub fn subscribe(
         &self,
         subscription: i64,
@@ -498,21 +518,36 @@ impl LiquidWorkspace {
         resource: BridgeResource,
         deliver: impl FnMut(BridgeChange) -> bool + Send + 'static,
     ) -> Result<(), String> {
+        let mut deliver = deliver;
         let mut inner = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
+        if inner.closed.remove(&subscription) {
+            return Err(format!("subscription {subscription} is already closed"));
+        }
         if inner.subscriptions.contains_key(&subscription) {
             return Err(format!("subscription {subscription} is already open"));
         }
-        inner
-            .subscriptions
-            .insert(subscription, (resource, Box::new(deliver)));
+        let seq = inner.seqs.get(&resource).copied().unwrap_or_default();
+        let current = BridgeChange {
+            resource: resource.clone(),
+            seq,
+        };
+        if deliver(current) {
+            inner
+                .subscriptions
+                .insert(subscription, (resource, Box::new(deliver)));
+        }
         Ok(())
     }
 
-    /// Ends a subscription. A Page that no subscription follows any more leaves memory.
+    /// Ends a subscription, also one whose registration has not arrived yet. A Page that no
+    /// subscription follows any more leaves memory.
     pub fn close(&self, subscription: i64) {
         let mut inner = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
-        if let Some((resource, _)) = inner.subscriptions.remove(&subscription) {
-            inner.release(&resource);
+        match inner.subscriptions.remove(&subscription) {
+            Some((resource, _)) => inner.release(&resource),
+            None => {
+                inner.closed.insert(subscription);
+            }
         }
     }
 }

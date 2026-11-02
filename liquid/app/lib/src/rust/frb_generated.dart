@@ -6232,7 +6232,8 @@ class LiquidWorkspaceImpl extends RustOpaque implements LiquidWorkspace {
       .api
       .crateApiWorkspaceLiquidWorkspaceApply(that: this, mutation: mutation);
 
-  /// Ends a subscription. A Page that no subscription follows any more leaves memory.
+  /// Ends a subscription, also one whose registration has not arrived yet. A Page that no
+  /// subscription follows any more leaves memory.
   Future<void> close({required PlatformInt64 subscription}) =>
       RustLib.instance.api.crateApiWorkspaceLiquidWorkspaceClose(
         that: this,
@@ -6246,7 +6247,9 @@ class LiquidWorkspaceImpl extends RustOpaque implements LiquidWorkspace {
       .crateApiWorkspaceLiquidWorkspaceQuery(that: this, query: query);
 
   /// Streams `resource`'s changes to Dart under the identity `subscription`, which Dart
-  /// chooses and passes to [`LiquidWorkspace::close`]; cancelling the Dart stream ends it too.
+  /// chooses and passes to [`LiquidWorkspace::close`] when it cancels the stream. The first
+  /// change carries the resource's current count and marks the registration: a reader queries
+  /// after it, so it misses no later change.
   Stream<BridgeChange> subscribe({
     required PlatformInt64 subscription,
     required BridgeResource resource,

@@ -210,8 +210,12 @@ fn a_write_reaches_only_the_subscribers_of_what_it_changed() {
         .iter()
         .map(|(id, change)| (*id, change.seq))
         .collect();
-    // Two edits and the removal reach the Block; only the removal reaches the Views.
-    assert_eq!(seen, [(3, 1), (3, 2), (2, 2), (3, 3)]);
+    // Each subscription starts with its resource's count; two edits and the removal reach
+    // the Block, and only the removal reaches the Views.
+    assert_eq!(
+        seen,
+        [(1, 1), (2, 1), (3, 0), (3, 1), (3, 2), (2, 2), (3, 3)]
+    );
     assert_eq!(text(&workspace, &page, &block), None);
 }
 
@@ -258,7 +262,6 @@ fn a_subscription_ends_when_dart_closes_it_or_its_stream() {
     );
 
     // Closing the Page's last subscription releases it; it loads again for the next read.
-    workspace.close(8);
     workspace.close(8);
     assert_eq!(text(&workspace, &page, &block).unwrap(), "Five days");
 }
@@ -341,4 +344,58 @@ fn the_keychain_keeps_a_replica_key() {
         1
     );
     keychain.delete().unwrap();
+}
+
+#[test]
+fn one_session_at_a_time_opens_a_replica_folder() {
+    let folder = Folder::new("exclusive");
+    let keys = Memory::default();
+    let first = LiquidWorkspace::open_with(&folder.0, &keys).unwrap();
+    let key = keys.read().unwrap();
+
+    let second = LiquidWorkspace::open_with(&folder.0, &Memory::default());
+    assert_eq!(
+        second.err().unwrap(),
+        "another Liquid session holds this replica"
+    );
+    assert_eq!(keys.read().unwrap(), key);
+    drop(first);
+    assert!(LiquidWorkspace::open_with(&folder.0, &keys).is_ok());
+}
+
+#[test]
+fn a_subscription_starts_with_its_resource_s_current_count() {
+    let folder = Folder::new("ack");
+    let workspace = LiquidWorkspace::open_with(&folder.0, &Memory::default()).unwrap();
+    lisbon(&workspace);
+    let seen: Arc<Mutex<Vec<i64>>> = Arc::default();
+    let record = seen.clone();
+    workspace
+        .watch(1, resource(BridgeResourceKind::Areas), move |change| {
+            record.lock().unwrap().push(change.seq);
+            true
+        })
+        .unwrap();
+    workspace
+        .apply(BridgeMutation {
+            text: Some("Home".into()),
+            ..mutation(BridgeMutationKind::CreateArea)
+        })
+        .unwrap();
+    // "Trips" counted once before the subscription began.
+    assert_eq!(*seen.lock().unwrap(), [1, 2]);
+}
+
+#[test]
+fn a_close_that_overtakes_its_subscription_still_ends_it() {
+    let folder = Folder::new("overtake");
+    let workspace = LiquidWorkspace::open_with(&folder.0, &Memory::default()).unwrap();
+    workspace.close(4);
+    let opened = workspace.watch(4, resource(BridgeResourceKind::Areas), |_| true);
+    assert_eq!(opened.unwrap_err(), "subscription 4 is already closed");
+    assert!(
+        workspace
+            .watch(4, resource(BridgeResourceKind::Areas), |_| true)
+            .is_ok()
+    );
 }
