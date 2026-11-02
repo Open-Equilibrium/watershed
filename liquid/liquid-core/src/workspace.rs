@@ -5,18 +5,20 @@ use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use automerge::transaction::{CommitOptions, Transactable};
-use automerge::{ActorId, AutoCommit, ObjType, ROOT};
+use automerge::{ActorId, AutoCommit, ObjType, ROOT, ReadDoc};
 
 use crate::history::Header;
 use crate::id::random_bytes;
 use crate::model::{
-    self, AREAS, BLOCK, BLOCKS, KIND, NAME, OWNER, PAGES, PARENT, SORT, TEXT, TITLE, VIEWS,
+    self, AREAS, BLOCK, BLOCKS, BOUNDARY, KIND, NAME, OWNER, PAGES, PARENT, SORT, STYLE, TEXT,
+    TITLE, VIEWS,
 };
 use crate::order::Order;
 use crate::store::{Commit, Store, Write};
 use crate::{
     Action, ActionId, Actor, Applied, Area, AreaId, BlockId, Changed, Created, Document, Error,
-    Mutation, Operation, Origin, PageEntry, PageId, Permission, PersonId, Request, View, ViewId,
+    Mutation, Operation, Origin, PageEntry, PageId, Permission, PersonId, Request, TextStyle, View,
+    ViewId,
 };
 
 /// A document is stored again as one snapshot once it has this many chunks, so loading it
@@ -175,6 +177,13 @@ impl<S: Store> Workspace<S> {
         Ok(self.page(page)?.1.len())
     }
 
+    /// How a live Text Block reads, from the document of its home `page`.
+    pub fn style(&mut self, page: &PageId, block: &BlockId) -> Result<Option<TextStyle>, Error> {
+        let doc = self.doc(&Document::Page(page.clone()))?;
+        Ok(model::live(doc, BLOCKS, block.as_str())
+            .map(|entry| model::style(model::string(doc, &entry, STYLE).as_deref())))
+    }
+
     /// A live Text Block's text, from the document of its home `page`.
     pub fn text(&mut self, page: &PageId, block: &BlockId) -> Result<Option<String>, Error> {
         Ok(model::text(
@@ -306,26 +315,94 @@ impl<S: Store> Workspace<S> {
             }
             Mutation::AddTextBlock { page, after, text } => {
                 let (doc, order) = self.page(page)?;
-                let sort = order.key_after(after.as_ref())?;
-                let (block, view) = (BlockId::new()?, ViewId::new()?);
-                let entry = model::insert(doc, BLOCKS, block.as_str(), &[(KIND, "text")])?;
-                let content = doc.put_object(&entry, TEXT, ObjType::Text)?;
-                doc.splice_text(&content, 0, 0, text)?;
-                model::insert(
-                    doc,
-                    VIEWS,
-                    view.as_str(),
-                    &[(BLOCK, block.as_str()), (SORT, &sort)],
-                )?;
-                let placed = View {
-                    id: view.clone(),
-                    block: block.clone(),
-                };
-                order.insert(sort, placed);
+                let (block, view) =
+                    add_text_block(doc, order, after.as_ref(), text, TextStyle::Paragraph)?;
                 let mut written =
                     Written::new(Document::Page(page.clone()), Changed::Views(page.clone()));
                 written.created = Some(Created::Block { block, view });
                 Ok(written)
+            }
+            Mutation::SplitTextBlock {
+                page,
+                block,
+                view,
+                at,
+                style,
+            } => {
+                let (doc, order) = self.page(page)?;
+                if order.view(view).is_none_or(|shown| &shown.block != block) {
+                    return Err(Error::NotFound);
+                }
+                let content = text_of(doc, block)?;
+                if !model::on_boundary(doc, &content, *at) {
+                    return Err(Error::OutOfRange);
+                }
+                let text = doc.text(&content)?;
+                let tail = text[utf8_offset(&text, *at)..].to_string();
+                let length =
+                    isize::try_from(doc.length(&content) - at).map_err(|_| Error::OutOfRange)?;
+                doc.splice_text(&content, *at, length, "")?;
+                let (new_block, new_view) = add_text_block(doc, order, Some(view), &tail, *style)?;
+                let mut written =
+                    Written::new(Document::Page(page.clone()), Changed::Views(page.clone()));
+                written
+                    .changed
+                    .push(Changed::Block(page.clone(), block.clone()));
+                written.created = Some(Created::Block {
+                    block: new_block,
+                    view: new_view,
+                });
+                Ok(written)
+            }
+            Mutation::JoinTextBlock { page, view } => {
+                let (doc, order) = self.page(page)?;
+                let joining = order.view(view).ok_or(Error::NotFound)?.clone();
+                let above = order.above(view).ok_or(Error::NotFound)?.clone();
+                let text = model::text(doc, joining.block.as_str()).ok_or(Error::NotFound)?;
+                let target = text_of(doc, &above.block)?;
+                let end = doc.length(&target);
+                doc.splice_text(&target, end, 0, &text)?;
+                let entry = model::live(doc, VIEWS, view.as_str()).ok_or(Error::NotFound)?;
+                model::mark_deleted(doc, &entry)?;
+                let mut written =
+                    Written::new(Document::Page(page.clone()), Changed::Views(page.clone()));
+                written
+                    .changed
+                    .push(Changed::Block(page.clone(), above.block.clone()));
+                if !order.shows(&joining.block, view) {
+                    if let Some(block_entry) = model::live(doc, BLOCKS, joining.block.as_str()) {
+                        model::mark_deleted(doc, &block_entry)?;
+                    }
+                    written
+                        .changed
+                        .push(Changed::Block(page.clone(), joining.block));
+                }
+                order.remove(view);
+                Ok(written)
+            }
+            Mutation::SetTextStyle { page, block, style } => {
+                let name = model::style_name(*style)?;
+                let (doc, _) = self.page(page)?;
+                let entry = model::live(doc, BLOCKS, block.as_str()).ok_or(Error::NotFound)?;
+                doc.put(&entry, STYLE, name)?;
+                Ok(Written::new(
+                    Document::Page(page.clone()),
+                    Changed::Block(page.clone(), block.clone()),
+                ))
+            }
+            Mutation::SetSectionBoundary {
+                page,
+                view,
+                boundary,
+            } => {
+                let (doc, order) = self.page(page)?;
+                let entry = model::live(doc, VIEWS, view.as_str()).ok_or(Error::NotFound)?;
+                doc.put(&entry, BOUNDARY, *boundary)?;
+                order.set_boundary(view, *boundary);
+                Ok(Written::new(
+                    Document::Page(page.clone()),
+                    Changed::Views(page.clone()),
+                ))
             }
             Mutation::EditText {
                 page,
@@ -433,4 +510,63 @@ impl<S: Store> Workspace<S> {
         }
         Ok(())
     }
+}
+
+/// Adds a Text Block of `style` holding `text`, with its View after `after` or first.
+fn add_text_block(
+    doc: &mut AutoCommit,
+    order: &mut Order,
+    after: Option<&ViewId>,
+    text: &str,
+    style: TextStyle,
+) -> Result<(BlockId, ViewId), Error> {
+    let style = model::style_name(style)?;
+    let sort = order.key_after(after)?;
+    let (block, view) = (BlockId::new()?, ViewId::new()?);
+    let entry = model::insert(
+        doc,
+        BLOCKS,
+        block.as_str(),
+        &[(KIND, "text"), (STYLE, &style)],
+    )?;
+    let content = doc.put_object(&entry, TEXT, ObjType::Text)?;
+    doc.splice_text(&content, 0, 0, text)?;
+    model::insert(
+        doc,
+        VIEWS,
+        view.as_str(),
+        &[(BLOCK, block.as_str()), (SORT, &sort)],
+    )?;
+    doc.put(
+        model::live(doc, VIEWS, view.as_str())
+            .as_ref()
+            .ok_or(Error::NotFound)?,
+        BOUNDARY,
+        false,
+    )?;
+    let placed = View {
+        id: view.clone(),
+        block: block.clone(),
+        boundary: false,
+    };
+    order.insert(sort, placed);
+    Ok((block, view))
+}
+
+/// A live Text Block's text object.
+fn text_of(doc: &AutoCommit, block: &BlockId) -> Result<automerge::ObjId, Error> {
+    let entry = model::live(doc, BLOCKS, block.as_str()).ok_or(Error::NotFound)?;
+    model::child(doc, &entry, TEXT).ok_or(Error::NotFound)
+}
+
+/// The UTF-8 byte offset of the UTF-16 offset `at`, which lies between characters.
+fn utf8_offset(text: &str, at: usize) -> usize {
+    let mut units = 0;
+    for (offset, c) in text.char_indices() {
+        if units >= at {
+            return offset;
+        }
+        units += c.len_utf16();
+    }
+    text.len()
 }
