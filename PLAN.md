@@ -188,6 +188,9 @@ A macOS Liquid app, built ahead of M2 and M3a, that controls pi through an embed
 
 **Follow-ups:**
 
+- Keep Liquid key profiles consistent with the native mapping when disabling fails.
+- Keep stored Liquid key profiles disabled on unsupported hosts.
+- Preserve both Appearance selections when they change before the next frame.
 - Close the cheap record gaps (ADR-0222): record every approval decision, also those made without asking, with its reason, the approval mode and a hash of the approved arguments; show the nested tool calls pi records; and say in the Diff and Trajectory tabs exactly what they cover, after an approved mockup.
 - On a Mac keyboard with the Liquid key on, ⇪1, ⇪2 and ⇪3 work, but ⇪L and ⇪N do nothing and type nothing either (hardware test, 2026-10-28), while widget tests with the same keys pass. Next: run Liquid from a terminal with `LIQUID_KEY_LOG=1`, press ⇪1, ⇪L and ⇪N, and compare the native and Flutter lines for the letters ([liquid/README.md](liquid/README.md#run)).
 - Closeout review leftovers (2026-10-30, delta review 2026-10-31), Minor findings and decided follow-ups:
