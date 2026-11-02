@@ -1685,7 +1685,10 @@ fn no_restore_partly_applies_a_stash_with_undecodable_paths() {
 
         assert_eq!(read(&repo, "a.txt"), "old\n", "{restored:?}");
         assert!(matches!(restored, Err(DiffError::Git(reason)) if reason.contains("UTF-8")));
-        assert_eq!(stash_of(&checkpoints).await, stash.trim());
+        assert!(
+            matches!(checkpoints.stash().await, Err(DiffError::Git(reason)) if reason.contains("UTF-8"))
+        );
+        assert_eq!(repo.git(&["rev-parse", "refs/stash"]).trim(), stash.trim());
         assert_eq!(
             std::fs::read(repo.path().join(".git/index")).expect("index"),
             index_before
