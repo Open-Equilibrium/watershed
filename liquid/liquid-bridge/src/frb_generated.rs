@@ -41,7 +41,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.13.0";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 1197575727;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 1998495386;
 
 // Section: executor
 
@@ -383,6 +383,113 @@ fn wire__crate__api__session__AgentSession_clear_queue_impl(
                     })()
                     .await,
                 )
+            }
+        },
+    )
+}
+fn wire__crate__api__session__AgentSession_commit_files_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "AgentSession_commit_files",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_that = <RustOpaqueMoi<
+                flutter_rust_bridge::for_generated::RustAutoOpaqueInner<AgentSession>,
+            >>::sse_decode(&mut deserializer);
+            let api_paths = <Vec<String>>::sse_decode(&mut deserializer);
+            let api_message = <String>::sse_decode(&mut deserializer);
+            let api_branch = <Option<String>>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let mut api_that_guard = None;
+                    let decode_indices_ =
+                        flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![
+                            flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                &api_that, 0, false,
+                            ),
+                        ]);
+                    for i in decode_indices_ {
+                        match i {
+                            0 => api_that_guard = Some(api_that.lockable_decode_sync_ref()),
+                            _ => unreachable!(),
+                        }
+                    }
+                    let api_that_guard = api_that_guard.unwrap();
+                    let output_ok = crate::api::session::AgentSession::commit_files(
+                        &*api_that_guard,
+                        api_paths,
+                        api_message,
+                        api_branch,
+                    )?;
+                    std::result::Result::Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__api__session__AgentSession_commit_plan_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "AgentSession_commit_plan",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_that = <RustOpaqueMoi<
+                flutter_rust_bridge::for_generated::RustAutoOpaqueInner<AgentSession>,
+            >>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let mut api_that_guard = None;
+                    let decode_indices_ =
+                        flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![
+                            flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                &api_that, 0, false,
+                            ),
+                        ]);
+                    for i in decode_indices_ {
+                        match i {
+                            0 => api_that_guard = Some(api_that.lockable_decode_sync_ref()),
+                            _ => unreachable!(),
+                        }
+                    }
+                    let api_that_guard = api_that_guard.unwrap();
+                    let output_ok =
+                        crate::api::session::AgentSession::commit_plan(&*api_that_guard)?;
+                    std::result::Result::Ok(output_ok)
+                })())
             }
         },
     )
@@ -1114,6 +1221,56 @@ fn wire__crate__api__session__AgentSession_in_repository_impl(
                     let api_that_guard = api_that_guard.unwrap();
                     let output_ok =
                         crate::api::session::AgentSession::in_repository(&*api_that_guard)?;
+                    std::result::Result::Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__api__session__AgentSession_initialize_git_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "AgentSession_initialize_git",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_that = <RustOpaqueMoi<
+                flutter_rust_bridge::for_generated::RustAutoOpaqueInner<AgentSession>,
+            >>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let mut api_that_guard = None;
+                    let decode_indices_ =
+                        flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![
+                            flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                &api_that, 0, false,
+                            ),
+                        ]);
+                    for i in decode_indices_ {
+                        match i {
+                            0 => api_that_guard = Some(api_that.lockable_decode_sync_ref()),
+                            _ => unreachable!(),
+                        }
+                    }
+                    let api_that_guard = api_that_guard.unwrap();
+                    let output_ok =
+                        crate::api::session::AgentSession::initialize_git(&*api_that_guard)?;
                     std::result::Result::Ok(output_ok)
                 })())
             }
@@ -2336,6 +2493,114 @@ fn wire__crate__api__session__AgentSession_turns_impl(
         },
     )
 }
+fn wire__crate__api__session__AgentSession_uncommitted_changes_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "AgentSession_uncommitted_changes",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_that = <RustOpaqueMoi<
+                flutter_rust_bridge::for_generated::RustAutoOpaqueInner<AgentSession>,
+            >>::sse_decode(&mut deserializer);
+            let api_hide_whitespace = <bool>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let mut api_that_guard = None;
+                    let decode_indices_ =
+                        flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![
+                            flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                &api_that, 0, false,
+                            ),
+                        ]);
+                    for i in decode_indices_ {
+                        match i {
+                            0 => api_that_guard = Some(api_that.lockable_decode_sync_ref()),
+                            _ => unreachable!(),
+                        }
+                    }
+                    let api_that_guard = api_that_guard.unwrap();
+                    let output_ok = crate::api::session::AgentSession::uncommitted_changes(
+                        &*api_that_guard,
+                        api_hide_whitespace,
+                    )?;
+                    std::result::Result::Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__api__session__AgentSession_uncommitted_patch_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "AgentSession_uncommitted_patch",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_that = <RustOpaqueMoi<
+                flutter_rust_bridge::for_generated::RustAutoOpaqueInner<AgentSession>,
+            >>::sse_decode(&mut deserializer);
+            let api_path = <String>::sse_decode(&mut deserializer);
+            let api_hide_whitespace = <bool>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let mut api_that_guard = None;
+                    let decode_indices_ =
+                        flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![
+                            flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                &api_that, 0, false,
+                            ),
+                        ]);
+                    for i in decode_indices_ {
+                        match i {
+                            0 => api_that_guard = Some(api_that.lockable_decode_sync_ref()),
+                            _ => unreachable!(),
+                        }
+                    }
+                    let api_that_guard = api_that_guard.unwrap();
+                    let output_ok = crate::api::session::AgentSession::uncommitted_patch(
+                        &*api_that_guard,
+                        api_path,
+                        api_hide_whitespace,
+                    )?;
+                    std::result::Result::Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
 fn wire__crate__api__workspace__LiquidWorkspace_apply_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -2946,6 +3211,35 @@ impl SseDecode for crate::api::session::BridgeCheckpointSession {
     }
 }
 
+impl SseDecode for crate::api::git::BridgeCommitFile {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_change = <crate::api::events::BridgeFileChange>::sse_decode(deserializer);
+        let mut var_turns = <Vec<i64>>::sse_decode(deserializer);
+        let mut var_edited = <bool>::sse_decode(deserializer);
+        let mut var_stagedPartly = <bool>::sse_decode(deserializer);
+        return crate::api::git::BridgeCommitFile {
+            change: var_change,
+            turns: var_turns,
+            edited: var_edited,
+            staged_partly: var_stagedPartly,
+        };
+    }
+}
+
+impl SseDecode for crate::api::git::BridgeCommitPlan {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_files = <Vec<crate::api::git::BridgeCommitFile>>::sse_decode(deserializer);
+        let mut var_running =
+            <Vec<crate::api::history::BridgeRunningAgent>>::sse_decode(deserializer);
+        return crate::api::git::BridgeCommitPlan {
+            files: var_files,
+            running: var_running,
+        };
+    }
+}
+
 impl SseDecode for crate::api::history::BridgeContextDetail {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -3143,11 +3437,17 @@ impl SseDecode for crate::api::git::BridgeGitOutcome {
         let mut var_running =
             <Vec<crate::api::history::BridgeRunningAgent>>::sse_decode(deserializer);
         let mut var_detail = <String>::sse_decode(deserializer);
+        let mut var_branch = <Option<String>>::sse_decode(deserializer);
+        let mut var_subject = <Option<String>>::sse_decode(deserializer);
+        let mut var_count = <Option<i64>>::sse_decode(deserializer);
         return crate::api::git::BridgeGitOutcome {
             kind: var_kind,
             files: var_files,
             running: var_running,
             detail: var_detail,
+            branch: var_branch,
+            subject: var_subject,
+            count: var_count,
         };
     }
 }
@@ -3165,6 +3465,8 @@ impl SseDecode for crate::api::git::BridgeGitOutcomeKind {
             5 => crate::api::git::BridgeGitOutcomeKind::BranchMoved,
             6 => crate::api::git::BridgeGitOutcomeKind::SubmoduleChanged,
             7 => crate::api::git::BridgeGitOutcomeKind::HookFailed,
+            8 => crate::api::git::BridgeGitOutcomeKind::CommitFailed,
+            9 => crate::api::git::BridgeGitOutcomeKind::HookChanged,
             _ => unreachable!("Invalid variant for BridgeGitOutcomeKind: {}", inner),
         };
     }
@@ -3180,6 +3482,9 @@ impl SseDecode for crate::api::git::BridgeGitStatus {
         let mut var_behind = <i64>::sse_decode(deserializer);
         let mut var_changed = <i64>::sse_decode(deserializer);
         let mut var_stash = <Option<crate::api::git::BridgeStash>>::sse_decode(deserializer);
+        let mut var_defaultBranch = <Option<String>>::sse_decode(deserializer);
+        let mut var_merging = <bool>::sse_decode(deserializer);
+        let mut var_conflicts = <Vec<String>>::sse_decode(deserializer);
         return crate::api::git::BridgeGitStatus {
             branch: var_branch,
             commit: var_commit,
@@ -3188,6 +3493,9 @@ impl SseDecode for crate::api::git::BridgeGitStatus {
             behind: var_behind,
             changed: var_changed,
             stash: var_stash,
+            default_branch: var_defaultBranch,
+            merging: var_merging,
+            conflicts: var_conflicts,
         };
     }
 }
@@ -3885,6 +4193,20 @@ impl SseDecode for Vec<crate::api::session::BridgeCheckpointSession> {
     }
 }
 
+impl SseDecode for Vec<crate::api::git::BridgeCommitFile> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = Vec::with_capacity(len_ as usize);
+        for idx_ in 0..len_ {
+            ans_.push(<crate::api::git::BridgeCommitFile>::sse_decode(
+                deserializer,
+            ));
+        }
+        return ans_;
+    }
+}
+
 impl SseDecode for Vec<crate::api::history::BridgeContextMessage> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -4086,6 +4408,18 @@ impl SseDecode for Vec<crate::api::workspace::BridgeView> {
             ans_.push(<crate::api::workspace::BridgeView>::sse_decode(
                 deserializer,
             ));
+        }
+        return ans_;
+    }
+}
+
+impl SseDecode for Vec<i64> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = Vec::with_capacity(len_ as usize);
+        for idx_ in 0..len_ {
+            ans_.push(<i64>::sse_decode(deserializer));
         }
         return ans_;
     }
@@ -4427,222 +4761,252 @@ fn pde_ffi_dispatcher_primary_impl(
             rust_vec_len,
             data_len,
         ),
-        7 => {
+        7 => wire__crate__api__session__AgentSession_commit_files_impl(
+            port,
+            ptr,
+            rust_vec_len,
+            data_len,
+        ),
+        8 => wire__crate__api__session__AgentSession_commit_plan_impl(
+            port,
+            ptr,
+            rust_vec_len,
+            data_len,
+        ),
+        9 => {
             wire__crate__api__session__AgentSession_context_impl(port, ptr, rust_vec_len, data_len)
         }
-        8 => wire__crate__api__session__AgentSession_create_branch_impl(
+        10 => wire__crate__api__session__AgentSession_create_branch_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        9 => wire__crate__api__session__AgentSession_current_model_impl(
+        11 => wire__crate__api__session__AgentSession_current_model_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        10 => {
+        12 => {
             wire__crate__api__session__AgentSession_decide_impl(port, ptr, rust_vec_len, data_len)
         }
-        11 => wire__crate__api__session__AgentSession_delete_session_impl(
+        13 => wire__crate__api__session__AgentSession_delete_session_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        12 => wire__crate__api__session__AgentSession_discard_stash_impl(
+        14 => wire__crate__api__session__AgentSession_discard_stash_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        13 => {
+        15 => {
             wire__crate__api__session__AgentSession_dismiss_impl(port, ptr, rust_vec_len, data_len)
         }
-        14 => {
+        16 => {
             wire__crate__api__session__AgentSession_events_impl(port, ptr, rust_vec_len, data_len)
         }
-        15 => wire__crate__api__session__AgentSession_fetch_impl(port, ptr, rust_vec_len, data_len),
-        16 => wire__crate__api__session__AgentSession_git_branches_impl(
+        17 => wire__crate__api__session__AgentSession_fetch_impl(port, ptr, rust_vec_len, data_len),
+        18 => wire__crate__api__session__AgentSession_git_branches_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        17 => wire__crate__api__session__AgentSession_git_stash_impl(
+        19 => wire__crate__api__session__AgentSession_git_stash_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        18 => wire__crate__api__session__AgentSession_git_status_impl(
-            port,
-            ptr,
-            rust_vec_len,
-            data_len,
-        ),
-        19 => {
-            wire__crate__api__session__AgentSession_history_impl(port, ptr, rust_vec_len, data_len)
-        }
-        20 => wire__crate__api__session__AgentSession_in_repository_impl(
+        20 => wire__crate__api__session__AgentSession_git_status_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
         21 => {
+            wire__crate__api__session__AgentSession_history_impl(port, ptr, rust_vec_len, data_len)
+        }
+        22 => wire__crate__api__session__AgentSession_in_repository_impl(
+            port,
+            ptr,
+            rust_vec_len,
+            data_len,
+        ),
+        23 => wire__crate__api__session__AgentSession_initialize_git_impl(
+            port,
+            ptr,
+            rust_vec_len,
+            data_len,
+        ),
+        24 => {
             wire__crate__api__session__AgentSession_models_impl(port, ptr, rust_vec_len, data_len)
         }
-        22 => wire__crate__api__session__AgentSession_new_session_impl(
+        25 => wire__crate__api__session__AgentSession_new_session_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        23 => wire__crate__api__session__AgentSession_recent_sessions_impl(
+        26 => wire__crate__api__session__AgentSession_recent_sessions_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        24 => wire__crate__api__session__AgentSession_remove_all_checkpoints_impl(
+        27 => wire__crate__api__session__AgentSession_remove_all_checkpoints_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        25 => wire__crate__api__session__AgentSession_restore_stash_impl(
+        28 => wire__crate__api__session__AgentSession_restore_stash_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        26 => wire__crate__api__session__AgentSession_revert_plan_impl(
+        29 => wire__crate__api__session__AgentSession_revert_plan_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        27 => wire__crate__api__session__AgentSession_revert_to_turn_impl(
+        30 => wire__crate__api__session__AgentSession_revert_to_turn_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        28 => wire__crate__api__session__AgentSession_send_impl(port, ptr, rust_vec_len, data_len),
-        29 => wire__crate__api__session__AgentSession_session_file_impl(
+        31 => wire__crate__api__session__AgentSession_send_impl(port, ptr, rust_vec_len, data_len),
+        32 => wire__crate__api__session__AgentSession_session_file_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        30 => wire__crate__api__session__AgentSession_set_approval_mode_impl(
+        33 => wire__crate__api__session__AgentSession_set_approval_mode_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        31 => wire__crate__api__session__AgentSession_set_model_impl(
+        34 => wire__crate__api__session__AgentSession_set_model_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        32 => {
+        35 => {
             wire__crate__api__session__AgentSession_shutdown_impl(port, ptr, rust_vec_len, data_len)
         }
-        33 => wire__crate__api__session__AgentSession_start_impl(port, ptr, rust_vec_len, data_len),
-        34 => wire__crate__api__session__AgentSession_stash_changes_impl(
+        36 => wire__crate__api__session__AgentSession_start_impl(port, ptr, rust_vec_len, data_len),
+        37 => wire__crate__api__session__AgentSession_stash_changes_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        35 => wire__crate__api__session__AgentSession_stash_patch_impl(
+        38 => wire__crate__api__session__AgentSession_stash_patch_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        36 => wire__crate__api__session__AgentSession_stored_turns_impl(
+        39 => wire__crate__api__session__AgentSession_stored_turns_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        37 => wire__crate__api__session__AgentSession_switch_branch_impl(
+        40 => wire__crate__api__session__AgentSession_switch_branch_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        38 => wire__crate__api__session__AgentSession_switch_session_impl(
+        41 => wire__crate__api__session__AgentSession_switch_session_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        39 => wire__crate__api__session__AgentSession_title_impl(port, ptr, rust_vec_len, data_len),
-        40 => wire__crate__api__session__AgentSession_transcript_impl(
+        42 => wire__crate__api__session__AgentSession_title_impl(port, ptr, rust_vec_len, data_len),
+        43 => wire__crate__api__session__AgentSession_transcript_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        41 => wire__crate__api__session__AgentSession_turn_changes_impl(
+        44 => wire__crate__api__session__AgentSession_turn_changes_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        42 => wire__crate__api__session__AgentSession_turn_patch_impl(
+        45 => wire__crate__api__session__AgentSession_turn_patch_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        43 => wire__crate__api__session__AgentSession_turns_impl(port, ptr, rust_vec_len, data_len),
-        44 => wire__crate__api__workspace__LiquidWorkspace_apply_impl(
+        46 => wire__crate__api__session__AgentSession_turns_impl(port, ptr, rust_vec_len, data_len),
+        47 => wire__crate__api__session__AgentSession_uncommitted_changes_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        45 => wire__crate__api__workspace__LiquidWorkspace_close_impl(
+        48 => wire__crate__api__session__AgentSession_uncommitted_patch_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        46 => wire__crate__api__workspace__LiquidWorkspace_open_impl(
+        49 => wire__crate__api__workspace__LiquidWorkspace_apply_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        47 => wire__crate__api__workspace__LiquidWorkspace_query_impl(
+        50 => wire__crate__api__workspace__LiquidWorkspace_close_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        48 => wire__crate__api__workspace__LiquidWorkspace_subscribe_impl(
+        51 => wire__crate__api__workspace__LiquidWorkspace_open_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        49 => {
+        52 => wire__crate__api__workspace__LiquidWorkspace_query_impl(
+            port,
+            ptr,
+            rust_vec_len,
+            data_len,
+        ),
+        53 => wire__crate__api__workspace__LiquidWorkspace_subscribe_impl(
+            port,
+            ptr,
+            rust_vec_len,
+            data_len,
+        ),
+        54 => {
             wire__crate__api__events__bridge_queue_default_impl(port, ptr, rust_vec_len, data_len)
         }
-        50 => wire__crate__api__history__bridge_tool_outcome_default_impl(
+        55 => wire__crate__api__history__bridge_tool_outcome_default_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        51 => {
+        56 => {
             wire__crate__api__events__bridge_usage_default_impl(port, ptr, rust_vec_len, data_len)
         }
         _ => unreachable!(),
@@ -4938,6 +5302,50 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::session::BridgeCheckpointSess
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::git::BridgeCommitFile {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.change.into_into_dart().into_dart(),
+            self.turns.into_into_dart().into_dart(),
+            self.edited.into_into_dart().into_dart(),
+            self.staged_partly.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::git::BridgeCommitFile
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::git::BridgeCommitFile>
+    for crate::api::git::BridgeCommitFile
+{
+    fn into_into_dart(self) -> crate::api::git::BridgeCommitFile {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::git::BridgeCommitPlan {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.files.into_into_dart().into_dart(),
+            self.running.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::git::BridgeCommitPlan
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::git::BridgeCommitPlan>
+    for crate::api::git::BridgeCommitPlan
+{
+    fn into_into_dart(self) -> crate::api::git::BridgeCommitPlan {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::api::history::BridgeContextDetail {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
@@ -5215,6 +5623,9 @@ impl flutter_rust_bridge::IntoDart for crate::api::git::BridgeGitOutcome {
             self.files.into_into_dart().into_dart(),
             self.running.into_into_dart().into_dart(),
             self.detail.into_into_dart().into_dart(),
+            self.branch.into_into_dart().into_dart(),
+            self.subject.into_into_dart().into_dart(),
+            self.count.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -5242,6 +5653,8 @@ impl flutter_rust_bridge::IntoDart for crate::api::git::BridgeGitOutcomeKind {
             Self::BranchMoved => 5.into_dart(),
             Self::SubmoduleChanged => 6.into_dart(),
             Self::HookFailed => 7.into_dart(),
+            Self::CommitFailed => 8.into_dart(),
+            Self::HookChanged => 9.into_dart(),
             _ => unreachable!(),
         }
     }
@@ -5268,6 +5681,9 @@ impl flutter_rust_bridge::IntoDart for crate::api::git::BridgeGitStatus {
             self.behind.into_into_dart().into_dart(),
             self.changed.into_into_dart().into_dart(),
             self.stash.into_into_dart().into_dart(),
+            self.default_branch.into_into_dart().into_dart(),
+            self.merging.into_into_dart().into_dart(),
+            self.conflicts.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -6354,6 +6770,24 @@ impl SseEncode for crate::api::session::BridgeCheckpointSession {
     }
 }
 
+impl SseEncode for crate::api::git::BridgeCommitFile {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <crate::api::events::BridgeFileChange>::sse_encode(self.change, serializer);
+        <Vec<i64>>::sse_encode(self.turns, serializer);
+        <bool>::sse_encode(self.edited, serializer);
+        <bool>::sse_encode(self.staged_partly, serializer);
+    }
+}
+
+impl SseEncode for crate::api::git::BridgeCommitPlan {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <Vec<crate::api::git::BridgeCommitFile>>::sse_encode(self.files, serializer);
+        <Vec<crate::api::history::BridgeRunningAgent>>::sse_encode(self.running, serializer);
+    }
+}
+
 impl SseEncode for crate::api::history::BridgeContextDetail {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -6512,6 +6946,9 @@ impl SseEncode for crate::api::git::BridgeGitOutcome {
         <Vec<String>>::sse_encode(self.files, serializer);
         <Vec<crate::api::history::BridgeRunningAgent>>::sse_encode(self.running, serializer);
         <String>::sse_encode(self.detail, serializer);
+        <Option<String>>::sse_encode(self.branch, serializer);
+        <Option<String>>::sse_encode(self.subject, serializer);
+        <Option<i64>>::sse_encode(self.count, serializer);
     }
 }
 
@@ -6528,6 +6965,8 @@ impl SseEncode for crate::api::git::BridgeGitOutcomeKind {
                 crate::api::git::BridgeGitOutcomeKind::BranchMoved => 5,
                 crate::api::git::BridgeGitOutcomeKind::SubmoduleChanged => 6,
                 crate::api::git::BridgeGitOutcomeKind::HookFailed => 7,
+                crate::api::git::BridgeGitOutcomeKind::CommitFailed => 8,
+                crate::api::git::BridgeGitOutcomeKind::HookChanged => 9,
                 _ => {
                     unimplemented!("");
                 }
@@ -6547,6 +6986,9 @@ impl SseEncode for crate::api::git::BridgeGitStatus {
         <i64>::sse_encode(self.behind, serializer);
         <i64>::sse_encode(self.changed, serializer);
         <Option<crate::api::git::BridgeStash>>::sse_encode(self.stash, serializer);
+        <Option<String>>::sse_encode(self.default_branch, serializer);
+        <bool>::sse_encode(self.merging, serializer);
+        <Vec<String>>::sse_encode(self.conflicts, serializer);
     }
 }
 
@@ -7057,6 +7499,16 @@ impl SseEncode for Vec<crate::api::session::BridgeCheckpointSession> {
     }
 }
 
+impl SseEncode for Vec<crate::api::git::BridgeCommitFile> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::api::git::BridgeCommitFile>::sse_encode(item, serializer);
+        }
+    }
+}
+
 impl SseEncode for Vec<crate::api::history::BridgeContextMessage> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -7203,6 +7655,16 @@ impl SseEncode for Vec<crate::api::workspace::BridgeView> {
         <i32>::sse_encode(self.len() as _, serializer);
         for item in self {
             <crate::api::workspace::BridgeView>::sse_encode(item, serializer);
+        }
+    }
+}
+
+impl SseEncode for Vec<i64> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <i64>::sse_encode(item, serializer);
         }
     }
 }

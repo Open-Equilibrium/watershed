@@ -20,11 +20,17 @@ use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 
 mod branches;
+mod commit;
 mod process;
 mod revert;
 mod stash;
 
 pub use branches::{Branch, BranchTarget, Changes, GitStatus};
+pub use commit::Commit;
+
+pub(crate) async fn initialize(dir: &Path) -> Result<(), DiffError> {
+    process::user_git(dir, &["init"]).await.map(drop)
+}
 pub use stash::Stash;
 #[cfg(test)]
 pub(crate) use stash::{before_drop, before_stash_identity};
@@ -145,6 +151,8 @@ pub enum DiffError {
     /// The remote's fetch refspec writes outside its remote-tracking branches, so Liquid does
     /// not fetch it in the background.
     FetchOutsideRemotes(String),
+    /// Git refused the commit; nothing was committed.
+    CommitFailed(String),
 }
 
 impl fmt::Display for DiffError {
@@ -198,6 +206,9 @@ impl fmt::Display for DiffError {
                 if *count == 1 { "" } else { "s" }
             ),
             Self::HookFailed(output) => write!(f, "Git switched, but a hook failed: {output}"),
+            Self::CommitFailed(output) => {
+                write!(f, "Could not commit: nothing was committed. {output}")
+            }
             Self::FetchOutsideRemotes(spec) => write!(
                 f,
                 "the remote's fetch refspec {spec} writes outside its remote-tracking branches, \

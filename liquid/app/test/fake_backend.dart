@@ -1,4 +1,8 @@
 import 'dart:async';
+
+import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart'
+    show Int64List;
+
 import 'dart:math' as math;
 
 import 'package:liquid/src/rust/api/events.dart';
@@ -296,6 +300,9 @@ class FakeBackend implements SessionBackend {
             behind: now.behind,
             changed: now.changed,
             stash: stashed,
+            defaultBranch: now.defaultBranch,
+            merging: now.merging,
+            conflicts: now.conflicts,
           );
   }
 
@@ -318,6 +325,67 @@ class FakeBackend implements SessionBackend {
   Future<BridgeGitOutcome> createBranch(String name) async {
     calls.add('create $name');
     return outcome;
+  }
+
+  BridgeCommitPlan commitPlanned = const BridgeCommitPlan(
+    files: [],
+    running: [],
+  );
+  List<String>? committedPaths;
+  String? committedMessage;
+  String? committedBranch;
+
+  @override
+  Future<BridgeCommitPlan> commitPlan() async => commitPlanned;
+  @override
+  Future<BridgeGitOutcome> commitFiles(
+    List<String> paths,
+    String message,
+    String? branch,
+  ) async {
+    committedPaths = paths;
+    committedMessage = message;
+    committedBranch = branch;
+    return outcome.kind == BridgeGitOutcomeKind.done
+        ? BridgeGitOutcome(
+            kind: BridgeGitOutcomeKind.done,
+            files: [],
+            running: [],
+            detail: '',
+            branch: branch ?? git?.branch,
+            subject: message.split('\n').first,
+            count: paths.length,
+          )
+        : outcome;
+  }
+
+  @override
+  Future<BridgeGitOutcome> initializeGit() async {
+    calls.add('initialize git');
+    git = gitStatusOf();
+    inRepository = true;
+    return outcome;
+  }
+
+  @override
+  Future<List<BridgeFileChange>> uncommittedChanges({
+    required bool hideWhitespace,
+  }) async {
+    calls.add(
+      'uncommitted changes${hideWhitespace ? ' without whitespace' : ''}',
+    );
+    return hideWhitespace
+        ? changedWithoutWhitespace ?? changed ?? []
+        : changed ?? [];
+  }
+
+  @override
+  Future<String> uncommittedPatch(
+    String path, {
+    required bool hideWhitespace,
+  }) async {
+    calls.add('uncommitted patch $path');
+    return patches[path] ?? '';
   }
 
   @override
@@ -656,6 +724,9 @@ BridgeGitStatus gitStatusOf({
   int ahead = 0,
   int behind = 0,
   int changed = 0,
+  String? defaultBranch,
+  bool merging = false,
+  List<String> conflicts = const [],
 }) => BridgeGitStatus(
   branch: branch,
   commit: '1a2b3c4',
@@ -664,6 +735,9 @@ BridgeGitStatus gitStatusOf({
   behind: behind,
   changed: changed,
   stash: null,
+  defaultBranch: defaultBranch,
+  merging: merging,
+  conflicts: conflicts,
 );
 
 BridgeBranch branchOf(
@@ -690,4 +764,25 @@ BridgeGitOutcome outcomeOf(
   files: files,
   running: running,
   detail: detail,
+);
+
+BridgeCommitFile commitFileOf(
+  String path, {
+  List<int> turns = const [],
+  bool edited = false,
+  bool stagedPartly = false,
+  BridgeChangeStatus status = BridgeChangeStatus.modified,
+  int added = 0,
+  int removed = 0,
+}) => BridgeCommitFile(
+  change: BridgeFileChange(
+    path: path,
+    shown: path,
+    status: status,
+    added: added,
+    removed: removed,
+  ),
+  turns: Int64List.fromList(turns),
+  edited: edited,
+  stagedPartly: stagedPartly,
 );

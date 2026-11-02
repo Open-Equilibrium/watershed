@@ -1,8 +1,9 @@
 //! Observation workload for checkpoints in a large project (PERFORMANCE.md, Meta-Harness): a Git
 //! project of 20,000 committed files of 1 KiB in 200 folders. Each sample is one turn: its start
 //! checkpoint, ten changed files and one new file, its end checkpoint, the status and stash
-//! Liquid reads after each fetch and turn, the list of what it
-//! changed, the plan of a revert to its start and that revert. The first sample's start also
+//! Liquid reads after each fetch and turn, the list of what it changed, the uncommitted scope,
+//! commit attribution over all turns so far, the plan of a revert to its start and that revert.
+//! The first sample's start also
 //! opens the project. A last turn replaces a file with a folder of 20,000 folders, which the
 //! plan searches for repositories before it would write the file back. Last, the sessions with
 //! checkpoints are listed and all checkpoints removed. The project is written by
@@ -19,7 +20,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Instant;
 
-use meta_harness_core::{Checkpoint, Checkpoints, Phase, Whitespace};
+use meta_harness_core::{Checkpoint, Checkpoints, Phase, TurnCheckpoints, Whitespace};
 use serde_json::json;
 
 const FOLDERS: usize = 200;
@@ -99,6 +100,9 @@ async fn observe(dir: &Path) {
     let mut plans = Vec::new();
     let mut reverts = Vec::new();
     let mut polls = Vec::new();
+    let mut uncommitted = Vec::new();
+    let mut commits = Vec::new();
+    let mut turns = Vec::new();
     for sample in 0..SAMPLES {
         let at = |phase| Checkpoint {
             session: "observe".to_owned(),
@@ -137,6 +141,34 @@ async fn observe(dir: &Path) {
             .await
             .expect("changes");
         let list_ms = ms(started);
+        turns.push(TurnCheckpoints {
+            session: "observe".to_owned(),
+            turn: format!("t{sample}"),
+            number: sample as u64 + 1,
+            start_entry: String::new(),
+            end_entry: Some(String::new()),
+            prompt_entry: None,
+            prompt: String::new(),
+            started_ms: None,
+            ended_ms: None,
+            ended: true,
+            failure: None,
+            changed: None,
+        });
+        let started = Instant::now();
+        let files = checkpoints
+            .uncommitted_changes(Whitespace::Shown)
+            .await
+            .expect("uncommitted");
+        let uncommitted_ms = ms(started);
+        assert_eq!(files.len(), changes.len());
+        let started = Instant::now();
+        let commit = checkpoints
+            .commit_plan(&turns)
+            .await
+            .expect("commit attribution");
+        let commit_ms = ms(started);
+        assert_eq!(commit.files.len(), changes.len());
         let started = Instant::now();
         let plan = checkpoints
             .revert_plan(&at(Phase::Start), Some(&at(Phase::End)))
@@ -164,6 +196,9 @@ async fn observe(dir: &Path) {
                 "plan_ms": round(plan_ms),
                 "revert_ms": round(revert_ms),
                 "poll_ms": round(poll_ms),
+                "uncommitted_ms": round(uncommitted_ms),
+                "commit_plan_ms": round(commit_ms),
+                "attributed_turns": turns.len(),
                 "files": changes.len(),
             })
         );
@@ -173,6 +208,8 @@ async fn observe(dir: &Path) {
         plans.push(plan_ms);
         reverts.push(revert_ms);
         polls.push(poll_ms);
+        uncommitted.push(uncommitted_ms);
+        commits.push(commit_ms);
     }
     let in_place = |phase| Checkpoint {
         session: "observe".to_owned(),
@@ -228,6 +265,8 @@ async fn observe(dir: &Path) {
             "plan": summary(&mut plans),
             "revert": summary(&mut reverts),
             "poll": summary(&mut polls),
+            "uncommitted": summary(&mut uncommitted),
+            "commit_plan": summary(&mut commits),
         })
     );
 }

@@ -43,6 +43,7 @@ class GitState {
   bool _watching = false;
   int _failures = 0;
   DateTime? _fetched;
+  DateTime? get fetched => _fetched;
   bool _fetching = false;
 
   /// Reads of the state left until the next fetch; the state is read every [fetchEvery]
@@ -191,7 +192,7 @@ class GitState {
         fromBranch: fromBranch,
         replacingStash: replacingStash,
       ),
-      done: (now) {
+      done: (now, _) {
         final name = now?.branch ?? branch.shown;
         final changes = left?.changed ?? 0;
         final count = changes == 1 ? '1 change is' : '$changes changes are';
@@ -206,8 +207,29 @@ class GitState {
   Future<BridgeGitOutcome?> create(String name) => _write(
     'create the branch',
     () => _backend.createBranch(name),
-    done: (_) => 'Created and switched to $name.',
+    done: (_, _) => 'Created and switched to $name.',
   );
+
+  Future<BridgeCommitPlan> commitPlan() => _backend.commitPlan();
+
+  Future<BridgeGitOutcome?> commit(
+    List<String> paths,
+    String message, {
+    String? branch,
+  }) => _write(
+    'commit',
+    () => _backend.commitFiles(paths, message, branch),
+    done: (now, outcome) =>
+        'Committed ${outcome.count} ${outcome.count == 1 ? 'file' : 'files'} on ${outcome.branch ?? now?.branch}: “${outcome.subject}”',
+  );
+
+  Future<void> initialize() async {
+    await _write(
+      'initialize Git',
+      _backend.initializeGit,
+      done: (_, _) => 'Initialized Git. Checkpoints start with the next turn.',
+    );
+  }
 
   /// Moves the stashed changes `stashed` back into the checkout.
   Future<void> restoreStash(BridgeStash stashed) async {
@@ -216,7 +238,7 @@ class GitState {
     await _write(
       'restore',
       () => _backend.restoreStash(stashed.id),
-      done: (_) =>
+      done: (_, _) =>
           'Restored $files stashed ${files == 1 ? 'file' : 'files'} on $branch',
     );
   }
@@ -225,7 +247,7 @@ class GitState {
   Future<void> discardStash(BridgeStash stashed) => _write(
     'discard',
     () => _backend.discardStash(stashed.id),
-    done: (_) => 'Discarded the stashed changes.',
+    done: (_, _) => 'Discarded the stashed changes.',
   );
 
   /// Runs the Git write `run`, reports how it ended, `action` naming it, and reads the state
@@ -233,7 +255,8 @@ class GitState {
   Future<BridgeGitOutcome?> _write(
     String action,
     Future<BridgeGitOutcome> Function() run, {
-    required String Function(BridgeGitStatus? now) done,
+    required String Function(BridgeGitStatus? now, BridgeGitOutcome outcome)
+    done,
   }) async {
     final previous = _pendingWrite;
     final finished = Completer<void>();
@@ -254,11 +277,21 @@ class GitState {
       final files = outcome.files.join(', ');
       switch (outcome.kind) {
         case BridgeGitOutcomeKind.done:
-          notify(BridgeLevel.info, done(status.value));
+          notify(BridgeLevel.info, done(status.value, outcome));
         case BridgeGitOutcomeKind.hookFailed:
           notify(
             BridgeLevel.warning,
-            '${done(status.value)} A hook failed after: ${outcome.detail}',
+            '${done(status.value, outcome)} A hook failed after: ${outcome.detail}',
+          );
+        case BridgeGitOutcomeKind.commitFailed:
+          notify(
+            BridgeLevel.error,
+            'Could not commit: nothing was committed. ${outcome.detail}',
+          );
+        case BridgeGitOutcomeKind.hookChanged:
+          notify(
+            BridgeLevel.warning,
+            'Committed. The pre-commit hook also changed $files, which stays uncommitted.',
           );
         case BridgeGitOutcomeKind.agentRunning:
           notify(

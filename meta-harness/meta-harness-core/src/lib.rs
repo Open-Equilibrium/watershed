@@ -16,9 +16,11 @@ mod stored;
 mod visible;
 
 pub use approval::ApprovalMode;
-pub use checkpoint::{Branches, Checkpoint, Checkpoints, Phase, RevertFile, RevertPlan};
+pub use checkpoint::{
+    Branches, Checkpoint, Checkpoints, CommitFile, CommitPlan, Phase, RevertFile, RevertPlan,
+};
 pub use diff::{
-    Branch, BranchTarget, ChangeStatus, Changes, DiffError, FileChange, GitStatus, Stash,
+    Branch, BranchTarget, ChangeStatus, Changes, Commit, DiffError, FileChange, GitStatus, Stash,
     Whitespace,
 };
 pub use event::{

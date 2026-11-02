@@ -97,6 +97,18 @@ abstract interface class SessionBackend {
   /// Creates the branch `name` at the current commit and switches to it.
   Future<BridgeGitOutcome> createBranch(String name);
 
+  Future<BridgeCommitPlan> commitPlan();
+  Future<BridgeGitOutcome> commitFiles(
+    List<String> paths,
+    String message,
+    String? branch,
+  );
+  Future<BridgeGitOutcome> initializeGit();
+  Future<List<BridgeFileChange>> uncommittedChanges({
+    required bool hideWhitespace,
+  });
+  Future<String> uncommittedPatch(String path, {required bool hideWhitespace});
+
   /// The stashed changes of the branch checked out, if any.
   Future<BridgeStash?> gitStash();
 
@@ -236,6 +248,25 @@ class RustSessionBackend implements SessionBackend {
   @override
   Future<BridgeGitOutcome> createBranch(String name) =>
       _session.createBranch(name: name);
+  @override
+  Future<BridgeCommitPlan> commitPlan() => _session.commitPlan();
+  @override
+  Future<BridgeGitOutcome> commitFiles(
+    List<String> paths,
+    String message,
+    String? branch,
+  ) => _session.commitFiles(paths: paths, message: message, branch: branch);
+  @override
+  Future<BridgeGitOutcome> initializeGit() => _session.initializeGit();
+  @override
+  Future<List<BridgeFileChange>> uncommittedChanges({
+    required bool hideWhitespace,
+  }) => _session.uncommittedChanges(hideWhitespace: hideWhitespace);
+  @override
+  Future<String> uncommittedPatch(
+    String path, {
+    required bool hideWhitespace,
+  }) => _session.uncommittedPatch(path: path, hideWhitespace: hideWhitespace);
   @override
   Future<BridgeStash?> gitStash() => _session.gitStash();
   @override

@@ -129,7 +129,13 @@ async fn user_output(mut child: Git) -> Result<String, DiffError> {
     keep_ready(&stderr, MAX_ERROR_BYTES, &mut errors).map_err(unreadable)?;
     if !status.success() {
         return Err(DiffError::Git(
-            String::from_utf8_lossy(&errors).trim().to_owned(),
+            format!(
+                "{}\n{}",
+                String::from_utf8_lossy(&output),
+                String::from_utf8_lossy(&errors)
+            )
+            .trim()
+            .to_owned(),
         ));
     }
     Ok(String::from_utf8_lossy(&output).into_owned())
@@ -343,7 +349,7 @@ fn explicit_git_retains_output_when_the_child_exits_before_the_first_poll() {
             match exit {
                 0 => assert_eq!(result.expect("successful child"), "retained"),
                 _ => assert!(
-                    matches!(result, Err(DiffError::Git(ref text)) if text == "diagnostic"),
+                    matches!(result, Err(DiffError::Git(ref text)) if text == "retained\ndiagnostic"),
                     "{result:?}"
                 ),
             }

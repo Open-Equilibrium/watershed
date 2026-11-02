@@ -22,6 +22,23 @@ void main() {
     );
   });
 
+  test('hook changes report only files left uncommitted', () async {
+    backend.outcome = BridgeGitOutcome(
+      kind: BridgeGitOutcomeKind.hookChanged,
+      files: const ['a.txt'],
+      running: const [],
+      detail: '',
+      branch: 'main',
+      subject: 'Subject',
+      count: 1,
+    );
+    await git.commit(['a.txt'], 'Subject');
+    expect(notices.single, (
+      BridgeLevel.warning,
+      'Committed. The pre-commit hook also changed a.txt, which stays uncommitted.',
+    ));
+  });
+
   int fetches() => backend.calls.where((call) => call == 'fetch').length;
 
   testWidgets('a pending fetch leaves checkout polling active', (tester) async {

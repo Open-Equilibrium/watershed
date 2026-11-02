@@ -1,6 +1,7 @@
 mod approval;
 mod branches;
 mod checkpoint;
+mod commit;
 mod diff;
 mod framing;
 mod outcome;

@@ -191,6 +191,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeCheckpointSession dco_decode_bridge_checkpoint_session(dynamic raw);
 
   @protected
+  BridgeCommitFile dco_decode_bridge_commit_file(dynamic raw);
+
+  @protected
+  BridgeCommitPlan dco_decode_bridge_commit_plan(dynamic raw);
+
+  @protected
   BridgeContextDetail dco_decode_bridge_context_detail(dynamic raw);
 
   @protected
@@ -358,6 +364,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  List<BridgeCommitFile> dco_decode_list_bridge_commit_file(dynamic raw);
+
+  @protected
   List<BridgeContextMessage> dco_decode_list_bridge_context_message(
     dynamic raw,
   );
@@ -405,6 +414,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<BridgeView> dco_decode_list_bridge_view(dynamic raw);
+
+  @protected
+  Int64List dco_decode_list_prim_i_64_strict(dynamic raw);
 
   @protected
   Uint8List dco_decode_list_prim_u_8_strict(dynamic raw);
@@ -681,6 +693,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeCommitFile sse_decode_bridge_commit_file(SseDeserializer deserializer);
+
+  @protected
+  BridgeCommitPlan sse_decode_bridge_commit_plan(SseDeserializer deserializer);
+
+  @protected
   BridgeContextDetail sse_decode_bridge_context_detail(
     SseDeserializer deserializer,
   );
@@ -878,6 +896,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  List<BridgeCommitFile> sse_decode_list_bridge_commit_file(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   List<BridgeContextMessage> sse_decode_list_bridge_context_message(
     SseDeserializer deserializer,
   );
@@ -943,6 +966,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<BridgeView> sse_decode_list_bridge_view(SseDeserializer deserializer);
+
+  @protected
+  Int64List sse_decode_list_prim_i_64_strict(SseDeserializer deserializer);
 
   @protected
   Uint8List sse_decode_list_prim_u_8_strict(SseDeserializer deserializer);
@@ -1307,6 +1333,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_bridge_commit_file(
+    BridgeCommitFile self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_commit_plan(
+    BridgeCommitPlan self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_bridge_context_detail(
     BridgeContextDetail self,
     SseSerializer serializer,
@@ -1577,6 +1615,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_list_bridge_commit_file(
+    List<BridgeCommitFile> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_list_bridge_context_message(
     List<BridgeContextMessage> self,
     SseSerializer serializer,
@@ -1663,6 +1707,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_list_bridge_view(
     List<BridgeView> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_prim_i_64_strict(
+    Int64List self,
     SseSerializer serializer,
   );
 

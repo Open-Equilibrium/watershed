@@ -14,6 +14,9 @@ use std::time::{Duration, Instant};
 
 use tokio::sync::watch;
 
+mod git;
+pub use git::{CommitFile, CommitPlan};
+
 use crate::checkout::{Alone, RETRY, Running};
 use crate::diff::{
     Branch, BranchTarget, ChangeStatus, Changes, DiffError, FileChange, GitStatus, Stash,
@@ -577,7 +580,7 @@ impl Checkpoints {
     /// The project, opened on first use.
     async fn tree(&self) -> Result<Arc<WorkingTree>, DiffError> {
         let mut tree = self.tree.lock().await;
-        if tree.is_none() {
+        if tree.is_none() || matches!(tree.as_ref(), Some(Err(Unopened::OutsideGit))) {
             let opened = self.bounded(WorkingTree::open(&self.dir)).await;
             *tree = Some(match opened {
                 Ok(opened) => Ok(Arc::new(opened)),
@@ -609,10 +612,10 @@ impl Checkpoints {
     /// project's hooks and filters, which can take long, and stopping Git midway would leave
     /// its lock and a half-switched checkout, so it runs to its end, as in a terminal, even when
     /// its caller stops waiting or the checkpoints close.
-    async fn user_write<F, W>(&self, write: F) -> Result<(), DiffError>
+    async fn user_write<T: Send + 'static, F, W>(&self, write: F) -> Result<T, DiffError>
     where
         F: FnOnce(Arc<WorkingTree>) -> W,
-        W: Future<Output = Result<(), DiffError>> + Send + 'static,
+        W: Future<Output = Result<T, DiffError>> + Send + 'static,
     {
         let tree = self.tree().await?;
         let alone = tree.checkout().alone().await?;

@@ -39,6 +39,17 @@ abstract class AgentSession implements RustOpaqueInterface {
   /// Removes the messages waiting for the running agent and returns them.
   Future<BridgeQueue> clearQueue();
 
+  /// Commits the selected whole files using the user's Git and hooks, optionally creating
+  /// and switching to a branch first.
+  Future<BridgeGitOutcome> commitFiles({
+    required List<String> paths,
+    required String message,
+    String? branch,
+  });
+
+  /// Every uncommitted file with attribution from the current session branch's checkpoints.
+  Future<BridgeCommitPlan> commitPlan();
+
   /// Everything the model saw for the request behind the response `entry`; `None` unless
   /// `entry` is a response.
   Future<BridgeContextDetail?> context({required String entry});
@@ -89,6 +100,9 @@ abstract class AgentSession implements RustOpaqueInterface {
 
   /// Whether the project is in a Git repository, so its turns can have checkpoints.
   Future<bool> inRepository();
+
+  /// Explicitly initializes Git; checkpoints begin with the next turn.
+  Future<BridgeGitOutcome> initializeGit();
 
   /// The models the agent can use.
   Future<List<BridgeModel>> models();
@@ -199,6 +213,17 @@ abstract class AgentSession implements RustOpaqueInterface {
 
   /// The turns of the current branch, oldest first, with what each changed.
   Future<List<BridgeTurn>> turns();
+
+  /// Uncommitted tracked and untracked files compared with the checkout's last commit.
+  Future<List<BridgeFileChange>> uncommittedChanges({
+    required bool hideWhitespace,
+  });
+
+  /// One uncommitted file compared with the last commit, its lines written out as a turn's.
+  Future<String> uncommittedPatch({
+    required String path,
+    required bool hideWhitespace,
+  });
 }
 
 /// How much an agent may do without asking.
