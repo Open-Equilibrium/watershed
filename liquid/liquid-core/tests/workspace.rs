@@ -368,7 +368,7 @@ fn identities_read_back_from_text_and_reject_anything_else() {
     for text in [
         "",
         "trips",
-        &trips.as_str().to_uppercase(),
+        "0123456789ABCDEF0123456789abcdef",
         &format!("{trips}0"),
     ] {
         assert_eq!(AreaId::parse(text), None, "{text}");
