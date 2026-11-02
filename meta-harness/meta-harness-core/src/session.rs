@@ -736,9 +736,13 @@ async fn capture(
         let outcome = match checkpoint {
             Ok(checkpoint) => match checkpoints.capture(&checkpoint).await {
                 Ok(()) => taken(&checkpoints, &checkpoint).await,
-                Err(error) => json!({ "error": error.to_string() }),
+                Err(error) => json!({
+                    "error": error.to_string(),
+                    "canRun": matches!(error, crate::DiffError::NotARepository)
+                        || checkpoints.guards(&checkpoint),
+                }),
             },
-            Err(reason) => json!({ "error": reason }),
+            Err(reason) => json!({ "error": reason, "canRun": false }),
         };
         let answer = json!({ "value": outcome.to_string() });
         if writer.send(ui_response(&request, answer)).await.is_err() {
@@ -776,7 +780,7 @@ async fn report_waiting(
 /// so listing turns needs no Git.
 async fn taken(checkpoints: &Checkpoints, checkpoint: &Checkpoint) -> Value {
     if checkpoint.phase == Phase::Start {
-        return json!({ "ok": true });
+        return json!({ "ok": true, "canRun": true });
     }
     let start = Checkpoint {
         phase: Phase::Start,

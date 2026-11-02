@@ -16,8 +16,11 @@ mod stored;
 mod visible;
 
 pub use approval::ApprovalMode;
-pub use checkpoint::{Checkpoint, Checkpoints, Phase, RevertFile, RevertPlan};
-pub use diff::{ChangeStatus, DiffError, FileChange, Whitespace};
+pub use checkpoint::{Branches, Checkpoint, Checkpoints, Phase, RevertFile, RevertPlan};
+pub use diff::{
+    Branch, BranchTarget, ChangeStatus, Changes, DiffError, FileChange, GitStatus, Stash,
+    Whitespace,
+};
 pub use event::{
     AgentEvent, Answer, ChangedLines, Decision, Delivery, EditChange, EditPreview, EntryKind,
     ItemDetail, ItemId, ItemKind, ItemStatus, NotificationLevel, Queue, RequestId, RequestKind,

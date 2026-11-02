@@ -1,5 +1,8 @@
 //! Checkpoints of a session's Git project at each turn's start and end (ADR-0220, ADR-0234): commits
-//! under `refs/watershed/checkpoints/<session>/<turn>/<start|end>` that the Diff tab compares.
+//! under `refs/watershed/checkpoints/<session>/<turn>/<start|end>` that the Diff tab compares. The
+//! checkout's other Git operations, its branches, stash and fetch, run here too: reads and the
+//! background fetch under the checkpoint time limit, and the Git writes a user asks for to their
+//! end under the lock against running agents.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::{Future, poll_fn};
@@ -12,7 +15,10 @@ use std::time::{Duration, Instant};
 use tokio::sync::watch;
 
 use crate::checkout::{Alone, RETRY, Running};
-use crate::diff::{ChangeStatus, DiffError, FileChange, Whitespace, WorkingTree};
+use crate::diff::{
+    Branch, BranchTarget, ChangeStatus, Changes, DiffError, FileChange, GitStatus, Stash,
+    Whitespace, WorkingTree,
+};
 
 /// Longest one Git command on the project may take; Git is then stopped with the programs it
 /// started that stay in its process group.
@@ -111,7 +117,17 @@ pub struct RevertFile {
     pub kept: bool,
 }
 
-/// A session's checkpoints in its project.
+/// The branches of a checkout.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Branches {
+    /// The local branches, then the remote ones no local branch tracks, each most recently
+    /// committed first.
+    pub branches: Vec<Branch>,
+    /// The sessions whose agents run in the checkout, sorted.
+    pub running: Vec<String>,
+}
+
+/// A session's checkpoints in its project, and the Git operations on its checkout.
 #[derive(Debug)]
 pub struct Checkpoints {
     dir: PathBuf,
@@ -173,7 +189,8 @@ impl Checkpoints {
 
     /// Takes `checkpoint` of the project as it is now. It can take a while in a large project.
     /// From a turn's start to its end, the session's agent counts as running in the checkout,
-    /// even when a capture fails; a turn's start waits for a revert in progress.
+    /// even when its snapshot fails; a turn whose checkout guard cannot be acquired must not
+    /// start (D-080). A turn's start waits for a revert in progress.
     pub async fn capture(&self, checkpoint: &Checkpoint) -> Result<(), DiffError> {
         let reference = checkpoint.reference()?;
         let tree = self.tree().await?;
@@ -215,6 +232,17 @@ impl Checkpoints {
             }
         }
         captured
+    }
+
+    /// Whether this exact turn acquired and still holds its running checkout guard.
+    pub(crate) fn guards(&self, checkpoint: &Checkpoint) -> bool {
+        self.running
+            .lock()
+            .expect("running lock")
+            .as_ref()
+            .is_some_and(|(start, _)| {
+                start.session == checkpoint.session && start.turn == checkpoint.turn
+            })
     }
 
     /// What reverting the files to `to` would change; `since`, such as the last turn's end,
@@ -293,6 +321,103 @@ impl Checkpoints {
             }
             result => result,
         }
+    }
+
+    /// The checkout's branch, upstream and uncommitted files.
+    pub async fn status(&self) -> Result<GitStatus, DiffError> {
+        let tree = self.tree().await?;
+        self.bounded(tree.status()).await
+    }
+
+    /// The status and the stash belonging to its captured branch and commit.
+    pub async fn status_with_stash(&self) -> Result<(GitStatus, Option<Stash>), DiffError> {
+        let tree = self.tree().await?;
+        self.bounded(async {
+            let status = tree.status().await?;
+            let stash = tree
+                .stash_for(status.branch.as_deref(), status.commit.as_deref())
+                .await?;
+            Ok((status, stash))
+        })
+        .await
+    }
+
+    /// The branches, and the sessions whose agents run in the checkout, which allow no switch.
+    pub async fn branches(&self) -> Result<Branches, DiffError> {
+        let tree = self.tree().await?;
+        Ok(Branches {
+            branches: self.bounded(tree.branches()).await?,
+            running: tree.checkout().running(),
+        })
+    }
+
+    /// Switches to `to`, bringing uncommitted changes along or leaving them in the branch's
+    /// stash. Refused while an agent runs in the checkout, as a revert is.
+    pub async fn switch_branch(
+        &self,
+        to: &BranchTarget,
+        changes: Changes,
+    ) -> Result<(), DiffError> {
+        let to = to.clone();
+        self.user_write(move |tree| async move { tree.switch(&to, changes).await })
+            .await
+    }
+
+    /// Creates the branch `name` at the current commit and switches to it; uncommitted changes
+    /// come along. Refused while an agent runs in the checkout.
+    pub async fn create_branch(&self, name: &str) -> Result<(), DiffError> {
+        let name = name.to_owned();
+        self.user_write(move |tree| async move { tree.create(&name).await })
+            .await
+    }
+
+    /// The stashed changes of the branch checked out, if any.
+    pub async fn stash(&self) -> Result<Option<Stash>, DiffError> {
+        let tree = self.tree().await?;
+        self.bounded(tree.stash()).await
+    }
+
+    /// The files and line counts of stash `id`, with the chosen whitespace setting.
+    pub async fn stash_changes(
+        &self,
+        id: &str,
+        whitespace: Whitespace,
+    ) -> Result<Vec<FileChange>, DiffError> {
+        let tree = self.tree().await?;
+        self.bounded(tree.stash_changes(id, whitespace)).await
+    }
+
+    /// The patch of the stashed file `path` of the stash `id`.
+    pub async fn stash_patch(
+        &self,
+        id: &str,
+        path: &str,
+        whitespace: Whitespace,
+    ) -> Result<String, DiffError> {
+        let tree = self.tree().await?;
+        self.bounded(tree.stash_patch(id, path, whitespace)).await
+    }
+
+    /// Moves the stashed changes `id` back into the checkout. Refused while an agent runs in
+    /// the checkout.
+    pub async fn restore_stash(&self, id: &str) -> Result<(), DiffError> {
+        let id = id.to_owned();
+        self.user_write(move |tree| async move { tree.restore_stash(&id).await })
+            .await
+    }
+
+    /// Deletes the stashed changes `id`. Refused while an agent runs in the checkout.
+    pub async fn discard_stash(&self, id: &str) -> Result<(), DiffError> {
+        let id = id.to_owned();
+        self.user_write(move |tree| async move { tree.discard_stash(&id).await })
+            .await
+    }
+
+    /// Fetches the remote of the branch's upstream, as Liquid does in the background; returns
+    /// whether there was one.
+    pub async fn fetch(&self) -> Result<bool, DiffError> {
+        let tree = self.tree().await?;
+        self.bounded(tree.fetch()).await
     }
 
     /// The files that changed from checkpoint `from` to `to`.
@@ -478,6 +603,26 @@ impl Checkpoints {
                 .unwrap_or(Err(DiffError::TimedOut(self.timeout)))
         })
         .await
+    }
+
+    /// Runs `write`, a Git write the user asked for, with the checkout held alone. It runs the
+    /// project's hooks and filters, which can take long, and stopping Git midway would leave
+    /// its lock and a half-switched checkout, so it runs to its end, as in a terminal, even when
+    /// its caller stops waiting or the checkpoints close.
+    async fn user_write<F, W>(&self, write: F) -> Result<(), DiffError>
+    where
+        F: FnOnce(Arc<WorkingTree>) -> W,
+        W: Future<Output = Result<(), DiffError>> + Send + 'static,
+    {
+        let tree = self.tree().await?;
+        let alone = tree.checkout().alone().await?;
+        let written = write(tree);
+        tokio::spawn(async move {
+            let _alone = alone;
+            written.await
+        })
+        .await
+        .map_err(|error| DiffError::Io(std::io::Error::other(error)))?
     }
 
     /// Runs `work` until it ends or the checkpoints close; dropping it stops its Git.

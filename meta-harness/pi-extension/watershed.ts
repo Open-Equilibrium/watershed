@@ -91,8 +91,10 @@ function watershed(pi: ExtensionAPI, clock: Clock): void {
     const data = { ...running, phase };
     const answer = await ui.input(CHECKPOINT_PREFIX + JSON.stringify(data));
     let recorded: Record<string, unknown> = { ...data, error: "No answer from Watershed" };
+    let canRun = false;
     try {
       const parsed = JSON.parse(answer ?? "") as Record<string, unknown>;
+      canRun = parsed.canRun === true;
       if (parsed.ok === true) {
         // At a turn's end the core also counts what the turn changed.
         const counted = ["files", "added", "removed"].filter((key) => Number.isSafeInteger(parsed[key]));
@@ -104,13 +106,27 @@ function watershed(pi: ExtensionAPI, clock: Clock): void {
       // An unreadable answer leaves the checkpoint unknown.
     }
     pi.appendEntry("watershed.checkpoint", recorded);
+    return {
+      canRun,
+      error: typeof recorded.error === "string" ? recorded.error : "No checkout guard from Watershed",
+    };
   };
   pi.on("before_agent_start", async (_event, ctx) => {
     if (ctx.mode !== "rpc") {
       return undefined;
     }
     running = { session: ctx.sessionManager.getSessionId(), turn: randomUUID() };
-    await checkpoint(ctx.ui, "start");
+    let start;
+    try {
+      start = await checkpoint(ctx.ui, "start");
+    } catch (error) {
+      start = { canRun: false, error: error instanceof Error ? error.message : String(error) };
+    }
+    if (!start?.canRun) {
+      running = undefined;
+      ctx.abort();
+      ctx.ui.notify(`Could not start: ${start?.error ?? "No answer from Watershed"}`, "error");
+    }
     return undefined;
   });
   pi.on("agent_settled", async (_event, ctx) => {

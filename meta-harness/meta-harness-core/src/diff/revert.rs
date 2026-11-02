@@ -3,7 +3,7 @@
 
 use super::*;
 
-/// Most folder entries one revert reads to find repositories in returning files' places.
+/// Most folder entries one preflight reads to find repositories in returning files' places.
 const MAX_SEARCHED_ENTRIES: usize = 100_000;
 
 /// What a revert changes and what it leaves alone near repositories.
@@ -18,6 +18,22 @@ pub struct Revertable {
 }
 
 impl WorkingTree {
+    /// Repositories a whole-checkout reset could overwrite. Share the revert's bounded,
+    /// link-aware search, without restricting it to the session's working folder.
+    pub(super) fn repositories_in_the_way(&self, changes: &[FileChange]) -> BTreeSet<String> {
+        let mut kept = BTreeSet::new();
+        let mut budget = MAX_SEARCHED_ENTRIES;
+        for change in changes
+            .iter()
+            .filter(|change| change.status != ChangeStatus::Deleted)
+        {
+            if let Some(path) = self.repository_near(&change.path, &kept, &mut budget) {
+                kept.insert(path);
+            }
+        }
+        kept
+    }
+
     /// The changes from `from` to `to` a revert to `to` makes, and the repositories it leaves
     /// alone. It changes only files below the working folder, and no path inside, at or above
     /// a submodule or nested repository that either state records or that is on disk now:

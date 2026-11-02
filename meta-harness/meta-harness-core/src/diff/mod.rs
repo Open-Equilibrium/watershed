@@ -1,6 +1,8 @@
-//! States of an agent's Git project and their changes (ADR-0190, ADR-0191). Trees and checkpoint
-//! commits go into the project's object database, refs only under Watershed's own namespace
-//! (ADR-0220); the project's index, HEAD and branches stay untouched.
+//! States of an agent's Git project and their changes (ADR-0190, ADR-0191). Snapshots,
+//! checkpoints and reverts put trees and checkpoint commits into the project's object database
+//! and refs only under Watershed's own namespace (ADR-0220); they leave the project's index, HEAD
+//! and branches untouched. Only the Git writes a user asks for in [`branches`] and [`stash`], and
+//! the background fetch, change them.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::ffi::OsString;
@@ -17,10 +19,17 @@ use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWriteExt, BufRead
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 
+mod branches;
 mod process;
 mod revert;
+mod stash;
 
-use process::{Git, git, git_command, git_path, unreadable};
+pub use branches::{Branch, BranchTarget, Changes, GitStatus};
+pub use stash::Stash;
+#[cfg(test)]
+pub(crate) use stash::{before_drop, before_stash_identity};
+
+use process::{Git, git, git_command, git_path, git_path_output, git_ref_output, unreadable};
 #[cfg(test)]
 pub(crate) use revert::holds_repository;
 
@@ -113,6 +122,29 @@ pub enum DiffError {
     NotReverted(Vec<String>),
     /// Git failed or was stopped while it wrote the files back, so some may be reverted.
     PartlyReverted(Box<DiffError>),
+    /// Git refused, as it would overwrite the uncommitted changes in these files; nothing
+    /// changed.
+    WouldOverwrite(Vec<String>),
+    /// Git refuses this branch name.
+    InvalidBranch(String),
+    /// HEAD names no branch, which changes could be left on.
+    NoBranch,
+    /// The branch has no stashed changes.
+    NoStash,
+    /// The stashed changes were restored, but these files conflict; Git kept the stash.
+    RestoredWithConflicts(Vec<String>),
+    /// The checkout has this many uncommitted changes, so nothing was restored.
+    Uncommitted(u64),
+    /// The branch has moved on from the tree the changes were left on, so nothing was
+    /// restored.
+    BranchMoved,
+    /// Git cannot stash these submodules' new commits, so nothing was left or switched.
+    SubmoduleChanged(Vec<String>),
+    /// Git switched, but a hook it ran after failed with this output.
+    HookFailed(String),
+    /// The remote's fetch refspec writes outside its remote-tracking branches, so Liquid does
+    /// not fetch it in the background.
+    FetchOutsideRemotes(String),
 }
 
 impl fmt::Display for DiffError {
@@ -140,6 +172,37 @@ impl fmt::Display for DiffError {
             Self::AgentRunning(_) => f.write_str("an agent runs in this checkout"),
             Self::NotReverted(paths) => write!(f, "Git could not revert {}", paths.join(", ")),
             Self::PartlyReverted(error) => write!(f, "the files may be partly reverted: {error}"),
+            Self::WouldOverwrite(paths) => write!(
+                f,
+                "Git would overwrite your uncommitted changes in {}",
+                paths.join(", ")
+            ),
+            Self::InvalidBranch(name) => write!(f, "Git does not allow {name:?} as a branch name"),
+            Self::NoBranch => f.write_str("the checkout is on no branch"),
+            Self::NoStash => f.write_str("the branch has no stashed changes"),
+            Self::RestoredWithConflicts(paths) => {
+                write!(f, "restored with conflicts in {}", paths.join(", "))
+            }
+            Self::BranchMoved => f.write_str(
+                "the branch has new commits since the changes were left, so Liquid does not \
+                 restore them",
+            ),
+            Self::SubmoduleChanged(paths) => write!(
+                f,
+                "Git cannot stash the new commits of {}",
+                paths.join(", ")
+            ),
+            Self::Uncommitted(count) => write!(
+                f,
+                "the checkout has {count} uncommitted change{}",
+                if *count == 1 { "" } else { "s" }
+            ),
+            Self::HookFailed(output) => write!(f, "Git switched, but a hook failed: {output}"),
+            Self::FetchOutsideRemotes(spec) => write!(
+                f,
+                "the remote's fetch refspec {spec} writes outside its remote-tracking branches, \
+                 so Liquid does not fetch it in the background"
+            ),
         }
     }
 }
@@ -206,7 +269,7 @@ impl WorkingTree {
         let index = git_path(dir, &["rev-parse", "--git-path", "index"]).await?;
         let locks = git_path(dir, &["rev-parse", "--git-path", "watershed"]).await?;
         let common = git_path(dir, &["rev-parse", "--git-common-dir"]).await?;
-        let prefix = git(dir, &[], &["rev-parse", "--show-prefix"]).await?;
+        let prefix = git_path_output(dir, &[], &["rev-parse", "--show-prefix"]).await?;
         let prefix = prefix.strip_suffix('\n').unwrap_or(&prefix).to_owned();
         let absolute = |path: &str| {
             let path = Path::new(path);
@@ -303,14 +366,14 @@ impl WorkingTree {
 
     /// The branch checked out, or none when HEAD names a commit.
     pub async fn branch(&self) -> Result<Option<String>, DiffError> {
-        match git(
-            &self.root,
-            &[],
-            &["symbolic-ref", "--quiet", "--short", "HEAD"],
-        )
-        .await
-        {
-            Ok(name) => Ok(Some(name.trim_end_matches('\n').to_owned())),
+        // The full name, as `--short` prints `heads/main` beside a tag `main`.
+        match git_ref_output(&self.root, &["symbolic-ref", "--quiet", "HEAD"]).await {
+            Ok(name) => {
+                let name = name.trim_end_matches('\n');
+                Ok(Some(
+                    name.strip_prefix("refs/heads/").unwrap_or(name).to_owned(),
+                ))
+            }
             // `--quiet` fails silently only when HEAD names no branch.
             Err(DiffError::Git(reason)) if reason.is_empty() => Ok(None),
             Err(error) => Err(error),
@@ -476,7 +539,12 @@ impl WorkingTree {
             "--ignore-submodules=none",
         ];
         command.extend_from_slice(args);
-        git(&self.root, &self.env(&self.store.0.join("index")), &command).await
+        let env = self.env(&self.store.0.join("index"));
+        if args.contains(&"-z") {
+            git_path_output(&self.root, &env, &command).await
+        } else {
+            git(&self.root, &env, &command).await
+        }
     }
 
     /// Writes the working tree into the private store and returns its tree id.
@@ -488,12 +556,35 @@ impl WorkingTree {
     /// [`Self::write_tree`] while the private index is held; files at the repository paths
     /// `forced` count even where Git ignores them.
     async fn capture(&self, forced: &[String]) -> Result<String, DiffError> {
+        let index = self.copy_index().await?;
+        let env = self.env(&index);
+        if let Err(error) = git(&self.root, &env, &["add", "--all", "--", "."]).await {
+            // Git cannot record a nested repository without a commit and refuses the whole
+            // snapshot, so such repositories are left out, as T3 Code does (ADR-0210).
+            let skipped = self.uncommitted_repositories(&env).await;
+            if skipped.is_empty() {
+                return Err(error);
+            }
+            let mut args = vec!["add", "--all", "--", "."];
+            args.extend(skipped.iter().map(String::as_str));
+            git(&self.root, &env, &args).await?;
+        }
+        if !forced.is_empty() {
+            self.add_forced(&env, forced).await?;
+        }
+        Ok(git(&self.root, &env, &["write-tree"])
+            .await?
+            .trim()
+            .to_owned())
+    }
+
+    /// Copies the project's index and clears its skip marks while the private index is held.
+    async fn copy_index(&self) -> Result<PathBuf, DiffError> {
         // A Git stopped at its time limit leaves its lock; no other Git uses this index now.
         let _ = std::fs::remove_file(self.store.0.join("index.lock"));
         let _ = std::fs::remove_file(self.store.0.join("index.new.lock"));
-        // Each snapshot starts from the project's index, so Git rereads only the files that
-        // changed, and a file the project ignores since an earlier snapshot drops out instead of
-        // staying captured. The copy replaces the private index only once its marks are cleared.
+        // Start from the project's index each time. Replace the private index only once the
+        // copy's marks are cleared, so a failed attempt leaves none for the next read.
         let index = self.store.0.join("index");
         let copy = self.store.0.join("index.new");
         match std::fs::copy(&self.index, &copy) {
@@ -531,25 +622,7 @@ impl WorkingTree {
             },
             Err(error) => return Err(DiffError::Io(error)),
         }
-        let env = self.env(&index);
-        if let Err(error) = git(&self.root, &env, &["add", "--all", "--", "."]).await {
-            // Git cannot record a nested repository without a commit and refuses the whole
-            // snapshot, so such repositories are left out, as T3 Code does (ADR-0210).
-            let skipped = self.uncommitted_repositories(&env).await;
-            if skipped.is_empty() {
-                return Err(error);
-            }
-            let mut args = vec!["add", "--all", "--", "."];
-            args.extend(skipped.iter().map(String::as_str));
-            git(&self.root, &env, &args).await?;
-        }
-        if !forced.is_empty() {
-            self.add_forced(&env, forced).await?;
-        }
-        Ok(git(&self.root, &env, &["write-tree"])
-            .await?
-            .trim()
-            .to_owned())
+        Ok(index)
     }
 
     /// Adds the files at the repository paths `paths` although Git may ignore them, in one Git

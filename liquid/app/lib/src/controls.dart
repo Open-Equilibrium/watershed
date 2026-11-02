@@ -201,7 +201,9 @@ class PrimaryButton extends StatelessWidget {
 
   final String label;
   final String? shortcut;
-  final VoidCallback onPressed;
+
+  /// None shows the button disabled.
+  final VoidCallback? onPressed;
   final FocusNode? focusNode;
 
   @override
@@ -266,57 +268,122 @@ class DangerDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final ws = context.ws;
     final confirm = action != null && allowed;
     void confirmed() => Navigator.of(context).pop(true);
-    return CallbackShortcuts(
+    return ActionDialog(
+      title: title,
       bindings: {
         if (confirm) const Keys(LogicalKeyboardKey.enter).activator: confirmed,
       },
-      child: Focus(
-        autofocus: true,
-        child: Dialog(
-          backgroundColor: ws.surface,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(WsMetrics.radiusXl),
+      cancelled: false,
+      actions: [
+        if (action case final label?)
+          DangerButton(
+            label: label,
+            shortcut: confirm ? '⏎' : null,
+            onPressed: confirm ? confirmed : null,
           ),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 520),
-            child: Padding(
-              padding: const EdgeInsets.all(WsMetrics.space5),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                spacing: WsMetrics.space4,
-                children: [
-                  Text(
-                    title,
-                    style: Theme.of(context).textTheme.titleSmall
-                        ?.copyWith(fontWeight: WsMetrics.fwSemibold),
-                  ),
-                  ...children,
-                  Row(
-                    spacing: WsMetrics.space3,
-                    children: [
-                      if (action case final label?)
-                        DangerButton(
-                          label: label,
-                          shortcut: confirm ? '⏎' : null,
-                          onPressed: confirm ? confirmed : null,
-                        ),
-                      const Spacer(),
-                      SecondaryButton(
-                        label: 'Cancel',
-                        shortcut: 'esc',
-                        onPressed: () => Navigator.of(context).pop(false),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
+      ],
+      children: children,
+    );
+  }
+}
+
+/// A dialog with a title, its text, its actions and Cancel, which esc also takes, closing
+/// with `cancelled`; without actions Cancel is Close.
+class ActionDialog extends StatelessWidget {
+  const ActionDialog({
+    super.key,
+    required this.title,
+    required this.children,
+    required this.actions,
+    this.bindings = const {},
+    this.cancelled,
+    this.dismiss,
+  });
+
+  final String title;
+  final List<Widget> children;
+  final List<Widget> actions;
+  final Map<ShortcutActivator, VoidCallback> bindings;
+  final Object? cancelled;
+
+  /// The label of the button esc takes, if not Cancel or, without actions, Close.
+  final String? dismiss;
+
+  @override
+  Widget build(BuildContext context) => CallbackShortcuts(
+    bindings: {
+      ...bindings,
+      const Keys(LogicalKeyboardKey.escape).activator: () =>
+          Navigator.of(context).pop(cancelled),
+    },
+    child: Focus(
+      autofocus: true,
+      child: Dialog(
+        backgroundColor: context.ws.surface,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(WsMetrics.radiusXl),
+        ),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 520),
+          child: Padding(
+            padding: const EdgeInsets.all(WsMetrics.space5),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              spacing: WsMetrics.space4,
+              children: [
+                Text(
+                  title,
+                  style: Theme.of(context).textTheme.titleSmall
+                      ?.copyWith(fontWeight: WsMetrics.fwSemibold),
+                ),
+                ...children,
+                // Long labels wrap below each other rather than overflow.
+                OverflowBar(
+                  alignment: MainAxisAlignment.spaceBetween,
+                  spacing: WsMetrics.space3,
+                  overflowSpacing: WsMetrics.space3,
+                  children: [
+                    ...actions,
+                    SecondaryButton(
+                      label: dismiss ?? (actions.isEmpty ? 'Close' : 'Cancel'),
+                      shortcut: 'esc',
+                      onPressed: () => Navigator.of(context).pop(cancelled),
+                    ),
+                  ],
+                ),
+              ],
             ),
           ),
         ),
+      ),
+    ),
+  );
+}
+
+/// A warning inside a dialog or menu, such as which agent holds an action up.
+class WarningNotice extends StatelessWidget {
+  const WarningNotice(this.text, {super.key});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final ws = context.ws;
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: WsMetrics.space4,
+        vertical: WsMetrics.space3,
+      ),
+      decoration: BoxDecoration(
+        color: ws.warningSubtle,
+        borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
+      ),
+      child: Text(
+        text,
+        style: TextStyle(color: ws.warning, fontSize: WsMetrics.fsCompact),
       ),
     );
   }

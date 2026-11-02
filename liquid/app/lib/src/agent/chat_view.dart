@@ -186,7 +186,7 @@ class BranchMark extends StatelessWidget {
             RefBadge(ref: ref, shown: true),
             const SizedBox(width: WsMetrics.space2),
           ] else ...[
-            Text('New branch', style: style),
+            Text('New session branch', style: style),
             const SizedBox(width: WsMetrics.space1),
           ],
           Text('continues after step ${marker.step}', style: style),

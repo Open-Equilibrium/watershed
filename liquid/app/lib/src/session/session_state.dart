@@ -4,13 +4,16 @@ import 'package:flutter/foundation.dart';
 
 import '../diff/turn_scope.dart';
 import '../rust/api/events.dart';
+import '../rust/api/git.dart';
 import '../rust/api/history.dart';
 import '../rust/api/session.dart';
 import 'backend.dart';
 import 'chat_history.dart';
 import 'chat_items.dart';
+import 'git_state.dart';
 
 export 'chat_items.dart';
+export 'git_state.dart';
 
 /// What the session is doing, as the status bar and sidebar show it.
 enum RunStatus { idle, running, waitingForYou, exited, failed }
@@ -37,6 +40,10 @@ class SessionState {
   SessionState(this._backend) {
     _subscription = _backend.events().listen(_apply);
     hideWhitespace.addListener(() => unawaited(readChanges()));
+    // Stashed changes restored or discarded leave the Diff tab.
+    git.stash.addListener(() {
+      if (diffScope.value is StashedChanges) unawaited(readChanges());
+    });
   }
 
   final SessionBackend _backend;
@@ -100,6 +107,9 @@ class SessionState {
 
   /// Whether earlier stored entries of the chat remain to be read.
   ValueNotifier<bool> get chatMore => _chat.more;
+
+  /// The checkout's branch, its counts and its stash.
+  late final git = GitState(_backend, notify: notify);
 
   /// Counts the changes of the session's stored history; the Trajectory reloads on each.
   final stored = ValueNotifier(0);
@@ -199,6 +209,7 @@ class SessionState {
     diffScope.value = const LatestTurn();
     shownScope.value = const LatestTurn();
     shown.value = null;
+    shownStash.value = null;
     changed.value = const [];
     changesProblem.value = null;
     _byId.clear();
@@ -364,6 +375,11 @@ class SessionState {
   /// choice still being read.
   final shownScope = ValueNotifier<DiffScope>(const LatestTurn());
 
+  /// The stash and its branch read with the shown files, retained during a later refresh.
+  final shownStash = ValueNotifier<({BridgeStash stash, String? branch})?>(
+    null,
+  );
+
   /// The files the shown turns changed, as last read; null before the first read. The Diff tab
   /// and its count show them.
   final changed = ValueNotifier<List<BridgeFileChange>?>(null);
@@ -376,9 +392,10 @@ class SessionState {
   final hideWhitespace = ValueNotifier(false);
 
   /// Shows `scope` in the Diff tab.
-  Future<void> showTurns(DiffScope scope) {
+  Future<void> showTurns(DiffScope scope) async {
     diffScope.value = scope;
-    return readChanges();
+    if (scope is StashedChanges) await git.refresh();
+    await readChanges();
   }
 
   /// Reads the branch's turns and what the shown ones changed between their checkpoints. A
@@ -412,6 +429,23 @@ class SessionState {
       final read = await _backend.turns();
       if (generation != _generation) return;
       turns.value = read;
+      if (diffScope.value is StashedChanges) {
+        final stash = git.stash.value;
+        if (stash != null) {
+          final branch = git.status.value?.branch;
+          final files = hideWhitespace.value
+              ? await _backend.stashChanges(stash.id, hideWhitespace: true)
+              : stash.files;
+          if (generation != _generation) return;
+          reportRead('changes', null);
+          shownScope.value = const StashedChanges();
+          shownStash.value = (stash: stash, branch: branch);
+          changesProblem.value = null;
+          changed.value = files;
+          return;
+        }
+        diffScope.value = const LatestTurn();
+      }
       final scope = diffScope.value;
       final pair = compared(read, scope);
       if (pair == null) {
@@ -472,6 +506,7 @@ class SessionState {
   /// Reads the turns that ended and adds what each changed where it ended in the chat.
   Future<void> _endTurn() async {
     final generation = _generation;
+    unawaited(git.refresh());
     await readChanges();
     if (generation != _generation) return;
     _chat.endTurns(turns.value);
@@ -491,6 +526,15 @@ class SessionState {
 
   /// One file's unified diff between the shown checkpoints.
   Future<String> patch(String path) {
+    if (shownScope.value is StashedChanges) {
+      final id = shownStash.value?.stash.id;
+      if (id == null) return Future.value('');
+      return _backend.stashPatch(
+        id,
+        path,
+        hideWhitespace: hideWhitespace.value,
+      );
+    }
     final pair = shown.value;
     if (pair == null) return Future.value('');
     return _backend.turnPatch(
@@ -715,6 +759,7 @@ class SessionState {
   /// Releases the event stream and stops the agent.
   Future<void> dispose() async {
     _fade?.cancel();
+    git.stop();
     // The bridge's stream finishes cancelling only with its next event, which an idle agent
     // sends once it is shut down, so the agent stops first.
     final cancelled = _subscription.cancel();
