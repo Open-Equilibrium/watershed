@@ -5,6 +5,40 @@ use super::process::{git_path_output, user_git};
 use super::*;
 use std::collections::BTreeMap;
 
+/// How often a drop tries again after another Git shifted the stash list.
+const DROP_TRIES: usize = 5;
+
+/// Runs before each drop in the checkout at a root, to shift the list there as another Git
+/// would.
+#[cfg(test)]
+type Hook = (PathBuf, Box<dyn FnOnce() + Send>);
+
+#[cfg(test)]
+static BEFORE_DROP: std::sync::Mutex<Vec<Hook>> = std::sync::Mutex::new(Vec::new());
+
+/// Runs `hook` once before the next drop in the checkout at `root`.
+#[cfg(test)]
+pub(crate) fn before_drop(root: &Path, hook: impl FnOnce() + Send + 'static) {
+    let root = std::fs::canonicalize(root).expect("root");
+    BEFORE_DROP
+        .lock()
+        .expect("hooks")
+        .push((root, Box::new(hook)));
+}
+
+#[cfg(test)]
+fn run_before_drop(root: &Path) {
+    let root = std::fs::canonicalize(root).expect("root");
+    let hook = {
+        let mut hooks = BEFORE_DROP.lock().expect("hooks");
+        let at = hooks.iter().position(|(at, _)| *at == root);
+        at.map(|at| hooks.remove(at).1)
+    };
+    if let Some(hook) = hook {
+        hook();
+    }
+}
+
 /// What a stash's message starts with, followed by its branch.
 const MESSAGE: &str = "Liquid: changes left on ";
 
@@ -214,11 +248,39 @@ impl WorkingTree {
     }
 
     /// Drops the stash commit `id`, wherever it now is in the list.
+    ///
+    /// Git drops a stash only by its place in the list, which another Git can shift between
+    /// finding and dropping it. Git names the commit it dropped, so one not `id` goes straight
+    /// back into the list, its commit unchanged, and the drop tries again.
     pub(super) async fn drop_stash(&self, id: &str) -> Result<(), DiffError> {
-        let place = self.place_of(id).await?;
-        user_git(&self.root, &["stash", "drop", "--quiet", &place])
-            .await
-            .map(drop)
+        for _ in 0..DROP_TRIES {
+            let place = self.place_of(id).await?;
+            #[cfg(test)]
+            run_before_drop(&self.root);
+            let said = user_git(&self.root, &["stash", "drop", &place]).await?;
+            let dropped = said
+                .rsplit_once('(')
+                .and_then(|(_, rest)| rest.trim_end().strip_suffix(')'))
+                .unwrap_or_default();
+            if dropped == id {
+                return Ok(());
+            }
+            if dropped.is_empty() {
+                return Err(DiffError::Git(format!(
+                    "Git did not say which stash it dropped: {said}"
+                )));
+            }
+            // Its own subject is what the list showed for it.
+            let subject = git(&self.root, &[], &["log", "-1", "--format=%s", dropped]).await?;
+            user_git(
+                &self.root,
+                &["stash", "store", "-m", subject.trim_end(), dropped],
+            )
+            .await?;
+        }
+        Err(DiffError::Git(
+            "the stash list kept changing while Liquid dropped its stash".to_owned(),
+        ))
     }
 
     /// Moves the stashed changes `id` left on a branch back into the checkout and drops the
@@ -326,14 +388,16 @@ impl WorkingTree {
     }
 
     /// Pops the stash commit `id`, wherever it now is in the list.
+    /// Applies by the commit `id`, so no stash another Git stores meanwhile is applied, then
+    /// drops it as [`Self::drop_stash`] does.
     pub(super) async fn pop(&self, id: &str) -> Result<(), DiffError> {
-        let place = self.place_of(id).await?;
+        self.place_of(id).await?;
         // The index can hold content absent from the working tree; dropping it would lose it.
-        let error =
-            match user_git(&self.root, &["stash", "pop", "--quiet", "--index", &place]).await {
-                Ok(_) => return Ok(()),
-                Err(error) => error,
-            };
+        let error = match user_git(&self.root, &["stash", "apply", "--quiet", "--index", id]).await
+        {
+            Ok(_) => return self.drop_stash(id).await,
+            Err(error) => error,
+        };
         let conflicts = git(
             &self.root,
             &[],

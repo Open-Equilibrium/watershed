@@ -2140,3 +2140,72 @@ fn leaving_refuses_a_submodule_commit_git_cannot_stash() {
         }
     });
 }
+
+/// A stash of `text` in `a.txt` that is in no list, as another Git stores it.
+fn external_stash(repo: &Repo, text: &str) -> String {
+    repo.write("a.txt", text);
+    let id = repo.git(&["stash", "create"]).trim().to_owned();
+    repo.git(&["checkout", "--", "a.txt"]);
+    id
+}
+
+#[test]
+fn a_stash_another_git_stores_meanwhile_survives_a_discard_and_a_restore() {
+    run(async {
+        let repo = Repo::new("stash-external");
+        let main = repo.git(&["branch", "--show-current"]).trim().to_owned();
+        repo.git(&["branch", "other"]);
+        let checkpoints = Checkpoints::new(repo.path());
+        let leave = |text: &'static str| {
+            let repo = &repo;
+            let checkpoints = &checkpoints;
+            let main = main.clone();
+            async move {
+                repo.write("a.txt", text);
+                checkpoints
+                    .switch_branch(&local("other"), leave_on(checkpoints).await)
+                    .await
+                    .expect("left");
+                checkpoints
+                    .switch_branch(&local(&main), Changes::Bring)
+                    .await
+                    .expect("back");
+                stash_of(checkpoints).await
+            }
+        };
+
+        for restoring in [false, true] {
+            let mine = leave("mine\n").await;
+            let theirs = external_stash(&repo, "theirs\n");
+            let root = repo.path().to_owned();
+            let stored = theirs.clone();
+            // Between finding its place and dropping it, another Git stores a stash on top.
+            crate::diff::before_drop(repo.path(), move || {
+                let output = Command::new("git")
+                    .args(["stash", "store", "-m", "theirs", &stored])
+                    .current_dir(&root)
+                    .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                    .output()
+                    .expect("git runs");
+                assert!(output.status.success(), "stored");
+            });
+
+            if restoring {
+                checkpoints.restore_stash(&mine).await.expect("restored");
+                assert_eq!(read(&repo, "a.txt"), "mine\n");
+                repo.git(&["checkout", "--", "a.txt"]);
+            } else {
+                checkpoints.discard_stash(&mine).await.expect("discarded");
+                assert_eq!(read(&repo, "a.txt"), "old\n");
+            }
+
+            let listed = repo.git(&["stash", "list", "--format=%H"]);
+            assert_eq!(
+                listed,
+                format!("{theirs}\n"),
+                "only the confirmed stash went"
+            );
+            repo.git(&["stash", "drop", "-q"]);
+        }
+    });
+}
