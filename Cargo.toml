@@ -7,6 +7,7 @@ members = [
     "flow-agent/flow-agent-executor",
     "liquid/liquid-bridge",
     "liquid/liquid-core",
+    "liquid/liquid-storage",
     "meta-harness/meta-harness-core",
     "proto/proto",
 ]
@@ -29,6 +30,7 @@ core-script = { path = "core/core-script", version = "0.0.0" }
 flow-agent-core = { path = "flow-agent/flow-agent-core", version = "0.0.0" }
 flutter_rust_bridge = "=2.13.0"
 getrandom = { version = "=0.4.3", default-features = false, features = ["std"] }
+liquid-core = { path = "liquid/liquid-core", version = "0.0.0" }
 meta-harness-core = { path = "meta-harness/meta-harness-core", version = "0.0.0" }
 noyalib = { version = "=0.0.53", default-features = false, features = ["std"] }
 proto = { path = "proto/proto", version = "0.0.0" }
@@ -39,6 +41,7 @@ sha2 = { version = "=0.11.0", default-features = false }
 proptest = { version = "=1.11.0", default-features = false, features = ["std"] }
 regex = { version = "=1.13.1", default-features = false, features = ["perf", "std", "unicode"] }
 reqwest = { version = "=0.13.5", default-features = false, features = ["form", "json", "rustls-no-provider"] }
+rusqlite = { version = "=0.41.1", features = ["bundled-sqlcipher-vendored-openssl"] }
 rustls = { version = "=0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
 rustix = { version = "=1.1.5", default-features = false, features = ["fs", "process"] }
 signal-hook = { version = "=0.4.4", default-features = false, features = ["iterator"] }

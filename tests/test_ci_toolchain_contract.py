@@ -31,7 +31,7 @@ UBUNTU = "matrix.os == 'ubuntu-24.04'"
 MAC = "matrix.os == 'xcode-27'"
 PRODUCT = "needs.scope.outputs.product == 'true'"
 LIQUID = "needs.scope.outputs.liquid == 'true'"
-LIQUID_COVERAGE_PACKAGES = "-p meta-harness-core -p liquid_bridge -p liquid-core"
+LIQUID_COVERAGE_PACKAGES = "-p meta-harness-core -p liquid_bridge -p liquid-core -p liquid-storage"
 MATRIX_JOBS = ("checks", "test", "flow-agent", "liquid")
 M12_EXECUTOR = "target/m12-standard/release/flow-executor"
 EVIDENCE_ONLY_UNIX_RUNNER_PATTERN = (
