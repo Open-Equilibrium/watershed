@@ -9,6 +9,11 @@ class FakeWorkspace implements LiquidWorkspace {
   final pages = <String, List<BridgePage>>{};
   final applied = <BridgeMutation>[];
 
+  /// Each Page's Views in order, and each Text Block's text and style.
+  final views = <String, List<BridgeView>>{};
+  final texts = <String, String>{};
+  final styles = <String, BridgeTextStyle>{};
+
   /// Fails every apply with this text.
   String? refuse;
 
@@ -71,10 +76,129 @@ class FakeWorkspace implements LiquidWorkspace {
           _changed(BridgeResource(kind: BridgeResourceKind.pages, area: area));
         }
         return BridgeApplied(action: _id());
+      case BridgeMutationKind.addTextBlock:
+        final page = views.putIfAbsent(mutation.page!, () => []);
+        final at = mutation.after == null
+            ? 0
+            : page.indexWhere((view) => view.id == mutation.after) + 1;
+        final view = _block(
+          mutation.page!,
+          at,
+          mutation.text!,
+          BridgeTextStyle.paragraph,
+        );
+        return BridgeApplied(action: _id(), block: view.block, view: view.id);
+      case BridgeMutationKind.editText:
+        final text = texts[mutation.block]!;
+        texts[mutation.block!] = text.replaceRange(
+          mutation.at,
+          mutation.at + mutation.delete,
+          mutation.text!,
+        );
+        _changed(_blockResource(mutation));
+        return BridgeApplied(action: _id());
+      case BridgeMutationKind.splitTextBlock:
+        final page = views[mutation.page]!;
+        final at = page.indexWhere((view) => view.id == mutation.view);
+        final text = texts[mutation.block]!;
+        final BridgeView created;
+        if (mutation.at == 0) {
+          // At the start the new empty Text Block goes above and takes the boundary.
+          final shown = page[at];
+          page[at] = BridgeView(
+            id: shown.id,
+            block: shown.block,
+            boundary: false,
+          );
+          created = _block(
+            mutation.page!,
+            at,
+            '',
+            mutation.style,
+            boundary: shown.boundary,
+          );
+        } else {
+          texts[mutation.block!] = text.substring(0, mutation.at);
+          _changed(_blockResource(mutation));
+          created = _block(
+            mutation.page!,
+            at + 1,
+            text.substring(mutation.at),
+            mutation.style,
+          );
+        }
+        return BridgeApplied(
+          action: _id(),
+          block: created.block,
+          view: created.id,
+        );
+      case BridgeMutationKind.joinTextBlock:
+        final page = views[mutation.page]!;
+        final at = page.indexWhere((view) => view.id == mutation.view);
+        if (at <= 0) throw 'not found';
+        if (page[at].boundary) throw 'a Section starts here';
+        final above = page[at - 1].block;
+        texts[above] = texts[above]! + texts.remove(page[at].block)!;
+        page.removeAt(at);
+        _changed(
+          BridgeResource(
+            kind: BridgeResourceKind.block,
+            page: mutation.page,
+            block: above,
+          ),
+        );
+        _changed(
+          BridgeResource(kind: BridgeResourceKind.views, page: mutation.page),
+        );
+        return BridgeApplied(action: _id());
+      case BridgeMutationKind.setTextStyle:
+        styles[mutation.block!] = mutation.style;
+        _changed(_blockResource(mutation));
+        return BridgeApplied(action: _id());
+      case BridgeMutationKind.setSectionBoundary:
+        final page = views[mutation.page]!;
+        final at = page.indexWhere((view) => view.id == mutation.view);
+        final shown = page[at];
+        page[at] = BridgeView(
+          id: shown.id,
+          block: shown.block,
+          boundary: mutation.boundary,
+        );
+        _changed(
+          BridgeResource(kind: BridgeResourceKind.views, page: mutation.page),
+        );
+        return BridgeApplied(action: _id());
       default:
         throw UnimplementedError('${mutation.kind}');
     }
   }
+
+  BridgeResource _blockResource(BridgeMutation mutation) => BridgeResource(
+    kind: BridgeResourceKind.block,
+    page: mutation.page,
+    block: mutation.block,
+  );
+
+  /// A new Text Block with its View at `at`.
+  BridgeView _block(
+    String page,
+    int at,
+    String text,
+    BridgeTextStyle style, {
+    bool boundary = false,
+  }) {
+    final view = BridgeView(id: _id(), block: _id(), boundary: boundary);
+    texts[view.block] = text;
+    styles[view.block] = style;
+    views[page]!.insert(at, view);
+    _changed(BridgeResource(kind: BridgeResourceKind.views, page: page));
+    return view;
+  }
+
+  /// The Page's Text Blocks' texts in order.
+  List<String> textsOf(String page) => [
+    for (final view in views[page] ?? const <BridgeView>[]) texts[view.block]!,
+  ];
 
   bool _below(List<BridgePage> tree, BridgePage page, String parent) {
     for (var at = page.parent; at != null;) {
@@ -101,7 +225,20 @@ class FakeWorkspace implements LiquidWorkspace {
         views: const [],
         count: pages[query.area]!.length,
       ),
-      _ => throw UnimplementedError('${query.kind}'),
+      BridgeQueryKind.views => BridgeAnswer(
+        areas: const [],
+        pages: const [],
+        views: window(views[query.page] ?? const []),
+        count: views[query.page]?.length ?? 0,
+      ),
+      BridgeQueryKind.text => BridgeAnswer(
+        areas: const [],
+        pages: const [],
+        views: const [],
+        count: 0,
+        text: texts[query.block],
+        style: styles[query.block],
+      ),
     };
   }
 

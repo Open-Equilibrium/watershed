@@ -44,13 +44,14 @@ BridgeQuery query(
   String? page,
   String? block,
   int start = 0,
+  int limit = window,
 }) => BridgeQuery(
   kind: kind,
   area: area,
   page: page,
   block: block,
   start: start,
-  limit: window,
+  limit: limit,
 );
 
 /// The Page the window shows.
@@ -115,6 +116,9 @@ class WorkspaceState {
   /// `area`'s Pages in their tree's order, each after its parent's earlier siblings.
   ValueListenable<List<BridgePage>> pages(String area) =>
       _trees.putIfAbsent(area, () => ValueNotifier(const []));
+
+  /// Completes once every mutation asked for so far is applied or refused.
+  Future<void> get settled => _applied;
 
   /// Applies mutations in the order asked: the bridge may run two calls at once.
   Future<BridgeApplied> apply(BridgeMutation change) {
