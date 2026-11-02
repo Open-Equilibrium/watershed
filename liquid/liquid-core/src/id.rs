@@ -77,7 +77,8 @@ impl PersonId {
         Self(id.into())
     }
 
-    pub(crate) fn as_str(&self) -> &str {
+    /// The identity as the account names it.
+    pub fn as_str(&self) -> &str {
         &self.0
     }
 }

@@ -149,6 +149,11 @@ impl<S: Store> Workspace<S> {
         })
     }
 
+    /// The person who created the Workspace and holds Can manage.
+    pub fn owner(&self) -> &PersonId {
+        &self.owner
+    }
+
     /// The areas, in Explorer order.
     pub fn areas(&mut self) -> Result<Vec<Area>, Error> {
         Ok(model::areas(self.doc(&Document::Workspace)?))
