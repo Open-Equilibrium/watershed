@@ -71,18 +71,6 @@ summary{cursor:pointer}summary h3{display:inline;margin:0}summary:focus-visible{
   <section id="m2">
     <h2>M2 - Meta-Harness</h2>
     <div class="grid">
-      <details id="d-080" class="decision">
-        <summary><h3>D-080 - Starting A Turn Without Its Checkout Lock</h3></summary>
-        <p><strong>Status:</strong> Blocks Liquid Git slice PR A closeout. Clawpatch finding <code>fnd_sig-feat-library-1f740d20a4-f8ca_0107a655ba</code>, reproduced on 2026-11-02 at <code>40f95f4</code>. D-077, D-078 and D-079 remain decided.</p>
-        <p><strong>Question:</strong> What should happen when a turn cannot register its running checkout lock? The <a href="../../meta-harness/README.md">checkpoint protocol</a> lets a run continue after any checkpoint error, but the <a href="../../SECURITY.md#mvp-vcs-boundary">Git safety contract</a> requires running agents to block branch switches, stashes and reverts.</p>
-        <p><strong>Evidence:</strong> With one instance already using a repository, temporarily break that test repository's Git configuration. Another instance's start capture fails before acquiring its running lock. Repair the configuration: the first instance can switch branches before the other turn ends. The extension records the start error and allows that turn to run. Snapshot failures after successful lock registration already retain the lock; the gap is registration failure.</p>
-        <ul>
-          <li><strong>A - Refuse to start a turn without its checkout guard.</strong> Continue after a failed snapshot only when its running lock is held; distinguish these failures in the checkpoint handshake. Pro: preserves the existing Git safety boundary with a narrow failure rule. Con: an unavailable Git configuration or lock can prevent a run that currently continues.</li>
-          <li><strong>B - Keep runs nonfatal and block project Git writes independently.</strong> Establish a host-wide blocker shared by Meta-Harness instances before starting a turn whose checkout cannot be registered, retaining it until the turn settles. Pro: the agent can run despite that checkout error. Con: unrelated projects' Git writes may be unavailable, and a separate cross-process registration mechanism needs its own failure and recovery contract.</li>
-        </ul>
-        <p><strong>Recommendation:</strong> A. A missing snapshot can remain nonfatal; missing concurrency protection must be distinguishable. Maintainer approval is required before changing the current startup behavior or adding another registration mechanism.</p>
-        <p><strong>Acceptance criterion:</strong> Record the selected startup rule in the ADR log and update the checkpoint protocol. Deterministically exercise both repository-opening and lock-registration failures, repair each while the turn would still be active, and prove that either the turn never begins or independent instances still refuse branch switches, stash writes and reverts until it settles. Retain the behavior that a failed snapshot after guard acquisition does not stop the run and keeps Git writes blocked.</p>
-      </details>
       <details id="d-021" class="decision">
         <summary><h3>D-021 - Meta-Harness Packaging</h3></summary>
         <p><strong>Status:</strong> Open implementation detail before M2; Meta-Harness must already run headless, without Liquid (<a href="../concept/V-Spec_MetaHarness.html">Meta-Harness V-Spec</a>).</p>

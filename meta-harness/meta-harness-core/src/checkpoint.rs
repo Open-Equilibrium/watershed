@@ -188,7 +188,8 @@ impl Checkpoints {
 
     /// Takes `checkpoint` of the project as it is now. It can take a while in a large project.
     /// From a turn's start to its end, the session's agent counts as running in the checkout,
-    /// even when a capture fails; a turn's start waits for a revert in progress.
+    /// even when its snapshot fails; a turn whose checkout guard cannot be acquired must not
+    /// start (D-080). A turn's start waits for a revert in progress.
     pub async fn capture(&self, checkpoint: &Checkpoint) -> Result<(), DiffError> {
         let reference = checkpoint.reference()?;
         let tree = self.tree().await?;
@@ -230,6 +231,17 @@ impl Checkpoints {
             }
         }
         captured
+    }
+
+    /// Whether this exact turn acquired and still holds its running checkout guard.
+    pub(crate) fn guards(&self, checkpoint: &Checkpoint) -> bool {
+        self.running
+            .lock()
+            .expect("running lock")
+            .as_ref()
+            .is_some_and(|(start, _)| {
+                start.session == checkpoint.session && start.turn == checkpoint.turn
+            })
     }
 
     /// What reverting the files to `to` would change; `since`, such as the last turn's end,
