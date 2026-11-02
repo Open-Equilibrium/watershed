@@ -20,6 +20,14 @@ class FakeWorkspace implements LiquidWorkspace {
   /// Holds applies until it completes.
   Completer<void>? gate;
 
+  /// Fails every query with this text.
+  String? refuseQueries;
+
+  /// While set, each query of [deferredKinds] answers from the state at its call but waits
+  /// for its own release.
+  List<Completer<void>>? deferred;
+  Set<BridgeQueryKind> deferredKinds = BridgeQueryKind.values.toSet();
+
   final _followers = <int, (BridgeResource, StreamController<BridgeChange>)>{};
   final _seqs = <BridgeResource, int>{};
   int _ids = 0;
@@ -210,6 +218,17 @@ class FakeWorkspace implements LiquidWorkspace {
 
   @override
   Future<BridgeAnswer> query({required BridgeQuery query}) async {
+    if (refuseQueries case final refused?) throw refused;
+    final answer = _answer(query);
+    if (deferred case final held? when deferredKinds.contains(query.kind)) {
+      final release = Completer<void>();
+      held.add(release);
+      await release.future;
+    }
+    return answer;
+  }
+
+  BridgeAnswer _answer(BridgeQuery query) {
     List<T> window<T>(List<T> all) =>
         all.skip(query.start).take(query.limit).toList();
     return switch (query.kind) {

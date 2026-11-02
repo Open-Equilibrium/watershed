@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -14,10 +16,11 @@ void main() {
   late WorkspaceState workspace;
   late String page;
 
-  /// Opens a Page holding `texts` as paragraphs.
+  /// Opens a Page holding `texts`, as paragraphs unless `style` says otherwise.
   Future<void> show(
     WidgetTester tester, [
     List<String> texts = const [],
+    BridgeTextStyle style = BridgeTextStyle.paragraph,
   ]) async {
     await tester.binding.setSurfaceSize(const Size(1400, 900));
     fake = FakeWorkspace();
@@ -35,6 +38,7 @@ void main() {
         ),
       );
       after = added.view;
+      fake.styles[added.block!] = style;
     }
     // Opened afresh, not as the new Page that takes the keys in its title.
     workspace.open.value = OpenPage(workspace.open.value!.area, page);
@@ -230,5 +234,131 @@ void main() {
     await type(tester, 0, '!');
     expect(field(tester, 0).controller!.text, 'Lisbon');
     expect(find.text('the replica is read-only'), findsOneWidget);
+  });
+
+  testWidgets('typing right after ⏎ lands in the new Text Block', (
+    tester,
+  ) async {
+    await show(tester, ['One']);
+    await caret(tester, 0, 3);
+    fake.gate = Completer();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    // The split still waits, so the caret is still in the first Text Block.
+    await type(tester, 0, 'Two');
+    fake.gate!.complete();
+    await tester.pumpAndSettle();
+    expect(fake.textsOf(page), ['One', 'Two']);
+    expect(focused(tester, 1), isTrue);
+    expect(field(tester, 1).controller!.text, 'Two');
+    expect(field(tester, 0).controller!.text, 'One');
+  });
+
+  testWidgets('the first line hands over all typed while its Block is made', (
+    tester,
+  ) async {
+    await show(tester);
+    fake.gate = Completer();
+    await tester.enterText(find.byKey(const Key('first-line')), 'a');
+    await tester.enterText(find.byKey(const Key('first-line')), 'b');
+    fake.gate!.complete();
+    await tester.pumpAndSettle();
+    expect(fake.textsOf(page), ['b']);
+    expect(field(tester, 0).controller!.text, 'b');
+  });
+
+  testWidgets('the first line waits until a composition ends', (tester) async {
+    await show(tester);
+    await tester.tap(find.byKey(const Key('first-line')));
+    await tester.pump();
+    tester.testTextInput.updateEditingValue(
+      const TextEditingValue(
+        text: 'ni',
+        selection: TextSelection.collapsed(offset: 2),
+        composing: TextRange(start: 0, end: 2),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(fake.textsOf(page), isEmpty);
+    tester.testTextInput.updateEditingValue(
+      const TextEditingValue(
+        text: '你',
+        selection: TextSelection.collapsed(offset: 1),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(fake.textsOf(page), ['你']);
+  });
+
+  testWidgets('a read that crossed an edit never shows older text', (
+    tester,
+  ) async {
+    await show(tester, ['']);
+    await caret(tester, 0, 0);
+    fake.gate = Completer();
+    fake.deferredKinds = {BridgeQueryKind.text};
+    fake.deferred = [];
+    await type(tester, 0, 'a');
+    await type(tester, 0, 'b');
+    fake.gate!.complete();
+    await tester.pump();
+    await tester.pump();
+    final held = fake.deferred!;
+    fake.deferred = null;
+    // The newest reads answer first, the oldest last.
+    for (final release in held.reversed) {
+      release.complete();
+      await tester.pump();
+    }
+    await tester.pumpAndSettle();
+    expect(fake.textsOf(page), ['ab']);
+    expect(field(tester, 0).controller!.text, 'ab');
+  });
+
+  testWidgets('a Text Block takes no typing before its text is read', (
+    tester,
+  ) async {
+    await show(tester, ['One']);
+    fake.deferredKinds = {BridgeQueryKind.text};
+    fake.deferred = [];
+    await workspace.apply(
+      mutation(
+        BridgeMutationKind.addTextBlock,
+        page: page,
+        after: fake.views[page]!.first.id,
+        text: 'Two',
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(field(tester, 1).readOnly, isTrue);
+    final held = fake.deferred!;
+    fake.deferred = null;
+    for (final release in held) {
+      release.complete();
+    }
+    await tester.pumpAndSettle();
+    expect(field(tester, 1).readOnly, isFalse);
+    expect(field(tester, 1).controller!.text, 'Two');
+  });
+
+  testWidgets('numbers count items scrolled out of view', (tester) async {
+    await show(tester, [
+      for (var item = 1; item <= 150; item++) 'Item $item',
+    ], BridgeTextStyle.numbered);
+    final scroll = tester.state<ScrollableState>(
+      find
+          .descendant(
+            of: find.byType(CustomScrollView),
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
+    for (var round = 0; round < 5; round++) {
+      scroll.position.jumpTo(scroll.position.maxScrollExtent);
+      await tester.pumpAndSettle();
+    }
+    expect(find.text('Item 150'), findsOneWidget);
+    expect(find.text('1.'), findsNothing);
+    expect(find.text('150.'), findsOneWidget);
   });
 }

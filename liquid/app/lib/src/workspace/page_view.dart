@@ -50,6 +50,7 @@ class _WorkspacePageState extends State<WorkspacePage> {
     super.initState();
     _title.text = _page?.title ?? '';
     _tree.addListener(_titleChanged);
+    _first.addListener(() => unawaited(_typedFirst()));
     // After the frame, so it wins over the window's own first focus.
     if (widget.open.fresh) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -104,10 +105,13 @@ class _WorkspacePageState extends State<WorkspacePage> {
     return KeyEventResult.handled;
   }
 
-  /// The first character typed on an empty Page creates its first Text Block, which then
-  /// takes what was typed meanwhile and the caret.
-  Future<void> _typedFirst(String text) async {
-    if (_creating || text.isEmpty) return;
+  /// The first character typed on an empty Page, once any composition ends, creates its
+  /// first Text Block, which then takes everything typed meanwhile and the caret.
+  Future<void> _typedFirst() async {
+    final text = _first.text;
+    if (_creating || text.isEmpty || !_first.value.composing.isCollapsed) {
+      return;
+    }
     _creating = true;
     try {
       final created = await widget.state.apply(
@@ -117,20 +121,19 @@ class _WorkspacePageState extends State<WorkspacePage> {
           text: text,
         ),
       );
-      final typed = _first.text;
-      if (typed != text && typed.startsWith(text)) {
+      final typed = _first.value;
+      if (typed.text != text) {
         await widget.state.apply(
-          mutation(
-            BridgeMutationKind.editText,
-            page: widget.open.page,
-            block: created.block,
-            at: text.length,
-            text: typed.substring(text.length),
-          ),
+          textEdit(widget.open.page, created.block!, text, typed.text),
         );
       }
       if (!mounted) return;
-      _views.caret.value = Caret(created.view!, typed.length);
+      _views.caret.value = Caret(
+        created.view!,
+        typed.selection.isValid
+            ? typed.selection.baseOffset
+            : typed.text.length,
+      );
       _first.clear();
     } on Object {
       // The problem shows above the Page; what was typed stays in the line.
@@ -221,7 +224,6 @@ class _WorkspacePageState extends State<WorkspacePage> {
                               key: const Key('first-line'),
                               controller: _first,
                               focusNode: _firstFocus,
-                              onChanged: (text) => unawaited(_typedFirst(text)),
                               style: TextStyle(
                                 fontSize: WsMetrics.fsProse,
                                 height: WsMetrics.lhProse / WsMetrics.fsProse,

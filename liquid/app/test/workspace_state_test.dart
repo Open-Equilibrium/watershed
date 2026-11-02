@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/rust/api/workspace.dart';
+import 'package:liquid/src/launch.dart';
+import 'package:liquid/src/workspace/page_views.dart';
 import 'package:liquid/src/workspace/workspace_state.dart';
 
 import 'fake_workspace.dart';
@@ -105,5 +107,77 @@ void main() {
     });
     await state.dispose();
     expect(fake.followed, isEmpty);
+  });
+
+  test('a Workspace whose first read fails says so', () async {
+    final fake = FakeWorkspace()..refuseQueries = 'disk I/O error';
+    final (state, problem) = await startWorkspace(fake, show: true);
+    expect(problem, 'The Workspace did not load: disk I/O error');
+    await state.dispose();
+  });
+
+  group('a Page’s Views', () {
+    late FakeWorkspace fake;
+    late WorkspaceState state;
+    late String page;
+    late PageViews views;
+
+    setUp(() async {
+      fake = FakeWorkspace();
+      state = WorkspaceState(fake);
+      await state.start();
+      page = state.open.value!.page;
+      String? after;
+      for (var index = 0; index < 150; index++) {
+        final added = await state.apply(
+          mutation(
+            BridgeMutationKind.addTextBlock,
+            page: page,
+            after: after,
+            text: '$index',
+          ),
+        );
+        after = added.view;
+      }
+      views = PageViews(state, page)..start();
+      await pumpEventQueue();
+    });
+
+    tearDown(() async {
+      views.dispose();
+      await state.dispose();
+    });
+
+    test('have nothing before the first or after the last', () async {
+      expect(views.count, 150);
+      expect(views.at(0), isNotNull);
+      expect(views.at(-1), isNull);
+      expect(views.at(150), isNull);
+    });
+
+    test(
+      'read a window again when the Page changed while it was read',
+      () async {
+        fake.deferredKinds = {BridgeQueryKind.views};
+        fake.deferred = [];
+        expect(views.at(120), isNull);
+        await pumpEventQueue();
+        final window = fake.deferred!.single;
+        // A change while the window is on its way.
+        await state.apply(
+          mutation(BridgeMutationKind.addTextBlock, page: page, text: 'new'),
+        );
+        await pumpEventQueue();
+        final reread = [...fake.deferred!.skip(1)];
+        fake.deferred = null;
+        for (final release in reread) {
+          release.complete();
+        }
+        await pumpEventQueue();
+        window.complete();
+        await pumpEventQueue();
+        expect(views.indexOf(fake.views[page]![120].id), 120);
+      },
+    );
   });
 }

@@ -41,6 +41,34 @@ BridgeTextStyle nextStyle(BridgeTextStyle style) => switch (style) {
 bool _listed(BridgeTextStyle style) =>
     nextStyle(style) != BridgeTextStyle.paragraph;
 
+/// The one edit that turns `from` into `to` in `block`: the changed middle, never between the
+/// halves of a surrogate pair, which the core refuses.
+BridgeMutation textEdit(String page, String block, String from, String to) {
+  final shorter = to.length < from.length ? to.length : from.length;
+  var start = 0;
+  while (start < shorter && to.codeUnitAt(start) == from.codeUnitAt(start)) {
+    start++;
+  }
+  var end = 0;
+  while (end < shorter - start &&
+      to.codeUnitAt(to.length - 1 - end) ==
+          from.codeUnitAt(from.length - 1 - end)) {
+    end++;
+  }
+  bool trail(int at) =>
+      at < from.length && (from.codeUnitAt(at) & 0xFC00) == 0xDC00;
+  if (start > 0 && trail(start)) start--;
+  if (end > 0 && trail(from.length - end)) end--;
+  return mutation(
+    BridgeMutationKind.editText,
+    page: page,
+    block: block,
+    at: start,
+    delete: from.length - start - end,
+    text: to.substring(start, to.length - end),
+  );
+}
+
 /// One Text Block on its Page, with the divider above it when it starts a Section. It
 /// follows only its own Block (client architecture rule 6); typing shows at once and
 /// reaches the core afterwards (rule 7).
@@ -83,6 +111,12 @@ class _TextBlockState extends State<TextBlock> {
 
   /// While the text changes from the core or a key, not from typing.
   bool _quiet = false;
+
+  /// While ⏎'s split is on its way: what is typed meanwhile goes to the new Text Block.
+  bool _splitting = false;
+
+  /// Reads asked for, so only the latest shows.
+  int _reads = 0;
   StreamSubscription<BridgeChange>? _followed;
 
   WorkspaceState get _state => widget.views.state;
@@ -119,6 +153,9 @@ class _TextBlockState extends State<TextBlock> {
 
   /// Shows the stored text and style, unless an edit of this Block is on its way.
   Future<void> _read() async {
+    final read = ++_reads;
+    // A read asked while an edit is on its way may miss it, whenever it answers.
+    final clean = _pending == 0;
     final sent = _sent;
     final BridgeAnswer answer;
     try {
@@ -129,12 +166,17 @@ class _TextBlockState extends State<TextBlock> {
       _report(error);
       return;
     }
-    if (!mounted) return;
+    if (!mounted || read != _reads) return;
     final style = answer.style ?? BridgeTextStyle.paragraph;
     widget.views.setStyle(_block, style);
-    if (style != _style || _stored == null) setState(() => _style = style);
+    if (style == BridgeTextStyle.numbered) {
+      unawaited(widget.views.readRun(widget.index).catchError(_report));
+    }
+    if (style != _style) setState(() => _style = style);
     final text = answer.text;
-    if (text == null || _pending > 0 || sent != _sent) return;
+    if (text == null || !clean || _pending > 0 || sent != _sent) return;
+    // Editable once the text is known, so nothing typed before is lost.
+    if (_stored == null) setState(() {});
     _stored = text;
     if (_text.text != text && !_composing) {
       final offset = _text.selection.baseOffset.clamp(0, text.length);
@@ -161,15 +203,20 @@ class _TextBlockState extends State<TextBlock> {
     }
     widget.views.caret.value = null;
     _focus.requestFocus();
-    _text.selection = TextSelection.collapsed(
-      offset: caret.offset.clamp(0, _text.text.length),
-    );
+    final offset = caret.offset.clamp(0, _text.text.length);
+    if (caret.insert.isEmpty) {
+      _text.selection = TextSelection.collapsed(offset: offset);
+      return;
+    }
+    final text = _text.text.replaceRange(offset, offset, caret.insert);
+    _set(text, offset + caret.insert.length);
+    _send(text);
   }
 
   /// Sends what typing changed, or applies a shortcut typed at the start.
   void _typed() {
     final stored = _stored;
-    if (_quiet || stored == null || _composing) return;
+    if (_quiet || _splitting || stored == null || _composing) return;
     final text = _text.text;
     if (text == stored) return;
     if (_style == BridgeTextStyle.paragraph) {
@@ -207,36 +254,9 @@ class _TextBlockState extends State<TextBlock> {
   void _send(String text) {
     final stored = _stored!;
     if (text == stored) return;
-    var start = 0;
-    final shorter = text.length < stored.length ? text.length : stored.length;
-    while (start < shorter &&
-        text.codeUnitAt(start) == stored.codeUnitAt(start)) {
-      start++;
-    }
-    var end = 0;
-    while (end < shorter - start &&
-        text.codeUnitAt(text.length - 1 - end) ==
-            stored.codeUnitAt(stored.length - 1 - end)) {
-      end++;
-    }
-    // Never between the halves of a surrogate pair, which the core refuses.
-    if (start > 0 && _isTrail(stored, start)) start--;
-    if (end > 0 && _isTrail(stored, stored.length - end)) end--;
     _stored = text;
-    _apply(
-      mutation(
-        BridgeMutationKind.editText,
-        page: _page,
-        block: _block,
-        at: start,
-        delete: stored.length - start - end,
-        text: text.substring(start, text.length - end),
-      ),
-    );
+    _apply(textEdit(_page, _block, stored, text));
   }
-
-  static bool _isTrail(String text, int at) =>
-      at < text.length && (text.codeUnitAt(at) & 0xFC00) == 0xDC00;
 
   /// Applies `change` after earlier ones; a refusal shows the stored text again (rule 7).
   Future<BridgeApplied?> _apply(BridgeMutation change) async {
@@ -268,6 +288,12 @@ class _TextBlockState extends State<TextBlock> {
   KeyEventResult _key(KeyEvent event) {
     if (event is KeyUpEvent || _composing || _stored == null) {
       return KeyEventResult.ignored;
+    }
+    // A second ⏎ before the first split arrived is dropped rather than typed as a line.
+    if (_splitting) {
+      return event.logicalKey == LogicalKeyboardKey.enter
+          ? KeyEventResult.handled
+          : KeyEventResult.ignored;
     }
     final keys = HardwareKeyboard.instance;
     final plain =
@@ -350,24 +376,34 @@ class _TextBlockState extends State<TextBlock> {
       _restyle(BridgeTextStyle.paragraph);
       return;
     }
-    if (at > 0) {
-      _stored = text.substring(0, at);
-      _set(_stored!, at);
-    }
+    final split = _apply(
+      mutation(
+        BridgeMutationKind.splitTextBlock,
+        page: _page,
+        block: _block,
+        view: widget.view.id,
+        at: at,
+        style: nextStyle(_style),
+      ),
+    );
+    // At the start the text stays here, below a new empty Text Block, and typing goes on
+    // here.
+    if (at == 0) return;
+    final head = text.substring(0, at);
+    _stored = head;
+    _set(head, at);
+    _splitting = true;
     unawaited(
-      _apply(
-        mutation(
-          BridgeMutationKind.splitTextBlock,
-          page: _page,
-          block: _block,
-          view: widget.view.id,
-          at: at,
-          style: nextStyle(_style),
-        ),
-      ).then((applied) {
-        // At the start the text stays here, below a new empty Text Block.
-        if (applied?.view case final view? when at > 0) {
-          widget.views.caret.value = Caret(view, 0);
+      split.then((applied) {
+        _splitting = false;
+        if (!mounted) return;
+        final typed = _text.text;
+        final extra = typed.startsWith(head)
+            ? typed.substring(head.length)
+            : '';
+        if (typed != head) _set(head, head.length);
+        if (applied?.view case final view?) {
+          widget.views.caret.value = Caret(view, 0, insert: extra);
         }
       }),
     );
@@ -443,6 +479,7 @@ class _TextBlockState extends State<TextBlock> {
     Widget text = TextField(
       key: _field,
       controller: _text,
+      readOnly: _stored == null,
       focusNode: _focus,
       maxLines: null,
       keyboardType: TextInputType.multiline,
