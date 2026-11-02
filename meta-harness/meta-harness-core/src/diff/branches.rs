@@ -1,7 +1,9 @@
 //! The checkout's branch and its upstream, listing, switching and creating branches, and
 //! fetching the upstream's remote ([mockups](../../../../docs/design/mockups/liquid-git-branches.html)).
 
-use super::process::{NO_PROMPTS, git_config, timestamp_ms, user_git};
+use super::process::{
+    NO_PROMPTS, git_bytes, git_config, git_ref_output, ref_text, timestamp_ms, user_git,
+};
 use super::stash::listed_files;
 use super::*;
 
@@ -69,7 +71,7 @@ impl WorkingTree {
     pub async fn status(&self) -> Result<GitStatus, DiffError> {
         let _busy = self.busy.lock().await;
         let index = self.copy_index().await?;
-        let output = git(
+        let output = git_bytes(
             &self.root,
             &self.env(&index),
             &[
@@ -91,9 +93,12 @@ impl WorkingTree {
             behind: 0,
             changed: 0,
         };
-        let mut records = output.split('\0').filter(|record| !record.is_empty());
+        let mut records = output
+            .split(|byte| *byte == 0)
+            .filter(|record| !record.is_empty());
         while let Some(record) = records.next() {
-            if let Some(header) = record.strip_prefix("# ") {
+            if let Some(header) = record.strip_prefix(b"# ") {
+                let header = ref_text(header)?;
                 let (key, value) = header.split_once(' ').unwrap_or((header, ""));
                 match key {
                     "branch.oid" if value != "(initial)" => status.commit = Some(value.to_owned()),
@@ -116,10 +121,10 @@ impl WorkingTree {
                 continue;
             }
             // A renamed file's record is followed by its old path.
-            if record.starts_with("2 ") {
+            if record.starts_with(b"2 ") {
                 records.next();
             }
-            if !record.starts_with("! ") {
+            if !record.starts_with(b"! ") {
                 status.changed += 1;
             }
         }
@@ -130,7 +135,7 @@ impl WorkingTree {
     /// recently committed first.
     pub async fn branches(&self) -> Result<Vec<Branch>, DiffError> {
         let count = format!("--count={MAX_BRANCHES}");
-        let listed = git(
+        let listed = git_bytes(
             &self.root,
             &[],
             &[
@@ -147,8 +152,11 @@ impl WorkingTree {
         .await?;
         let stashed = self.stashed_branches().await?;
         let rows: Vec<Vec<&str>> = listed
-            .lines()
+            .split(|byte| *byte == b'\n')
+            // The menu omits refs that its String identifiers cannot name exactly.
+            .filter_map(|line| std::str::from_utf8(line).ok())
             .map(|line| line.split('\0').collect())
+            .filter(|row: &Vec<&str>| row.len() == 5)
             .collect();
         let tracked: HashSet<&str> = rows
             .iter()
@@ -280,14 +288,10 @@ impl WorkingTree {
 
     /// What HEAD names, a branch or `HEAD` itself, and the commit it is at.
     async fn head(&self) -> Result<(String, Option<String>), DiffError> {
-        let name = git(
-            &self.root,
-            &[],
-            &["rev-parse", "--symbolic-full-name", "HEAD"],
-        )
-        .await;
-        // Before the first commit HEAD names a branch that does not exist yet.
-        let name = name.unwrap_or_default();
+        let name = self.branch().await?.map_or_else(
+            || "HEAD".to_owned(),
+            |branch| format!("refs/heads/{branch}"),
+        );
         Ok((name, self.resolve("HEAD").await?))
     }
 
@@ -299,9 +303,8 @@ impl WorkingTree {
             return Ok(false);
         };
         let reference = format!("refs/heads/{branch}");
-        let remote = git(
+        let remote = git_ref_output(
             &self.root,
-            &[],
             &[
                 "for-each-ref",
                 "--format=%(upstream:remotename)",
@@ -362,7 +365,9 @@ impl WorkingTree {
             // for an explicit refspec. symbolic-ref resolves the full chain by default.
             if !destination.contains('*') {
                 let target =
-                    match git(&self.root, &[], &["symbolic-ref", "--quiet", destination]).await {
+                    match git_ref_output(&self.root, &["symbolic-ref", "--quiet", destination])
+                        .await
+                    {
                         Ok(target) => target,
                         Err(DiffError::Git(reason)) if reason.is_empty() => continue,
                         Err(error) => return Err(error),

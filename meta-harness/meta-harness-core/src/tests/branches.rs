@@ -2729,3 +2729,68 @@ fn legacy_branch_stashes_remain_listed_restorable_and_discardable() {
         }
     });
 }
+
+#[test]
+fn non_utf8_refs_never_collide_with_replacement_character_branches() {
+    run(async {
+        let repo = Repo::new("branch-encoding-identity");
+        repo.git(&["branch", "-M", "main"]);
+        let id = repo.git(&["rev-parse", "HEAD"]);
+        let mut packed = Vec::new();
+        for prefix in ["refs/heads/", "refs/remotes/origin/"] {
+            for suffix in [b"\xff".as_slice(), "\u{fffd}".as_bytes()] {
+                packed.extend_from_slice(format!("{} {prefix}bad-", id.trim()).as_bytes());
+                packed.extend_from_slice(suffix);
+                packed.push(b'\n');
+            }
+        }
+        std::fs::write(repo.path().join(".git/packed-refs"), packed).expect("byte-distinct refs");
+        let checkpoints = Checkpoints::new(repo.path());
+
+        let listed = checkpoints
+            .branches()
+            .await
+            .expect("representable branches still usable");
+
+        let names: Vec<_> = listed
+            .branches
+            .iter()
+            .map(|branch| (branch.name.as_str(), branch.remote))
+            .collect();
+        assert_eq!(
+            names,
+            [
+                ("bad-\u{fffd}", false),
+                ("main", false),
+                ("origin/bad-\u{fffd}", true)
+            ]
+        );
+        checkpoints
+            .switch_branch(&local("bad-\u{fffd}"), Changes::Bring)
+            .await
+            .expect("exact branch selected");
+        assert_eq!(
+            repo.git(&["symbolic-ref", "HEAD"]),
+            "refs/heads/bad-\u{fffd}\n"
+        );
+
+        std::fs::write(repo.path().join(".git/HEAD"), b"ref: refs/heads/bad-\xff\n")
+            .expect("non-UTF-8 current ref");
+        let tree = crate::diff::WorkingTree::open(repo.path())
+            .await
+            .expect("tree");
+        for read in [
+            tree.branch().await.map(|_| ()),
+            checkpoints.status().await.map(|_| ()),
+        ] {
+            assert!(
+                matches!(read, Err(DiffError::Git(ref reason)) if reason.contains("UTF-8")),
+                "{read:?}"
+            );
+        }
+        assert_eq!(
+            std::fs::read(repo.path().join(".git/HEAD")).expect("HEAD bytes"),
+            b"ref: refs/heads/bad-\xff\n"
+        );
+    });
+}

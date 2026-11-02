@@ -29,7 +29,7 @@ pub use stash::Stash;
 #[cfg(test)]
 pub(crate) use stash::{before_drop, before_stash_identity};
 
-use process::{Git, git, git_command, git_path, git_path_output, unreadable};
+use process::{Git, git, git_command, git_path, git_path_output, git_ref_output, unreadable};
 #[cfg(test)]
 pub(crate) use revert::holds_repository;
 
@@ -367,7 +367,7 @@ impl WorkingTree {
     /// The branch checked out, or none when HEAD names a commit.
     pub async fn branch(&self) -> Result<Option<String>, DiffError> {
         // The full name, as `--short` prints `heads/main` beside a tag `main`.
-        match git(&self.root, &[], &["symbolic-ref", "--quiet", "HEAD"]).await {
+        match git_ref_output(&self.root, &["symbolic-ref", "--quiet", "HEAD"]).await {
             Ok(name) => {
                 let name = name.trim_end_matches('\n');
                 Ok(Some(

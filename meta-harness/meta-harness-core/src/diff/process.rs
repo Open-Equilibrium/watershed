@@ -30,7 +30,28 @@ pub(super) async fn git(
     env: &[(&str, OsString)],
     args: &[&str],
 ) -> Result<String, DiffError> {
-    Ok(String::from_utf8_lossy(&output(git_command(dir, env, args), false).await?).into_owned())
+    Ok(String::from_utf8_lossy(&git_bytes(dir, env, args).await?).into_owned())
+}
+
+/// Bounded machine output whose individual records may need exact decoding.
+pub(super) async fn git_bytes(
+    dir: &Path,
+    env: &[(&str, OsString)],
+    args: &[&str],
+) -> Result<Vec<u8>, DiffError> {
+    output(git_command(dir, env, args), false).await
+}
+
+/// Decodes ref identities without aliasing byte-distinct branches.
+pub(super) fn ref_text(bytes: &[u8]) -> Result<&str, DiffError> {
+    std::str::from_utf8(bytes).map_err(|_| {
+        DiffError::Git("Git returned an unsupported non-UTF-8 ref identity".to_owned())
+    })
+}
+
+/// Queries ref identities that must be represented exactly by the String API.
+pub(super) async fn git_ref_output(dir: &Path, args: &[&str]) -> Result<String, DiffError> {
+    ref_text(&git_bytes(dir, &[], args).await?).map(str::to_owned)
 }
 
 /// Reads Git configuration exactly, treating only its silent missing-key exit as empty output.
