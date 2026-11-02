@@ -2953,3 +2953,219 @@ fn an_external_commit_during_a_refused_switch_preserves_both_stashes() {
         );
     });
 }
+
+#[test]
+fn restoring_a_stash_never_replaces_a_dirty_submodule() {
+    run(async {
+        let sub = Repo::new("restore-submodule-inner");
+        let repo = Repo::new("restore-submodule-outer");
+        repo.git(&["branch", "-M", "main"]);
+        repo.git(&[
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            "-q",
+            &sub.path().display().to_string(),
+            "sub",
+        ]);
+        repo.git(&["commit", "-qm", "submodule"]);
+        repo.git(&["branch", "other"]);
+        std::fs::remove_dir_all(repo.path().join("sub")).expect("remove checkout");
+        repo.write("sub", "saved file instead of submodule\n");
+        repo.git(&["add", "sub"]);
+        let checkpoints = Checkpoints::new(repo.path());
+        checkpoints
+            .switch_branch(&local("other"), leave_on(&checkpoints).await)
+            .await
+            .expect("left");
+        checkpoints
+            .switch_branch(&local("main"), Changes::Bring)
+            .await
+            .expect("back");
+        repo.git(&[
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "update",
+            "--init",
+            "-q",
+        ]);
+        let inner = Repo(repo.path().join("sub"));
+        inner.write("a.txt", "edited submodule\n");
+        inner.write("untracked.txt", "untracked submodule\n");
+        let head = inner.git(&["rev-parse", "HEAD"]);
+        let index = repo.git(&["write-tree"]);
+        let saved = stash_of(&checkpoints).await;
+        assert_eq!(checkpoints.status().await.expect("status").changed, 0);
+
+        let restored = checkpoints.restore_stash(&saved).await;
+
+        assert!(
+            matches!(restored, Err(DiffError::WouldOverwrite(ref paths)) if paths == &["sub"]),
+            "{restored:?}"
+        );
+        assert_eq!(read(&inner, "a.txt"), "edited submodule\n");
+        assert_eq!(read(&inner, "untracked.txt"), "untracked submodule\n");
+        assert_eq!(inner.git(&["rev-parse", "HEAD"]), head);
+        assert_eq!(repo.git(&["write-tree"]), index);
+        assert_eq!(stash_of(&checkpoints).await, saved);
+        std::mem::forget(inner);
+    });
+}
+
+#[test]
+fn a_branch_named_detached_keeps_its_identity_and_stash() {
+    run(async {
+        let repo = Repo::new("branch-detached-name");
+        repo.git(&["branch", "-M", "(detached)"]);
+        repo.write("a.txt", "stashed\n");
+        repo.git(&["stash", "push", "-qm", "Liquid: changes left on (detached)"]);
+        let saved = repo.git(&["rev-parse", "refs/stash"]).trim().to_owned();
+        let checkpoints = Checkpoints::new(repo.path());
+
+        let (status, stash) = checkpoints.status_with_stash().await.expect("status");
+
+        assert_eq!(status.branch.as_deref(), Some("(detached)"));
+        assert_eq!(status.changed, 0);
+        let stash = stash.expect("branch stash");
+        assert_eq!(stash.id, saved);
+        assert!(stash.current);
+        repo.git(&["switch", "--detach", "-q", "HEAD"]);
+        let (status, stash) = checkpoints
+            .status_with_stash()
+            .await
+            .expect("detached status");
+        assert!(status.branch.is_none());
+        assert!(stash.is_none());
+    });
+}
+
+#[test]
+fn a_refused_switch_never_restores_its_stash_over_a_dirty_submodule() {
+    run(async {
+        let sub = Repo::new("rollback-submodule-inner");
+        let repo = Repo::new("rollback-submodule-outer");
+        repo.git(&["branch", "-M", "main"]);
+        repo.git(&[
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            "-q",
+            &sub.path().display().to_string(),
+            "sub",
+        ]);
+        repo.git(&["commit", "-qm", "submodule"]);
+        let head = repo.git(&["rev-parse", "HEAD"]);
+        let index = repo.git(&["write-tree"]);
+        let other = Repo(repo.path().with_extension("worktree"));
+        let _ = std::fs::remove_dir_all(other.path());
+        repo.git(&[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "other",
+            other.path().to_str().unwrap(),
+        ]);
+        std::fs::remove_dir_all(repo.path().join("sub")).expect("remove checkout");
+        repo.write("sub", "saved file instead of submodule\n");
+        repo.git(&["add", "sub"]);
+        let checkpoints = Checkpoints::new(repo.path());
+        let root = repo.path().to_owned();
+        crate::diff::before_stash_identity(repo.path(), move || {
+            let external = Repo(root);
+            external.git(&[
+                "-c",
+                "protocol.file.allow=always",
+                "submodule",
+                "update",
+                "--init",
+                "-q",
+            ]);
+            external.write("sub/a.txt", "edited submodule\n");
+            external.write("sub/untracked.txt", "untracked submodule\n");
+            std::mem::forget(external);
+        });
+
+        let switched = checkpoints
+            .switch_branch(&local("other"), leave_on(&checkpoints).await)
+            .await;
+
+        assert!(
+            matches!(switched, Err(DiffError::WouldOverwrite(ref paths)) if paths == &["sub"]),
+            "{switched:?}"
+        );
+        assert_eq!(repo.git(&["branch", "--show-current"]), "main\n");
+        assert_eq!(repo.git(&["rev-parse", "HEAD"]), head);
+        assert_eq!(repo.git(&["write-tree"]), index);
+        assert_eq!(read(&repo, "sub/a.txt"), "edited submodule\n");
+        assert_eq!(read(&repo, "sub/untracked.txt"), "untracked submodule\n");
+        let saved = stash_of(&checkpoints).await;
+        assert_eq!(
+            repo.git(&["show", &format!("{saved}:sub")]),
+            "saved file instead of submodule\n"
+        );
+    });
+}
+
+#[test]
+fn automatic_fetch_never_writes_through_a_linked_remote_ref_directory() {
+    use std::os::unix::fs::symlink;
+
+    run(async {
+        for (case, directory, target, spec) in [
+            (
+                "root",
+                ".git/refs/remotes",
+                "heads",
+                "+refs/heads/main:refs/remotes/main",
+            ),
+            (
+                "child",
+                ".git/refs/remotes/aliased",
+                "../heads",
+                "+refs/heads/main:refs/remotes/aliased/main",
+            ),
+            (
+                "wildcard",
+                ".git/refs/remotes/aliased",
+                "../heads",
+                "+refs/heads/*:refs/remotes/aliased/*",
+            ),
+        ] {
+            let clone = Clone::new(&format!("fetch-directory-alias-{case}"));
+            let repo = &clone.repo;
+            repo.git(&["config", "user.name", "Test"]);
+            repo.git(&["config", "user.email", "test@example.com"]);
+            repo.write("a.txt", "local commit\n");
+            repo.git(&["commit", "-qam", "local"]);
+            let head = repo.git(&["rev-parse", "HEAD"]);
+            let index = std::fs::read(repo.path().join(".git/index")).expect("index");
+            clone.commit_upstream("upstream commit\n");
+            repo.git(&["config", "remote.origin.fetch", spec]);
+            let directory = repo.path().join(directory);
+            if directory.is_dir() {
+                std::fs::remove_dir_all(&directory).expect("remove remote refs");
+            }
+            symlink(target, &directory).expect("link remote ref directory");
+            let checkpoints = Checkpoints::new(repo.path());
+
+            let fetched = checkpoints.fetch().await;
+
+            assert!(
+                matches!(fetched, Err(DiffError::Git(_))),
+                "{case}: {fetched:?}"
+            );
+            assert_eq!(repo.git(&["rev-parse", "HEAD"]), head, "{case}");
+            assert_eq!(repo.git(&["rev-parse", "refs/heads/main"]), head, "{case}");
+            assert_eq!(
+                std::fs::read(repo.path().join(".git/index")).expect("index"),
+                index,
+                "{case}"
+            );
+            assert_eq!(read(repo, "a.txt"), "local commit\n", "{case}");
+        }
+    });
+}

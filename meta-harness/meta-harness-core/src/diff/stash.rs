@@ -372,6 +372,12 @@ impl WorkingTree {
         {
             return Err(DiffError::NoStash);
         }
+        self.pop(id).await
+    }
+
+    /// Applies a stash only at its base tree, without overwriting changes, ignored files or
+    /// repositories. Failed-switch rollback uses the same preflight as an explicit restore.
+    pub(super) async fn apply_stash(&self, id: &str) -> Result<(), DiffError> {
         // As GitHub Desktop, only into a checkout without changes: Git restores a stash only in
         // part when one of its files changed meanwhile, and keeps it.
         let changed = self.status().await?.changed;
@@ -405,6 +411,7 @@ impl WorkingTree {
         // contents too. Check both trees because --index restores saved index-only changes.
         for changes in [&index_changes, &tracked_changes] {
             in_the_way.extend(self.ignored_in_the_way(changes, &[]).await?);
+            in_the_way.extend(self.repositories_in_the_way(changes));
         }
         let stash_changes = self.changes(&base, &tracked, Whitespace::Shown).await?;
         // Only a file still tracked in HEAD can be removed to make way for untracked files.
@@ -423,7 +430,33 @@ impl WorkingTree {
         if !in_the_way.is_empty() {
             return Err(DiffError::WouldOverwrite(in_the_way.into_iter().collect()));
         }
-        self.pop(id).await
+        // The index can hold content absent from the working tree; dropping it would lose it.
+        let error = match user_git(&self.root, &["stash", "apply", "--quiet", "--index", id]).await
+        {
+            Ok(_) => return Ok(()),
+            Err(error) => error,
+        };
+        let conflicts = git(
+            &self.root,
+            &[],
+            &["diff", "--name-only", "-z", "--diff-filter=U"],
+        )
+        .await?;
+        // None were unresolved before, so each conflict is the stash's.
+        let conflicts = paths(&conflicts);
+        if !conflicts.is_empty() {
+            return Err(DiffError::RestoredWithConflicts(conflicts));
+        }
+        Err(match error {
+            DiffError::Git(reason) if reason.contains("would be overwritten") => {
+                DiffError::WouldOverwrite(listed_files(&reason))
+            }
+            // Git may have restored some files before it failed.
+            DiffError::Git(reason) => DiffError::Git(format!(
+                "{reason}; Git kept the stash, and some of its files may already be restored"
+            )),
+            error => error,
+        })
     }
 
     /// The ignored paths a tracked-tree write would overwrite or remove, using its source
@@ -462,38 +495,12 @@ impl WorkingTree {
         ))
     }
 
-    /// Pops the stash commit `id`, wherever it now is in the list.
-    /// Applies by the commit `id`, so no stash another Git stores meanwhile is applied, then
-    /// drops it as [`Self::drop_stash`] does.
+    /// Applies the stash commit `id`, wherever it now is in the list, then drops it as
+    /// [`Self::drop_stash`] does.
     pub(super) async fn pop(&self, id: &str) -> Result<(), DiffError> {
         self.place_of(id).await?;
-        // The index can hold content absent from the working tree; dropping it would lose it.
-        let error = match user_git(&self.root, &["stash", "apply", "--quiet", "--index", id]).await
-        {
-            Ok(_) => return self.drop_stash(id).await,
-            Err(error) => error,
-        };
-        let conflicts = git(
-            &self.root,
-            &[],
-            &["diff", "--name-only", "-z", "--diff-filter=U"],
-        )
-        .await?;
-        // None were unresolved before, so each conflict is the stash's.
-        let conflicts = paths(&conflicts);
-        if !conflicts.is_empty() {
-            return Err(DiffError::RestoredWithConflicts(conflicts));
-        }
-        Err(match error {
-            DiffError::Git(reason) if reason.contains("would be overwritten") => {
-                DiffError::WouldOverwrite(listed_files(&reason))
-            }
-            // Git may have restored some files before it failed.
-            DiffError::Git(reason) => DiffError::Git(format!(
-                "{reason}; Git kept the stash, and some of its files may already be restored"
-            )),
-            error => error,
-        })
+        self.apply_stash(id).await?;
+        self.drop_stash(id).await
     }
 
     /// Deletes the stashed changes `id` left on a branch.

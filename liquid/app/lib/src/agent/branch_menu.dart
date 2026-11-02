@@ -200,21 +200,21 @@ Future<void> _switch(
     if (choice == null || !context.mounted) return;
     leave = choice;
   }
-  final outcome = await switchTo(leave);
-  if (outcome?.kind != BridgeGitOutcomeKind.wouldOverwrite ||
-      !context.mounted) {
-    return;
+  var outcome = await switchTo(leave);
+  while (outcome?.kind == BridgeGitOutcomeKind.wouldOverwrite) {
+    if (!context.mounted) return;
+    final again = await showDialog<bool>(
+      context: context,
+      builder: (context) => _RefusedDialog(
+        target: branch.shown,
+        files: outcome!.files,
+        left: left,
+        stashed: stashed,
+      ),
+    );
+    if (again != true || !context.mounted) return;
+    outcome = await switchTo(true);
   }
-  final again = await showDialog<bool>(
-    context: context,
-    builder: (context) => _RefusedDialog(
-      target: branch.shown,
-      files: outcome!.files,
-      left: left,
-      stashed: stashed,
-    ),
-  );
-  if (again == true) await switchTo(true);
 }
 
 /// The searchable list of local and remote branches, with "Create branch" for a new name

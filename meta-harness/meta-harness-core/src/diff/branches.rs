@@ -102,8 +102,13 @@ impl WorkingTree {
                 let (key, value) = header.split_once(' ').unwrap_or((header, ""));
                 match key {
                     "branch.oid" if value != "(initial)" => status.commit = Some(value.to_owned()),
-                    "branch.head" if value != "(detached)" => {
-                        status.branch = Some(value.to_owned());
+                    "branch.head" => {
+                        status.branch = if value == "(detached)" {
+                            // Git permits a branch with the same name as this sentinel.
+                            self.branch().await?.filter(|branch| branch == value)
+                        } else {
+                            Some(value.to_owned())
+                        };
                     }
                     "branch.upstream" => status.upstream = Some(value.to_owned()),
                     "branch.ab" => {
@@ -242,7 +247,7 @@ impl WorkingTree {
             // Git did not switch, so the changes go back where they were.
             if earlier.as_ref() == Some(left) {
                 // An identical save reused the existing stash and added no reflog entry.
-                user_git(&self.root, &["stash", "apply", "--quiet", "--index", left]).await?;
+                self.apply_stash(left).await?;
             } else {
                 self.pop(left).await?;
             }
@@ -377,6 +382,7 @@ impl WorkingTree {
                 "Git remote groups cannot be expanded by automatic fetch.".to_owned(),
             ));
         }
+        check_remote_ref_storage(&self.common)?;
         // A fetch writes where the remote's refspecs say, which can be a local branch.
         let key = format!("remote.{remote}.fetch");
         let specs = git_config(&self.root, &["--get-all", &key]).await?;
@@ -432,6 +438,51 @@ impl WorkingTree {
         })?;
         Ok(true)
     }
+}
+
+/// Loose remote refs must stay in ordinary directories: a filesystem link can redirect a
+/// correctly named remote ref into a local branch. Bound the no-follow walk for wildcard
+/// destinations too, including directories that Git's ref listing does not traverse.
+fn check_remote_ref_storage(common: &Path) -> Result<(), DiffError> {
+    const MAX_ENTRIES: usize = 100_000;
+    let unsupported = || {
+        DiffError::Git(
+            "Automatic fetch cannot use symbolic links or special files in remote-ref \
+             storage. Fetch with Git instead."
+                .to_owned(),
+        )
+    };
+    let refs = common.join("refs");
+    let remotes = refs.join("remotes");
+    for directory in [&refs, &remotes] {
+        match std::fs::symlink_metadata(directory) {
+            Ok(metadata) if metadata.is_dir() => {}
+            Ok(_) => return Err(unsupported()),
+            Err(error) if error.kind() == ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(DiffError::Io(error)),
+        }
+    }
+    let mut directories = vec![remotes];
+    let mut entries = 0;
+    while let Some(directory) = directories.pop() {
+        for entry in std::fs::read_dir(directory).map_err(DiffError::Io)? {
+            let entry = entry.map_err(DiffError::Io)?;
+            entries += 1;
+            if entries > MAX_ENTRIES {
+                return Err(DiffError::Git(format!(
+                    "Automatic fetch cannot inspect more than {MAX_ENTRIES} remote-ref entries. \
+                     Fetch with Git instead."
+                )));
+            }
+            let kind = entry.file_type().map_err(DiffError::Io)?;
+            if kind.is_dir() {
+                directories.push(entry.path());
+            } else if !kind.is_file() {
+                return Err(unsupported());
+            }
+        }
+    }
+    Ok(())
 }
 
 /// `name`, unless it could be read as an option or names nothing.

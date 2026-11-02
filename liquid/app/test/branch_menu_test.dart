@@ -356,6 +356,41 @@ void main() {
     await tester.pump(const Duration(seconds: 7));
   });
 
+  testWidgets('a refused Leave retry keeps its current refusal visible', (
+    tester,
+  ) async {
+    await show(tester);
+    backend.outcome = outcomeOf(
+      BridgeGitOutcomeKind.wouldOverwrite,
+      files: ['src/routes/login.ts'],
+    );
+    await openMenu(tester);
+    await tester.tap(find.text('feature/token-bucket'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Bring my changes to feature/token-bucket'));
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    backend.outcome = outcomeOf(
+      BridgeGitOutcomeKind.wouldOverwrite,
+      files: ['config.local'],
+    );
+
+    await tester.tap(find.text('Leave them on main and switch'));
+    await tester.pumpAndSettle();
+
+    expect(backend.calls.last, 'switch feature/token-bucket leaving changes');
+    expect(
+      find.text('Could not switch to feature/token-bucket'),
+      findsOneWidget,
+    );
+    expect(find.text('config.local'), findsOneWidget);
+    expect(find.text('src/routes/login.ts'), findsNothing);
+    await tester.tap(find.text('Close'));
+    await tester.pumpAndSettle();
+    await tester.pump(const Duration(seconds: 7));
+  });
+
   testWidgets('no branch is chosen while an agent runs in the checkout', (
     tester,
   ) async {
