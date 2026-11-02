@@ -1,4 +1,4 @@
-//! A Page's View order, kept beside its open document so that placing a View or reading a
+//! A Page's View order, kept beside its loaded document so that placing a View or reading a
 //! window of the order never reads every View from the document.
 
 use std::collections::HashSet;
