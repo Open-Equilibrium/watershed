@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/rust/api/events.dart';
 import 'package:liquid/src/rust/api/git.dart';
@@ -21,6 +23,43 @@ void main() {
   });
 
   int fetches() => backend.calls.where((call) => call == 'fetch').length;
+
+  testWidgets('a write waits for the latest read to publish its own switch', (
+    tester,
+  ) async {
+    final pending = _PendingStatusBackend();
+    final state = GitState(
+      pending,
+      notify: (level, text) => notices.add((level, text)),
+    );
+    await state.refresh();
+    pending.hold = true;
+    var completed = false;
+    final write = state.switchTo(
+      branchOf('feature'),
+      leaveChanges: false,
+      fromBranch: null,
+      replacingStash: null,
+    )..then((_) => completed = true);
+    await tester.pump();
+    expect(pending.reads, hasLength(1));
+    final later = state.refresh();
+    expect(pending.reads, hasLength(2));
+    pending.reads[0].complete(gitStatusOf(branch: 'feature'));
+    await tester.pump();
+    expect(
+      completed,
+      isFalse,
+      reason: 'the superseding read has not published',
+    );
+    expect(notices, isEmpty);
+    pending.reads[1].complete(gitStatusOf(branch: 'feature'));
+    await tester.pump();
+    await write;
+    await later;
+    expect(state.status.value?.branch, 'feature');
+    expect(notices, [(BridgeLevel.info, 'Switched to feature.')]);
+  });
 
   test(
     'an external switch cannot pair another branch stash with the status',
@@ -320,6 +359,19 @@ class _SwitchingBackend extends FakeBackend {
       files: [],
     );
     return before;
+  }
+}
+
+class _PendingStatusBackend extends FakeBackend {
+  bool hold = false;
+  final reads = <Completer<BridgeGitStatus?>>[];
+
+  @override
+  Future<BridgeGitStatus?> gitStatus() {
+    if (!hold) return super.gitStatus();
+    final read = Completer<BridgeGitStatus?>();
+    reads.add(read);
+    return read.future;
   }
 }
 

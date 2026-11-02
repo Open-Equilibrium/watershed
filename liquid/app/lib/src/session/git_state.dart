@@ -50,6 +50,7 @@ class GitState {
 
   /// Counts the reads started, so only the latest one sets the state.
   int _reads = 0;
+  Future<void>? _latestRefresh;
 
   /// Whether a Git write of this window is running, so its own switch is not reported as one
   /// outside Liquid.
@@ -104,8 +105,9 @@ class GitState {
   }
 
   /// Reads the branch, its counts and its stash again.
-  Future<void> refresh() async {
-    final read = ++_reads;
+  Future<void> refresh() => _latestRefresh = _refresh(++_reads);
+
+  Future<void> _refresh(int read) async {
     final before = status.value?.branch;
     try {
       final now = await _backend.gitStatus();
@@ -140,6 +142,17 @@ class GitState {
       }
     } on Object catch (error) {
       if (read == _reads) problem.value = '$error';
+    }
+  }
+
+  /// Waits until the most recent read has published before settling a write.
+  Future<void> _refreshAfterWrite() async {
+    var pending = refresh();
+    while (true) {
+      await pending;
+      final latest = _latestRefresh!;
+      if (identical(pending, latest)) return;
+      pending = latest;
     }
   }
 
@@ -215,10 +228,10 @@ class GitState {
       } on Object catch (error) {
         notify(BridgeLevel.error, 'Could not $action: $error');
         // Git may have changed something before it failed.
-        await refresh();
+        await _refreshAfterWrite();
         return null;
       }
-      await refresh();
+      await _refreshAfterWrite();
       final files = outcome.files.join(', ');
       switch (outcome.kind) {
         case BridgeGitOutcomeKind.done:
