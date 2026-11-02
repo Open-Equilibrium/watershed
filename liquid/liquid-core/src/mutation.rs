@@ -24,7 +24,7 @@ pub enum Origin {
 /// One write to the Workspace. Text positions count UTF-16 code units, as Dart and
 /// JavaScript do. A Page-scoped mutation names the Page whose document holds its target:
 /// a Block's home Page.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Mutation {
     /// Adds an area after the existing ones.
     CreateArea {
@@ -144,6 +144,8 @@ pub enum Error {
     Random,
     /// The CRDT library failed; the message is its own.
     Document(String),
+    /// The store failed, so nothing was acknowledged; the message is the store's own.
+    Storage(String),
 }
 
 impl From<automerge::AutomergeError> for Error {

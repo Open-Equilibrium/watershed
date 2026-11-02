@@ -1,6 +1,7 @@
 //! Observation workload for the Workspace core's mutation pipeline (PERFORMANCE.md, Liquid):
-//! typing and Page building through the pipeline, one recorded Action per request. It prints
-//! a summary and never compares with a threshold. Run from the repository root:
+//! typing and Page building through the pipeline, one recorded Action per request, with an
+//! in-memory store. It prints a summary and never compares with a threshold. Run from the
+//! repository root:
 //!
 //! ```sh
 //! cargo build --release -p liquid-core --example pipeline_observe
@@ -9,7 +10,9 @@
 
 use std::time::{Duration, Instant};
 
-use liquid_core::{Actor, Created, Mutation, Origin, PageId, PersonId, Request, Workspace};
+use liquid_core::{
+    Actor, Created, MemoryStore, Mutation, Origin, PageId, PersonId, Request, Workspace,
+};
 
 const KEYSTROKES: usize = 10_000;
 const BLOCKS: usize = 1_000;
@@ -22,7 +25,7 @@ fn request(mutation: Mutation) -> Request {
     }
 }
 
-fn page(workspace: &mut Workspace) -> PageId {
+fn page(workspace: &mut Workspace<MemoryStore>) -> PageId {
     let Some(Created::Area(area)) = workspace
         .apply(request(Mutation::CreateArea {
             name: "Trips".into(),
@@ -56,7 +59,8 @@ fn summary(name: &str, mut times: Vec<Duration>) {
 
 fn main() {
     // Typing: one Action per keystroke, the worst case for an editor that groups keystrokes.
-    let mut workspace = Workspace::create(PersonId::new("observer")).unwrap();
+    let mut workspace =
+        Workspace::create(PersonId::new("observer"), MemoryStore::default()).unwrap();
     let lisbon = page(&mut workspace);
     let add = Mutation::AddTextBlock {
         page: lisbon.clone(),
@@ -85,7 +89,8 @@ fn main() {
     );
 
     // A long Page: each Text Block added after the last one.
-    let mut workspace = Workspace::create(PersonId::new("observer")).unwrap();
+    let mut workspace =
+        Workspace::create(PersonId::new("observer"), MemoryStore::default()).unwrap();
     let lisbon = page(&mut workspace);
     let mut after = None;
     let mut times = Vec::with_capacity(BLOCKS);
@@ -107,7 +112,7 @@ fn main() {
         times,
     );
     let start = Instant::now();
-    let views = workspace.views(&lisbon);
+    let views = workspace.views(&lisbon).unwrap();
     println!(
         "reading that Page's {} Views in order: {:.2} ms",
         views.len(),

@@ -11,8 +11,8 @@ use std::collections::{HashMap, HashSet};
 
 use automerge::transaction::Transactable;
 use automerge::{
-    ActorId, AutoCommit, ObjId, ObjType, ROOT, ReadDoc, ScalarValue, ScalarValueRef, TextEncoding,
-    Value, ValueRef,
+    ActorId, AutoCommit, LoadOptions, ObjId, ObjType, ROOT, ReadDoc, ScalarValue, ScalarValueRef,
+    TextEncoding, Value, ValueRef,
 };
 
 use crate::{AreaId, BlockId, Error, PageId, ViewId};
@@ -60,10 +60,16 @@ pub struct View {
     pub block: BlockId,
 }
 
-/// A new document for this device. Text positions count UTF-16 code units; loading a
-/// saved document must ask for the same encoding.
+/// A new document for this device. Text positions count UTF-16 code units, also when
+/// [`load`] reads it back.
 pub(crate) fn document(device: &ActorId) -> AutoCommit {
     AutoCommit::new_with_encoding(TextEncoding::Utf16CodeUnit).with_actor(device.clone())
+}
+
+/// A stored document, loaded for this device.
+pub(crate) fn load(bytes: &[u8], device: &ActorId) -> Result<AutoCommit, Error> {
+    let options = LoadOptions::new().text_encoding(TextEncoding::Utf16CodeUnit);
+    Ok(AutoCommit::load_with_options(bytes, options)?.with_actor(device.clone()))
 }
 
 /// Creates the empty top-level maps of a new document.
