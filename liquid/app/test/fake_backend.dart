@@ -358,7 +358,7 @@ class FakeBackend implements SessionBackend {
     committedPaths = paths;
     committedMessage = message;
     committedBranch = branch;
-    return outcome.kind == BridgeGitOutcomeKind.done
+    return outcome.kind == BridgeGitOutcomeKind.done && outcome.commit == null
         ? BridgeGitOutcome(
             kind: BridgeGitOutcomeKind.done,
             files: [],

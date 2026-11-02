@@ -22,6 +22,22 @@ void main() {
     );
   });
 
+  test('a completed commit reports failed inspection as a warning', () async {
+    backend.outcome = const BridgeGitOutcome(
+      kind: BridgeGitOutcomeKind.done,
+      files: [],
+      running: [],
+      detail: 'Could not inspect the completed commit: unreadable index',
+      commit: BridgeCommit(branch: 'main', subject: null, count: 1),
+    );
+    final result = await git.commit(['a.txt'], 'Subject', snapshot: 'snapshot');
+    expect(result!.kind, BridgeGitOutcomeKind.done);
+    expect(notices.single, (
+      BridgeLevel.warning,
+      'Committed 1 file on main. Could not inspect the completed commit: unreadable index',
+    ));
+  });
+
   test('hook changes report only files left uncommitted', () async {
     backend.outcome = BridgeGitOutcome(
       kind: BridgeGitOutcomeKind.hookChanged,

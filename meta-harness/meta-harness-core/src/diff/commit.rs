@@ -9,8 +9,10 @@ use super::*;
 pub struct Commit {
     /// The branch committed on.
     pub branch: String,
-    /// The committed first line, after the user's hooks.
-    pub subject: String,
+    /// The committed first line after hooks, when it could be read.
+    pub subject: Option<String>,
+    /// A failed read after Git confirmed the commit; the write still succeeded.
+    pub inspection_error: Option<String>,
     /// Files a hook changed in the checkout, leaving them uncommitted.
     pub hook_changed: Vec<String>,
 }
@@ -337,22 +339,35 @@ impl WorkingTree {
                 });
             }
             did_commit = true;
-            let subject = git(&self.root, &[], &["log", "-1", "--format=%s"])
-                .await?
-                .trim_end_matches('\n')
-                .to_owned();
-            let (_, after, uncommitted) = self.uncommitted_paths(Whitespace::Shown).await?;
-            let uncommitted: HashSet<_> = uncommitted.into_iter().map(|file| file.path).collect();
-            let hook_changed = self
-                .changes(&before, &after, Whitespace::Shown)
-                .await?
-                .into_iter()
-                .map(|file| file.path)
-                .filter(|path| uncommitted.contains(path))
-                .collect();
+            let mut subject = None;
+            let inspected: Result<Vec<String>, DiffError> = async {
+                subject = Some(
+                    git(&self.root, &[], &["log", "-1", "--format=%s"])
+                        .await?
+                        .trim_end_matches('\n')
+                        .to_owned(),
+                );
+                let (_, after, uncommitted) = self.uncommitted_paths(Whitespace::Shown).await?;
+                let uncommitted: HashSet<_> =
+                    uncommitted.into_iter().map(|file| file.path).collect();
+                let hook_changed = self
+                    .changes(&before, &after, Whitespace::Shown)
+                    .await?
+                    .into_iter()
+                    .map(|file| file.path)
+                    .filter(|path| uncommitted.contains(path))
+                    .collect::<Vec<_>>();
+                Ok(hook_changed)
+            }
+            .await;
+            let (hook_changed, inspection_error) = match inspected {
+                Ok(paths) => (paths, None),
+                Err(error) => (Vec::new(), Some(error.to_string())),
+            };
             Ok(Commit {
                 branch,
                 subject,
+                inspection_error,
                 hook_changed,
             })
         }

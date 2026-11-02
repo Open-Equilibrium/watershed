@@ -263,8 +263,12 @@ class GitState {
   }) => _write(
     'commit',
     () => _backend.commitFiles(snapshot, paths, message, branch),
-    done: (now, outcome) =>
-        'Committed ${outcome.commit?.count} ${outcome.commit?.count == 1 ? 'file' : 'files'} on ${outcome.commit?.branch ?? now?.branch}: “${outcome.commit?.subject}”',
+    done: (now, outcome) {
+      final commit = outcome.commit!;
+      final text =
+          'Committed ${commit.count} ${commit.count == 1 ? 'file' : 'files'} on ${commit.branch}';
+      return commit.subject == null ? '$text.' : '$text: “${commit.subject}”';
+    },
   );
 
   /// Creates Git explicitly, once at a time, after status confirmed this folder is outside it.
@@ -336,7 +340,11 @@ class GitState {
       final files = outcome.files.join(', ');
       switch (outcome.kind) {
         case BridgeGitOutcomeKind.done:
-          notify(BridgeLevel.info, done(status.value, outcome));
+          final text = done(status.value, outcome);
+          notify(
+            outcome.detail.isEmpty ? BridgeLevel.info : BridgeLevel.warning,
+            outcome.detail.isEmpty ? text : '$text ${outcome.detail}',
+          );
         case BridgeGitOutcomeKind.hookFailed:
           notify(
             BridgeLevel.warning,

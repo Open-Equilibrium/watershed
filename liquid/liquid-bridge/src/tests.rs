@@ -1616,3 +1616,47 @@ fn commit_bridge_names_the_created_branch_when_either_hook_refuses() {
         let _ = std::fs::remove_dir_all(repo);
     }
 }
+
+#[test]
+fn a_committed_bridge_outcome_survives_failed_inspection() {
+    use crate::api::git::BridgeGitOutcomeKind;
+    use std::os::unix::fs::PermissionsExt;
+    let repo = repository("commit-inspection");
+    git(&repo, &["config", "user.name", "Test"]);
+    git(&repo, &["config", "user.email", "test@example.com"]);
+    git(&repo, &["config", "commit.gpgsign", "false"]);
+    std::fs::write(repo.join("a.txt"), "committed\n").unwrap();
+    let hook = repo.join(".git/hooks/post-commit");
+    std::fs::write(&hook, "#!/bin/sh\nprintf 'bad index' > .git/index\n").unwrap();
+    std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let script = [
+        no_session_file(2),
+        entries(3, TURN),
+        "IFS= read -r line || exit 0".into(),
+    ]
+    .concat();
+    let session = launch(gated(&script), repo.display().to_string()).unwrap();
+    let result = session
+        .commit_files(
+            session.commit_plan().unwrap().snapshot,
+            vec!["a.txt".into()],
+            "Committed".into(),
+            None,
+        )
+        .unwrap();
+    assert_eq!(result.kind, BridgeGitOutcomeKind::Done);
+    assert_eq!(
+        result.commit.as_ref().unwrap().subject.as_deref(),
+        Some("Committed")
+    );
+    assert!(!result.detail.is_empty());
+    let output = std::process::Command::new("git")
+        .args(["show", "HEAD:a.txt"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert_eq!(output.stdout, b"committed\n");
+    assert!(call(session.shutdown()));
+    let _ = std::fs::remove_dir_all(repo);
+}

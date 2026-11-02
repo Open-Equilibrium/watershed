@@ -37,7 +37,7 @@ fn commit_whole_selected_files_preserves_excluded_staging_and_checkpoints() {
                 .count(),
             2
         );
-        assert_eq!(result.subject, "Subject");
+        assert_eq!(result.subject.as_deref(), Some("Subject"));
         assert_eq!(repo.git(&["show", "HEAD:a.txt"]), "whole file\n");
         assert_eq!(repo.git(&["show", "HEAD:new[*].txt"]), "new\n");
         assert_eq!(repo.git(&["show", ":excluded.txt"]), "staged excluded\n");
@@ -856,6 +856,48 @@ fn commit_accepts_complete_file_directory_replacements() {
             assert_eq!(repo.git(&["show", ":excluded"]), "excluded staging\n");
             assert_eq!(repo.git(&["diff", "--name-only"]), "");
             assert_eq!(repo.git(&["diff", "--cached", "--name-only"]), "excluded\n");
+        }
+    });
+}
+
+#[test]
+fn a_successful_commit_survives_failed_post_commit_inspection() {
+    use std::os::unix::fs::PermissionsExt;
+    run(async {
+        for target in ["index", "config"] {
+            let repo = Repo::new("commit-inspection-failure");
+            identity(&repo);
+            repo.write("a.txt", "committed content\n");
+            let hook = repo.path().join(".git/hooks/post-commit");
+            std::fs::write(
+                &hook,
+                format!("#!/bin/sh\nprintf 'bad {target}' > .git/{target}\n"),
+            )
+            .unwrap();
+            std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+            let result = Checkpoints::new(repo.path())
+                .commit_current(&["a.txt".into()], "Committed", None)
+                .await;
+            assert!(result.is_ok(), "{result:?}");
+            let result = result.unwrap();
+            assert_eq!(
+                result.subject.as_deref(),
+                if target == "index" {
+                    Some("Committed")
+                } else {
+                    None
+                }
+            );
+            assert!(result.inspection_error.is_some());
+            if target == "config" {
+                // Repair only this fixture's deliberately malformed configuration to inspect HEAD.
+                std::fs::write(
+                    repo.path().join(".git/config"),
+                    "[core]\nrepositoryformatversion = 0\nbare = false\n",
+                )
+                .unwrap();
+            }
+            assert_eq!(repo.git(&["show", "HEAD:a.txt"]), "committed content\n");
         }
     });
 }

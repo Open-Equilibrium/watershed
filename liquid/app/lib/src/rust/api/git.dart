@@ -90,7 +90,7 @@ class BridgeCommit {
   /// The branch now checked out, as Liquid shows names.
   final String branch;
 
-  /// The committed subject; none when only the branch was created.
+  /// The committed subject; none after a failed read or when only the branch was created.
   final String? subject;
 
   /// Whole files committed; zero when only the branch was created.
@@ -190,7 +190,7 @@ class BridgeGitOutcome {
   /// The agents running in the checkout.
   final List<BridgeRunningAgent> running;
 
-  /// Git's output for a failed hook or commit, with unsafe characters written out.
+  /// Failure or post-commit inspection details, with unsafe characters written out.
   final String detail;
 
   /// A completed commit, or a created branch when its commit failed.

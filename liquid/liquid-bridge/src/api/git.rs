@@ -111,7 +111,7 @@ pub struct BridgeGitOutcome {
     pub files: Vec<String>,
     /// The agents running in the checkout.
     pub running: Vec<BridgeRunningAgent>,
-    /// Git's output for a failed hook or commit, with unsafe characters written out.
+    /// Failure or post-commit inspection details, with unsafe characters written out.
     pub detail: String,
     /// A completed commit, or a created branch when its commit failed.
     pub commit: Option<BridgeCommit>,
@@ -122,7 +122,7 @@ pub struct BridgeGitOutcome {
 pub struct BridgeCommit {
     /// The branch now checked out, as Liquid shows names.
     pub branch: String,
-    /// The committed subject; none when only the branch was created.
+    /// The committed subject; none after a failed read or when only the branch was created.
     pub subject: Option<String>,
     /// Whole files committed; zero when only the branch was created.
     pub count: i64,
@@ -229,9 +229,18 @@ impl AgentSession {
                         .iter()
                         .map(|path| visible_name(path))
                         .collect();
+                    outcome.detail = commit
+                        .inspection_error
+                        .map(|error| {
+                            format!(
+                                "Could not inspect the completed commit: {}",
+                                visible_lines(&error)
+                            )
+                        })
+                        .unwrap_or_default();
                     outcome.commit = Some(BridgeCommit {
                         branch: visible_name(&commit.branch),
-                        subject: Some(visible_name(&commit.subject)),
+                        subject: commit.subject.as_deref().map(visible_name),
                         count: i64::try_from(paths.len()).unwrap_or(i64::MAX),
                     });
                     Ok(outcome)
