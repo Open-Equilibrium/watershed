@@ -33,6 +33,10 @@ pub enum Write {
 }
 
 /// Where a Workspace keeps its documents and History.
+///
+/// A store belongs to one Workspace for as long as that Workspace lives, because the
+/// Workspace keeps documents in memory and compacts from them: an implementation over
+/// shared data refuses a second session while the first holds it.
 pub trait Store {
     /// The stored chunks of `document`, oldest first; none if it was never stored.
     fn chunks(&mut self, document: &Document) -> Result<Vec<Vec<u8>>, Error>;
