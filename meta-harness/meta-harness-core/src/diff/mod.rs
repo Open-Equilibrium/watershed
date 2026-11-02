@@ -29,7 +29,7 @@ pub use stash::Stash;
 #[cfg(test)]
 pub(crate) use stash::before_drop;
 
-use process::{Git, git, git_command, git_path, unreadable};
+use process::{Git, git, git_command, git_path, git_path_output, unreadable};
 #[cfg(test)]
 pub(crate) use revert::holds_repository;
 
@@ -539,7 +539,12 @@ impl WorkingTree {
             "--ignore-submodules=none",
         ];
         command.extend_from_slice(args);
-        git(&self.root, &self.env(&self.store.0.join("index")), &command).await
+        let env = self.env(&self.store.0.join("index"));
+        if args.contains(&"-z") {
+            git_path_output(&self.root, &env, &command).await
+        } else {
+            git(&self.root, &env, &command).await
+        }
     }
 
     /// Writes the working tree into the private store and returns its tree id.
