@@ -17,6 +17,9 @@ pub struct Stash {
     pub files: Vec<FileChange>,
     /// The stash commit, which names it to restore or discard it.
     pub id: String,
+    /// Whether the branch is still at the tree the changes were left on, which a restore
+    /// needs.
+    pub current: bool,
 }
 
 /// An entry of Git's stash list.
@@ -45,9 +48,12 @@ impl WorkingTree {
         let Some(entry) = self.stash_entry().await? else {
             return Ok(None);
         };
+        let base = self.resolve(&format!("{}^1^{{tree}}", entry.id)).await?;
+        let head = self.resolve("HEAD^{tree}").await?;
         Ok(Some(Stash {
             created_ms: entry.created_ms,
             files: self.stash_changes(&entry.id, Whitespace::Shown).await?,
+            current: base.is_some() && base == head,
             id: entry.id,
         }))
     }
@@ -105,6 +111,12 @@ impl WorkingTree {
     /// Stashes the uncommitted changes, untracked files included, for the branch checked out;
     /// returns the new stash, none when there was nothing to stash.
     pub(super) async fn push_stash(&self) -> Result<Option<String>, DiffError> {
+        // A stash records a submodule's new commit but leaves it checked out, so the change
+        // would come along; Liquid refuses rather than say it was left.
+        let moved = self.moved_submodules().await?;
+        if !moved.is_empty() {
+            return Err(DiffError::SubmoduleChanged(moved));
+        }
         // Native stash resets tracked files after saving them. Refuse if its index flags or
         // settings hide any edits that Liquid reports, rather than losing those unsaved edits.
         {
@@ -163,6 +175,45 @@ impl WorkingTree {
         Ok(after.filter(|after| Some(after) != before.as_ref()))
     }
 
+    /// The submodules checked out at another commit than the index records.
+    async fn moved_submodules(&self) -> Result<Vec<String>, DiffError> {
+        let output = git(
+            &self.root,
+            &[("GIT_OPTIONAL_LOCKS", "0".into())],
+            &[
+                "status",
+                "--porcelain=v2",
+                "-z",
+                "--ignore-submodules=dirty",
+            ],
+        )
+        .await?;
+        let mut moved = Vec::new();
+        let mut records = output.split('\0');
+        while let Some(record) = records.next() {
+            // `1 XY <sub> ...` and `2 XY <sub> ...` name a submodule whose commit changed
+            // with `SC`; a rename's record is followed by its old path.
+            let fields: Vec<&str> = record.splitn(9, ' ').collect();
+            let changed = |fields: &[&str], at: usize| {
+                fields
+                    .get(2)
+                    .is_some_and(|sub| sub.starts_with("SC"))
+                    .then(|| fields.get(at).map(|path| (*path).to_owned()))
+                    .flatten()
+            };
+            match fields.first() {
+                Some(&"1") => moved.extend(changed(&fields, 8)),
+                Some(&"2") => {
+                    let fields: Vec<&str> = record.splitn(10, ' ').collect();
+                    moved.extend(changed(&fields, 9));
+                    records.next();
+                }
+                _ => {}
+            }
+        }
+        Ok(moved)
+    }
+
     /// Drops the stash commit `id`, wherever it now is in the list.
     pub(super) async fn drop_stash(&self, id: &str) -> Result<(), DiffError> {
         let place = self.place_of(id).await?;
@@ -196,6 +247,11 @@ impl WorkingTree {
             None => self.empty_tree().await?,
         };
         let (base, index, tracked, untracked) = self.stash_trees(id).await?;
+        // Only onto the tree the changes were left on, so Git applies them without a merge,
+        // whose renames could write paths no check sees.
+        if current != base {
+            return Err(DiffError::BranchMoved);
+        }
         // All paths used by the preflight must be represented exactly before Git can write.
         // Patches and error text can be lossy; filesystem destinations cannot.
         let current_paths: HashSet<String> = self.tree_paths(&current).await?.into_iter().collect();

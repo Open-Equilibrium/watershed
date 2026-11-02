@@ -2811,7 +2811,9 @@ impl SseDecode for crate::api::git::BridgeGitOutcomeKind {
             2 => crate::api::git::BridgeGitOutcomeKind::Conflicts,
             3 => crate::api::git::BridgeGitOutcomeKind::AgentRunning,
             4 => crate::api::git::BridgeGitOutcomeKind::Uncommitted,
-            5 => crate::api::git::BridgeGitOutcomeKind::HookFailed,
+            5 => crate::api::git::BridgeGitOutcomeKind::BranchMoved,
+            6 => crate::api::git::BridgeGitOutcomeKind::SubmoduleChanged,
+            7 => crate::api::git::BridgeGitOutcomeKind::HookFailed,
             _ => unreachable!("Invalid variant for BridgeGitOutcomeKind: {}", inner),
         };
     }
@@ -3111,10 +3113,12 @@ impl SseDecode for crate::api::git::BridgeStash {
         let mut var_id = <String>::sse_decode(deserializer);
         let mut var_createdMs = <i64>::sse_decode(deserializer);
         let mut var_files = <Vec<crate::api::events::BridgeFileChange>>::sse_decode(deserializer);
+        let mut var_current = <bool>::sse_decode(deserializer);
         return crate::api::git::BridgeStash {
             id: var_id,
             created_ms: var_createdMs,
             files: var_files,
+            current: var_current,
         };
     }
 }
@@ -4571,7 +4575,9 @@ impl flutter_rust_bridge::IntoDart for crate::api::git::BridgeGitOutcomeKind {
             Self::Conflicts => 2.into_dart(),
             Self::AgentRunning => 3.into_dart(),
             Self::Uncommitted => 4.into_dart(),
-            Self::HookFailed => 5.into_dart(),
+            Self::BranchMoved => 5.into_dart(),
+            Self::SubmoduleChanged => 6.into_dart(),
+            Self::HookFailed => 7.into_dart(),
             _ => unreachable!(),
         }
     }
@@ -4980,6 +4986,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::git::BridgeStash {
             self.id.into_into_dart().into_dart(),
             self.created_ms.into_into_dart().into_dart(),
             self.files.into_into_dart().into_dart(),
+            self.current.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -5594,7 +5601,9 @@ impl SseEncode for crate::api::git::BridgeGitOutcomeKind {
                 crate::api::git::BridgeGitOutcomeKind::Conflicts => 2,
                 crate::api::git::BridgeGitOutcomeKind::AgentRunning => 3,
                 crate::api::git::BridgeGitOutcomeKind::Uncommitted => 4,
-                crate::api::git::BridgeGitOutcomeKind::HookFailed => 5,
+                crate::api::git::BridgeGitOutcomeKind::BranchMoved => 5,
+                crate::api::git::BridgeGitOutcomeKind::SubmoduleChanged => 6,
+                crate::api::git::BridgeGitOutcomeKind::HookFailed => 7,
                 _ => {
                     unimplemented!("");
                 }
@@ -5828,6 +5837,7 @@ impl SseEncode for crate::api::git::BridgeStash {
         <String>::sse_encode(self.id, serializer);
         <i64>::sse_encode(self.created_ms, serializer);
         <Vec<crate::api::events::BridgeFileChange>>::sse_encode(self.files, serializer);
+        <bool>::sse_encode(self.current, serializer);
     }
 }
 

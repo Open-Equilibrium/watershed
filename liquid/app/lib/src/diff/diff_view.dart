@@ -1156,26 +1156,28 @@ class _TurnHeader extends StatelessWidget {
                   mainAxisAlignment: MainAxisAlignment.end,
                   spacing: WsMetrics.space3,
                   children: [
-                    // As GitHub Desktop, only into a checkout without changes.
+                    // As GitHub Desktop, only into a checkout without changes, and only on
+                    // the tree the changes were left on, where Git applies them unmerged.
                     ValueListenableBuilder(
                       valueListenable: git,
-                      builder: (context, status, _) =>
-                          (status?.changed ?? 0) == 0
-                          ? PrimaryButton(
-                              label: 'Restore',
-                              onPressed: status?.branch == branch
-                                  ? onRestore
-                                  : null,
-                            )
-                          : const Tooltip(
-                              message:
-                                  'Unable to restore stash when changes are present on '
-                                  'your branch.',
-                              child: PrimaryButton(
-                                label: 'Restore',
-                                onPressed: null,
-                              ),
-                            ),
+                      builder: (context, status, _) {
+                        final why = !stash.current
+                            ? 'The branch has new commits since these changes were left, so '
+                                  'Liquid cannot restore them. Restore them with Git.'
+                            : (status?.changed ?? 0) > 0
+                            ? 'Unable to restore stash when changes are present on your '
+                                  'branch.'
+                            : null;
+                        final button = PrimaryButton(
+                          label: 'Restore',
+                          onPressed: why == null && status?.branch == branch
+                              ? onRestore
+                              : null,
+                        );
+                        return why == null
+                            ? button
+                            : Tooltip(message: why, child: button);
+                      },
                     ),
                     SecondaryButton(label: 'Discard…', onPressed: onDiscard),
                   ],

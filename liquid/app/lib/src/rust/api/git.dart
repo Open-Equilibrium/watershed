@@ -137,6 +137,12 @@ enum BridgeGitOutcomeKind {
   /// The checkout has uncommitted changes, so nothing was restored.
   uncommitted,
 
+  /// The branch has new commits since the changes were left, so nothing was restored.
+  branchMoved,
+
+  /// Git cannot stash the new commits of the submodules `files`, so nothing changed.
+  submoduleChanged,
+
   /// Git switched, but a hook it ran after failed with `detail`.
   hookFailed,
 }
@@ -203,14 +209,20 @@ class BridgeStash {
   /// The stashed files, untracked ones as added.
   final List<BridgeFileChange> files;
 
+  /// Whether the branch is still at the tree the changes were left on, which a restore
+  /// needs.
+  final bool current;
+
   const BridgeStash({
     required this.id,
     required this.createdMs,
     required this.files,
+    required this.current,
   });
 
   @override
-  int get hashCode => id.hashCode ^ createdMs.hashCode ^ files.hashCode;
+  int get hashCode =>
+      id.hashCode ^ createdMs.hashCode ^ files.hashCode ^ current.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -219,5 +231,6 @@ class BridgeStash {
           runtimeType == other.runtimeType &&
           id == other.id &&
           createdMs == other.createdMs &&
-          files == other.files;
+          files == other.files &&
+          current == other.current;
 }

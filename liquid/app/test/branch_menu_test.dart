@@ -132,6 +132,7 @@ void main() {
   ) async {
     await show(tester);
     backend.stashed = BridgeStash(
+      current: true,
       id: 's1',
       createdMs: DateTime(2026, 11, 1, 10, 12).millisecondsSinceEpoch,
       files: [
@@ -181,6 +182,7 @@ void main() {
     await tester.tap(find.text('feature/token-bucket'));
     await tester.pumpAndSettle();
     backend.stashed = const BridgeStash(
+      current: true,
       id: 'unconfirmed',
       createdMs: 1,
       files: [],
@@ -211,6 +213,7 @@ void main() {
         running: const [],
       );
       backend.stashed = const BridgeStash(
+        current: true,
         id: 'other-stash',
         createdMs: 1,
         files: [],

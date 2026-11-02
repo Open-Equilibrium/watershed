@@ -2642,12 +2642,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeStash dco_decode_bridge_stash(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 3)
-      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+    if (arr.length != 4)
+      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
     return BridgeStash(
       id: dco_decode_String(arr[0]),
       createdMs: dco_decode_i_64(arr[1]),
       files: dco_decode_list_bridge_file_change(arr[2]),
+      current: dco_decode_bool(arr[3]),
     );
   }
 
@@ -3817,7 +3818,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_id = sse_decode_String(deserializer);
     var var_createdMs = sse_decode_i_64(deserializer);
     var var_files = sse_decode_list_bridge_file_change(deserializer);
-    return BridgeStash(id: var_id, createdMs: var_createdMs, files: var_files);
+    var var_current = sse_decode_bool(deserializer);
+    return BridgeStash(
+      id: var_id,
+      createdMs: var_createdMs,
+      files: var_files,
+      current: var_current,
+    );
   }
 
   @protected
@@ -5192,6 +5199,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.id, serializer);
     sse_encode_i_64(self.createdMs, serializer);
     sse_encode_list_bridge_file_change(self.files, serializer);
+    sse_encode_bool(self.current, serializer);
   }
 
   @protected

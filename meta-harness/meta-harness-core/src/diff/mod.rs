@@ -133,6 +133,11 @@ pub enum DiffError {
     RestoredWithConflicts(Vec<String>),
     /// The checkout has this many uncommitted changes, so nothing was restored.
     Uncommitted(u64),
+    /// The branch has moved on from the tree the changes were left on, so nothing was
+    /// restored.
+    BranchMoved,
+    /// Git cannot stash these submodules' new commits, so nothing was left or switched.
+    SubmoduleChanged(Vec<String>),
     /// Git switched, but a hook it ran after failed with this output.
     HookFailed(String),
     /// The remote's fetch refspec writes outside its remote-tracking branches, so Liquid does
@@ -176,6 +181,15 @@ impl fmt::Display for DiffError {
             Self::RestoredWithConflicts(paths) => {
                 write!(f, "restored with conflicts in {}", paths.join(", "))
             }
+            Self::BranchMoved => f.write_str(
+                "the branch has new commits since the changes were left, so Liquid does not \
+                 restore them",
+            ),
+            Self::SubmoduleChanged(paths) => write!(
+                f,
+                "Git cannot stash the new commits of {}",
+                paths.join(", ")
+            ),
             Self::Uncommitted(count) => write!(
                 f,
                 "the checkout has {count} uncommitted change{}",

@@ -211,6 +211,7 @@ kbd{font-size:11px;padding:0 4px;border-radius:4px;border:1px solid currentColor
         <p>Left on main at 10:41. <b>Restore</b> moves the stashed files back to your uncommitted changes.</p>
         <div class="flist"><div class="frow"><span class="st M">M</span><code>docs/api.md</code><span class="r"><span class="add">+3</span> <span class="del">−0</span></span></div><div class="frow"><span class="st M">M</span><code>src/middleware/rateLimit.ts</code><span class="r"><span class="add">+5</span> <span class="del">−0</span></span></div><div class="frow"><span class="st M">M</span><code>src/routes/login.ts</code><span class="r"><span class="add">+4</span> <span class="del">−1</span></span></div><div class="frow"><span class="st A">A</span><code>notes/todo.md</code><span class="r"><span class="add">+6</span> <span class="del">−0</span></span></div></div>
         <p>As in GitHub Desktop, Restore is disabled while the checkout has uncommitted changes, saying “Unable to restore stash when changes are present on your branch.” on hover: Git restores a stash only in part when one of its files changed meanwhile.</p>
+        <p>Restore is also disabled once the branch has new commits since the changes were left, saying “The branch has new commits since these changes were left, so Liquid cannot restore them. Restore them with Git.” on hover: Git would merge them into the new tree.</p>
         <p>A file's diff opens below the list, as a turn's does. The Diff tab's turn menu lists "Stashed changes" beside "Uncommitted changes" while the branch has them.</p>
       </div></div></div>
     </div>
@@ -221,7 +222,7 @@ kbd{font-size:11px;padding:0 4px;border-radius:4px;border:1px solid currentColor
         <div class="nrow frow"><span class="k">Back on the branch</span><span>ⓘ main has stashed changes from 10:41 · Show</span></div>
         <div class="nrow frow"><span class="k">Restored</span><span>ⓘ Restored 4 stashed files on main</span></div>
         <div class="nrow frow"><span class="k">Restore with changes</span><span class="wa">⚠ Could not restore: the checkout has 2 uncommitted changes. Commit or discard them, then restore; the stash stays.</span></div>
-        <div class="nrow frow"><span class="k">Restored with conflicts</span><span class="wa">⚠ Restored with conflicts in src/routes/login.ts; Git kept the stash. Resolve them in an editor, then discard the stash.</span></div>
+        <div class="nrow frow"><span class="k">Branch has new commits</span><span class="wa">⚠ Could not restore: the branch has new commits since these changes were left. Restore them with Git; the stash stays.</span></div>
         <div class="nrow frow"><span class="k">Agent running</span><span class="wa">⚠ Could not restore: “Fix flaky sync test” is running in this checkout. Stop it or wait until it finishes.</span></div>
       </div></div></div>
     </div>
@@ -462,6 +463,7 @@ kbd{font-size:11px;padding:0 4px;border-radius:4px;border:1px solid currentColor
       <li>A stash's message names its branch in Liquid's own words, <code>Liquid: changes left on main</code>; other stashes stay untouched and unlisted (question 15).</li>
       <li>A branch holds one stash; leaving new changes replaces it after the dialog's warning (question 16).</li>
       <li>Stashed changes are restored only into a checkout without uncommitted changes, as GitHub Desktop does (decided 2026-11-01 after review found Git restoring a stash only in part).</li>
+      <li>Stashed changes are restored only while the branch is at the tree they were left on; after new commits Liquid points to Git, so Git never merges them here (decided 2026-11-02).</li>
     </ol>
   </section>
 </div>

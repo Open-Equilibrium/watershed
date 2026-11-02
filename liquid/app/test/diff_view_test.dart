@@ -819,6 +819,7 @@ void main() {
   ) async {
     final backend = FakeBackend()
       ..stashed = BridgeStash(
+        current: true,
         id: 's1',
         createdMs: 1,
         files: [modified('code.ts', 2, 1), modified('spaced.ts', 1, 1)],
@@ -1097,6 +1098,7 @@ void main() {
     'keeps the stash files, patch, heading and actions on the same read',
     (tester) async {
       BridgeStash stash(String id, int minute) => BridgeStash(
+        current: true,
         id: id,
         createdMs: DateTime(2026, 11, 1, 10, minute).millisecondsSinceEpoch,
         files: [
@@ -1182,7 +1184,12 @@ void main() {
         ),
       ];
       final backend = FakeBackend()
-        ..stashed = BridgeStash(id: 's1', createdMs: 1, files: files)
+        ..stashed = BridgeStash(
+          current: true,
+          id: 's1',
+          createdMs: 1,
+          files: files,
+        )
         ..stashPatches = {
           's1': {'notes/todo.md': '@@ -0,0 +1 @@\n+old stash\n'},
           's2': {'notes/todo.md': '@@ -0,0 +1 @@\n+fresh stash\n'},
@@ -1193,7 +1200,12 @@ void main() {
       await state.showTurns(const StashedChanges());
       await tester.pumpAndSettle();
 
-      backend.stashed = BridgeStash(id: 's2', createdMs: 2, files: files);
+      backend.stashed = BridgeStash(
+        current: true,
+        id: 's2',
+        createdMs: 2,
+        files: files,
+      );
       await state.git.refresh();
       await tester.pumpAndSettle();
       backend.patchGate!.complete();
@@ -1217,6 +1229,7 @@ void main() {
     final left = DateTime(2026, 11, 1, 10, 41).millisecondsSinceEpoch;
     final backend = FakeBackend()
       ..stashed = BridgeStash(
+        current: true,
         id: 's1',
         createdMs: left,
         files: [
@@ -1265,7 +1278,22 @@ void main() {
     await tester.pumpAndSettle();
     expect(backend.calls, isNot(contains('restore stash s1')));
 
+    // Nor onto a branch with new commits, where Git would merge.
     backend.git = gitStatusOf();
+    final saved = backend.stashed!;
+    backend.stashed = BridgeStash(
+      current: false,
+      id: saved.id,
+      createdMs: saved.createdMs,
+      files: saved.files,
+    );
+    await state.git.refresh();
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Restore'));
+    await tester.pumpAndSettle();
+    expect(backend.calls, isNot(contains('restore stash s1')));
+
+    backend.stashed = saved;
     await state.git.refresh();
     await tester.pumpAndSettle();
     await tester.tap(find.text('Restore'));

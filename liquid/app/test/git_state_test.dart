@@ -75,6 +75,7 @@ void main() {
 
   test('the same stash keeps its value across reads', () async {
     backend.stashed = BridgeStash(
+      current: true,
       id: 's1',
       createdMs: 0,
       files: [change('a.txt')],
@@ -82,6 +83,7 @@ void main() {
     await git.refresh();
     final first = git.stash.value;
     backend.stashed = BridgeStash(
+      current: true,
       id: 's1',
       createdMs: 0,
       files: [change('a.txt')],
@@ -125,6 +127,7 @@ void main() {
     await git.refresh();
     backend.git = gitStatusOf();
     backend.stashed = BridgeStash(
+      current: true,
       id: 's1',
       createdMs: DateTime(2026, 11, 1, 10, 41).millisecondsSinceEpoch,
       files: [change('a.txt')],
@@ -188,6 +191,7 @@ void main() {
     'a restore that conflicts or that Git refuses keeps the stash',
     () async {
       backend.stashed = BridgeStash(
+        current: true,
         id: 's1',
         createdMs: 0,
         files: [change('a.txt')],
@@ -231,6 +235,7 @@ void main() {
 
   test('restoring reports its files and reads the stash again', () async {
     backend.stashed = BridgeStash(
+      current: true,
       id: 's1',
       createdMs: 0,
       files: [change('a.txt'), change('b.txt')],
@@ -281,7 +286,8 @@ void main() {
   });
 }
 
-BridgeStash stashOf() => const BridgeStash(id: 's1', createdMs: 0, files: []);
+BridgeStash stashOf() =>
+    const BridgeStash(current: true, id: 's1', createdMs: 0, files: []);
 
 BridgeFileChange change(String path) => BridgeFileChange(
   path: path,

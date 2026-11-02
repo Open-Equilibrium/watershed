@@ -115,7 +115,11 @@ class GitState {
       problem.value = null;
       status.value = now;
       // The same stash keeps its value, so the Diff tab keeps its place in it.
-      if (stashed?.id != stash.value?.id) stash.value = stashed;
+      // The same stash on the same tree keeps its value, so the Diff tab keeps its place.
+      if (stashed?.id != stash.value?.id ||
+          stashed?.current != stash.value?.current) {
+        stash.value = stashed;
+      }
       final after = now?.branch;
       if (before == null || after == null || after == before) return;
       if (!_writing) {
@@ -245,6 +249,18 @@ class GitState {
             BridgeLevel.warning,
             'Could not $action: the checkout has $changes. Commit or discard them, then '
             'restore; the stash stays.',
+          );
+        case BridgeGitOutcomeKind.branchMoved:
+          notify(
+            BridgeLevel.warning,
+            'Could not restore: the branch has new commits since these changes were left. '
+            'Restore them with Git; the stash stays.',
+          );
+        case BridgeGitOutcomeKind.submoduleChanged:
+          notify(
+            BridgeLevel.warning,
+            'Could not $action: Git cannot stash the new commit of $files. Commit it, or '
+            'bring the changes along.',
           );
         // A switch Git refuses asks in a dialog what to do.
         case BridgeGitOutcomeKind.wouldOverwrite when action == 'restore':

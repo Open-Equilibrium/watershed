@@ -61,6 +61,9 @@ pub struct BridgeStash {
     pub created_ms: i64,
     /// The stashed files, untracked ones as added.
     pub files: Vec<BridgeFileChange>,
+    /// Whether the branch is still at the tree the changes were left on, which a restore
+    /// needs.
+    pub current: bool,
 }
 
 /// How a Git write the user asked for ended, when not with an error to show as it is.
@@ -76,6 +79,10 @@ pub enum BridgeGitOutcomeKind {
     AgentRunning,
     /// The checkout has uncommitted changes, so nothing was restored.
     Uncommitted,
+    /// The branch has new commits since the changes were left, so nothing was restored.
+    BranchMoved,
+    /// Git cannot stash the new commits of the submodules `files`, so nothing changed.
+    SubmoduleChanged,
     /// Git switched, but a hook it ran after failed with `detail`.
     HookFailed,
 }
@@ -184,6 +191,7 @@ impl AgentSession {
                     id: stash.id,
                     created_ms: stash.created_ms,
                     files: stash.files.into_iter().map(Into::into).collect(),
+                    current: stash.current,
                 }))
         })
     }
@@ -260,6 +268,12 @@ impl AgentSession {
             }
             Err(DiffError::Uncommitted(_)) => {
                 Ok(outcome(BridgeGitOutcomeKind::Uncommitted, Vec::new()))
+            }
+            Err(DiffError::BranchMoved) => {
+                Ok(outcome(BridgeGitOutcomeKind::BranchMoved, Vec::new()))
+            }
+            Err(DiffError::SubmoduleChanged(files)) => {
+                Ok(outcome(BridgeGitOutcomeKind::SubmoduleChanged, files))
             }
             Err(DiffError::HookFailed(output)) => Ok(BridgeGitOutcome {
                 detail: visible_lines(&output),

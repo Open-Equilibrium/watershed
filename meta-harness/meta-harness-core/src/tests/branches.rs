@@ -929,14 +929,18 @@ fn a_restore_git_refuses_or_that_conflicts_keeps_the_stash() {
         ));
         assert_eq!(read(&repo, "a.txt"), "edited meanwhile\n");
 
+        // A commit since moves the branch off the stash's tree, where Git would merge.
         repo.git(&["commit", "-q", "-am", "committed meanwhile"]);
         assert!(matches!(
-            checkpoints.restore_stash(&stash_of(&checkpoints).await).await,
-            Err(DiffError::RestoredWithConflicts(paths)) if paths == ["a.txt"]
+            checkpoints
+                .restore_stash(&stash_of(&checkpoints).await)
+                .await,
+            Err(DiffError::BranchMoved)
         ));
+        assert_eq!(read(&repo, "a.txt"), "edited meanwhile\n");
         assert!(
             checkpoints.stash().await.expect("read").is_some(),
-            "Git keeps the stash"
+            "the stash stays"
         );
     });
 }
@@ -1161,8 +1165,9 @@ fn no_restore_exempts_ignored_paths_after_a_stashed_deletion_is_committed() {
             let restored = checkpoints.restore_stash(&stash).await;
 
             assert_eq!(read(&repo, "a.txt"), "old\n", "{ignored}: {restored:?}");
+            // The committed deletion moved the branch off the stash's tree.
             assert!(
-                matches!(restored, Err(DiffError::WouldOverwrite(ref paths)) if paths == &["p/new.txt"]),
+                matches!(restored, Err(DiffError::BranchMoved)),
                 "{restored:?}"
             );
             assert_eq!(read(&repo, ignored), "unsaved ignored contents\n");
@@ -1202,9 +1207,7 @@ fn no_restore_exempts_a_tracked_parent_committed_after_the_stash() {
         let restored = checkpoints.restore_stash(&stash).await;
 
         assert_eq!(read(&repo, "a.txt"), "old\n", "{restored:?}");
-        assert!(
-            matches!(restored, Err(DiffError::WouldOverwrite(paths)) if paths == ["dir/new.txt"])
-        );
+        assert!(matches!(restored, Err(DiffError::BranchMoved)));
         assert_eq!(read(&repo, "dir"), "later commit\n");
         assert_eq!(stash_of(&checkpoints).await, stash);
         assert_eq!(
@@ -1508,9 +1511,13 @@ fn no_restore_overwrites_ignored_paths_from_the_stashed_index_or_working_tree() 
 
                 let restored = checkpoints.restore_stash(&stash).await;
 
+                // A deletion committed since moves the branch off the stash's tree.
                 assert!(
-                    matches!(&restored, Err(DiffError::WouldOverwrite(paths))
-                        if paths == &[path]),
+                    match saved {
+                        "deleted-since-stash" => matches!(&restored, Err(DiffError::BranchMoved)),
+                        _ => matches!(&restored, Err(DiffError::WouldOverwrite(paths))
+                            if paths == &[path]),
+                    },
                     "{saved}/{obstruction}: {restored:?}"
                 );
                 assert_eq!(read(&repo, path), "keep ignored contents\n");
@@ -1892,5 +1899,97 @@ fn a_switch_whose_caller_gives_up_still_finishes_and_leaves_no_lock() {
             repo.git(&["stash", "list", "--format=%s"]),
             format!("On {main}: Liquid: changes left on {main}\n")
         );
+    });
+}
+
+#[test]
+fn stashed_changes_restore_only_on_the_tree_they_were_left_on() {
+    run(async {
+        let repo = Repo::new("stash-moved");
+        let main = repo.git(&["branch", "--show-current"]).trim().to_owned();
+        repo.git(&["branch", "other"]);
+        std::fs::create_dir(repo.path().join("old")).expect("folder");
+        repo.write("old/new.txt", "stashed\n");
+        repo.git(&["add", "old/new.txt"]);
+        let checkpoints = Checkpoints::new(repo.path());
+        checkpoints
+            .switch_branch(&local("other"), leave_on(&checkpoints).await)
+            .await
+            .expect("left");
+        checkpoints
+            .switch_branch(&local(&main), Changes::Bring)
+            .await
+            .expect("back");
+        assert!(
+            checkpoints
+                .stash()
+                .await
+                .expect("read")
+                .expect("stash")
+                .current
+        );
+
+        // Git would merge the stash into the moved tree, here through a directory rename onto
+        // an ignored file; Liquid restores only without such a merge.
+        std::fs::create_dir(repo.path().join("old")).expect("folder");
+        repo.write("old/kept.txt", "kept\n");
+        repo.git(&["add", "old"]);
+        repo.git(&["commit", "-q", "-m", "old"]);
+        repo.git(&["mv", "old", "new"]);
+        repo.git(&["commit", "-q", "-m", "renamed"]);
+        repo.git(&["config", "merge.directoryRenames", "true"]);
+        std::fs::write(repo.path().join(".git/info/exclude"), "new/new.txt\n").expect("excluded");
+        repo.write("new/new.txt", "ignored\n");
+        let saved = stash_of(&checkpoints).await;
+        assert!(
+            !checkpoints
+                .stash()
+                .await
+                .expect("read")
+                .expect("stash")
+                .current
+        );
+
+        assert!(matches!(
+            checkpoints.restore_stash(&saved).await,
+            Err(DiffError::BranchMoved)
+        ));
+        assert_eq!(read(&repo, "new/new.txt"), "ignored\n");
+        assert_eq!(stash_of(&checkpoints).await, saved);
+    });
+}
+
+#[test]
+fn leaving_refuses_a_submodule_commit_git_cannot_stash() {
+    run(async {
+        let sub = Repo::new("stash-submodule-inner");
+        let repo = Repo::new("stash-submodule-outer");
+        repo.git(&[
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            "-q",
+            &sub.path().display().to_string(),
+            "sub",
+        ]);
+        repo.git(&["commit", "-q", "-m", "submodule"]);
+        repo.git(&["branch", "other"]);
+        let inner = Repo(repo.path().join("sub"));
+        inner.write("a.txt", "moved\n");
+        inner.git(&["commit", "-q", "-am", "moved"]);
+        let moved = inner.git(&["rev-parse", "HEAD"]);
+        let current = repo.git(&["branch", "--show-current"]);
+        let checkpoints = Checkpoints::new(repo.path());
+
+        assert!(matches!(
+            checkpoints.switch_branch(&local("other"), leave_on(&checkpoints).await).await,
+            Err(DiffError::SubmoduleChanged(paths)) if paths == ["sub"]
+        ));
+        assert_eq!(repo.git(&["branch", "--show-current"]), current);
+        assert_eq!(inner.git(&["rev-parse", "HEAD"]), moved);
+        assert_eq!(repo.git(&["stash", "list"]), "");
+        // The inner repository belongs to the outer one's temporary folder.
+        std::mem::forget(inner);
     });
 }
