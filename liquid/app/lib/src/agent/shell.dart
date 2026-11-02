@@ -101,6 +101,7 @@ class _AgentShellState extends State<AgentShell> {
       unawaited(state.loadStart());
       state.git.watch();
     }
+    widget.workspace?.open.addListener(_pageOpened);
     // A reopened Trajectory tab starts outside the comparison.
     _tab.addListener(() => _comparing.value = false);
     _shortcuts.report = (problem) => widget.state != null
@@ -168,6 +169,7 @@ class _AgentShellState extends State<AgentShell> {
   @override
   void dispose() {
     widget.state?.git.stop();
+    widget.workspace?.open.removeListener(_pageOpened);
     _lifecycle.dispose();
     widget.state?.draft.removeListener(_applyDraft);
     widget.state?.requests.removeListener(_requestsChanged);
@@ -182,6 +184,11 @@ class _AgentShellState extends State<AgentShell> {
     _diffSettings.removeListener(_hideWhitespace);
     if (widget.diffSettings == null) _diffSettings.dispose();
     super.dispose();
+  }
+
+  /// A Page opened from anywhere shows in place of Settings.
+  void _pageOpened() {
+    if (widget.workspace?.open.value != null) _settings.value = false;
   }
 
   /// Shows the agent session in place of the open Page.

@@ -88,16 +88,26 @@ Future<(WorkspaceState?, String?)> openWorkspace(
   String dir, {
   required bool show,
 }) async {
-  final WorkspaceState state;
+  final LiquidWorkspace workspace;
   try {
-    state = WorkspaceState(await LiquidWorkspace.open(dir: dir));
+    workspace = await LiquidWorkspace.open(dir: dir);
   } on Object catch (error) {
     return (null, 'The Workspace did not open: $error');
   }
+  return startWorkspace(workspace, show: show);
+}
+
+/// Follows an open Workspace; a failed first read is said in the sidebar, since no Page may
+/// be open to say it.
+Future<(WorkspaceState, String?)> startWorkspace(
+  LiquidWorkspace workspace, {
+  required bool show,
+}) async {
+  final state = WorkspaceState(workspace);
   try {
     await state.start(show: show);
   } on Object catch (error) {
-    state.problem.value = 'The Workspace did not load: $error';
+    return (state, 'The Workspace did not load: $error');
   }
   return (state, null);
 }

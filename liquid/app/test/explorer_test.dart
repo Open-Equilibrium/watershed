@@ -171,4 +171,16 @@ void main() {
       findsOneWidget,
     );
   });
+
+  testWidgets('choosing a Page in the Explorer closes Settings', (
+    tester,
+  ) async {
+    await show(tester);
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    expect(find.byType(WorkspacePage), findsNothing);
+    await tester.tap(inSidebar('Untitled'));
+    await tester.pumpAndSettle();
+    expect(find.byType(WorkspacePage), findsOneWidget);
+  });
 }
