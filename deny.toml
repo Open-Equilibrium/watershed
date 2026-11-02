@@ -23,6 +23,7 @@ allow = [
 confidence-threshold = 0.8
 exceptions = [
     { crate = "winx@0.36.4", allow = ["Apache-2.0 WITH LLVM-exception"] },
+    { crate = "zlib-rs@0.6.8", allow = ["Zlib"] },
 ]
 
 [licenses.private]
