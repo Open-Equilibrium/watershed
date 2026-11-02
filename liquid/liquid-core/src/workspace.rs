@@ -12,6 +12,7 @@ use crate::id::random_bytes;
 use crate::model::{
     self, AREAS, BLOCK, BLOCKS, KIND, NAME, OWNER, PAGES, PARENT, SORT, TEXT, TITLE, VIEWS,
 };
+use crate::order::Order;
 use crate::store::{Commit, Store, Write};
 use crate::{
     Action, ActionId, Actor, Applied, Area, AreaId, BlockId, Changed, Created, Document, Error,
@@ -36,6 +37,8 @@ pub(crate) struct Loaded {
     pub doc: AutoCommit,
     /// How many chunks the store holds for the document.
     chunks: usize,
+    /// A Page document's View order, read once it is first needed.
+    order: Option<Order>,
 }
 
 /// What a mutation wrote before its changes are committed.
@@ -156,9 +159,15 @@ impl<S: Store> Workspace<S> {
         Ok(model::pages(self.doc(&Document::Area(area.clone()))?))
     }
 
-    /// A Page's Views in order.
-    pub fn views(&mut self, page: &PageId) -> Result<Vec<View>, Error> {
-        Ok(model::views(self.doc(&Document::Page(page.clone()))?))
+    /// Up to `limit` of a Page's Views in order, from position `start`, so a reader takes
+    /// only the window it shows (client architecture rule 3).
+    pub fn views(&mut self, page: &PageId, start: usize, limit: usize) -> Result<Vec<View>, Error> {
+        Ok(self.page(page)?.1.window(start, limit))
+    }
+
+    /// How many Views a Page shows.
+    pub fn view_count(&mut self, page: &PageId) -> Result<usize, Error> {
+        Ok(self.page(page)?.1.len())
     }
 
     /// A live Text Block's text, from the document of its home `page`.
@@ -178,6 +187,15 @@ impl<S: Store> Workspace<S> {
         self.store.history(before, limit)
     }
 
+    /// A Page document with its View order.
+    fn page(&mut self, page: &PageId) -> Result<(&mut AutoCommit, &mut Order), Error> {
+        let document = Document::Page(page.clone());
+        self.doc(&document)?;
+        let loaded = self.docs.get_mut(&document).expect("loaded above");
+        let order = loaded.order.get_or_insert_with(|| Order::read(&loaded.doc));
+        Ok((&mut loaded.doc, order))
+    }
+
     /// A document, loaded from the store on first use.
     fn doc(&mut self, document: &Document) -> Result<&mut AutoCommit, Error> {
         if !self.docs.contains_key(document) {
@@ -189,6 +207,7 @@ impl<S: Store> Workspace<S> {
             let loaded = Loaded {
                 doc,
                 chunks: chunks.len(),
+                order: None,
             };
             self.docs.insert(document.clone(), loaded);
         }
@@ -270,9 +289,8 @@ impl<S: Store> Workspace<S> {
                 Err(Error::NotFound)
             }
             Mutation::AddTextBlock { page, after, text } => {
-                let doc = self.doc(&Document::Page(page.clone()))?;
-                let siblings = model::sorted(doc, VIEWS);
-                let sort = model::sort_after(&siblings, after.as_ref().map(ViewId::as_str))?;
+                let (doc, order) = self.page(page)?;
+                let sort = order.key_after(after.as_ref())?;
                 let (block, view) = (BlockId::new()?, ViewId::new()?);
                 let entry = model::insert(doc, BLOCKS, block.as_str(), &[(KIND, "text")])?;
                 let content = doc.put_object(&entry, TEXT, ObjType::Text)?;
@@ -283,6 +301,11 @@ impl<S: Store> Workspace<S> {
                     view.as_str(),
                     &[(BLOCK, block.as_str()), (SORT, &sort)],
                 )?;
+                let placed = View {
+                    id: view.clone(),
+                    block: block.clone(),
+                };
+                order.insert(sort, placed);
                 let mut written =
                     Written::new(Document::Page(page.clone()), Changed::Views(page.clone()));
                 written.created = Some(Created::Block { block, view });
@@ -312,23 +335,20 @@ impl<S: Store> Workspace<S> {
                 ))
             }
             Mutation::RemoveView { page, view } => {
-                let doc = self.doc(&Document::Page(page.clone()))?;
+                let (doc, order) = self.page(page)?;
                 let entry = model::live(doc, VIEWS, view.as_str()).ok_or(Error::NotFound)?;
-                let block = model::string(doc, &entry, BLOCK).ok_or(Error::NotFound)?;
+                let block =
+                    BlockId::stored(&model::string(doc, &entry, BLOCK).ok_or(Error::NotFound)?);
                 model::mark_deleted(doc, &entry)?;
                 let mut written =
                     Written::new(Document::Page(page.clone()), Changed::Views(page.clone()));
-                let shown = model::sorted(doc, VIEWS)
-                    .iter()
-                    .any(|other| other.get(BLOCK) == Some(block.as_str()));
-                if !shown {
-                    if let Some(block_entry) = model::live(doc, BLOCKS, &block) {
+                if !order.shows(&block, view) {
+                    if let Some(block_entry) = model::live(doc, BLOCKS, block.as_str()) {
                         model::mark_deleted(doc, &block_entry)?;
                     }
-                    written
-                        .changed
-                        .push(Changed::Block(page.clone(), BlockId::stored(&block)));
+                    written.changed.push(Changed::Block(page.clone(), block));
                 }
+                order.remove(view);
                 Ok(written)
             }
         }
@@ -351,7 +371,12 @@ impl<S: Store> Workspace<S> {
         new: Vec<(Document, AutoCommit)>,
     ) -> Result<(), Error> {
         for (document, doc) in new {
-            self.docs.insert(document, Loaded { doc, chunks: 0 });
+            let loaded = Loaded {
+                doc,
+                chunks: 0,
+                order: None,
+            };
+            self.docs.insert(document, loaded);
         }
         let message = serde_json::to_string(&Header::of(&action)).expect("a serializable header");
         let time = SystemTime::now()

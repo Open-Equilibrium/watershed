@@ -112,7 +112,7 @@ fn main() {
         times,
     );
     let start = Instant::now();
-    let views = workspace.views(&lisbon).unwrap();
+    let views = workspace.views(&lisbon, 0, usize::MAX).unwrap();
     println!(
         "reading that Page's {} Views in order: {:.2} ms",
         views.len(),

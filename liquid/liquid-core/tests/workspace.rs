@@ -89,7 +89,7 @@ fn titles(workspace: &mut Workspace, area: &AreaId) -> Vec<(String, Option<Strin
 }
 
 fn texts(workspace: &mut Workspace, page: &PageId) -> Vec<String> {
-    let views = workspace.views(page).unwrap();
+    let views = workspace.views(page, 0, usize::MAX).unwrap();
     views
         .iter()
         .map(|view| {
@@ -164,7 +164,9 @@ fn text_blocks_keep_their_order_and_edit_in_utf16_units() {
     );
 
     // "🌄" is two UTF-16 units, as Dart and JavaScript count text.
-    let sintra = workspace.views(&lisbon).unwrap()[1].block.clone();
+    let sintra = workspace.views(&lisbon, 0, usize::MAX).unwrap()[1]
+        .block
+        .clone();
     apply(
         &mut workspace,
         Mutation::EditText {
@@ -321,4 +323,39 @@ fn every_action_names_its_actor_origin_and_permission() {
     assert_eq!(last.origin, Origin::Api);
     assert_eq!(last.permission, Permission::Owner);
     assert!(history.iter().all(|action| action.actor == owner()));
+}
+
+#[test]
+fn a_page_reads_its_views_in_windows() {
+    let mut workspace = workspace();
+    let trips = area(&mut workspace, "Trips");
+    let lisbon = page(&mut workspace, &trips, None, "Lisbon");
+    let mut after = None;
+    for day in 1..=30 {
+        let (_, view) = text_block(
+            &mut workspace,
+            &lisbon,
+            after.as_ref(),
+            &format!("Day {day}"),
+        );
+        after = Some(view);
+    }
+    let removed = workspace.views(&lisbon, 9, 1).unwrap().remove(0).id;
+    apply(
+        &mut workspace,
+        Mutation::RemoveView {
+            page: lisbon.clone(),
+            view: removed,
+        },
+    );
+
+    assert_eq!(workspace.view_count(&lisbon).unwrap(), 29);
+    let window: Vec<String> = workspace
+        .views(&lisbon, 8, 3)
+        .unwrap()
+        .iter()
+        .map(|view| workspace.text(&lisbon, &view.block).unwrap().unwrap())
+        .collect();
+    assert_eq!(window, ["Day 9", "Day 11", "Day 12"]);
+    assert!(workspace.views(&lisbon, 29, 10).unwrap().is_empty());
 }

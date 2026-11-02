@@ -121,7 +121,7 @@ fn main() {
         .sum();
     let start = Instant::now();
     let mut workspace = Workspace::open(Sqlite::open(&path, &KEY).unwrap()).unwrap();
-    let views = workspace.views(&lisbon).unwrap();
+    let views = workspace.views(&lisbon, 0, usize::MAX).unwrap();
     println!(
         "reopening and reading that Page's {} Views: {:.1} ms; database with its log {:.1} MiB",
         views.len(),

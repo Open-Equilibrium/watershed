@@ -21,6 +21,7 @@ mod history;
 mod id;
 mod model;
 mod mutation;
+mod order;
 mod sort_key;
 mod store;
 mod workspace;

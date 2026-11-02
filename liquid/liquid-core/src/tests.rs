@@ -208,3 +208,75 @@ fn a_write_the_store_refuses_is_not_acknowledged_and_leaves_no_trace() {
         "Our Five days"
     );
 }
+
+#[test]
+fn the_view_order_index_matches_the_page_document() {
+    let owner = Actor::Person(PersonId::new("benni"));
+    let mut workspace = Workspace::create(PersonId::new("benni"), MemoryStore::default()).unwrap();
+    let apply = |workspace: &mut Workspace<MemoryStore>, mutation| {
+        workspace
+            .apply(Request {
+                actor: owner.clone(),
+                origin: Origin::Ui,
+                mutation,
+            })
+            .unwrap()
+            .created
+    };
+    let Some(Created::Area(area)) = apply(
+        &mut workspace,
+        Mutation::CreateArea {
+            name: "Trips".into(),
+        },
+    ) else {
+        panic!("an area")
+    };
+    let create = Mutation::CreatePage {
+        area,
+        parent: None,
+        title: "Lisbon".into(),
+    };
+    let Some(Created::Page(page)) = apply(&mut workspace, create) else {
+        panic!("a Page")
+    };
+    let mut views: Vec<crate::ViewId> = Vec::new();
+    for round in 0..60usize {
+        let count = workspace.view_count(&page).unwrap();
+        if round % 5 == 4 && count > 0 {
+            let view = workspace
+                .views(&page, round % count, 1)
+                .unwrap()
+                .remove(0)
+                .id;
+            let remove = Mutation::RemoveView {
+                page: page.clone(),
+                view,
+            };
+            apply(&mut workspace, remove);
+            continue;
+        }
+        let after =
+            (round % 3 > 0 && !views.is_empty()).then(|| views[round % views.len()].clone());
+        let add = Mutation::AddTextBlock {
+            page: page.clone(),
+            after,
+            text: format!("Block {round}"),
+        };
+        if let Some(Created::Block { view, .. }) = apply(&mut workspace, add) {
+            views.push(view);
+        }
+        views.retain(|view| {
+            workspace
+                .views(&page, 0, usize::MAX)
+                .unwrap()
+                .iter()
+                .any(|shown| &shown.id == view)
+        });
+    }
+
+    let kept = workspace.views(&page, 0, usize::MAX).unwrap();
+    let loaded = &workspace.docs[&Document::Page(page)];
+    let read = crate::order::Order::read(&loaded.doc).window(0, usize::MAX);
+    assert_eq!(kept, read);
+    assert!(kept.len() > 30);
+}
