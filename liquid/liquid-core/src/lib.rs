@@ -2,8 +2,8 @@
 //! and the History of Actions it records (ADR-0235), over Automerge documents (ADR-0238).
 //!
 //! The Workspace commits every write to a [`Store`] before acknowledging it;
-//! `liquid-storage` implements one on SQLite. Its data lives in three kinds of Automerge document, each created with its whole top-level
-//! structure in its first change:
+//! `liquid-storage` implements one on SQLite. The Workspace's data lives in three kinds of
+//! Automerge document, each created with its whole top-level structure in its first change:
 //!
 //! - the Workspace document: its owner and its areas;
 //! - one document per area: its Page tree, so the Explorer opens without any Page;

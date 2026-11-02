@@ -14,7 +14,8 @@ use std::path::Path;
 use liquid_core::{Action, ActionId, Commit, Document, Error, Store, Write};
 use rusqlite::{Connection, ErrorCode, OptionalExtension, params};
 
-/// The schema version this crate writes; [`Sqlite::open`] migrates older databases to it.
+/// The schema version this crate writes; [`Sqlite::open`] creates it in a new database and
+/// refuses a newer one.
 const VERSION: i64 = 1;
 
 const SCHEMA: &str = "
