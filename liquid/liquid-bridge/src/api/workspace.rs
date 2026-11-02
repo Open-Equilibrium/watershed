@@ -444,6 +444,32 @@ impl BridgeResource {
     }
 }
 
+/// Opens the replica folder's lock file without truncating it, and refuses one that is a
+/// link or no plain file, so opening never writes to a file elsewhere.
+fn open_lock(path: &Path) -> Result<File, String> {
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true).write(true).create(true).truncate(false);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::custom_flags(
+        &mut options,
+        rustix::fs::OFlags::NOFOLLOW.bits() as i32,
+    );
+    let lock = options
+        .open(path)
+        .map_err(|error| format!("the replica lock {}: {error}", path.display()))?;
+    let plain = lock
+        .metadata()
+        .map_err(|error| error.to_string())?
+        .is_file();
+    if !plain {
+        return Err(format!(
+            "the replica lock {} is no plain file",
+            path.display()
+        ));
+    }
+    Ok(lock)
+}
+
 /// The window `start..start + limit`, with `limit` capped at [`MAX_WINDOW`].
 fn window(start: i64, limit: i64) -> Result<(usize, usize), String> {
     Ok((
@@ -468,7 +494,7 @@ impl LiquidWorkspace {
         std::fs::create_dir_all(dir).map_err(|error| error.to_string())?;
         // Taken before the key is read or made, so two sessions opening a new folder at once
         // cannot each store a key of their own.
-        let lock = File::create(dir.join("replica.lock")).map_err(|error| error.to_string())?;
+        let lock = open_lock(&dir.join("replica.lock"))?;
         match lock.try_lock() {
             Ok(()) => {}
             Err(TryLockError::WouldBlock) => {

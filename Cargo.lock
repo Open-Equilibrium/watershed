@@ -1527,6 +1527,7 @@ dependencies = [
  "liquid-core",
  "liquid-storage",
  "meta-harness-core",
+ "rustix",
  "tokio",
 ]
 

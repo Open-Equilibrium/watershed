@@ -579,3 +579,17 @@ fn text_blocks_split_join_restyle_and_start_sections_through_the_bridge() {
     assert_eq!(read(&block).0, Some("Five days".into()));
     assert_eq!(read(&rest), (None, None));
 }
+
+#[cfg(unix)]
+#[test]
+fn opening_never_writes_through_a_linked_lock_file() {
+    let folder = Folder::new("link");
+    std::fs::create_dir_all(&folder.0).unwrap();
+    let elsewhere = folder.0.join("notes.txt");
+    std::fs::write(&elsewhere, "keep me").unwrap();
+    std::os::unix::fs::symlink(&elsewhere, folder.0.join("replica.lock")).unwrap();
+
+    let opened = LiquidWorkspace::open_with(&folder.0, &Memory::default());
+    assert!(opened.is_err(), "a linked lock file is refused");
+    assert_eq!(std::fs::read_to_string(&elsewhere).unwrap(), "keep me");
+}
