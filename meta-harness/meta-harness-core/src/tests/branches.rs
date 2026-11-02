@@ -1747,6 +1747,57 @@ fn no_background_fetch_writes_outside_remote_tracking_branches() {
 }
 
 #[test]
+fn automatic_fetch_follows_symbolic_destinations_only_within_remote_refs() {
+    run(async {
+        for (case, target, indirect, allowed) in [
+            ("branch", "refs/heads/release", false, false),
+            ("checkout", "refs/heads/main", false, false),
+            ("chain", "refs/heads/release", true, false),
+            ("remote", "refs/remotes/origin/release", true, true),
+        ] {
+            let clone = Clone::new(&format!("fetch-symbolic-{case}"));
+            let repo = &clone.repo;
+            repo.git(&["branch", "release"]);
+            repo.git(&["update-ref", "refs/remotes/origin/release", "HEAD"]);
+            let destination = "refs/remotes/origin/main";
+            if indirect {
+                repo.git(&["symbolic-ref", "refs/remotes/origin/alias", target]);
+                repo.git(&["symbolic-ref", destination, "refs/remotes/origin/alias"]);
+            } else {
+                repo.git(&["symbolic-ref", destination, target]);
+            }
+            repo.git(&[
+                "config",
+                "remote.origin.fetch",
+                "+refs/heads/main:refs/remotes/origin/main",
+            ]);
+            let before = repo.git(&["show-ref"]);
+            let branches = repo.git(&["show-ref", "--heads"]);
+            clone.commit_upstream("theirs\n");
+            let checkpoints = Checkpoints::new(repo.path());
+
+            let fetched = checkpoints.fetch().await;
+
+            if allowed {
+                assert!(fetched.expect("remote target fetched"));
+                assert_eq!(
+                    repo.git(&["rev-parse", target]),
+                    clone.origin.git(&["rev-parse", "HEAD"])
+                );
+            } else {
+                assert!(
+                    matches!(fetched, Err(DiffError::FetchOutsideRemotes(_))),
+                    "{case}: {fetched:?}"
+                );
+                assert_eq!(repo.git(&["show-ref"]), before, "{case}");
+            }
+            assert_eq!(repo.git(&["show-ref", "--heads"]), branches, "{case}");
+            assert_eq!(read(repo, "a.txt"), "old\n", "{case}");
+        }
+    });
+}
+
+#[test]
 fn worktrees_serialize_leaving_restoring_and_discarding_stashes() {
     run(async {
         use std::os::unix::fs::PermissionsExt;

@@ -336,11 +336,24 @@ impl WorkingTree {
             .unwrap_or_default();
         for spec in specs.lines() {
             let destination = spec.split_once(':').map_or("", |(_, to)| to);
-            if !spec.starts_with('^')
-                && !destination.is_empty()
-                && !destination.starts_with("refs/remotes/")
-            {
+            if spec.starts_with('^') || destination.is_empty() {
+                continue;
+            }
+            if !destination.starts_with("refs/remotes/") {
                 return Err(DiffError::FetchOutsideRemotes(spec.to_owned()));
+            }
+            // Git skips symbolic destinations when expanding a wildcard, but follows them
+            // for an explicit refspec. symbolic-ref resolves the full chain by default.
+            if !destination.contains('*') {
+                let target =
+                    match git(&self.root, &[], &["symbolic-ref", "--quiet", destination]).await {
+                        Ok(target) => target,
+                        Err(DiffError::Git(reason)) if reason.is_empty() => continue,
+                        Err(error) => return Err(error),
+                    };
+                if !target.trim_end_matches('\n').starts_with("refs/remotes/") {
+                    return Err(DiffError::FetchOutsideRemotes(spec.to_owned()));
+                }
             }
         }
         let env: Vec<(&str, OsString)> = NO_PROMPTS
