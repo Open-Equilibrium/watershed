@@ -30,7 +30,9 @@ core-script = { path = "core/core-script", version = "0.0.0" }
 flow-agent-core = { path = "flow-agent/flow-agent-core", version = "0.0.0" }
 flutter_rust_bridge = "=2.13.0"
 getrandom = { version = "=0.4.3", default-features = false, features = ["std"] }
+keyring = "=4.2.0"
 liquid-core = { path = "liquid/liquid-core", version = "0.0.0" }
+liquid-storage = { path = "liquid/liquid-storage", version = "0.0.0" }
 meta-harness-core = { path = "meta-harness/meta-harness-core", version = "0.0.0" }
 noyalib = { version = "=0.0.53", default-features = false, features = ["std"] }
 proto = { path = "proto/proto", version = "0.0.0" }

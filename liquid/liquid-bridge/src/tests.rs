@@ -1,3 +1,5 @@
+mod workspace;
+
 use meta_harness_core::{
     AgentCommand, AgentEvent, ChangedLines, CommandError, Decision, EditChange, EditPreview,
     ItemDetail, ItemId, ItemKind, ItemStatus, RequestId, RequestKind, SessionEvent, TurnId, Usage,
