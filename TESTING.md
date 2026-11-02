@@ -182,7 +182,7 @@ Liquid clients use Flutter, which builds desktop apps only on their own operatin
 | Linux | Linux | clang, CMake, Ninja, pkg-config and GTK 3 development headers |
 | Android | Linux, macOS or Windows | Android SDK |
 
-`liquid-storage` compiles SQLCipher and OpenSSL from source (ADR-0237), so every host that builds it also needs Perl and make; Windows uses Visual Studio's nmake instead of make. CI hosts have no keychain, so the bridge's keychain test is ignored there; run `cargo test -p liquid_bridge -- --ignored keychain` on each desktop target that changes how the key is stored.
+`liquid-storage` compiles SQLCipher and OpenSSL from source (ADR-0237), so every host that builds it also needs Perl and make; Windows uses Visual Studio's nmake instead of make. CI hosts have no keychain, so the bridge's keychain test is ignored; run `cargo test -p liquid_bridge -- --ignored keychain` by hand on each desktop target whenever how the key is stored changes.
 
 Every Liquid build, including `flutter test`, also compiles the Rust bridge through rustup with the toolchain pinned in `liquid/liquid-bridge/rust-toolchain.toml` (ADR-0213). Flutter passes hooks only a few environment variables, such as `PATH`, `HOME`, proxy settings and those starting with `CCACHE_`, `DOTNET_`, `NIX_`, `NUGET_` or `CONAN_`, and records them in `liquid/app/.dart_tool/hooks_runner` and in verbose output; keep credentials out of all of them on build hosts. flutter_rust_bridge has one main maintainer, so every Flutter or Rust pin update also checks its recent releases and open issues for whether it is still maintained (ADR-0217). Without Xcode, a Mac still runs Rust core tests, `flutter test` and `flutter analyze`. Native CI hosts can supply the other desktop builds.
 
