@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:liquid/src/agent/commit_dialog.dart';
 import 'package:liquid/src/agent/shell.dart';
 import 'package:liquid/src/agent/sidebar.dart';
 import 'package:liquid/src/controls.dart';
@@ -15,11 +18,16 @@ import 'fake_backend.dart';
 void main() {
   late FakeBackend backend;
   late SessionState state;
-  Future<void> show(WidgetTester tester, {BridgeGitStatus? status}) async {
+  Future<void> show(
+    WidgetTester tester, {
+    BridgeGitStatus? status,
+    FakeBackend? using,
+  }) async {
     await tester.binding.setSurfaceSize(const Size(1600, 1000));
-    backend = FakeBackend()
+    backend = (using ?? FakeBackend())
       ..git = status ?? gitStatusOf(changed: 4, defaultBranch: 'main');
     backend.commitPlanned = BridgeCommitPlan(
+      snapshot: 'snapshot',
       files: [
         commitFileOf('docs/api.md', turns: [3], added: 3),
         commitFileOf('src/middleware/rateLimit.ts', turns: [1, 3], added: 5),
@@ -97,6 +105,7 @@ void main() {
       await message(tester);
       await tester.tap(find.widgetWithText(PrimaryButton, 'Commit'));
       await tester.pumpAndSettle();
+      expect(backend.committedSnapshot, 'snapshot');
       expect(backend.committedPaths, [
         'docs/api.md',
         'src/middleware/rateLimit.ts',
@@ -112,6 +121,191 @@ void main() {
     },
   );
 
+  testWidgets(
+    'Enter in the message field keeps a multiline draft without committing',
+    (tester) async {
+      await show(tester);
+      await open(tester);
+      await tester.enterText(
+        find.byKey(const Key('commit-message')),
+        'Subject',
+      );
+      await tester.pumpAndSettle();
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      expect(backend.committedPaths, isNull);
+      expect(find.byKey(const Key('commit-message')), findsOneWidget);
+      expect(
+        tester.testTextInput.setClientArgs!['inputAction'],
+        'TextInputAction.newline',
+      );
+      await tester.testTextInput.receiveAction(TextInputAction.newline);
+      await tester.enterText(
+        find.byKey(const Key('commit-message')),
+        'Subject\nDetails',
+      );
+      expect(
+        tester
+            .widget<TextField>(find.byKey(const Key('commit-message')))
+            .controller!
+            .text,
+        'Subject\nDetails',
+      );
+      expect(backend.committedPaths, isNull);
+    },
+  );
+
+  testWidgets(
+    'running refusal clears when Git changes while the dialog is open',
+    (tester) async {
+      await show(tester);
+      backend.commitPlanned = BridgeCommitPlan(
+        snapshot: 'snapshot',
+        files: backend.commitPlanned.files,
+        running: const [BridgeRunningAgent(own: false, title: 'Other session')],
+      );
+      await open(tester);
+      await message(tester);
+      expect(find.text('Commit on new branch…'), findsNothing);
+      backend.commitPlanned = BridgeCommitPlan(
+        snapshot: 'snapshot',
+        files: backend.commitPlanned.files,
+        running: const [],
+      );
+      backend.git = gitStatusOf(changed: 3);
+      await state.git.refresh();
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Other session'), findsNothing);
+      expect(
+        tester
+            .widget<PrimaryButton>(find.widgetWithText(PrimaryButton, 'Commit'))
+            .onPressed,
+        isNotNull,
+      );
+      expect(find.text('Return 429\n\nExplain the change.'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'turn end refreshes an open commit plan without a status change',
+    (tester) async {
+      await show(tester);
+      await open(tester);
+      await message(tester);
+      state.status.value = RunStatus.running;
+      await tester.pump();
+      expect(find.text('Commit on new branch…'), findsNothing);
+      final reads = backend.calls.where((call) => call == 'commit plan').length;
+      state.status.value = RunStatus.idle;
+      await tester.pumpAndSettle();
+      expect(
+        backend.calls.where((call) => call == 'commit plan'),
+        hasLength(reads + 1),
+      );
+      expect(
+        tester
+            .widget<PrimaryButton>(find.widgetWithText(PrimaryButton, 'Commit'))
+            .onPressed,
+        isNotNull,
+      );
+      expect(find.text('Return 429\n\nExplain the change.'), findsOneWidget);
+    },
+  );
+
+  testWidgets('detached dialog permits a new branch but disables Commit', (
+    tester,
+  ) async {
+    await show(tester);
+    await open(tester);
+    await message(tester);
+    backend.git = gitStatusOf(branch: null, upstream: null, changed: 4);
+    await state.git.refresh();
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<PrimaryButton>(find.widgetWithText(PrimaryButton, 'Commit'))
+          .onPressed,
+      isNull,
+    );
+    expect(find.text('Commit on new branch…'), findsOneWidget);
+    expect(
+      find.textContaining('Detached HEAD: create a branch'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets(
+    'one pending plan opens one dialog and drops a switched session',
+    (tester) async {
+      final pending = FakeBackend()..planGate = Completer<BridgeCommitPlan>();
+      await show(tester, using: pending);
+      final context = tester.element(find.byType(AgentShell));
+      final first = showCommitDialog(context, state);
+      final second = showCommitDialog(context, state);
+      await tester.pump();
+      expect(
+        backend.calls.where((call) => call == 'commit plan'),
+        hasLength(1),
+      );
+      await state.newSession();
+      pending.planGate!.complete(pending.commitPlanned);
+      await tester.pumpAndSettle();
+      expect(find.text('Commit changes'), findsNothing);
+      await Future.wait([first, second]);
+    },
+  );
+
+  testWidgets('two open requests share a plan and show a single dialog', (
+    tester,
+  ) async {
+    final pending = FakeBackend()..planGate = Completer<BridgeCommitPlan>();
+    await show(tester, using: pending);
+    final context = tester.element(find.byType(AgentShell));
+    final first = showCommitDialog(context, state);
+    final second = showCommitDialog(context, state);
+    await tester.pump();
+    pending.planGate!.complete(pending.commitPlanned);
+    await tester.pumpAndSettle();
+    expect(backend.calls.where((call) => call == 'commit plan'), hasLength(1));
+    expect(find.text('Commit changes'), findsOneWidget);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    await Future.wait([first, second]);
+  });
+
+  testWidgets(
+    'Initialize waits for loaded status and disables repeated writes',
+    (tester) async {
+      final pending = FakeBackend()..statusGate = Completer<BridgeGitStatus?>();
+      await show(tester, using: pending);
+      expect(find.text('Initialize Git'), findsNothing);
+      pending.statusGate!.complete(null);
+      pending.statusGate = null;
+      pending.git = null;
+      await tester.pumpAndSettle();
+      expect(find.text('Initialize Git'), findsOneWidget);
+      pending.initializeGate = Completer<BridgeGitOutcome>();
+      final first = state.git.initialize();
+      final second = state.git.initialize();
+      await tester.pump();
+      expect(
+        tester
+            .widget<OutlinedButton>(
+              find.widgetWithText(OutlinedButton, 'Initialize Git'),
+            )
+            .onPressed,
+        isNull,
+      );
+      expect(
+        backend.calls.where((call) => call == 'initialize git'),
+        hasLength(1),
+      );
+      pending.initializeGate!.complete(outcomeOf(BridgeGitOutcomeKind.done));
+      await Future.wait([first, second]);
+      state.clearNotices();
+    },
+  );
+
   testWidgets('Edit excludes files and shows the mixed checkbox', (
     tester,
   ) async {
@@ -119,6 +313,13 @@ void main() {
     await open(tester);
     await tester.tap(find.text('Edit'));
     await tester.pumpAndSettle();
+    expect(find.bySemanticsLabel('All files'), findsOneWidget);
+    expect(
+      tester
+          .getSemantics(find.byKey(const Key('commit-select-notes/todo.md')))
+          .label,
+      startsWith('notes/todo.md\n'),
+    );
     await tester.tap(find.byKey(const Key('commit-select-notes/todo.md')));
     await tester.pumpAndSettle();
     expect(
@@ -210,6 +411,7 @@ void main() {
   ) async {
     await show(tester);
     backend.commitPlanned = BridgeCommitPlan(
+      snapshot: 'snapshot',
       files: backend.commitPlanned.files,
       running: const [
         BridgeRunningAgent(own: false, title: 'Fix flaky sync test'),
@@ -248,6 +450,18 @@ void main() {
       }
       await tester.sendKeyEvent(LogicalKeyboardKey.escape);
       await tester.pumpAndSettle();
+      backend.git = gitStatusOf(ahead: 1);
+      await state.git.refresh();
+      await tester.pumpAndSettle();
+      expect(find.byTooltip('Nothing to commit.'), findsOneWidget);
+      backend.git = gitStatusOf(changed: 1);
+      await state.git.refresh();
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('git-menu')));
+      await tester.pumpAndSettle();
+      expect(find.text('1 file'), findsOneWidget);
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
       backend.git = gitStatusOf(branch: null, upstream: null);
       await state.git.refresh();
       await tester.pumpAndSettle();
@@ -262,6 +476,10 @@ void main() {
       );
       await state.git.refresh();
       await tester.pumpAndSettle();
+      expect(
+        tester.widget<Text>(find.text('merging')).style!.color,
+        tester.element(find.text('merging')).ws.warning,
+      );
       expect(find.text('merging'), findsOneWidget);
       expect(
         find.byTooltip(
@@ -271,6 +489,30 @@ void main() {
       );
     },
   );
+
+  testWidgets('merge hints distinguish one conflicted file from no conflicts', (
+    tester,
+  ) async {
+    await show(
+      tester,
+      status: gitStatusOf(merging: true, conflicts: ['a.txt']),
+    );
+    expect(
+      find.byTooltip(
+        '1 file has conflicts: a.txt. Resolve them in an editor or a terminal; Liquid resolves no conflicts.',
+      ),
+      findsOneWidget,
+    );
+    backend.git = gitStatusOf(merging: true);
+    await state.git.refresh();
+    await tester.pumpAndSettle();
+    expect(
+      find.byTooltip(
+        'A merge is in progress. Finish it in a terminal; Liquid commits no merges.',
+      ),
+      findsOneWidget,
+    );
+  });
 
   testWidgets('Initialize Git is explicit and reports when checkpoints begin', (
     tester,

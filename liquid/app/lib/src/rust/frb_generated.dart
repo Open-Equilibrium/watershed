@@ -111,6 +111,7 @@ abstract class RustLibApi extends BaseApi {
 
   Future<BridgeGitOutcome> crateApiSessionAgentSessionCommitFiles({
     required AgentSession that,
+    required String snapshot,
     required List<String> paths,
     required String message,
     String? branch,
@@ -599,6 +600,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   @override
   Future<BridgeGitOutcome> crateApiSessionAgentSessionCommitFiles({
     required AgentSession that,
+    required String snapshot,
     required List<String> paths,
     required String message,
     String? branch,
@@ -611,6 +613,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             that,
             serializer,
           );
+          sse_encode_String(snapshot, serializer);
           sse_encode_list_String(paths, serializer);
           sse_encode_String(message, serializer);
           sse_encode_opt_String(branch, serializer);
@@ -626,7 +629,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeErrorData: sse_decode_String,
         ),
         constMeta: kCrateApiSessionAgentSessionCommitFilesConstMeta,
-        argValues: [that, paths, message, branch],
+        argValues: [that, snapshot, paths, message, branch],
         apiImpl: this,
       ),
     );
@@ -635,7 +638,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   TaskConstMeta get kCrateApiSessionAgentSessionCommitFilesConstMeta =>
       const TaskConstMeta(
         debugName: "AgentSession_commit_files",
-        argNames: ["that", "paths", "message", "branch"],
+        argNames: ["that", "snapshot", "paths", "message", "branch"],
       );
 
   @override
@@ -2590,6 +2593,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgeCommit dco_decode_box_autoadd_bridge_commit(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_bridge_commit(raw);
+  }
+
+  @protected
   BridgeContextDetail dco_decode_box_autoadd_bridge_context_detail(
     dynamic raw,
   ) {
@@ -2845,6 +2854,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgeCommit dco_decode_bridge_commit(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 3)
+      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+    return BridgeCommit(
+      branch: dco_decode_String(arr[0]),
+      subject: dco_decode_opt_String(arr[1]),
+      count: dco_decode_i_64(arr[2]),
+    );
+  }
+
+  @protected
   BridgeCommitFile dco_decode_bridge_commit_file(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
@@ -2862,11 +2884,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeCommitPlan dco_decode_bridge_commit_plan(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 2)
-      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    if (arr.length != 3)
+      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
     return BridgeCommitPlan(
-      files: dco_decode_list_bridge_commit_file(arr[0]),
-      running: dco_decode_list_bridge_running_agent(arr[1]),
+      snapshot: dco_decode_String(arr[0]),
+      files: dco_decode_list_bridge_commit_file(arr[1]),
+      running: dco_decode_list_bridge_running_agent(arr[2]),
     );
   }
 
@@ -3004,16 +3027,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeGitOutcome dco_decode_bridge_git_outcome(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 7)
-      throw Exception('unexpected arr length: expect 7 but see ${arr.length}');
+    if (arr.length != 5)
+      throw Exception('unexpected arr length: expect 5 but see ${arr.length}');
     return BridgeGitOutcome(
       kind: dco_decode_bridge_git_outcome_kind(arr[0]),
       files: dco_decode_list_String(arr[1]),
       running: dco_decode_list_bridge_running_agent(arr[2]),
       detail: dco_decode_String(arr[3]),
-      branch: dco_decode_opt_String(arr[4]),
-      subject: dco_decode_opt_String(arr[5]),
-      count: dco_decode_opt_box_autoadd_i_64(arr[6]),
+      commit: dco_decode_opt_box_autoadd_bridge_commit(arr[4]),
     );
   }
 
@@ -3683,6 +3704,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgeCommit? dco_decode_opt_box_autoadd_bridge_commit(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_box_autoadd_bridge_commit(raw);
+  }
+
+  @protected
   BridgeContextDetail? dco_decode_opt_box_autoadd_bridge_context_detail(
     dynamic raw,
   ) {
@@ -3954,6 +3981,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return (sse_decode_bridge_approval(deserializer));
+  }
+
+  @protected
+  BridgeCommit sse_decode_box_autoadd_bridge_commit(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_bridge_commit(deserializer));
   }
 
   @protected
@@ -4246,6 +4281,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgeCommit sse_decode_bridge_commit(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_branch = sse_decode_String(deserializer);
+    var var_subject = sse_decode_opt_String(deserializer);
+    var var_count = sse_decode_i_64(deserializer);
+    return BridgeCommit(
+      branch: var_branch,
+      subject: var_subject,
+      count: var_count,
+    );
+  }
+
+  @protected
   BridgeCommitFile sse_decode_bridge_commit_file(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_change = sse_decode_bridge_file_change(deserializer);
@@ -4263,9 +4311,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   @protected
   BridgeCommitPlan sse_decode_bridge_commit_plan(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_snapshot = sse_decode_String(deserializer);
     var var_files = sse_decode_list_bridge_commit_file(deserializer);
     var var_running = sse_decode_list_bridge_running_agent(deserializer);
-    return BridgeCommitPlan(files: var_files, running: var_running);
+    return BridgeCommitPlan(
+      snapshot: var_snapshot,
+      files: var_files,
+      running: var_running,
+    );
   }
 
   @protected
@@ -4412,17 +4465,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_files = sse_decode_list_String(deserializer);
     var var_running = sse_decode_list_bridge_running_agent(deserializer);
     var var_detail = sse_decode_String(deserializer);
-    var var_branch = sse_decode_opt_String(deserializer);
-    var var_subject = sse_decode_opt_String(deserializer);
-    var var_count = sse_decode_opt_box_autoadd_i_64(deserializer);
+    var var_commit = sse_decode_opt_box_autoadd_bridge_commit(deserializer);
     return BridgeGitOutcome(
       kind: var_kind,
       files: var_files,
       running: var_running,
       detail: var_detail,
-      branch: var_branch,
-      subject: var_subject,
-      count: var_count,
+      commit: var_commit,
     );
   }
 
@@ -5326,6 +5375,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgeCommit? sse_decode_opt_box_autoadd_bridge_commit(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_bridge_commit(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
   BridgeContextDetail? sse_decode_opt_box_autoadd_bridge_context_detail(
     SseDeserializer deserializer,
   ) {
@@ -5740,6 +5802,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_box_autoadd_bridge_commit(
+    BridgeCommit self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_bridge_commit(self, serializer);
+  }
+
+  @protected
   void sse_encode_box_autoadd_bridge_context_detail(
     BridgeContextDetail self,
     SseSerializer serializer,
@@ -6031,6 +6102,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_bridge_commit(BridgeCommit self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.branch, serializer);
+    sse_encode_opt_String(self.subject, serializer);
+    sse_encode_i_64(self.count, serializer);
+  }
+
+  @protected
   void sse_encode_bridge_commit_file(
     BridgeCommitFile self,
     SseSerializer serializer,
@@ -6048,6 +6127,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     SseSerializer serializer,
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.snapshot, serializer);
     sse_encode_list_bridge_commit_file(self.files, serializer);
     sse_encode_list_bridge_running_agent(self.running, serializer);
   }
@@ -6176,9 +6256,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_list_String(self.files, serializer);
     sse_encode_list_bridge_running_agent(self.running, serializer);
     sse_encode_String(self.detail, serializer);
-    sse_encode_opt_String(self.branch, serializer);
-    sse_encode_opt_String(self.subject, serializer);
-    sse_encode_opt_box_autoadd_i_64(self.count, serializer);
+    sse_encode_opt_box_autoadd_bridge_commit(self.commit, serializer);
   }
 
   @protected
@@ -6902,6 +6980,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_opt_box_autoadd_bridge_commit(
+    BridgeCommit? self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_bridge_commit(self, serializer);
+    }
+  }
+
+  @protected
   void sse_encode_opt_box_autoadd_bridge_context_detail(
     BridgeContextDetail? self,
     SseSerializer serializer,
@@ -7224,11 +7315,13 @@ class AgentSessionImpl extends RustOpaque implements AgentSession {
   /// Commits the selected whole files using the user's Git and hooks, optionally creating
   /// and switching to a branch first.
   Future<BridgeGitOutcome> commitFiles({
+    required String snapshot,
     required List<String> paths,
     required String message,
     String? branch,
   }) => RustLib.instance.api.crateApiSessionAgentSessionCommitFiles(
     that: this,
+    snapshot: snapshot,
     paths: paths,
     message: message,
     branch: branch,

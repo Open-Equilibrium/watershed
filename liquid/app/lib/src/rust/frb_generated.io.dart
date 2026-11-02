@@ -95,6 +95,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeApproval dco_decode_box_autoadd_bridge_approval(dynamic raw);
 
   @protected
+  BridgeCommit dco_decode_box_autoadd_bridge_commit(dynamic raw);
+
+  @protected
   BridgeContextDetail dco_decode_box_autoadd_bridge_context_detail(dynamic raw);
 
   @protected
@@ -189,6 +192,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeCheckpointSession dco_decode_bridge_checkpoint_session(dynamic raw);
+
+  @protected
+  BridgeCommit dco_decode_bridge_commit(dynamic raw);
 
   @protected
   BridgeCommitFile dco_decode_bridge_commit_file(dynamic raw);
@@ -431,6 +437,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeApproval? dco_decode_opt_box_autoadd_bridge_approval(dynamic raw);
 
   @protected
+  BridgeCommit? dco_decode_opt_box_autoadd_bridge_commit(dynamic raw);
+
+  @protected
   BridgeContextDetail? dco_decode_opt_box_autoadd_bridge_context_detail(
     dynamic raw,
   );
@@ -567,6 +576,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeCommit sse_decode_box_autoadd_bridge_commit(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   BridgeContextDetail sse_decode_box_autoadd_bridge_context_detail(
     SseDeserializer deserializer,
   );
@@ -691,6 +705,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeCheckpointSession sse_decode_bridge_checkpoint_session(
     SseDeserializer deserializer,
   );
+
+  @protected
+  BridgeCommit sse_decode_bridge_commit(SseDeserializer deserializer);
 
   @protected
   BridgeCommitFile sse_decode_bridge_commit_file(SseDeserializer deserializer);
@@ -985,6 +1002,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeCommit? sse_decode_opt_box_autoadd_bridge_commit(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   BridgeContextDetail? sse_decode_opt_box_autoadd_bridge_context_detail(
     SseDeserializer deserializer,
   );
@@ -1155,6 +1177,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_box_autoadd_bridge_approval(
     BridgeApproval self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_bridge_commit(
+    BridgeCommit self,
     SseSerializer serializer,
   );
 
@@ -1331,6 +1359,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
     BridgeCheckpointSession self,
     SseSerializer serializer,
   );
+
+  @protected
+  void sse_encode_bridge_commit(BridgeCommit self, SseSerializer serializer);
 
   @protected
   void sse_encode_bridge_commit_file(
@@ -1731,6 +1762,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_opt_box_autoadd_bridge_approval(
     BridgeApproval? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_bridge_commit(
+    BridgeCommit? self,
     SseSerializer serializer,
   );
 

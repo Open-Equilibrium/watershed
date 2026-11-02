@@ -1,33 +1,26 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-
-import '../shortcuts/keymap.dart';
 
 import '../controls.dart';
 import '../rust/api/events.dart';
 import '../rust/api/git.dart';
 import '../session/session_state.dart';
+import '../shortcuts/keymap.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 
 /// The approved whole-file commit dialog; its message and selection remain a draft.
 Future<void> showCommitDialog(BuildContext context, SessionState state) async {
-  await state.git.refresh();
-  final BridgeCommitPlan plan;
-  try {
-    plan = await state.git.commitPlan();
-  } on Object catch (error) {
-    state.notify(
-      BridgeLevel.error,
-      'Could not read uncommitted changes: $error',
+  final generation = state.generation;
+  await state.git.openCommitPlan((plan) async {
+    if (!context.mounted || generation != state.generation) return;
+    await showDialog<void>(
+      context: context,
+      builder: (_) => _CommitDialog(state: state, plan: plan),
     );
-    return;
-  }
-  if (!context.mounted) return;
-  await showDialog<void>(
-    context: context,
-    builder: (_) => _CommitDialog(state: state, plan: plan),
-  );
+  });
 }
 
 class _CommitDialog extends StatefulWidget {
@@ -40,32 +33,88 @@ class _CommitDialog extends StatefulWidget {
 
 class _CommitDialogState extends State<_CommitDialog> {
   final _message = TextEditingController();
-  late final _selected = {
-    for (final file in widget.plan.files) file.change.path,
-  };
+  final _messageFocus = FocusNode();
+  late var _plan = widget.plan;
+  int _reads = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _messageFocus.addListener(_rebuild);
+    widget.state.git.status.addListener(_refreshPlan);
+    widget.state.status.addListener(_turnChanged);
+  }
+
+  void _rebuild() {
+    if (mounted) setState(() {});
+  }
+
+  void _turnChanged() {
+    if (widget.state.status.value != RunStatus.running &&
+        widget.state.status.value != RunStatus.waitingForYou) {
+      unawaited(_refreshPlan());
+    } else {
+      _rebuild();
+    }
+  }
+
+  Future<void> _refreshPlan() async {
+    if (_saving) return;
+    final read = ++_reads;
+    try {
+      final plan = await widget.state.git.commitPlan();
+      if (!mounted || read != _reads) return;
+      setState(() {
+        _plan = plan;
+        _running = plan.running;
+        _selected.retainAll(plan.files.map((file) => file.change.path));
+      });
+    } on Object catch (error) {
+      if (mounted) {
+        widget.state.notify(
+          BridgeLevel.error,
+          'Could not read uncommitted changes: $error',
+        );
+      }
+    }
+  }
+
+  late final _selected = {for (final file in _plan.files) file.change.path};
   late var _running = widget.plan.running;
   bool _editing = false;
   bool _saving = false;
+  bool get _agentRunning =>
+      _running.isNotEmpty ||
+      widget.state.status.value == RunStatus.running ||
+      widget.state.status.value == RunStatus.waitingForYou;
   bool get _enabled =>
       !_saving &&
-      _running.isEmpty &&
+      !_agentRunning &&
+      widget.state.git.status.value?.merging != true &&
       _selected.isNotEmpty &&
       _message.text.trim().isNotEmpty;
   @override
   void dispose() {
+    widget.state.git.status.removeListener(_refreshPlan);
+    widget.state.status.removeListener(_turnChanged);
+    _messageFocus.dispose();
     _message.dispose();
     super.dispose();
   }
 
   Future<void> _commit([String? branch]) async {
-    if (!_enabled) return;
+    if (!_enabled ||
+        (branch == null && widget.state.git.status.value?.branch == null)) {
+      return;
+    }
     setState(() => _saving = true);
     final result = await widget.state.git.commit(
       [
-        for (final file in widget.plan.files)
+        for (final file in _plan.files)
           if (_selected.contains(file.change.path)) file.change.path,
       ],
       _message.text,
+      snapshot: _plan.snapshot,
       branch: branch,
     );
     if (!mounted) return;
@@ -97,7 +146,7 @@ class _CommitDialogState extends State<_CommitDialog> {
   Widget build(BuildContext context) {
     final ws = context.ws;
     final status = widget.state.git.status.value;
-    final files = widget.plan.files;
+    final files = _plan.files;
     final included = files.where(
       (file) => _selected.contains(file.change.path),
     );
@@ -107,19 +156,22 @@ class _CommitDialogState extends State<_CommitDialog> {
     return ActionDialog(
       title: 'Commit changes',
       bindings: {
-        if (_enabled)
+        if (_enabled && status?.branch != null && !_messageFocus.hasFocus)
           const Keys(LogicalKeyboardKey.enter).activator: () => _commit(),
       },
       actions: [
         PrimaryButton(
           label: 'Commit',
-          shortcut: '⏎',
-          onPressed: _enabled ? () => _commit() : null,
+          shortcut: _messageFocus.hasFocus ? null : '⏎',
+          onPressed: _enabled && status?.branch != null
+              ? () => _commit()
+              : null,
         ),
-        SecondaryButton(
-          label: 'Commit on new branch…',
-          onPressed: _enabled ? _newBranch : null,
-        ),
+        if (!_agentRunning)
+          SecondaryButton(
+            label: 'Commit on new branch…',
+            onPressed: _enabled ? _newBranch : null,
+          ),
       ],
       children: [
         Container(
@@ -162,6 +214,7 @@ class _CommitDialogState extends State<_CommitDialog> {
                     if (_editing)
                       Checkbox(
                         key: const Key('commit-select-all'),
+                        semanticLabel: 'All files',
                         materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                         visualDensity: VisualDensity.compact,
                         tristate: true,
@@ -225,10 +278,14 @@ class _CommitDialogState extends State<_CommitDialog> {
           WarningNotice(
             '${whoRuns(_running)}. ${stopFirst(_running)}, then commit.',
           ),
+        if (status?.branch == null) const WarningNotice(detachedCommitHint),
+        if (status?.merging == true) WarningNotice(mergeHint(status)),
         const Text('Commit message'),
         TextField(
           key: const Key('commit-message'),
           controller: _message,
+          focusNode: _messageFocus,
+          textInputAction: TextInputAction.newline,
           enabled: !_saving,
           minLines: 3,
           maxLines: 5,
@@ -281,6 +338,7 @@ class _CommitDialogState extends State<_CommitDialog> {
           if (_editing)
             Checkbox(
               key: Key('commit-select-${change.path}'),
+              semanticLabel: change.shown,
               materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
               visualDensity: VisualDensity.compact,
               value: selected,

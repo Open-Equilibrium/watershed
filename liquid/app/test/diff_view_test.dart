@@ -47,6 +47,54 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  testWidgets('equal Git polls keep the uncommitted patch and scroll position', (
+    tester,
+  ) async {
+    final backend = FakeBackend()
+      ..git = gitStatusOf(changed: 1)
+      ..changed = [
+        const BridgeFileChange(
+          path: 'a.txt',
+          shown: 'a.txt',
+          status: BridgeChangeStatus.added,
+          added: 200,
+          removed: 0,
+        ),
+      ]
+      ..patches = {
+        'a.txt':
+            '@@ -0,0 +1,200 @@\n${List.generate(200, (i) => '+line $i').join('\n')}\n',
+      };
+    final state = await show(tester, backend);
+    await state.showTurns(const UncommittedChanges());
+    await tester.pumpAndSettle();
+    final pane = find.byWidgetPredicate(
+      (widget) => widget is ListView && widget.controller != null,
+    );
+    final scroll = tester.widget<ListView>(pane).controller!;
+    scroll.jumpTo(400);
+    await tester.pumpAndSettle();
+    final reads = backend.calls
+        .where((call) => call == 'uncommitted patch a.txt')
+        .length;
+    await state.git.refresh();
+    await tester.pumpAndSettle();
+    expect(
+      backend.calls.where((call) => call == 'uncommitted patch a.txt'),
+      hasLength(reads),
+    );
+    expect(scroll.offset, 400);
+    // A real status change re-reads the file but the same comparison keeps its place.
+    backend.git = gitStatusOf(changed: 1, ahead: 1);
+    await state.git.refresh();
+    await tester.pumpAndSettle();
+    expect(
+      backend.calls.where((call) => call == 'uncommitted patch a.txt'),
+      hasLength(reads + 1),
+    );
+    expect(scroll.offset, 400);
+  });
+
   testWidgets(
     'Uncommitted changes works before a finished turn and honors whitespace',
     (tester) async {

@@ -412,6 +412,7 @@ fn wire__crate__api__session__AgentSession_commit_files_impl(
             let api_that = <RustOpaqueMoi<
                 flutter_rust_bridge::for_generated::RustAutoOpaqueInner<AgentSession>,
             >>::sse_decode(&mut deserializer);
+            let api_snapshot = <String>::sse_decode(&mut deserializer);
             let api_paths = <Vec<String>>::sse_decode(&mut deserializer);
             let api_message = <String>::sse_decode(&mut deserializer);
             let api_branch = <Option<String>>::sse_decode(&mut deserializer);
@@ -434,6 +435,7 @@ fn wire__crate__api__session__AgentSession_commit_files_impl(
                     let api_that_guard = api_that_guard.unwrap();
                     let output_ok = crate::api::session::AgentSession::commit_files(
                         &*api_that_guard,
+                        api_snapshot,
                         api_paths,
                         api_message,
                         api_branch,
@@ -3211,6 +3213,20 @@ impl SseDecode for crate::api::session::BridgeCheckpointSession {
     }
 }
 
+impl SseDecode for crate::api::git::BridgeCommit {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_branch = <String>::sse_decode(deserializer);
+        let mut var_subject = <Option<String>>::sse_decode(deserializer);
+        let mut var_count = <i64>::sse_decode(deserializer);
+        return crate::api::git::BridgeCommit {
+            branch: var_branch,
+            subject: var_subject,
+            count: var_count,
+        };
+    }
+}
+
 impl SseDecode for crate::api::git::BridgeCommitFile {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -3230,10 +3246,12 @@ impl SseDecode for crate::api::git::BridgeCommitFile {
 impl SseDecode for crate::api::git::BridgeCommitPlan {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_snapshot = <String>::sse_decode(deserializer);
         let mut var_files = <Vec<crate::api::git::BridgeCommitFile>>::sse_decode(deserializer);
         let mut var_running =
             <Vec<crate::api::history::BridgeRunningAgent>>::sse_decode(deserializer);
         return crate::api::git::BridgeCommitPlan {
+            snapshot: var_snapshot,
             files: var_files,
             running: var_running,
         };
@@ -3437,17 +3455,13 @@ impl SseDecode for crate::api::git::BridgeGitOutcome {
         let mut var_running =
             <Vec<crate::api::history::BridgeRunningAgent>>::sse_decode(deserializer);
         let mut var_detail = <String>::sse_decode(deserializer);
-        let mut var_branch = <Option<String>>::sse_decode(deserializer);
-        let mut var_subject = <Option<String>>::sse_decode(deserializer);
-        let mut var_count = <Option<i64>>::sse_decode(deserializer);
+        let mut var_commit = <Option<crate::api::git::BridgeCommit>>::sse_decode(deserializer);
         return crate::api::git::BridgeGitOutcome {
             kind: var_kind,
             files: var_files,
             running: var_running,
             detail: var_detail,
-            branch: var_branch,
-            subject: var_subject,
-            count: var_count,
+            commit: var_commit,
         };
     }
 }
@@ -3467,6 +3481,8 @@ impl SseDecode for crate::api::git::BridgeGitOutcomeKind {
             7 => crate::api::git::BridgeGitOutcomeKind::HookFailed,
             8 => crate::api::git::BridgeGitOutcomeKind::CommitFailed,
             9 => crate::api::git::BridgeGitOutcomeKind::HookChanged,
+            10 => crate::api::git::BridgeGitOutcomeKind::CommitBranchFailed,
+            11 => crate::api::git::BridgeGitOutcomeKind::MergeInProgress,
             _ => unreachable!("Invalid variant for BridgeGitOutcomeKind: {}", inner),
         };
     }
@@ -4472,6 +4488,17 @@ impl SseDecode for Option<crate::api::events::BridgeApproval> {
     }
 }
 
+impl SseDecode for Option<crate::api::git::BridgeCommit> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<crate::api::git::BridgeCommit>::sse_decode(deserializer));
+        } else {
+            return None;
+        }
+    }
+}
+
 impl SseDecode for Option<crate::api::history::BridgeContextDetail> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -5302,6 +5329,25 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::session::BridgeCheckpointSess
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::git::BridgeCommit {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.branch.into_into_dart().into_dart(),
+            self.subject.into_into_dart().into_dart(),
+            self.count.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive for crate::api::git::BridgeCommit {}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::git::BridgeCommit>
+    for crate::api::git::BridgeCommit
+{
+    fn into_into_dart(self) -> crate::api::git::BridgeCommit {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::api::git::BridgeCommitFile {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
@@ -5328,6 +5374,7 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::git::BridgeCommitFile>
 impl flutter_rust_bridge::IntoDart for crate::api::git::BridgeCommitPlan {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
+            self.snapshot.into_into_dart().into_dart(),
             self.files.into_into_dart().into_dart(),
             self.running.into_into_dart().into_dart(),
         ]
@@ -5623,9 +5670,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::git::BridgeGitOutcome {
             self.files.into_into_dart().into_dart(),
             self.running.into_into_dart().into_dart(),
             self.detail.into_into_dart().into_dart(),
-            self.branch.into_into_dart().into_dart(),
-            self.subject.into_into_dart().into_dart(),
-            self.count.into_into_dart().into_dart(),
+            self.commit.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -5655,6 +5700,8 @@ impl flutter_rust_bridge::IntoDart for crate::api::git::BridgeGitOutcomeKind {
             Self::HookFailed => 7.into_dart(),
             Self::CommitFailed => 8.into_dart(),
             Self::HookChanged => 9.into_dart(),
+            Self::CommitBranchFailed => 10.into_dart(),
+            Self::MergeInProgress => 11.into_dart(),
             _ => unreachable!(),
         }
     }
@@ -6770,6 +6817,15 @@ impl SseEncode for crate::api::session::BridgeCheckpointSession {
     }
 }
 
+impl SseEncode for crate::api::git::BridgeCommit {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.branch, serializer);
+        <Option<String>>::sse_encode(self.subject, serializer);
+        <i64>::sse_encode(self.count, serializer);
+    }
+}
+
 impl SseEncode for crate::api::git::BridgeCommitFile {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -6783,6 +6839,7 @@ impl SseEncode for crate::api::git::BridgeCommitFile {
 impl SseEncode for crate::api::git::BridgeCommitPlan {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.snapshot, serializer);
         <Vec<crate::api::git::BridgeCommitFile>>::sse_encode(self.files, serializer);
         <Vec<crate::api::history::BridgeRunningAgent>>::sse_encode(self.running, serializer);
     }
@@ -6946,9 +7003,7 @@ impl SseEncode for crate::api::git::BridgeGitOutcome {
         <Vec<String>>::sse_encode(self.files, serializer);
         <Vec<crate::api::history::BridgeRunningAgent>>::sse_encode(self.running, serializer);
         <String>::sse_encode(self.detail, serializer);
-        <Option<String>>::sse_encode(self.branch, serializer);
-        <Option<String>>::sse_encode(self.subject, serializer);
-        <Option<i64>>::sse_encode(self.count, serializer);
+        <Option<crate::api::git::BridgeCommit>>::sse_encode(self.commit, serializer);
     }
 }
 
@@ -6967,6 +7022,8 @@ impl SseEncode for crate::api::git::BridgeGitOutcomeKind {
                 crate::api::git::BridgeGitOutcomeKind::HookFailed => 7,
                 crate::api::git::BridgeGitOutcomeKind::CommitFailed => 8,
                 crate::api::git::BridgeGitOutcomeKind::HookChanged => 9,
+                crate::api::git::BridgeGitOutcomeKind::CommitBranchFailed => 10,
+                crate::api::git::BridgeGitOutcomeKind::MergeInProgress => 11,
                 _ => {
                     unimplemented!("");
                 }
@@ -7705,6 +7762,16 @@ impl SseEncode for Option<crate::api::events::BridgeApproval> {
         <bool>::sse_encode(self.is_some(), serializer);
         if let Some(value) = self {
             <crate::api::events::BridgeApproval>::sse_encode(value, serializer);
+        }
+    }
+}
+
+impl SseEncode for Option<crate::api::git::BridgeCommit> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <crate::api::git::BridgeCommit>::sse_encode(value, serializer);
         }
     }
 }

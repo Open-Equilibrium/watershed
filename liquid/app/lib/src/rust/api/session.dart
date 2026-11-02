@@ -42,6 +42,7 @@ abstract class AgentSession implements RustOpaqueInterface {
   /// Commits the selected whole files using the user's Git and hooks, optionally creating
   /// and switching to a branch first.
   Future<BridgeGitOutcome> commitFiles({
+    required String snapshot,
     required List<String> paths,
     required String message,
     String? branch,

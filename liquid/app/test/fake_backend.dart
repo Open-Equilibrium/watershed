@@ -272,6 +272,9 @@ class FakeBackend implements SessionBackend {
   /// The checkout's Git state; null outside Git.
   BridgeGitStatus? git = gitStatusOf();
   Object? gitError;
+  Completer<BridgeGitStatus?>? statusGate;
+  Completer<BridgeCommitPlan>? planGate;
+  Completer<BridgeGitOutcome>? initializeGate;
   BridgeBranches branches = const BridgeBranches(branches: [], running: []);
   BridgeStash? stashed;
   ({String? branch, String? stash})? switchConfirmation;
@@ -288,6 +291,7 @@ class FakeBackend implements SessionBackend {
   @override
   Future<BridgeGitStatus?> gitStatus() async {
     statusReads++;
+    if (statusGate case final gate?) return gate.future;
     if (gitError case final error?) throw error;
     final now = git;
     return now == null
@@ -302,7 +306,7 @@ class FakeBackend implements SessionBackend {
             stash: stashed,
             defaultBranch: now.defaultBranch,
             merging: now.merging,
-            conflicts: now.conflicts,
+            conflicts: List.of(now.conflicts),
           );
   }
 
@@ -328,21 +332,29 @@ class FakeBackend implements SessionBackend {
   }
 
   BridgeCommitPlan commitPlanned = const BridgeCommitPlan(
+    snapshot: 'snapshot',
     files: [],
     running: [],
   );
+  String? committedSnapshot;
   List<String>? committedPaths;
   String? committedMessage;
   String? committedBranch;
 
   @override
-  Future<BridgeCommitPlan> commitPlan() async => commitPlanned;
+  Future<BridgeCommitPlan> commitPlan() async {
+    calls.add('commit plan');
+    return planGate?.future ?? commitPlanned;
+  }
+
   @override
   Future<BridgeGitOutcome> commitFiles(
+    String snapshot,
     List<String> paths,
     String message,
     String? branch,
   ) async {
+    committedSnapshot = snapshot;
     committedPaths = paths;
     committedMessage = message;
     committedBranch = branch;
@@ -352,9 +364,11 @@ class FakeBackend implements SessionBackend {
             files: [],
             running: [],
             detail: '',
-            branch: branch ?? git?.branch,
-            subject: message.split('\n').first,
-            count: paths.length,
+            commit: BridgeCommit(
+              branch: branch ?? git?.branch ?? 'main',
+              subject: message.split('\n').first,
+              count: paths.length,
+            ),
           )
         : outcome;
   }
@@ -362,6 +376,7 @@ class FakeBackend implements SessionBackend {
   @override
   Future<BridgeGitOutcome> initializeGit() async {
     calls.add('initialize git');
+    if (initializeGate case final gate?) return gate.future;
     git = gitStatusOf();
     inRepository = true;
     return outcome;
@@ -374,9 +389,11 @@ class FakeBackend implements SessionBackend {
     calls.add(
       'uncommitted changes${hideWhitespace ? ' without whitespace' : ''}',
     );
-    return hideWhitespace
-        ? changedWithoutWhitespace ?? changed ?? []
-        : changed ?? [];
+    return List.of(
+      hideWhitespace
+          ? changedWithoutWhitespace ?? changed ?? []
+          : changed ?? [],
+    );
   }
 
   @override

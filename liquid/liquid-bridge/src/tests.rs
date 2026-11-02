@@ -1481,6 +1481,8 @@ fn commit_bridge_exposes_attribution_whole_files_and_safe_notices() {
         "touch .git/ready\n".to_owned(),
         no_session_file(2),
         entries(3, TURN),
+        entries(4, TURN),
+        entries(5, TURN),
         "IFS= read -r line || exit 0".to_owned(),
     ]
     .concat();
@@ -1499,11 +1501,19 @@ fn commit_bridge_exposes_attribution_whole_files_and_safe_notices() {
             .contains("+new")
     );
     let result = session
-        .commit_files(vec!["a.txt".into()], "Subject\u{202e}".into(), None)
+        .commit_files(
+            plan.snapshot,
+            vec!["a.txt".into()],
+            "Subject\u{202e}".into(),
+            None,
+        )
         .unwrap();
     assert_eq!(result.kind, BridgeGitOutcomeKind::Done);
-    assert_eq!(result.subject.as_deref(), Some("Subject<U+202E>"));
-    assert_eq!(result.count, Some(1));
+    assert_eq!(
+        result.commit.as_ref().unwrap().subject.as_deref(),
+        Some("Subject<U+202E>")
+    );
+    assert_eq!(result.commit.as_ref().unwrap().count, 1);
     assert!(session.uncommitted_changes(false).unwrap().is_empty());
     use std::os::unix::fs::PermissionsExt;
     let hook = repo.join(".git/hooks/pre-commit");
@@ -1511,13 +1521,23 @@ fn commit_bridge_exposes_attribution_whole_files_and_safe_notices() {
     std::fs::write(&hook, "#!/bin/sh\nprintf 'hook\\033output\\n'\nexit 1\n").unwrap();
     std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
     let result = session
-        .commit_files(vec!["a.txt".into()], "Next".into(), None)
+        .commit_files(
+            session.commit_plan().unwrap().snapshot,
+            vec!["a.txt".into()],
+            "Next".into(),
+            None,
+        )
         .unwrap();
     assert_eq!(result.kind, BridgeGitOutcomeKind::CommitFailed);
     assert!(result.detail.contains("hook<U+001B>output"), "{result:?}");
     std::fs::write(&hook, "#!/bin/sh\nprintf 'formatted\\n' > a.txt\n").unwrap();
     let result = session
-        .commit_files(vec!["a.txt".into()], "Next".into(), None)
+        .commit_files(
+            session.commit_plan().unwrap().snapshot,
+            vec!["a.txt".into()],
+            "Next".into(),
+            None,
+        )
         .unwrap();
     assert_eq!(result.kind, BridgeGitOutcomeKind::HookChanged);
     assert_eq!(result.files, ["a.txt"]);
@@ -1544,4 +1564,52 @@ fn initialize_bridge_exposes_the_new_repository_without_backfilled_checkpoints()
     assert!(session.checkpoint_sessions().unwrap().is_empty());
     assert!(call(session.shutdown()));
     let _ = std::fs::remove_dir_all(repo);
+}
+
+#[test]
+fn commit_bridge_names_the_created_branch_when_either_hook_refuses() {
+    use crate::api::git::BridgeGitOutcomeKind;
+    use std::os::unix::fs::PermissionsExt;
+    for hook_name in ["pre-commit", "post-checkout"] {
+        let repo = repository(&format!("commit-branch-{hook_name}"));
+        git(&repo, &["config", "user.name", "Test"]);
+        git(&repo, &["config", "user.email", "test@example.com"]);
+        git(&repo, &["config", "commit.gpgsign", "false"]);
+        std::fs::write(repo.join("a.txt"), "changed\n").unwrap();
+        let hook = repo.join(".git/hooks").join(hook_name);
+        std::fs::write(&hook, "#!/bin/sh\nprintf 'refused\\033hook\n'\nexit 1\n").unwrap();
+        std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let script = [
+            no_session_file(2),
+            entries(3, ""),
+            "IFS= read -r line || exit 0".to_owned(),
+        ]
+        .concat();
+        let session = launch(gated(&script), repo.display().to_string()).unwrap();
+        let head = session.git_status().unwrap().unwrap().commit;
+        let plan = session.commit_plan().unwrap();
+        let result = session
+            .commit_files(
+                plan.snapshot,
+                vec!["a.txt".into()],
+                "Subject".into(),
+                Some("feat".into()),
+            )
+            .unwrap();
+        assert_eq!(result.kind, BridgeGitOutcomeKind::CommitBranchFailed);
+        let commit = result.commit.unwrap();
+        assert_eq!(commit.branch, "feat");
+        assert_eq!(commit.subject, None);
+        assert_eq!(commit.count, 0);
+        assert!(
+            result.detail.contains("refused<U+001B>hook"),
+            "{}",
+            result.detail
+        );
+        let status = session.git_status().unwrap().unwrap();
+        assert_eq!(status.branch.as_deref(), Some("feat"));
+        assert_eq!(status.commit, head);
+        assert!(call(session.shutdown()));
+        let _ = std::fs::remove_dir_all(repo);
+    }
 }

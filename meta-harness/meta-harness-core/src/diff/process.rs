@@ -39,7 +39,7 @@ pub(super) async fn git_bytes(
     env: &[(&str, OsString)],
     args: &[&str],
 ) -> Result<Vec<u8>, DiffError> {
-    output(git_command(dir, env, args), false).await
+    output(git_command(dir, env, args), false, None).await
 }
 
 /// Decodes ref identities without aliasing byte-distinct branches.
@@ -58,7 +58,7 @@ pub(super) async fn git_ref_output(dir: &Path, args: &[&str]) -> Result<String, 
 pub(super) async fn git_config(dir: &Path, args: &[&str]) -> Result<String, DiffError> {
     let mut command = git_command(dir, &[], &["config"]);
     command.args(args);
-    String::from_utf8(output(command, true).await?).map_err(|_| {
+    String::from_utf8(output(command, true, None).await?).map_err(|_| {
         DiffError::Git("Git returned configuration that is not valid UTF-8".to_owned())
     })
 }
@@ -69,7 +69,7 @@ pub(super) async fn git_path_output(
     env: &[(&str, OsString)],
     args: &[&str],
 ) -> Result<String, DiffError> {
-    String::from_utf8(output(git_command(dir, env, args), false).await?)
+    String::from_utf8(output(git_command(dir, env, args), false, None).await?)
         .map_err(|_| DiffError::Git("Git returned a pathname that is not valid UTF-8".to_owned()))
 }
 
@@ -153,7 +153,14 @@ pub(super) const NO_PROMPTS: [(&str, &str); 5] = [
 ];
 
 /// Runs `command` and returns at most [`MAX_OUTPUT_BYTES`] of its output.
-async fn output(mut command: Command, missing_config: bool) -> Result<Vec<u8>, DiffError> {
+async fn output(
+    mut command: Command,
+    missing_config: bool,
+    input: Option<&[u8]>,
+) -> Result<Vec<u8>, DiffError> {
+    if input.is_some() {
+        command.stdin(Stdio::piped());
+    }
     let mut child = Git::spawn(&mut command)?;
     // Git's warnings drain meanwhile, so a full error pipe never blocks it; dropped, the set ends
     // the drain.
@@ -164,13 +171,21 @@ async fn output(mut command: Command, missing_config: bool) -> Result<Vec<u8>, D
     // Reading one byte past the limit tells a cut-off output apart; dropping the child then
     // stops Git instead of buffering unbounded output.
     let stdout = child.child.stdout.take().expect("stdout is piped");
+    let mut writes = tokio::task::JoinSet::new();
+    if let (Some(mut stdin), Some(input)) = (child.child.stdin.take(), input) {
+        let input = input.to_owned();
+        writes.spawn(async move { stdin.write_all(&input).await.map_err(unreadable) });
+    }
     stdout
         .take(MAX_OUTPUT_BYTES + 1)
         .read_to_end(&mut output)
         .await
-        .map_err(|error| DiffError::Git(error.to_string()))?;
+        .map_err(unreadable)?;
     if output.len() as u64 > MAX_OUTPUT_BYTES {
         return Err(DiffError::TooLarge);
+    }
+    if let Some(written) = writes.join_next().await {
+        written.map_err(|error| DiffError::Io(std::io::Error::other(error)))??;
     }
     // A program Git started can hold its error output after Git ended. Git is reaped only once
     // that output ended too, so until then its time limit still ends such programs with it.
@@ -387,4 +402,20 @@ fn explicit_git_writes_drain_stdout_past_the_retained_limit() {
             MAX_OUTPUT_BYTES
         );
     });
+}
+
+/// Bounded pathname output while feeding a batch through stdin.
+pub(super) async fn git_path_input(
+    dir: &Path,
+    args: &[&str],
+    input: &[u8],
+) -> Result<String, DiffError> {
+    String::from_utf8(output(git_command(dir, &[], args), false, Some(input)).await?)
+        .map_err(|_| DiffError::Git("Git returned a pathname that is not valid UTF-8".to_owned()))
+}
+
+/// The paths of NUL-separated output, each once.
+pub(super) fn paths(output: &str) -> Vec<String> {
+    let unique: BTreeSet<&str> = output.split('\0').filter(|path| !path.is_empty()).collect();
+    unique.into_iter().map(str::to_owned).collect()
 }

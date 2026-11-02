@@ -28,16 +28,67 @@ void main() {
       files: const ['a.txt'],
       running: const [],
       detail: '',
-      branch: 'main',
-      subject: 'Subject',
-      count: 1,
+      commit: const BridgeCommit(branch: 'main', subject: 'Subject', count: 1),
     );
-    await git.commit(['a.txt'], 'Subject');
+    await git.commit(['a.txt'], 'Subject', snapshot: 'snapshot');
     expect(notices.single, (
       BridgeLevel.warning,
-      'Committed. The pre-commit hook also changed a.txt, which stays uncommitted.',
+      'Committed 1 file on main: “Subject” A hook also changed a.txt, which stays uncommitted.',
     ));
   });
+
+  test(
+    'equal fresh status objects do not notify but real changes do',
+    () async {
+      var changes = 0;
+      git.status.addListener(() => changes++);
+      await git.refresh();
+      await git.refresh();
+      expect(changes, 1);
+      backend.git = gitStatusOf(changed: 2);
+      await git.refresh();
+      expect(changes, 2);
+    },
+  );
+
+  test('new branch failure says nothing was committed and names the created branch', () async {
+    backend.outcome = const BridgeGitOutcome(
+      kind: BridgeGitOutcomeKind.commitBranchFailed,
+      files: [],
+      running: [],
+      detail: 'hook refused',
+      commit: BridgeCommit(branch: 'feat', subject: null, count: 0),
+    );
+    await git.commit(
+      ['a.txt'],
+      'Subject',
+      snapshot: 'snapshot',
+      branch: 'feat',
+    );
+    expect(
+      notices.single.$2,
+      'Created and switched to feat; nothing was committed. hook refused',
+    );
+    expect(notices.single.$2, isNot(contains('null')));
+  });
+
+  test(
+    'several hook-changed files stay uncommitted after the success notice',
+    () async {
+      backend.outcome = const BridgeGitOutcome(
+        kind: BridgeGitOutcomeKind.hookChanged,
+        files: ['a.txt', 'b.txt'],
+        running: [],
+        detail: '',
+        commit: BridgeCommit(branch: 'main', subject: 'Subject', count: 2),
+      );
+      await git.commit(['a.txt', 'b.txt'], 'Subject', snapshot: 'snapshot');
+      expect(
+        notices.single.$2,
+        'Committed 2 files on main: “Subject” A hook also changed a.txt, b.txt, which stay uncommitted.',
+      );
+    },
+  );
 
   int fetches() => backend.calls.where((call) => call == 'fetch').length;
 

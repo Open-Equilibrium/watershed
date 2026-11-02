@@ -40,10 +40,10 @@ class SessionState {
   SessionState(this._backend) {
     _subscription = _backend.events().listen(_apply);
     hideWhitespace.addListener(() => unawaited(readChanges()));
-    // Stashed changes restored or discarded leave the Diff tab.
     git.status.addListener(() {
       if (diffScope.value is UncommittedChanges) unawaited(readChanges());
     });
+    // Stashed changes restored or discarded leave the Diff tab.
     git.stash.addListener(() {
       if (diffScope.value is StashedChanges) unawaited(readChanges());
     });
@@ -165,6 +165,9 @@ class SessionState {
 
   /// Counts session switches; a chat read started before the latest one is dropped.
   int _generation = 0;
+
+  /// Identifies the session whose asynchronous UI work is still current.
+  int get generation => _generation;
 
   /// Switches only while the agent is idle, then shows the session it continues.
   Future<void> _switch(

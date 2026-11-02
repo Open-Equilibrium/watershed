@@ -148,7 +148,10 @@ impl WorkingTree {
                 status.changed += 1;
             }
         }
-        status.default_branch = self.default_branch(status.branch.as_deref()).await?;
+        status.default_branch = self
+            .default_branch(status.branch.as_deref())
+            .await
+            .unwrap_or(None);
         Ok(status)
     }
 
@@ -167,11 +170,10 @@ impl WorkingTree {
             }
             None => String::new(),
         };
-        let remote = if remote.trim().is_empty() {
-            "origin"
-        } else {
-            remote.trim()
-        };
+        let remote = remote.trim();
+        if remote.is_empty() || remote == "." {
+            return Ok(None);
+        }
         let prefix = format!("refs/remotes/{remote}/");
         match git_ref_output(
             &self.root,

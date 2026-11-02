@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../controls.dart';
-import 'commit_dialog.dart';
 import '../format.dart';
 import '../rust/api/events.dart';
 import '../rust/api/git.dart';
@@ -13,6 +12,7 @@ import '../shortcuts/keymap.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
+import 'commit_dialog.dart';
 
 /// The checkout's branch with its commits ahead and behind its upstream, in the session header;
 /// it opens the branch menu (approved Git mockups).
@@ -81,7 +81,8 @@ class BranchChip extends StatelessWidget {
                     style: monoStyle(context, color: ws.text),
                   ),
                 ),
-                if (status.merging) Text('merging', style: small),
+                if (status.merging)
+                  Text('merging', style: small.copyWith(color: ws.warning)),
                 if (status.ahead > 0) Text('↑${status.ahead}', style: small),
                 if (status.behind > 0)
                   Text(
@@ -210,7 +211,7 @@ Future<void> _switch(
   var outcome = await switchTo(leave);
   while (outcome?.kind == BridgeGitOutcomeKind.wouldOverwrite) {
     if (!context.mounted) return;
-    final again = await showDialog<String>(
+    final again = await showDialog<_RefusedChoice>(
       context: context,
       builder: (context) => _RefusedDialog(
         target: branch.shown,
@@ -220,11 +221,11 @@ Future<void> _switch(
       ),
     );
     if (!context.mounted) return;
-    if (again == 'commit') {
+    if (again == _RefusedChoice.commit) {
       await showCommitDialog(context, state);
       return;
     }
-    if (again != 'leave') return;
+    if (again != _RefusedChoice.leave) return;
     outcome = await switchTo(true);
   }
 }
@@ -648,8 +649,9 @@ class _Choice extends StatelessWidget {
   }
 }
 
-/// Says that Git refused to bring the changes along and offers to leave them instead; closes
-/// with `true` to switch leaving them.
+enum _RefusedChoice { leave, commit }
+
+/// Offers to leave the changes or commit them after Git refused to bring them along.
 class _RefusedDialog extends StatelessWidget {
   const _RefusedDialog({
     required this.target,
@@ -667,7 +669,7 @@ class _RefusedDialog extends StatelessWidget {
   Widget build(BuildContext context) {
     final ws = context.ws;
     final left = this.left;
-    void leave() => Navigator.of(context).pop('leave');
+    void leave() => Navigator.of(context).pop(_RefusedChoice.leave);
     return ActionDialog(
       title: 'Could not switch to $target',
       // Nothing changed, so it closes rather than cancels.
@@ -686,7 +688,7 @@ class _RefusedDialog extends StatelessWidget {
           ),
         SecondaryButton(
           label: 'Commit changes…',
-          onPressed: () => Navigator.of(context).pop('commit'),
+          onPressed: () => Navigator.of(context).pop(_RefusedChoice.commit),
         ),
       ],
       children: [

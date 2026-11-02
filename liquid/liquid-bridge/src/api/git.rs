@@ -97,6 +97,10 @@ pub enum BridgeGitOutcomeKind {
     CommitFailed,
     /// Committed, but a hook left changes uncommitted.
     HookChanged,
+    /// Created and switched to a new branch, but nothing was committed.
+    CommitBranchFailed,
+    /// Liquid cannot commit while a merge is in progress.
+    MergeInProgress,
 }
 
 /// How a Git write the user asked for ended.
@@ -107,29 +111,44 @@ pub struct BridgeGitOutcome {
     pub files: Vec<String>,
     /// The agents running in the checkout.
     pub running: Vec<BridgeRunningAgent>,
-    /// What Git said, written out as file names are; empty unless a hook failed.
+    /// Git's output for a failed hook or commit, with unsafe characters written out.
     pub detail: String,
-    /// The committed branch, as Liquid shows names.
-    pub branch: Option<String>,
-    /// The committed first line, as Liquid shows text.
+    /// A completed commit, or a created branch when its commit failed.
+    pub commit: Option<BridgeCommit>,
+}
+
+/// Commit details, including the branch created when the subsequent commit failed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgeCommit {
+    /// The branch now checked out, as Liquid shows names.
+    pub branch: String,
+    /// The committed subject; none when only the branch was created.
     pub subject: Option<String>,
-    /// Selected whole files committed.
-    pub count: Option<i64>,
+    /// Whole files committed; zero when only the branch was created.
+    pub count: i64,
 }
 
 /// The commit dialog's files and running-agent refusal.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BridgeCommitPlan {
+    /// The captured tree identity to confirm when committing these files.
+    pub snapshot: String,
+    /// Every uncommitted whole file.
     pub files: Vec<BridgeCommitFile>,
+    /// The agents preventing a commit.
     pub running: Vec<BridgeRunningAgent>,
 }
 
 /// One whole file and which session turns changed it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BridgeCommitFile {
+    /// The whole-file status and line counts.
     pub change: BridgeFileChange,
+    /// Session turns that changed it.
     pub turns: Vec<i64>,
+    /// A checkpoint gap or the current checkout also changed it.
     pub edited: bool,
+    /// The user staged only part of it.
     pub staged_partly: bool,
 }
 
@@ -167,6 +186,7 @@ impl AgentSession {
             let turns = branch_turns(&mut *self.session.lock().await).await?;
             let plan = self.checkpoints.commit_plan(&turns).await.map_err(shown)?;
             Ok(BridgeCommitPlan {
+                snapshot: plan.snapshot,
                 files: plan
                     .files
                     .into_iter()
@@ -186,6 +206,7 @@ impl AgentSession {
     /// and switching to a branch first.
     pub fn commit_files(
         &self,
+        snapshot: String,
         paths: Vec<String>,
         message: String,
         branch: Option<String>,
@@ -193,7 +214,7 @@ impl AgentSession {
         RUNTIME.block_on(async {
             match self
                 .checkpoints
-                .commit(&paths, &message, branch.as_deref())
+                .commit(&snapshot, &paths, &message, branch.as_deref())
                 .await
             {
                 Ok(commit) => {
@@ -208,9 +229,11 @@ impl AgentSession {
                         .iter()
                         .map(|path| visible_name(path))
                         .collect();
-                    outcome.branch = Some(visible_name(&commit.branch));
-                    outcome.subject = Some(visible_name(&commit.subject));
-                    outcome.count = Some(i64::try_from(commit.files).unwrap_or(i64::MAX));
+                    outcome.commit = Some(BridgeCommit {
+                        branch: visible_name(&commit.branch),
+                        subject: Some(visible_name(&commit.subject)),
+                        count: i64::try_from(paths.len()).unwrap_or(i64::MAX),
+                    });
                     Ok(outcome)
                 }
                 Err(error) => self.outcome(Err(error)).await,
@@ -245,20 +268,7 @@ impl AgentSession {
 
     /// Explicitly initializes Git; checkpoints begin with the next turn.
     pub fn initialize_git(&self) -> Result<BridgeGitOutcome, String> {
-        RUNTIME.block_on(async {
-            let running = open(&mut *self.session.lock().await)?.running();
-            if running {
-                return Ok(BridgeGitOutcome {
-                    kind: BridgeGitOutcomeKind::AgentRunning,
-                    running: vec![BridgeRunningAgent {
-                        own: true,
-                        title: None,
-                    }],
-                    ..self.outcome(Ok(())).await?
-                });
-            }
-            self.outcome(self.checkpoints.initialize_git().await).await
-        })
+        RUNTIME.block_on(async { self.outcome(self.checkpoints.initialize_git().await).await })
     }
 
     /// The checkout's branches.
@@ -394,9 +404,7 @@ impl AgentSession {
             files: files.iter().map(|path| visible_name(path)).collect(),
             running: Vec::new(),
             detail: String::new(),
-            branch: None,
-            subject: None,
-            count: None,
+            commit: None,
         };
         match result {
             Ok(()) => Ok(outcome(BridgeGitOutcomeKind::Done, Vec::new())),
@@ -414,6 +422,21 @@ impl AgentSession {
             }
             Err(DiffError::SubmoduleChanged(files)) => {
                 Ok(outcome(BridgeGitOutcomeKind::SubmoduleChanged, files))
+            }
+            Err(DiffError::CommitOnBranchFailed { branch, error }) => Ok(BridgeGitOutcome {
+                detail: visible_lines(&match *error {
+                    DiffError::CommitFailed(output) | DiffError::HookFailed(output) => output,
+                    error => error.to_string(),
+                }),
+                commit: Some(BridgeCommit {
+                    branch: visible_name(&branch),
+                    subject: None,
+                    count: 0,
+                }),
+                ..outcome(BridgeGitOutcomeKind::CommitBranchFailed, Vec::new())
+            }),
+            Err(DiffError::MergeInProgress) => {
+                Ok(outcome(BridgeGitOutcomeKind::MergeInProgress, Vec::new()))
             }
             Err(DiffError::CommitFailed(output)) => Ok(BridgeGitOutcome {
                 detail: visible_lines(&output),

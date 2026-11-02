@@ -6,6 +6,7 @@
 //! The system drops the locks of a process that ends, so a crash leaves no agent running.
 
 use std::fs::{File, OpenOptions, TryLockError};
+use std::hash::{Hash, Hasher};
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -55,6 +56,20 @@ pub(crate) struct Alone {
 }
 
 impl Checkout {
+    /// A shared namespace outside the project, also before it has a Git directory.
+    pub(crate) fn folder(project: &Path) -> Result<Self, DiffError> {
+        let canonical = std::fs::canonicalize(project).map_err(DiffError::Io)?;
+        let mut key = std::hash::DefaultHasher::new();
+        canonical.hash(&mut key);
+        let dir = std::env::temp_dir()
+            .join(format!(
+                "watershed-project-locks-{}",
+                rustix::process::getuid().as_raw()
+            ))
+            .join(format!("{:016x}", key.finish()));
+        Ok(Self::new(dir.clone(), dir))
+    }
+
     /// The locks in `dir`, the checkout's `watershed` folder in its Git directory, and in
     /// `repository`, the one in the Git directory all worktrees share.
     pub(crate) fn new(dir: PathBuf, repository: PathBuf) -> Self {

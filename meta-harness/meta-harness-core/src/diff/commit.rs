@@ -1,7 +1,7 @@
 //! Whole-file commits and the checkout compared with its last commit. Explicit writes use
 //! the user's Git and hooks; snapshots keep the user's index intact.
 
-use super::process::user_git;
+use super::process::{paths as nul_paths, user_git};
 use super::*;
 
 /// A completed user commit.
@@ -11,30 +11,109 @@ pub struct Commit {
     pub branch: String,
     /// The committed first line, after the user's hooks.
     pub subject: String,
-    /// Selected files.
-    pub files: usize,
     /// Files a hook changed in the checkout, leaving them uncommitted.
     pub hook_changed: Vec<String>,
 }
 
 impl WorkingTree {
+    /// The checkpoint trees under one session prefix, with no per-turn processes.
+    pub(crate) async fn checkpoint_trees(
+        &self,
+        prefix: &str,
+    ) -> Result<HashMap<String, Snapshot>, DiffError> {
+        let output = git(
+            &self.root,
+            &[],
+            &["for-each-ref", "--format=%(refname) %(tree)", prefix],
+        )
+        .await?;
+        Ok(output
+            .lines()
+            .filter_map(|line| line.split_once(' '))
+            .map(|(name, tree)| (name.to_owned(), Snapshot(tree.to_owned())))
+            .collect())
+    }
+
+    /// Compares tree pairs with bounded output and constant process starts. Raw records frame
+    /// each pathname separately, so a filename resembling a batch header cannot alias one.
+    pub(crate) async fn changed_paths_batch(
+        &self,
+        pairs: &[(Snapshot, Snapshot)],
+    ) -> Result<Vec<Vec<String>>, DiffError> {
+        if pairs.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut input = String::new();
+        for (from, to) in pairs {
+            if input.len() + from.0.len() + to.0.len() + 2 > MAX_OUTPUT_BYTES as usize {
+                return Err(DiffError::TooLarge);
+            }
+            use std::fmt::Write;
+            writeln!(input, "{} {}", from.0, to.0).expect("writing to a String");
+        }
+        let output = process::git_path_input(
+            &self.root,
+            &[
+                "diff-tree",
+                "--stdin",
+                "-r",
+                "--raw",
+                "--no-abbrev",
+                "-z",
+                "--no-renames",
+                "--no-ext-diff",
+                "--no-textconv",
+                "--ignore-submodules=none",
+            ],
+            input.as_bytes(),
+        )
+        .await?;
+        let invalid = || DiffError::Git("Git returned an invalid batched diff".to_owned());
+        let mut remaining = output.as_str();
+        let mut changes = Vec::new();
+        for (from, to) in pairs {
+            remaining = remaining
+                .strip_prefix(&format!("{} {}\n", from.0, to.0))
+                .ok_or_else(invalid)?;
+            let mut paths = Vec::new();
+            while remaining.starts_with(':') {
+                let (_, after_record) = remaining.split_once('\0').ok_or_else(invalid)?;
+                let (path, after_path) = after_record.split_once('\0').ok_or_else(invalid)?;
+                paths.push(path.to_owned());
+                remaining = after_path;
+            }
+            changes.push(paths);
+        }
+        if !remaining.is_empty() {
+            return Err(invalid());
+        }
+        Ok(changes)
+    }
+
     pub(crate) async fn staged_paths(&self) -> Result<HashSet<String>, DiffError> {
-        self.index_paths(&["diff", "--cached", "--name-only", "--no-renames", "-z"])
-            .await
+        Ok(nul_paths(
+            &process::git_path_output(
+                &self.root,
+                &[],
+                &["diff", "--cached", "--name-only", "--no-renames", "-z"],
+            )
+            .await?,
+        )
+        .into_iter()
+        .collect())
     }
 
     pub(crate) async fn unstaged_paths(&self) -> Result<HashSet<String>, DiffError> {
-        self.index_paths(&["diff", "--name-only", "--no-renames", "-z"])
-            .await
-    }
-
-    async fn index_paths(&self, args: &[&str]) -> Result<HashSet<String>, DiffError> {
-        Ok(process::git_path_output(&self.root, &[], args)
-            .await?
-            .split('\0')
-            .filter(|path| !path.is_empty())
-            .map(str::to_owned)
-            .collect())
+        Ok(nul_paths(
+            &process::git_path_output(
+                &self.root,
+                &[],
+                &["diff", "--name-only", "--no-renames", "-z"],
+            )
+            .await?,
+        )
+        .into_iter()
+        .collect())
     }
 
     /// A commit's tree, or Git's empty tree before the first commit.
@@ -55,11 +134,23 @@ impl WorkingTree {
         &self,
         whitespace: Whitespace,
     ) -> Result<Vec<FileChange>, DiffError> {
-        let from = self.committed("HEAD").await?;
-        let to = self.snapshot().await?;
-        self.changes(&from, &to, whitespace).await
+        self.uncommitted_paths(whitespace)
+            .await
+            .map(|(_, files)| files)
     }
 
+    /// The captured checkout and its changed whole files against HEAD.
+    pub(crate) async fn uncommitted_paths(
+        &self,
+        whitespace: Whitespace,
+    ) -> Result<(Snapshot, Vec<FileChange>), DiffError> {
+        let from = self.committed("HEAD").await?;
+        let to = self.snapshot().await?;
+        let files = self.changes(&from, &to, whitespace).await?;
+        Ok((to, files))
+    }
+
+    /// One current whole file compared with the last commit.
     pub async fn uncommitted_patch(
         &self,
         path: &str,
@@ -74,6 +165,7 @@ impl WorkingTree {
     /// index also keeps an unstaged edit a hook makes outside the commit.
     pub async fn commit(
         &self,
+        snapshot: &str,
         paths: &[String],
         message: &str,
         branch: Option<&str>,
@@ -85,104 +177,136 @@ impl WorkingTree {
         }
         let status = self.status().await?;
         if status.merging {
-            return Err(DiffError::Git("Merge in progress. Resolve it in an editor or a terminal; Liquid resolves no conflicts.".to_owned()));
+            return Err(DiffError::MergeInProgress);
         }
         if status.branch.is_none() && branch.is_none() {
             return Err(DiffError::NoBranch);
         }
         // Validate exact file identities against the displayed whole-file list. Literal
         // pathspecs below also keep names such as '*' from selecting other files.
-        let before = self.snapshot().await?;
-        let changes: BTreeSet<String> = self
-            .changes(&self.committed("HEAD").await?, &before, Whitespace::Shown)
-            .await?
-            .into_iter()
-            .map(|file| file.path)
-            .collect();
+        let (before, files) = self.uncommitted_paths(Whitespace::Shown).await?;
+        let changes: BTreeSet<String> = files.into_iter().map(|file| file.path).collect();
         let selected: BTreeSet<&str> = paths.iter().map(String::as_str).collect();
+        let stale =
+            || DiffError::Git("The selected files changed. Open Commit changes again.".to_owned());
         if selected.len() != paths.len() || selected.iter().any(|path| !changes.contains(*path)) {
+            return Err(stale());
+        }
+        if selected.iter().any(|path| {
+            changes.iter().any(|other| {
+                !selected.contains(other.as_str())
+                    && (path.starts_with(&format!("{other}/"))
+                        || other.starts_with(&format!("{path}/")))
+            })
+        }) {
             return Err(DiffError::Git(
-                "The selected files changed. Open Commit changes again.".to_owned(),
+                "Select both sides of a file and directory replacement.".to_owned(),
             ));
         }
-        if let Some(branch) = branch {
-            self.create(branch).await?;
+        if !matches!(snapshot.len(), 40 | 64) || !snapshot.bytes().all(|c| c.is_ascii_hexdigit()) {
+            return Err(stale());
         }
-        let branch = self.branch().await?.ok_or(DiffError::NoBranch)?;
-        let path_file = self.store.0.join("commit-paths");
-        let message_file = self.store.0.join("commit-message");
-        let write_paths = |paths: Vec<&str>| -> Result<(), DiffError> {
-            let mut input = Vec::new();
-            for path in paths {
-                input.extend_from_slice(format!(":(top,literal){path}").as_bytes());
-                input.push(0);
-            }
-            std::fs::write(&path_file, input).map_err(DiffError::Io)
-        };
-        let path_arg = format!("--pathspec-from-file={}", path_file.display());
-        // An untracked file must first be known to Git for --only. Intent-to-add leaves its
-        // content unstaged, also if the user's hook refuses the commit.
-        let untracked = process::git_path_output(
-            &self.root,
-            &[],
-            &["ls-files", "--others", "--exclude-standard", "-z"],
-        )
-        .await?;
-        let new: Vec<&str> = untracked
-            .split('\0')
-            .filter(|path| selected.contains(path))
-            .collect();
-        if !new.is_empty() {
-            write_paths(new)?;
-            user_git(
-                &self.root,
-                &["add", "--intent-to-add", &path_arg, "--pathspec-file-nul"],
-            )
-            .await?;
-        }
-        write_paths(selected.iter().copied().collect())?;
-        std::fs::write(&message_file, message).map_err(DiffError::Io)?;
-        let message_arg = format!("--file={}", message_file.display());
-        if let Err(error) = user_git(
-            &self.root,
-            &[
-                "commit",
-                "--only",
-                &message_arg,
-                &path_arg,
-                "--pathspec-file-nul",
-            ],
-        )
-        .await
+        if self
+            .changes(&Snapshot(snapshot.to_owned()), &before, Whitespace::Shown)
+            .await?
+            .iter()
+            .any(|file| selected.contains(file.path.as_str()))
         {
-            return Err(match error {
-                DiffError::Git(output) => DiffError::CommitFailed(output),
-                error => error,
+            return Err(stale());
+        }
+        if let Some(branch) = branch
+            && let Err(error) = self.create(branch).await
+        {
+            return Err(if matches!(error, DiffError::HookFailed(_)) {
+                DiffError::CommitOnBranchFailed {
+                    branch: branch.to_owned(),
+                    error: Box::new(error),
+                }
+            } else {
+                error
             });
         }
-        let subject = git(&self.root, &[], &["log", "-1", "--format=%s"])
-            .await?
-            .trim_end_matches('\n')
-            .to_owned();
-        let after = self.snapshot().await?;
-        let uncommitted: HashSet<String> = self
-            .changes(&self.committed("HEAD").await?, &after, Whitespace::Shown)
-            .await?
+        let mut did_commit = false;
+        let committed = async {
+            let branch = self.branch().await?.ok_or(DiffError::NoBranch)?;
+            let path_file = self.store.0.join("commit-paths");
+            let message_file = self.store.0.join("commit-message");
+            let write_paths = |paths: Vec<&str>| -> Result<(), DiffError> {
+                let mut input = Vec::new();
+                for path in paths {
+                    input.extend_from_slice(format!(":(top,literal){path}").as_bytes());
+                    input.push(0);
+                }
+                std::fs::write(&path_file, input).map_err(DiffError::Io)
+            };
+            let path_arg = format!("--pathspec-from-file={}", path_file.display());
+            // An untracked file must first be known to Git for --only. Intent-to-add leaves its
+            // content unstaged, also if the user's hook refuses the commit.
+            let tracked: HashSet<_> = nul_paths(
+                &process::git_path_output(&self.root, &[], &["ls-files", "--cached", "-z"]).await?,
+            )
             .into_iter()
-            .map(|file| file.path)
             .collect();
-        let hook_changed = self
-            .changes(&before, &after, Whitespace::Shown)
-            .await?
-            .into_iter()
-            .map(|file| file.path)
-            .filter(|path| uncommitted.contains(path))
-            .collect();
-        Ok(Commit {
-            branch,
-            subject,
-            files: paths.len(),
-            hook_changed,
+            let new: Vec<&str> = selected
+                .iter()
+                .copied()
+                .filter(|path| !tracked.contains(*path))
+                .collect();
+            if !new.is_empty() {
+                write_paths(new)?;
+                user_git(
+                    &self.root,
+                    &["add", "--intent-to-add", &path_arg, "--pathspec-file-nul"],
+                )
+                .await?;
+            }
+            write_paths(selected.iter().copied().collect())?;
+            std::fs::write(&message_file, message).map_err(DiffError::Io)?;
+            let message_arg = format!("--file={}", message_file.display());
+            if let Err(error) = user_git(
+                &self.root,
+                &[
+                    "commit",
+                    "--only",
+                    &message_arg,
+                    &path_arg,
+                    "--pathspec-file-nul",
+                ],
+            )
+            .await
+            {
+                return Err(match error {
+                    DiffError::Git(output) => DiffError::CommitFailed(output),
+                    error => error,
+                });
+            }
+            did_commit = true;
+            let subject = git(&self.root, &[], &["log", "-1", "--format=%s"])
+                .await?
+                .trim_end_matches('\n')
+                .to_owned();
+            let (after, uncommitted) = self.uncommitted_paths(Whitespace::Shown).await?;
+            let uncommitted: HashSet<_> = uncommitted.into_iter().map(|file| file.path).collect();
+            let hook_changed = self
+                .changes(&before, &after, Whitespace::Shown)
+                .await?
+                .into_iter()
+                .map(|file| file.path)
+                .filter(|path| uncommitted.contains(path))
+                .collect();
+            Ok(Commit {
+                branch,
+                subject,
+                hook_changed,
+            })
+        }
+        .await;
+        committed.map_err(|error| match branch {
+            Some(branch) if !did_commit => DiffError::CommitOnBranchFailed {
+                branch: branch.to_owned(),
+                error: Box::new(error),
+            },
+            _ => error,
         })
     }
 }

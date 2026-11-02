@@ -59,6 +59,8 @@ class _DiffViewState extends State<DiffView> {
 
   /// Why the selected file shows no lines, if it shows none.
   String? _note;
+  String? _shownPath;
+  String? _shownComparison;
 
   static const _textless =
       'No text changes to show, as for a binary file or a new file mode.';
@@ -132,8 +134,10 @@ class _DiffViewState extends State<DiffView> {
     // The selection moves at once, so quick arrow presses each move on from it.
     setState(() {
       _selected = change;
-      _lines = const [];
-      _note = null;
+      if (change?.path != _shownPath || _comparison != _shownComparison) {
+        _lines = const [];
+        _note = null;
+      }
     });
     if (_loading) return;
     _loading = true;
@@ -164,12 +168,16 @@ class _DiffViewState extends State<DiffView> {
         if (!mounted || _selected != wanted || _comparison != comparison) {
           continue;
         }
+        final keepPosition =
+            _shownPath == wanted.path && _shownComparison == comparison;
         setState(() {
+          _shownPath = wanted.path;
+          _shownComparison = comparison;
           _lines = lines;
           _note = note;
         });
         // Another file starts at its top.
-        if (_scroll.hasClients) _scroll.jumpTo(0);
+        if (!keepPosition && _scroll.hasClients) _scroll.jumpTo(0);
         return;
       }
     } finally {
@@ -447,28 +455,24 @@ class _DiffViewState extends State<DiffView> {
     }
     if (_changes.isEmpty) {
       final scope = widget.state.shownScope.value;
-      final all = scope is AllTurns;
-      final turns = all ? 'these turns' : 'this turn';
-      final title = scope is UncommittedChanges
-          ? 'No uncommitted changes'
-          : scope is StashedChanges
-          ? 'No stashed changes'
-          : 'No changes in $turns';
+      final title = switch (scope) {
+        UncommittedChanges() => 'No uncommitted changes',
+        StashedChanges() => 'No stashed changes',
+        AllTurns() => 'No changes in these turns',
+        _ => 'No changes in this turn',
+      };
       return widget.settings.value.hideWhitespace
           ? _empty(
               context,
               '$title with whitespace hidden',
               '${Fixed.hideWhitespace.display} shows them.',
             )
-          : _empty(
-              context,
-              title,
-              scope is UncommittedChanges
-                  ? 'The checkout is the same as its last commit.'
-                  : scope is StashedChanges
-                  ? 'The stash contains no changed files.'
-                  : 'The project was the same at its end as at its start.',
-            );
+          : _empty(context, title, switch (scope) {
+              UncommittedChanges() =>
+                'The checkout is the same as its last commit.',
+              StashedChanges() => 'The stash contains no changed files.',
+              _ => 'The project was the same at its end as at its start.',
+            });
     }
     final added = _changes.fold(0, (sum, change) => sum + change.added);
     final removed = _changes.fold(0, (sum, change) => sum + change.removed);
@@ -1077,7 +1081,9 @@ class _TurnHeader extends StatelessWidget {
                 'started';
     } else {
       label = 'Choose changes';
-      about = 'Compare uncommitted changes or the branch’s stashed changes.';
+      about = stash == null
+          ? 'Compare uncommitted changes.'
+          : 'Compare uncommitted changes or the branch’s stashed changes.';
     }
     final small = TextStyle(color: ws.textFaint, fontSize: WsMetrics.fsSmall);
     String counts(BridgeTurn turn) => [
@@ -1133,12 +1139,12 @@ class _TurnHeader extends StatelessWidget {
             ].join(' · '),
           ),
         ],
+        if (ended.isNotEmpty && (git.value != null || stash != null))
+          const PopupMenuDivider(),
         if (git.value != null) ...[
-          if (ended.isNotEmpty) const PopupMenuDivider(),
           item(const UncommittedChanges(), 'Uncommitted changes', ''),
         ],
         if (stash != null) ...[
-          if (ended.isNotEmpty) const PopupMenuDivider(),
           item(
             const StashedChanges(),
             'Stashed changes',

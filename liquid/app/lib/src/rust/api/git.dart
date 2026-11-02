@@ -10,7 +10,7 @@ import 'history.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 // These functions are ignored because they are not marked as `pub`: `count`, `outcome`, `running_agents`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`
 
 /// A local or remote branch.
 class BridgeBranch {
@@ -85,11 +85,44 @@ class BridgeBranches {
           running == other.running;
 }
 
+/// Commit details, including the branch created when the subsequent commit failed.
+class BridgeCommit {
+  /// The branch now checked out, as Liquid shows names.
+  final String branch;
+
+  /// The committed subject; none when only the branch was created.
+  final String? subject;
+
+  /// Whole files committed; zero when only the branch was created.
+  final PlatformInt64 count;
+
+  const BridgeCommit({required this.branch, this.subject, required this.count});
+
+  @override
+  int get hashCode => branch.hashCode ^ subject.hashCode ^ count.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeCommit &&
+          runtimeType == other.runtimeType &&
+          branch == other.branch &&
+          subject == other.subject &&
+          count == other.count;
+}
+
 /// One whole file and which session turns changed it.
 class BridgeCommitFile {
+  /// The whole-file status and line counts.
   final BridgeFileChange change;
+
+  /// Session turns that changed it.
   final Int64List turns;
+
+  /// A checkpoint gap or the current checkout also changed it.
   final bool edited;
+
+  /// The user staged only part of it.
   final bool stagedPartly;
 
   const BridgeCommitFile({
@@ -119,19 +152,30 @@ class BridgeCommitFile {
 
 /// The commit dialog's files and running-agent refusal.
 class BridgeCommitPlan {
+  /// The captured tree identity to confirm when committing these files.
+  final String snapshot;
+
+  /// Every uncommitted whole file.
   final List<BridgeCommitFile> files;
+
+  /// The agents preventing a commit.
   final List<BridgeRunningAgent> running;
 
-  const BridgeCommitPlan({required this.files, required this.running});
+  const BridgeCommitPlan({
+    required this.snapshot,
+    required this.files,
+    required this.running,
+  });
 
   @override
-  int get hashCode => files.hashCode ^ running.hashCode;
+  int get hashCode => snapshot.hashCode ^ files.hashCode ^ running.hashCode;
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       other is BridgeCommitPlan &&
           runtimeType == other.runtimeType &&
+          snapshot == other.snapshot &&
           files == other.files &&
           running == other.running;
 }
@@ -146,26 +190,18 @@ class BridgeGitOutcome {
   /// The agents running in the checkout.
   final List<BridgeRunningAgent> running;
 
-  /// What Git said, written out as file names are; empty unless a hook failed.
+  /// Git's output for a failed hook or commit, with unsafe characters written out.
   final String detail;
 
-  /// The committed branch, as Liquid shows names.
-  final String? branch;
-
-  /// The committed first line, as Liquid shows text.
-  final String? subject;
-
-  /// Selected whole files committed.
-  final PlatformInt64? count;
+  /// A completed commit, or a created branch when its commit failed.
+  final BridgeCommit? commit;
 
   const BridgeGitOutcome({
     required this.kind,
     required this.files,
     required this.running,
     required this.detail,
-    this.branch,
-    this.subject,
-    this.count,
+    this.commit,
   });
 
   @override
@@ -174,9 +210,7 @@ class BridgeGitOutcome {
       files.hashCode ^
       running.hashCode ^
       detail.hashCode ^
-      branch.hashCode ^
-      subject.hashCode ^
-      count.hashCode;
+      commit.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -187,9 +221,7 @@ class BridgeGitOutcome {
           files == other.files &&
           running == other.running &&
           detail == other.detail &&
-          branch == other.branch &&
-          subject == other.subject &&
-          count == other.count;
+          commit == other.commit;
 }
 
 /// How a Git write the user asked for ended, when not with an error to show as it is.
@@ -223,6 +255,12 @@ enum BridgeGitOutcomeKind {
 
   /// Committed, but a hook left changes uncommitted.
   hookChanged,
+
+  /// Created and switched to a new branch, but nothing was committed.
+  commitBranchFailed,
+
+  /// Liquid cannot commit while a merge is in progress.
+  mergeInProgress,
 }
 
 /// The checkout's branch and how it stands against its upstream.
