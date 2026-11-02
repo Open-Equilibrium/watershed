@@ -90,6 +90,17 @@ impl Workspace {
                 return Err(error);
             }
         };
+        // Automerge drops a write of the value already stored, so a mutation can leave
+        // nothing to commit; it records no Action.
+        let unchanged = written.new_area.is_none()
+            && written.new_page.is_none()
+            && written.touched.iter().all(|document| {
+                self.document(document)
+                    .is_none_or(|doc| doc.pending_ops() == 0)
+            });
+        if unchanged {
+            return Err(Error::NoChange);
+        }
         if let Some((area, doc)) = written.new_area {
             self.areas.insert(area, doc);
         }
@@ -245,9 +256,6 @@ impl Workspace {
                 {
                     return Err(Error::OutOfRange);
                 }
-                if *delete == 0 && insert.is_empty() {
-                    return Err(Error::NoChange);
-                }
                 let delete = isize::try_from(*delete).map_err(|_| Error::OutOfRange)?;
                 doc.splice_text(&content, *at, delete, insert)?;
                 Ok(Written::new(
@@ -278,6 +286,14 @@ impl Workspace {
         }
     }
 
+    fn document(&mut self, document: &Document) -> Option<&mut AutoCommit> {
+        match document {
+            Document::Workspace => Some(&mut self.workspace),
+            Document::Area(area) => self.areas.get_mut(area),
+            Document::Page(page) => self.pages.get_mut(page),
+        }
+    }
+
     /// Discards every uncommitted write, so a refused mutation leaves no trace.
     fn rollback(&mut self) {
         self.workspace.rollback();
@@ -297,11 +313,7 @@ impl Workspace {
             .duration_since(UNIX_EPOCH)
             .map_or(0, |elapsed| elapsed.as_secs() as i64);
         for document in touched {
-            let doc = match document {
-                Document::Workspace => Some(&mut self.workspace),
-                Document::Area(area) => self.areas.get_mut(area),
-                Document::Page(page) => self.pages.get_mut(page),
-            };
+            let doc = self.document(document);
             let options = CommitOptions::default()
                 .with_message(message.clone())
                 .with_time(time);

@@ -117,6 +117,18 @@ fn the_explorer_lists_areas_and_nested_pages_in_creation_order() {
         },
     );
     assert_eq!(titles(&workspace, &trips)[0].0, "Lisbon in May");
+
+    let recorded = workspace.history().len();
+    let unchanged = workspace.apply(Request {
+        actor: owner(),
+        origin: Origin::Ui,
+        mutation: Mutation::RenamePage {
+            page: lisbon,
+            title: "Lisbon in May".into(),
+        },
+    });
+    assert_eq!(unchanged.unwrap_err(), Error::NoChange);
+    assert_eq!(workspace.history().len(), recorded);
 }
 
 #[test]
