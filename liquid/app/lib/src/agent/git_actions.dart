@@ -20,6 +20,7 @@ class GitActions extends StatelessWidget {
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: Listenable.merge([
       state.git.status,
+      state.git.refreshed,
       state.git.problem,
       state.git.loaded,
       state.git.writing,

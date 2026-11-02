@@ -463,6 +463,31 @@ void main() {
   });
 
   testWidgets(
+    'Git menu refreshes the fetch time when status counts stay unchanged',
+    (tester) async {
+      await show(tester, status: gitStatusOf());
+      await tester.tap(find.byKey(const Key('git-menu')));
+      await tester.pumpAndSettle();
+      expect(find.text('main → origin/main'), findsOneWidget);
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+
+      await tester.pump(const Duration(seconds: 15));
+      await tester.pumpAndSettle();
+      expect(backend.calls, contains('fetch'));
+      expect(state.git.fetched, isNotNull);
+      await tester.tap(find.byKey(const Key('git-menu')));
+      await tester.pumpAndSettle();
+      expect(
+        find.textContaining('main → origin/main · fetched '),
+        findsOneWidget,
+      );
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+    },
+  );
+
+  testWidgets(
     'header handles clean, detached HEAD, merge conflicts and the scoped Git menu',
     (tester) async {
       await show(tester, status: gitStatusOf());
