@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::api::workspace::{
     BridgeChange, BridgeMutation, BridgeMutationKind, BridgeQuery, BridgeQueryKind, BridgeResource,
-    BridgeResourceKind, LiquidWorkspace, MAX_WINDOW,
+    BridgeResourceKind, BridgeTextStyle, LiquidWorkspace, MAX_WINDOW,
 };
 use crate::keys::Keys;
 
@@ -58,6 +58,8 @@ fn mutation(kind: BridgeMutationKind) -> BridgeMutation {
         text: None,
         at: 0,
         delete: 0,
+        style: BridgeTextStyle::Paragraph,
+        boundary: false,
     }
 }
 
@@ -501,4 +503,79 @@ fn every_way_a_subscription_ends_leaves_nothing_behind() {
     assert!(workspace.watch(6, nameless(), |_| true).is_err());
 
     assert_eq!(workspace.lifecycle_markers(), 0);
+}
+
+#[test]
+fn text_blocks_split_join_restyle_and_start_sections_through_the_bridge() {
+    let folder = Folder::new("text");
+    let workspace = LiquidWorkspace::open_with(&folder.0, &Memory::default()).unwrap();
+    let (_, page, block, view) = lisbon(&workspace);
+    let split = workspace
+        .apply(BridgeMutation {
+            page: Some(page.clone()),
+            block: Some(block.clone()),
+            view: Some(view.clone()),
+            at: 4,
+            style: BridgeTextStyle::Todo,
+            ..mutation(BridgeMutationKind::SplitTextBlock)
+        })
+        .unwrap();
+    let (rest, rest_view) = (split.block.unwrap(), split.view.unwrap());
+    let read = |block: &str| {
+        let answer = workspace
+            .query(BridgeQuery {
+                page: Some(page.clone()),
+                block: Some(block.into()),
+                ..query(BridgeQueryKind::Text)
+            })
+            .unwrap();
+        (answer.text, answer.style)
+    };
+    assert_eq!(
+        read(&block),
+        (Some("Five".into()), Some(BridgeTextStyle::Paragraph))
+    );
+    assert_eq!(
+        read(&rest),
+        (Some(" days".into()), Some(BridgeTextStyle::Todo))
+    );
+
+    workspace
+        .apply(BridgeMutation {
+            page: Some(page.clone()),
+            block: Some(rest.clone()),
+            style: BridgeTextStyle::Heading2,
+            ..mutation(BridgeMutationKind::SetTextStyle)
+        })
+        .unwrap();
+    assert_eq!(read(&rest).1, Some(BridgeTextStyle::Heading2));
+    workspace
+        .apply(BridgeMutation {
+            page: Some(page.clone()),
+            view: Some(rest_view.clone()),
+            boundary: true,
+            ..mutation(BridgeMutationKind::SetSectionBoundary)
+        })
+        .unwrap();
+    let views = workspace
+        .query(BridgeQuery {
+            page: Some(page.clone()),
+            ..query(BridgeQueryKind::Views)
+        })
+        .unwrap()
+        .views;
+    assert_eq!(
+        views.iter().map(|view| view.boundary).collect::<Vec<_>>(),
+        [false, true]
+    );
+
+    workspace
+        .apply(BridgeMutation {
+            page: Some(page.clone()),
+            view: Some(rest_view),
+            ..mutation(BridgeMutationKind::JoinTextBlock)
+        })
+        .unwrap();
+    assert_eq!(read(&block).0, Some("Five days".into()));
+    assert_eq!(read(&rest), (None, None));
 }

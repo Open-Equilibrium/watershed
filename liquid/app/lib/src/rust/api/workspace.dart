@@ -7,9 +7,9 @@ import '../frb_generated.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `id`, `message`, `normalized`, `notify`, `of`, `open_with`, `optional_id`, `page`, `random_hex`, `read`, `release_page`, `release`, `to_core`, `units`, `watch`, `window`
+// These functions are ignored because they are not marked as `pub`: `id`, `message`, `normalized`, `notify`, `of`, `of`, `open_with`, `optional_id`, `page`, `random_hex`, `read`, `release_page`, `release`, `to_core`, `to_core`, `units`, `watch`, `window`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `Inner`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `hash`, `hash`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `hash`, `hash`
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<LiquidWorkspace>>
 abstract class LiquidWorkspace implements RustOpaqueInterface {
@@ -56,12 +56,16 @@ class BridgeAnswer {
   /// A Block's text.
   final String? text;
 
+  /// A Text Block's style, with its text.
+  final BridgeTextStyle? style;
+
   const BridgeAnswer({
     required this.areas,
     required this.pages,
     required this.views,
     required this.count,
     this.text,
+    this.style,
   });
 
   @override
@@ -70,7 +74,8 @@ class BridgeAnswer {
       pages.hashCode ^
       views.hashCode ^
       count.hashCode ^
-      text.hashCode;
+      text.hashCode ^
+      style.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -81,7 +86,8 @@ class BridgeAnswer {
           pages == other.pages &&
           views == other.views &&
           count == other.count &&
-          text == other.text;
+          text == other.text &&
+          style == other.style;
 }
 
 /// What an applied write recorded and created.
@@ -206,6 +212,12 @@ class BridgeMutation {
   /// How many units an edit removes.
   final PlatformInt64 delete;
 
+  /// A Text Block's style.
+  final BridgeTextStyle style;
+
+  /// Whether a Section starts at `view`.
+  final bool boundary;
+
   const BridgeMutation({
     required this.kind,
     this.area,
@@ -217,6 +229,8 @@ class BridgeMutation {
     this.text,
     required this.at,
     required this.delete,
+    required this.style,
+    required this.boundary,
   });
 
   @override
@@ -230,7 +244,9 @@ class BridgeMutation {
       after.hashCode ^
       text.hashCode ^
       at.hashCode ^
-      delete.hashCode;
+      delete.hashCode ^
+      style.hashCode ^
+      boundary.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -246,7 +262,9 @@ class BridgeMutation {
           after == other.after &&
           text == other.text &&
           at == other.at &&
-          delete == other.delete;
+          delete == other.delete &&
+          style == other.style &&
+          boundary == other.boundary;
 }
 
 /// What a [`BridgeMutation`] does; each kind names the parts it fills.
@@ -269,6 +287,19 @@ enum BridgeMutationKind {
 
   /// Removes `view` from `page`.
   removeView,
+
+  /// Ends `block`, shown by `view` on its home `page`, at `at`, as ⏎ does: the text from
+  /// there moves to a new Text Block of `style` after `view`.
+  splitTextBlock,
+
+  /// Appends the Text Block of `view` on `page` to the one above, as ⌫ at its start does.
+  joinTextBlock,
+
+  /// Sets `block`'s `style` on its home `page`.
+  setTextStyle,
+
+  /// Starts a Section at `view` on `page`, or stops one, as `boundary` says.
+  setSectionBoundary,
 }
 
 /// A Page in an area's tree, which lists each Page before its descendants.
@@ -359,7 +390,8 @@ enum BridgeQueryKind {
   /// A window of `page`'s Views into `views`, and their number into `count`.
   views,
 
-  /// `block`'s text on its home `page` into `text`; none once the Block is removed.
+  /// `block`'s text and style on its home `page` into `text` and `style`; none once the
+  /// Block is removed.
   text,
 }
 
@@ -409,6 +441,36 @@ enum BridgeResourceKind {
   block,
 }
 
+/// How a Text Block reads.
+enum BridgeTextStyle {
+  /// A paragraph.
+  paragraph,
+
+  /// A heading of level 1.
+  heading1,
+
+  /// A heading of level 2.
+  heading2,
+
+  /// A heading of level 3.
+  heading3,
+
+  /// A bulleted list item.
+  bullet,
+
+  /// A numbered list item.
+  numbered,
+
+  /// A to-do not yet done.
+  todo,
+
+  /// A done to-do.
+  done,
+
+  /// A quote.
+  quote,
+}
+
 /// A View on a Page.
 class BridgeView {
   /// Its identity.
@@ -417,10 +479,17 @@ class BridgeView {
   /// The Block it shows.
   final String block;
 
-  const BridgeView({required this.id, required this.block});
+  /// Whether a Section starts here.
+  final bool boundary;
+
+  const BridgeView({
+    required this.id,
+    required this.block,
+    required this.boundary,
+  });
 
   @override
-  int get hashCode => id.hashCode ^ block.hashCode;
+  int get hashCode => id.hashCode ^ block.hashCode ^ boundary.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -428,5 +497,6 @@ class BridgeView {
       other is BridgeView &&
           runtimeType == other.runtimeType &&
           id == other.id &&
-          block == other.block;
+          block == other.block &&
+          boundary == other.boundary;
 }

@@ -2266,12 +2266,15 @@ impl SseDecode for crate::api::workspace::BridgeAnswer {
         let mut var_views = <Vec<crate::api::workspace::BridgeView>>::sse_decode(deserializer);
         let mut var_count = <i64>::sse_decode(deserializer);
         let mut var_text = <Option<String>>::sse_decode(deserializer);
+        let mut var_style =
+            <Option<crate::api::workspace::BridgeTextStyle>>::sse_decode(deserializer);
         return crate::api::workspace::BridgeAnswer {
             areas: var_areas,
             pages: var_pages,
             views: var_views,
             count: var_count,
             text: var_text,
+            style: var_style,
         };
     }
 }
@@ -2675,6 +2678,8 @@ impl SseDecode for crate::api::workspace::BridgeMutation {
         let mut var_text = <Option<String>>::sse_decode(deserializer);
         let mut var_at = <i64>::sse_decode(deserializer);
         let mut var_delete = <i64>::sse_decode(deserializer);
+        let mut var_style = <crate::api::workspace::BridgeTextStyle>::sse_decode(deserializer);
+        let mut var_boundary = <bool>::sse_decode(deserializer);
         return crate::api::workspace::BridgeMutation {
             kind: var_kind,
             area: var_area,
@@ -2686,6 +2691,8 @@ impl SseDecode for crate::api::workspace::BridgeMutation {
             text: var_text,
             at: var_at,
             delete: var_delete,
+            style: var_style,
+            boundary: var_boundary,
         };
     }
 }
@@ -2701,6 +2708,10 @@ impl SseDecode for crate::api::workspace::BridgeMutationKind {
             3 => crate::api::workspace::BridgeMutationKind::AddTextBlock,
             4 => crate::api::workspace::BridgeMutationKind::EditText,
             5 => crate::api::workspace::BridgeMutationKind::RemoveView,
+            6 => crate::api::workspace::BridgeMutationKind::SplitTextBlock,
+            7 => crate::api::workspace::BridgeMutationKind::JoinTextBlock,
+            8 => crate::api::workspace::BridgeMutationKind::SetTextStyle,
+            9 => crate::api::workspace::BridgeMutationKind::SetSectionBoundary,
             _ => unreachable!("Invalid variant for BridgeMutationKind: {}", inner),
         };
     }
@@ -3016,6 +3027,25 @@ impl SseDecode for crate::api::session::BridgeStoredSession {
     }
 }
 
+impl SseDecode for crate::api::workspace::BridgeTextStyle {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut inner = <i32>::sse_decode(deserializer);
+        return match inner {
+            0 => crate::api::workspace::BridgeTextStyle::Paragraph,
+            1 => crate::api::workspace::BridgeTextStyle::Heading1,
+            2 => crate::api::workspace::BridgeTextStyle::Heading2,
+            3 => crate::api::workspace::BridgeTextStyle::Heading3,
+            4 => crate::api::workspace::BridgeTextStyle::Bullet,
+            5 => crate::api::workspace::BridgeTextStyle::Numbered,
+            6 => crate::api::workspace::BridgeTextStyle::Todo,
+            7 => crate::api::workspace::BridgeTextStyle::Done,
+            8 => crate::api::workspace::BridgeTextStyle::Quote,
+            _ => unreachable!("Invalid variant for BridgeTextStyle: {}", inner),
+        };
+    }
+}
+
 impl SseDecode for crate::api::history::BridgeToolOutcome {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -3180,9 +3210,11 @@ impl SseDecode for crate::api::workspace::BridgeView {
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut var_id = <String>::sse_decode(deserializer);
         let mut var_block = <String>::sse_decode(deserializer);
+        let mut var_boundary = <bool>::sse_decode(deserializer);
         return crate::api::workspace::BridgeView {
             id: var_id,
             block: var_block,
+            boundary: var_boundary,
         };
     }
 }
@@ -3640,6 +3672,19 @@ impl SseDecode for Option<crate::api::history::BridgeStepContext> {
     }
 }
 
+impl SseDecode for Option<crate::api::workspace::BridgeTextStyle> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<crate::api::workspace::BridgeTextStyle>::sse_decode(
+                deserializer,
+            ));
+        } else {
+            return None;
+        }
+    }
+}
+
 impl SseDecode for Option<crate::api::events::BridgeUsage> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -3979,6 +4024,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::workspace::BridgeAnswer {
             self.views.into_into_dart().into_dart(),
             self.count.into_into_dart().into_dart(),
             self.text.into_into_dart().into_dart(),
+            self.style.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -4575,6 +4621,8 @@ impl flutter_rust_bridge::IntoDart for crate::api::workspace::BridgeMutation {
             self.text.into_into_dart().into_dart(),
             self.at.into_into_dart().into_dart(),
             self.delete.into_into_dart().into_dart(),
+            self.style.into_into_dart().into_dart(),
+            self.boundary.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -4600,6 +4648,10 @@ impl flutter_rust_bridge::IntoDart for crate::api::workspace::BridgeMutationKind
             Self::AddTextBlock => 3.into_dart(),
             Self::EditText => 4.into_dart(),
             Self::RemoveView => 5.into_dart(),
+            Self::SplitTextBlock => 6.into_dart(),
+            Self::JoinTextBlock => 7.into_dart(),
+            Self::SetTextStyle => 8.into_dart(),
+            Self::SetSectionBoundary => 9.into_dart(),
             _ => unreachable!(),
         }
     }
@@ -5043,6 +5095,34 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::session::BridgeStoredSession>
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::workspace::BridgeTextStyle {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        match self {
+            Self::Paragraph => 0.into_dart(),
+            Self::Heading1 => 1.into_dart(),
+            Self::Heading2 => 2.into_dart(),
+            Self::Heading3 => 3.into_dart(),
+            Self::Bullet => 4.into_dart(),
+            Self::Numbered => 5.into_dart(),
+            Self::Todo => 6.into_dart(),
+            Self::Done => 7.into_dart(),
+            Self::Quote => 8.into_dart(),
+            _ => unreachable!(),
+        }
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::workspace::BridgeTextStyle
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::workspace::BridgeTextStyle>
+    for crate::api::workspace::BridgeTextStyle
+{
+    fn into_into_dart(self) -> crate::api::workspace::BridgeTextStyle {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::api::history::BridgeToolOutcome {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
@@ -5247,6 +5327,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::workspace::BridgeView {
         [
             self.id.into_into_dart().into_dart(),
             self.block.into_into_dart().into_dart(),
+            self.boundary.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -5372,6 +5453,7 @@ impl SseEncode for crate::api::workspace::BridgeAnswer {
         <Vec<crate::api::workspace::BridgeView>>::sse_encode(self.views, serializer);
         <i64>::sse_encode(self.count, serializer);
         <Option<String>>::sse_encode(self.text, serializer);
+        <Option<crate::api::workspace::BridgeTextStyle>>::sse_encode(self.style, serializer);
     }
 }
 
@@ -5707,6 +5789,8 @@ impl SseEncode for crate::api::workspace::BridgeMutation {
         <Option<String>>::sse_encode(self.text, serializer);
         <i64>::sse_encode(self.at, serializer);
         <i64>::sse_encode(self.delete, serializer);
+        <crate::api::workspace::BridgeTextStyle>::sse_encode(self.style, serializer);
+        <bool>::sse_encode(self.boundary, serializer);
     }
 }
 
@@ -5721,6 +5805,10 @@ impl SseEncode for crate::api::workspace::BridgeMutationKind {
                 crate::api::workspace::BridgeMutationKind::AddTextBlock => 3,
                 crate::api::workspace::BridgeMutationKind::EditText => 4,
                 crate::api::workspace::BridgeMutationKind::RemoveView => 5,
+                crate::api::workspace::BridgeMutationKind::SplitTextBlock => 6,
+                crate::api::workspace::BridgeMutationKind::JoinTextBlock => 7,
+                crate::api::workspace::BridgeMutationKind::SetTextStyle => 8,
+                crate::api::workspace::BridgeMutationKind::SetSectionBoundary => 9,
                 _ => {
                     unimplemented!("");
                 }
@@ -5963,6 +6051,29 @@ impl SseEncode for crate::api::session::BridgeStoredSession {
     }
 }
 
+impl SseEncode for crate::api::workspace::BridgeTextStyle {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(
+            match self {
+                crate::api::workspace::BridgeTextStyle::Paragraph => 0,
+                crate::api::workspace::BridgeTextStyle::Heading1 => 1,
+                crate::api::workspace::BridgeTextStyle::Heading2 => 2,
+                crate::api::workspace::BridgeTextStyle::Heading3 => 3,
+                crate::api::workspace::BridgeTextStyle::Bullet => 4,
+                crate::api::workspace::BridgeTextStyle::Numbered => 5,
+                crate::api::workspace::BridgeTextStyle::Todo => 6,
+                crate::api::workspace::BridgeTextStyle::Done => 7,
+                crate::api::workspace::BridgeTextStyle::Quote => 8,
+                _ => {
+                    unimplemented!("");
+                }
+            },
+            serializer,
+        );
+    }
+}
+
 impl SseEncode for crate::api::history::BridgeToolOutcome {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -6063,6 +6174,7 @@ impl SseEncode for crate::api::workspace::BridgeView {
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <String>::sse_encode(self.id, serializer);
         <String>::sse_encode(self.block, serializer);
+        <bool>::sse_encode(self.boundary, serializer);
     }
 }
 
@@ -6416,6 +6528,16 @@ impl SseEncode for Option<crate::api::history::BridgeStepContext> {
         <bool>::sse_encode(self.is_some(), serializer);
         if let Some(value) = self {
             <crate::api::history::BridgeStepContext>::sse_encode(value, serializer);
+        }
+    }
+}
+
+impl SseEncode for Option<crate::api::workspace::BridgeTextStyle> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <crate::api::workspace::BridgeTextStyle>::sse_encode(value, serializer);
         }
     }
 }

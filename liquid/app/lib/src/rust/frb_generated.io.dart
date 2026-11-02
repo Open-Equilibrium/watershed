@@ -139,6 +139,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeStepContext dco_decode_box_autoadd_bridge_step_context(dynamic raw);
 
   @protected
+  BridgeTextStyle dco_decode_box_autoadd_bridge_text_style(dynamic raw);
+
+  @protected
   BridgeUsage dco_decode_box_autoadd_bridge_usage(dynamic raw);
 
   @protected
@@ -286,6 +289,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeStoredSession dco_decode_bridge_stored_session(dynamic raw);
 
   @protected
+  BridgeTextStyle dco_decode_bridge_text_style(dynamic raw);
+
+  @protected
   BridgeToolOutcome dco_decode_bridge_tool_outcome(dynamic raw);
 
   @protected
@@ -429,6 +435,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeStepContext? dco_decode_opt_box_autoadd_bridge_step_context(
     dynamic raw,
   );
+
+  @protected
+  BridgeTextStyle? dco_decode_opt_box_autoadd_bridge_text_style(dynamic raw);
 
   @protected
   BridgeUsage? dco_decode_opt_box_autoadd_bridge_usage(dynamic raw);
@@ -580,6 +589,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeStepContext sse_decode_box_autoadd_bridge_step_context(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeTextStyle sse_decode_box_autoadd_bridge_text_style(
     SseDeserializer deserializer,
   );
 
@@ -759,6 +773,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeStoredSession sse_decode_bridge_stored_session(
     SseDeserializer deserializer,
   );
+
+  @protected
+  BridgeTextStyle sse_decode_bridge_text_style(SseDeserializer deserializer);
 
   @protected
   BridgeToolOutcome sse_decode_bridge_tool_outcome(
@@ -948,6 +965,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeStepContext? sse_decode_opt_box_autoadd_bridge_step_context(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeTextStyle? sse_decode_opt_box_autoadd_bridge_text_style(
     SseDeserializer deserializer,
   );
 
@@ -1142,6 +1164,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_box_autoadd_bridge_step_context(
     BridgeStepContext self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_bridge_text_style(
+    BridgeTextStyle self,
     SseSerializer serializer,
   );
 
@@ -1382,6 +1410,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_bridge_stored_session(
     BridgeStoredSession self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_text_style(
+    BridgeTextStyle self,
     SseSerializer serializer,
   );
 
@@ -1628,6 +1662,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_opt_box_autoadd_bridge_step_context(
     BridgeStepContext? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_bridge_text_style(
+    BridgeTextStyle? self,
     SseSerializer serializer,
   );
 
