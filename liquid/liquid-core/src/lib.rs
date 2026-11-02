@@ -12,6 +12,8 @@
 //! Removing an object marks it deleted instead of deleting it from the document, so a
 //! concurrent edit or move cannot bring it back and a revert can restore it unchanged.
 //! Every change of every document carries the header of the Action that made it.
+//! These are the merge rules of the client architecture's rule 11
+//! (`docs/concept/liquid-client-architecture.md`).
 
 #![deny(missing_docs)]
 
