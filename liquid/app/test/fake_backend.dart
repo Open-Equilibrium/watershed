@@ -313,6 +313,14 @@ class FakeBackend implements SessionBackend {
   Future<BridgeStash?> gitStash() async => stashed;
 
   @override
+  Future<List<BridgeFileChange>> stashChanges(
+    String id, {
+    required bool hideWhitespace,
+  }) async => hideWhitespace
+      ? changedWithoutWhitespace ?? stashed?.files ?? const []
+      : stashed?.files ?? const [];
+
+  @override
   Future<String> stashPatch(
     String id,
     String path, {

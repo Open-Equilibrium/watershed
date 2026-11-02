@@ -351,6 +351,16 @@ impl Checkpoints {
         self.bounded(tree.stash()).await
     }
 
+    /// The files and line counts of stash `id`, with the chosen whitespace setting.
+    pub async fn stash_changes(
+        &self,
+        id: &str,
+        whitespace: Whitespace,
+    ) -> Result<Vec<FileChange>, DiffError> {
+        let tree = self.tree().await?;
+        self.bounded(tree.stash_changes(id, whitespace)).await
+    }
+
     /// The patch of the stashed file `path` of the stash `id`.
     pub async fn stash_patch(
         &self,

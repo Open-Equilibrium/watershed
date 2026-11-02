@@ -45,30 +45,39 @@ impl WorkingTree {
         let Some(entry) = self.stash_entry().await? else {
             return Ok(None);
         };
-        let (base, index, tracked, untracked) = self.stash_trees(&entry.id).await?;
+        Ok(Some(Stash {
+            created_ms: entry.created_ms,
+            files: self.stash_changes(&entry.id, Whitespace::Shown).await?,
+            id: entry.id,
+        }))
+    }
+
+    /// The files and line counts of stash `id`, with the chosen whitespace setting.
+    pub async fn stash_changes(
+        &self,
+        id: &str,
+        whitespace: Whitespace,
+    ) -> Result<Vec<FileChange>, DiffError> {
+        let (base, index, tracked, untracked) = self.stash_trees(id).await?;
         let mut files: BTreeMap<String, FileChange> = self
-            .changes(&base, &tracked, Whitespace::Shown)
+            .changes(&base, &tracked, whitespace)
             .await?
             .into_iter()
             .map(|file| (file.path.clone(), file))
             .collect();
         // As in the working diff, show a file once, preferring its working contents.
-        for file in self.changes(&base, &index, Whitespace::Shown).await? {
+        for file in self.changes(&base, &index, whitespace).await? {
             files.entry(file.path.clone()).or_insert(file);
         }
         if let Some(untracked) = untracked {
             files.extend(
-                self.changes(&self.empty_tree().await?, &untracked, Whitespace::Shown)
+                self.changes(&self.empty_tree().await?, &untracked, whitespace)
                     .await?
                     .into_iter()
                     .map(|file| (file.path.clone(), file)),
             );
         }
-        Ok(Some(Stash {
-            created_ms: entry.created_ms,
-            files: files.into_values().collect(),
-            id: entry.id,
-        }))
+        Ok(files.into_values().collect())
     }
 
     /// The patch of the stashed file `path` of the stash `id`.

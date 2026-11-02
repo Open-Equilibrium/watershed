@@ -814,6 +814,39 @@ void main() {
     expect(find.text('spaced.ts'), findsOneWidget);
   });
 
+  testWidgets('hides whitespace in the stash file list and line counts', (
+    tester,
+  ) async {
+    final backend = FakeBackend()
+      ..stashed = BridgeStash(
+        id: 's1',
+        createdMs: 1,
+        files: [modified('code.ts', 2, 1), modified('spaced.ts', 1, 1)],
+      )
+      ..changedWithoutWhitespace = [modified('code.ts', 1, 0)]
+      ..stashPatches = {
+        's1': {'code.ts': '@@ -1 +1,2 @@\n keep\n+added\n'},
+      };
+    final settings = DiffSettingsController();
+    final state = await show(tester, backend, settings: settings);
+    await state.showTurns(const StashedChanges());
+    await tester.pumpAndSettle();
+    expect(find.text('spaced.ts'), findsOneWidget);
+
+    await press(tester, LogicalKeyboardKey.keyW);
+
+    expect(find.text('spaced.ts'), findsNothing);
+    expect(state.changed.value!.single.path, 'code.ts');
+    expect(state.changed.value!.single.added, 1);
+    expect(state.changed.value!.single.removed, 0);
+    expect(state.shownStash.value?.stash.id, 's1');
+    await tester.tap(find.text('Hide whitespace'));
+    await tester.pumpAndSettle();
+    expect(find.text('spaced.ts'), findsOneWidget);
+    expect(state.changed.value!.first.added, 2);
+    expect(state.changed.value!.first.removed, 1);
+  });
+
   testWidgets('opens with the Diff settings kept from before', (tester) async {
     final backend = FakeBackend()
       ..changed = [modified('code.ts', 2, 1), modified('spaced.ts', 1, 1)]

@@ -1563,6 +1563,63 @@ fn no_restore_applies_tracked_changes_when_an_untracked_parent_is_obstructed() {
 }
 
 #[test]
+fn stashed_changes_filter_whitespace_in_files_and_line_counts() {
+    run(async {
+        let repo = Repo::new("stash-whitespace");
+        let main = repo.git(&["branch", "--show-current"]).trim().to_owned();
+        repo.write("space.txt", "spaced\n");
+        repo.write("index-only.txt", "base\n");
+        repo.git(&["add", "."]);
+        repo.git(&["commit", "-qm", "add preview files"]);
+        repo.git(&["branch", "other"]);
+        repo.write("a.txt", " old \nsemantic\n");
+        repo.write("space.txt", " spaced \n");
+        repo.write("index-only.txt", " staged \n");
+        repo.git(&["add", "index-only.txt"]);
+        repo.write("index-only.txt", "base\n");
+        repo.write("new.txt", "new\n");
+        let checkpoints = Checkpoints::new(repo.path());
+        checkpoints
+            .switch_branch(&local("other"), leave_on(&checkpoints).await)
+            .await
+            .expect("left");
+        let stash = repo.git(&["rev-parse", "refs/stash"]).trim().to_owned();
+
+        let files = checkpoints
+            .stash_changes(&stash, crate::Whitespace::Hidden)
+            .await
+            .expect("filtered changes");
+
+        let files: Vec<(&str, u64, u64)> = files
+            .iter()
+            .map(|file| (file.path.as_str(), file.added, file.removed))
+            .collect();
+        assert_eq!(
+            files,
+            [("a.txt", 1, 0), ("index-only.txt", 1, 1), ("new.txt", 1, 0)]
+        );
+        assert_eq!(
+            checkpoints
+                .stash_patch(&stash, "space.txt", crate::Whitespace::Hidden)
+                .await
+                .expect("patch"),
+            ""
+        );
+        checkpoints
+            .switch_branch(&local(&main), Changes::Bring)
+            .await
+            .expect("back");
+        let full = checkpoints.stash().await.expect("stash").expect("saved");
+        assert_eq!(full.id, stash);
+        assert_eq!(
+            full.files.len(),
+            4,
+            "the stash summary counts every saved file"
+        );
+    });
+}
+
+#[test]
 fn a_stash_preview_includes_changes_saved_only_in_the_index() {
     run(async {
         let repo = Repo::new("stash-index-preview");

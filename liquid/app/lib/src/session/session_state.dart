@@ -432,11 +432,16 @@ class SessionState {
       if (diffScope.value is StashedChanges) {
         final stash = git.stash.value;
         if (stash != null) {
+          final branch = git.status.value?.branch;
+          final files = hideWhitespace.value
+              ? await _backend.stashChanges(stash.id, hideWhitespace: true)
+              : stash.files;
+          if (generation != _generation) return;
           reportRead('changes', null);
           shownScope.value = const StashedChanges();
-          shownStash.value = (stash: stash, branch: git.status.value?.branch);
+          shownStash.value = (stash: stash, branch: branch);
           changesProblem.value = null;
-          changed.value = stash.files;
+          changed.value = files;
           return;
         }
         diffScope.value = const LatestTurn();

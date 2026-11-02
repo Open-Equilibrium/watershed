@@ -188,6 +188,21 @@ impl AgentSession {
         })
     }
 
+    /// The files and line counts of stash `id`, with the chosen whitespace setting.
+    pub fn stash_changes(
+        &self,
+        id: String,
+        hide_whitespace: bool,
+    ) -> Result<Vec<BridgeFileChange>, String> {
+        RUNTIME.block_on(async {
+            self.checkpoints
+                .stash_changes(&id, whitespace(hide_whitespace))
+                .await
+                .map(|files| files.into_iter().map(Into::into).collect())
+                .map_err(shown)
+        })
+    }
+
     /// The unified diff of the file `path` of the stash `id`, its lines written out as a
     /// turn's are.
     pub fn stash_patch(

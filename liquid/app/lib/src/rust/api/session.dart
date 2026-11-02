@@ -138,6 +138,12 @@ abstract class AgentSession implements RustOpaqueInterface {
   static Future<AgentSession> start({required SessionConfig config}) =>
       RustLib.instance.api.crateApiSessionAgentSessionStart(config: config);
 
+  /// The files and line counts of stash `id`, with the chosen whitespace setting.
+  Future<List<BridgeFileChange>> stashChanges({
+    required String id,
+    required bool hideWhitespace,
+  });
+
   /// The unified diff of the file `path` of the stash `id`, its lines written out as a
   /// turn's are.
   Future<String> stashPatch({

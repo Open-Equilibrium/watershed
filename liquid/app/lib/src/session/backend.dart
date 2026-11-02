@@ -100,6 +100,12 @@ abstract interface class SessionBackend {
   /// The stashed changes of the branch checked out, if any.
   Future<BridgeStash?> gitStash();
 
+  /// The files and line counts of stash `id`, with the chosen whitespace setting.
+  Future<List<BridgeFileChange>> stashChanges(
+    String id, {
+    required bool hideWhitespace,
+  });
+
   /// One file's unified diff in the stash `id`.
   Future<String> stashPatch(
     String id,
@@ -232,6 +238,11 @@ class RustSessionBackend implements SessionBackend {
       _session.createBranch(name: name);
   @override
   Future<BridgeStash?> gitStash() => _session.gitStash();
+  @override
+  Future<List<BridgeFileChange>> stashChanges(
+    String id, {
+    required bool hideWhitespace,
+  }) => _session.stashChanges(id: id, hideWhitespace: hideWhitespace);
   @override
   Future<String> stashPatch(
     String id,
