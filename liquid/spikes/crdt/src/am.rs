@@ -1,16 +1,69 @@
 //! The Page model on Automerge.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use automerge::legacy;
 use automerge::marks::{ExpandMark, Mark};
 use automerge::transaction::Transactable;
-use automerge::{ActorId, AutoCommit, ObjId, ObjType, ROOT, ReadDoc, ScalarValue, Value};
+use automerge::{
+    ActorId, AutoCommit, ChangeHash, ObjId, ObjType, ROOT, ReadDoc, ScalarValue, Value,
+};
 
 use crate::{Policy, Rejected, Replica, sorted_order};
 
 pub struct Am {
     pub doc: AutoCommit,
+    /// Where every object was created: its parent and key, from the `Make` operations of
+    /// all changes. Unlike the visible tree it never depends on deletions or on which
+    /// concurrent write won, so every replica answers the Role check alike.
+    created: HashMap<String, (String, String)>,
+    indexed: Vec<ChangeHash>,
+}
+
+fn obj_key(op: &legacy::Op) -> (String, String) {
+    let obj = match &op.obj {
+        legacy::ObjectId::Root => "_root".to_string(),
+        legacy::ObjectId::Id(id) => id.to_string(),
+    };
+    let key = match &op.key {
+        legacy::Key::Map(key) => key.to_string(),
+        legacy::Key::Seq(_) => String::new(),
+    };
+    (obj, key)
+}
+
+fn record_created(created: &mut HashMap<String, (String, String)>, change: &automerge::Change) {
+    let decoded = change.decode();
+    for (index, op) in decoded.operations.iter().enumerate() {
+        if matches!(op.action, legacy::OpType::Make(_)) {
+            let id = legacy::OpId(
+                decoded.start_op.get() + index as u64,
+                decoded.actor_id.clone(),
+            );
+            created.insert(id.to_string(), obj_key(op));
+        }
+    }
+}
+
+/// Whether a write at (`obj`, `key`) lies under the root key `root`, walking creation
+/// parents rather than the visible tree.
+fn under(
+    created: &HashMap<String, (String, String)>,
+    local: &HashMap<String, (String, String)>,
+    obj: &str,
+    key: &str,
+    root: &str,
+) -> bool {
+    let (mut obj, mut key) = (obj.to_string(), key.to_string());
+    loop {
+        if obj == "_root" {
+            return key == root;
+        }
+        match local.get(&obj).or_else(|| created.get(&obj)) {
+            Some((parent, parent_key)) => (obj, key) = (parent.clone(), parent_key.clone()),
+            None => return false,
+        }
+    }
 }
 
 fn actor(peer: u64) -> ActorId {
@@ -55,23 +108,33 @@ impl Am {
         self.child(&block, "text")
     }
 
-    /// Whether a received change writes inside `target`, read from its operations alone. An
-    /// object the change itself creates is not in the Page yet; it is inside only if the
-    /// operation creating it is, which already answers yes. Trying the change on a fork and
-    /// diffing gives the same answer but copies the Page for every change.
-    fn touches(&self, change: &automerge::Change, target: &ObjId) -> bool {
-        change.decode().operations.iter().any(|op| match &op.obj {
-            legacy::ObjectId::Root => {
-                matches!(&op.key, legacy::Key::Map(key) if *target == self.root(key))
+    fn index_new_changes(&mut self) {
+        for change in self.doc.get_changes(&self.indexed) {
+            record_created(&mut self.created, &change);
+        }
+        self.indexed = self.doc.get_heads();
+    }
+
+    /// Whether a received change writes under the root key `root`, read from its operations
+    /// and the creation index alone. Trying the change on a fork and diffing depends on the
+    /// visible state, and copies the Page for every change.
+    fn touches(&self, change: &automerge::Change, root: &str) -> bool {
+        let decoded = change.decode();
+        let mut local = HashMap::new();
+        for (index, op) in decoded.operations.iter().enumerate() {
+            let (obj, key) = obj_key(op);
+            if under(&self.created, &local, &obj, &key, root) {
+                return true;
             }
-            legacy::ObjectId::Id(id) => self.doc.import_obj(&id.to_string()).is_ok_and(|obj| {
-                obj == *target
-                    || self
-                        .doc
-                        .parents(&obj)
-                        .is_ok_and(|mut parents| parents.any(|parent| parent.obj == *target))
-            }),
-        })
+            if matches!(op.action, legacy::OpType::Make(_)) {
+                let id = legacy::OpId(
+                    decoded.start_op.get() + index as u64,
+                    decoded.actor_id.clone(),
+                );
+                local.insert(id.to_string(), (obj, key));
+            }
+        }
+        false
     }
 
     fn walk(&self, obj: &ObjId, out: &mut String) {
@@ -113,12 +176,18 @@ impl Replica for Am {
             doc.put_object(ROOT, key, ObjType::Map).unwrap();
         }
         doc.commit();
-        Am { doc }
+        Am {
+            doc,
+            created: HashMap::new(),
+            indexed: Vec::new(),
+        }
     }
 
     fn fork_as(&mut self, peer: u64) -> Self {
         Am {
             doc: self.doc.fork().with_actor(actor(peer)),
+            created: HashMap::new(),
+            indexed: Vec::new(),
         }
     }
 
@@ -129,7 +198,8 @@ impl Replica for Am {
         let obj = self.doc.put_object(&block, "text", ObjType::Text).unwrap();
         self.doc.splice_text(&obj, 0, 0, text).unwrap();
         let order = self.root("order");
-        self.doc.put(&order, id, sort_key).unwrap();
+        let view = self.doc.put_object(&order, id, ObjType::Map).unwrap();
+        self.doc.put(&view, "key", sort_key).unwrap();
     }
 
     fn edit_text(&mut self, id: &str, pos: usize, delete: usize, insert: &str) {
@@ -159,9 +229,12 @@ impl Replica for Am {
         self.doc.put(&row_obj, field, value).unwrap();
     }
 
+    /// Writes inside the View's own object, so a concurrent deletion of the View wins
+    /// instead of the move bringing it back.
     fn move_view(&mut self, id: &str, sort_key: &str) {
-        let order = self.root("order");
-        self.doc.put(&order, id, sort_key).unwrap();
+        if let Some(view) = self.child(&self.root("order"), id) {
+            self.doc.put(&view, "key", sort_key).unwrap();
+        }
     }
 
     fn add_connection(&mut self, id: &str, from: &str, to: &str) {
@@ -216,7 +289,7 @@ impl Replica for Am {
     }
 
     fn pull_checked(&mut self, other: &mut Self, policy: Policy) -> Rejected {
-        let rows = self.root("rows");
+        self.index_new_changes();
         let mut rejected = Vec::new();
         let mut refused = HashSet::new();
         for change in other.doc.get_changes(&self.doc.get_heads()) {
@@ -226,11 +299,12 @@ impl Replica for Am {
             let depends_on_refused = change.deps().iter().any(|dep| refused.contains(dep));
             let denied = depends_on_refused
                 || (peer_of(change.actor_id()) == policy.denied_rows_peer
-                    && self.touches(&change, &rows));
+                    && self.touches(&change, "rows"));
             if denied {
                 refused.insert(change.hash());
                 rejected.push(change.hash().to_string());
             } else {
+                record_created(&mut self.created, &change);
                 self.doc.apply_changes([change]).unwrap();
             }
         }
@@ -259,7 +333,10 @@ impl Replica for Am {
             .doc
             .keys(&order)
             .map(|id| {
-                let key = self.get_str(&order, &id).unwrap_or_default();
+                let key = self
+                    .child(&order, &id)
+                    .and_then(|view| self.get_str(&view, "key"))
+                    .unwrap_or_default();
                 (id, key)
             })
             .collect();
@@ -284,6 +361,8 @@ impl Replica for Am {
     fn load(bytes: &[u8]) -> Self {
         Am {
             doc: AutoCommit::load(bytes).unwrap(),
+            created: HashMap::new(),
+            indexed: Vec::new(),
         }
     }
 }

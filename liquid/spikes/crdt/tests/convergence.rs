@@ -126,6 +126,18 @@ macro_rules! suite {
             }
 
             #[test]
+            fn a_move_concurrent_with_the_deletion_brings_no_view_back() {
+                let mut seed: R = page();
+                let (mut a, mut b) = (seed.fork_as(1), seed.fork_as(2));
+                a.delete_block("plan");
+                b.move_view("plan", "a9");
+                b.commit();
+                sync(&mut a, &mut b);
+                assert_eq!(a.canonical(), b.canonical());
+                assert_eq!(a.order(), ["notes", "ideas"]);
+            }
+
+            #[test]
             fn a_saved_page_loads_unchanged() {
                 let mut seed: R = page();
                 let mut a = seed.fork_as(1);
@@ -166,6 +178,34 @@ macro_rules! suite {
                 assert_eq!(a.cell_values("rent", "category"), vec!["Home"]);
                 assert_eq!(a.text("notes").unwrap(), "Note: Tram 28 is crowded");
                 assert_eq!(a.text("ideas").unwrap(), "Day trip to Sintra");
+            }
+
+            #[test]
+            fn a_denied_write_is_refused_whichever_concurrent_write_arrives_first() {
+                let policy = Policy {
+                    denied_rows_peer: 3,
+                };
+                let mut seed: R = page();
+                let mut allowed = seed.fork_as(1);
+                allowed.put_cell("rent", "category", "Housing");
+                allowed.commit();
+                let mut restricted = seed.fork_as(3);
+                restricted.put_cell("rent", "category", "Mine");
+                restricted.commit();
+
+                let (mut first_denied, mut first_allowed) = (seed.fork_as(4), seed.fork_as(5));
+                let refused_early = first_denied.pull_checked(&mut restricted, policy);
+                first_denied.pull_checked(&mut allowed, policy);
+                first_allowed.pull_checked(&mut allowed, policy);
+                let refused_late = first_allowed.pull_checked(&mut restricted, policy);
+
+                assert_eq!(refused_early.len(), 1);
+                assert_eq!(refused_early, refused_late);
+                assert_eq!(first_denied.canonical(), first_allowed.canonical());
+                assert_eq!(
+                    first_denied.cell_values("rent", "category"),
+                    vec!["Housing"]
+                );
             }
         }
     };

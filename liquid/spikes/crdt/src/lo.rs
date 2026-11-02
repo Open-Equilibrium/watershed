@@ -1,16 +1,52 @@
 //! The Page model on Loro.
 
 use std::borrow::Cow;
+use std::collections::HashMap;
 
 use loro::{
-    Container, ContainerID, ExpandType, ExportMode, ID, IdSpan, LoroDoc, LoroMap, LoroText,
-    LoroValue, StyleConfig, ValueOrContainer,
+    Container, ContainerID, ExpandType, ExportMode, IdSpan, JsonChange, JsonOpContent, LoroDoc,
+    LoroMap, LoroText, LoroValue, StyleConfig, ValueOrContainer, VersionVector, json::MapOp,
 };
 
 use crate::{Policy, Rejected, Replica, sorted_order};
 
 pub struct Lo {
     pub doc: LoroDoc,
+    /// Where every container was created: its parent and key, from the map insertions of
+    /// all changes, independent of deletions and of which concurrent write won.
+    created: HashMap<ContainerID, ContainerID>,
+    indexed: VersionVector,
+}
+
+fn record_created(created: &mut HashMap<ContainerID, ContainerID>, change: &JsonChange) {
+    for op in &change.ops {
+        if let JsonOpContent::Map(MapOp::Insert {
+            value: LoroValue::Container(child),
+            ..
+        }) = &op.content
+        {
+            created.insert(child.clone(), op.container.clone());
+        }
+    }
+}
+
+/// Whether `container` lies under the root container `root`, walking creation parents.
+fn under(
+    created: &HashMap<ContainerID, ContainerID>,
+    local: &HashMap<ContainerID, ContainerID>,
+    container: &ContainerID,
+    root: &str,
+) -> bool {
+    let mut current = container.clone();
+    loop {
+        if let ContainerID::Root { name, .. } = &current {
+            return name.as_str() == root;
+        }
+        match local.get(&current).or_else(|| created.get(&current)) {
+            Some(parent) => current = parent.clone(),
+            None => return false,
+        }
+    }
 }
 
 /// Formatting expands like Automerge's, and every commit stays its own change: by default
@@ -96,12 +132,47 @@ impl Lo {
         out
     }
 
-    fn touches_rows(doc: &LoroDoc, cid: &ContainerID) -> bool {
-        let is_rows = |id: &ContainerID| matches!(id, ContainerID::Root { name, .. } if name.as_str() == "rows");
-        is_rows(cid)
-            || doc
-                .get_path_to_container(cid)
-                .is_some_and(|path| path.iter().any(|(id, _)| is_rows(id)))
+    fn new(doc: LoroDoc) -> Self {
+        configure(&doc);
+        Lo {
+            doc,
+            created: HashMap::new(),
+            indexed: VersionVector::default(),
+        }
+    }
+
+    fn changes_between(doc: &LoroDoc, from: &VersionVector, to: &VersionVector) -> Vec<JsonChange> {
+        doc.export_json_updates_without_peer_compression(from, to)
+            .unwrap()
+            .changes
+    }
+
+    fn index_new_changes(&mut self) {
+        let now = self.doc.oplog_vv();
+        for change in Self::changes_between(&self.doc, &self.indexed, &now) {
+            record_created(&mut self.created, &change);
+        }
+        self.indexed = now;
+    }
+
+    /// Whether a received change writes under the root container `root`, read from its
+    /// operations and the creation index alone; a visible diff would depend on which
+    /// concurrent write already won.
+    fn touches(&self, change: &JsonChange, root: &str) -> bool {
+        let mut local = HashMap::new();
+        for op in &change.ops {
+            if under(&self.created, &local, &op.container, root) {
+                return true;
+            }
+            if let JsonOpContent::Map(MapOp::Insert {
+                value: LoroValue::Container(child),
+                ..
+            }) = &op.content
+            {
+                local.insert(child.clone(), op.container.clone());
+            }
+        }
+        false
     }
 }
 
@@ -109,16 +180,14 @@ impl Replica for Lo {
     fn seed(peer: u64) -> Self {
         let doc = LoroDoc::new();
         doc.set_peer_id(peer).unwrap();
-        configure(&doc);
-        Lo { doc }
+        Lo::new(doc)
     }
 
     fn fork_as(&mut self, peer: u64) -> Self {
         self.doc.commit();
         let doc = self.doc.fork();
         doc.set_peer_id(peer).unwrap();
-        configure(&doc);
-        Lo { doc }
+        Lo::new(doc)
     }
 
     fn add_text_block(&mut self, id: &str, text: &str, sort_key: &str) {
@@ -129,7 +198,11 @@ impl Replica for Lo {
         block.insert("kind", "text").unwrap();
         let obj = block.insert_container("text", LoroText::new()).unwrap();
         obj.insert(0, text).unwrap();
-        self.root("order").insert(id, sort_key).unwrap();
+        let view = self
+            .root("order")
+            .insert_container(id, LoroMap::new())
+            .unwrap();
+        view.insert("key", sort_key).unwrap();
     }
 
     fn edit_text(&mut self, id: &str, pos: usize, delete: usize, insert: &str) {
@@ -154,8 +227,11 @@ impl Replica for Lo {
         row_obj.insert(field, value).unwrap();
     }
 
+    /// Writes inside the View's own container, so a concurrent deletion of the View wins.
     fn move_view(&mut self, id: &str, sort_key: &str) {
-        self.root("order").insert(id, sort_key).unwrap();
+        if let Some(view) = Self::child_map(&self.root("order"), id) {
+            view.insert("key", sort_key).unwrap();
+        }
     }
 
     fn add_connection(&mut self, id: &str, from: &str, to: &str) {
@@ -220,44 +296,22 @@ impl Replica for Lo {
     fn pull_checked(&mut self, other: &mut Self, policy: Policy) -> Rejected {
         other.doc.commit();
         self.doc.commit();
+        self.index_new_changes();
         let mine = self.doc.oplog_vv();
-        let mut changes = Vec::new();
-        for (peer, end) in other.doc.oplog_vv().iter() {
-            let mut counter = mine.get(peer).copied().unwrap_or(0);
-            while counter < *end {
-                let meta = other.doc.get_change(ID::new(*peer, counter)).unwrap();
-                let span = IdSpan::new(*peer, meta.id.counter, meta.id.counter + meta.len as i32);
-                counter = span.counter.end;
-                changes.push((meta, span));
-            }
-        }
-        changes.sort_by_key(|(meta, _)| (meta.lamport, meta.id.peer));
+        let mut changes = Self::changes_between(&other.doc, &mine, &other.doc.oplog_vv());
+        changes.sort_by_key(|change| (change.lamport, change.id.peer));
         let mut refused: Vec<IdSpan> = Vec::new();
         let mut rejected = Vec::new();
-        for (meta, span) in changes {
-            let depends_on_refused = meta.deps.iter().any(|dep| {
+        for change in changes {
+            let len = other.doc.get_change(change.id).unwrap().len as i32;
+            let span = IdSpan::new(change.id.peer, change.id.counter, change.id.counter + len);
+            let depends_on_refused = change.deps.iter().any(|dep| {
                 refused
                     .iter()
                     .any(|r| r.peer == dep.peer && r.counter.contains(dep.counter))
             });
-            let bytes = other
-                .doc
-                .export(ExportMode::UpdatesInRange {
-                    spans: Cow::Owned(vec![span]),
-                })
-                .unwrap();
-            let denied = depends_on_refused || {
-                let trial = self.doc.fork();
-                let before = self.doc.oplog_frontiers();
-                let status = trial.import(&bytes).unwrap();
-                status.pending.is_some()
-                    || (meta.id.peer == policy.denied_rows_peer
-                        && trial
-                            .diff(&before, &trial.oplog_frontiers())
-                            .unwrap()
-                            .iter()
-                            .any(|(cid, _)| Self::touches_rows(&trial, cid)))
-            };
+            let denied = depends_on_refused
+                || (change.id.peer == policy.denied_rows_peer && self.touches(&change, "rows"));
             if denied {
                 rejected.push(format!(
                     "{}@{}..{}",
@@ -265,6 +319,13 @@ impl Replica for Lo {
                 ));
                 refused.push(span);
             } else {
+                record_created(&mut self.created, &change);
+                let bytes = other
+                    .doc
+                    .export(ExportMode::UpdatesInRange {
+                        spans: Cow::Owned(vec![span]),
+                    })
+                    .unwrap();
                 self.doc.import(&bytes).unwrap();
             }
         }
@@ -284,7 +345,9 @@ impl Replica for Lo {
         let keys = order
             .keys()
             .map(|id| {
-                let key = Self::get_str(&order, &id).unwrap_or_default();
+                let key = Self::child_map(&order, &id)
+                    .and_then(|view| Self::get_str(&view, "key"))
+                    .unwrap_or_default();
                 (id.to_string(), key)
             })
             .collect();
@@ -312,7 +375,6 @@ impl Replica for Lo {
     fn load(bytes: &[u8]) -> Self {
         let doc = LoroDoc::new();
         doc.import(bytes).unwrap();
-        configure(&doc);
-        Lo { doc }
+        Lo::new(doc)
     }
 }

@@ -105,22 +105,22 @@ fn run<R: Replica>(name: &str) {
     let build = start.elapsed();
     let page_heap = live().saturating_sub(base);
     let bytes = page.save();
-    // Role-checked receive on the large Page: each trial fork copies the Page.
+    // Role-checked receive on the large Page, with the same restricted editing peer. The
+    // first check indexes where every object was created; a replica keeps that index, so
+    // it is timed apart from the per-change cost.
+    let policy = Policy {
+        denied_rows_peer: 2,
+    };
     let (mut a, mut b) = (page.fork_as(1), page.fork_as(2));
+    let start = Instant::now();
+    assert!(a.pull_checked(&mut b, policy).is_empty());
+    let index_build = start.elapsed();
     for i in 0..LARGE_CHECKED {
         b.edit_text("b0", i, 0, "z");
         b.commit();
     }
     let start = Instant::now();
-    assert!(
-        a.pull_checked(
-            &mut b,
-            Policy {
-                denied_rows_peer: 3
-            }
-        )
-        .is_empty()
-    );
+    assert!(a.pull_checked(&mut b, policy).is_empty());
     let large_checked = start.elapsed() / LARGE_CHECKED as u32;
     drop((a, b, page));
     let base = live();
@@ -137,8 +137,9 @@ fn run<R: Replica>(name: &str) {
         mib(loaded_heap)
     );
     println!(
-        "| {name} | Role-checked receive on that Page, {LARGE_CHECKED} changes | {} per change |",
-        micros(large_checked)
+        "| {name} | Role-checked receive on that Page, {LARGE_CHECKED} changes | {} per change, after indexing the Page's history once in {:.0} ms |",
+        micros(large_checked),
+        index_build.as_secs_f64() * 1e3
     );
     drop(loaded);
 
@@ -158,7 +159,8 @@ fn run<R: Replica>(name: &str) {
         start.elapsed().as_secs_f64() * 1e3
     );
 
-    // Role-checked receive: each change is tried on a fork and its diff inspected.
+    // Role-checked receive: the editing peer may not change rows, so every one of its text
+    // edits runs the full operation check and is allowed.
     let (mut a, mut b) = (seed.fork_as(1), seed.fork_as(2));
     for i in 0..CHECKED {
         b.edit_text("t", 5 + i, 0, "z");
@@ -168,7 +170,7 @@ fn run<R: Replica>(name: &str) {
     let refused = a.pull_checked(
         &mut b,
         Policy {
-            denied_rows_peer: 3,
+            denied_rows_peer: 2,
         },
     );
     assert!(refused.is_empty());
