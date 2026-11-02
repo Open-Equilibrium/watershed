@@ -26,9 +26,10 @@ Stream<BridgeChange> follow(
             onDone: controller.close,
           );
     },
+    // Closing in Rust first drops its end of the stream, which the cancellation waits for.
     onCancel: () async {
-      await changes?.cancel();
       await workspace.close(subscription: subscription);
+      await changes?.cancel();
     },
   );
   return controller.stream;

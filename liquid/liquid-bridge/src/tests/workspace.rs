@@ -430,6 +430,15 @@ fn a_page_nothing_follows_leaves_memory_after_each_call() {
     assert!(!workspace.is_loaded(&id));
     assert_eq!(text(&workspace, &page, &block).unwrap(), "Five days");
     assert!(!workspace.is_loaded(&id), "after a read nothing follows");
+    let refused = workspace.apply(BridgeMutation {
+        page: Some(page.clone()),
+        block: Some(block),
+        text: Some("x".into()),
+        at: 99,
+        ..mutation(BridgeMutationKind::EditText)
+    });
+    assert_eq!(refused.unwrap_err(), "text position out of range");
+    assert!(!workspace.is_loaded(&id), "after a refused write");
 }
 
 #[test]

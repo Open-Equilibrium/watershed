@@ -9,12 +9,17 @@ class FakeWorkspace implements LiquidWorkspace {
   final streams = <int, StreamController<BridgeChange>>{};
   final closed = <int>[];
 
+  final _ended = <int, Completer<void>>{};
+
+  /// Like the bridge's stream, cancelling it finishes only once Rust drops its end, which
+  /// closing the subscription does.
   @override
   Stream<BridgeChange> subscribe({
     required int subscription,
     required BridgeResource resource,
   }) {
-    final controller = StreamController<BridgeChange>();
+    final ended = _ended[subscription] = Completer<void>();
+    final controller = StreamController<BridgeChange>(onCancel: () => ended.future);
     streams[subscription] = controller;
     return controller.stream;
   }
@@ -22,6 +27,7 @@ class FakeWorkspace implements LiquidWorkspace {
   @override
   Future<void> close({required int subscription}) async {
     closed.add(subscription);
+    _ended[subscription]?.complete();
   }
 
   @override
@@ -47,11 +53,11 @@ void main() {
       final id = workspace.streams.keys.first;
       workspace.streams[id]!.add(const BridgeChange(resource: areas, seq: 3));
       await pumpEventQueue();
-      await first.cancel();
+      await first.cancel().timeout(const Duration(seconds: 1));
 
       expect(seen, [3]);
       expect(workspace.closed, [id]);
-      await second.cancel();
+      await second.cancel().timeout(const Duration(seconds: 1));
       expect(workspace.closed, hasLength(2));
       expect(workspace.closed.toSet(), workspace.streams.keys.toSet());
     },

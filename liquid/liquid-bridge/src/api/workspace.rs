@@ -427,14 +427,21 @@ impl LiquidWorkspace {
         };
         let mut inner = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
         let actor = Actor::Person(inner.workspace.owner().clone());
-        let applied = inner
-            .workspace
-            .apply(Request {
-                actor,
-                origin: Origin::Ui,
-                mutation,
-            })
-            .map_err(message)?;
+        let result = inner.workspace.apply(Request {
+            actor,
+            origin: Origin::Ui,
+            mutation,
+        });
+        // A refused write may have loaded its Page too.
+        let applied = match result {
+            Ok(applied) => applied,
+            Err(error) => {
+                if let Some(page) = &mutation_page {
+                    inner.release_page(page);
+                }
+                return Err(message(error));
+            }
+        };
         for changed in &applied.changed {
             inner.notify(BridgeResource::of(changed));
         }
@@ -553,9 +560,15 @@ impl LiquidWorkspace {
         resource: BridgeResource,
         sink: StreamSink<BridgeChange>,
     ) -> Result<(), String> {
-        self.watch(subscription, resource, move |change| {
+        // Dart's stream sees only what the sink carries, so a refusal travels through it.
+        let refused = sink.clone();
+        let watched = self.watch(subscription, resource, move |change| {
             sink.add(change).is_ok()
-        })
+        });
+        if let Err(error) = watched {
+            let _ = refused.add_error(error);
+        }
+        Ok(())
     }
 
     /// Hands `resource`'s changes to `deliver` until it returns `false`; Rust-side consumers
