@@ -341,7 +341,13 @@ impl<S: Store> Workspace<S> {
                 let tail = text[utf8_offset(&text, *at)..].to_string();
                 let (new_block, new_view) = if *at == 0 {
                     let above = order.above(view).map(|above| above.id.clone());
-                    add_text_block(doc, order, above.as_ref(), "", *style)?
+                    let starts_section = order.view(view).is_some_and(|shown| shown.boundary);
+                    let added = add_text_block(doc, order, above.as_ref(), "", *style)?;
+                    // A Section that started here now starts at the new Text Block above.
+                    if starts_section {
+                        move_boundary(doc, order, view, &added.1)?;
+                    }
+                    added
                 } else {
                     let length = isize::try_from(doc.length(&content) - at)
                         .map_err(|_| Error::OutOfRange)?;
@@ -577,4 +583,19 @@ fn utf8_offset(text: &str, at: usize) -> usize {
         units += c.len_utf16();
     }
     text.len()
+}
+
+/// Moves a Section boundary from the View `from` to the View `to`.
+fn move_boundary(
+    doc: &mut AutoCommit,
+    order: &mut Order,
+    from: &ViewId,
+    to: &ViewId,
+) -> Result<(), Error> {
+    for (view, boundary) in [(from, false), (to, true)] {
+        let entry = model::live(doc, VIEWS, view.as_str()).ok_or(Error::NotFound)?;
+        doc.put(&entry, BOUNDARY, boundary)?;
+        order.set_boundary(view, boundary);
+    }
+    Ok(())
 }

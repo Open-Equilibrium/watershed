@@ -575,3 +575,38 @@ fn backspace_never_joins_across_a_section_boundary() {
     );
     assert_eq!(texts(&mut workspace, &lisbon), ["Plan", "Day one"]);
 }
+
+#[test]
+fn enter_at_a_section_s_start_keeps_the_new_text_block_in_that_section() {
+    let mut workspace = workspace();
+    let trips = area(&mut workspace, "Trips");
+    let lisbon = page(&mut workspace, &trips, None, "Lisbon");
+    let (_, plan_view) = text_block(&mut workspace, &lisbon, None, "Plan");
+    let (day, day_view) = text_block(&mut workspace, &lisbon, Some(&plan_view), "Day one");
+    apply(
+        &mut workspace,
+        Mutation::SetSectionBoundary {
+            page: lisbon.clone(),
+            view: day_view.clone(),
+            boundary: true,
+        },
+    );
+    apply(
+        &mut workspace,
+        Mutation::SplitTextBlock {
+            page: lisbon.clone(),
+            block: day,
+            view: day_view,
+            at: 0,
+            style: TextStyle::Paragraph,
+        },
+    );
+    let boundaries: Vec<bool> = workspace
+        .views(&lisbon, 0, usize::MAX)
+        .unwrap()
+        .iter()
+        .map(|view| view.boundary)
+        .collect();
+    assert_eq!(texts(&mut workspace, &lisbon), ["Plan", "", "Day one"]);
+    assert_eq!(boundaries, [false, true, false]);
+}
