@@ -359,3 +359,18 @@ fn a_page_reads_its_views_in_windows() {
     assert_eq!(window, ["Day 9", "Day 11", "Day 12"]);
     assert!(workspace.views(&lisbon, 29, 10).unwrap().is_empty());
 }
+
+#[test]
+fn identities_read_back_from_text_and_reject_anything_else() {
+    let mut workspace = workspace();
+    let trips = area(&mut workspace, "Trips");
+    assert_eq!(AreaId::parse(trips.as_str()), Some(trips.clone()));
+    for text in [
+        "",
+        "trips",
+        &trips.as_str().to_uppercase(),
+        &format!("{trips}0"),
+    ] {
+        assert_eq!(AreaId::parse(text), None, "{text}");
+    }
+}

@@ -178,6 +178,12 @@ impl<S: Store> Workspace<S> {
         ))
     }
 
+    /// Releases a Page's document and View order from memory; the next read loads them
+    /// again from the store. A Page holds no uncommitted writes between requests.
+    pub fn close_page(&mut self, page: &PageId) {
+        self.docs.remove(&Document::Page(page.clone()));
+    }
+
     /// Up to `limit` recorded Actions, newest first, starting before `before`.
     pub fn history(
         &mut self,

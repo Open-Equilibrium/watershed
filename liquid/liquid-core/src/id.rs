@@ -32,6 +32,13 @@ macro_rules! ids {
                 Self(key.to_string())
             }
 
+            /// The identity `text` names, if it has the stored form.
+            pub fn parse(text: &str) -> Option<Self> {
+                let stored = text.len() == 32
+                    && text.bytes().all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'));
+                stored.then(|| Self(text.to_string()))
+            }
+
             /// The identity as documents store it.
             pub fn as_str(&self) -> &str {
                 &self.0
