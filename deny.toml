@@ -9,7 +9,14 @@ targets = [
 [advisories]
 version = 2
 yanked = "deny"
-ignore = []
+# keyring 4.2 reaches the Secret Service through zbus 5, whose parts moved into zbus 6 and are
+# no longer published on their own; these are maintenance notices, not vulnerabilities.
+# Remove them once keyring uses zbus 6.
+ignore = [
+    { id = "RUSTSEC-2026-0370", reason = "zvariant moved into zbus 6; keyring 4.2 needs zbus 5" },
+    { id = "RUSTSEC-2026-0371", reason = "zbus_names moved into zbus 6; keyring 4.2 needs zbus 5" },
+    { id = "RUSTSEC-2026-0372", reason = "zvariant_derive moved into zbus 6; keyring 4.2 needs zbus 5" },
+]
 
 [licenses]
 version = 2
