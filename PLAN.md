@@ -155,7 +155,7 @@ M2 delivers Meta-Harness as a **self-contained, host-scoped headless control pla
 
 **Wedge:** prove safe human/agent co-editing of local-first Workspace state with attributed, reviewable and reversible History. Liquid remains useful without agents, network or a hosted service. Do not build a generic Notion clone.
 
-The target product is canonical in [`docs/concept/V-Spec_Liquid.html`](docs/concept/V-Spec_Liquid.html). M3 is staged so workspace fundamentals prove value before sync, community extensions and broad integrations.
+The target product is canonical in [`docs/concept/V-Spec_Liquid.html`](docs/concept/V-Spec_Liquid.html). M3 is staged so workspace fundamentals prove value before sync, community extensions and broad integrations. Chat between people and a calendar follow after Release 1 (ADR-0236).
 
 #### Liquid agent surface — early slice
 
@@ -216,7 +216,10 @@ The agent writes only to its project and temporary folders unless the person all
 
 #### M3a — Local Workspace foundation
 
-- Local replica as the only interactive store; storage choice remains D-029.
+- Local replica as the only interactive store: SQLite with SQLCipher and FTS5 (ADR-0237).
+- The ADR-0238 spike passed on macOS: Automerge converges on every case and refuses Role-denied changes identically, with Loro measured alongside ([evidence](liquid/benchmarks/CRDT_SPIKE_EVIDENCE.md)); `liquid-core`'s CI runs Automerge on Linux too, and Windows and Android follow with their clients.
+- Delivery order, one PR each: `liquid-core` object model, mutation pipeline, Actions and History over Automerge, starting with areas, Pages, Text Blocks and Views, to which each later slice adds its objects (done); `liquid-storage` with SQLite, SQLCipher and FTS5 and the durable commit (done); the Workspace bridge calls (ADR-0216), with the database key in the operating system's keystore; Explorer, Pages, Text Blocks and Sections; the other built-in Blocks; Views, copy and the deletion cascade; Arrange mode; PowerBar, with its FTS5 index; Connections and formulas; Automations; Roles and protection; History, revert and Restore version; Sources, Page icons, Markdown import and export, and Settings, History and Automations as dialogs.
+- Each loaded Page keeps its View order as an index; closing a Page and releasing it come with the Workspace bridge calls. The Text Blocks slice measures how ⏎ lengthens sort keys while typing ([evidence](liquid/benchmarks/WORKSPACE_CORE_EVIDENCE.md#probe-of-the-long-pages-snapshot)).
 - Flutter clients over the Rust core follow the [client architecture](docs/concept/liquid-client-architecture.md) invariants (ADR-0182).
 - Pages, Blocks, Views, Sources, Connections, Automations, Roles, History and settings.
 - Explorer with Pages and Sources as peer navigation entries; Page templates create use-case compositions rather than new Page Types.
@@ -227,7 +230,7 @@ The agent writes only to its project and temporary folders unless the person all
 - Synchronized multi-Page Views over one canonical Block. Duplicate creates a new Block; deleting the last View deletes the Block, its Connections and owned Automations in one reversible Action, while independent dependent Automations are disabled for repair.
 - Connections/formulas for direct logic and Workspace Automations for when/if/then logic.
 - Allow-only Roles with default-denied unlisted access; explicit deny rules are post-MVP.
-- One mutation pipeline and History for every M3a write surface, including UI, Connections/formulas, Automations and import. History design and revert detail remain D-028/D-031.
+- One mutation pipeline and History for every M3a write surface, including UI, Connections/formulas, Automations and import. History and revert follow ADR-0235.
 
 **M3a DoD:** offline, a user can create and navigate Pages/Sources, act immediately on a blank Page, edit and connect Blocks, reuse a Block through synchronized Views, arrange the Page responsively, assign a Role, run a simple Automation and recover the tested deletion cascade through History.
 
@@ -235,6 +238,8 @@ The agent writes only to its project and temporary folders unless the person all
 
 - Restricted local JavaScript/TypeScript App Runtime with declarative UI, resource limits and explicit capabilities; WASM is a later extension.
 - App and Agent Session Blocks, including permitted agent actions in the PowerBar.
+- Web-link Sources, read-only and loaded only when opened, in a built-in browser (ADR-0236).
+- Reviewing agent changes: what an agent changed is marked on the Page and filterable in History, from Automerge's attributed changes (ADR-0238), and the person can approve or revert it at any time; an approved mockup comes first.
 - App SDK for AI/user-built Workspace-local Apps, with versioned state, Views and typed App actions.
 - Workspace CLI/API (D-027) exposes compact typed reads, mutation proposals/execution and permitted App actions to agents.
 - Liquid AI uses the same Role, capability, mutation and History boundaries.
@@ -245,7 +250,7 @@ The agent writes only to its project and temporary folders unless the person all
 
 #### M3c — Central sync, mobile and headless execution
 
-- Central Sync Server with resumable star-topology exchange; conflict rules remain D-035.
+- Central Sync Server with resumable star-topology exchange, merging with Automerge 3 (ADR-0238); a concurrent edit of one field shows both values, after an approved mockup.
 - Authorized user devices sync complete Workspaces and continue offline from local replicas.
 - Optional headless Liquid replica receives only explicitly enabled Workspaces and exposes the same Role/mutation boundary to same-host agents while user devices are offline.
 - Sync applies received actions through the same permissioned mutation/History pipeline.

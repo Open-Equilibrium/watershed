@@ -1,0 +1,499 @@
+<!doctype html>
+<html lang="en"><head><title>Liquid: Workspace Blocks mockups</title>
+<link rel="stylesheet" href="../tokens.css"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+.chrome{--foreground:var(--ws-text);--muted-foreground:var(--ws-text-muted);--muted:var(--ws-subtle);--border:var(--ws-border-strong);--secondary:var(--ws-hover);--radius:8px;background:var(--ws-canvas);padding:24px}
+body{margin:0;font-family:var(--ws-font-ui);color:var(--foreground)}
+.page{display:flex;flex-direction:column;gap:28px;max-width:1400px}
+.toolbar{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;font-size:13px;color:var(--muted-foreground)}
+.toolbar>div{display:flex;gap:8px;align-items:center}
+.seg{display:inline-flex;border:1px solid var(--border);border-radius:6px;overflow:hidden}
+.seg button{all:unset;cursor:pointer;padding:4px 10px;font-size:12.5px;color:var(--muted-foreground)}
+.seg button.on{background:var(--secondary);color:var(--foreground)}
+h1{margin:0 0 6px;font-size:var(--ws-fs-h1);line-height:var(--ws-lh-h1)}
+h3.sec{margin:0 0 4px;font-size:15px;font-weight:600}
+p.sub{margin:0 0 10px;font-size:13px;color:var(--muted-foreground);line-height:1.5;max-width:900px}
+.stage{padding:16px;border-radius:8px;background:var(--muted);overflow:hidden}
+.scaler{position:relative}
+.scaler>.win{position:absolute;top:0;left:0;transform-origin:0 0}
+.win{font-family:var(--ws-font-ui);color:var(--ws-text);font-size:var(--ws-fs-ui);line-height:var(--ws-lh-ui);-webkit-font-smoothing:antialiased;background:var(--ws-canvas);border-radius:var(--ws-radius-xl);overflow:hidden;box-shadow:var(--ws-shadow)}
+.win code,.win kbd,.mono{font-family:var(--ws-font-mono)}
+.win.bare{background:transparent;box-shadow:none;overflow:visible;border-radius:0}
+.tbar{height:38px;background:var(--ws-titlebar);display:flex;align-items:center;padding:0 14px}
+.lights{display:flex;gap:8px}.lights i{width:12px;height:12px;border-radius:50%;display:block}
+.body{display:flex;height:var(--h);position:relative}
+.side{width:280px;flex:none;overflow:hidden;background:var(--ws-subtle);padding:4px 8px 8px;display:flex;flex-direction:column;gap:1px;box-shadow:inset -1px 0 0 var(--ws-border);box-sizing:border-box}
+.wsw{display:flex;align-items:center;gap:8px;height:var(--ws-row-nav);padding:0 8px;font-weight:500;border-radius:6px}
+.av{width:22px;height:22px;border-radius:4px;background:var(--ws-accent);color:var(--ws-on-accent);display:grid;place-items:center;font-size:12px;font-weight:600;flex:none}
+.srch{height:var(--ws-row-nav);display:flex;align-items:center;gap:8px;padding:0 8px;border-radius:6px;color:var(--ws-text-muted)}
+.srch kbd{margin-left:auto}
+.side h6{font-size:12px;line-height:16px;color:var(--ws-text-faint);font-weight:500;margin:14px 8px 4px;display:flex;justify-content:space-between;align-items:center}
+.side h6 span.a{display:flex;gap:10px}
+.nav{flex:none;display:flex;align-items:center;gap:8px;height:var(--ws-row-nav);padding:0 8px 0 calc(8px + var(--d,0) * 18px);border-radius:6px;color:var(--ws-text-muted);white-space:nowrap;overflow:hidden;box-sizing:border-box}
+.nav.on{background:var(--ws-selected);color:var(--ws-text)}
+.nav .tw{width:12px;flex:none;color:var(--ws-text-faint);font-size:11px;text-align:center}
+.nav .r{margin-left:auto;font-size:12px;color:var(--ws-text-faint)}
+.nav .r.warn{color:var(--ws-warning)}
+.ico{width:18px;flex:none;display:inline-flex;justify-content:center;color:var(--ws-text-faint)}
+.em{font-size:15px;line-height:1}
+.tic{display:inline-block;margin-right:10px;font-size:30px;vertical-align:-2px}
+.tic.add{font-size:15px;font-weight:400;color:var(--ws-text-faint);vertical-align:6px;margin-right:12px}
+.modal{position:absolute;left:50%;top:28px;bottom:28px;transform:translateX(-50%);z-index:4;background:var(--ws-canvas);border-radius:12px;box-shadow:var(--ws-shadow);display:flex;flex-direction:column;overflow:hidden}
+.mh{height:48px;flex:none;display:flex;align-items:center;gap:8px;padding:0 12px 0 20px;font-size:15px;font-weight:600;box-shadow:inset 0 -1px 0 var(--ws-border)}
+.mh .end{margin-left:auto;display:flex;gap:6px;align-items:center;font-weight:400}
+.mb{flex:1;display:flex;min-height:0}
+.pbfoot{display:flex;gap:16px;padding:8px 16px;font-size:12px;color:var(--ws-text-faint);box-shadow:inset 0 1px 0 var(--ws-border)}
+.pbfoot b{font-family:var(--ws-font-mono);color:var(--ws-text-muted);font-weight:500;margin-right:4px}
+.ipick{width:360px;padding:0;overflow:hidden}
+.ipick .tabs2{display:flex;gap:14px;padding:0 12px;height:38px;align-items:center;font-size:13px;color:var(--ws-text-muted);box-shadow:inset 0 -1px 0 var(--ws-border)}
+.ipick .tabs2 .on{color:var(--ws-text);font-weight:500;box-shadow:inset 0 -2px 0 var(--ws-text);height:100%;display:flex;align-items:center}
+.ipick .tabs2 .end{margin-left:auto}
+.egrid{display:grid;grid-template-columns:repeat(9,1fr);gap:2px;padding:4px 10px 10px;font-size:20px;text-align:center}
+.egrid span{height:34px;display:grid;place-items:center;border-radius:6px}
+.egrid span.on{background:var(--ws-hover)}
+.foot{margin-top:auto;padding-top:6px;box-shadow:inset 0 1px 0 var(--ws-border)}
+.main{flex:1;display:flex;flex-direction:column;min-width:0;position:relative}
+.head{height:44px;flex:none;display:flex;align-items:center;gap:8px;padding:0 16px 0 24px;font-size:14px}
+.crumb{color:var(--ws-text-muted);display:flex;gap:6px;align-items:center;white-space:nowrap}
+.crumb b{color:var(--ws-text);font-weight:500}
+.head .end{margin-left:auto;display:flex;gap:4px;align-items:center}
+.ib{height:28px;min-width:28px;padding:0 6px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;gap:6px;color:var(--ws-text-muted);font-size:13px;box-sizing:border-box}
+.ib.on{background:var(--ws-accent-subtle);color:var(--ws-accent)}
+kbd{font-size:11px;padding:0 4px;border-radius:4px;border:1px solid currentColor;opacity:.6;line-height:16px;font-weight:400}
+.btn{height:28px;padding:0 10px;border-radius:6px;background:var(--ws-canvas);box-shadow:inset 0 0 0 1px var(--ws-border-strong);color:var(--ws-text);font-size:13px;display:inline-flex;align-items:center;gap:8px;font-weight:500;white-space:nowrap}
+.btn.pri{background:var(--ws-accent);color:var(--ws-on-accent);box-shadow:none}
+.btn.ghost{box-shadow:none;background:transparent;color:var(--ws-text-muted)}
+.pg{flex:1;overflow:hidden;padding:28px 0 0;-webkit-mask-image:linear-gradient(to top,transparent 0,#000 40px);mask-image:linear-gradient(to top,transparent 0,#000 40px)}
+.col{width:740px;margin:0 auto;display:flex;flex-direction:column;gap:14px}
+.ttl{font-size:var(--ws-fs-display);line-height:var(--ws-lh-display);font-weight:var(--ws-fw-bold);margin:0 0 6px}
+.ttl.ph{color:var(--ws-text-faint)}
+.prose{font-size:var(--ws-fs-prose);line-height:var(--ws-lh-prose)}
+.prose p{margin:0 0 8px}
+.prose h2{font-size:var(--ws-fs-h2);line-height:var(--ws-lh-h2);margin:6px 0 6px;font-weight:600}
+.hint{color:var(--ws-text-faint);font-size:var(--ws-fs-prose);line-height:var(--ws-lh-prose);display:flex;align-items:center;gap:2px}
+.caret{display:inline-block;width:1.5px;height:20px;background:var(--ws-text);margin-right:6px;vertical-align:middle}
+.blk{position:relative}
+.gut{position:absolute;left:-52px;top:2px;display:flex;gap:2px;color:var(--ws-text-faint)}
+.gut span{width:22px;height:24px;display:grid;place-items:center;border-radius:4px}
+.gut span.on{background:var(--ws-hover);color:var(--ws-text-muted)}
+.bh{display:flex;align-items:center;gap:8px;height:30px;font-size:14px;color:var(--ws-text-muted)}
+.bh b{color:var(--ws-text);font-weight:600}
+.bh .end{margin-left:auto;display:flex;gap:6px;align-items:center}
+.chip{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 8px;border-radius:6px;color:var(--ws-text-muted);font-size:13px;white-space:nowrap;background:var(--ws-subtle)}
+.tag{display:inline-block;font-size:12px;font-weight:500;padding:0 6px;border-radius:4px;line-height:20px}
+.t1{background:var(--ws-accent-subtle);color:var(--ws-accent)}.t2{background:color-mix(in srgb,var(--ws-data-2) 14%,transparent);color:var(--ws-data-2)}.t3{background:var(--ws-success-subtle);color:var(--ws-success)}.t4{background:var(--ws-warning-subtle);color:var(--ws-warning)}
+.tbl{border-radius:8px;box-shadow:0 0 0 1px var(--ws-border);overflow:hidden;font-size:14px}
+.tr{display:grid;grid-template-columns:var(--cols);height:var(--ws-row-table);align-items:center;box-shadow:inset 0 -1px 0 var(--ws-border);white-space:nowrap}
+.tr>span{padding:0 10px;overflow:hidden;text-overflow:ellipsis}
+.tr>span+span{box-shadow:inset 1px 0 0 var(--ws-border);height:100%;display:flex;align-items:center}
+.tr.hd{color:var(--ws-text-faint);font-size:13px;height:30px;background:var(--ws-subtle)}
+.tr.add{color:var(--ws-text-faint);font-size:13px;box-shadow:none}
+.tr.add>span+span{box-shadow:none}
+.num{justify-content:flex-end;font-variant-numeric:tabular-nums}
+.tr.sum{color:var(--ws-text-muted);font-size:13px;box-shadow:none;background:var(--ws-subtle)}
+.card{border-radius:8px;box-shadow:0 0 0 1px var(--ws-border);padding:12px 14px;background:var(--ws-canvas)}
+.cap{font-size:12px;line-height:18px;color:var(--ws-text-faint)}
+.fx{font-family:var(--ws-font-mono);font-size:13px;color:var(--ws-text-muted)}
+.ref{display:inline-flex;align-items:center;gap:4px;height:20px;padding:0 6px;border-radius:4px;background:var(--ws-accent-subtle);color:var(--ws-accent);font-family:var(--ws-font-ui);font-size:12px;font-weight:500;vertical-align:middle}
+.big{font-size:var(--ws-fs-h1);line-height:var(--ws-lh-h1);font-weight:600;font-variant-numeric:tabular-nums}
+.pop{position:absolute;z-index:3;border-radius:8px;background:var(--ws-surface);box-shadow:var(--ws-shadow);padding:6px;display:flex;flex-direction:column;gap:1px;font-size:14px}
+.pop .lbl{font-size:12px;color:var(--ws-text-faint);padding:6px 8px 2px}
+.pop .it{display:flex;gap:10px;align-items:center;min-height:32px;padding:0 8px;border-radius:6px;white-space:nowrap;color:var(--ws-text)}
+.pop .it.on{background:var(--ws-hover)}
+.pop .it .d{color:var(--ws-text-faint);font-size:12px}
+.pop .it .r{margin-left:auto;color:var(--ws-text-faint);font-size:12px}
+.pop .it .bi{width:28px;height:28px;border-radius:6px;box-shadow:inset 0 0 0 1px var(--ws-border);display:grid;place-items:center;color:var(--ws-text-muted);flex:none}
+.pop .it .tx{display:flex;flex-direction:column;line-height:18px;padding:4px 0}
+.pop hr{border:0;height:1px;background:var(--ws-border);margin:4px 2px}
+.pb{position:absolute;left:50%;top:70px;transform:translateX(-50%);width:640px;border-radius:12px;background:var(--ws-surface);box-shadow:var(--ws-shadow);z-index:4;overflow:hidden}
+.pb .in{height:52px;display:flex;align-items:center;gap:10px;padding:0 16px;font-size:16px;box-shadow:inset 0 -1px 0 var(--ws-border)}
+.pb .in .ph{color:var(--ws-text-faint)}
+.pb .in .back{height:24px;padding:0 8px;border-radius:6px;background:var(--ws-hover);font-size:13px;display:inline-flex;align-items:center;gap:6px;color:var(--ws-text-muted)}
+.pb .ls{padding:6px;display:flex;flex-direction:column;gap:1px;font-size:14px}
+.pb .lbl{font-size:12px;color:var(--ws-text-faint);padding:8px 10px 4px}
+.pb .it{display:flex;gap:10px;align-items:center;height:36px;padding:0 10px;border-radius:6px;white-space:nowrap}
+.pb .it.on{background:var(--ws-hover)}
+.pb .it .d{color:var(--ws-text-faint);font-size:13px;overflow:hidden;text-overflow:ellipsis}
+.pb .it .r{margin-left:auto;color:var(--ws-text-faint);font-size:12px}
+.pb mark{background:none;color:var(--ws-text);font-weight:600}
+.scrim{position:absolute;inset:0;background:rgba(15,15,15,.24);z-index:2}
+.grid12{position:relative;display:grid;grid-template-columns:repeat(12,1fr);gap:16px;align-items:start}
+.grid12.lines::before{content:"";position:absolute;inset:-8px 0;background:repeating-linear-gradient(to right,color-mix(in srgb,var(--ws-accent) 6%,transparent) 0,color-mix(in srgb,var(--ws-accent) 6%,transparent) calc((100% - 176px)/12),transparent calc((100% - 176px)/12),transparent calc((100% - 176px)/12 + 16px));pointer-events:none;border-radius:4px}
+.tile{position:relative;border-radius:8px;padding:10px 12px;background:var(--ws-canvas);box-shadow:0 0 0 1px var(--ws-border-strong);min-width:0}
+.tile.sel{box-shadow:0 0 0 2px var(--ws-accent)}
+.tile .mv{position:absolute;top:-11px;left:50%;transform:translateX(-50%);height:18px;padding:0 6px;border-radius:4px;background:var(--ws-surface);box-shadow:0 0 0 1px var(--ws-border-strong);font-size:11px;color:var(--ws-text-faint);display:flex;align-items:center;letter-spacing:1px}
+.tile.sel .mv{background:var(--ws-accent);color:var(--ws-on-accent);box-shadow:none}
+.tile .rs{position:absolute;right:-5px;top:50%;width:8px;height:28px;margin-top:-14px;border-radius:4px;background:var(--ws-surface);box-shadow:0 0 0 1px var(--ws-border-strong)}
+.tile.sel .rs{background:var(--ws-accent);box-shadow:none}
+.tile .span{position:absolute;right:10px;bottom:-11px;font-size:11px;line-height:18px;padding:0 6px;border-radius:4px;background:var(--ws-accent);color:var(--ws-on-accent)}
+.armode{height:44px;flex:none;display:flex;align-items:center;gap:12px;padding:0 16px 0 24px;background:var(--ws-accent-subtle);font-size:13px;color:var(--ws-accent)}
+.armode b{font-weight:600}
+.armode .end{margin-left:auto;display:flex;gap:8px;align-items:center}
+.sg2{display:inline-flex;background:var(--ws-canvas);border-radius:6px;padding:2px;font-size:13px;box-shadow:inset 0 0 0 1px var(--ws-border)}
+.sg2 span{padding:1px 10px;color:var(--ws-text-muted);border-radius:4px;line-height:22px}.sg2 span.on{background:var(--ws-hover);color:var(--ws-text)}
+.bars{display:flex;align-items:flex-end;gap:14px;height:120px;padding:4px 4px 0;box-shadow:inset 0 -1px 0 var(--ws-border)}
+.bars div{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:4px;height:100%;font-size:11px;color:var(--ws-text-faint);font-variant-numeric:tabular-nums}
+.bars i{display:block;width:100%;background:var(--ws-data-1);border-radius:3px 3px 0 0}
+.blab{display:flex;gap:14px;padding:4px 4px 0;font-size:11px;color:var(--ws-text-faint)}.blab span{flex:1;text-align:center}
+.code{background:var(--ws-code);border-radius:8px;padding:10px 14px;font-family:var(--ws-font-mono);font-size:13px;line-height:20px;white-space:pre;overflow:hidden}
+i.kw{font-style:normal;color:var(--ws-syn-kw)}i.st{font-style:normal;color:var(--ws-syn-str)}i.cm{font-style:italic;color:var(--ws-syn-com)}i.nu{font-style:normal;color:var(--ws-syn-num)}
+.img{height:150px;border-radius:8px;background:linear-gradient(135deg,color-mix(in srgb,var(--ws-data-1) 30%,var(--ws-subtle)),color-mix(in srgb,var(--ws-data-3) 35%,var(--ws-subtle)));position:relative}
+.img::after{content:"";position:absolute;left:18%;bottom:0;width:0;height:0;border-left:60px solid transparent;border-right:60px solid transparent;border-bottom:70px solid color-mix(in srgb,var(--ws-data-3) 55%,var(--ws-subtle))}
+.bm{display:flex;gap:12px;align-items:center;border-radius:8px;box-shadow:0 0 0 1px var(--ws-border);padding:10px 12px;font-size:14px}
+.bm .u{color:var(--ws-text-faint);font-size:12px}
+.emb{border-radius:8px;background:var(--ws-subtle);height:120px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;font-size:13px;color:var(--ws-text-muted);text-align:center;padding:0 20px}
+.wb{height:150px;border-radius:8px;box-shadow:0 0 0 1px var(--ws-border);background-image:radial-gradient(var(--ws-border-strong) 1px,transparent 1px);background-size:16px 16px;position:relative;overflow:hidden}
+.wb svg{position:absolute;inset:0}
+.todo{display:flex;gap:8px;align-items:center}
+.cb{width:14px;height:14px;border-radius:3px;box-shadow:inset 0 0 0 1.5px var(--ws-border-strong);display:inline-grid;place-items:center;font-size:10px;flex:none}
+.cb.on{background:var(--ws-accent);box-shadow:none;color:var(--ws-on-accent)}
+.toggle{display:flex;gap:6px;align-items:center}
+.quote{box-shadow:inset 3px 0 0 var(--ws-text);padding-left:14px}
+.gal{display:grid;align-items:start;grid-template-columns:repeat(auto-fill,minmax(min(100%,380px),1fr));gap:16px}
+.gcell{padding:14px 16px 16px;border-radius:12px;background:var(--ws-canvas);box-shadow:var(--ws-shadow);display:flex;flex-direction:column;gap:8px;font-family:var(--ws-font-ui);color:var(--ws-text);font-size:14px;line-height:20px}
+.gcell h4{margin:0;font-size:13px;font-weight:600;display:flex;gap:8px;align-items:center}
+.gcell h4 span{font-weight:400;color:var(--ws-text-faint)}
+.gcell .cap{margin-top:auto}
+.maps{border-collapse:collapse;font-size:13px;line-height:1.5;width:100%;max-width:900px}
+.maps td,.maps th{padding:6px 10px;text-align:left;vertical-align:top;border-bottom:1px solid var(--ws-border)}
+.maps th{color:var(--muted-foreground);font-weight:500;font-size:12px}
+.maps code{font-family:var(--ws-font-mono);font-size:12.5px;background:var(--ws-subtle);padding:0 4px;border-radius:4px}
+.wrapx{overflow-x:auto;max-width:100%}
+.phone{width:390px;border-radius:28px;overflow:hidden;background:var(--ws-canvas);box-shadow:var(--ws-shadow);font-size:15px;line-height:22px}
+.phone .sb{height:44px;display:flex;align-items:center;justify-content:space-between;padding:0 22px;font-size:13px;font-weight:600}
+.phone .ph{height:44px;display:flex;align-items:center;gap:10px;padding:0 16px;font-size:14px;color:var(--ws-text-muted)}
+.phone .st{display:flex;flex-direction:column;gap:12px;padding:6px 16px 20px}
+.opn{display:flex;justify-content:space-between;align-items:center;font-size:13px;color:var(--ws-accent);padding-top:6px}
+.notes{font-size:13px;line-height:1.6;margin:0;padding-left:18px;max-width:900px}.notes li{margin:0 0 6px}
+.qs{font-size:13px;line-height:1.6;margin:0;padding-left:18px;max-width:900px}.qs li{margin:0 0 8px}
+h4.qh{margin:14px 0 6px;font-size:13px}
+.dlg{width:540px;box-sizing:border-box;border-radius:12px;background:var(--ws-surface);box-shadow:var(--ws-shadow);padding:16px;display:flex;flex-direction:column;gap:12px;font-size:13px;line-height:20px}
+.dlg h4{margin:0;font-size:16px;line-height:22px;font-weight:600}
+.dlg p{margin:0;color:var(--ws-text-muted)}
+.dlg .acts{display:flex;gap:8px;align-items:center}.dlg .acts .sp{flex:1}
+.flist{border-radius:8px;background:var(--ws-subtle);padding:6px;display:flex;flex-direction:column;gap:1px}
+.frow{display:flex;gap:8px;align-items:center;min-height:28px;padding:0 6px;border-radius:6px;font-size:13px;white-space:nowrap}
+.frow .r{margin-left:auto;font-size:12px;color:var(--ws-text-faint)}
+.frow .r.warn{color:var(--ws-warning)}
+.frow.h{min-height:22px;padding-top:4px;font-size:12px;color:var(--ws-text-faint)}
+.btn.dngp{background:var(--ws-danger);color:var(--ws-on-accent);box-shadow:none}
+.toast{position:absolute;left:50%;bottom:20px;transform:translateX(-50%);display:flex;gap:14px;align-items:center;padding:8px 10px 8px 14px;border-radius:8px;background:var(--ws-text);color:var(--ws-canvas);font-size:13px;box-shadow:var(--ws-shadow);white-space:nowrap;z-index:3}
+.toast b{font-weight:600}
+.toast .u{color:var(--ws-canvas);opacity:.75}
+.pastechip{display:inline-flex;gap:6px;align-items:center;height:28px;padding:0 4px 0 10px;border-radius:6px;background:var(--ws-surface);box-shadow:var(--ws-shadow);font-size:13px;color:var(--ws-text-muted)}
+.pastechip .btn{height:22px;padding:0 8px;font-size:12px}
+.panel{width:320px;flex:none;box-shadow:inset 1px 0 0 var(--ws-border);padding:12px 16px;display:flex;flex-direction:column;gap:14px;font-size:13px;box-sizing:border-box}
+.panel h5{margin:0;font-size:12px;color:var(--ws-text-faint);font-weight:500}
+.panel .ttlr{display:flex;align-items:center;gap:8px;font-size:14px;font-weight:600;height:28px}
+.fld{display:grid;grid-template-columns:96px 1fr;gap:6px 10px;align-items:center}
+.fld .l{color:var(--ws-text-muted)}
+.sel{height:28px;border-radius:6px;box-shadow:inset 0 0 0 1px var(--ws-border-strong);display:flex;align-items:center;gap:6px;padding:0 8px;white-space:nowrap;overflow:hidden}
+.sel .c{margin-left:auto;color:var(--ws-text-faint)}
+.sel.bad{box-shadow:inset 0 0 0 1px var(--ws-danger);color:var(--ws-danger)}
+.focus{box-shadow:0 0 0 2px var(--ws-accent);border-radius:8px}
+.fxin{display:flex;align-items:center;gap:4px;flex-wrap:wrap;height:36px;padding:0 10px;border-radius:6px;box-shadow:inset 0 0 0 1.5px var(--ws-accent);font-family:var(--ws-font-mono);font-size:13px;background:var(--ws-canvas)}
+.err{display:flex;gap:8px;align-items:center;color:var(--ws-danger);font-size:13px}
+.board{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.bcol{background:var(--ws-subtle);border-radius:8px;padding:8px;display:flex;flex-direction:column;gap:6px;font-size:13px}
+.bcol .h{display:flex;gap:6px;align-items:center;color:var(--ws-text-muted);font-size:12px}
+.bcard{background:var(--ws-canvas);border-radius:6px;box-shadow:0 0 0 1px var(--ws-border);padding:6px 8px;line-height:18px}
+.bcard span{display:block;color:var(--ws-text-faint);font-size:12px;font-variant-numeric:tabular-nums}
+.alist .tr{--cols:1.4fr 1fr 1.2fr 1fr 150px;font-size:14px}
+.st{display:inline-flex;gap:6px;align-items:center;font-size:13px}
+.st.on{color:var(--ws-success)}.st.off{color:var(--ws-text-faint)}.st.warn{color:var(--ws-warning)}
+.sent{display:flex;flex-direction:column;gap:10px;font-size:16px;line-height:24px}
+.sent .ln{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.sent .kw{color:var(--ws-text-muted);font-weight:600;width:56px}
+.tok{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 10px;border-radius:6px;background:var(--ws-subtle);box-shadow:inset 0 0 0 1px var(--ws-border);font-size:15px;white-space:nowrap}
+.tok.ref{background:var(--ws-accent-subtle);color:var(--ws-accent);box-shadow:none;font-weight:500}
+.tok.bad{background:var(--ws-danger-subtle);color:var(--ws-danger);box-shadow:none;text-decoration:line-through}
+.tok.add{background:transparent;box-shadow:inset 0 0 0 1px dashed var(--ws-border-strong);color:var(--ws-text-faint);border:1px dashed var(--ws-border-strong)}
+.banner{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border-radius:8px;background:var(--ws-warning-subtle);color:var(--ws-warning);font-size:14px;line-height:20px}
+.banner .acts{margin-left:auto;display:flex;gap:8px;flex:none}
+.sw{width:30px;height:18px;border-radius:9px;background:var(--ws-success);position:relative;display:inline-block;flex:none}
+.sw::after{content:"";position:absolute;right:2px;top:2px;width:14px;height:14px;border-radius:50%;background:var(--ws-canvas)}
+.sw.off{background:var(--ws-border-strong)}.sw.off::after{right:auto;left:2px}
+</style></head><body class="theme-light chrome">
+<div class="page">
+  <div class="toolbar">
+    <div>Theme <span class="seg" id="theme"><button data-v="light">Light</button><button data-v="dark">Dark</button><button data-v="system" class="on">System</button></span></div>
+    <div>Size <span class="seg" id="size"><button data-v="fit" class="on">Fit</button><button data-v="full">100 %</button></span></div>
+  </div>
+  <section>
+    <h1>Liquid Workspace: Blocks</h1>
+    <p class="sub">Mockups for the M3a slice in <a href="../../../PLAN.md#m3a--local-workspace-foundation">PLAN.md</a>, approved by the maintainer on 2026-11-01: synchronized Views over one Block, copying, the deletion cascade, Connections and formulas, and Automations. They follow the <a href="../../concept/V-Spec_Liquid.html#model">V-Spec</a>, ADR-0235 and <a href="../guidelines.md">guidelines.md</a>; the shell is the one in the <a href="liquid-workspace-pages.html">Pages mockups</a>.</p>
+  </section>
+  <section>
+    <h3 class="sec">1 · One Block, two Views</h3>
+    <p class="sub">"Expenses" is one Database Block shown on two Pages: as a table on Household budget and as a board on Monthly review. Editing either changes both. The header says it is synced and where else it appears, as Notion's synced blocks do. The Block's menu holds Add to Page, Duplicate and both ways to remove it.</p>
+    <div class="stage"><div class="scaler"><div class="win" id="w-views" data-w="1240"></div></div></div>
+  </section>
+  <section>
+    <h3 class="sec">2 · Copy, paste and Add to Page</h3>
+    <p class="sub">Pasting a copied Block creates an independent copy (ADR-0235); a chip right after the paste offers "Paste as View" instead, as Notion offers choices after a paste. "Add to Page…" in the Block menu, and "Existing Block…" in the chooser, add a View on purpose.</p>
+    <div class="stage"><div class="scaler"><div class="win bare" id="w-paste" data-w="1240"></div></div></div>
+  </section>
+  <section>
+    <h3 class="sec">3 · Removing a View, and deleting the last one</h3>
+    <p class="sub">"Remove from this Page" on a Block that has other Views takes away only this View, with no dialog. Removing the last View deletes the Block, so the menu then says "Delete". Without dependents it deletes at once and offers Undo. With dependents a dialog lists the impact first: Connections and the Block's own Automations go with it, Automations of the Workspace that use it turn off and need attention. All of it is one Action in History, and one revert brings it back. "Delete everywhere…" does the same from any View.</p>
+    <div class="stage"><div class="scaler"><div class="win" id="w-del" data-w="1240"></div></div></div>
+    <div class="stage" style="margin-top:16px"><div class="scaler"><div class="win bare" id="w-del2" data-w="1240"></div></div></div>
+  </section>
+  <section>
+    <h3 class="sec">4 · Connections</h3>
+    <p class="sub">A Connection is created where data is needed: the Chart's panel picks its data from a Database or a Source. The panel lists what the Block uses and what uses it. Placing Blocks side by side never connects them.</p>
+    <div class="stage"><div class="scaler"><div class="win" id="w-conn" data-w="1240"></div></div></div>
+  </section>
+  <section>
+    <h3 class="sec">5 · Formulas</h3>
+    <p class="sub">Formulas use Excel's function names (ADR-0235). Typing a name suggests Blocks, fields and functions; a chosen reference becomes a chip bound to the Block's ID, so renaming "Expenses" changes the chip, not the result. A Database formula field uses the same language over its own row. A reference to a deleted Block shows why it fails.</p>
+    <div class="stage"><div class="scaler"><div class="win" id="w-fx" data-w="1240"></div></div></div>
+  </section>
+  <section>
+    <h3 class="sec">6 · Automations</h3>
+    <p class="sub">"Automations" at the Explorer's foot opens a dialog over the current Page that lists every Automation; closing it shows the Page again. It lists those that belong to a Block and are deleted with it, and those of the Workspace. M3a Automations start when a row is added, a field changes or a button is clicked (ADR-0235); each runs as the Role it is assigned.</p>
+    <div class="stage"><div class="scaler"><div class="win" id="w-alist" data-w="1240"></div></div></div>
+  </section>
+  <section>
+    <h3 class="sec">7 · An Automation reads as a sentence</h3>
+    <p class="sub">The editor builds a sentence, as Trello's Butler rules read: When, If, Then. Each part is a token that opens a short list. The Role it runs as shows whether it allows every action; Test runs it once on the last row and records the result in History like any run.</p>
+    <div class="stage"><div class="scaler"><div class="win" id="w-aed" data-w="1240"></div></div></div>
+  </section>
+  <section>
+    <h3 class="sec">8 · Needs attention</h3>
+    <p class="sub">An Automation of the Workspace whose Block was deleted turns off and says why. Choosing another Block repairs it; reverting the deletion in History turns it back on.</p>
+    <div class="stage"><div class="scaler"><div class="win" id="w-att" data-w="1240"></div></div></div>
+  </section>
+  <section>
+    <h3 class="sec">Decisions</h3>
+    <h4 class="qh">Decided (V-Spec, ADR-0235)</h4>
+    <ol class="qs">
+      <li>Removing the last View deletes the Block, its Connections and its own Automations in one revertible Action; Automations of the Workspace that use it turn off and need attention. There is no Trash.</li>
+      <li>Pasting a copied Block creates a copy; a View is always explicit.</li>
+      <li>Formulas use Excel function names with references as chips bound to stable IDs; Automations read as sentences and start on events and buttons.</li>
+    </ol>
+    <h4 class="qh">Approved with these mockups (2026-11-01)</h4>
+    <ol class="qs">
+      <li>The synced marker "Synced · on 2 Pages" with the other Pages on hover.</li>
+      <li>Block menu: Add to Page, Duplicate, Copy, Copy link to Block, Move to, Protect, Block history, Remove from this Page (Delete when it is the last View) and Delete everywhere.</li>
+      <li>Deleting without dependents needs no dialog and offers Undo; with dependents a dialog lists them.</li>
+      <li>A Connection is made in the panel of the Block that needs the data; the panel lists "Uses" and "Used by".</li>
+      <li>M3a Automation actions: change a field, add a row, create a Page from a template and show a notification.</li>
+    </ol>
+    <h4 class="qh">Added on request, approved the same day</h4>
+    <ol class="qs">
+      <li>Automations open as a dialog over the current Page or Source, with the editor inside it; closing it returns there.</li>
+    </ol>
+  </section>
+</div>
+<script>
+const DW=1240;
+const sv=(p,w=14)=>`<svg viewBox="0 0 16 16" width="${w}" height="${w}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
+const I={
+page:sv('<path d="M4 2h5l3 3v9H4z"/><path d="M9 2v3h3"/>'),
+file:sv('<path d="M4 2h5l3 3v9H4z"/><path d="M6 9h4M6 11.5h4"/>'),
+dir:sv('<path d="M1.8 4.2c0-.6.4-1 1-1h3.4l1.4 1.6h5.6c.6 0 1 .4 1 1v6.9c0 .6-.4 1-1 1H2.8c-.6 0-1-.4-1-1z"/>'),
+srch:sv('<circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5l3 3"/>'),
+zap:sv('<path d="M9 1.5L3 9h4.5L7 14.5 13 7H8.5z"/>'),
+clock:sv('<circle cx="8" cy="8" r="6"/><path d="M8 4.5V8l2.5 1.5"/>'),
+grid:sv('<rect x="2" y="2" width="5" height="5" rx="1"/><rect x="9" y="2" width="5" height="5" rx="1"/><rect x="2" y="9" width="5" height="5" rx="1"/><rect x="9" y="9" width="5" height="5" rx="1"/>'),
+more:sv('<circle cx="3.5" cy="8" r=".8"/><circle cx="8" cy="8" r=".8"/><circle cx="12.5" cy="8" r=".8"/>'),
+drag:sv('<circle cx="6" cy="4" r=".8"/><circle cx="10" cy="4" r=".8"/><circle cx="6" cy="8" r=".8"/><circle cx="10" cy="8" r=".8"/><circle cx="6" cy="12" r=".8"/><circle cx="10" cy="12" r=".8"/>'),
+plus:sv('<path d="M8 3v10M3 8h10"/>'),
+text:sv('<path d="M3 3.5h10M8 3.5V13"/>'),
+db:sv('<rect x="2" y="2.5" width="12" height="11" rx="1.5"/><path d="M2 6h12M6 6v7.5"/>'),
+chart:sv('<path d="M2.5 13.5h11"/><path d="M4.5 11V8M8 11V4M11.5 11V6.5"/>'),
+code:sv('<path d="M5.5 4.5L2 8l3.5 3.5M10.5 4.5L14 8l-3.5 3.5"/>'),
+fx:sv('<path d="M11.5 3H5.5l4 5-4 5h6"/>'),
+img:sv('<rect x="2" y="2.5" width="12" height="11" rx="1.5"/><circle cx="6" cy="6.5" r="1.2"/><path d="M2.5 12l3.5-3.5 2.5 2.5 2-2 3 3"/>'),
+pen:sv('<path d="M10.5 2.5l3 3L6 13H3v-3z"/>'),
+link:sv('<path d="M6.5 9.5l3-3"/><path d="M7 4.5l1-1a2.5 2.5 0 013.5 3.5l-1 1M9 11.5l-1 1A2.5 2.5 0 014.5 9l1-1"/>'),
+copy:sv('<rect x="5" y="5" width="8.5" height="8.5" rx="1.5"/><path d="M11 5V3.5c0-.6-.4-1-1-1H3.5c-.6 0-1 .4-1 1V10c0 .6.4 1 1 1H5"/>'),
+tpl:sv('<rect x="2" y="2" width="12" height="12" rx="1.5"/><path d="M2 6h12M6 6v8"/>'),
+cog:sv('<circle cx="8" cy="8" r="2"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4"/>'),
+reload:sv('<path d="M13 8a5 5 0 11-1.5-3.5"/><path d="M13 2.5V5h-2.5"/>'),
+back:sv('<path d="M10 3.5L5.5 8l4.5 4.5"/>'),
+};
+const E={budget:'💰',review:'📊',trip:'🧳',road:'🗺️',api:'🧩',plan:'🗓️'};
+const em=e=>`<span class="em">${e}</span>`;
+const modal=(title,body,o={})=>`<div class="scrim"></div><div class="modal" style="width:${o.w||1000}px"><div class="mh">${title}<span class="end">${o.right||''}<span class="ib">✕</span></span></div><div class="mb">${body}</div></div>`;
+const nav=(d,ic,label,o={})=>`<div class="nav ${o.on?'on':''}" style="--d:${d}"><span class="tw">${o.tw||''}</span><span class="ico">${ic}</span><span>${label}</span>${o.r?`<span class="r ${o.warn?'warn':''}">${o.r}</span>`:''}</div>`;
+function side(o={}){const s=o.sel||'budget';const e=(k)=>s==k;
+return `<div class="side"><div class="wsw"><span class="av">B</span>Benni's Workspace<span style="margin-left:auto;color:var(--ws-text-faint)">⌄</span></div>
+<div class="srch">${I.srch}<span>Search or run a command</span><kbd>⌘K</kbd></div>
+<h6>Private<span class="a">${o.plus?'<span style="color:var(--ws-text-muted)">···  ＋</span>':''}</span></h6>
+${nav(0,em(E.budget),'Household budget',{tw:'⌄',on:e('budget')})}
+${nav(1,em(E.review),'Monthly review',{on:e('review')})}
+${o.newp?nav(0,o.newp=='Untitled'?I.page:em(E.plan),o.newp,{on:e('new')}):''}
+${nav(0,em(E.trip),'Trip to Lisbon',{tw:'›',on:e('trip')})}
+${nav(0,I.file,'bank-export.csv',{on:e('csv')})}
+<h6>Acme API</h6>
+${nav(0,em(E.road),'Roadmap',{on:e('road')})}
+${nav(0,em(E.api),'API design',{on:e('api')})}
+${nav(0,I.dir,'docs',{tw:'›',on:e('docs')})}
+<h6>Agent sessions <kbd>⌘N</kbd></h6>
+${nav(0,I.dir,'acme-api <span style="color:var(--ws-text-faint);font-size:12px">2 sessions</span>',{tw:'›'})}
+<div class="foot">${nav(0,I.zap,'Automations',Object.assign({on:e('auto')},o.att?{r:'⚠ 1',warn:true}:{}))}${nav(0,I.clock,'History',{on:e('hist')})}${nav(0,I.cog,'Settings',{on:e('set')})}</div>
+${o.menu||''}</div>`}
+function head(crumb,o={}){return `<div class="head"><span class="crumb">${crumb}</span><span class="end">${o.right!==undefined?o.right:`<span class="ib ${o.arr?'on':''}">${I.grid}Arrange</span><span class="ib" title="Page history">${I.clock}</span><span class="ib">${I.more}</span>`}</span></div>`}
+function frame(id,o){document.getElementById(id).innerHTML=`<div class="tbar"><div class="lights"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></div></div>
+<div class="body" style="--h:${o.h}px">${side(o.side||{})}<div class="main">${o.head||''}${o.main}</div>${o.over||''}</div>`}
+
+const rows=[['1 Nov','Groceries','Food','t1','84.20'],['30 Oct','Electricity','Home','t2','96.00'],['28 Oct','Train to Porto','Travel','t3','42.50'],['27 Oct','Rent','Home','t2','950.00'],['25 Oct','Cinema','Leisure','t4','111.80']];
+const dbTable=(o={})=>`<div class="tbl" style="--cols:96px 1fr 120px 110px"><div class="tr hd"><span>Date</span><span>Item</span><span>Category</span><span class="num">Amount</span></div>
+${rows.slice(0,o.n||5).map(r=>`<div class="tr"><span>${r[0]}</span><span>${r[1]}</span><span><span class="tag ${r[3]}">${r[2]}</span></span><span class="num">€ ${r[4]}</span></div>`).join('')}
+<div class="tr sum"><span>5 rows</span><span></span><span></span><span class="num">Sum € 1,284.50</span></div></div>`;
+const dbHead=(o={})=>`<div class="bh"><span class="ico">${I.db}</span><b>Expenses</b><span class="chip">Table ⌄</span><span class="end">${o.synced?'<span class="cap">Synced · on 2 Pages</span>':''}<span class="ib">${I.more}</span></span></div>`;
+const chart=(h=120)=>`<div class="bars" style="height:${h}px">${[['Home',1046],['Leisure',112],['Food',84],['Travel',43]].map(([k,v])=>`<div><span>€ ${v}</span><i style="height:${Math.max(4,v/1046*(h-30))}px"></i></div>`).join('')}</div><div class="blab"><span>Home</span><span>Leisure</span><span>Food</span><span>Travel</span></div>`;
+const chartBlk=`<div class="bh"><span class="ico">${I.chart}</span><b>Spending by category</b><span class="chip">Bar ⌄</span><span class="end"><span class="cap">from Expenses</span></span></div>${chart()}`;
+const fxBlk=(o={})=>`<div class="card"><div class="cap">Left this month</div><div class="big">€ 715.50</div>${o.f!==false?`<div class="fx" style="margin-top:4px">= 2000 − SUM(<span class="ref">${I.db} Expenses › Amount</span>)</div>`:''}</div>`;
+
+Object.assign(I,{
+lock:sv('<rect x="3.5" y="7" width="9" height="7" rx="1.2"/><path d="M5.5 7V5a2.5 2.5 0 015 0v2"/>'),
+trash:sv('<path d="M2.5 4.5h11M6 4.5V3h4v1.5M4 4.5l.7 9h6.6l.7-9"/>'),
+bell:sv('<path d="M4 11V7a4 4 0 018 0v4l1 1.5H3z"/><path d="M6.5 14h3"/>'),
+warn:sv('<path d="M8 2l6.5 11.5h-13z"/><path d="M8 6.5v3.5M8 12v.1"/>'),
+dup:sv('<rect x="5" y="5" width="8.5" height="8.5" rx="1.5"/><path d="M11 5V3.5c0-.6-.4-1-1-1H3.5c-.6 0-1 .4-1 1V10c0 .6.4 1 1 1H5"/>'),
+move:sv('<path d="M3 8h10M10 5l3 3-3 3"/>'),
+play:sv('<path d="M5 3.5l7 4.5-7 4.5z"/>'),
+});
+const boardHead=`<div class="bh"><span class="ico">${I.db}</span><b>Expenses</b><span class="chip">Board ⌄</span><span class="end"><span class="cap">Synced · on 2 Pages</span><span class="ib on">${I.more}</span></span></div>`;
+const board=`<div class="board">${[['Home','t2',[['Electricity','96.00'],['Rent','950.00']]],['Food','t1',[['Groceries','84.20']]],['Travel','t3',[['Train to Porto','42.50']]],['Leisure','t4',[['Cinema','111.80']]]].map(([c,t,cs])=>`<div class="bcol"><div class="h"><span class="tag ${t}">${c}</span>${cs.length}</div>${cs.map(([n,v])=>`<div class="bcard">${n}<span>€ ${v}</span></div>`).join('')}</div>`).join('')}</div>`;
+const blockMenu=`<div class="pop" style="left:830px;top:212px;width:290px">
+<div class="lbl">Expenses · also on Household budget</div>
+<div class="it">${I.link}<span>Add to Page…</span></div>
+<div class="it">${I.dup}<span>Duplicate</span><span class="r">new Block</span></div>
+<div class="it">${I.copy}<span>Copy</span></div>
+<div class="it">${I.link}<span>Copy link to Block</span></div>
+<div class="it">${I.move}<span>Move to…</span></div>
+<hr><div class="it">${I.lock}<span>Protect…</span></div>
+<div class="it">${I.clock}<span>Block history</span></div>
+<hr><div class="it on">${I.trash}<span>Remove from this Page</span><span class="r">stays on 1 Page</span></div>
+<div class="it" style="color:var(--ws-danger)">${I.trash}<span>Delete everywhere…</span></div></div>`;
+frame('w-views',{h:560,side:{sel:'review'},head:head('Private <span>›</span> Household budget <span>›</span> <b>📊 Monthly review</b>'),main:`<div class="pg"><div class="col">
+<div class="ttl"><span class="tic">📊</span>Monthly review</div>
+<div class="prose"><p>What went where in October.</p></div>
+<div class="blk"><div class="gut"><span>＋</span><span class="on">${I.drag}</span></div>${boardHead}${board}</div>
+</div></div>`,over:blockMenu});
+
+// 2 · Paste
+const pasted=`<div class="win" style="width:740px;flex:none;padding:20px 24px 24px;box-sizing:border-box">
+<div class="ttl" style="font-size:24px;line-height:32px">December budget</div>
+<div class="prose"><p>Starting from October's numbers.</p></div>
+<div class="blk" style="border-radius:8px">${dbHead()}${dbTable({n:3})}</div>
+<div style="margin-top:8px"><span class="pastechip">Pasted as a copy<span class="btn">Paste as View</span><span class="ib">×</span></span></div>
+<div class="cap" style="margin-top:12px">A copy is a new Block named "Expenses (copy)" in the menu; it no longer follows the original.</div></div>`;
+const addTo=`<div class="dlg" style="width:440px;flex:none"><h4>Add “Expenses” to a Page</h4>
+<div class="sel" style="height:34px">${I.srch}<span style="color:var(--ws-text-faint)">Search Pages</span></div>
+<div class="flist">
+<div class="frow"><span class="ico">${I.page}</span>Household budget<span class="r">already shows it</span></div>
+<div class="frow"><span class="ico">${I.page}</span>Monthly review<span class="r">already shows it</span></div>
+<div class="frow" style="background:var(--ws-hover)"><span class="ico">${I.page}</span>December budget<span class="r">Private</span></div>
+<div class="frow"><span class="ico">${I.page}</span>Trip to Lisbon<span class="r">Private</span></div></div>
+<p>The View is added at the end of the Page and stays synced. Its rights follow Expenses, not the Page.</p>
+<div class="acts"><span class="btn pri">Add View <kbd>⏎</kbd></span><span class="sp"></span><span class="btn">Cancel <kbd>esc</kbd></span></div></div>`;
+document.getElementById('w-paste').innerHTML=`<div style="display:flex;gap:40px;align-items:flex-start">${pasted}${addTo}</div>`;
+
+// 3 · Delete
+const delDlg=`<div class="scrim"></div><div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:4"><div class="dlg"><h4>Delete “Expenses”?</h4>
+<p>This is its last View, so the Block and its 5 rows are deleted. These depend on it:</p>
+<div class="flist">
+<div class="frow h">Connections, removed</div>
+<div class="frow"><span class="ico">${I.chart}</span>Spending by category<span class="r">Chart, shows no data</span></div>
+<div class="frow"><span class="ico">${I.fx}</span>Left this month<span class="r">Formula, shows an error</span></div>
+<div class="frow h">Its own Automation, deleted</div>
+<div class="frow"><span class="ico">${I.zap}</span>Flag large expenses</div>
+<div class="frow h">Workspace Automation, turned off</div>
+<div class="frow"><span class="ico">${I.zap}</span>Monthly summary<span class="r warn">⚠ needs attention</span></div></div>
+<p>All of it is one Action in History. Reverting it brings everything back and turns Monthly summary on again.</p>
+<div class="acts"><span class="btn dngp">Delete</span><span class="sp"></span><span class="btn">Cancel <kbd>esc</kbd></span></div></div></div>`;
+frame('w-del',{h:600,head:head('Private <span>›</span> <b>💰 Household budget</b>'),main:`<div class="pg"><div class="col"><div class="ttl"><span class="tic">💰</span>Household budget</div><div class="blk">${dbHead()}${dbTable()}</div><div class="blk">${chartBlk}</div></div></div>`,over:delDlg});
+const after=`<div class="win" style="width:740px;flex:none;padding:20px 24px 24px;box-sizing:border-box;position:relative;height:430px">
+<div class="ttl" style="font-size:24px;line-height:32px">Household budget</div>
+<div class="prose"><p>October is almost done. Rent is the largest share, as every month.</p></div>
+<div class="bh"><span class="ico">${I.chart}</span><b>Spending by category</b></div>
+<div class="emb" style="height:110px"><span>No data: its Database “Expenses” was deleted.</span><span class="btn">Choose data…</span></div>
+<div class="card" style="margin-top:14px"><div class="cap">Left this month</div><div class="err">${I.warn}<span>#REF: “Expenses” was deleted</span></div></div>
+<div class="toast" style="bottom:16px"><span>Deleted <b>Expenses</b>; 1 Automation needs attention</span><span class="u">Undo ⌘Z</span><span class="u">Show in History</span></div></div>`;
+const removed=`<div class="win" style="width:440px;flex:none;padding:20px 24px;box-sizing:border-box;position:relative;height:430px">
+<div class="ttl" style="font-size:24px;line-height:32px">Monthly review</div>
+<div class="prose"><p>What went where in October.</p></div>
+<div class="cap">The board View is gone from this Page; Expenses stays on Household budget.</div>
+<div class="toast" style="bottom:16px"><span>Removed from Monthly review</span><span class="u">Undo ⌘Z</span></div></div>`;
+document.getElementById('w-del2').innerHTML=`<div style="display:flex;gap:40px;align-items:flex-start">${removed}${after}</div>`;
+
+// 4 · Connections
+const chartPanel=`<div class="panel"><div class="ttlr">${I.chart}Spending by category<span style="margin-left:auto" class="ib">×</span></div>
+<h5>Data</h5><div class="fld"><span class="l">From</span><span class="sel">${I.db}Expenses<span class="c">⌄</span></span>
+<span class="l">Group by</span><span class="sel">Category<span class="c">⌄</span></span>
+<span class="l">Value</span><span class="sel">Sum of Amount<span class="c">⌄</span></span>
+<span class="l">Kind</span><span class="sel">Bar<span class="c">⌄</span></span></div>
+<h5>Uses</h5><div class="flist"><div class="frow"><span class="ico">${I.db}</span>Expenses<span class="r">Database · Household budget</span></div></div>
+<h5>Used by</h5><div class="cap">Nothing yet. A formula or Automation that reads this Chart appears here.</div>
+<div class="cap">The data list offers Databases and Sources you may read. Removing a Connection leaves both Blocks in place.</div></div>`;
+frame('w-conn',{h:580,head:head('Private <span>›</span> <b>💰 Household budget</b>'),main:`<div style="display:flex;flex:1;min-height:0"><div class="pg"><div class="col" style="width:580px">
+<div class="blk">${dbHead({synced:true})}${dbTable({n:3})}</div>
+<div class="blk focus" style="padding:6px 8px">${chartBlk}</div></div></div>${chartPanel}</div>`});
+
+// 5 · Formulas
+const sugg=`<div class="pop" style="left:600px;top:250px;width:340px">
+<div class="lbl">Blocks and fields</div>
+<div class="it on"><span class="ico">${I.db}</span><span>Expenses › Amount</span><span class="r">number · 5 rows</span></div>
+<div class="it"><span class="ico">${I.db}</span><span>Expenses › Date</span><span class="r">date</span></div>
+<div class="it"><span class="ico">${I.fx}</span><span>Left this month</span><span class="r">Formula</span></div>
+<div class="lbl">Functions</div>
+<div class="it"><span class="mono">SUMIF</span><span class="r">sum of the values that match</span></div></div>`;
+frame('w-fx',{h:600,head:head('Private <span>›</span> <b>💰 Household budget</b>'),main:`<div class="pg"><div class="col">
+<div class="ttl"><span class="tic">💰</span>Household budget</div>
+<div class="card focus"><div class="cap">Left this month</div><div class="big">€ 715.50</div>
+<div class="fxin" style="margin-top:8px">= 2000 − SUM(<span class="ref">${I.db} Expenses › Amount</span>) − SUMIF(Exp<span class="caret" style="height:16px;margin:0"></span></div>
+<div class="cap" style="margin-top:6px">⏎ saves · esc cancels · the value updates while typing</div></div>
+<div class="bh"><span class="ico">${I.db}</span><b>Expenses</b><span class="cap">formula field</span></div>
+<div class="tbl" style="--cols:1fr 110px 120px"><div class="tr hd"><span>Item</span><span class="num">Amount</span><span class="num">Share ƒ</span></div>
+${rows.slice(0,3).map(r=>`<div class="tr"><span>${r[1]}</span><span class="num">€ ${r[4]}</span><span class="num">${Math.round(parseFloat(r[4].replace(',',''))/1284.5*100)} %</span></div>`).join('')}</div>
+<div class="fx">Share = ROUND([Amount] / SUM(<span class="ref">${I.db} Expenses › Amount</span>) * 100)</div>
+</div></div>`,over:sugg});
+
+// 6 · Automations list (dialog over the prior Page)
+const bgPage=`<div class="pg"><div class="col"><div class="ttl"><span class="tic">💰</span>Household budget</div><div class="prose"><p>October is almost done.</p></div>${dbHead({synced:true})}${dbTable()}</div></div>`;
+const bgHead=head('Private <span>›</span> <b>💰 Household budget</b>');
+const mbody=c=>`<div style="flex:1;min-width:0;padding:20px 28px;display:flex;flex-direction:column;gap:14px;overflow:hidden">${c}</div>`;
+const arow=(n,owner,when,role,st)=>`<div class="tr"><span>${n}</span><span>${owner}</span><span>${when}</span><span>${role}</span><span>${st}</span></div>`;
+frame('w-alist',{h:520,side:{sel:'auto',att:true},head:bgHead,main:bgPage,over:modal('Automations',mbody(`
+<div class="tbl alist"><div class="tr hd"><span>Name</span><span>Belongs to</span><span>When</span><span>Runs as</span><span>Status</span></div>
+${arow('Flag large expenses',`${I.db} Expenses`,'a row is added','Budget editor','<span class="st on">● On</span>')}
+${arow('Monthly summary','Workspace','“Summarize” in Months is clicked','Can edit','<span class="st warn">⚠ Needs attention</span>')}
+${arow('Archive paid bills',`${I.db} Bills`,'“Paid” changes','Can edit','<span class="st off">○ Off</span>')}</div>
+<div class="cap">Last runs and their changes are in History, filtered by the Automation. Closing this dialog shows 💰 Household budget again.</div>`),{right:`<span class="btn pri">${I.plus}New Automation</span>`})});
+
+// 7 · Editor
+frame('w-aed',{h:640,side:{sel:'auto'},head:bgHead,main:bgPage,over:modal(`<span class="ib">${I.back}</span><span style="font-weight:400;color:var(--ws-text-muted)">Automations ›</span> Flag large expenses`,mbody(`
+<div class="sent">
+<div class="ln"><span class="kw">When</span><span class="tok">a row is added</span>to<span class="tok ref">${I.db} Expenses</span></div>
+<div class="ln"><span class="kw">If</span><span class="tok ref">Amount</span><span class="tok">is more than</span><span class="tok">500</span><span class="tok add">＋ and</span></div>
+<div class="ln"><span class="kw">Then</span><span class="tok">set</span><span class="tok ref">Category</span>to<span class="tok"><span class="tag t4">Review</span></span></div>
+<div class="ln"><span class="kw">and</span><span class="tok">${I.bell} show a notification</span><span class="tok">“Large expense: <span class="ref">Item</span>”</span></div>
+<div class="ln"><span class="kw"></span><span class="tok add">＋ action</span></div></div>
+<div class="fld" style="grid-template-columns:120px 1fr;margin-top:12px;font-size:14px">
+<span class="l">Runs as</span><span style="display:flex;gap:10px;align-items:center"><span class="sel" style="width:200px">Budget editor<span class="c">⌄</span></span><span class="st on">✓ allows Apply on Expenses</span></span>
+<span class="l">Belongs to</span><span>${I.db} Expenses <span class="cap">· deleted together with it</span></span>
+<span class="l">Last run</span><span>today 10:42 · set 1 row · <span style="color:var(--ws-accent)">Show in History</span></span></div>`),{right:`<span class="ib">${I.play}Test</span><span class="ib">On <span class="sw"></span></span>`})});
+
+// 8 · Needs attention
+frame('w-att',{h:560,side:{sel:'auto',att:true},head:bgHead,main:bgPage,over:modal(`<span class="ib">${I.back}</span><span style="font-weight:400;color:var(--ws-text-muted)">Automations ›</span> Monthly summary`,mbody(`
+<div class="banner"><span>⚠</span><span>Turned off: its Database “Expenses” was deleted today at 11:02. Choose another Database, or revert the deletion in History.</span><span class="acts"><span class="btn">Show in History</span></span></div>
+<div class="sent">
+<div class="ln"><span class="kw">When</span><span class="tok">the button</span><span class="tok ref">Summarize</span>in<span class="tok ref">${I.db} Months</span>is clicked</div>
+<div class="ln"><span class="kw">Then</span><span class="tok">create a Page from</span><span class="tok ref">${I.tpl} Month summary</span>with the total of<span class="tok bad">${I.db} Expenses › Amount</span></div></div>
+<div class="fld" style="grid-template-columns:120px 1fr;margin-top:12px;font-size:14px"><span class="l">Runs as</span><span class="sel" style="width:200px">Can edit<span class="c">⌄</span></span><span class="l">Belongs to</span><span>Workspace <span class="cap">· stays when Blocks it uses are deleted</span></span></div>`),{right:`<span class="ib">${I.play}Test</span><span class="ib">Off <span class="sw off"></span></span>`})});
+
+let mode='system',fit=true;const mq=matchMedia('(prefers-color-scheme: dark)');
+function hostDark(){const v=getComputedStyle(document.documentElement).getPropertyValue('--background').trim();if(!v)return mq.matches;const c=document.createElement('canvas');c.width=c.height=1;const x=c.getContext('2d');x.fillStyle='#808080';x.fillStyle=v;x.fillRect(0,0,1,1);const d=x.getImageData(0,0,1,1).data;return .2126*d[0]+.7152*d[1]+.0722*d[2]<128}
+function applyTheme(){const dark=mode=='dark'||(mode=='system'&&hostDark());document.querySelectorAll('.win,.maps,.stage').forEach(w=>{w.classList.toggle('theme-dark',dark);w.classList.toggle('theme-light',!dark)});document.body.classList.toggle('theme-dark',dark);document.body.classList.toggle('theme-light',!dark);document.querySelectorAll('#theme button').forEach(b=>b.classList.toggle('on',b.dataset.v==mode))}
+function layout(){document.querySelectorAll('.stage').forEach(st=>{const sc=st.querySelector('.scaler'),w=sc.firstElementChild;const W=+(w.dataset.w||DW);w.style.width=W+'px';const s=fit?Math.min(1,(st.clientWidth-32)/W):1;w.style.transform=`scale(${s})`;sc.style.width=W*s+'px';sc.style.height=w.offsetHeight*s+'px';st.style.overflowX=fit?'hidden':'auto'});document.querySelectorAll('#size button').forEach(b=>b.classList.toggle('on',(b.dataset.v=='fit')==fit))}
+document.querySelectorAll('#theme button').forEach(b=>b.onclick=()=>{mode=b.dataset.v;applyTheme()});
+document.querySelectorAll('#size button').forEach(b=>b.onclick=()=>{fit=b.dataset.v=='fit';layout()});
+mq.addEventListener('change',applyTheme);addEventListener('resize',layout);setInterval(()=>{if(mode=='system')applyTheme()},1500);
+applyTheme();layout();
+</script>
+</body></html>

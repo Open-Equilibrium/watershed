@@ -67,9 +67,13 @@ Liquid        = local-first workspace and App platform</code></pre>
         <li>Typing creates a Text Block; <code>/</code> opens the Block chooser; paste/drop/drawing create the deterministic matching Block.</li>
         <li>Text shortcuts format the current Text Block. For example, <code>&gt;</code> plus space applies toggle formatting; a toggle is not a Block.</li>
         <li>Blocks begin in one ordered vertical flow. Arrange mode reveals a responsive grid with move/resize handles, like placing mobile widgets without a separate container.</li>
+        <li>A Text Block is one paragraph, heading or item; ⏎ ends it. Consecutive Text Blocks form a <strong>Section</strong>, which <code>---</code> or a Block of another type ends; Arrange mode places each Section and each other Block as one tile, and a Section's Text Blocks can be arranged in columns inside it. A Section is layout only and owns no content (ADR-0235).</li>
         <li>Page templates create useful starting compositions, such as an AI Project with Agent Session, Database and App Blocks. A template is not a Page Type.</li>
         <li>The Explorer shows Pages and Sources as peer entries. Opening either follows one navigation model; the internal object types remain distinct.</li>
-        <li>The PowerBar finds Workspace objects, creates Blocks and invokes permitted Workspace or agent actions.</li>
+        <li>The Explorer shows each area under its own heading, as Notion shows teamspaces; each holds a tree of nested Pages with Sources among them (ADR-0235).</li>
+        <li>In M3a a Source is a local file or folder, read-only, because History cannot revert writes outside Workspace data (ADR-0235). Web links follow after M3a as read-only Sources that load only when opened and show in a built-in browser (ADR-0236).</li>
+        <li>Media come from local attachments; a web link is a bookmark that fetches nothing, and an embed loads remote content only after a click (ADR-0235).</li>
+        <li>The PowerBar finds Workspace objects, creates Blocks and invokes permitted Workspace or agent actions. Without a prefix it searches and jumps; <code>/</code> adds a Block and <code>&gt;</code> lists actions; <code>@</code> is kept for people (ADR-0236, <a href="../design/mockups/liquid-workspace-pages.html">Pages mockups</a>).</li>
       </ul>
     </div></section>
 
@@ -87,7 +91,7 @@ Liquid        = local-first workspace and App platform</code></pre>
         <li>A <strong>Block</strong> is the canonical typed content/functionality instance. A <strong>View</strong> is one representation and placement of that Block.</li>
         <li>A Block may support several View kinds, such as Database table/board/calendar or App UI/code. Switching or adding a View does not create a Block.</li>
         <li>The same Block may appear through synchronized Views on several Pages. Editing any View changes the same canonical state everywhere.</li>
-        <li><strong>Duplicate</strong> copies current state into a new independent Block. <strong>Add View</strong> reuses the existing Block.</li>
+        <li><strong>Duplicate</strong> copies current state into a new independent Block. <strong>Add View</strong> reuses the existing Block. Pasting a copied Block duplicates it; a View is always explicit (ADR-0235).</li>
         <li>Removing the last View deletes the Block in the same atomic, reversible History Action. There is no orphan Block pool or separate Trash.</li>
         <li>That deletion also removes its Connections and owned Automations. Independent Workspace Automations that reference it are disabled and surfaced as <em>Needs attention</em>; deletion shows this impact when dependencies exist.</li>
         <li>A full-page representation counts as a View. Deleting its Explorer entry therefore follows the same last-View rule.</li>
@@ -120,6 +124,7 @@ Liquid        = local-first workspace and App platform</code></pre>
         <div class="card"><h3>3 — App logic</h3><p>App Blocks cover custom interactive functionality that would be awkward as formulas or rules.</p></div>
       </div>
       <p>Connections and Automations are the medium through which Pages, Blocks and Sources communicate. Layout proximity never creates a Connection or permission. Liquid Automations may call a Meta-Harness public action, while Meta-Harness separately owns agent-process schedules and orchestration on its host.</p>
+      <p>Formulas use Excel function names with references as chips bound to stable IDs. The Automation editor reads as sentences, as Trello's Butler rules do. M3a Automations start on events and buttons only; schedules follow the headless replica, so no two devices run one (ADR-0235).</p>
     </div></section>
 
     <section id="apps" class="section"><h2>5. Apps, extensions and MCP</h2><div class="body">
@@ -154,6 +159,8 @@ Liquid        = local-first workspace and App platform</code></pre>
         <li>Agents may receive narrower per-session authority than their reusable agent profile.</li>
         <li>Every Workspace write uses the same mutation pipeline and records actor, origin, permission result and reversible change in History.</li>
         <li>Visibility, View placement, Connection existence and sync access never imply execution authority.</li>
+        <li>Rights inherit from an area to its Pages and Blocks. A <strong>protected</strong> Page, Block or Source stops inheriting them, so only Roles allowed on it may change it. A Block's rights follow its home, never the Page that shows a View of it. Read access is never finer than an area; in M3 every authorized device holds the complete Workspace, so the Workspace stays the confidentiality boundary (ADR-0235).</li>
+        <li>M3a assigns Roles to Automations; people follow with sync and agent profiles with M3b (ADR-0235). Three editable Role templates follow Notion's access levels: Can view (read), Can edit (read and apply) and Can manage (every capability), so that no template repeats the approval mode Full access. The person who creates a Workspace holds Can manage, which protection never removes, so no one can lock the owner out (<a href="../design/mockups/liquid-workspace-history.html">History and Roles mockups</a>).</li>
       </ul>
       <h3>How an agent changes Workspace data</h3>
       <div class="flow">
@@ -205,7 +212,7 @@ Headless replica ┘</code></pre>
         <li>A headless Liquid replica is an optional normal replica without UI. It requires workspace-level opt-in because it introduces a server execution boundary.</li>
         <li>Same-host agents use the headless replica's normal CLI/API, Roles and mutation pipeline even while user devices are offline.</li>
         <li>The Sync Server does not execute Apps or agents. It and headless Liquid may be co-located in one hosted deployment while remaining separate logical services.</li>
-        <li>Conflict semantics remain <a href="../decisions/open-decisions.html#d-035">D-035</a>.</li>
+        <li>Replicas merge with Automerge 3, which keeps both values of a concurrent edit to one field (ADR-0238).</li>
       </ul>
     </div></section>
 
@@ -257,19 +264,19 @@ liquid-ui (Flutter)
 
 integrations
   Meta-Harness projection clients and MCP adapters</code></pre>
-      <p>Package names are design targets, not frozen implementation names. Interactive clients use Flutter over the Rust core; thread, bridge, rendering, durability and resource rules live in the <a href="liquid-client-architecture.md">Liquid client architecture</a>. The storage engine remains open. All cross-product access uses public IDs and protocol surfaces; no product reads another product's private store.</p>
+      <p>Package names are design targets, not frozen implementation names. Interactive clients use Flutter over the Rust core; thread, bridge, rendering, durability and resource rules live in the <a href="liquid-client-architecture.md">Liquid client architecture</a>. The local replica uses SQLite with SQLCipher (ADR-0237). All cross-product access uses public IDs and protocol surfaces; no product reads another product's private store.</p>
     </div></section>
 
     <section id="history" class="section"><h2>11. History and Workspace CLI/API</h2><div class="body">
       <p>History covers Liquid Workspace data only: Pages, Blocks, Views, Sources, Connections, Automations, Roles, App state, layout and settings. It supports attribution, diff, undo/revert and sync; it is not project-code VCS.</p>
       <pre><code>request → validate → effective permission → diff/proposal
         → apply atomically → record Action → emit event</code></pre>
-      <p>UI, Liquid AI, CLI/API, App, Automation, import and sync all use this path. The CLI/API exposes small typed operations rather than one unrestricted document interface; final syntax remains <a href="../decisions/open-decisions.html#d-027">D-027</a>. History storage/revert details remain <a href="../decisions/open-decisions.html#d-028">D-028</a>, <a href="../decisions/open-decisions.html#d-029">D-029</a> and <a href="../decisions/open-decisions.html#d-031">D-031</a>.</p>
+      <p>UI, Liquid AI, CLI/API, App, Automation, import and sync all use this path. The CLI/API exposes small typed operations rather than one unrestricted document interface; final syntax remains <a href="../decisions/open-decisions.html#d-027">D-027</a>. History is a sequence of Actions plus save points. A revert records a new reversing Action, as <code>git revert</code> does; Restore version returns a Page to an earlier point, also when later changes conflict; ⌘Z reverts the person's last Action as an Undo entry (ADR-0235). Storage is SQLite with SQLCipher (ADR-0237).</p>
     </div></section>
 
     <section id="delivery" class="section"><h2>12. Delivery and open decisions</h2><div class="body">
       <p>The target model above is delivered in four stages: local Workspace foundation; Apps and agent actions; central sync/mobile/headless execution; then Block Registry and MCP adapters. Scope and Definitions of Done are canonical in <a href="../../PLAN.md">PLAN.md</a>.</p>
-      <p>Remaining Liquid implementation decisions: CLI/API syntax (<a href="../decisions/open-decisions.html#d-027">D-027</a>), History/storage/revert (<a href="../decisions/open-decisions.html#d-028">D-028</a>, <a href="../decisions/open-decisions.html#d-029">D-029</a>, <a href="../decisions/open-decisions.html#d-031">D-031</a>) and sync conflicts (<a href="../decisions/open-decisions.html#d-035">D-035</a>).</p>
+      <p>Remaining Liquid implementation decisions: CLI/API syntax (<a href="../decisions/open-decisions.html#d-027">D-027</a>).</p>
     </div></section>
   </main>
 </div>

@@ -157,6 +157,7 @@ Liquid is a standalone workspace product that external agents and tools can read
 - Sync applies received actions through that same pipeline. Sync credentials authorize Workspace exchange only; they do not authorize Meta-Harness control. Interrupted or untrusted sync never disables access to the local replica.
 - A headless Liquid replica is a separate execution boundary. It receives only Workspaces explicitly enabled for that replica, then enforces the same Roles and mutation pipeline as a UI replica.
 - External-agent writes are **attributed** (actor/origin) and **revertible**; sensitive changes require approval, and a proposed diff can be reviewed before apply.
+- The built-in browser for web-link Sources (planned after M3a) gives pages no access to Liquid or the Rust–Flutter bridge, keeps cookies per Workspace and loads a page only when the person opens it (ADR-0236).
 - Secrets and credentials are never Workspace data; Workspace data holds only references to a keychain or a company secret manager (ADR-0224).
 
 Accepted target for agents (ADR-0223):
