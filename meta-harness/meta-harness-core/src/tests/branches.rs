@@ -84,6 +84,113 @@ fn read(repo: &Repo, path: &str) -> String {
 }
 
 #[test]
+fn branch_and_stash_dates_outside_millisecond_range_return_an_error() {
+    run(async {
+        for reference in ["refs/heads/future", "refs/stash"] {
+            let repo = Repo::new("branch-date-overflow");
+            let tree = repo.git(&["rev-parse", "HEAD^{tree}"]);
+            repo.write(
+            ".git/future-commit",
+            &format!(
+                "tree {}\nauthor Test <test@example.com> 9223372036854776 +0000\ncommitter Test <test@example.com> 9223372036854776 +0000\n\nfuture\n",
+                tree.trim()
+            ),
+        );
+            let future = repo.git(&["hash-object", "-t", "commit", "-w", ".git/future-commit"]);
+            repo.git(&[
+                "update-ref",
+                "--create-reflog",
+                "-m",
+                "On main: Liquid: changes left on main",
+                reference,
+                future.trim(),
+            ]);
+
+            let listed = Checkpoints::new(repo.path()).branches().await;
+
+            assert!(matches!(listed, Err(DiffError::Git(_))), "{listed:?}");
+        }
+    });
+}
+
+#[test]
+fn leaving_changes_preserves_a_nested_repository_replacing_a_tracked_file() {
+    run(async {
+        let repo = Repo::new("stash-nested-repository");
+        repo.write("p", "tracked\n");
+        repo.git(&["add", "p"]);
+        repo.git(&["commit", "-qm", "track p"]);
+        repo.git(&["branch", "other"]);
+        std::fs::remove_file(repo.path().join("p")).expect("remove tracked file");
+        let nested = Repo::at(repo.path().join("p"));
+        nested.write("a.txt", "unsaved nested contents\n");
+        let nested_head = nested.git(&["rev-parse", "HEAD"]);
+        repo.write("a.txt", "unsaved parent contents\n");
+        let before = repo.git(&["status", "--porcelain"]);
+        let index = std::fs::read(repo.path().join(".git/index")).expect("index");
+        let checkpoints = Checkpoints::new(repo.path());
+
+        let switched = checkpoints
+            .switch_branch(&local("other"), leave_on(&checkpoints).await)
+            .await;
+
+        assert!(
+            matches!(switched, Err(DiffError::SubmoduleChanged(ref paths)) if paths == &["p"]),
+            "{switched:?}"
+        );
+        assert_eq!(read(&nested, "a.txt"), "unsaved nested contents\n");
+        assert_eq!(nested.git(&["rev-parse", "HEAD"]), nested_head);
+        assert_eq!(read(&repo, "a.txt"), "unsaved parent contents\n");
+        assert_eq!(repo.git(&["status", "--porcelain"]), before);
+        assert_eq!(
+            std::fs::read(repo.path().join(".git/index")).expect("index"),
+            index
+        );
+        assert!(repo.git(&["stash", "list"]).is_empty());
+    });
+}
+
+#[test]
+fn a_status_stash_stays_on_its_captured_branch_after_an_external_switch() {
+    run(async {
+        let repo = Repo::new("status-stash-branch");
+        repo.git(&["branch", "-M", "main"]);
+        repo.git(&["branch", "other"]);
+        let checkpoints = Checkpoints::new(repo.path());
+        repo.write("a.txt", "main changes\n");
+        checkpoints
+            .switch_branch(&local("other"), leave_on(&checkpoints).await)
+            .await
+            .expect("main left");
+        repo.write("a.txt", "other changes\n");
+        checkpoints
+            .switch_branch(&local("main"), leave_on(&checkpoints).await)
+            .await
+            .expect("other left");
+        let (status, expected) = checkpoints
+            .status_with_stash()
+            .await
+            .expect("status and stash");
+        let tree = crate::diff::WorkingTree::open(repo.path())
+            .await
+            .expect("tree");
+        repo.git(&["switch", "-q", "other"]);
+
+        let stashed = tree
+            .stash_for(status.branch.as_deref(), status.commit.as_deref())
+            .await
+            .expect("captured branch stash");
+
+        assert_eq!(stashed, expected);
+        assert_ne!(
+            stashed.expect("main stash").id,
+            stash_of(&checkpoints).await
+        );
+        assert_eq!(repo.git(&["branch", "--show-current"]), "other\n");
+    });
+}
+
+#[test]
 fn the_status_counts_commits_against_the_upstream_and_uncommitted_files() {
     run(async {
         let clone = Clone::new("status");
@@ -353,6 +460,78 @@ fn switching_never_overwrites_ignored_files_in_the_destination_branch() {
                 }
             }
         }
+    });
+}
+
+#[test]
+fn a_refused_switch_restores_changes_when_stash_reuses_its_commit() {
+    const CHILD: &str = "WATERSHED_STASH_ID_TEST";
+    if std::env::var_os(CHILD).is_none() {
+        let output = Command::new(std::env::current_exe().expect("test executable"))
+            .args([
+                "--exact",
+                "tests::branches::a_refused_switch_restores_changes_when_stash_reuses_its_commit",
+            ])
+            .env(CHILD, "1")
+            .env("GIT_AUTHOR_DATE", "2001-02-03T04:05:06+0000")
+            .env("GIT_COMMITTER_DATE", "2001-02-03T04:05:06+0000")
+            .output()
+            .expect("test starts");
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+        return;
+    }
+    run(async {
+        let repo = Repo::new("stash-same-commit");
+        repo.git(&["branch", "-M", "main"]);
+        repo.git(&["switch", "-qc", "other"]);
+        repo.write("private.txt", "committed\n");
+        repo.git(&["add", "private.txt"]);
+        repo.git(&["commit", "-qm", "add destination file"]);
+        repo.git(&["switch", "-q", "main"]);
+        repo.write("a.txt", "indexed\n");
+        repo.git(&["add", "a.txt"]);
+        repo.write("a.txt", "working\n");
+        let checkpoints = Checkpoints::new(repo.path());
+        checkpoints
+            .switch_branch(&local("other"), leave_on(&checkpoints).await)
+            .await
+            .expect("initial changes left");
+        checkpoints
+            .switch_branch(&local("main"), Changes::Bring)
+            .await
+            .expect("back");
+        repo.git(&["stash", "apply", "--quiet", "--index"]);
+        repo.write(".git/info/exclude", "private.txt\n");
+        repo.write("private.txt", "unsaved ignored contents\n");
+        let index = repo.git(&["write-tree"]);
+        let stashes = repo.git(&["stash", "list", "--format=%H"]);
+
+        let switched = checkpoints
+            .switch_branch(&local("other"), leave_on(&checkpoints).await)
+            .await;
+
+        assert!(
+            matches!(switched, Err(DiffError::WouldOverwrite(_))),
+            "{switched:?}"
+        );
+        assert_eq!(repo.git(&["branch", "--show-current"]), "main\n");
+        assert_eq!(read(&repo, "a.txt"), "working\n");
+        assert_eq!(read(&repo, "private.txt"), "unsaved ignored contents\n");
+        assert_eq!(repo.git(&["write-tree"]), index);
+        assert_eq!(repo.git(&["stash", "list", "--format=%H"]), stashes);
+
+        std::fs::remove_file(repo.path().join("private.txt")).expect("remove obstruction");
+        checkpoints
+            .switch_branch(&local("other"), leave_on(&checkpoints).await)
+            .await
+            .expect("same changes left after switching");
+        assert_eq!(repo.git(&["branch", "--show-current"]), "other\n");
+        assert_eq!(read(&repo, "a.txt"), "old\n");
+        assert_eq!(repo.git(&["stash", "list", "--format=%H"]), stashes);
     });
 }
 
@@ -1883,6 +2062,44 @@ fn automatic_fetch_follows_symbolic_destinations_only_within_remote_refs() {
             assert_eq!(repo.git(&["show-ref", "--heads"]), branches, "{case}");
             assert_eq!(read(repo, "a.txt"), "old\n", "{case}");
         }
+    });
+}
+
+#[test]
+fn automatic_fetch_rejects_non_utf8_refspecs_before_contacting_the_remote() {
+    use std::io::Write;
+
+    run(async {
+        let clone = Clone::new("fetch-refspec-bytes");
+        let repo = &clone.repo;
+        let contacted = repo.path().join(".git/remote-contacted");
+        repo.git(&[
+            "config",
+            "remote.origin.uploadpack",
+            &format!("touch {}; false", super::shell_word(contacted.display())),
+        ]);
+        std::fs::OpenOptions::new()
+            .append(true)
+            .open(repo.path().join(".git/config"))
+            .expect("fixture configuration")
+            .write_all(
+                b"\n[remote \"origin\"]\nfetch = +refs/heads/main:refs/remotes/origin/\xff\n",
+            )
+            .expect("raw-byte refspec");
+        let before = repo.git(&["show-ref"]);
+        let checkpoints = Checkpoints::new(repo.path());
+
+        let fetched = checkpoints.fetch().await;
+
+        assert!(
+            !contacted.exists(),
+            "invalid refspec reached fetch: {fetched:?}"
+        );
+        assert!(
+            matches!(fetched, Err(DiffError::Git(ref reason)) if reason.contains("UTF-8")),
+            "{fetched:?}"
+        );
+        assert_eq!(repo.git(&["show-ref"]), before);
     });
 }
 

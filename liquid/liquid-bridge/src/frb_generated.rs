@@ -2828,6 +2828,7 @@ impl SseDecode for crate::api::git::BridgeGitStatus {
         let mut var_ahead = <i64>::sse_decode(deserializer);
         let mut var_behind = <i64>::sse_decode(deserializer);
         let mut var_changed = <i64>::sse_decode(deserializer);
+        let mut var_stash = <Option<crate::api::git::BridgeStash>>::sse_decode(deserializer);
         return crate::api::git::BridgeGitStatus {
             branch: var_branch,
             commit: var_commit,
@@ -2835,6 +2836,7 @@ impl SseDecode for crate::api::git::BridgeGitStatus {
             ahead: var_ahead,
             behind: var_behind,
             changed: var_changed,
+            stash: var_stash,
         };
     }
 }
@@ -4603,6 +4605,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::git::BridgeGitStatus {
             self.ahead.into_into_dart().into_dart(),
             self.behind.into_into_dart().into_dart(),
             self.changed.into_into_dart().into_dart(),
+            self.stash.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -5622,6 +5625,7 @@ impl SseEncode for crate::api::git::BridgeGitStatus {
         <i64>::sse_encode(self.ahead, serializer);
         <i64>::sse_encode(self.behind, serializer);
         <i64>::sse_encode(self.changed, serializer);
+        <Option<crate::api::git::BridgeStash>>::sse_encode(self.stash, serializer);
     }
 }
 

@@ -24,6 +24,8 @@ pub struct BridgeGitStatus {
     pub behind: i64,
     /// Files that differ from the last commit.
     pub changed: i64,
+    /// The stash belonging to this status's branch and commit.
+    pub stash: Option<BridgeStash>,
 }
 
 /// A local or remote branch.
@@ -103,7 +105,7 @@ impl AgentSession {
     /// The checkout's branch, upstream and uncommitted files; none outside Git.
     pub fn git_status(&self) -> Result<Option<BridgeGitStatus>, String> {
         RUNTIME.block_on(async {
-            let status = match self.checkpoints.status().await {
+            let (status, stash) = match self.checkpoints.status_with_stash().await {
                 Ok(status) => status,
                 Err(DiffError::NotARepository) => return Ok(None),
                 Err(error) => return Err(shown(error)),
@@ -115,6 +117,7 @@ impl AgentSession {
                 ahead: count(status.ahead),
                 behind: count(status.behind),
                 changed: count(status.changed),
+                stash: stash.map(Into::into),
             }))
         })
     }
@@ -187,12 +190,7 @@ impl AgentSession {
                 .stash()
                 .await
                 .map_err(shown)?
-                .map(|stash| BridgeStash {
-                    id: stash.id,
-                    created_ms: stash.created_ms,
-                    files: stash.files.into_iter().map(Into::into).collect(),
-                    current: stash.current,
-                }))
+                .map(Into::into))
         })
     }
 
@@ -305,6 +303,17 @@ impl AgentSession {
                 title: dir.and_then(|dir| session_title_of(dir, &self.cwd, session)),
             })
             .collect()
+    }
+}
+
+impl From<meta_harness_core::Stash> for BridgeStash {
+    fn from(stash: meta_harness_core::Stash) -> Self {
+        Self {
+            id: stash.id,
+            created_ms: stash.created_ms,
+            files: stash.files.into_iter().map(Into::into).collect(),
+            current: stash.current,
+        }
     }
 }
 

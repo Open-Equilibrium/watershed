@@ -2440,8 +2440,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeGitStatus dco_decode_bridge_git_status(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 6)
-      throw Exception('unexpected arr length: expect 6 but see ${arr.length}');
+    if (arr.length != 7)
+      throw Exception('unexpected arr length: expect 7 but see ${arr.length}');
     return BridgeGitStatus(
       branch: dco_decode_opt_String(arr[0]),
       commit: dco_decode_opt_String(arr[1]),
@@ -2449,6 +2449,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       ahead: dco_decode_i_64(arr[3]),
       behind: dco_decode_i_64(arr[4]),
       changed: dco_decode_i_64(arr[5]),
+      stash: dco_decode_opt_box_autoadd_bridge_stash(arr[6]),
     );
   }
 
@@ -3583,6 +3584,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_ahead = sse_decode_i_64(deserializer);
     var var_behind = sse_decode_i_64(deserializer);
     var var_changed = sse_decode_i_64(deserializer);
+    var var_stash = sse_decode_opt_box_autoadd_bridge_stash(deserializer);
     return BridgeGitStatus(
       branch: var_branch,
       commit: var_commit,
@@ -3590,6 +3592,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       ahead: var_ahead,
       behind: var_behind,
       changed: var_changed,
+      stash: var_stash,
     );
   }
 
@@ -5031,6 +5034,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_i_64(self.ahead, serializer);
     sse_encode_i_64(self.behind, serializer);
     sse_encode_i_64(self.changed, serializer);
+    sse_encode_opt_box_autoadd_bridge_stash(self.stash, serializer);
   }
 
   @protected

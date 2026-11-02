@@ -285,7 +285,18 @@ class FakeBackend implements SessionBackend {
   Future<BridgeGitStatus?> gitStatus() async {
     statusReads++;
     if (gitError case final error?) throw error;
-    return git;
+    final now = git;
+    return now == null
+        ? null
+        : BridgeGitStatus(
+            branch: now.branch,
+            commit: now.commit,
+            upstream: now.upstream,
+            ahead: now.ahead,
+            behind: now.behind,
+            changed: now.changed,
+            stash: stashed,
+          );
   }
 
   @override
@@ -652,6 +663,7 @@ BridgeGitStatus gitStatusOf({
   ahead: ahead,
   behind: behind,
   changed: changed,
+  stash: null,
 );
 
 BridgeBranch branchOf(

@@ -7,12 +7,14 @@ use super::*;
 /// the single trailing one is taken off; splitting the output into lines could name another
 /// repository.
 pub(super) async fn git_path(dir: &Path, args: &[&str]) -> Result<String, DiffError> {
-    let output = git(dir, &[], args).await.map_err(|error| match error {
-        DiffError::Git(reason) if reason.contains("not a git repository") => {
-            DiffError::NotARepository
-        }
-        error => error,
-    })?;
+    let output = git_path_output(dir, &[], args)
+        .await
+        .map_err(|error| match error {
+            DiffError::Git(reason) if reason.contains("not a git repository") => {
+                DiffError::NotARepository
+            }
+            error => error,
+        })?;
     match output.strip_suffix('\n') {
         Some(path) if !path.is_empty() => Ok(path.to_owned()),
         _ => Err(DiffError::NotARepository),
@@ -28,11 +30,13 @@ pub(super) async fn git(
     Ok(String::from_utf8_lossy(&output(git_command(dir, env, args), false).await?).into_owned())
 }
 
-/// Reads Git configuration, treating only its silent missing-key exit as empty output.
+/// Reads Git configuration exactly, treating only its silent missing-key exit as empty output.
 pub(super) async fn git_config(dir: &Path, args: &[&str]) -> Result<String, DiffError> {
     let mut command = git_command(dir, &[], &["config"]);
     command.args(args);
-    Ok(String::from_utf8_lossy(&output(command, true).await?).into_owned())
+    String::from_utf8(output(command, true).await?).map_err(|_| {
+        DiffError::Git("Git returned configuration that is not valid UTF-8".to_owned())
+    })
 }
 
 /// Reads pathname output without replacing bytes that the String-based path API cannot name.
@@ -43,6 +47,17 @@ pub(super) async fn git_path_output(
 ) -> Result<String, DiffError> {
     String::from_utf8(output(git_command(dir, env, args), false).await?)
         .map_err(|_| DiffError::Git("Git returned a pathname that is not valid UTF-8".to_owned()))
+}
+
+/// A Git timestamp represented without wrapping Liquid's Unix milliseconds.
+pub(super) fn timestamp_ms(seconds: &str) -> Result<i64, DiffError> {
+    seconds
+        .parse::<i64>()
+        .ok()
+        .and_then(|seconds| seconds.checked_mul(1000))
+        .ok_or_else(|| {
+            DiffError::Git("Git returned a timestamp outside the supported range".to_owned())
+        })
 }
 
 /// Runs the host's `git` in `dir` as the user's own would run, with the project's hooks and

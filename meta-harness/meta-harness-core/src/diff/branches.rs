@@ -1,7 +1,7 @@
 //! The checkout's branch and its upstream, listing, switching and creating branches, and
 //! fetching the upstream's remote ([mockups](../../../../docs/design/mockups/liquid-git-branches.html)).
 
-use super::process::{NO_PROMPTS, git_config, user_git};
+use super::process::{NO_PROMPTS, git_config, timestamp_ms, user_git};
 use super::stash::listed_files;
 use super::*;
 
@@ -168,15 +168,15 @@ impl WorkingTree {
                     Some(name) => (name, false),
                     None => (row[0].strip_prefix("refs/remotes/")?, true),
                 };
-                Some(Branch {
+                Some(timestamp_ms(row[1]).map(|committed_ms| Branch {
                     name: name.to_owned(),
                     remote,
-                    committed_ms: row[1].parse::<i64>().unwrap_or_default() * 1000,
+                    committed_ms,
                     current: row[4] == "*",
                     stashed: !remote && stashed.contains(name),
-                })
+                }))
             })
-            .collect();
+            .collect::<Result<_, DiffError>>()?;
         branches.sort_by(|a, b| {
             a.remote
                 .cmp(&b.remote)
@@ -226,10 +226,17 @@ impl WorkingTree {
             !matches!(switched, Err(ref error) if !matches!(error, DiffError::HookFailed(_)));
         if let (false, Some(left)) = (moved, &left) {
             // Git did not switch, so the changes go back where they were.
-            self.pop(left).await?;
+            if earlier.as_ref() == Some(left) {
+                // An identical save reused the existing stash and added no reflog entry.
+                user_git(&self.root, &["stash", "apply", "--quiet", "--index", left]).await?;
+            } else {
+                self.pop(left).await?;
+            }
             return switched;
         }
-        if let (Some(_), Some(earlier)) = (left, earlier) {
+        if let (Some(left), Some(earlier)) = (left, earlier)
+            && left != earlier
+        {
             self.drop_stash(&earlier).await?;
         }
         // Git switched, also when a hook failed after.

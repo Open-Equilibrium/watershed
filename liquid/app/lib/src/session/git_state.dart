@@ -109,12 +109,11 @@ class GitState {
     final before = status.value?.branch;
     try {
       final now = await _backend.gitStatus();
-      final stashed = now == null ? null : await _backend.gitStash();
+      final stashed = now?.stash;
       // A later read, such as one after a write, wins.
       if (read != _reads) return;
       problem.value = null;
       status.value = now;
-      // The same stash keeps its value, so the Diff tab keeps its place in it.
       // The same stash on the same tree keeps its value, so the Diff tab keeps its place.
       if (stashed?.id != stash.value?.id ||
           stashed?.current != stash.value?.current) {

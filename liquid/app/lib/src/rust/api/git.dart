@@ -10,7 +10,7 @@ import 'history.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 // These functions are ignored because they are not marked as `pub`: `count`, `outcome`, `running_agents`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`
 
 /// A local or remote branch.
 class BridgeBranch {
@@ -167,6 +167,9 @@ class BridgeGitStatus {
   /// Files that differ from the last commit.
   final PlatformInt64 changed;
 
+  /// The stash belonging to this status's branch and commit.
+  final BridgeStash? stash;
+
   const BridgeGitStatus({
     this.branch,
     this.commit,
@@ -174,6 +177,7 @@ class BridgeGitStatus {
     required this.ahead,
     required this.behind,
     required this.changed,
+    this.stash,
   });
 
   @override
@@ -183,7 +187,8 @@ class BridgeGitStatus {
       upstream.hashCode ^
       ahead.hashCode ^
       behind.hashCode ^
-      changed.hashCode;
+      changed.hashCode ^
+      stash.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -195,7 +200,8 @@ class BridgeGitStatus {
           upstream == other.upstream &&
           ahead == other.ahead &&
           behind == other.behind &&
-          changed == other.changed;
+          changed == other.changed &&
+          stash == other.stash;
 }
 
 /// A branch's stashed changes.

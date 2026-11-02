@@ -1,7 +1,7 @@
 //! Uncommitted changes left on a branch, as GitHub Desktop leaves them: one stash per branch,
 //! whose message names it ([mockups](../../../../docs/design/mockups/liquid-git-branches.html)).
 
-use super::process::{git_path_output, user_git};
+use super::process::{git_path_output, timestamp_ms, user_git};
 use super::*;
 use std::collections::BTreeMap;
 
@@ -79,11 +79,34 @@ impl WorkingTree {
 
     /// The stashed changes of the branch checked out, if any.
     pub async fn stash(&self) -> Result<Option<Stash>, DiffError> {
-        let Some(entry) = self.stash_entry().await? else {
+        let branch = self.branch().await?;
+        let head = self.resolve("HEAD").await?;
+        self.stash_for(branch.as_deref(), head.as_deref()).await
+    }
+
+    /// Reads the stash for the branch and commit of a captured status, even if an external
+    /// Git switches the checkout before this query.
+    pub(crate) async fn stash_for(
+        &self,
+        branch: Option<&str>,
+        head: Option<&str>,
+    ) -> Result<Option<Stash>, DiffError> {
+        let Some(branch) = branch else {
+            return Ok(None);
+        };
+        let Some(entry) = self
+            .stashes()
+            .await?
+            .into_iter()
+            .find(|entry| entry.branch.as_deref() == Some(branch))
+        else {
             return Ok(None);
         };
         let base = self.resolve(&format!("{}^1^{{tree}}", entry.id)).await?;
-        let head = self.resolve("HEAD^{tree}").await?;
+        let head = match head {
+            Some(head) => self.resolve(&format!("{head}^{{tree}}")).await?,
+            None => None,
+        };
         Ok(Some(Stash {
             created_ms: entry.created_ms,
             files: self.stash_changes(&entry.id, Whitespace::Shown).await?,
@@ -192,21 +215,18 @@ impl WorkingTree {
         }
         let branch = self.branch().await?.ok_or(DiffError::NoBranch)?;
         let message = format!("{MESSAGE}{branch}");
-        let before = self.resolve("refs/stash").await?;
-        user_git(
+        // Identical contents and second-resolution timestamps can reuse the commit and its
+        // reflog entry. Git's English result still distinguishes a save from no changes.
+        let saved = user_git(
             &self.root,
-            &[
-                "stash",
-                "push",
-                "--quiet",
-                "--include-untracked",
-                "-m",
-                &message,
-            ],
+            &["stash", "push", "--include-untracked", "-m", &message],
         )
         .await?;
-        let after = self.resolve("refs/stash").await?;
-        Ok(after.filter(|after| Some(after) != before.as_ref()))
+        if saved.starts_with("Saved working directory and index state ") {
+            self.resolve("refs/stash").await
+        } else {
+            Ok(None)
+        }
     }
 
     /// The submodules with changed checked-out or staged commits.
@@ -469,7 +489,7 @@ impl WorkingTree {
             &["stash", "list", "--format=%H%x00%gd%x00%ct%x00%gs"],
         )
         .await?;
-        Ok(listed
+        listed
             .lines()
             .filter_map(|line| {
                 let mut fields = line.splitn(4, '\0');
@@ -479,18 +499,21 @@ impl WorkingTree {
                     fields.next()?,
                     fields.next()?,
                 );
+                Some((id, place, created, subject))
+            })
+            .map(|(id, place, created, subject)| {
                 // Git puts `On <branch>: ` before the message.
                 let message = subject
                     .split_once(": ")
                     .map_or(subject, |(_, message)| message);
-                Some(Entry {
+                Ok(Entry {
                     id: id.to_owned(),
                     place: place.to_owned(),
                     branch: message.strip_prefix(MESSAGE).map(str::to_owned),
-                    created_ms: created.parse::<i64>().unwrap_or_default() * 1000,
+                    created_ms: timestamp_ms(created)?,
                 })
             })
-            .collect())
+            .collect()
     }
 
     /// The trees of stash `id`: its base, index, tracked working files and optional untracked

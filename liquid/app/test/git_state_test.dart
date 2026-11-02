@@ -22,6 +22,19 @@ void main() {
 
   int fetches() => backend.calls.where((call) => call == 'fetch').length;
 
+  test(
+    'an external switch cannot pair another branch stash with the status',
+    () async {
+      final switching = _SwitchingBackend();
+      final state = GitState(switching, notify: (_, _) {});
+
+      await state.refresh();
+
+      expect(state.status.value?.branch, 'main');
+      expect(state.stash.value?.id, 'main-stash');
+    },
+  );
+
   testWidgets('fetches every 15 seconds and waits longer after failures', (
     tester,
   ) async {
@@ -284,6 +297,30 @@ void main() {
       'Git does not allow a branch name to end with “.lock”.',
     );
   });
+}
+
+class _SwitchingBackend extends FakeBackend {
+  _SwitchingBackend() {
+    stashed = const BridgeStash(
+      current: true,
+      id: 'main-stash',
+      createdMs: 0,
+      files: [],
+    );
+  }
+
+  @override
+  Future<BridgeGitStatus?> gitStatus() async {
+    final before = await super.gitStatus();
+    git = gitStatusOf(branch: 'other');
+    stashed = const BridgeStash(
+      current: true,
+      id: 'other-stash',
+      createdMs: 0,
+      files: [],
+    );
+    return before;
+  }
 }
 
 BridgeStash stashOf() =>

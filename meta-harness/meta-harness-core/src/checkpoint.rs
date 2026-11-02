@@ -316,6 +316,19 @@ impl Checkpoints {
         self.bounded(tree.status()).await
     }
 
+    /// The status and the stash belonging to its captured branch and commit.
+    pub async fn status_with_stash(&self) -> Result<(GitStatus, Option<Stash>), DiffError> {
+        let tree = self.tree().await?;
+        self.bounded(async {
+            let status = tree.status().await?;
+            let stash = tree
+                .stash_for(status.branch.as_deref(), status.commit.as_deref())
+                .await?;
+            Ok((status, stash))
+        })
+        .await
+    }
+
     /// The branches, and the sessions whose agents run in the checkout, which allow no switch.
     pub async fn branches(&self) -> Result<Branches, DiffError> {
         let tree = self.tree().await?;

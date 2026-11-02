@@ -70,6 +70,36 @@ fn run<F: std::future::Future>(test: F) -> F::Output {
 }
 
 #[test]
+fn an_unrepresentable_repository_path_never_selects_its_replacement_sibling() {
+    use std::io::Write;
+
+    run(async {
+        let parent = Repo::new("root-bytes");
+        let sibling = Repo::at(parent.path().join("repo-\u{fffd}"));
+        sibling.git(&["symbolic-ref", "HEAD", "refs/heads/sibling"]);
+        let mut config = std::fs::OpenOptions::new()
+            .append(true)
+            .open(parent.path().join(".git/config"))
+            .expect("fixture config");
+        writeln!(config, "\n[core]").expect("core section");
+        write!(config, "worktree = {}/repo-", parent.path().display()).expect("worktree prefix");
+        config.write_all(b"\xff\n").expect("raw worktree path");
+
+        let opened = WorkingTree::open(parent.path()).await;
+
+        match opened {
+            Err(DiffError::Git(reason)) => assert!(reason.contains("UTF-8"), "{reason}"),
+            Err(error) => panic!("unexpected error: {error}"),
+            Ok(_) => panic!("opened an unrepresentable repository path"),
+        }
+        assert_eq!(
+            sibling.git(&["symbolic-ref", "HEAD"]),
+            "refs/heads/sibling\n"
+        );
+    });
+}
+
+#[test]
 fn diffs_a_run_against_its_snapshot_without_touching_the_projects_index() {
     run(async {
         let repo = Repo::new("run");
