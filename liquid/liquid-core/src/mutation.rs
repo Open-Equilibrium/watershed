@@ -146,21 +146,6 @@ pub enum Error {
     Document(String),
 }
 
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::NotAllowed => f.write_str("not allowed"),
-            Self::NotFound => f.write_str("not found"),
-            Self::OutOfRange => f.write_str("text position out of range"),
-            Self::NoChange => f.write_str("the edit changes nothing"),
-            Self::Random => f.write_str("the random source failed"),
-            Self::Document(message) => write!(f, "document error: {message}"),
-        }
-    }
-}
-
-impl std::error::Error for Error {}
-
 impl From<automerge::AutomergeError> for Error {
     fn from(error: automerge::AutomergeError) -> Self {
         Self::Document(error.to_string())
