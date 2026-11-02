@@ -493,7 +493,15 @@ void main() {
     expect(find.text('continues after step 2'), findsOneWidget);
     expect(find.text('A: 1 more'), findsOneWidget);
 
-    await tester.drag(find.byType(ListView).first, const Offset(0, 4000));
+    await tester.drag(
+      find
+          .descendant(
+            of: find.byType(ChatView),
+            matching: find.byType(ListView),
+          )
+          .first,
+      const Offset(0, 4000),
+    );
     await tester.pumpAndSettle();
     expect(backend.calls, contains('transcript u1'));
   });
