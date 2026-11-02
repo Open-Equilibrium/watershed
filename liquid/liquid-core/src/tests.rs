@@ -5,7 +5,10 @@ use std::collections::HashSet;
 use automerge::AutoCommit;
 
 use crate::history::Header;
-use crate::{Actor, Created, Document, Mutation, Origin, PersonId, Request, Workspace};
+use crate::{
+    Action, ActionId, Actor, Commit, Created, Document, Error, MemoryStore, Mutation, Origin,
+    PersonId, Request, Store, Workspace,
+};
 
 fn changes(doc: &mut AutoCommit) -> Vec<(automerge::ChangeHash, Option<Header>)> {
     doc.get_changes(&[])
@@ -22,8 +25,8 @@ fn changes(doc: &mut AutoCommit) -> Vec<(automerge::ChangeHash, Option<Header>)>
 #[test]
 fn every_change_of_every_document_belongs_to_a_recorded_action() {
     let owner = Actor::Person(PersonId::new("benni"));
-    let mut workspace = Workspace::create(PersonId::new("benni")).unwrap();
-    let apply = |workspace: &mut Workspace, mutation| {
+    let mut workspace = Workspace::create(PersonId::new("benni"), MemoryStore::default()).unwrap();
+    let apply = |workspace: &mut Workspace<MemoryStore>, mutation| {
         workspace
             .apply(Request {
                 actor: owner.clone(),
@@ -67,8 +70,8 @@ fn every_change_of_every_document_belongs_to_a_recorded_action() {
     apply(&mut workspace, edit);
     apply(&mut workspace, Mutation::RemoveView { page, view });
 
-    let recorded: HashSet<_> = workspace
-        .history()
+    let history = workspace.history(None, usize::MAX).unwrap();
+    let recorded: HashSet<_> = history
         .iter()
         .flat_map(|action| {
             let header = Header::of(action);
@@ -81,22 +84,14 @@ fn every_change_of_every_document_belongs_to_a_recorded_action() {
             })
         })
         .collect();
+    // The store, not the documents in memory, is what another session loads.
     let mut stored = HashSet::new();
-    let documents = std::iter::once((Document::Workspace, &mut workspace.workspace))
-        .chain(
-            workspace
-                .areas
-                .iter_mut()
-                .map(|(id, doc)| (Document::Area(id.clone()), doc)),
-        )
-        .chain(
-            workspace
-                .pages
-                .iter_mut()
-                .map(|(id, doc)| (Document::Page(id.clone()), doc)),
-        );
-    for (document, doc) in documents {
-        for (hash, header) in changes(doc) {
+    let documents: Vec<Document> = workspace.docs.keys().cloned().collect();
+    assert_eq!(documents.len(), 3, "the Workspace, one area and one Page");
+    for document in documents {
+        let chunks = workspace.store.chunks(&document).unwrap();
+        let mut doc = AutoCommit::load(&chunks.concat()).unwrap();
+        for (hash, header) in changes(&mut doc) {
             let header = header.expect("every change names its Action");
             stored.insert((
                 document.clone(),
@@ -106,5 +101,110 @@ fn every_change_of_every_document_belongs_to_a_recorded_action() {
         }
     }
     assert_eq!(stored, recorded);
-    assert_eq!(workspace.history().len(), 6);
+    assert_eq!(history.len(), 6);
+}
+
+/// A store whose commits fail while `failing` is set.
+#[derive(Default)]
+struct Flaky {
+    inner: MemoryStore,
+    failing: bool,
+}
+
+impl Store for Flaky {
+    fn chunks(&mut self, document: &Document) -> Result<Vec<Vec<u8>>, Error> {
+        self.inner.chunks(document)
+    }
+
+    fn commit(&mut self, commit: &Commit<'_>) -> Result<(), Error> {
+        if self.failing {
+            return Err(Error::Storage("disk full".into()));
+        }
+        self.inner.commit(commit)
+    }
+
+    fn history(&mut self, before: Option<&ActionId>, limit: usize) -> Result<Vec<Action>, Error> {
+        self.inner.history(before, limit)
+    }
+}
+
+#[test]
+fn a_write_the_store_refuses_is_not_acknowledged_and_leaves_no_trace() {
+    let owner = Actor::Person(PersonId::new("benni"));
+    let mut workspace = Workspace::create(PersonId::new("benni"), Flaky::default()).unwrap();
+    let apply = |workspace: &mut Workspace<Flaky>, mutation| {
+        workspace.apply(Request {
+            actor: owner.clone(),
+            origin: Origin::Ui,
+            mutation,
+        })
+    };
+    let Ok(Some(Created::Area(area))) = apply(
+        &mut workspace,
+        Mutation::CreateArea {
+            name: "Trips".into(),
+        },
+    )
+    .map(|applied| applied.created) else {
+        panic!("an area")
+    };
+    let create = Mutation::CreatePage {
+        area: area.clone(),
+        parent: None,
+        title: "Lisbon".into(),
+    };
+    let Ok(Some(Created::Page(page))) =
+        apply(&mut workspace, create).map(|applied| applied.created)
+    else {
+        panic!("a Page")
+    };
+    let add = Mutation::AddTextBlock {
+        page: page.clone(),
+        after: None,
+        text: "Five days".into(),
+    };
+    let Ok(Some(Created::Block { block, .. })) =
+        apply(&mut workspace, add).map(|applied| applied.created)
+    else {
+        panic!("a Block")
+    };
+    let recorded = workspace.history(None, usize::MAX).unwrap().len();
+
+    workspace.store.failing = true;
+    let edit = Mutation::EditText {
+        page: page.clone(),
+        block: block.clone(),
+        at: 0,
+        delete: 0,
+        insert: "Our ".into(),
+    };
+    let rename = Mutation::RenamePage {
+        page: page.clone(),
+        title: "Porto".into(),
+    };
+    let new_page = Mutation::CreatePage {
+        area: area.clone(),
+        parent: None,
+        title: "Porto".into(),
+    };
+    for mutation in [edit.clone(), rename, new_page] {
+        let refused = apply(&mut workspace, mutation);
+        assert_eq!(refused.unwrap_err(), Error::Storage("disk full".into()));
+    }
+    assert_eq!(workspace.text(&page, &block).unwrap().unwrap(), "Five days");
+    let titles: Vec<_> = workspace
+        .pages(&area)
+        .unwrap()
+        .into_iter()
+        .map(|entry| entry.title)
+        .collect();
+    assert_eq!(titles, ["Lisbon"]);
+    assert_eq!(workspace.history(None, usize::MAX).unwrap().len(), recorded);
+
+    workspace.store.failing = false;
+    apply(&mut workspace, edit).unwrap();
+    assert_eq!(
+        workspace.text(&page, &block).unwrap().unwrap(),
+        "Our Five days"
+    );
 }

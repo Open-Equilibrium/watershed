@@ -1,9 +1,9 @@
 //! Liquid's Workspace core: the object model, the one mutation pipeline every write takes,
 //! and the History of Actions it records (ADR-0235), over Automerge documents (ADR-0238).
 //!
-//! The Workspace is held in memory; durable storage follows in `liquid-storage`. Its data
-//! lives in three kinds of Automerge document, each created with its whole top-level
-//! structure in its first change:
+//! The Workspace commits every write to a [`Store`] before acknowledging it;
+//! `liquid-storage` implements one on SQLite. The Workspace's data lives in three kinds of
+//! Automerge document, each created with its whole top-level structure in its first change:
 //!
 //! - the Workspace document: its owner and its areas;
 //! - one document per area: its Page tree, so the Explorer opens without any Page;
@@ -22,12 +22,14 @@ mod id;
 mod model;
 mod mutation;
 mod sort_key;
+mod store;
 mod workspace;
 
 pub use history::{Action, Document, Operation, Permission};
 pub use id::{ActionId, AreaId, BlockId, PageId, PersonId, ViewId};
 pub use model::{Area, PageEntry, View};
 pub use mutation::{Actor, Applied, Changed, Created, Error, Mutation, Origin, Request};
+pub use store::{Commit, MemoryStore, Store, Write};
 pub use workspace::Workspace;
 
 #[cfg(test)]

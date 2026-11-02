@@ -38,8 +38,12 @@ fn key_between(before: Option<&[u8]>, after: Option<&[u8]>) -> Vec<u8> {
             if int.len() < after.len() {
                 return int.to_vec();
             }
-            decrement(int)
-                .unwrap_or_else(|| [int, &midpoint(b"", Some(&after[int.len()..]))].concat())
+            match decrement(int) {
+                // The smallest integer is no key on its own, so it takes a fraction.
+                Some(smaller) if smaller == SMALLEST => [SMALLEST, &midpoint(b"", None)].concat(),
+                Some(smaller) => smaller,
+                None => [int, &midpoint(b"", Some(&after[int.len()..]))].concat(),
+            }
         }
         (Some(before), None) => {
             let int = integer(before).expect("a valid key");
@@ -187,6 +191,14 @@ mod tests {
             (last, first) = (next, previous);
         }
         assert!(last.len() <= 4 && first.len() <= 4, "{last} {first}");
+    }
+
+    #[test]
+    fn prepending_at_the_smallest_integer_keeps_the_order() {
+        let high = format!("A{}1", "0".repeat(25));
+        let first = between(None, Some(&high));
+        let second = between(None, Some(&first));
+        assert!(second < first && first < high, "{second} {first} {high}");
     }
 
     #[test]

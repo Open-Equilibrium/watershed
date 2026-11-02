@@ -13,7 +13,7 @@ pub enum Permission {
 }
 
 /// What an Action did.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Operation {
     /// Created the Workspace with its empty structure.
     CreateWorkspace,
@@ -21,8 +21,8 @@ pub enum Operation {
     Mutation(Mutation),
 }
 
-/// A Workspace document an Action changed.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+/// A Workspace document.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Document {
     /// The Workspace document.
     Workspace,
@@ -32,8 +32,19 @@ pub enum Document {
     Page(PageId),
 }
 
+impl Document {
+    /// The name a store files the document under.
+    pub fn key(&self) -> String {
+        match self {
+            Self::Workspace => "workspace".to_string(),
+            Self::Area(area) => format!("area/{area}"),
+            Self::Page(page) => format!("page/{page}"),
+        }
+    }
+}
+
 /// One recorded Workspace mutation.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Action {
     /// The Action's identity, also named in each of its changes.
     pub id: ActionId,

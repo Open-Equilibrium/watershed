@@ -12,20 +12,30 @@ use crate::id::random_bytes;
 use crate::model::{
     self, AREAS, BLOCK, BLOCKS, KIND, NAME, OWNER, PAGES, PARENT, SORT, TEXT, TITLE, VIEWS,
 };
+use crate::store::{Commit, Store, Write};
 use crate::{
     Action, ActionId, Actor, Applied, Area, AreaId, BlockId, Changed, Created, Document, Error,
     Mutation, Operation, Origin, PageEntry, PageId, Permission, PersonId, Request, View, ViewId,
 };
 
-/// One person's Workspace on this device, held in memory.
-pub struct Workspace {
+/// A document is stored again as one snapshot once it has this many chunks, so loading it
+/// never replays more changes than that.
+const COMPACT_AFTER: usize = 1_000;
+
+/// One person's Workspace on this device. Documents load from the store when first used,
+/// and every write is durable in the store before it is acknowledged.
+pub struct Workspace<S: Store> {
+    pub(crate) store: S,
     device: ActorId,
     /// The Workspace document's owner, which never changes after its first change.
     owner: PersonId,
-    pub(crate) workspace: AutoCommit,
-    pub(crate) areas: HashMap<AreaId, AutoCommit>,
-    pub(crate) pages: HashMap<PageId, AutoCommit>,
-    history: Vec<Action>,
+    pub(crate) docs: HashMap<Document, Loaded>,
+}
+
+pub(crate) struct Loaded {
+    pub doc: AutoCommit,
+    /// How many chunks the store holds for the document.
+    chunks: usize,
 }
 
 /// What a mutation wrote before its changes are committed.
@@ -33,8 +43,7 @@ struct Written {
     created: Option<Created>,
     changed: Vec<Changed>,
     touched: Vec<Document>,
-    new_area: Option<(AreaId, AutoCommit)>,
-    new_page: Option<(PageId, AutoCommit)>,
+    new: Vec<(Document, AutoCommit)>,
 }
 
 impl Written {
@@ -43,26 +52,27 @@ impl Written {
             created: None,
             changed: vec![changed],
             touched: vec![touched],
-            new_area: None,
-            new_page: None,
+            new: Vec::new(),
         }
     }
 }
 
-impl Workspace {
-    /// Creates an empty Workspace owned by `owner`, recorded as its first Action.
-    pub fn create(owner: PersonId) -> Result<Self, Error> {
+impl<S: Store> Workspace<S> {
+    /// Creates an empty Workspace owned by `owner` in an empty `store`, recorded as its
+    /// first Action.
+    pub fn create(owner: PersonId, mut store: S) -> Result<Self, Error> {
+        if !store.chunks(&Document::Workspace)?.is_empty() {
+            return Err(Error::Storage("the store already holds a Workspace".into()));
+        }
         let device = ActorId::from(&random_bytes()?[..]);
-        let mut workspace = model::document(&device);
-        workspace.put(ROOT, OWNER, owner.as_str())?;
-        model::create_maps(&mut workspace, &[AREAS])?;
+        let mut doc = model::document(&device);
+        doc.put(ROOT, OWNER, owner.as_str())?;
+        model::create_maps(&mut doc, &[AREAS])?;
         let mut this = Self {
+            store,
             device,
             owner: owner.clone(),
-            workspace,
-            areas: HashMap::new(),
-            pages: HashMap::new(),
-            history: Vec::new(),
+            docs: HashMap::new(),
         };
         let action = Action {
             id: ActionId::new()?,
@@ -72,12 +82,31 @@ impl Workspace {
             operation: Operation::CreateWorkspace,
             changes: Vec::new(),
         };
-        this.record(action, &[Document::Workspace]);
+        this.record(
+            action,
+            &[Document::Workspace],
+            vec![(Document::Workspace, doc)],
+        )?;
         Ok(this)
     }
 
-    /// Applies one write through the pipeline and records it as one Action, or refuses it
-    /// and changes nothing.
+    /// Opens the Workspace that `store` holds. This device writes under a new Automerge
+    /// actor each time.
+    pub fn open(store: S) -> Result<Self, Error> {
+        let mut this = Self {
+            store,
+            device: ActorId::from(&random_bytes()?[..]),
+            owner: PersonId::new(""),
+            docs: HashMap::new(),
+        };
+        let owner = model::string(this.doc(&Document::Workspace)?, &ROOT, OWNER)
+            .ok_or_else(|| Error::Document("the Workspace document names no owner".into()))?;
+        this.owner = PersonId::new(owner);
+        Ok(this)
+    }
+
+    /// Applies one write through the pipeline and acknowledges it once it is durably
+    /// recorded as one Action, or refuses it and changes nothing.
     pub fn apply(&mut self, request: Request) -> Result<Applied, Error> {
         // Until Roles exist the permission depends only on the actor, so it is checked
         // before anything is read and a refused actor learns nothing about the Workspace.
@@ -92,20 +121,14 @@ impl Workspace {
         };
         // Automerge drops a write of the value already stored, so a mutation can leave
         // nothing to commit; it records no Action.
-        let unchanged = written.new_area.is_none()
-            && written.new_page.is_none()
+        let unchanged = written.new.is_empty()
             && written.touched.iter().all(|document| {
-                self.document(document)
-                    .is_none_or(|doc| doc.pending_ops() == 0)
+                self.docs
+                    .get(document)
+                    .is_none_or(|loaded| loaded.doc.pending_ops() == 0)
             });
         if unchanged {
             return Err(Error::NoChange);
-        }
-        if let Some((area, doc)) = written.new_area {
-            self.areas.insert(area, doc);
-        }
-        if let Some((page, doc)) = written.new_page {
-            self.pages.insert(page, doc);
         }
         let action = Action {
             id: id.clone(),
@@ -115,7 +138,7 @@ impl Workspace {
             operation: Operation::Mutation(request.mutation),
             changes: Vec::new(),
         };
-        self.record(action, &written.touched);
+        self.record(action, &written.touched, written.new)?;
         Ok(Applied {
             action: id,
             created: written.created,
@@ -124,28 +147,52 @@ impl Workspace {
     }
 
     /// The areas, in Explorer order.
-    pub fn areas(&self) -> Vec<Area> {
-        model::areas(&self.workspace)
+    pub fn areas(&mut self) -> Result<Vec<Area>, Error> {
+        Ok(model::areas(self.doc(&Document::Workspace)?))
     }
 
     /// An area's Pages, each followed by its descendants, siblings in Explorer order.
-    pub fn pages(&self, area: &AreaId) -> Vec<PageEntry> {
-        self.areas.get(area).map(model::pages).unwrap_or_default()
+    pub fn pages(&mut self, area: &AreaId) -> Result<Vec<PageEntry>, Error> {
+        Ok(model::pages(self.doc(&Document::Area(area.clone()))?))
     }
 
     /// A Page's Views in order.
-    pub fn views(&self, page: &PageId) -> Vec<View> {
-        self.pages.get(page).map(model::views).unwrap_or_default()
+    pub fn views(&mut self, page: &PageId) -> Result<Vec<View>, Error> {
+        Ok(model::views(self.doc(&Document::Page(page.clone()))?))
     }
 
     /// A live Text Block's text, from the document of its home `page`.
-    pub fn text(&self, page: &PageId, block: &BlockId) -> Option<String> {
-        model::text(self.pages.get(page)?, block.as_str())
+    pub fn text(&mut self, page: &PageId, block: &BlockId) -> Result<Option<String>, Error> {
+        Ok(model::text(
+            self.doc(&Document::Page(page.clone()))?,
+            block.as_str(),
+        ))
     }
 
-    /// Every recorded Action, oldest first.
-    pub fn history(&self) -> &[Action] {
-        &self.history
+    /// Up to `limit` recorded Actions, newest first, starting before `before`.
+    pub fn history(
+        &mut self,
+        before: Option<&ActionId>,
+        limit: usize,
+    ) -> Result<Vec<Action>, Error> {
+        self.store.history(before, limit)
+    }
+
+    /// A document, loaded from the store on first use.
+    fn doc(&mut self, document: &Document) -> Result<&mut AutoCommit, Error> {
+        if !self.docs.contains_key(document) {
+            let chunks = self.store.chunks(document)?;
+            if chunks.is_empty() {
+                return Err(Error::NotFound);
+            }
+            let doc = model::load(&chunks.concat(), &self.device)?;
+            let loaded = Loaded {
+                doc,
+                chunks: chunks.len(),
+            };
+            self.docs.insert(document.clone(), loaded);
+        }
+        Ok(&mut self.docs.get_mut(document).expect("loaded above").doc)
     }
 
     fn permit(&self, actor: &Actor) -> Result<Permission, Error> {
@@ -163,11 +210,12 @@ impl Workspace {
                 let id = AreaId::new()?;
                 let mut doc = model::document(&self.device);
                 model::create_maps(&mut doc, &[PAGES])?;
-                let siblings = model::sorted(&self.workspace, AREAS);
+                let workspace = self.doc(&Document::Workspace)?;
+                let siblings = model::sorted(workspace, AREAS);
                 let last = siblings.last().map(|entry| entry.id.as_str());
                 let sort = model::sort_after(&siblings, last)?;
                 model::insert(
-                    &mut self.workspace,
+                    workspace,
                     AREAS,
                     id.as_str(),
                     &[(NAME, name), (SORT, &sort)],
@@ -175,7 +223,7 @@ impl Workspace {
                 let mut written = Written::new(Document::Workspace, Changed::Areas);
                 written.touched.push(Document::Area(id.clone()));
                 written.created = Some(Created::Area(id.clone()));
-                written.new_area = Some((id, doc));
+                written.new.push((Document::Area(id), doc));
                 Ok(written)
             }
             Mutation::CreatePage {
@@ -183,7 +231,7 @@ impl Workspace {
                 parent,
                 title,
             } => {
-                let area_doc = self.areas.get_mut(area).ok_or(Error::NotFound)?;
+                let area_doc = self.doc(&Document::Area(area.clone()))?;
                 if let Some(parent) = parent {
                     model::live(area_doc, PAGES, parent.as_str()).ok_or(Error::NotFound)?;
                 }
@@ -205,24 +253,24 @@ impl Workspace {
                     Written::new(Document::Area(area.clone()), Changed::Pages(area.clone()));
                 written.touched.push(Document::Page(id.clone()));
                 written.created = Some(Created::Page(id.clone()));
-                written.new_page = Some((id, doc));
+                written.new.push((Document::Page(id), doc));
                 Ok(written)
             }
             Mutation::RenamePage { page, title } => {
-                let (area, area_doc) = self
-                    .areas
-                    .iter_mut()
-                    .find(|(_, doc)| model::live(doc, PAGES, page.as_str()).is_some())
-                    .ok_or(Error::NotFound)?;
-                let entry = model::live(area_doc, PAGES, page.as_str()).ok_or(Error::NotFound)?;
-                area_doc.put(&entry, TITLE, title.as_str())?;
-                Ok(Written::new(
-                    Document::Area(area.clone()),
-                    Changed::Pages(area.clone()),
-                ))
+                for area in model::areas(self.doc(&Document::Workspace)?) {
+                    let area_doc = self.doc(&Document::Area(area.id.clone()))?;
+                    if let Some(entry) = model::live(area_doc, PAGES, page.as_str()) {
+                        area_doc.put(&entry, TITLE, title.as_str())?;
+                        return Ok(Written::new(
+                            Document::Area(area.id.clone()),
+                            Changed::Pages(area.id),
+                        ));
+                    }
+                }
+                Err(Error::NotFound)
             }
             Mutation::AddTextBlock { page, after, text } => {
-                let doc = self.pages.get_mut(page).ok_or(Error::NotFound)?;
+                let doc = self.doc(&Document::Page(page.clone()))?;
                 let siblings = model::sorted(doc, VIEWS);
                 let sort = model::sort_after(&siblings, after.as_ref().map(ViewId::as_str))?;
                 let (block, view) = (BlockId::new()?, ViewId::new()?);
@@ -247,7 +295,7 @@ impl Workspace {
                 delete,
                 insert,
             } => {
-                let doc = self.pages.get_mut(page).ok_or(Error::NotFound)?;
+                let doc = self.doc(&Document::Page(page.clone()))?;
                 let entry = model::live(doc, BLOCKS, block.as_str()).ok_or(Error::NotFound)?;
                 let content = model::child(doc, &entry, TEXT).ok_or(Error::NotFound)?;
                 let end = at.checked_add(*delete).ok_or(Error::OutOfRange)?;
@@ -264,7 +312,7 @@ impl Workspace {
                 ))
             }
             Mutation::RemoveView { page, view } => {
-                let doc = self.pages.get_mut(page).ok_or(Error::NotFound)?;
+                let doc = self.doc(&Document::Page(page.clone()))?;
                 let entry = model::live(doc, VIEWS, view.as_str()).ok_or(Error::NotFound)?;
                 let block = model::string(doc, &entry, BLOCK).ok_or(Error::NotFound)?;
                 model::mark_deleted(doc, &entry)?;
@@ -286,41 +334,62 @@ impl Workspace {
         }
     }
 
-    fn document(&mut self, document: &Document) -> Option<&mut AutoCommit> {
-        match document {
-            Document::Workspace => Some(&mut self.workspace),
-            Document::Area(area) => self.areas.get_mut(area),
-            Document::Page(page) => self.pages.get_mut(page),
+    /// Discards every uncommitted write, so a refused mutation leaves no trace.
+    fn rollback(&mut self) {
+        for loaded in self.docs.values_mut() {
+            loaded.doc.rollback();
         }
     }
 
-    /// Discards every uncommitted write, so a refused mutation leaves no trace.
-    fn rollback(&mut self) {
-        self.workspace.rollback();
-        self.areas.values_mut().for_each(|doc| {
-            doc.rollback();
-        });
-        self.pages.values_mut().for_each(|doc| {
-            doc.rollback();
-        });
-    }
-
-    /// Commits each touched document as one change that carries the Action's header, then
-    /// appends the Action to History.
-    fn record(&mut self, mut action: Action, touched: &[Document]) {
+    /// Commits each touched document as one change that carries the Action's header and
+    /// writes them with the Action to the store. If the store fails, the touched documents
+    /// are dropped from memory, so they load again as the store holds them.
+    fn record(
+        &mut self,
+        mut action: Action,
+        touched: &[Document],
+        new: Vec<(Document, AutoCommit)>,
+    ) -> Result<(), Error> {
+        for (document, doc) in new {
+            self.docs.insert(document, Loaded { doc, chunks: 0 });
+        }
         let message = serde_json::to_string(&Header::of(&action)).expect("a serializable header");
         let time = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map_or(0, |elapsed| elapsed.as_secs() as i64);
+        let mut writes = Vec::new();
         for document in touched {
-            let doc = self.document(document);
+            let Some(loaded) = self.docs.get_mut(document) else {
+                continue;
+            };
             let options = CommitOptions::default()
                 .with_message(message.clone())
                 .with_time(time);
-            if let Some(hash) = doc.and_then(|doc| doc.commit_with(options)) {
-                action.changes.push((document.clone(), hash));
+            let Some(hash) = loaded.doc.commit_with(options) else {
+                continue;
+            };
+            action.changes.push((document.clone(), hash));
+            let document = document.clone();
+            if loaded.chunks >= COMPACT_AFTER {
+                let snapshot = loaded.doc.save();
+                writes.push(Write::Replace { document, snapshot });
+                loaded.chunks = 1;
+            } else if let Some(mut change) = loaded.doc.get_change_by_hash(&hash) {
+                let chunk = change.bytes().into_owned();
+                writes.push(Write::Append { document, chunk });
+                loaded.chunks += 1;
             }
         }
-        self.history.push(action);
+        let commit = Commit {
+            action: &action,
+            writes,
+        };
+        if let Err(error) = self.store.commit(&commit) {
+            for document in touched {
+                self.docs.remove(document);
+            }
+            return Err(error);
+        }
+        Ok(())
     }
 }

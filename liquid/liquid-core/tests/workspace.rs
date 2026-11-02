@@ -2,9 +2,22 @@
 //! recorded as one Action, and a refused write changes nothing.
 
 use liquid_core::{
-    Actor, Applied, AreaId, Error, Mutation, Operation, Origin, PageId, Permission, PersonId,
-    Request, ViewId, Workspace,
+    Action, Actor, Applied, AreaId, Error, MemoryStore, Mutation, Operation, Origin, PageId,
+    Permission, PersonId, Request, ViewId,
 };
+
+type Workspace = liquid_core::Workspace<MemoryStore>;
+
+fn workspace() -> Workspace {
+    Workspace::create(PersonId::new("benni"), MemoryStore::default()).unwrap()
+}
+
+/// Every recorded Action, oldest first.
+fn history(workspace: &mut Workspace) -> Vec<Action> {
+    let mut actions = workspace.history(None, usize::MAX).unwrap();
+    actions.reverse();
+    actions
+}
 
 fn owner() -> Actor {
     Actor::Person(PersonId::new("benni"))
@@ -56,16 +69,15 @@ fn text_block(
     }
 }
 
-fn titles(workspace: &Workspace, area: &AreaId) -> Vec<(String, Option<String>)> {
+fn titles(workspace: &mut Workspace, area: &AreaId) -> Vec<(String, Option<String>)> {
+    let pages = workspace.pages(area).unwrap();
     let title_of = |id: &PageId| {
-        workspace
-            .pages(area)
-            .into_iter()
+        pages
+            .iter()
             .find(|entry| &entry.id == id)
-            .map(|entry| entry.title)
+            .map(|entry| entry.title.clone())
     };
-    workspace
-        .pages(area)
+    pages
         .iter()
         .map(|entry| {
             (
@@ -76,17 +88,22 @@ fn titles(workspace: &Workspace, area: &AreaId) -> Vec<(String, Option<String>)>
         .collect()
 }
 
-fn texts(workspace: &Workspace, page: &PageId) -> Vec<String> {
-    workspace
-        .views(page)
+fn texts(workspace: &mut Workspace, page: &PageId) -> Vec<String> {
+    let views = workspace.views(page).unwrap();
+    views
         .iter()
-        .map(|view| workspace.text(page, &view.block).expect("a live Block"))
+        .map(|view| {
+            workspace
+                .text(page, &view.block)
+                .unwrap()
+                .expect("a live Block")
+        })
         .collect()
 }
 
 #[test]
 fn the_explorer_lists_areas_and_nested_pages_in_creation_order() {
-    let mut workspace = Workspace::create(PersonId::new("benni")).unwrap();
+    let mut workspace = workspace();
     let trips = area(&mut workspace, "Trips");
     let home = area(&mut workspace, "Home");
     let lisbon = page(&mut workspace, &trips, None, "Lisbon");
@@ -96,12 +113,13 @@ fn the_explorer_lists_areas_and_nested_pages_in_creation_order() {
 
     let names: Vec<_> = workspace
         .areas()
+        .unwrap()
         .into_iter()
         .map(|area| area.name)
         .collect();
     assert_eq!(names, ["Trips", "Home"]);
     assert_eq!(
-        titles(&workspace, &trips),
+        titles(&mut workspace, &trips),
         [
             ("Lisbon".into(), None),
             ("Day trips".into(), Some("Lisbon".into())),
@@ -116,9 +134,9 @@ fn the_explorer_lists_areas_and_nested_pages_in_creation_order() {
             title: "Lisbon in May".into(),
         },
     );
-    assert_eq!(titles(&workspace, &trips)[0].0, "Lisbon in May");
+    assert_eq!(titles(&mut workspace, &trips)[0].0, "Lisbon in May");
 
-    let recorded = workspace.history().len();
+    let recorded = history(&mut workspace).len();
     let unchanged = workspace.apply(Request {
         actor: owner(),
         origin: Origin::Ui,
@@ -128,12 +146,12 @@ fn the_explorer_lists_areas_and_nested_pages_in_creation_order() {
         },
     });
     assert_eq!(unchanged.unwrap_err(), Error::NoChange);
-    assert_eq!(workspace.history().len(), recorded);
+    assert_eq!(history(&mut workspace).len(), recorded);
 }
 
 #[test]
 fn text_blocks_keep_their_order_and_edit_in_utf16_units() {
-    let mut workspace = Workspace::create(PersonId::new("benni")).unwrap();
+    let mut workspace = workspace();
     let trips = area(&mut workspace, "Trips");
     let lisbon = page(&mut workspace, &trips, None, "Lisbon");
     let (plan, plan_view) = text_block(&mut workspace, &lisbon, None, "Five days");
@@ -141,12 +159,12 @@ fn text_blocks_keep_their_order_and_edit_in_utf16_units() {
     text_block(&mut workspace, &lisbon, Some(&plan_view), "Sintra 🌄");
     text_block(&mut workspace, &lisbon, Some(&notes_view), "Pastéis");
     assert_eq!(
-        texts(&workspace, &lisbon),
+        texts(&mut workspace, &lisbon),
         ["Five days", "Sintra 🌄", "Tram 28", "Pastéis"]
     );
 
     // "🌄" is two UTF-16 units, as Dart and JavaScript count text.
-    let sintra = workspace.views(&lisbon)[1].block.clone();
+    let sintra = workspace.views(&lisbon).unwrap()[1].block.clone();
     apply(
         &mut workspace,
         Mutation::EditText {
@@ -167,7 +185,10 @@ fn text_blocks_keep_their_order_and_edit_in_utf16_units() {
             insert: "Six".into(),
         },
     );
-    assert_eq!(texts(&workspace, &lisbon)[..2], ["Six days", "Sintra 🌄!"]);
+    assert_eq!(
+        texts(&mut workspace, &lisbon)[..2],
+        ["Six days", "Sintra 🌄!"]
+    );
 
     for (at, delete) in [(8, 0), (7, 1), (10, 1)] {
         let refused = workspace.apply(Request {
@@ -187,12 +208,12 @@ fn text_blocks_keep_their_order_and_edit_in_utf16_units() {
             "at {at}, delete {delete}"
         );
     }
-    assert_eq!(texts(&workspace, &lisbon)[1], "Sintra 🌄!");
+    assert_eq!(texts(&mut workspace, &lisbon)[1], "Sintra 🌄!");
 }
 
 #[test]
 fn removing_the_last_view_removes_its_block() {
-    let mut workspace = Workspace::create(PersonId::new("benni")).unwrap();
+    let mut workspace = workspace();
     let trips = area(&mut workspace, "Trips");
     let lisbon = page(&mut workspace, &trips, None, "Lisbon");
     let (plan, plan_view) = text_block(&mut workspace, &lisbon, None, "Five days");
@@ -206,8 +227,8 @@ fn removing_the_last_view_removes_its_block() {
         },
     );
     assert_eq!(applied.created, None);
-    assert_eq!(texts(&workspace, &lisbon), ["Tram 28"]);
-    assert_eq!(workspace.text(&lisbon, &plan), None);
+    assert_eq!(texts(&mut workspace, &lisbon), ["Tram 28"]);
+    assert_eq!(workspace.text(&lisbon, &plan).unwrap(), None);
 
     for mutation in [
         Mutation::RemoveView {
@@ -238,11 +259,11 @@ fn removing_the_last_view_removes_its_block() {
 
 #[test]
 fn a_refused_request_changes_nothing_and_records_no_action() {
-    let mut workspace = Workspace::create(PersonId::new("benni")).unwrap();
+    let mut workspace = workspace();
     let trips = area(&mut workspace, "Trips");
     let home = area(&mut workspace, "Home");
     let budget = page(&mut workspace, &home, None, "Budget");
-    let before = workspace.history().len();
+    let before = history(&mut workspace).len();
 
     let stranger = workspace.apply(Request {
         actor: Actor::Person(PersonId::new("mallory")),
@@ -266,13 +287,13 @@ fn a_refused_request_changes_nothing_and_records_no_action() {
     });
     assert_eq!(other_area_parent.unwrap_err(), Error::NotFound);
 
-    assert!(workspace.pages(&trips).is_empty());
-    assert_eq!(workspace.history().len(), before);
+    assert!(workspace.pages(&trips).unwrap().is_empty());
+    assert_eq!(history(&mut workspace).len(), before);
 }
 
 #[test]
 fn every_action_names_its_actor_origin_and_permission() {
-    let mut workspace = Workspace::create(PersonId::new("benni")).unwrap();
+    let mut workspace = workspace();
     let trips = area(&mut workspace, "Trips");
     let lisbon = page(&mut workspace, &trips, None, "Lisbon");
     let applied = workspace
@@ -287,7 +308,7 @@ fn every_action_names_its_actor_origin_and_permission() {
         })
         .unwrap();
 
-    let history = workspace.history();
+    let history = history(&mut workspace);
     assert_eq!(history.len(), 4);
     assert_eq!(history[0].operation, Operation::CreateWorkspace);
     assert!(matches!(

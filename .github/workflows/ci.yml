@@ -261,7 +261,7 @@ jobs:
           cargo llvm-cov clean --workspace
           cargo nextest run \
             --config 'target."cfg(all())".runner = ["node", "../../scripts/run-isolated-rust-test.mjs"]' \
-            --locked -p meta-harness-core -p liquid_bridge -p liquid-core --all-targets --all-features
+            --locked -p meta-harness-core -p liquid_bridge -p liquid-core -p liquid-storage --all-targets --all-features
           cargo llvm-cov report --fail-under-lines 88 \
             --ignore-filename-regex "$COVERAGE_EXCLUSIONS" --show-missing-lines
 
