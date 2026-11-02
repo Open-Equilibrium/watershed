@@ -27,7 +27,7 @@ mod stash;
 pub use branches::{Branch, BranchTarget, Changes, GitStatus};
 pub use stash::Stash;
 #[cfg(test)]
-pub(crate) use stash::before_drop;
+pub(crate) use stash::{before_drop, before_stash_identity};
 
 use process::{Git, git, git_command, git_path, git_path_output, unreadable};
 #[cfg(test)]

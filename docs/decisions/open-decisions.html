@@ -107,19 +107,6 @@ summary{cursor:pointer}summary h3{display:inline;margin:0}summary:focus-visible{
   <section id="m3">
     <h2>M3 - Liquid</h2>
     <div class="grid">
-      <details id="d-081" class="decision" open style="grid-column:1/-1">
-        <summary><h3>D-081 - Identify The Stash A Leave Operation Saved</h3></summary>
-        <p><strong>Status:</strong> Blocks the Git branch-status slice at <code>638586e</code>. The approved apply/drop behavior in <a href="../adr/ADR-LOG.md">D-079</a> remains decided; this question concerns acquiring the saved commit's identity before using it.</p>
-        <p><strong>Confirmed failure:</strong> After native <code>git stash push</code> succeeds, Liquid separately reads <code>refs/stash</code>. Another Git can store a different stash between those steps. A failed branch switch then restores that other stash and drops its entry, leaving the user's original changes stashed. A deterministic Git shim reproduced this through <code>Checkpoints::switch_branch</code>: the working file became <code>theirs</code> instead of <code>mine</code>, and only Liquid's original stash remained listed.</p>
-        <p><strong>Review stop:</strong> Applying by commit and checking the dropped commit already handle later list shifts. Save-time shifts are the same identity bug class, but the current save operation returns no independently bound commit identity. Searching more timings or messages would enumerate variants rather than establish that every subsequent action uses this operation's save.</p>
-        <p><strong>Decision required:</strong> May Liquid add an operation identifier to persisted stash metadata, or must it retain the current message format and identical-save commit reuse?</p>
-        <ul>
-          <li><strong>A - Preserve the current format and acquire the identity through a different native-Git operation sequence.</strong> Pro: preserves existing stash messages and commit reuse. Con: needs a bounded feasibility proof, including untracked files, the saved index, hooks and supported Git versions; another read of the stash tip or a branch-message match alone does not prove ownership.</li>
-          <li><strong>B - Permit an operation identifier in the saved metadata.</strong> Pro: lets lookup distinguish this save from concurrent stores without relying on list position or branch label. Con: changes persisted metadata and identical-save commit reuse; the encoding, older-stash compatibility and user-visible Git presentation need approval.</li>
-        </ul>
-        <p><strong>Recommendation:</strong> B, preserving the readable branch label and access to older stashes. Do not replace native stash behavior or change D-079's apply/drop contract without a separate decision.</p>
-        <p><strong>Acceptance criterion:</strong> Record the chosen identity mechanism and compatibility behavior in the decision log. Then prove, with deterministic stores between save and identity acquisition, that successful and refused switches use only their own saved commit, preserve the original working contents and index, and retain unrelated stash commits. If identity cannot be established, preserve the saves and report a recoverable error. Retain the existing safety regressions and a finite operation-boundary test matrix before resuming the remaining feature reviews. The separately confirmed non-UTF-8 branch-name collision also remains to fix.</p>
-      </details>
       <details id="d-027" class="decision">
         <summary><h3>D-027 - Liquid CLI/API Surface</h3></summary>
         <p><strong>Status:</strong> Open before external-agent Liquid edits.</p>

@@ -28,9 +28,26 @@ pub(crate) fn before_drop(root: &Path, hook: impl FnOnce() + Send + 'static) {
 
 #[cfg(test)]
 fn run_before_drop(root: &Path) {
+    run_hook(&BEFORE_DROP, root);
+}
+
+#[cfg(test)]
+static BEFORE_IDENTITY: std::sync::Mutex<Vec<Hook>> = std::sync::Mutex::new(Vec::new());
+
+/// Runs once after a save, before identifying it in the stash list.
+#[cfg(test)]
+pub(crate) fn before_stash_identity(root: &Path, hook: impl FnOnce() + Send + 'static) {
+    BEFORE_IDENTITY
+        .lock()
+        .expect("hooks")
+        .push((std::fs::canonicalize(root).expect("root"), Box::new(hook)));
+}
+
+#[cfg(test)]
+fn run_hook(hooks: &std::sync::Mutex<Vec<Hook>>, root: &Path) {
     let root = std::fs::canonicalize(root).expect("root");
     let hook = {
-        let mut hooks = BEFORE_DROP.lock().expect("hooks");
+        let mut hooks = hooks.lock().expect("hooks");
         let at = hooks.iter().position(|(at, _)| *at == root);
         at.map(|at| hooks.remove(at).1)
     };
@@ -64,6 +81,8 @@ pub(super) struct Entry {
     /// The branch whose changes Liquid left there; none for other entries.
     branch: Option<String>,
     created_ms: i64,
+    /// The save operation named in the message; absent on legacy and other stashes.
+    operation: Option<String>,
 }
 
 impl WorkingTree {
@@ -214,16 +233,33 @@ impl WorkingTree {
             }
         }
         let branch = self.branch().await?.ok_or(DiffError::NoBranch)?;
-        let message = format!("{MESSAGE}{branch}");
-        // Identical contents and second-resolution timestamps can reuse the commit and its
-        // reflog entry. Git's English result still distinguishes a save from no changes.
+        let operation = format!(
+            "{:016x}",
+            RandomState::new().hash_one(STORES.fetch_add(1, Ordering::Relaxed))
+        );
+        let message = format!("{MESSAGE}{branch} · {operation}");
+        // The operation makes even identical saves distinct. The reflog message binds the
+        // commit to this save even when another Git stores a different stash on top.
         let saved = user_git(
             &self.root,
             &["stash", "push", "--include-untracked", "-m", &message],
         )
         .await?;
         if saved.starts_with("Saved working directory and index state ") {
-            self.resolve("refs/stash").await
+            #[cfg(test)]
+            run_hook(&BEFORE_IDENTITY, &self.root);
+            self.stashes()
+                .await?
+                .into_iter()
+                .find(|entry| entry.operation.as_deref() == Some(operation.as_str()))
+                .map(|entry| Some(entry.id))
+                .ok_or_else(|| {
+                    DiffError::Git(
+                        "Liquid could not identify its saved changes. All stashes were kept; \
+                         use Git to recover the saved changes before switching again."
+                            .to_owned(),
+                    )
+                })
         } else {
             Ok(None)
         }
@@ -506,10 +542,23 @@ impl WorkingTree {
                 let message = subject
                     .split_once(": ")
                     .map_or(subject, |(_, message)| message);
+                let (branch, operation) = match message.strip_prefix(MESSAGE) {
+                    Some(label) => match label.rsplit_once(" · ") {
+                        Some((branch, operation))
+                            if operation.len() == 16
+                                && operation.bytes().all(|byte| byte.is_ascii_hexdigit()) =>
+                        {
+                            (Some(branch.to_owned()), Some(operation.to_owned()))
+                        }
+                        _ => (Some(label.to_owned()), None),
+                    },
+                    None => (None, None),
+                };
                 Ok(Entry {
                     id: id.to_owned(),
                     place: place.to_owned(),
-                    branch: message.strip_prefix(MESSAGE).map(str::to_owned),
+                    branch,
+                    operation,
                     created_ms: timestamp_ms(created)?,
                 })
             })

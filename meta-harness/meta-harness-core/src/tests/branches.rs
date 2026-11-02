@@ -79,6 +79,23 @@ async fn leave_on(checkpoints: &Checkpoints) -> Changes {
     }
 }
 
+/// Readable subjects with each new operation token verified and removed for comparison.
+fn stash_subjects(repo: &Repo) -> String {
+    repo.git(&["stash", "list", "--format=%s"])
+        .lines()
+        .map(|subject| {
+            if subject.contains("Liquid: changes left on ") {
+                let (label, token) = subject.rsplit_once(" · ").expect("operation token");
+                assert_eq!(token.len(), 16, "short operation token");
+                assert!(token.bytes().all(|byte| byte.is_ascii_hexdigit()));
+                format!("{label}\n")
+            } else {
+                format!("{subject}\n")
+            }
+        })
+        .collect()
+}
+
 fn read(repo: &Repo, path: &str) -> String {
     std::fs::read_to_string(repo.path().join(path)).expect("file read")
 }
@@ -357,7 +374,7 @@ fn the_bounded_branch_list_keeps_the_current_branch_and_recent_order() {
             .expect("changes left on the listed source branch");
         assert_eq!(read(&repo, "a.txt"), "old\n");
         assert_eq!(
-            repo.git(&["stash", "list", "--format=%s"]),
+            stash_subjects(&repo),
             format!("On {current}: Liquid: changes left on {current}\n")
         );
     });
@@ -464,13 +481,13 @@ fn switching_never_overwrites_ignored_files_in_the_destination_branch() {
 }
 
 #[test]
-fn a_refused_switch_restores_changes_when_stash_reuses_its_commit() {
+fn repeated_identical_saves_remain_distinct_and_restore_after_refusal() {
     const CHILD: &str = "WATERSHED_STASH_ID_TEST";
     if std::env::var_os(CHILD).is_none() {
         let output = Command::new(std::env::current_exe().expect("test executable"))
             .args([
                 "--exact",
-                "tests::branches::a_refused_switch_restores_changes_when_stash_reuses_its_commit",
+                "tests::branches::repeated_identical_saves_remain_distinct_and_restore_after_refusal",
             ])
             .env(CHILD, "1")
             .env("GIT_AUTHOR_DATE", "2001-02-03T04:05:06+0000")
@@ -531,7 +548,31 @@ fn a_refused_switch_restores_changes_when_stash_reuses_its_commit() {
             .expect("same changes left after switching");
         assert_eq!(repo.git(&["branch", "--show-current"]), "other\n");
         assert_eq!(read(&repo, "a.txt"), "old\n");
-        assert_eq!(repo.git(&["stash", "list", "--format=%H"]), stashes);
+        let replaced = repo.git(&["stash", "list", "--format=%H"]);
+        assert_eq!(
+            replaced.lines().count(),
+            1,
+            "the earlier entry was replaced"
+        );
+        assert_ne!(
+            replaced, stashes,
+            "the token prevents identical-commit reuse"
+        );
+        assert_eq!(
+            stash_subjects(&repo),
+            "On main: Liquid: changes left on main\n"
+        );
+        checkpoints
+            .switch_branch(&local("main"), Changes::Bring)
+            .await
+            .expect("back again");
+        checkpoints
+            .restore_stash(&stash_of(&checkpoints).await)
+            .await
+            .expect("repeated save restored");
+        assert_eq!(read(&repo, "a.txt"), "working\n");
+        assert_eq!(repo.git(&["write-tree"]), index);
+        assert!(repo.git(&["stash", "list"]).is_empty());
     });
 }
 
@@ -965,7 +1006,7 @@ fn leaving_changes_stashes_them_on_the_branch_and_restoring_brings_them_back() {
             .collect();
         assert_eq!(stashed, [main.as_str()]);
         assert_eq!(
-            repo.git(&["stash", "list", "--format=%s"]),
+            stash_subjects(&repo),
             format!("On {main}: Liquid: changes left on {main}\n")
         );
 
@@ -1139,7 +1180,7 @@ fn a_branch_keeps_one_stash_and_other_stashes_stay_untouched() {
                 .expect("back");
         }
 
-        let subjects = repo.git(&["stash", "list", "--format=%s"]);
+        let subjects = stash_subjects(&repo);
         assert_eq!(
             subjects,
             format!("On {main}: Liquid: changes left on {main}\nOn {main}: the user's own\n")
@@ -1165,7 +1206,7 @@ fn a_branch_keeps_one_stash_and_other_stashes_stay_untouched() {
             .expect("discarded");
         assert_eq!(read(&repo, "a.txt"), "old\n");
         assert_eq!(
-            repo.git(&["stash", "list", "--format=%s"]),
+            stash_subjects(&repo),
             format!("On {main}: the user's own\n")
         );
     });
@@ -1347,7 +1388,7 @@ fn a_hook_failing_after_git_switched_keeps_the_changes_left_on_the_branch() {
         assert_eq!(repo.git(&["branch", "--show-current"]), "other\n");
         assert_eq!(read(&repo, "a.txt"), "old\n", "the changes stay on {main}");
         assert_eq!(
-            repo.git(&["stash", "list", "--format=%s"]),
+            stash_subjects(&repo),
             format!("On {main}: Liquid: changes left on {main}\n")
         );
         assert!(matches!(
@@ -2349,7 +2390,7 @@ fn a_switch_whose_caller_gives_up_still_finishes_and_leaves_no_lock() {
         }
         assert_eq!(read(&repo, "f.slow"), "slow\n");
         assert_eq!(
-            repo.git(&["stash", "list", "--format=%s"]),
+            stash_subjects(&repo),
             format!("On {main}: Liquid: changes left on {main}\n")
         );
     });
@@ -2519,6 +2560,172 @@ fn a_stash_another_git_stores_meanwhile_survives_a_discard_and_a_restore() {
                 "only the confirmed stash went"
             );
             repo.git(&["stash", "drop", "-q"]);
+        }
+    });
+}
+
+#[test]
+fn a_concurrent_store_during_save_preserves_the_own_stash_and_index() {
+    run(async {
+        for refused in [false, true] {
+            for replace in [false, true] {
+                let repo = Repo::new(&format!("stash-save-identity-{refused}-{replace}"));
+                repo.git(&["branch", "-M", "main"]);
+                repo.git(&["branch", "other"]);
+                let checkpoints = Checkpoints::new(repo.path());
+                let earlier = if replace {
+                    repo.write("a.txt", "earlier\n");
+                    repo.git(&["stash", "push", "-qm", "Liquid: changes left on main"]);
+                    Some(repo.git(&["rev-parse", "refs/stash"]).trim().to_owned())
+                } else {
+                    None
+                };
+                let theirs = external_stash(&repo, "theirs\n");
+                repo.write("a.txt", "indexed\n");
+                repo.git(&["add", "a.txt"]);
+                repo.write("a.txt", "working\n");
+                repo.write("new.txt", "untracked\n");
+                let index = repo.git(&["write-tree"]);
+                let status = repo.git(&["status", "--porcelain"]);
+                let root = repo.path().to_owned();
+                let stored = theirs.clone();
+                crate::diff::before_stash_identity(repo.path(), move || {
+                    let repo = std::mem::ManuallyDrop::new(Repo(root));
+                    repo.git(&["stash", "store", "-m", "theirs", &stored]);
+                });
+
+                let switched = checkpoints
+                    .switch_branch(
+                        &local(if refused { "missing" } else { "other" }),
+                        leave_on(&checkpoints).await,
+                    )
+                    .await;
+
+                let mut expected = vec![theirs];
+                if refused {
+                    assert!(matches!(switched, Err(DiffError::Git(_))), "{switched:?}");
+                    assert_eq!(repo.git(&["branch", "--show-current"]), "main\n");
+                    if let Some(earlier) = earlier {
+                        expected.push(earlier);
+                    }
+                } else {
+                    switched.expect("switched");
+                    assert_eq!(repo.git(&["branch", "--show-current"]), "other\n");
+                    assert_eq!(read(&repo, "a.txt"), "old\n");
+                    assert!(!repo.path().join("new.txt").exists());
+                    checkpoints
+                        .switch_branch(&local("main"), Changes::Bring)
+                        .await
+                        .expect("back");
+                    let mine = stash_of(&checkpoints).await;
+                    assert_ne!(mine, expected[0], "the concurrent save is never ours");
+                    assert_eq!(
+                        repo.git(&["stash", "list", "--format=%H"]).lines().count(),
+                        2
+                    );
+                    checkpoints
+                        .restore_stash(&mine)
+                        .await
+                        .expect("own save restored");
+                }
+                assert_eq!(read(&repo, "a.txt"), "working\n");
+                assert_eq!(read(&repo, "new.txt"), "untracked\n");
+                assert_eq!(repo.git(&["write-tree"]), index);
+                assert_eq!(repo.git(&["status", "--porcelain"]), status);
+                assert_eq!(
+                    repo.git(&["stash", "list", "--format=%H"])
+                        .lines()
+                        .collect::<Vec<_>>(),
+                    expected
+                );
+            }
+        }
+    });
+}
+
+#[test]
+fn an_unidentified_save_preserves_stashes_and_reports_recovery() {
+    run(async {
+        let repo = Repo::new("stash-unidentified-save");
+        repo.git(&["branch", "-M", "main"]);
+        repo.git(&["branch", "other"]);
+        repo.write("a.txt", "earlier\n");
+        repo.git(&["stash", "push", "-qm", "Liquid: changes left on main"]);
+        let earlier = repo.git(&["rev-parse", "refs/stash"]).trim().to_owned();
+        let theirs = external_stash(&repo, "theirs\n");
+        repo.write("a.txt", "indexed\n");
+        repo.git(&["add", "a.txt"]);
+        repo.write("a.txt", "working\n");
+        let index = repo.git(&["write-tree"]);
+        let checkpoints = Checkpoints::new(repo.path());
+        let root = repo.path().to_owned();
+        let stored = theirs.clone();
+        crate::diff::before_stash_identity(repo.path(), move || {
+            let repo = std::mem::ManuallyDrop::new(Repo(root));
+            let mine = repo.git(&["rev-parse", "refs/stash"]);
+            repo.git(&["stash", "drop", "-q"]);
+            repo.git(&["stash", "store", "-m", "renamed externally", mine.trim()]);
+            repo.git(&["stash", "store", "-m", "theirs", &stored]);
+        });
+
+        let switched = checkpoints
+            .switch_branch(&local("missing"), leave_on(&checkpoints).await)
+            .await;
+
+        assert!(
+            matches!(switched, Err(DiffError::Git(ref reason)) if reason.contains("identify") && reason.contains("Git")),
+            "{switched:?}"
+        );
+        assert_eq!(repo.git(&["branch", "--show-current"]), "main\n");
+        assert_eq!(read(&repo, "a.txt"), "old\n");
+        let listed = repo.git(&["stash", "list", "--format=%H"]);
+        let ids: Vec<_> = listed.lines().collect();
+        assert_eq!(ids.len(), 3);
+        assert_eq!(ids[0], theirs);
+        assert_eq!(ids[2], earlier);
+        repo.git(&["stash", "apply", "--quiet", "--index", ids[1]]);
+        assert_eq!(read(&repo, "a.txt"), "working\n");
+        assert_eq!(repo.git(&["write-tree"]), index);
+    });
+}
+
+#[test]
+fn legacy_branch_stashes_remain_listed_restorable_and_discardable() {
+    run(async {
+        for restore in [false, true] {
+            let repo = Repo::new(&format!("stash-legacy-{restore}"));
+            repo.git(&["branch", "-M", "main"]);
+            repo.write("a.txt", "indexed\n");
+            repo.git(&["add", "a.txt"]);
+            repo.write("a.txt", "working\n");
+            let index = repo.git(&["write-tree"]);
+            repo.git(&["stash", "push", "-qm", "Liquid: changes left on main"]);
+            let checkpoints = Checkpoints::new(repo.path());
+            let mine = stash_of(&checkpoints).await;
+            assert!(
+                checkpoints
+                    .branches()
+                    .await
+                    .expect("branches")
+                    .branches
+                    .iter()
+                    .any(|branch| branch.name == "main" && branch.stashed)
+            );
+            if restore {
+                checkpoints
+                    .restore_stash(&mine)
+                    .await
+                    .expect("legacy restored");
+                assert_eq!(read(&repo, "a.txt"), "working\n");
+                assert_eq!(repo.git(&["write-tree"]), index);
+            } else {
+                checkpoints
+                    .discard_stash(&mine)
+                    .await
+                    .expect("legacy discarded");
+                assert_eq!(read(&repo, "a.txt"), "old\n");
+            }
+            assert!(repo.git(&["stash", "list"]).is_empty());
         }
     });
 }
