@@ -41,6 +41,9 @@ class SessionState {
     _subscription = _backend.events().listen(_apply);
     hideWhitespace.addListener(() => unawaited(readChanges()));
     // Stashed changes restored or discarded leave the Diff tab.
+    git.status.addListener(() {
+      if (diffScope.value is UncommittedChanges) unawaited(readChanges());
+    });
     git.stash.addListener(() {
       if (diffScope.value is StashedChanges) unawaited(readChanges());
     });
@@ -394,7 +397,9 @@ class SessionState {
   /// Shows `scope` in the Diff tab.
   Future<void> showTurns(DiffScope scope) async {
     diffScope.value = scope;
-    if (scope is StashedChanges) await git.refresh();
+    if (scope is StashedChanges || scope is UncommittedChanges) {
+      await git.refresh();
+    }
     await readChanges();
   }
 
@@ -429,6 +434,18 @@ class SessionState {
       final read = await _backend.turns();
       if (generation != _generation) return;
       turns.value = read;
+      if (diffScope.value is UncommittedChanges) {
+        final files = await _backend.uncommittedChanges(
+          hideWhitespace: hideWhitespace.value,
+        );
+        if (generation != _generation) return;
+        reportRead('changes', null);
+        shownScope.value = const UncommittedChanges();
+        shown.value = null;
+        changesProblem.value = null;
+        changed.value = files;
+        return;
+      }
       if (diffScope.value is StashedChanges) {
         final stash = git.stash.value;
         if (stash != null) {
@@ -526,6 +543,12 @@ class SessionState {
 
   /// One file's unified diff between the shown checkpoints.
   Future<String> patch(String path) {
+    if (shownScope.value is UncommittedChanges) {
+      return _backend.uncommittedPatch(
+        path,
+        hideWhitespace: hideWhitespace.value,
+      );
+    }
     if (shownScope.value is StashedChanges) {
       final id = shownStash.value?.stash.id;
       if (id == null) return Future.value('');

@@ -83,6 +83,8 @@ class _DiffViewState extends State<DiffView> {
     widget.state.changed.addListener(_show);
     widget.state.shown.addListener(_rebuild);
     widget.state.shownScope.addListener(_rebuild);
+    widget.state.git.status.addListener(_rebuild);
+    unawaited(widget.state.git.refresh());
     widget.state.shownStash.addListener(_show);
     widget.state.git.stash.addListener(_rebuild);
     // Opening the tab reads the turns again, so it shows the latest one.
@@ -100,6 +102,7 @@ class _DiffViewState extends State<DiffView> {
     widget.state.changed.removeListener(_show);
     widget.state.shown.removeListener(_rebuild);
     widget.state.shownScope.removeListener(_rebuild);
+    widget.state.git.status.removeListener(_rebuild);
     widget.state.shownStash.removeListener(_show);
     widget.state.git.stash.removeListener(_rebuild);
     _focus.dispose();
@@ -330,7 +333,11 @@ class _DiffViewState extends State<DiffView> {
     final branch = scope is StashedChanges
         ? snapshot?.branch
         : widget.state.git.status.value?.branch;
-    if (shown == null && stash == null) return null;
+    if (shown == null &&
+        stash == null &&
+        widget.state.git.status.value == null) {
+      return null;
+    }
     final files = widget.state.changed.value;
     return _TurnHeader(
       menuKey: _turnMenu,
@@ -442,7 +449,9 @@ class _DiffViewState extends State<DiffView> {
       final scope = widget.state.shownScope.value;
       final all = scope is AllTurns;
       final turns = all ? 'these turns' : 'this turn';
-      final title = scope is StashedChanges
+      final title = scope is UncommittedChanges
+          ? 'No uncommitted changes'
+          : scope is StashedChanges
           ? 'No stashed changes'
           : 'No changes in $turns';
       return widget.settings.value.hideWhitespace
@@ -454,7 +463,9 @@ class _DiffViewState extends State<DiffView> {
           : _empty(
               context,
               title,
-              scope is StashedChanges
+              scope is UncommittedChanges
+                  ? 'The checkout is the same as its last commit.'
+                  : scope is StashedChanges
                   ? 'The stash contains no changed files.'
                   : 'The project was the same at its end as at its start.',
             );
@@ -1045,7 +1056,10 @@ class _TurnHeader extends StatelessWidget {
     final ended = finished(turns);
     final String about;
     final String label;
-    if (stashed) {
+    if (scope is UncommittedChanges) {
+      label = 'Uncommitted changes';
+      about = 'Compared with the checkout’s last commit';
+    } else if (stashed) {
       label = 'Stashed changes';
       about =
           'Left on $branch at ${formatClockMs(stash.createdMs)} · Restore moves the stashed '
@@ -1062,8 +1076,8 @@ class _TurnHeader extends StatelessWidget {
           : '“${turn.prompt}” · $since–$until · compared with the project when the turn '
                 'started';
     } else {
-      label = 'No finished turn yet';
-      about = 'This menu shows the branch’s stashed changes.';
+      label = 'Choose changes';
+      about = 'Compare uncommitted changes or the branch’s stashed changes.';
     }
     final small = TextStyle(color: ws.textFaint, fontSize: WsMetrics.fsSmall);
     String counts(BridgeTurn turn) => [
@@ -1118,6 +1132,10 @@ class _TurnHeader extends StatelessWidget {
                 '+${lines.added} −${lines.removed}',
             ].join(' · '),
           ),
+        ],
+        if (git.value != null) ...[
+          if (ended.isNotEmpty) const PopupMenuDivider(),
+          item(const UncommittedChanges(), 'Uncommitted changes', ''),
         ],
         if (stash != null) ...[
           if (ended.isNotEmpty) const PopupMenuDivider(),

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../controls.dart';
+import 'commit_dialog.dart';
 import '../format.dart';
 import '../rust/api/events.dart';
 import '../rust/api/git.dart';
@@ -60,7 +61,10 @@ class BranchChip extends StatelessWidget {
             'Branch $name',
             if (status.ahead > 0) '${status.ahead} ahead',
             if (status.behind > 0) '${status.behind} behind',
-            if (status.branch != null && status.upstream == null) 'no upstream',
+            if (!status.merging &&
+                status.branch != null &&
+                status.upstream == null)
+              'no upstream',
           ].join(', '),
           excludeSemantics: true,
           child: InkWell(
@@ -77,13 +81,16 @@ class BranchChip extends StatelessWidget {
                     style: monoStyle(context, color: ws.text),
                   ),
                 ),
+                if (status.merging) Text('merging', style: small),
                 if (status.ahead > 0) Text('↑${status.ahead}', style: small),
                 if (status.behind > 0)
                   Text(
                     '↓${status.behind}',
                     style: small.copyWith(color: ws.warning),
                   ),
-                if (status.branch != null && status.upstream == null)
+                if (!status.merging &&
+                    status.branch != null &&
+                    status.upstream == null)
                   Text('no upstream', style: small),
                 Icon(LucideIcons.chevronDown, size: 13, color: ws.textFaint),
               ],
@@ -203,7 +210,7 @@ Future<void> _switch(
   var outcome = await switchTo(leave);
   while (outcome?.kind == BridgeGitOutcomeKind.wouldOverwrite) {
     if (!context.mounted) return;
-    final again = await showDialog<bool>(
+    final again = await showDialog<String>(
       context: context,
       builder: (context) => _RefusedDialog(
         target: branch.shown,
@@ -212,7 +219,12 @@ Future<void> _switch(
         stashed: stashed,
       ),
     );
-    if (again != true || !context.mounted) return;
+    if (!context.mounted) return;
+    if (again == 'commit') {
+      await showCommitDialog(context, state);
+      return;
+    }
+    if (again != 'leave') return;
     outcome = await switchTo(true);
   }
 }
@@ -655,7 +667,7 @@ class _RefusedDialog extends StatelessWidget {
   Widget build(BuildContext context) {
     final ws = context.ws;
     final left = this.left;
-    void leave() => Navigator.of(context).pop(true);
+    void leave() => Navigator.of(context).pop('leave');
     return ActionDialog(
       title: 'Could not switch to $target',
       // Nothing changed, so it closes rather than cancels.
@@ -672,6 +684,10 @@ class _RefusedDialog extends StatelessWidget {
             shortcut: '⏎',
             onPressed: leave,
           ),
+        SecondaryButton(
+          label: 'Commit changes…',
+          onPressed: () => Navigator.of(context).pop('commit'),
+        ),
       ],
       children: [
         Text(

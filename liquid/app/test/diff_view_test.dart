@@ -48,6 +48,41 @@ void main() {
   }
 
   testWidgets(
+    'Uncommitted changes works before a finished turn and honors whitespace',
+    (tester) async {
+      final backend = FakeBackend()
+        ..turnList = []
+        ..changed = [
+          BridgeFileChange(
+            path: 'new.txt',
+            shown: 'new.txt',
+            status: BridgeChangeStatus.added,
+            added: 1,
+            removed: 0,
+          ),
+        ]
+        ..changedWithoutWhitespace = []
+        ..patches = {'new.txt': '@@ -0,0 +1 @@\n+new\n'};
+      final settings = DiffSettingsController();
+      final state = await show(tester, backend, settings: settings);
+      await state.git.refresh();
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Choose the turn'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Uncommitted changes'));
+      await tester.pumpAndSettle();
+      expect(find.text('new.txt'), findsWidgets);
+      expect(find.textContaining('new', findRichText: true), findsWidgets);
+      expect(backend.calls, contains('uncommitted patch new.txt'));
+      await state.showTurns(const UncommittedChanges());
+      state.hideWhitespace.value = true;
+      await tester.pumpAndSettle();
+      expect(backend.calls, contains('uncommitted changes without whitespace'));
+      expect(find.text('No uncommitted changes'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
     'lists changed files as folders and shows the selected file\'s diff',
     (tester) async {
       final backend = FakeBackend()
