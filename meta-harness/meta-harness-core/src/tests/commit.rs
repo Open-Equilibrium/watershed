@@ -564,12 +564,38 @@ fn commit_plan_attributes_turns_outside_edits_and_partial_staging() {
 }
 
 #[test]
-fn status_supports_a_branch_tracking_a_local_branch() {
+fn status_resolves_origin_defaults_without_overriding_local_upstreams() {
     run(async {
         let repo = Repo::new("local-upstream");
         repo.git(&["branch", "-M", "main"]);
+        repo.git(&["update-ref", "refs/remotes/origin/main", "HEAD"]);
+        repo.git(&[
+            "symbolic-ref",
+            "refs/remotes/origin/HEAD",
+            "refs/remotes/origin/main",
+        ]);
+        let checkpoints = Checkpoints::new(repo.path());
+        assert_eq!(
+            checkpoints
+                .status()
+                .await
+                .unwrap()
+                .default_branch
+                .as_deref(),
+            Some("main")
+        );
+        repo.git(&["checkout", "--detach"]);
+        assert_eq!(
+            checkpoints
+                .status()
+                .await
+                .unwrap()
+                .default_branch
+                .as_deref(),
+            Some("main")
+        );
         repo.git(&["switch", "-c", "feat", "--track", "main"]);
-        let status = Checkpoints::new(repo.path()).status().await.unwrap();
+        let status = checkpoints.status().await.unwrap();
         assert_eq!(status.upstream.as_deref(), Some("main"));
         assert_eq!(status.default_branch, None);
     });

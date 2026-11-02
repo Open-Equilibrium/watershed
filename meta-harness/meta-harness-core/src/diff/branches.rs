@@ -170,10 +170,11 @@ impl WorkingTree {
             }
             None => String::new(),
         };
-        let remote = remote.trim();
-        if remote.is_empty() || remote == "." {
-            return Ok(None);
-        }
+        let remote = match remote.trim() {
+            "." => return Ok(None),
+            "" => "origin",
+            remote => remote,
+        };
         let prefix = format!("refs/remotes/{remote}/");
         match git_ref_output(
             &self.root,
