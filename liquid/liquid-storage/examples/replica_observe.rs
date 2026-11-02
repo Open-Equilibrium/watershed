@@ -1,5 +1,6 @@
 //! Observation workload for the local replica (PERFORMANCE.md, Liquid): typing with one
-//! durable commit per keystroke, then reopening a long Page from the encrypted database. It
+//! durable commit per keystroke, then a new process reopening a long Page from the encrypted
+//! database. It
 //! prints a summary and never compares with a threshold. Run from the repository root:
 //!
 //! ```sh
@@ -7,6 +8,8 @@
 //! /usr/bin/time -l target/release/examples/replica_observe
 //! ```
 
+use std::path::Path;
+use std::process::Command;
 use std::time::{Duration, Instant};
 
 use liquid_core::{Actor, Created, Mutation, Origin, PageId, PersonId, Request, Workspace};
@@ -64,6 +67,10 @@ fn summary(name: &str, mut times: Vec<Duration>) {
 }
 
 fn main() {
+    if let Some(path) = std::env::args().nth(1) {
+        reopen(Path::new(&path));
+        return;
+    }
     let dir = std::env::temp_dir().join(format!("liquid-replica-observe-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("replica.db");
@@ -119,14 +126,29 @@ fn main() {
         .unwrap()
         .map(|entry| entry.unwrap().metadata().unwrap().len())
         .sum();
-    let start = Instant::now();
-    let mut workspace = Workspace::open(Sqlite::open(&path, &KEY).unwrap()).unwrap();
-    let views = workspace.views(&lisbon, 0, usize::MAX).unwrap();
     println!(
-        "reopening and reading that Page's {} Views: {:.1} ms; database with its log {:.1} MiB",
-        views.len(),
-        start.elapsed().as_secs_f64() * 1e3,
+        "database with its log after both: {:.1} MiB",
         size as f64 / 1_048_576.0
     );
+    // A new session in a new process, as when Liquid starts again.
+    let reopened = Command::new(std::env::current_exe().unwrap())
+        .arg(&path)
+        .status()
+        .unwrap();
+    assert!(reopened.success());
     std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// Opens the replica at `path` and reads its first Page's Views, as the Explorer opens it.
+fn reopen(path: &Path) {
+    let start = Instant::now();
+    let mut workspace = Workspace::open(Sqlite::open(path, &KEY).unwrap()).unwrap();
+    let area = workspace.areas().unwrap().remove(0).id;
+    let page = workspace.pages(&area).unwrap().remove(0).id;
+    let views = workspace.views(&page, 0, usize::MAX).unwrap();
+    println!(
+        "a new process opening the replica and reading that Page's {} Views: {:.1} ms",
+        views.len(),
+        start.elapsed().as_secs_f64() * 1e3
+    );
 }
