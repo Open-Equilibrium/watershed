@@ -3,3 +3,4 @@
 pub mod events;
 pub mod history;
 pub mod session;
+pub mod workspace;

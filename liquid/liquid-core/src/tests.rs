@@ -280,3 +280,48 @@ fn the_view_order_index_matches_the_page_document() {
     assert_eq!(kept, read);
     assert!(kept.len() > 30);
 }
+
+#[test]
+fn a_closed_page_leaves_memory_and_loads_again_unchanged() {
+    let owner = Actor::Person(PersonId::new("benni"));
+    let mut workspace = Workspace::create(PersonId::new("benni"), MemoryStore::default()).unwrap();
+    let apply = |workspace: &mut Workspace<MemoryStore>, mutation| {
+        workspace
+            .apply(Request {
+                actor: owner.clone(),
+                origin: Origin::Ui,
+                mutation,
+            })
+            .unwrap()
+            .created
+    };
+    let Some(Created::Area(area)) = apply(
+        &mut workspace,
+        Mutation::CreateArea {
+            name: "Trips".into(),
+        },
+    ) else {
+        panic!("an area")
+    };
+    let create = Mutation::CreatePage {
+        area,
+        parent: None,
+        title: "Lisbon".into(),
+    };
+    let Some(Created::Page(page)) = apply(&mut workspace, create) else {
+        panic!("a Page")
+    };
+    let add = Mutation::AddTextBlock {
+        page: page.clone(),
+        after: None,
+        text: "Five days".into(),
+    };
+    let Some(Created::Block { block, .. }) = apply(&mut workspace, add) else {
+        panic!("a Block")
+    };
+
+    workspace.close_page(&page);
+    assert!(!workspace.docs.contains_key(&Document::Page(page.clone())));
+    assert_eq!(workspace.view_count(&page).unwrap(), 1);
+    assert_eq!(workspace.text(&page, &block).unwrap().unwrap(), "Five days");
+}

@@ -19,7 +19,9 @@ flowchart TD
   P --> R
   S --> R
   L[liquid_bridge] --> M[meta-harness-core]
-  LS[liquid-storage] --> LC[liquid-core]
+  L --> LS[liquid-storage]
+  L --> LC[liquid-core]
+  LS --> LC
 ```
 
 The package manifests are the executable dependency source of truth. Test-only dependencies are omitted. `flow-agent-executor` is the companion binary launched through the protocol, not a library dependency of Flow Agent core.
