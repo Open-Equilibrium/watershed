@@ -4,3 +4,4 @@ pub mod events;
 pub mod git;
 pub mod history;
 pub mod session;
+pub mod workspace;

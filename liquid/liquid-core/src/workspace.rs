@@ -149,6 +149,11 @@ impl<S: Store> Workspace<S> {
         })
     }
 
+    /// The person who created the Workspace and holds Can manage.
+    pub fn owner(&self) -> &PersonId {
+        &self.owner
+    }
+
     /// The areas, in Explorer order.
     pub fn areas(&mut self) -> Result<Vec<Area>, Error> {
         Ok(model::areas(self.doc(&Document::Workspace)?))
@@ -176,6 +181,17 @@ impl<S: Store> Workspace<S> {
             self.doc(&Document::Page(page.clone()))?,
             block.as_str(),
         ))
+    }
+
+    /// Whether a Page's document is in memory.
+    pub fn is_loaded(&self, page: &PageId) -> bool {
+        self.docs.contains_key(&Document::Page(page.clone()))
+    }
+
+    /// Releases a Page's document and View order from memory; the next read loads them
+    /// again from the store. A Page holds no uncommitted writes between requests.
+    pub fn close_page(&mut self, page: &PageId) {
+        self.docs.remove(&Document::Page(page.clone()));
     }
 
     /// Up to `limit` recorded Actions, newest first, starting before `before`.

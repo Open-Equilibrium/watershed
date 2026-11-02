@@ -28,8 +28,8 @@ flowchart TD
 
 1. The Dart main isolate only handles input, layout, paint and applying bounded deltas. Storage access, queries, large (de)serialization, diffing, CRDT merge, sync and App code never run on it or on Flutter's platform or raster threads.
 2. The Rust core runs on its own worker threads. Every bridge call from Dart is asynchronous; the main isolate never blocks on disk or network. The Workspace crosses the bridge through a few message-shaped calls: apply a mutation, subscribe to a resource's deltas, query, and close a subscription. Their Rust mutation and delta types are the schema that UI, CLI/API, external agents and sync share, so replacing the bridge touches only these calls (ADR-0216).
-3. The bridge carries bounded deltas addressed by stable IDs and a per-resource sequence, for example `BlockDelta { block_id, seq, op }`. It never carries a whole Page tree, a whole Database or an unbounded list. Opening a View transfers one bounded snapshot of what its viewport needs.
-4. Rust pushes updates as asynchronous streams and shares one producer per resource across synchronized Views. When the UI falls behind, Rust coalesces pending deltas per resource to the latest sequence instead of queueing every intermediate state; a consumer that detects a sequence gap requests a fresh bounded snapshot. The agent surface's bridge gathers streaming text for 50 ms, as T3 Code batches its stream, and sends anything else at once; flutter_rust_bridge's sink does not wait for Dart, so a stalled isolate still queues what was sent, and coalescing while the UI falls behind is not yet built for the agent stream.
+3. The bridge carries bounded deltas addressed by stable IDs and a per-resource sequence, for example `BlockDelta { block_id, seq, op }`. It never carries a whole Page tree, a whole Database or an unbounded list. Opening a View transfers one bounded snapshot of what its viewport needs. The Workspace calls send a change as its resource and sequence only, and the reader then queries the window it shows, at most 500 items.
+4. Rust pushes updates as asynchronous streams and shares one producer per resource across synchronized Views. When the UI falls behind, Rust coalesces pending deltas per resource to the latest sequence instead of queueing every intermediate state; a consumer that detects a sequence gap requests a fresh bounded snapshot. The agent surface's bridge gathers streaming text for 50 ms, as T3 Code batches its stream, and sends anything else at once; flutter_rust_bridge's sink does not wait for Dart, so a stalled isolate still queues what was sent, and coalescing while the UI falls behind is not yet built for the agent stream. The Workspace calls send each change at once, without coalescing yet.
 
 ### Rendering
 
@@ -48,7 +48,7 @@ flowchart TD
 ### Resources
 
 13. Database Views read windowed pages sized to the viewport. Sorting, filtering, grouping and aggregation run in Rust against indexes; Charts and Formulas receive computed results, not source rows.
-14. Every stream subscription, native handle and Dart listener has exactly one owner, normally the View widget, and is released when that owner is disposed or its Page closes. Cancelling a Dart stream drops the corresponding Rust producer.
+14. Every stream subscription, native handle and Dart listener has exactly one owner, normally the View widget, and is released when that owner is disposed or its Page closes. Cancelling a Dart stream drops the corresponding Rust producer; for the Workspace calls, `follow` in the app closes the subscription. A Page that no subscription follows leaves memory after each call, so the app follows the Pages it shows and edits.
 
 ### Storage
 
