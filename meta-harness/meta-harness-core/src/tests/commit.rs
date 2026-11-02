@@ -94,6 +94,54 @@ fn commit_includes_selected_files_hidden_by_index_marks() {
 }
 
 #[test]
+fn commit_plan_detects_partial_staging_without_changing_index_marks() {
+    run(async {
+        for marks in [
+            &[][..],
+            &["--assume-unchanged"][..],
+            &["--skip-worktree"][..],
+            &["--assume-unchanged", "--skip-worktree"][..],
+        ] {
+            let repo = Repo::new("commit-plan-marked-staging");
+            repo.write("a.txt", "staged edit\n");
+            repo.write("excluded.txt", "staged only\n");
+            repo.git(&["add", "a.txt", "excluded.txt"]);
+            for mark in marks {
+                repo.git(&["update-index", mark, "a.txt"]);
+            }
+            repo.write("a.txt", "whole file with later edit\n");
+            let index = std::fs::read(repo.path().join(".git/index")).unwrap();
+            let flags = repo.git(&["ls-files", "-v", "a.txt"]);
+            let plan = Checkpoints::new(repo.path())
+                .commit_plan(&[])
+                .await
+                .unwrap();
+            assert!(
+                plan.files
+                    .iter()
+                    .find(|file| file.change.path == "a.txt")
+                    .unwrap()
+                    .staged_partly,
+                "{marks:?}"
+            );
+            assert!(
+                !plan
+                    .files
+                    .iter()
+                    .find(|file| file.change.path == "excluded.txt")
+                    .unwrap()
+                    .staged_partly
+            );
+            assert_eq!(
+                std::fs::read(repo.path().join(".git/index")).unwrap(),
+                index
+            );
+            assert_eq!(repo.git(&["ls-files", "-v", "a.txt"]), flags);
+        }
+    });
+}
+
+#[test]
 fn commit_creates_and_switches_a_branch_and_commits_deletions() {
     run(async {
         let repo = Repo::new("commit-new-branch");

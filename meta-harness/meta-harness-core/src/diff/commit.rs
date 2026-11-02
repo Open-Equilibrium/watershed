@@ -106,10 +106,12 @@ impl WorkingTree {
     }
 
     pub(crate) async fn unstaged_paths(&self) -> Result<HashSet<String>, DiffError> {
+        let _busy = self.busy.lock().await;
+        let index = self.copy_index().await?;
         Ok(nul_paths(
             &process::git_path_output(
                 &self.root,
-                &[],
+                &self.env(&index),
                 &["diff", "--name-only", "--no-renames", "-z"],
             )
             .await?,
