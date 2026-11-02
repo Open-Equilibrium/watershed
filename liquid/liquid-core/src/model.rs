@@ -7,7 +7,7 @@
 //!                       views: { <view>: { block, sort, deleted } } }
 //! ```
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use automerge::transaction::Transactable;
 use automerge::{
@@ -234,23 +234,6 @@ pub(crate) fn pages(doc: &AutoCommit) -> Vec<PageEntry> {
         tree.push(entry);
     }
     tree
-}
-
-pub(crate) fn views(doc: &AutoCommit) -> Vec<View> {
-    let blocks: HashSet<String> = sorted(doc, BLOCKS)
-        .into_iter()
-        .map(|entry| entry.id)
-        .collect();
-    sorted(doc, VIEWS)
-        .into_iter()
-        .filter_map(|entry| {
-            let block = entry.get(BLOCK).filter(|block| blocks.contains(*block))?;
-            Some(View {
-                id: ViewId::stored(&entry.id),
-                block: BlockId::stored(block),
-            })
-        })
-        .collect()
 }
 
 pub(crate) fn text(doc: &AutoCommit, block: &str) -> Option<String> {
