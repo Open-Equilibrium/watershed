@@ -47,6 +47,150 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  testWidgets('equal Git polls keep the uncommitted patch and scroll position', (
+    tester,
+  ) async {
+    final backend = FakeBackend()
+      ..git = gitStatusOf(changed: 1)
+      ..changed = [
+        const BridgeFileChange(
+          path: 'a.txt',
+          shown: 'a.txt',
+          status: BridgeChangeStatus.added,
+          added: 200,
+          removed: 0,
+        ),
+      ]
+      ..patches = {
+        'a.txt':
+            '@@ -0,0 +1,200 @@\n${List.generate(200, (i) => '+line $i').join('\n')}\n',
+      };
+    final state = await show(tester, backend);
+    await state.showTurns(const UncommittedChanges());
+    await tester.pumpAndSettle();
+    final pane = find.byWidgetPredicate(
+      (widget) => widget is ListView && widget.controller != null,
+    );
+    final scroll = tester.widget<ListView>(pane).controller!;
+    scroll.jumpTo(400);
+    await tester.pumpAndSettle();
+    final reads = backend.calls
+        .where((call) => call == 'uncommitted patch a.txt')
+        .length;
+    await state.git.refresh();
+    await tester.pumpAndSettle();
+    expect(
+      backend.calls.where((call) => call == 'uncommitted patch a.txt'),
+      hasLength(reads),
+    );
+    expect(scroll.offset, 400);
+    // A real status change re-reads the file but the same comparison keeps its place.
+    backend.git = gitStatusOf(changed: 1, ahead: 1);
+    await state.git.refresh();
+    await tester.pumpAndSettle();
+    expect(
+      backend.calls.where((call) => call == 'uncommitted patch a.txt'),
+      hasLength(reads + 1),
+    );
+    expect(scroll.offset, 400);
+  });
+
+  testWidgets('an edited uncommitted revision replaces a pending older patch', (
+    tester,
+  ) async {
+    final backend = FakeBackend()
+      ..git = gitStatusOf(changed: 1)
+      ..changed = [
+        const BridgeFileChange(
+          path: 'a.txt',
+          shown: 'a.txt',
+          status: BridgeChangeStatus.modified,
+          added: 1,
+          removed: 1,
+        ),
+      ]
+      ..patches = {'a.txt': '@@ -1 +1 @@\n-old\n+before\n'};
+    final state = await show(tester, backend);
+    backend.patchGate = Completer<void>();
+    await state.showTurns(const UncommittedChanges());
+    await tester.pump();
+    backend
+      ..uncommittedRevision = 'edited'
+      ..patches = {'a.txt': '@@ -1 +1 @@\n-old\n+after\n'};
+    await state.git.refresh();
+    await tester.pump();
+    backend.patchGate!.complete();
+    await tester.pumpAndSettle();
+    expect(find.textContaining('before', findRichText: true), findsNothing);
+    expect(find.textContaining('after', findRichText: true), findsWidgets);
+    await state.git.refresh();
+    await tester.pumpAndSettle();
+    expect(find.textContaining('after', findRichText: true), findsWidgets);
+  });
+
+  testWidgets('equal Git summaries refresh edited uncommitted contents', (
+    tester,
+  ) async {
+    final backend = FakeBackend()
+      ..git = gitStatusOf(changed: 1)
+      ..changed = [
+        const BridgeFileChange(
+          path: 'a.txt',
+          shown: 'a.txt',
+          status: BridgeChangeStatus.modified,
+          added: 1,
+          removed: 1,
+        ),
+      ]
+      ..patches = {'a.txt': '@@ -1 +1 @@\n-old\n+before\n'};
+    final state = await show(tester, backend);
+    await state.showTurns(const UncommittedChanges());
+    await tester.pumpAndSettle();
+    expect(find.textContaining('before', findRichText: true), findsWidgets);
+    backend
+      ..uncommittedRevision = 'edited'
+      ..patches = {'a.txt': '@@ -1 +1 @@\n-old\n+after\n'};
+    await state.git.refresh();
+    await tester.pumpAndSettle();
+    expect(find.textContaining('before', findRichText: true), findsNothing);
+    expect(find.textContaining('after', findRichText: true), findsWidgets);
+  });
+
+  testWidgets(
+    'Uncommitted changes works before a finished turn and honors whitespace',
+    (tester) async {
+      final backend = FakeBackend()
+        ..turnList = []
+        ..changed = [
+          BridgeFileChange(
+            path: 'new.txt',
+            shown: 'new.txt',
+            status: BridgeChangeStatus.added,
+            added: 1,
+            removed: 0,
+          ),
+        ]
+        ..changedWithoutWhitespace = []
+        ..patches = {'new.txt': '@@ -0,0 +1 @@\n+new\n'};
+      final settings = DiffSettingsController();
+      final state = await show(tester, backend, settings: settings);
+      await state.git.refresh();
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Choose the turn'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Uncommitted changes'));
+      await tester.pumpAndSettle();
+      expect(find.text('new.txt'), findsWidgets);
+      expect(find.textContaining('new', findRichText: true), findsWidgets);
+      expect(backend.calls, contains('uncommitted patch new.txt'));
+      await state.showTurns(const UncommittedChanges());
+      state.hideWhitespace.value = true;
+      await tester.pumpAndSettle();
+      expect(backend.calls, contains('uncommitted changes without whitespace'));
+      expect(find.text('No uncommitted changes'), findsOneWidget);
+    },
+  );
+
   testWidgets(
     'lists changed files as folders and shows the selected file\'s diff',
     (tester) async {

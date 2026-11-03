@@ -14,7 +14,10 @@ use std::time::{Duration, Instant};
 
 use tokio::sync::watch;
 
-use crate::checkout::{Alone, RETRY, Running};
+mod git;
+pub use git::{CommitFile, CommitPlan};
+
+use crate::checkout::{Alone, Checkout, RETRY, Running};
 use crate::diff::{
     Branch, BranchTarget, ChangeStatus, Changes, DiffError, FileChange, GitStatus, Stash,
     Whitespace, WorkingTree,
@@ -134,6 +137,7 @@ pub struct Checkpoints {
     /// The project once opened, or why it could not be.
     tree: tokio::sync::Mutex<Option<Result<Arc<WorkingTree>, Unopened>>>,
     timeout: Duration,
+    attribution_timeout: Duration,
     /// Tells commands in progress that the checkpoints closed.
     closed: watch::Sender<bool>,
     /// Checkpoints are taken one after another; one waiting for its turn does not count its wait
@@ -166,6 +170,7 @@ impl Checkpoints {
             dir: dir.to_owned(),
             tree: tokio::sync::Mutex::new(None),
             timeout,
+            attribution_timeout: timeout,
             closed: watch::Sender::new(false),
             captures: tokio::sync::Mutex::new(()),
             running: std::sync::Mutex::new(None),
@@ -190,18 +195,39 @@ impl Checkpoints {
     /// Takes `checkpoint` of the project as it is now. It can take a while in a large project.
     /// From a turn's start to its end, the session's agent counts as running in the checkout,
     /// even when its snapshot fails; a turn whose checkout guard cannot be acquired must not
-    /// start (D-080). A turn's start waits for a revert in progress.
+    /// start. Outside Git the guard belongs to the canonical folder in system temporary storage;
+    /// a turn's start waits for a revert or initialization in progress.
     pub async fn capture(&self, checkpoint: &Checkpoint) -> Result<(), DiffError> {
         let reference = checkpoint.reference()?;
-        let tree = self.tree().await?;
+        let mut tree = Err(DiffError::Closed);
         if checkpoint.phase == Phase::Start {
             // A start whose run never settled ends that mark first, so it removes no name the
             // new one holds.
             self.running.lock().expect("running lock").take();
             let running = self
-                .until_closed(tree.checkout().run(&checkpoint.session, || {
-                    self.waiting.send_replace(true);
-                }))
+                .until_closed(async {
+                    // Always cross Initialize's lock before opening Git: its directory may
+                    // already exist while initialization still owns the folder.
+                    let folder = Checkout::folder(&self.dir)?
+                        .run(&checkpoint.session, || {
+                            self.waiting.send_replace(true);
+                        })
+                        .await?;
+                    tree = self.tree().await;
+                    match &tree {
+                        Ok(tree) => {
+                            tree.checkout()
+                                .run(&checkpoint.session, || {
+                                    self.waiting.send_replace(true);
+                                })
+                                .await
+                        }
+                        Err(DiffError::NotARepository) => Ok(folder),
+                        Err(_) => {
+                            Err(std::mem::replace(&mut tree, Err(DiffError::Closed)).unwrap_err())
+                        }
+                    }
+                })
                 .await;
             // Back to not waiting, telling only if it waited.
             self.waiting.send_if_modified(std::mem::take);
@@ -213,12 +239,14 @@ impl Checkpoints {
                 return Err(DiffError::Closed);
             }
             *slot = Some((checkpoint.clone(), running));
+        } else {
+            tree = self.tree().await;
         }
         let captured = async {
             let _turn = self
                 .until_closed(async { Ok(self.captures.lock().await) })
                 .await?;
-            self.bounded(tree.checkpoint(&reference)).await.map(drop)
+            self.bounded(tree?.checkpoint(&reference)).await.map(drop)
         }
         .await;
         if checkpoint.phase == Phase::End {
@@ -547,6 +575,11 @@ impl Checkpoints {
         self.timeout = timeout;
     }
 
+    #[cfg(test)]
+    pub(crate) fn set_attribution_timeout(&mut self, timeout: Duration) {
+        self.attribution_timeout = timeout;
+    }
+
     /// Holds the turn of captures, as a capture in progress does.
     #[cfg(test)]
     pub(crate) async fn hold(&self) -> tokio::sync::MutexGuard<'_, ()> {
@@ -577,7 +610,7 @@ impl Checkpoints {
     /// The project, opened on first use.
     async fn tree(&self) -> Result<Arc<WorkingTree>, DiffError> {
         let mut tree = self.tree.lock().await;
-        if tree.is_none() {
+        if tree.is_none() || matches!(tree.as_ref(), Some(Err(Unopened::OutsideGit))) {
             let opened = self.bounded(WorkingTree::open(&self.dir)).await;
             *tree = Some(match opened {
                 Ok(opened) => Ok(Arc::new(opened)),
@@ -609,10 +642,10 @@ impl Checkpoints {
     /// project's hooks and filters, which can take long, and stopping Git midway would leave
     /// its lock and a half-switched checkout, so it runs to its end, as in a terminal, even when
     /// its caller stops waiting or the checkpoints close.
-    async fn user_write<F, W>(&self, write: F) -> Result<(), DiffError>
+    async fn user_write<T: Send + 'static, F, W>(&self, write: F) -> Result<T, DiffError>
     where
         F: FnOnce(Arc<WorkingTree>) -> W,
-        W: Future<Output = Result<(), DiffError>> + Send + 'static,
+        W: Future<Output = Result<T, DiffError>> + Send + 'static,
     {
         let tree = self.tree().await?;
         let alone = tree.checkout().alone().await?;

@@ -322,7 +322,7 @@ impl Session {
             replies: Some(HashMap::new()),
             ..Shared::default()
         })));
-        tokio::spawn(write(stdin, writes));
+        let input_writer = tokio::spawn(write(stdin, writes));
         let checkpoints = Arc::new(Checkpoints::new(&command.cwd));
         let (captures, requests) = mpsc::channel(CAPTURE_BUFFER);
         tokio::spawn(capture(checkpoints.clone(), writer.clone(), requests));
@@ -342,6 +342,7 @@ impl Session {
             kill_requested: false,
             error_output,
             error_reader,
+            input_writer,
             captures,
             checkpoints: checkpoints.clone(),
         };

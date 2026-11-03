@@ -10,6 +10,7 @@
 //! ```
 
 use std::ffi::OsString;
+use std::os::unix::fs::DirBuilderExt;
 use std::path::Path;
 use std::time::Duration;
 
@@ -97,8 +98,12 @@ async fn reopen(file: &Path, entries: usize) {
 
 /// A Git project with one commit for pi to work in.
 fn project(dir: &Path) {
+    std::fs::DirBuilder::new()
+        .mode(0o700)
+        .create(dir)
+        .expect("fresh private session folder");
     let project = dir.join("project");
-    std::fs::create_dir_all(&project).expect("project");
+    std::fs::create_dir(&project).expect("project");
     std::fs::write(project.join("a.txt"), "a\n").expect("file");
     for args in [
         &["init", "-q"][..],
@@ -235,5 +240,42 @@ async fn check() {
             }
             _ => println!("{event:?}"),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::os::unix::fs::{DirBuilderExt, PermissionsExt, symlink};
+
+    #[test]
+    fn project_setup_is_private_and_refuses_preexisting_paths() {
+        let root = std::env::temp_dir().join(format!("pi-check-test-{}", std::process::id()));
+        std::fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&root)
+            .expect("fresh test directory");
+        let occupied = root.join("occupied");
+        let target = root.join("target");
+        std::fs::create_dir(&occupied).expect("occupied directory");
+        std::fs::create_dir(&target).expect("target directory");
+        std::fs::write(target.join("a.txt"), "keep\n").expect("existing file");
+        symlink(&target, occupied.join("project")).expect("project symlink");
+
+        let rejected = std::panic::catch_unwind(|| super::project(&occupied)).is_err();
+        let contents = std::fs::read_to_string(target.join("a.txt")).expect("target contents");
+        let fresh = root.join("fresh");
+        super::project(&fresh);
+        let mode = std::fs::metadata(&fresh)
+            .expect("fresh project directory")
+            .permissions()
+            .mode();
+        std::fs::remove_dir_all(&root).expect("remove test directory");
+
+        assert!(rejected, "setup must refuse an existing scratch directory");
+        assert_eq!(
+            contents, "keep\n",
+            "setup must not follow a project symlink"
+        );
+        assert_eq!(mode & 0o777, 0o700, "the scratch directory must be private");
     }
 }

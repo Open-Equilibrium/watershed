@@ -9,6 +9,7 @@
 //! ```
 
 use std::fmt::Write as _;
+use std::path::Path;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
@@ -31,24 +32,10 @@ fn main() {
     std::fs::create_dir_all(&dir).expect("temporary directory");
     let stream = dir.join("stream.jsonl");
     std::fs::write(&stream, agent_output()).expect("stream file");
-    // The agent confirms that Watershed's extension is loaded when the session starts and
-    // before the message, as the session requires.
-    let script = format!(
-        "IFS= read -r line\nprintf '%s\\n' '{}'\nIFS= read -r line\nprintf '%s\\n' '{}'\nIFS= read -r line\ncat '{}'\nIFS= read -r line || exit 0",
-        gate(1),
-        gate(2),
-        stream.display()
-    );
+    let command = agent_command(&dir, &stream);
     let mut elapsed = Vec::new();
     for sample in 0..SAMPLES {
-        let session = AgentSession::launch(AgentCommand {
-            program: "/bin/sh".into(),
-            args: vec!["-c".into(), script.clone().into()],
-            extension: "/watershed.ts".into(),
-            session: None,
-            cwd: dir.clone(),
-        })
-        .expect("agent starts");
+        let session = AgentSession::launch(command.clone()).expect("agent starts");
         let (sender, receiver) = mpsc::channel();
         session
             .forward(move |event| sender.send(event).is_ok())
@@ -90,6 +77,67 @@ fn main() {
         rank(&elapsed, 0.50),
         rank(&elapsed, 0.95),
         elapsed[elapsed.len() - 1],
+    );
+}
+
+fn agent_command(dir: &Path, stream: &Path) -> AgentCommand {
+    // The agent confirms that Watershed's extension is loaded when the session starts and
+    // before the message, as the session requires.
+    let script = format!(
+        "IFS= read -r line\nprintf '%s\\n' '{}'\nIFS= read -r line\nprintf '%s\\n' '{}'\nIFS= read -r line\ncat \"$1\"\nIFS= read -r line || exit 0",
+        gate(1),
+        gate(2),
+    );
+    AgentCommand {
+        program: "/bin/sh".into(),
+        args: vec![
+            "-c".into(),
+            script.into(),
+            "stream-observe".into(),
+            stream.as_os_str().to_owned(),
+        ],
+        extension: "/watershed.ts".into(),
+        session: None,
+        cwd: dir.to_path_buf(),
+    }
+}
+
+#[test]
+fn stream_script_handles_quoted_temporary_paths() {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
+    let dir = std::env::temp_dir().join(format!("liquid-stream 'quoted' {}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("temporary directory");
+    let stream = dir.join("stream.jsonl");
+    let text = agent_output();
+    std::fs::write(&stream, &text).expect("stream file");
+    let command = agent_command(&dir, &stream);
+    let mut child = Command::new(command.program)
+        .args(command.args)
+        .current_dir(command.cwd)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("script starts");
+    child
+        .stdin
+        .take()
+        .expect("piped input")
+        .write_all(b"gate\ngate\nprompt\n")
+        .expect("script input");
+    let output = child.wait_with_output().expect("script ends");
+    std::fs::remove_dir_all(&dir).expect("remove temporary directory");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        output.stdout == format!("{}\n{}\n{text}", gate(1), gate(2)).as_bytes(),
+        "the script did not return the gates and whole stream: {}",
+        String::from_utf8_lossy(&output.stderr)
     );
 }
 

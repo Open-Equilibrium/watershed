@@ -59,6 +59,8 @@ class _DiffViewState extends State<DiffView> {
 
   /// Why the selected file shows no lines, if it shows none.
   String? _note;
+  String? _shownPath;
+  String? _shownComparison;
 
   static const _textless =
       'No text changes to show, as for a binary file or a new file mode.';
@@ -83,6 +85,8 @@ class _DiffViewState extends State<DiffView> {
     widget.state.changed.addListener(_show);
     widget.state.shown.addListener(_rebuild);
     widget.state.shownScope.addListener(_rebuild);
+    widget.state.git.status.addListener(_rebuild);
+    unawaited(widget.state.git.refresh());
     widget.state.shownStash.addListener(_show);
     widget.state.git.stash.addListener(_rebuild);
     // Opening the tab reads the turns again, so it shows the latest one.
@@ -100,6 +104,7 @@ class _DiffViewState extends State<DiffView> {
     widget.state.changed.removeListener(_show);
     widget.state.shown.removeListener(_rebuild);
     widget.state.shownScope.removeListener(_rebuild);
+    widget.state.git.status.removeListener(_rebuild);
     widget.state.shownStash.removeListener(_show);
     widget.state.git.stash.removeListener(_rebuild);
     _focus.dispose();
@@ -129,8 +134,10 @@ class _DiffViewState extends State<DiffView> {
     // The selection moves at once, so quick arrow presses each move on from it.
     setState(() {
       _selected = change;
-      _lines = const [];
-      _note = null;
+      if (change?.path != _shownPath || _comparison != _shownComparison) {
+        _lines = const [];
+        _note = null;
+      }
     });
     if (_loading) return;
     _loading = true;
@@ -139,6 +146,7 @@ class _DiffViewState extends State<DiffView> {
       while (mounted) {
         final wanted = _selected;
         final comparison = _comparison;
+        final revision = _revision;
         if (wanted == null) return;
         // Why the file shows no lines: a diff that could not be read, such as one over Git's
         // output limit, or a change without text.
@@ -157,22 +165,33 @@ class _DiffViewState extends State<DiffView> {
             'Could not show the changes of ${wanted.shown}: $error',
           );
         }
-        // A file or turn chosen meanwhile, even with the same name and counts, reads again.
-        if (!mounted || _selected != wanted || _comparison != comparison) {
+        // A newer selection, comparison or uncommitted revision reads again.
+        if (!mounted ||
+            _selected != wanted ||
+            _comparison != comparison ||
+            _revision != revision) {
           continue;
         }
+        final keepPosition =
+            _shownPath == wanted.path && _shownComparison == comparison;
         setState(() {
+          _shownPath = wanted.path;
+          _shownComparison = comparison;
           _lines = lines;
           _note = note;
         });
         // Another file starts at its top.
-        if (_scroll.hasClients) _scroll.jumpTo(0);
+        if (!keepPosition && _scroll.hasClients) _scroll.jumpTo(0);
         return;
       }
     } finally {
       _loading = false;
     }
   }
+
+  String? get _revision => widget.state.shownScope.value is UncommittedChanges
+      ? widget.state.uncommittedRevision
+      : null;
 
   /// What the shown patch compares: the turns or stash and whether whitespace is hidden.
   String get _comparison {
@@ -330,7 +349,11 @@ class _DiffViewState extends State<DiffView> {
     final branch = scope is StashedChanges
         ? snapshot?.branch
         : widget.state.git.status.value?.branch;
-    if (shown == null && stash == null) return null;
+    if (shown == null &&
+        stash == null &&
+        widget.state.git.status.value == null) {
+      return null;
+    }
     final files = widget.state.changed.value;
     return _TurnHeader(
       menuKey: _turnMenu,
@@ -440,24 +463,24 @@ class _DiffViewState extends State<DiffView> {
     }
     if (_changes.isEmpty) {
       final scope = widget.state.shownScope.value;
-      final all = scope is AllTurns;
-      final turns = all ? 'these turns' : 'this turn';
-      final title = scope is StashedChanges
-          ? 'No stashed changes'
-          : 'No changes in $turns';
+      final title = switch (scope) {
+        UncommittedChanges() => 'No uncommitted changes',
+        StashedChanges() => 'No stashed changes',
+        AllTurns() => 'No changes in these turns',
+        _ => 'No changes in this turn',
+      };
       return widget.settings.value.hideWhitespace
           ? _empty(
               context,
               '$title with whitespace hidden',
               '${Fixed.hideWhitespace.display} shows them.',
             )
-          : _empty(
-              context,
-              title,
-              scope is StashedChanges
-                  ? 'The stash contains no changed files.'
-                  : 'The project was the same at its end as at its start.',
-            );
+          : _empty(context, title, switch (scope) {
+              UncommittedChanges() =>
+                'The checkout is the same as its last commit.',
+              StashedChanges() => 'The stash contains no changed files.',
+              _ => 'The project was the same at its end as at its start.',
+            });
     }
     final added = _changes.fold(0, (sum, change) => sum + change.added);
     final removed = _changes.fold(0, (sum, change) => sum + change.removed);
@@ -1045,7 +1068,10 @@ class _TurnHeader extends StatelessWidget {
     final ended = finished(turns);
     final String about;
     final String label;
-    if (stashed) {
+    if (scope is UncommittedChanges) {
+      label = 'Uncommitted changes';
+      about = 'Compared with the checkout’s last commit';
+    } else if (stashed) {
       label = 'Stashed changes';
       about =
           'Left on $branch at ${formatClockMs(stash.createdMs)} · Restore moves the stashed '
@@ -1062,8 +1088,10 @@ class _TurnHeader extends StatelessWidget {
           : '“${turn.prompt}” · $since–$until · compared with the project when the turn '
                 'started';
     } else {
-      label = 'No finished turn yet';
-      about = 'This menu shows the branch’s stashed changes.';
+      label = 'Choose changes';
+      about = stash == null
+          ? 'Compare uncommitted changes.'
+          : 'Compare uncommitted changes or the branch’s stashed changes.';
     }
     final small = TextStyle(color: ws.textFaint, fontSize: WsMetrics.fsSmall);
     String counts(BridgeTurn turn) => [
@@ -1119,8 +1147,12 @@ class _TurnHeader extends StatelessWidget {
             ].join(' · '),
           ),
         ],
+        if (ended.isNotEmpty && (git.value != null || stash != null))
+          const PopupMenuDivider(),
+        if (git.value != null) ...[
+          item(const UncommittedChanges(), 'Uncommitted changes', ''),
+        ],
         if (stash != null) ...[
-          if (ended.isNotEmpty) const PopupMenuDivider(),
           item(
             const StashedChanges(),
             'Stashed changes',

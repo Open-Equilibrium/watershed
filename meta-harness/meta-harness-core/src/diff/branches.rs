@@ -22,6 +22,12 @@ pub struct GitStatus {
     pub behind: u64,
     /// Files that differ from the last commit, untracked ones Git does not ignore included.
     pub changed: u64,
+    /// The default branch advertised by the upstream remote (origin without an upstream).
+    pub default_branch: Option<String>,
+    /// Whether Git records a merge in progress.
+    pub merging: bool,
+    /// Files with unresolved index conflicts.
+    pub conflicts: Vec<String>,
 }
 
 /// A local or remote branch.
@@ -92,6 +98,9 @@ impl WorkingTree {
             ahead: 0,
             behind: 0,
             changed: 0,
+            default_branch: None,
+            merging: self.resolve("MERGE_HEAD").await?.is_some(),
+            conflicts: Vec::new(),
         };
         let mut records = output
             .split(|byte| *byte == 0)
@@ -125,6 +134,12 @@ impl WorkingTree {
                 }
                 continue;
             }
+            if record.starts_with(b"u ") {
+                let record = process::ref_text(record)?;
+                if let Some(path) = record.splitn(11, ' ').nth(10) {
+                    status.conflicts.push(path.to_owned());
+                }
+            }
             // A renamed file's record is followed by its old path.
             if record.starts_with(b"2 ") {
                 records.next();
@@ -133,7 +148,47 @@ impl WorkingTree {
                 status.changed += 1;
             }
         }
+        status.default_branch = self
+            .default_branch(status.branch.as_deref())
+            .await
+            .unwrap_or(None);
         Ok(status)
+    }
+
+    async fn default_branch(&self, branch: Option<&str>) -> Result<Option<String>, DiffError> {
+        let remote = match branch {
+            Some(branch) => {
+                git_ref_output(
+                    &self.root,
+                    &[
+                        "for-each-ref",
+                        "--format=%(upstream:remotename)",
+                        &format!("refs/heads/{branch}"),
+                    ],
+                )
+                .await?
+            }
+            None => String::new(),
+        };
+        let remote = match remote.trim() {
+            "." => return Ok(None),
+            "" => "origin",
+            remote => remote,
+        };
+        let prefix = format!("refs/remotes/{remote}/");
+        match git_ref_output(
+            &self.root,
+            &["symbolic-ref", "--quiet", &format!("{prefix}HEAD")],
+        )
+        .await
+        {
+            Ok(reference) => Ok(reference
+                .trim_end_matches('\n')
+                .strip_prefix(&prefix)
+                .map(str::to_owned)),
+            Err(DiffError::Git(output)) if output.is_empty() => Ok(None),
+            Err(error) => Err(error),
+        }
     }
 
     /// The local branches, then the remote ones no local branch tracks, each group most

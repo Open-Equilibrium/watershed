@@ -28,6 +28,11 @@ class AllTurns extends DiffScope {
   const AllTurns();
 }
 
+/// The checkout compared with its last commit, including untracked files.
+class UncommittedChanges extends DiffScope {
+  const UncommittedChanges();
+}
+
 /// The stashed changes of the branch checked out (approved Git mockups).
 class StashedChanges extends DiffScope {
   const StashedChanges();
@@ -58,7 +63,7 @@ Compared? compared(List<BridgeTurn> turns, DiffScope scope) {
           ].firstOrNull ??
           latest,
     AllTurns() => (from: turns.first, to: ended.last),
-    StashedChanges() => null,
+    StashedChanges() || UncommittedChanges() => null,
   };
 }
 

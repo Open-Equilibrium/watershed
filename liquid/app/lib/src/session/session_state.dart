@@ -40,6 +40,9 @@ class SessionState {
   SessionState(this._backend) {
     _subscription = _backend.events().listen(_apply);
     hideWhitespace.addListener(() => unawaited(readChanges()));
+    git.refreshed.addListener(() {
+      if (diffScope.value is UncommittedChanges) unawaited(readChanges());
+    });
     // Stashed changes restored or discarded leave the Diff tab.
     git.stash.addListener(() {
       if (diffScope.value is StashedChanges) unawaited(readChanges());
@@ -162,6 +165,9 @@ class SessionState {
 
   /// Counts session switches; a chat read started before the latest one is dropped.
   int _generation = 0;
+
+  /// Identifies the session whose asynchronous UI work is still current.
+  int get generation => _generation;
 
   /// Switches only while the agent is idle, then shows the session it continues.
   Future<void> _switch(
@@ -384,6 +390,12 @@ class SessionState {
   /// and its count show them.
   final changed = ValueNotifier<List<BridgeFileChange>?>(null);
 
+  /// Equal polls keep the shown patch, but content, baseline or display changes reload it.
+  (String, BridgeGitStatus?, bool)? _uncommittedRead;
+
+  /// Tree identities of the published uncommitted list, also validating pending patches.
+  String? get uncommittedRevision => _uncommittedRead?.$1;
+
   /// Why the Diff tab shows no files, with its heading; null while it shows a list.
   final changesProblem = ValueNotifier<({String title, String text})?>(null);
 
@@ -394,7 +406,9 @@ class SessionState {
   /// Shows `scope` in the Diff tab.
   Future<void> showTurns(DiffScope scope) async {
     diffScope.value = scope;
-    if (scope is StashedChanges) await git.refresh();
+    if (scope is StashedChanges || scope is UncommittedChanges) {
+      await git.refresh();
+    }
     await readChanges();
   }
 
@@ -429,6 +443,26 @@ class SessionState {
       final read = await _backend.turns();
       if (generation != _generation) return;
       turns.value = read;
+      if (diffScope.value is UncommittedChanges) {
+        final whitespace = hideWhitespace.value;
+        final (revision, files) = await _backend.uncommittedChanges(
+          hideWhitespace: whitespace,
+        );
+        if (generation != _generation) return;
+        final identity = (revision, git.status.value, whitespace);
+        final publish =
+            _uncommittedRead != identity ||
+            shownScope.value is! UncommittedChanges ||
+            changesProblem.value != null ||
+            changed.value == null;
+        _uncommittedRead = identity;
+        reportRead('changes', null);
+        shownScope.value = const UncommittedChanges();
+        shown.value = null;
+        changesProblem.value = null;
+        if (publish) changed.value = files;
+        return;
+      }
       if (diffScope.value is StashedChanges) {
         final stash = git.stash.value;
         if (stash != null) {
@@ -524,8 +558,14 @@ class SessionState {
     text: 'Liquid could not capture the project: $failure',
   );
 
-  /// One file's unified diff between the shown checkpoints.
+  /// One file's unified diff for the shown Diff scope.
   Future<String> patch(String path) {
+    if (shownScope.value is UncommittedChanges) {
+      return _backend.uncommittedPatch(
+        path,
+        hideWhitespace: hideWhitespace.value,
+      );
+    }
     if (shownScope.value is StashedChanges) {
       final id = shownStash.value?.stash.id;
       if (id == null) return Future.value('');

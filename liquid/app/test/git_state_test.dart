@@ -22,6 +22,90 @@ void main() {
     );
   });
 
+  test('a completed commit reports failed inspection as a warning', () async {
+    backend.outcome = const BridgeGitOutcome(
+      kind: BridgeGitOutcomeKind.done,
+      files: [],
+      running: [],
+      detail: 'Could not inspect the completed commit: unreadable index',
+      commit: BridgeCommit(branch: 'main', subject: null, count: 1),
+    );
+    final result = await git.commit(['a.txt'], 'Subject', snapshot: 'snapshot');
+    expect(result!.kind, BridgeGitOutcomeKind.done);
+    expect(notices.single, (
+      BridgeLevel.warning,
+      'Committed 1 file on main. Could not inspect the completed commit: unreadable index',
+    ));
+  });
+
+  test('hook changes report only files left uncommitted', () async {
+    backend.outcome = BridgeGitOutcome(
+      kind: BridgeGitOutcomeKind.hookChanged,
+      files: const ['a.txt'],
+      running: const [],
+      detail: '',
+      commit: const BridgeCommit(branch: 'main', subject: 'Subject', count: 1),
+    );
+    await git.commit(['a.txt'], 'Subject', snapshot: 'snapshot');
+    expect(notices.single, (
+      BridgeLevel.warning,
+      'Committed 1 file on main: “Subject” A hook also changed a.txt, which stays uncommitted.',
+    ));
+  });
+
+  test(
+    'equal fresh status objects do not notify but real changes do',
+    () async {
+      var changes = 0;
+      git.status.addListener(() => changes++);
+      await git.refresh();
+      await git.refresh();
+      expect(changes, 1);
+      backend.git = gitStatusOf(changed: 2);
+      await git.refresh();
+      expect(changes, 2);
+    },
+  );
+
+  test('new branch failure says nothing was committed and names the created branch', () async {
+    backend.outcome = const BridgeGitOutcome(
+      kind: BridgeGitOutcomeKind.commitBranchFailed,
+      files: [],
+      running: [],
+      detail: 'hook refused',
+      commit: BridgeCommit(branch: 'feat', subject: null, count: 0),
+    );
+    await git.commit(
+      ['a.txt'],
+      'Subject',
+      snapshot: 'snapshot',
+      branch: 'feat',
+    );
+    expect(
+      notices.single.$2,
+      'Created and switched to feat; nothing was committed. hook refused',
+    );
+    expect(notices.single.$2, isNot(contains('null')));
+  });
+
+  test(
+    'several hook-changed files stay uncommitted after the success notice',
+    () async {
+      backend.outcome = const BridgeGitOutcome(
+        kind: BridgeGitOutcomeKind.hookChanged,
+        files: ['a.txt', 'b.txt'],
+        running: [],
+        detail: '',
+        commit: BridgeCommit(branch: 'main', subject: 'Subject', count: 2),
+      );
+      await git.commit(['a.txt', 'b.txt'], 'Subject', snapshot: 'snapshot');
+      expect(
+        notices.single.$2,
+        'Committed 2 files on main: “Subject” A hook also changed a.txt, b.txt, which stay uncommitted.',
+      );
+    },
+  );
+
   int fetches() => backend.calls.where((call) => call == 'fetch').length;
 
   testWidgets('a pending fetch leaves checkout polling active', (tester) async {
@@ -84,6 +168,43 @@ void main() {
       'two has stashed changes from 10:41; the Diff tab shows them.',
     ]);
   });
+
+  for (final kind in [
+    BridgeGitOutcomeKind.done,
+    BridgeGitOutcomeKind.hookFailed,
+  ]) {
+    test(
+      'a $kind switch with a failed refresh names the destination',
+      () async {
+        await git.refresh();
+        backend.git = gitStatusOf(branch: 'feature');
+        backend.gitError = 'status read failed';
+        backend.outcome = BridgeGitOutcome(
+          kind: kind,
+          files: const [],
+          running: const [],
+          detail: kind == BridgeGitOutcomeKind.hookFailed ? 'hook refused' : '',
+        );
+
+        await git.switchTo(
+          branchOf('feature'),
+          leaveChanges: false,
+          fromBranch: null,
+          replacingStash: null,
+        );
+
+        expect(git.problem.value, 'status read failed');
+        expect(notices.single, (
+          kind == BridgeGitOutcomeKind.done
+              ? BridgeLevel.info
+              : BridgeLevel.warning,
+          kind == BridgeGitOutcomeKind.done
+              ? 'Switched to feature.'
+              : 'Switched to feature. A hook failed after: hook refused',
+        ));
+      },
+    );
+  }
 
   testWidgets('a write waits for the latest read to publish its own switch', (
     tester,

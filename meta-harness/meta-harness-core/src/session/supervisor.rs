@@ -11,6 +11,7 @@ use serde_json::{Map, Value, json};
 use tokio::io::AsyncReadExt;
 use tokio::process::{Child, ChildStdout};
 use tokio::sync::{mpsc, oneshot};
+use tokio::time::Instant;
 
 use super::{CommandError, MAX_RECORD_BYTES, SessionEvent, State, Write, switched, ui_response};
 use crate::approval::{Allowance, needs_user};
@@ -29,6 +30,15 @@ const MAX_ERROR_OUTPUT: usize = 16 * 1024;
 /// keep it open.
 const ERROR_OUTPUT_WAIT: Duration = Duration::from_millis(500);
 
+// Two seconds lets ordinary final RPC writes drain without letting an inherited pipe hold
+// session completion indefinitely. Event delivery keeps its own backpressure after collection.
+const OUTPUT_DRAIN_WAIT: Duration = Duration::from_secs(2);
+
+enum Output {
+    Bytes(Vec<u8>),
+    CutOff,
+}
+
 /// Reads the agent's output until it exits, fails or is killed, then reports the exit.
 pub(super) struct Supervisor {
     pub(super) events: mpsc::Sender<SessionEvent>,
@@ -42,6 +52,7 @@ pub(super) struct Supervisor {
     /// The end of the agent's error output so far, and the task that reads it.
     pub(super) error_output: Arc<Mutex<Vec<u8>>>,
     pub(super) error_reader: tokio::task::JoinHandle<()>,
+    pub(super) input_writer: tokio::task::JoinHandle<()>,
     /// Checkpoint requests, taken one after another in the order the agent asked.
     pub(super) captures: mpsc::Sender<CheckpointRequest>,
     /// Closed once the agent is gone, so no capture outlives it.
@@ -55,34 +66,47 @@ impl Supervisor {
     pub(super) async fn run(
         mut self,
         mut child: Child,
-        mut stdout: ChildStdout,
+        stdout: ChildStdout,
         exit: oneshot::Sender<bool>,
     ) {
         let mut framer = LineFramer::new(MAX_RECORD_BYTES);
-        let mut buffer = vec![0; READ_BUFFER];
-        let mut exited = false;
+        let (output, mut reads) = mpsc::channel(1);
+        let (exited, drain) = oneshot::channel();
+        let mut exited = Some(exited);
+        let reader = tokio::spawn(read_output(stdout, output, drain));
+        let mut cut_off = false;
         let checkpoints = self.checkpoints.clone();
+        let input_writer = self.input_writer.abort_handle();
         let failure = 'read: loop {
             let read = watching(
-                self.unless_killed(stdout.read(&mut buffer)),
+                self.unless_killed(reads.recv()),
                 &mut child,
                 &mut exited,
                 &checkpoints,
+                &input_writer,
             )
             .await;
-            let Some(read) = read else {
+            let Some(Some(read)) = read else {
                 break None;
             };
             let frames = match read {
-                Ok(0) | Err(_) => break None,
-                Ok(length) => framer.push(&buffer[..length]),
+                Output::CutOff => {
+                    cut_off = true;
+                    break None;
+                }
+                Output::Bytes(bytes) => framer.push(&bytes),
             };
             for frame in frames {
                 let record = match frame {
                     Frame::Record(record) => record,
                     Frame::Oversized { start, .. } => {
-                        let skipped =
-                            watching(self.skip(&start), &mut child, &mut exited, &checkpoints);
+                        let skipped = watching(
+                            self.skip(&start),
+                            &mut child,
+                            &mut exited,
+                            &checkpoints,
+                            &input_writer,
+                        );
                         if !skipped.await {
                             break 'read None;
                         }
@@ -92,11 +116,39 @@ impl Supervisor {
                 let Ok(Value::Object(record)) = serde_json::from_slice::<Value>(&record) else {
                     break 'read Some("agent wrote a record that is not a JSON object".to_owned());
                 };
-                if !watching(self.handle(record), &mut child, &mut exited, &checkpoints).await {
+                if !watching(
+                    self.handle(record),
+                    &mut child,
+                    &mut exited,
+                    &checkpoints,
+                    &input_writer,
+                )
+                .await
+                {
                     break 'read None;
                 }
             }
         };
+        reader.abort();
+        let _ = reader.await;
+        // Keep the checkout guard until the process is gone, even when publishing its
+        // failure will wait for room in the event buffer.
+        let stop = failure.is_some() || self.kill_requested;
+        let status = if stop {
+            None
+        } else {
+            self.unless_killed(child.wait()).await
+        };
+        let status = match status {
+            Some(status) => status,
+            None => {
+                let _ = child.start_kill();
+                child.wait().await
+            }
+        };
+        let success = status.is_ok_and(|status| status.success());
+        self.input_writer.abort();
+        let _ = (&mut self.input_writer).await;
         {
             // Nothing is asked of a gone agent: open dialogs end with it, and their expiry
             // reports nothing after the exit.
@@ -111,31 +163,15 @@ impl Supervisor {
         // A capture in progress stops with its Git and the programs Git started, before the
         // exit is reported.
         self.checkpoints.close().await;
-        let stop = failure.is_some() || self.kill_requested;
-        if let Some(reason) = failure {
-            // A full event buffer must not keep a kill from ending the agent.
-            let events = self.events.clone();
-            let _ = self
-                .unless_killed(events.send(SessionEvent::Failed(reason)))
-                .await;
-        }
-        // An agent that closed its output may still run; a kill request ends the wait.
-        let status = if stop {
-            None
-        } else {
-            self.unless_killed(child.wait()).await
-        };
-        let status = match status {
-            Some(status) => status,
-            None => {
-                let _ = child.start_kill();
-                child.wait().await
-            }
-        };
-        let success = status.is_ok_and(|status| status.success());
         // Shutdown learns of the exit first; the event waits for buffer space.
         let _ = exit.send(success);
-        let _ = tokio::time::timeout(ERROR_OUTPUT_WAIT, &mut self.error_reader).await;
+        if tokio::time::timeout(ERROR_OUTPUT_WAIT, &mut self.error_reader)
+            .await
+            .is_err()
+        {
+            self.error_reader.abort();
+            let _ = (&mut self.error_reader).await;
+        }
         let error_output = {
             let kept = self
                 .error_output
@@ -143,6 +179,21 @@ impl Supervisor {
                 .unwrap_or_else(PoisonError::into_inner);
             String::from_utf8_lossy(&kept).trim().to_owned()
         };
+        if let Some(reason) = failure {
+            let events = self.events.clone();
+            let _ = self
+                .unless_killed(events.send(SessionEvent::Failed(reason)))
+                .await;
+        }
+        if cut_off {
+            let _ = self
+                .events
+                .send(SessionEvent::Agent(AgentEvent::Notification {
+                    level: NotificationLevel::Warning,
+                    message: "Some agent output may be missing.".to_owned(),
+                }))
+                .await;
+        }
         // No resolution can follow: one being reported finishes first.
         let mut ended = self.ended.lock().await;
         *ended = true;
@@ -400,33 +451,93 @@ impl Supervisor {
 }
 
 /// Runs `work` while watching for the agent's exit. Once the agent exited, the checkpoints close
-/// at once, so no capture outlives it, and `work` goes on: reading output a program the agent
-/// left behind still holds, or handing an event to a full buffer.
+/// at once, so no capture outlives it, input delivery ends and output collection gets its deadline.
+/// Already read records still finish delivery, even when the event buffer is full.
 async fn watching<F: Future>(
     work: F,
     child: &mut Child,
-    exited: &mut bool,
+    exited: &mut Option<oneshot::Sender<Instant>>,
     checkpoints: &Checkpoints,
+    input_writer: &tokio::task::AbortHandle,
 ) -> F::Output {
     let mut work = pin!(work);
-    if !*exited {
+    if exited.is_some() {
         let done = {
             let mut waiting = pin!(child.wait());
             poll_fn(|context| {
-                if let Poll::Ready(output) = work.as_mut().poll(context) {
-                    return Poll::Ready(Some(output));
+                if waiting.as_mut().poll(context).is_ready() {
+                    return Poll::Ready(None);
                 }
-                waiting.as_mut().poll(context).map(|_| None)
+                work.as_mut().poll(context).map(Some)
             })
             .await
         };
         if let Some(output) = done {
             return output;
         }
-        *exited = true;
+        if let Some(exited) = exited.take() {
+            let _ = exited.send(Instant::now() + OUTPUT_DRAIN_WAIT);
+        }
+        // A descendant may retain stdin without reading it. Dropping the writer's receiver
+        // releases queued automatic answers while already collected output finishes delivery.
+        input_writer.abort();
         checkpoints.close().await;
     }
     work.await
+}
+
+/// Streams with bounded backpressure while pi runs. After exit, collect independently of
+/// event delivery until EOF or the deadline, then close the pipe before forwarding the tail.
+/// This retains ordinary buffered output even when Liquid is slow to consume accepted events.
+async fn read_output(
+    mut stdout: ChildStdout,
+    output: mpsc::Sender<Output>,
+    mut exited: oneshot::Receiver<Instant>,
+) {
+    let mut buffer = vec![0; READ_BUFFER];
+    let (deadline, mut tail) = loop {
+        let length = match race(&mut exited, stdout.read(&mut buffer)).await {
+            Ok(Ok(deadline)) => break (deadline, Vec::new()),
+            Ok(Err(_)) | Err(Ok(0) | Err(_)) => return,
+            Err(Ok(length)) => length,
+        };
+        // Reserve before moving the bytes so cancellation at process exit keeps this chunk.
+        match race(&mut exited, output.reserve()).await {
+            Ok(Ok(deadline)) => break (deadline, vec![buffer[..length].to_vec()]),
+            Ok(Err(_)) | Err(Err(_)) => return,
+            Err(Ok(permit)) => permit.send(Output::Bytes(buffer[..length].to_vec())),
+        }
+    };
+    let deadline = tokio::time::sleep_until(deadline);
+    tokio::pin!(deadline);
+    let cut_off = loop {
+        match race(&mut deadline, stdout.read(&mut buffer)).await {
+            Ok(()) => break true,
+            Err(Ok(0) | Err(_)) => break false,
+            Err(Ok(length)) => tail.push(buffer[..length].to_vec()),
+        }
+    };
+    drop(stdout);
+    for bytes in tail {
+        if output.send(Output::Bytes(bytes)).await.is_err() {
+            return;
+        }
+    }
+    if cut_off {
+        let _ = output.send(Output::CutOff).await;
+    }
+}
+
+/// Waits for either future, polling `first` first so a busy pipe cannot starve a deadline.
+async fn race<A: Future, B: Future>(first: A, second: B) -> Result<A::Output, B::Output> {
+    let (mut first, mut second) = (pin!(first), pin!(second));
+    poll_fn(|context| {
+        if let Poll::Ready(output) = first.as_mut().poll(context) {
+            return Poll::Ready(Ok(output));
+        }
+        second.as_mut().poll(context).map(Err)
+    })
+    .await
 }
 
 /// Reads `reader` to its end and keeps the last [`MAX_ERROR_OUTPUT`] bytes in `kept`.

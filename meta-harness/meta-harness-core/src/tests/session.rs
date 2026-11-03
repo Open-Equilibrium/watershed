@@ -149,6 +149,65 @@ while :; do sleep 1; done"#,
 }
 
 #[test]
+fn a_protocol_failure_stops_the_process_before_releasing_its_checkout_guard() {
+    run(async {
+        let project = super::checkpoint::Repo::new("protocol-failure-guard");
+        let script = r#"printf '%s\n' "$$" > .git/agent-pid
+until [ -e .git/release ]; do sleep 0.02; done
+i=0
+while [ "$i" -lt 256 ]; do
+    printf '%s\n' '{"type":"queue_update","steering":[],"followUp":[]}'
+    i=$((i+1))
+done
+printf '%s\n' 'not json'
+exec sleep 30"#;
+        let (session, mut events) = Session::start(&AgentCommand {
+            program: "/bin/sh".into(),
+            args: vec!["-c".into(), script.into()],
+            extension: EXTENSION.into(),
+            session: None,
+            cwd: project.0.clone(),
+        })
+        .expect("fake agent starts");
+        session
+            .checkpoints()
+            .capture(&super::checkpoint::at("t1", crate::Phase::Start))
+            .await
+            .expect("the turn holds its checkout guard");
+        let checkout = crate::checkout::Checkout::new(
+            project.0.join(".git/watershed"),
+            project.0.join(".git/watershed"),
+        );
+        assert!(matches!(
+            checkout.alone().await,
+            Err(crate::DiffError::AgentRunning(_))
+        ));
+        std::fs::write(project.0.join(".git/release"), "").expect("release the agent");
+        let exclusive = timeout(WAIT, async {
+            loop {
+                if let Ok(guard) = checkout.alone().await {
+                    break guard;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("the failed process releases the checkout");
+        let pid = std::fs::read_to_string(project.0.join(".git/agent-pid"))
+            .expect("the process recorded its id");
+        let alive = std::process::Command::new("kill")
+            .args(["-0", pid.trim()])
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success());
+        drop(exclusive);
+        drop(session);
+        while !matches!(next(&mut events).await, SessionEvent::Exited { .. }) {}
+        assert!(!alive, "the live process lost its checkout guard");
+    });
+}
+
+#[test]
 fn shutdown_kills_an_agent_that_ignores_it() {
     run(async {
         let (session, _events) = fake_agent(r#"trap '' TERM; while :; do sleep 1; done"#);
@@ -160,12 +219,12 @@ fn shutdown_kills_an_agent_that_ignores_it() {
 #[test]
 fn shutdown_ends_an_agent_whose_events_nobody_reads() {
     run(async {
-        // Fills the 256-event buffer, then breaks the protocol while nobody reads.
+        // Overfills the 256-event buffer while nobody reads; the agent stays alive until
+        // shutdown, independently of the protocol-failure teardown tested above.
         let written = marker("unread");
         let (session, _events) = fake_agent(&format!(
             r#"i=0
-while [ $i -lt 256 ]; do printf '%s\n' '{{"type":"queue_update","steering":[],"followUp":[]}}'; i=$((i+1)); done
-printf '%s\n' 'not json'
+while [ $i -lt 257 ]; do printf '%s\n' '{{"type":"queue_update","steering":[],"followUp":[]}}'; i=$((i+1)); done
 trap '' TERM; : > {}; while :; do sleep 1; done"#,
             super::shell_word(written.display())
         ));
@@ -1661,6 +1720,218 @@ fn exited(success: bool) -> SessionEvent {
         success,
         error_output: String::new(),
     }
+}
+
+#[test]
+fn an_exited_agents_stdout_drain_is_bounded_and_keeps_complete_records() {
+    run(async {
+        let dir = marker("stdout-drain");
+        std::fs::create_dir_all(&dir).expect("temporary directory");
+        let script = format!(
+            r#"IFS= read -r line
+printf '%s\n' '{{"type":"extension_ui_request","method":"notify","message":"before exit","notifyType":"info"}}'
+/bin/sh -c '
+sleep 0.1
+printf "%s\n" '\''{{"type":"extension_ui_request","method":"notify","message":"after exit","notifyType":"info"}}'\''
+printf "%s" '\''{{"type":"unfinished"'\''
+exec sleep 30
+' 2>/dev/null &
+printf '%s\n' "$!" > {}/holder
+exit 0"#,
+            super::shell_word(dir.display())
+        );
+        let (mut session, mut events) = fake_agent(&script);
+        let pending = session.abort().await.expect("command sent");
+        let result = timeout(Duration::from_secs(5), async {
+            for message in [
+                "before exit",
+                "after exit",
+                "Some agent output may be missing.",
+            ] {
+                assert_eq!(
+                    next(&mut events).await,
+                    SessionEvent::Agent(AgentEvent::Notification {
+                        level: if message.starts_with("Some") {
+                            NotificationLevel::Warning
+                        } else {
+                            NotificationLevel::Info
+                        },
+                        message: message.to_owned(),
+                    })
+                );
+            }
+            assert_eq!(pending.accepted().await, Err(CommandError::Closed));
+            assert_eq!(next(&mut events).await, exited(true));
+        })
+        .await;
+        let pid = std::fs::read_to_string(dir.join("holder")).expect("holder pid");
+        let _ = std::process::Command::new("kill").arg(pid.trim()).status();
+        std::fs::remove_dir_all(&dir).expect("remove temporary directory");
+        result.expect("reply and exit arrive within the drain bound");
+    });
+}
+
+#[test]
+fn an_exited_agents_continuously_writing_descendant_cannot_extend_the_drain() {
+    run(async {
+        let dir = marker("stdout-streaming");
+        std::fs::create_dir_all(&dir).expect("temporary directory");
+        let (mut session, mut events) = fake_agent(&format!(
+            r#"IFS= read -r line
+/bin/sh -c 'i=0
+while [ "$i" -lt 1000 ]; do
+    printf "%s\n" '\''{{"type":"queue_update","steering":[],"followUp":[]}}'\''
+    i=$((i+1))
+    sleep 0.01
+done' 2>/dev/null &
+printf '%s\n' "$!" > {}/holder"#,
+            super::shell_word(dir.display())
+        ));
+        let pending = session.abort().await.expect("command sent");
+        let result = timeout(Duration::from_secs(5), async {
+            let mut records = 0;
+            loop {
+                match next(&mut events).await {
+                    SessionEvent::Agent(AgentEvent::QueueChanged(_)) => records += 1,
+                    warning => {
+                        assert_eq!(
+                            warning,
+                            SessionEvent::Agent(AgentEvent::Notification {
+                                level: NotificationLevel::Warning,
+                                message: "Some agent output may be missing.".to_owned(),
+                            })
+                        );
+                        break;
+                    }
+                }
+            }
+            assert!(records > 0, "complete descendant records were delivered");
+            assert_eq!(pending.accepted().await, Err(CommandError::Closed));
+            assert_eq!(next(&mut events).await, exited(true));
+        })
+        .await;
+        let pid = std::fs::read_to_string(dir.join("holder")).expect("holder pid");
+        let _ = std::process::Command::new("kill").arg(pid.trim()).status();
+        std::fs::remove_dir_all(&dir).expect("remove temporary directory");
+        result.expect("continuous output cannot extend the drain deadline");
+    });
+}
+
+#[test]
+fn an_exited_agents_unread_stdin_cannot_block_collected_output_or_completion() {
+    run(async {
+        let dir = marker("stdin-after-exit");
+        std::fs::create_dir_all(&dir).expect("temporary directory");
+        // Large automatic answers fill both the inherited input pipe and its bounded queue.
+        let descendant = format!(
+            "i=0\nwhile [ $i -lt 512 ]; do {}i=$((i+1)); done\nprintf '%s\\n' '{{\"type\":\"extension_ui_request\",\"method\":\"notify\",\"message\":\"collected\",\"notifyType\":\"info\"}}'\nexec sleep 30",
+            approval_request(&"x".repeat(4096), "read", true)
+        );
+        let (mut session, mut events) = fake_agent(&format!(
+            "IFS= read -r line\nexec 3<&0\n/bin/sh -c {} <&3 2>/dev/null &\nprintf '%s\\n' \"$!\" > {}/holder",
+            super::shell_word(descendant),
+            super::shell_word(dir.display())
+        ));
+        let pending = session.abort().await.expect("command sent");
+        let result = timeout(Duration::from_secs(5), async {
+            for (level, message) in [
+                (NotificationLevel::Info, "collected"),
+                (
+                    NotificationLevel::Warning,
+                    "Some agent output may be missing.",
+                ),
+            ] {
+                assert_eq!(
+                    next(&mut events).await,
+                    SessionEvent::Agent(AgentEvent::Notification {
+                        level,
+                        message: message.to_owned(),
+                    })
+                );
+            }
+            assert_eq!(pending.accepted().await, Err(CommandError::Closed));
+            assert_eq!(next(&mut events).await, exited(true));
+        })
+        .await;
+        let pid = std::fs::read_to_string(dir.join("holder")).expect("holder pid");
+        let _ = std::process::Command::new("kill").arg(pid.trim()).status();
+        std::fs::remove_dir_all(&dir).expect("remove temporary directory");
+        result.expect("unread inherited stdin cannot hold completion open");
+    });
+}
+
+#[test]
+fn an_exited_agents_buffered_stdout_reaches_eof_without_a_notice() {
+    run(async {
+        let written = marker("stdout-buffered");
+        let (mut session, mut events) = fake_agent(&format!(
+            r#"IFS= read -r line
+i=0
+while [ "$i" -lt 600 ]; do
+    printf '%s\n' "{{\"type\":\"extension_ui_request\",\"method\":\"notify\",\"message\":\"$i\",\"notifyType\":\"info\"}}"
+    i=$((i+1))
+done
+printf '%s\n' '{{"id":"1","type":"response","command":"abort","success":true}}'
+: > {}"#,
+            super::shell_word(written.display())
+        ));
+        let pending = session.abort().await.expect("command sent");
+        reached(&written).await;
+        // Hold event delivery past the drain grace: records already read still all arrive.
+        tokio::time::sleep(Duration::from_secs(3)).await;
+        for i in 0..600 {
+            assert_eq!(
+                next(&mut events).await,
+                SessionEvent::Agent(AgentEvent::Notification {
+                    level: NotificationLevel::Info,
+                    message: i.to_string(),
+                })
+            );
+        }
+        assert_eq!(pending.accepted().await, Ok(()));
+        assert_eq!(next(&mut events).await, exited(true));
+    });
+}
+
+#[test]
+fn an_exited_agents_stderr_reader_closes_while_a_descendant_holds_the_pipe() {
+    run(async {
+        let dir = marker("stderr-reader");
+        std::fs::create_dir_all(&dir).expect("temporary directory");
+        let script = format!(
+            r#"printf 'retained tail\n' >&2
+/bin/sh -c 'trap "" PIPE
+count=0
+until [ -e "$1/release" ]; do
+    [ "$count" -lt 500 ] || exit 1
+    count=$((count + 1))
+    sleep 0.02
+done
+if printf probe >&3 2>/dev/null; then result=open; else result=closed; fi
+: > "$1/$result"
+' holder {} 3>&2 >/dev/null 2>/dev/null &"#,
+            super::shell_word(dir.display())
+        );
+        let (_session, mut events) = fake_agent(&script);
+        assert_eq!(
+            next(&mut events).await,
+            SessionEvent::Exited {
+                success: true,
+                error_output: "retained tail".to_owned(),
+            }
+        );
+        std::fs::write(dir.join("release"), "").expect("release the descendant");
+        timeout(WAIT, async {
+            while !dir.join("open").exists() && !dir.join("closed").exists() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("the descendant probed stderr");
+        let closed = dir.join("closed").exists();
+        std::fs::remove_dir_all(&dir).expect("remove temporary directory");
+        assert!(closed, "the stderr reader outlived the reported agent exit");
+    });
 }
 
 #[test]

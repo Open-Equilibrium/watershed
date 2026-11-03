@@ -339,7 +339,16 @@ class ActionDialog extends StatelessWidget {
                   style: Theme.of(context).textTheme.titleSmall
                       ?.copyWith(fontWeight: WsMetrics.fwSemibold),
                 ),
-                ...children,
+                Flexible(
+                  child: SingleChildScrollView(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      spacing: WsMetrics.space4,
+                      children: children,
+                    ),
+                  ),
+                ),
                 // Long labels wrap below each other rather than overflow.
                 OverflowBar(
                   alignment: MainAxisAlignment.spaceBetween,
@@ -404,7 +413,7 @@ class SecondaryButton extends StatelessWidget {
   final IconData? icon;
   final String? shortcut;
   final Color? color;
-  final VoidCallback onPressed;
+  final VoidCallback? onPressed;
   final FocusNode? focusNode;
 
   @override

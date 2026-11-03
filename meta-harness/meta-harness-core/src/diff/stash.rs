@@ -1,7 +1,7 @@
 //! Uncommitted changes left on a branch, as GitHub Desktop leaves them: one stash per branch,
 //! whose message names it ([mockups](../../../../docs/design/mockups/liquid-git-branches.html)).
 
-use super::process::{git_path_output, timestamp_ms, user_git};
+use super::process::{git_path_output, paths, timestamp_ms, user_git};
 use super::*;
 use std::collections::BTreeMap;
 
@@ -657,12 +657,6 @@ fn obstructed(root: &Path, path: &str, removed: &HashSet<&str>) -> std::io::Resu
         }
     }
     Ok(false)
-}
-
-/// The paths of NUL-separated output, each once.
-fn paths(output: &str) -> Vec<String> {
-    let unique: BTreeSet<&str> = output.split('\0').filter(|path| !path.is_empty()).collect();
-    unique.into_iter().map(str::to_owned).collect()
 }
 
 /// The tab-indented file names in Git's error `reason`.
