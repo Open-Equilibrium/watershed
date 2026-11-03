@@ -257,7 +257,8 @@ fn a_cell_takes_only_values_of_its_field_s_kind() {
         (&amount, Cell::Number(f64::INFINITY)),
         (&date, Cell::Date("28.10.2026".into())),
         (&date, Cell::Date("2026-02-30".into())),
-        (&date, Cell::Date("2026-10-28T25:00".into())),
+        // Only days, until the times' zones are decided.
+        (&date, Cell::Date("2026-10-28T09:30".into())),
     ];
     for (field, value) in refused {
         assert_eq!(
@@ -304,7 +305,7 @@ fn a_cell_takes_only_values_of_its_field_s_kind() {
         &block,
         &rent,
         &date,
-        Cell::Date("2026-10-28T09:30".into()),
+        Cell::Date("2024-02-29".into()),
     )
     .unwrap();
     let database = workspace.database(&page, &block).unwrap().unwrap();

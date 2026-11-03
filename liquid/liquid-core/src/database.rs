@@ -54,7 +54,7 @@ pub struct SelectOption {
     pub id: OptionId,
     /// Its name.
     pub name: String,
-    /// Its color, an index into the design tokens' tag colors.
+    /// Its color, an index into the tag colors that the Table View's mockups define.
     pub color: u8,
 }
 
@@ -429,18 +429,14 @@ pub(crate) fn set_cell(
     Ok(())
 }
 
-/// Whether `date` is a real day, `YYYY-MM-DD`, with a time `THH:MM` if wanted.
+/// Whether `date` is a real day, `YYYY-MM-DD`.
 fn valid_date(date: &str) -> bool {
-    let (day, time) = match date.split_once('T') {
-        Some((day, time)) => (day, Some(time)),
-        None => (date, None),
-    };
     let number = |text: &str, digits: usize| {
         (text.len() == digits && text.bytes().all(|byte| byte.is_ascii_digit()))
             .then(|| text.parse::<u32>().ok())
             .flatten()
     };
-    let mut parts = day.split('-');
+    let mut parts = date.split('-');
     let (Some(year), Some(month), Some(of_month), None) = (
         parts.next().and_then(|part| number(part, 4)),
         parts.next().and_then(|part| number(part, 2)),
@@ -457,17 +453,7 @@ fn valid_date(date: &str) -> bool {
         2 => 28,
         _ => return false,
     };
-    if of_month == 0 || of_month > days {
-        return false;
-    }
-    match time.map(|time| time.split_once(':')) {
-        None => true,
-        Some(Some((hours, minutes))) => {
-            number(hours, 2).is_some_and(|hours| hours < 24)
-                && number(minutes, 2).is_some_and(|minutes| minutes < 60)
-        }
-        Some(None) => false,
-    }
+    (1..=days).contains(&of_month)
 }
 
 /// A live Database Block's name and fields, or none if `block` is no live Database.

@@ -41,9 +41,7 @@ pub enum TextStyle {
     Quote,
 }
 
-/// The kind of a Database field, which decides the values its cells take. File, link to a
-/// row, formula and button fields follow with attachments, Connections, Formulas and
-/// Automations.
+/// The kind of a Database field, which decides the values its cells take.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FieldKind {
     /// Plain text.
@@ -52,7 +50,7 @@ pub enum FieldKind {
     Number,
     /// One of the field's options.
     Select,
-    /// A day, `YYYY-MM-DD`, with a time `THH:MM` if wanted, as the person's clock shows it.
+    /// A day, `YYYY-MM-DD`; times follow once their zones are decided.
     Date,
     /// Ticked or not.
     Checkbox,
@@ -69,7 +67,7 @@ pub enum Cell {
     Number(f64),
     /// An option of the field.
     Select(OptionId),
-    /// A day, with a time if wanted.
+    /// A day, `YYYY-MM-DD`.
     Date(String),
     /// Ticked or not.
     Checkbox(bool),
@@ -253,7 +251,7 @@ pub enum Mutation {
         field: FieldId,
         /// Its name.
         name: String,
-        /// Its color, an index into the design tokens' tag colors.
+        /// Its color, an index into the tag colors that the Table View's mockups define.
         color: u8,
     },
     /// Adds an empty row first or after the row `after`.
