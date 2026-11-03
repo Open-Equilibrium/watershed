@@ -645,6 +645,15 @@ fn zero_is_one_value_whatever_its_sign() {
         .map(|row| row.id)
         .collect();
     assert_eq!(order, [first.clone(), second.clone()]);
+    // A filter for either zero finds both.
+    let zero = RowQuery {
+        filter: Some(liquid_core::Filter {
+            field: amount.clone(),
+            matches: Match::Is(Cell::Number(-0.0)),
+        }),
+        ..all()
+    };
+    assert_eq!(workspace.rows(&page, &block, &zero).unwrap().count, 2);
     workspace.close_page(&page);
     let reloaded: Vec<_> = workspace
         .rows(&page, &block, &sorted)

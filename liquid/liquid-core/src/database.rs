@@ -629,6 +629,8 @@ fn matches(cell: Option<&Cell>, matches: &Match) -> bool {
     match (matches, cell) {
         (Match::Empty, cell) => cell.is_none(),
         (Match::NotEmpty, cell) => cell.is_some(),
+        // Numbers by value, so either zero finds a stored zero.
+        (Match::Is(Cell::Number(value)), Some(Cell::Number(stored))) => value == stored,
         (Match::Is(value), cell) => cell == Some(value),
         (Match::Contains(part), Some(Cell::Text(text))) => {
             text.to_lowercase().contains(&part.to_lowercase())
