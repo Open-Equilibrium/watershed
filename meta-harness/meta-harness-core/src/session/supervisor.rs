@@ -33,6 +33,8 @@ const ERROR_OUTPUT_WAIT: Duration = Duration::from_millis(500);
 // Two seconds lets ordinary final RPC writes drain without letting an inherited pipe hold
 // session completion indefinitely. Event delivery keeps its own backpressure after collection.
 const OUTPUT_DRAIN_WAIT: Duration = Duration::from_secs(2);
+/// Aggregate bytes read after exit, independently of the per-record framing limit.
+const MAX_OUTPUT_DRAIN_BYTES: usize = 16 * 1024 * 1024;
 
 enum Output {
     Bytes(Vec<u8>),
@@ -487,7 +489,8 @@ async fn watching<F: Future>(
 }
 
 /// Streams with bounded backpressure while pi runs. After exit, collect independently of
-/// event delivery until EOF or the deadline, then close the pipe before forwarding the tail.
+/// event delivery until EOF, the deadline or the byte cap, then close the pipe before forwarding
+/// the tail.
 /// This retains ordinary buffered output even when Liquid is slow to consume accepted events.
 async fn read_output(
     mut stdout: ChildStdout,
@@ -510,11 +513,19 @@ async fn read_output(
     };
     let deadline = tokio::time::sleep_until(deadline);
     tokio::pin!(deadline);
+    let mut remaining = MAX_OUTPUT_DRAIN_BYTES;
     let cut_off = loop {
-        match race(&mut deadline, stdout.read(&mut buffer)).await {
+        if remaining == 0 {
+            break true;
+        }
+        let capacity = buffer.len().min(remaining);
+        match race(&mut deadline, stdout.read(&mut buffer[..capacity])).await {
             Ok(()) => break true,
             Err(Ok(0) | Err(_)) => break false,
-            Err(Ok(length)) => tail.push(buffer[..length].to_vec()),
+            Err(Ok(length)) => {
+                remaining -= length;
+                tail.push(buffer[..length].to_vec());
+            }
         }
     };
     drop(stdout);

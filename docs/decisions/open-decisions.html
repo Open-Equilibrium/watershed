@@ -71,19 +71,6 @@ summary{cursor:pointer}summary h3{display:inline;margin:0}summary:focus-visible{
   <section id="m2">
     <h2>M2 - Meta-Harness</h2>
     <div class="grid">
-      <details id="d-084" class="decision">
-        <summary><h3>D-084 - Agent Output Retained After Exit</h3></summary>
-        <p><strong>Status:</strong> Blocks the current Git push closeout review; no runtime change is approved.</p>
-        <p><strong>Problem:</strong> After an agent exits, Meta-Harness collects its remaining standard output for up to two seconds even while Liquid is too slow to receive events. A child program holding that output pipe can keep writing, and the collector retains every byte until the deadline. The deadline bounds time, not memory; the existing 16 MiB record limit applies only after collection. See <code>meta-harness/meta-harness-core/src/session/supervisor.rs</code>, <code>read_output</code>. This pre-existing path is in the reviewed session-supervision feature because the Git slice changes that feature's public exports.</p>
-        <p><strong>Question:</strong> How much output may be retained after agent exit, and when may collection stop before the two-second deadline?</p>
-        <ul>
-          <li><strong>A: A fixed byte budget, then close the pipe and warn.</strong> Reuse 16 MiB as the proposed aggregate budget, independently of the per-record limit. Pro: bounded memory and a small change; ordinary buffered output still arrives. Con: output beyond that budget is lost, even if it would arrive before the deadline.</li>
-          <li><strong>B: Keep bounded backpressure during the drain.</strong> Read only when the existing output queue has room; close the pipe at the deadline. Pro: minimal retained memory without another budget. Con: a slow client can lose ordinary buffered final records that the current implementation preserves.</li>
-          <li><strong>C: Spill to a temporary file with an approved storage quota.</strong> Pro: preserves a larger tail with bounded memory. Con: adds storage, cleanup and failure handling, and still needs a cutoff policy when storage fills.</li>
-        </ul>
-        <p><strong>Recommendation:</strong> A, with the proposed 16 MiB aggregate budget and the existing missing-output warning. The maintainer must approve the budget and truncation behavior, and whether the fix belongs in this Git slice or a separate change.</p>
-        <p><strong>Acceptance criterion:</strong> Record the chosen policy in the ADR log before implementation. Add a failing behavior test first. With event consumption paused and an inherited output writer still alive after agent exit, prove the selected retained-memory bound, pipe closure at the selected cutoff, ordered delivery of retained complete records, exactly one warning when output is cut off and eventual session completion once delivery resumes. Cover the exact byte budget and one byte beyond it if A is selected; retain the existing ordinary buffered-output and drain-deadline tests.</p>
-      </details>
       <details id="d-021" class="decision">
         <summary><h3>D-021 - Meta-Harness Packaging</h3></summary>
         <p><strong>Status:</strong> Open implementation detail before M2; Meta-Harness must already run headless, without Liquid (<a href="../concept/V-Spec_MetaHarness.html">Meta-Harness V-Spec</a>).</p>
