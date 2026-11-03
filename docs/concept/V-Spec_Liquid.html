@@ -272,12 +272,12 @@ integrations
       <p>History covers Liquid Workspace data only: Pages, Blocks, Views, Sources, Connections, Automations, Roles, App state, layout and settings. It supports attribution, diff, undo/revert and sync; it is not project-code VCS.</p>
       <pre><code>request → validate → effective permission → diff/proposal
         → apply atomically → record Action → emit event</code></pre>
-      <p>UI, Liquid AI, CLI/API, App, Automation, import and sync all use this path. The CLI/API exposes small typed operations rather than one unrestricted document interface; final syntax remains <a href="../decisions/open-decisions.html#d-027">the CLI/API decision</a>. History is a sequence of Actions plus save points. A revert records a new reversing Action, as <code>git revert</code> does; Restore version returns a Page to an earlier point, also when later changes conflict; ⌘Z reverts the person's last Action as an Undo entry (ADR-0235). Storage is SQLite with SQLCipher (ADR-0237).</p>
+      <p>UI, Liquid AI, CLI/API, App, Automation, import and sync all use this path. The CLI/API exposes small typed operations rather than one unrestricted document interface; final syntax remains <a href="../decisions/open-decisions.html#d-027">D-027</a>. History is a sequence of Actions plus save points. A revert records a new reversing Action, as <code>git revert</code> does; Restore version returns a Page to an earlier point, also when later changes conflict; ⌘Z reverts the person's last Action as an Undo entry (ADR-0235). Storage is SQLite with SQLCipher (ADR-0237).</p>
     </div></section>
 
     <section id="delivery" class="section"><h2>12. Delivery and open decisions</h2><div class="body">
       <p>The target model above is delivered in four stages: local Workspace foundation; Apps and agent actions; central sync/mobile/headless execution; then Block Registry and MCP adapters. Scope and Definitions of Done are canonical in <a href="../../PLAN.md">PLAN.md</a>.</p>
-      <p>Remaining Liquid implementation decisions: CLI/API syntax (<a href="../decisions/open-decisions.html#d-027">the CLI/API decision</a>).</p>
+      <p>Remaining Liquid implementation decisions: CLI/API syntax (<a href="../decisions/open-decisions.html#d-027">D-027</a>).</p>
     </div></section>
   </main>
 </div>
