@@ -1735,7 +1735,7 @@ sleep 0.1
 printf "%s\n" '\''{{"type":"extension_ui_request","method":"notify","message":"after exit","notifyType":"info"}}'\''
 printf "%s" '\''{{"type":"unfinished"'\''
 exec sleep 30
-' >/dev/stdout 2>/dev/null &
+' 2>/dev/null &
 printf '%s\n' "$!" > {}/holder
 exit 0"#,
             super::shell_word(dir.display())
