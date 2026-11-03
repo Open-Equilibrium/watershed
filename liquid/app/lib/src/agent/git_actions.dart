@@ -16,9 +16,6 @@ import 'commit_dialog.dart';
 
 enum _GitAction { commit, push, pull, fetch, create }
 
-const _noRemote =
-    'No remote: commits stay in this repository. Push needs a remote added in Git.';
-
 /// The next single Git step and the approved, explicitly invoked Git menu.
 class GitActions extends StatelessWidget {
   const GitActions({super.key, required this.state, required this.device});
@@ -27,48 +24,56 @@ class GitActions extends StatelessWidget {
 
   Future<void> _push(BuildContext context) async {
     final generation = state.generation;
-    final outcome = await state.git.push(device: device);
-    if (outcome?.kind != BridgeGitOutcomeKind.pushDefault ||
-        !context.mounted ||
-        generation != state.generation) {
+    BridgePushConfirmation? confirmed;
+    while (context.mounted && generation == state.generation) {
+      final outcome = await state.git.push(
+        device: device,
+        confirmed: confirmed,
+      );
+      if (outcome?.kind != BridgeGitOutcomeKind.pushDefault ||
+          !context.mounted ||
+          generation != state.generation) {
+        return;
+      }
+      final branch = outcome!.transfer!.destination;
+      final transfer = outcome.transfer!;
+      final upstream = transfer.upstream;
+      final count = transfer.ahead;
+      final decision = await showDialog<bool>(
+        context: context,
+        builder: (context) {
+          void push() => Navigator.of(context).pop(true);
+          return ActionDialog(
+            title: 'Push to $branch?',
+            bindings: {const Keys(LogicalKeyboardKey.enter).activator: push},
+            actions: [
+              PrimaryButton(
+                label: 'Push to $branch',
+                shortcut: '⏎',
+                onPressed: push,
+              ),
+              SecondaryButton(
+                label: 'Create branch…',
+                onPressed: () => Navigator.of(context).pop(false),
+              ),
+            ],
+            children: [
+              Text(
+                "This pushes ${plural(count, 'commit')} directly to $upstream, the repository's default branch. You can push it as it is, or create a branch first and push that.",
+                style: DangerDialog.text(context),
+              ),
+            ],
+          );
+        },
+      );
+      if (!context.mounted || generation != state.generation) return;
+      if (decision == true) {
+        confirmed = transfer.confirmation;
+        continue;
+      } else if (decision == false) {
+        await showBranchMenu(context, state);
+      }
       return;
-    }
-    final branch = outcome!.detail;
-    final transfer = outcome.transfer!;
-    final upstream = transfer.upstream;
-    final count = transfer.ahead;
-    final decision = await showDialog<bool>(
-      context: context,
-      builder: (context) {
-        void push() => Navigator.of(context).pop(true);
-        return ActionDialog(
-          title: 'Push to $branch?',
-          bindings: {const Keys(LogicalKeyboardKey.enter).activator: push},
-          actions: [
-            PrimaryButton(
-              label: 'Push to $branch',
-              shortcut: '⏎',
-              onPressed: push,
-            ),
-            SecondaryButton(
-              label: 'Create branch…',
-              onPressed: () => Navigator.of(context).pop(false),
-            ),
-          ],
-          children: [
-            Text(
-              "This pushes $count ${count == 1 ? 'commit' : 'commits'} directly to $upstream, the repository's default branch. You can push it as it is, or create a branch first and push that.",
-              style: DangerDialog.text(context),
-            ),
-          ],
-        );
-      },
-    );
-    if (!context.mounted || generation != state.generation) return;
-    if (decision == true) {
-      await state.git.push(device: device, confirmedDefault: true);
-    } else if (decision == false) {
-      await showBranchMenu(context, state);
     }
   }
 
@@ -101,10 +106,16 @@ class GitActions extends StatelessWidget {
       final detached = status.branch == null;
       final remote = status.remote;
       final diverged = status.ahead > 0 && status.behind > 0;
-      final divergedHint =
-          '${status.branch} and ${status.upstream} have diverged. Merge or rebase in a terminal, then push.';
+      final divergence = diverged
+          ? divergedHint(status.branch!, status.upstream!)
+          : '';
+      final noDestination = status.hasRemotes
+          ? noUpstreamRemoteHint
+          : noRemoteHint;
       String? blocker(_GitAction action) {
-        if (status.merging) return mergeHint(status);
+        if (status.merging && action != _GitAction.fetch) {
+          return mergeHint(status);
+        }
         if (action == _GitAction.create) return null;
         if (detached && action != _GitAction.fetch) return detachedCommitHint;
         switch (action) {
@@ -113,26 +124,30 @@ class GitActions extends StatelessWidget {
                 ? 'Branch is up to date. Nothing to commit.'
                 : null;
           case _GitAction.push:
-            if (status.commit == null)
+            if (status.commit == null) {
               return 'Commit before pushing this branch.';
-            if (remote == null) return _noRemote;
-            if (diverged) return divergedHint;
-            if (status.behind > 0) {
-              return '${status.upstream} has ${status.behind} ${status.behind == 1 ? 'commit' : 'commits'} that ${status.branch} lacks. Pull them, then push.';
             }
-            return status.upstream != null && status.ahead == 0
+            if (remote == null) return noDestination;
+            if (diverged) return divergence;
+            if (status.behind > 0) {
+              return behindHint(
+                status.branch!,
+                status.upstream!,
+                status.behind,
+              );
+            }
+            return status.upstream != null && !status.gone && status.ahead == 0
                 ? 'Branch is up to date. Nothing to push.'
                 : null;
           case _GitAction.pull:
-            if (remote == null) return _noRemote;
-            if (diverged) return divergedHint;
-            if (status.upstream == null)
-              return 'This branch has no upstream. Push it first.';
+            if (remote == null) return noDestination;
+            if (diverged) return divergence;
+            if (status.upstream == null || status.gone) return noUpstreamHint;
             return status.behind == 0
                 ? 'Branch is up to date. Nothing to pull.'
                 : null;
           case _GitAction.fetch:
-            return remote == null || remote == '.' ? _noRemote : null;
+            return remote == null || remote == '.' ? noDestination : null;
           case _GitAction.create:
             return null;
         }
@@ -174,16 +189,16 @@ class GitActions extends StatelessWidget {
         _GitAction.commit:
             blockers[_GitAction.commit] ??
             (remote == null
-                ? _noRemote
-                : 'Commit ${status.changed} changed ${status.changed == 1 ? 'file' : 'files'} on ${status.branch}.'),
+                ? noDestination
+                : 'Commit ${plural(status.changed, 'changed file')} on ${status.branch}.'),
         _GitAction.push:
             blockers[_GitAction.push] ??
-            (status.upstream == null
+            (status.upstream == null || status.gone
                 ? 'Push ${status.branch} to $remote and track it.'
-                : 'Push ${status.ahead} ${status.ahead == 1 ? 'commit' : 'commits'} to ${status.upstream}.'),
+                : 'Push ${plural(status.ahead, 'commit')} to ${status.upstream}.'),
         _GitAction.pull:
             blockers[_GitAction.pull] ??
-            'Pull ${status.behind} ${status.behind == 1 ? 'commit' : 'commits'} from ${status.upstream}.',
+            'Pull ${plural(status.behind, 'commit')} from ${status.upstream}.',
         _GitAction.fetch: blockers[_GitAction.fetch] ?? 'Fetch from $remote.',
         _GitAction.create:
             blockers[_GitAction.create] ??
@@ -316,7 +331,7 @@ class GitActions extends StatelessWidget {
                   _GitAction.commit,
                   'Commit…',
                   enabled[_GitAction.commit]!
-                      ? '${status.changed} ${status.changed == 1 ? 'file' : 'files'}'
+                      ? plural(status.changed, 'file')
                       : '',
                 ),
                 item(_GitAction.push, 'Push', counts[_GitAction.push]!),

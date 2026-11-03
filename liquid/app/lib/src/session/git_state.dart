@@ -58,7 +58,8 @@ class GitState {
   int _failures = 0;
   DateTime? _fetched;
   DateTime? get fetched => _fetched;
-  bool _fetching = false;
+  Future<void>? _fetching;
+  bool _fetchRequested = false;
 
   /// Reads of the state left until the next fetch; the state is read every [fetchEvery]
   /// regardless.
@@ -95,24 +96,25 @@ class GitState {
 
   Future<void> _tick(int watch) async {
     final upstream = status.value?.upstream;
-    if (!_fetching && upstream != null && --_untilFetch <= 0) {
-      unawaited(_fetch(watch, upstream));
+    if (_fetching == null &&
+        progress.value == null &&
+        upstream != null &&
+        --_untilFetch <= 0) {
+      unawaited(_fetch(watch, status.value!.remote!));
     }
     await refresh();
     if (watch == _watches) _next = Timer(fetchEvery, () => _tick(watch));
   }
 
-  /// Fetching can wait on a remote while checkout polling continues.
-  Future<void> _fetch(
-    int watch,
-    String upstream, {
-    bool requested = false,
-  }) async {
-    _fetching = true;
+  /// Shares an in-flight fetch, preserving any explicit request's failure notice.
+  Future<void> _fetch(int watch, String remote, {bool requested = false}) {
+    _fetchRequested |= requested;
+    return _fetching ??= _runFetch(watch, remote);
+  }
+
+  Future<void> _runFetch(int watch, String remote) async {
     try {
-      final fetched = await (requested
-          ? _backend.fetchNow()
-          : _backend.fetch());
+      final fetched = await _backend.fetch();
       if (watch != _watches) return;
       _failures = 0;
       if (fetched) _fetched = DateTime.now();
@@ -120,20 +122,20 @@ class GitState {
     } on Object catch (error) {
       if (watch != _watches) return;
       // A streak of failures tells once.
-      if (_failures++ == 0 || requested) {
-        final remote = status.value?.remote ?? upstream.split('/').first;
+      if (_failures++ == 0 || _fetchRequested) {
         final since = switch (_fetched) {
           final at? =>
             ' The ahead and behind counts are from ${formatClockMs(at.millisecondsSinceEpoch)}.',
           null => '',
         };
         notify(
-          BridgeLevel.warning,
-          'Could not fetch from $remote: “$error”.$since',
+          _fetchRequested ? BridgeLevel.error : BridgeLevel.warning,
+          '${fetchFailure(remote, '$error')}.$since',
         );
       }
     } finally {
-      _fetching = false;
+      _fetching = null;
+      _fetchRequested = false;
       if (watch == _watches) {
         _untilFetch = fetchWait(_failures).inSeconds ~/ fetchEvery.inSeconds;
       }
@@ -142,7 +144,6 @@ class GitState {
 
   /// A click bypasses the background retry wait, without overlapping another fetch.
   Future<void> fetchNow() async {
-    if (_fetching) return;
     final remote = status.value?.remote;
     if (remote == null) return;
     await _fetch(_watches, remote, requested: true);
@@ -150,16 +151,19 @@ class GitState {
 
   Future<BridgeGitOutcome?> push({
     required String device,
-    bool confirmedDefault = false,
+    BridgePushConfirmation? confirmed,
   }) => _write(
     'push',
-    () => _backend.push(confirmedDefault),
+    () => _backend.push(confirmed),
     device: device,
+    progressLabel: status.value?.remote == null
+        ? 'Pushing'
+        : 'Pushing to ${status.value!.remote}',
     done: (_, outcome) {
       final transfer = outcome.transfer!;
-      return transfer.firstPush
+      return transfer.firstPush || transfer.gone
           ? 'Pushed ${transfer.branch} to ${transfer.remote}; it now tracks ${transfer.upstream}'
-          : 'Pushed ${transfer.ahead} ${transfer.ahead == 1 ? 'commit' : 'commits'} to ${transfer.upstream}';
+          : 'Pushed ${plural(transfer.ahead, 'commit')} to ${transfer.upstream}';
     },
   );
 
@@ -167,9 +171,12 @@ class GitState {
     'pull',
     _backend.pull,
     device: device,
+    progressLabel: status.value?.remote == null
+        ? 'Pulling'
+        : 'Pulling from ${status.value!.remote}',
     done: (_, outcome) {
       final transfer = outcome.transfer!;
-      return 'Pulled ${transfer.behind} ${transfer.behind == 1 ? 'commit' : 'commits'} from ${transfer.upstream}';
+      return 'Pulled ${plural(transfer.behind, 'commit')} from ${transfer.upstream}';
     },
   );
 
@@ -308,7 +315,7 @@ class GitState {
     done: (now, outcome) {
       final commit = outcome.commit!;
       final text =
-          'Committed ${commit.count} ${commit.count == 1 ? 'file' : 'files'} on ${commit.branch}';
+          'Committed ${plural(commit.count, 'file')} on ${commit.branch}';
       return commit.subject == null ? '$text.' : '$text: “${commit.subject}”';
     },
   );
@@ -341,8 +348,7 @@ class GitState {
     await _write(
       'restore',
       () => _backend.restoreStash(stashed.id),
-      done: (_, _) =>
-          'Restored $files stashed ${files == 1 ? 'file' : 'files'} on $branch',
+      done: (_, _) => 'Restored ${plural(files, 'stashed file')} on $branch',
     );
   }
 
@@ -359,6 +365,7 @@ class GitState {
     String action,
     Future<BridgeGitOutcome> Function() run, {
     String? device,
+    String? progressLabel,
     required String Function(BridgeGitStatus? now, BridgeGitOutcome outcome)
     done,
   }) async {
@@ -370,12 +377,9 @@ class GitState {
     await previous;
     _writing = true;
     Timer? elapsed;
-    if (action == 'push' || action == 'pull') {
-      final remote = status.value?.remote ?? 'origin';
+    if (progressLabel != null) {
       var seconds = 0;
-      void tick() => progress.value = action == 'push'
-          ? 'Pushing to $remote… $seconds s'
-          : 'Pulling from $remote… $seconds s';
+      void tick() => progress.value = '$progressLabel… $seconds s';
       tick();
       elapsed = Timer.periodic(const Duration(seconds: 1), (timer) {
         seconds = timer.tick;
@@ -387,12 +391,22 @@ class GitState {
       try {
         outcome = await run();
       } on Object catch (error) {
-        notify(BridgeLevel.error, 'Could not $action: $error');
+        notify(
+          BridgeLevel.error,
+          'Could not $action: $error${nothingTransferred(action)}',
+        );
         // Git may have changed something before it failed.
         await _refreshAfterWrite();
         return null;
       }
-      if (outcome.transfer case final transfer? when transfer.remote != '.') {
+      if (outcome.transfer case final transfer?
+          when transfer.remote != '.' &&
+              {
+                BridgeGitOutcomeKind.done,
+                BridgeGitOutcomeKind.pushDefault,
+                BridgeGitOutcomeKind.diverged,
+                BridgeGitOutcomeKind.transferFailed,
+              }.contains(outcome.kind)) {
         _fetched = DateTime.now();
       }
       await _refreshAfterWrite();
@@ -402,19 +416,34 @@ class GitState {
         case BridgeGitOutcomeKind.pushDefault:
           // The caller opens the approved confirmation dialog; no push ran.
           break;
-        case BridgeGitOutcomeKind.pushRejected:
+        case BridgeGitOutcomeKind.diverged:
           final transfer = outcome.transfer!;
           final explanation = transfer.ahead > 0
-              ? '${transfer.branch} and ${transfer.upstream} have diverged, ${transfer.ahead} ${transfer.ahead == 1 ? 'commit' : 'commits'} here and ${transfer.behind} there. Merge or rebase in a terminal, then push.'
-              : '${transfer.upstream} has ${transfer.behind} ${transfer.behind == 1 ? 'commit' : 'commits'} that ${transfer.branch} lacks. Pull them, then push.';
+              ? divergedHint(
+                  transfer.branch,
+                  transfer.upstream,
+                  ahead: transfer.ahead,
+                  behind: transfer.behind,
+                )
+              : behindHint(transfer.branch, transfer.upstream, transfer.behind);
           notify(
-            BridgeLevel.warning,
-            'Could not $action: $explanation Nothing was ${action == 'push' ? 'pushed' : 'pulled'}.${outcome.detail.isEmpty ? '' : ' “${outcome.detail}”'}',
+            BridgeLevel.error,
+            'Could not $action: $explanation${nothingTransferred(action)}${outcome.detail.isEmpty ? '' : ' “${outcome.detail}”'}',
           );
         case BridgeGitOutcomeKind.signInFailed:
           notify(
             BridgeLevel.error,
-            'Could not $action: Git could not sign in to ${outcome.files.single}. Liquid uses the Git login of $device; sign in there with git or gh, then $action again. Nothing was ${action == 'push' ? 'pushed' : 'pulled'}. “${outcome.detail}”',
+            'Could not $action: Git could not sign in to ${outcome.transfer!.remote}. Liquid uses the Git login of $device; sign in there with git or gh, then $action again. Nothing was ${action == 'push' ? 'pushed' : 'pulled'}. “${outcome.detail}”',
+          );
+        case BridgeGitOutcomeKind.fetchFailed:
+          notify(
+            BridgeLevel.error,
+            'Could not $action: ${fetchFailure(outcome.transfer!.remote, outcome.detail)}.${nothingTransferred(action)}',
+          );
+        case BridgeGitOutcomeKind.preflightFailed:
+          notify(
+            BridgeLevel.error,
+            'Could not $action: ${outcome.detail}${nothingTransferred(action)}',
           );
         case BridgeGitOutcomeKind.transferFailed:
           notify(
@@ -433,7 +462,12 @@ class GitState {
             '${done(now, outcome)} A hook failed after: ${outcome.detail}',
           );
         case BridgeGitOutcomeKind.mergeInProgress:
-          notify(BridgeLevel.warning, mergeHint(status.value));
+          notify(
+            progressLabel == null ? BridgeLevel.warning : BridgeLevel.error,
+            progressLabel == null
+                ? mergeHint(status.value)
+                : 'Could not $action: ${mergeHint(status.value)}${nothingTransferred(action)}',
+          );
         case BridgeGitOutcomeKind.commitBranchFailed:
           notify(
             BridgeLevel.error,
@@ -452,7 +486,7 @@ class GitState {
         case BridgeGitOutcomeKind.agentRunning:
           notify(
             BridgeLevel.warning,
-            'Could not $action: ${whoRuns(outcome.running)}. ${stopFirst(outcome.running)}.',
+            'Could not $action: ${whoRuns(outcome.running)}. ${stopFirst(outcome.running)}.${nothingTransferred(action)}',
           );
         case BridgeGitOutcomeKind.conflicts:
           notify(
@@ -580,6 +614,8 @@ bool _sameStatus(BridgeGitStatus? a, BridgeGitStatus? b) =>
         a.commit == b.commit &&
         a.upstream == b.upstream &&
         a.remote == b.remote &&
+        a.hasRemotes == b.hasRemotes &&
+        a.gone == b.gone &&
         a.ahead == b.ahead &&
         a.behind == b.behind &&
         a.changed == b.changed &&
@@ -588,3 +624,29 @@ bool _sameStatus(BridgeGitStatus? a, BridgeGitStatus? b) =>
         listEquals(a.conflicts, b.conflicts) &&
         a.stash?.id == b.stash?.id &&
         a.stash?.current == b.stash?.current);
+
+/// The Git action messages shared by the split button and transfer notices.
+const noRemoteHint =
+    'No remote: commits stay in this repository. Push needs a remote added in Git.';
+const noUpstreamRemoteHint = 'No upstream: set one in Git to push this branch.';
+const noUpstreamHint = 'This branch has no upstream. Push it first.';
+
+String fetchFailure(String remote, String detail) =>
+    'Could not fetch from $remote: “$detail”';
+
+String behindHint(String branch, String upstream, int behind) =>
+    '$upstream has ${plural(behind, 'commit')} that $branch lacks. Pull them, then push.';
+
+String divergedHint(
+  String branch,
+  String upstream, {
+  int? ahead,
+  int? behind,
+}) =>
+    '$branch and $upstream have diverged${ahead == null ? '' : ', ${plural(ahead, 'commit')} here and $behind there'}. Merge or rebase in a terminal, then push.';
+
+String nothingTransferred(String action) => switch (action) {
+  'push' => ' Nothing was pushed.',
+  'pull' => ' Nothing was pulled.',
+  _ => '',
+};

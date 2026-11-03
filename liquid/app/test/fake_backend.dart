@@ -277,6 +277,7 @@ class FakeBackend implements SessionBackend {
   Completer<void>? commitGate;
   Completer<BridgeGitOutcome>? transferGate;
   BridgeGitOutcome? transferOutcome;
+  BridgePushConfirmation? lastConfirmation;
   Completer<BridgeGitOutcome>? initializeGate;
   BridgeBranches branches = const BridgeBranches(branches: [], running: []);
   BridgeStash? stashed;
@@ -304,6 +305,8 @@ class FakeBackend implements SessionBackend {
             commit: now.commit,
             upstream: now.upstream,
             remote: now.remote,
+            hasRemotes: now.hasRemotes,
+            gone: now.gone,
             ahead: now.ahead,
             behind: now.behind,
             changed: now.changed,
@@ -459,19 +462,13 @@ class FakeBackend implements SessionBackend {
   }
 
   @override
-  Future<bool> fetchNow() async {
-    calls.add('fetch now');
-    if (fetchError case final error?) throw error;
-    return git?.remote != null;
-  }
-
-  @override
-  Future<BridgeGitOutcome> push(bool confirmedDefault) async {
-    calls.add('push $confirmedDefault');
+  Future<BridgeGitOutcome> push(BridgePushConfirmation? confirmed) async {
+    calls.add('push ${confirmed != null}');
+    lastConfirmation = confirmed;
     if (transferGate case final gate?) return gate.future;
     if (transferOutcome case final outcome?) return outcome;
     final now = git!;
-    if (!confirmedDefault &&
+    if (confirmed == null &&
         now.defaultBranch != null &&
         (now.upstream ?? '${now.remote}/${now.branch}') ==
             '${now.remote}/${now.defaultBranch}') {
@@ -805,6 +802,8 @@ BridgeGitStatus gitStatusOf({
   String? branch = 'main',
   String? upstream = 'origin/main',
   String? remote = 'origin',
+  bool? hasRemotes,
+  bool gone = false,
   int ahead = 0,
   int behind = 0,
   int changed = 0,
@@ -816,6 +815,8 @@ BridgeGitStatus gitStatusOf({
   commit: commit,
   upstream: upstream,
   remote: remote,
+  hasRemotes: hasRemotes ?? remote != null,
+  gone: gone,
   ahead: ahead,
   behind: behind,
   changed: changed,
@@ -832,6 +833,7 @@ BridgeGitTransfer transferOf({
   int ahead = 0,
   int behind = 0,
   bool firstPush = false,
+  bool gone = false,
 }) => BridgeGitTransfer(
   branch: branch,
   remote: remote,
@@ -839,6 +841,14 @@ BridgeGitTransfer transferOf({
   ahead: ahead,
   behind: behind,
   firstPush: firstPush,
+  gone: gone,
+  destination: upstream.split('/').skip(1).join('/'),
+  confirmation: BridgePushConfirmation(
+    branch: branch,
+    remote: remote,
+    reference: 'refs/heads/${upstream.split('/').skip(1).join('/')}',
+    commit: '1a2b3c4',
+  ),
 );
 
 BridgeBranch branchOf(

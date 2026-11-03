@@ -1575,11 +1575,45 @@ fn git_transfer_bridge_confirms_push_tracks_and_pulls() {
     );
     std::fs::write(repo.join("a.txt"), "local change\n").unwrap();
     git(&repo, &["commit", "-am", "Local"]);
-    let confirmation = session.push(false).unwrap();
+    git(&repo, &["config", "branch.main.merge", "main"]);
+    let invalid = session.push(None).unwrap();
+    assert_eq!(invalid.kind, BridgeGitOutcomeKind::PreflightFailed);
+    assert!(invalid.transfer.is_none());
+    assert!(invalid.files.is_empty());
+    git(&repo, &["config", "branch.main.merge", "refs/heads/main"]);
+    let confirmation = session.push(None).unwrap();
     assert_eq!(confirmation.kind, BridgeGitOutcomeKind::PushDefault);
-    assert_eq!(confirmation.transfer.unwrap().ahead, 1);
+    assert!(confirmation.files.is_empty());
+    assert!(confirmation.detail.is_empty());
+    let transfer = confirmation.transfer.unwrap();
+    assert_eq!(transfer.ahead, 1);
+    assert_eq!(transfer.confirmation.remote, "origin");
+    assert_eq!(transfer.confirmation.reference, "refs/heads/main");
+    assert!(transfer.confirmation.commit.len() >= 40);
+    std::fs::write(repo.join("a.txt"), "later change\n").unwrap();
+    git(&repo, &["commit", "-am", "Later"]);
+    let renewed = session.push(Some(transfer.confirmation)).unwrap();
+    assert_eq!(renewed.kind, BridgeGitOutcomeKind::PushDefault);
+    let pushed = session
+        .push(Some(renewed.transfer.unwrap().confirmation))
+        .unwrap();
+    assert_eq!(pushed.kind, BridgeGitOutcomeKind::Done);
+    assert_eq!(pushed.transfer.unwrap().ahead, 2);
+    git(
+        &repo,
+        &[
+            "config",
+            "remote.origin.uploadpack",
+            "sh -c 'echo offline >&2; exit 1'",
+        ],
+    );
+    let failed = session.push(None).unwrap();
+    assert_eq!(failed.kind, BridgeGitOutcomeKind::FetchFailed);
+    assert_eq!(failed.transfer.unwrap().remote, "origin");
+    assert!(failed.files.is_empty());
+    git(&repo, &["config", "--unset", "remote.origin.uploadpack"]);
     git(&repo, &["switch", "-c", "feature/bridge"]);
-    let pushed = session.push(false).unwrap();
+    let pushed = session.push(None).unwrap();
     assert_eq!(pushed.kind, BridgeGitOutcomeKind::Done);
     assert!(pushed.transfer.unwrap().first_push);
     git(
@@ -1590,11 +1624,11 @@ fn git_transfer_bridge_confirms_push_tracks_and_pulls() {
     std::fs::write(other.join("a.txt"), "remote change\n").unwrap();
     git(&other, &["commit", "-am", "Remote"]);
     git(&other, &["push"]);
-    assert!(session.fetch_now().unwrap());
+    assert!(session.fetch().unwrap());
     assert_eq!(session.git_status().unwrap().unwrap().behind, 1);
     assert_eq!(
-        session.push(false).unwrap().kind,
-        BridgeGitOutcomeKind::PushRejected
+        session.push(None).unwrap().kind,
+        BridgeGitOutcomeKind::Diverged
     );
     let pulled = session.pull().unwrap();
     assert_eq!(pulled.kind, BridgeGitOutcomeKind::Done);

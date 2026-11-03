@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/agent/git_actions.dart';
+import 'package:liquid/src/controls.dart';
 import 'package:liquid/src/rust/api/git.dart';
 import 'package:liquid/src/session/session_state.dart';
 import 'package:liquid/src/theme/theme.dart';
@@ -59,6 +60,20 @@ void main() {
         '',
         true,
         'Push feature/retry-after to origin and track it.',
+      ),
+      (
+        gitStatusOf(upstream: 'github/feature', remote: 'github', gone: true),
+        'Push',
+        '',
+        true,
+        'Push main to github and track it.',
+      ),
+      (
+        gitStatusOf(upstream: null, remote: null, hasRemotes: true),
+        'Commit',
+        '',
+        false,
+        'Branch is up to date. Nothing to commit.',
       ),
       (
         gitStatusOf(behind: 3),
@@ -168,6 +183,16 @@ void main() {
         expect(tester.widget<PopupMenuItem<Object>>(item).enabled, isFalse);
       }
       expect(find.text('up to date'), findsNothing);
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      backend.git = gitStatusOf(upstream: null, remote: null, hasRemotes: true);
+      await state.git.refresh();
+      await menu(tester);
+      expect(
+        find.byTooltip('No upstream: set one in Git to push this branch.'),
+        findsNWidgets(3),
+      );
+      expect(find.text('up to date'), findsNothing);
       await state.dispose();
     },
   );
@@ -196,8 +221,14 @@ void main() {
       await tester.sendKeyEvent(LogicalKeyboardKey.enter);
       await tester.pumpAndSettle();
       expect(backend.calls.where((call) => call == 'push true'), hasLength(1));
+      expect(backend.lastConfirmation?.reference, 'refs/heads/main');
+      expect(backend.lastConfirmation?.commit, '1a2b3c4');
       await state.dispose();
       await open();
+      expect(
+        find.widgetWithText(SecondaryButton, 'Create branch…'),
+        findsOneWidget,
+      );
       await tester.tap(find.text('Create branch…'));
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('branch-search')), findsOneWidget);
@@ -274,10 +305,10 @@ void main() {
     await menu(tester);
     await tester.tap(find.text('Fetch'));
     await tester.pumpAndSettle();
-    expect(backend.calls, contains('fetch now'));
+    expect(backend.calls, contains('fetch'));
     await menu(tester);
     expect(find.textContaining(' · fetched '), findsOneWidget);
-    expect(backend.calls.where((call) => call == 'fetch now'), hasLength(1));
+    expect(backend.calls.where((call) => call == 'fetch'), hasLength(1));
     await state.dispose();
   });
 }

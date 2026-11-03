@@ -32,26 +32,37 @@ pub struct CommitPlan {
 }
 
 impl Checkpoints {
-    /// Push runs to completion without a checkout lock: it changes no checkout files and is
-    /// allowed during an agent turn. Hooks run as in the user's terminal.
-    pub async fn push(&self, confirmed_default: bool) -> Result<crate::GitTransfer, DiffError> {
+    /// Preflight reads are bounded; the user's push and hooks run to completion.
+    pub async fn push(
+        &self,
+        confirmed: Option<crate::PushConfirmation>,
+    ) -> Result<crate::GitTransfer, DiffError> {
         let tree = self.tree().await?;
-        tokio::spawn(async move { tree.push(confirmed_default).await })
-            .await
-            .map_err(|error| DiffError::Io(std::io::Error::other(error)))?
+        let transfer = self.bounded(tree.prepare_push(confirmed.as_ref())).await?;
+        let pushed = tokio::spawn({
+            let tree = tree.clone();
+            async move { tree.push(transfer).await }
+        })
+        .await
+        .map_err(|error| DiffError::Io(std::io::Error::other(error)))?;
+        if let Err(DiffError::Diverged(mut transfer, detail)) = pushed {
+            self.bounded(async {
+                tree.fetch_transfer(&transfer).await?;
+                tree.transfer_counts(&mut transfer).await
+            })
+            .await?;
+            return Err(DiffError::Diverged(transfer, detail));
+        }
+        pushed
     }
 
-    /// Pull changes checkout files and holds the same lock as commit until Git finishes.
+    /// Fetch without holding the checkout; acquire it again only for the local fast-forward.
     pub async fn pull(&self) -> Result<crate::GitTransfer, DiffError> {
-        self.user_write(move |tree| async move { tree.pull().await })
-            .await
-    }
-
-    /// Explicit Fetch uses the background fetch's destination checks, including before the
-    /// branch has an upstream.
-    pub async fn fetch_now(&self) -> Result<bool, DiffError> {
         let tree = self.tree().await?;
-        self.bounded(tree.fetch_now()).await
+        drop(tree.checkout().alone().await?);
+        let fetched = self.bounded(tree.prepare_pull()).await?;
+        self.user_write(move |tree| async move { tree.pull(&fetched).await })
+            .await
     }
 
     /// Compared tree identities and files, including untracked files.

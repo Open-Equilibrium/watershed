@@ -233,6 +233,8 @@ fn the_status_counts_commits_against_the_upstream_and_uncommitted_files() {
                 commit: status.commit.clone(),
                 upstream: Some("origin/main".to_owned()),
                 remote: Some("origin".to_owned()),
+                has_remotes: true,
+                gone: false,
                 ahead: 1,
                 behind: 2,
                 changed: 3,
@@ -712,8 +714,8 @@ fn fetching_updates_only_the_upstreams_remote_tracking_branches() {
 
         repo.git(&["switch", "-q", "-c", "local"]);
         assert!(
-            !checkpoints.fetch().await.expect("nothing to fetch"),
-            "a branch without upstream fetches nothing"
+            checkpoints.fetch().await.expect("sole remote fetched"),
+            "Fetch uses the sole remote before an upstream is configured"
         );
     });
 }

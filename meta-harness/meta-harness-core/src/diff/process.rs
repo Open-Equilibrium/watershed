@@ -174,6 +174,14 @@ pub(super) const NO_PROMPTS: [(&str, &str); 5] = [
     ("GCM_INTERACTIVE", "never"),
 ];
 
+/// The non-interactive environment for the checked Git reader.
+pub(super) fn no_prompts() -> Vec<(&'static str, OsString)> {
+    NO_PROMPTS
+        .iter()
+        .map(|(name, value)| (*name, OsString::from(value)))
+        .collect()
+}
+
 /// Runs `command` and returns at most [`MAX_OUTPUT_BYTES`] of its output.
 async fn output(
     mut command: Command,

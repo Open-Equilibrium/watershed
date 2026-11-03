@@ -1,9 +1,22 @@
 //! Explicit push and fast-forward pull through the host's Git and synchronous hooks.
 
 use super::branches::without_credentials;
-use super::process::{git_ref_output, user_git};
+use super::process::{git_config, git_ref_output, no_prompts, user_git};
 use super::stash::listed_files;
 use super::*;
+
+/// The exact branch, destination and commit approved for a default-branch push.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PushConfirmation {
+    /// The local branch.
+    pub branch: String,
+    /// The named destination remote.
+    pub remote: String,
+    /// The full destination ref.
+    pub reference: String,
+    /// The full branch-tip object ID.
+    pub commit: String,
+}
 
 /// The destination and counts captured immediately before a push or pull.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -14,17 +27,26 @@ pub struct GitTransfer {
     pub remote: String,
     /// The upstream name as Git shows it.
     pub upstream: String,
-    /// Commits to push.
+    /// Captured commits to push.
     pub ahead: u64,
-    /// Commits to pull.
+    /// Captured commits to pull.
     pub behind: u64,
-    /// The branch had no upstream before this push.
+    /// The branch had no configured upstream before this push.
     pub first_push: bool,
+    /// The upstream ref was gone before this transfer.
+    pub gone: bool,
+    /// Exact identities to return unchanged when confirming the push.
+    pub confirmation: PushConfirmation,
 }
 
 impl WorkingTree {
-    /// The upstream's remote, falling back to origin only when it is configured.
-    pub(super) async fn remote(&self, branch: Option<&str>) -> Result<Option<String>, DiffError> {
+    /// One destination policy for status, Fetch and transfers: upstream, origin, sole remote.
+    pub(super) async fn remote(
+        &self,
+        branch: Option<&str>,
+    ) -> Result<(Option<String>, bool), DiffError> {
+        let remotes = git_ref_output(&self.root, &["remote"]).await?;
+        let names: Vec<_> = remotes.lines().collect();
         if let Some(branch) = branch {
             let remote = git_ref_output(
                 &self.root,
@@ -35,105 +57,125 @@ impl WorkingTree {
                 ],
             )
             .await?;
-            if !remote.trim_end_matches('\n').is_empty() {
-                return Ok(Some(remote.trim_end_matches('\n').to_owned()));
+            let remote = remote.trim_end_matches('\n');
+            if !remote.is_empty() {
+                return Ok((Some(remote.to_owned()), !names.is_empty()));
             }
         }
-        let remotes = git_ref_output(&self.root, &["remote"]).await?;
-        Ok(remotes
-            .lines()
-            .any(|name| name == "origin")
-            .then(|| "origin".to_owned()))
-    }
-
-    /// Explicit Fetch also works before the first push, using origin.
-    pub async fn fetch_now(&self) -> Result<bool, DiffError> {
-        let branch = self.branch().await?;
-        let Some(remote) = self.remote(branch.as_deref()).await? else {
-            return Ok(false);
+        let remote = if names.contains(&"origin") {
+            Some("origin")
+        } else if names.len() == 1 {
+            Some(names[0])
+        } else {
+            None
         };
-        if remote == "." {
-            return Ok(false);
-        }
-        self.fetch_remote(&remote).await?;
-        Ok(true)
+        Ok((remote.map(str::to_owned), !names.is_empty()))
     }
 
-    async fn destination(&self) -> Result<(GitTransfer, String), DiffError> {
+    async fn destination(&self) -> Result<(GitTransfer, GitStatus), DiffError> {
         let status = self.status().await?;
-        let branch = status.branch.ok_or(DiffError::NoBranch)?;
-        let remote = status.remote.ok_or_else(|| {
+        let branch = status.branch.clone().ok_or(DiffError::NoBranch)?;
+        let commit = status
+            .commit
+            .clone()
+            .ok_or_else(|| DiffError::Git("Commit before transferring this branch.".to_owned()))?;
+        let remote = status.remote.clone().ok_or_else(|| {
             DiffError::Git(
-                "No remote: commits stay in this repository. Push needs a remote added in Git."
-                    .to_owned(),
+                if status.has_remotes {
+                    "The destination remote is ambiguous; configure an upstream in Git."
+                } else {
+                    "The repository has no remote."
+                }
+                .to_owned(),
             )
         })?;
-        let reference = git_ref_output(
-            &self.root,
-            &[
-                "for-each-ref",
-                "--format=%(upstream:remoteref)",
-                &format!("refs/heads/{branch}"),
-            ],
-        )
-        .await?;
-        let first_push = status.upstream.is_none();
+        let configured =
+            git_config(&self.root, &["--get", &format!("branch.{branch}.merge")]).await?;
+        let first_push = configured.is_empty();
         let reference = if first_push {
             format!("refs/heads/{branch}")
         } else {
-            reference.trim_end_matches('\n').to_owned()
+            configured.trim_end_matches('\n').to_owned()
+        };
+        // Never let a short or malformed merge target bypass the default-branch comparison.
+        if !reference.starts_with("refs/heads/")
+            || git(&self.root, &[], &["check-ref-format", &reference])
+                .await
+                .is_err()
+        {
+            return Err(DiffError::Git(
+                "The upstream must be a full refs/heads/ branch reference accepted by Git."
+                    .to_owned(),
+            ));
+        }
+        let confirmation = PushConfirmation {
+            branch: branch.clone(),
+            remote: remote.clone(),
+            reference,
+            commit,
         };
         Ok((
             GitTransfer {
                 upstream: status
                     .upstream
+                    .clone()
                     .unwrap_or_else(|| format!("{remote}/{branch}")),
                 branch,
                 remote,
-                ahead: status.ahead,
-                behind: status.behind,
+                ahead: 0,
+                behind: 0,
                 first_push,
+                gone: status.gone,
+                confirmation,
             },
-            reference,
+            status,
         ))
     }
 
-    /// Pushes only the current branch to its upstream, never forcibly. A first push tracks
-    /// origin under the same name. It does not acquire a checkout lock or change checkout files.
-    pub async fn push(&self, confirmed_default: bool) -> Result<GitTransfer, DiffError> {
-        let (mut transfer, reference) = self.destination().await?;
-        self.fetch_now()
-            .await
-            .map_err(|error| remote_error(&transfer.remote, error))?;
-        self.transfer_counts(&mut transfer, &reference).await?;
-        if !confirmed_default {
-            let env: Vec<(&str, OsString)> = process::NO_PROMPTS
-                .iter()
-                .map(|(name, value)| (*name, OsString::from(value)))
-                .collect();
-            let advertised = git(
-                &self.root,
-                &env,
-                &["ls-remote", "--symref", "--", &transfer.remote, "HEAD"],
-            )
-            .await
-            .map_err(|error| remote_error(&transfer.remote, error))?;
-            if advertised
-                .lines()
-                .any(|line| line == format!("ref: {reference}\tHEAD"))
-            {
-                return Err(DiffError::PushDefault(
-                    reference
-                        .strip_prefix("refs/heads/")
-                        .unwrap_or(&reference)
-                        .to_owned(),
-                    transfer,
-                ));
-            }
+    /// Network preflight is bounded by Checkpoints, outside any checkout write lock.
+    pub(crate) async fn prepare_push(
+        &self,
+        confirmed: Option<&PushConfirmation>,
+    ) -> Result<GitTransfer, DiffError> {
+        let (mut transfer, status) = self.destination().await?;
+        if status.merging {
+            return Err(DiffError::MergeInProgress);
         }
-        let spec = format!("refs/heads/{}:{reference}", transfer.branch);
-        // Explicit source/destination avoid push.default and configured push refspecs. These
-        // flags also prevent mirror, tags and force settings from broadening this one action.
+        self.fetch_transfer(&transfer).await?;
+        self.transfer_counts(&mut transfer).await?;
+        if transfer.behind > 0 {
+            return Err(DiffError::Diverged(Box::new(transfer), String::new()));
+        }
+        let advertised = git(
+            &self.root,
+            &no_prompts(),
+            &["ls-remote", "--symref", "--", &transfer.remote, "HEAD"],
+        )
+        .await
+        .map_err(|error| fetch_error(&transfer, error))?;
+        let reference = &transfer.confirmation.reference;
+        let default = status
+            .default_branch
+            .as_ref()
+            .is_some_and(|branch| *reference == format!("refs/heads/{branch}"))
+            || advertised
+                .lines()
+                .any(|line| line == format!("ref: {reference}\tHEAD"));
+        // A stale approval always asks again, even if the new destination is not a default.
+        if (default && confirmed != Some(&transfer.confirmation))
+            || confirmed.is_some_and(|confirmed| *confirmed != transfer.confirmation)
+        {
+            return Err(DiffError::PushDefault(Box::new(transfer)));
+        }
+        Ok(transfer)
+    }
+
+    /// Pushes the captured commit, never a branch ref that could move after confirmation.
+    pub(crate) async fn push(&self, transfer: GitTransfer) -> Result<GitTransfer, DiffError> {
+        let spec = format!(
+            "{}:{}",
+            transfer.confirmation.commit, transfer.confirmation.reference
+        );
         let result = user_git(
             &self.root,
             &[
@@ -142,7 +184,6 @@ impl WorkingTree {
                 "--no-force",
                 "--no-mirror",
                 "--no-follow-tags",
-                "--set-upstream",
                 "--",
                 &transfer.remote,
                 &spec,
@@ -150,40 +191,67 @@ impl WorkingTree {
         )
         .await;
         match result {
-            Ok(_) => Ok(transfer),
+            Ok(_) => {
+                // Git cannot infer a local branch from an OID source. Track only the captured
+                // branch, even if another process switched HEAD while the push ran.
+                for (key, value) in [
+                    ("remote", &transfer.remote),
+                    ("merge", &transfer.confirmation.reference),
+                ] {
+                    git(
+                        &self.root,
+                        &[],
+                        &[
+                            "config",
+                            &format!("branch.{}.{key}", transfer.branch),
+                            value,
+                        ],
+                    )
+                    .await
+                    .map_err(|error| {
+                        DiffError::TransferFailed(without_credentials(&error.to_string()))
+                    })?;
+                }
+                Ok(transfer)
+            }
             Err(DiffError::Git(detail))
                 if detail.contains("[rejected]")
                     && (detail.contains("non-fast-forward") || detail.contains("fetch first")) =>
             {
-                // A remote may advance after the preflight fetch. Refresh its counts after
-                // rejection too; a failed read does not turn stale counts into fresh ones.
-                self.fetch_now()
-                    .await
-                    .map_err(|error| remote_error(&transfer.remote, error))?;
-                self.transfer_counts(&mut transfer, &reference).await?;
-                Err(DiffError::PushRejected(
-                    transfer,
+                Err(DiffError::Diverged(
+                    Box::new(transfer),
                     without_credentials(&detail),
                 ))
             }
-            Err(error) => Err(remote_error(&transfer.remote, error)),
+            Err(error) => Err(DiffError::TransferFailed(without_credentials(
+                &error.to_string(),
+            ))),
         }
     }
 
-    async fn transfer_counts(
+    pub(crate) async fn fetch_transfer(&self, transfer: &GitTransfer) -> Result<(), DiffError> {
+        if transfer.remote != "." {
+            self.fetch_remote(&transfer.remote)
+                .await
+                .map_err(|error| fetch_error(transfer, error))?;
+        }
+        Ok(())
+    }
+
+    pub(crate) async fn transfer_counts(
         &self,
         transfer: &mut GitTransfer,
-        reference: &str,
     ) -> Result<(), DiffError> {
-        // Let Git map the destination through the configured fetch refspec, including before
-        // an upstream is set. The overrides affect this read only.
         let upstream = git_ref_output(
             &self.root,
             &[
                 "-c",
                 &format!("branch.{}.remote={}", transfer.branch, transfer.remote),
                 "-c",
-                &format!("branch.{}.merge={reference}", transfer.branch),
+                &format!(
+                    "branch.{}.merge={}",
+                    transfer.branch, transfer.confirmation.reference
+                ),
                 "for-each-ref",
                 "--format=%(upstream)",
                 &format!("refs/heads/{}", transfer.branch),
@@ -192,60 +260,85 @@ impl WorkingTree {
         .await?;
         let upstream = upstream.trim_end_matches('\n');
         if upstream.is_empty() || self.resolve(upstream).await?.is_none() {
-            transfer.ahead = git_ref_output(&self.root, &["rev-list", "--count", "HEAD", "--"])
+            // Only a true first publication counts all history when no destination exists.
+            transfer.ahead = if transfer.first_push {
+                git_ref_output(
+                    &self.root,
+                    &["rev-list", "--count", &transfer.confirmation.commit, "--"],
+                )
                 .await?
                 .trim()
                 .parse()
-                .map_err(|_| DiffError::Git("Git returned an invalid commit count.".to_owned()))?;
+                .map_err(|_| DiffError::Git("Git returned an invalid commit count.".to_owned()))?
+            } else {
+                0
+            };
             transfer.behind = 0;
             return Ok(());
         }
-        let range = format!("HEAD...{upstream}");
+        let range = format!("{}...{upstream}", transfer.confirmation.commit);
         let counts = git_ref_output(
             &self.root,
             &["rev-list", "--left-right", "--count", &range, "--"],
         )
         .await?;
         let mut counts = counts.split_whitespace();
-        transfer.ahead = counts.next().unwrap_or("0").parse().map_err(|_| {
-            DiffError::Git("Git returned invalid ahead and behind counts.".to_owned())
-        })?;
-        transfer.behind = counts.next().unwrap_or("0").parse().map_err(|_| {
-            DiffError::Git("Git returned invalid ahead and behind counts.".to_owned())
-        })?;
+        let invalid =
+            |_| DiffError::Git("Git returned invalid ahead and behind counts.".to_owned());
+        transfer.ahead = counts.next().unwrap_or("0").parse().map_err(invalid)?;
+        transfer.behind = counts.next().unwrap_or("0").parse().map_err(invalid)?;
         Ok(())
     }
 
-    /// Fetches the upstream through the checked refspecs, then fast-forwards through the
-    /// user's Git. The caller holds the checkout lock until Git and its hooks finish.
-    pub async fn pull(&self) -> Result<GitTransfer, DiffError> {
-        let (mut transfer, _) = self.destination().await?;
-        if transfer.first_push {
+    pub(crate) async fn prepare_pull(&self) -> Result<GitTransfer, DiffError> {
+        let (transfer, status) = self.destination().await?;
+        check_pull_status(&status)?;
+        self.fetch_transfer(&transfer).await?;
+        Ok(transfer)
+    }
+
+    /// Only local reads and merge run under the checkout lock, to completion with hooks.
+    pub(crate) async fn pull(&self, fetched: &GitTransfer) -> Result<GitTransfer, DiffError> {
+        let (mut transfer, status) = self.destination().await?;
+        if transfer.confirmation.branch != fetched.confirmation.branch
+            || transfer.confirmation.remote != fetched.confirmation.remote
+            || transfer.confirmation.reference != fetched.confirmation.reference
+        {
             return Err(DiffError::Git(
-                "This branch has no upstream. Push it first.".to_owned(),
+                "The branch or upstream changed. Pull again.".to_owned(),
             ));
         }
-        self.fetch_now()
-            .await
-            .map_err(|error| remote_error(&transfer.remote, error))?;
-        let status = self.status().await?;
+        check_pull_status(&status)?;
         transfer.ahead = status.ahead;
         transfer.behind = status.behind;
         if transfer.ahead > 0 && transfer.behind > 0 {
-            return Err(DiffError::PushRejected(transfer, String::new()));
+            return Err(DiffError::Diverged(Box::new(transfer), String::new()));
         }
-        let result = user_git(&self.root, &["merge", "--ff-only", "--", "@{upstream}"]).await;
-        match result {
+        match user_git(&self.root, &["merge", "--ff-only", "--", "@{upstream}"]).await {
             Ok(_) => Ok(transfer),
             Err(DiffError::Git(detail)) if detail.contains("would be overwritten by merge") => {
                 Err(DiffError::WouldOverwrite(listed_files(&detail)))
             }
-            Err(error) => Err(remote_error(&transfer.remote, error)),
+            Err(error) => Err(DiffError::TransferFailed(without_credentials(
+                &error.to_string(),
+            ))),
         }
     }
 }
 
-fn remote_error(remote: &str, error: DiffError) -> DiffError {
+fn check_pull_status(status: &GitStatus) -> Result<(), DiffError> {
+    if status.merging {
+        return Err(DiffError::MergeInProgress);
+    }
+    if status.upstream.is_none() || status.gone {
+        return Err(DiffError::Git(
+            "The branch has no resolvable upstream.".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+fn fetch_error(transfer: &GitTransfer, error: DiffError) -> DiffError {
     let detail = without_credentials(&match error {
         DiffError::Git(detail) => detail,
         error => error.to_string(),
@@ -262,8 +355,8 @@ fn remote_error(remote: &str, error: DiffError) -> DiffError {
     .iter()
     .any(|marker| lower.contains(marker))
     {
-        DiffError::SignInFailed(remote.to_owned(), detail)
+        DiffError::SignInFailed(Box::new(transfer.clone()), detail)
     } else {
-        DiffError::TransferFailed(detail)
+        DiffError::FetchFailed(Box::new(transfer.clone()), detail)
     }
 }

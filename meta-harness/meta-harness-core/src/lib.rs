@@ -21,7 +21,7 @@ pub use checkpoint::{
 };
 pub use diff::{
     Branch, BranchTarget, ChangeStatus, Changes, Commit, DiffError, FileChange, GitStatus,
-    GitTransfer, Stash, Whitespace,
+    GitTransfer, PushConfirmation, Stash, Whitespace,
 };
 pub use event::{
     AgentEvent, Answer, ChangedLines, Decision, Delivery, EditChange, EditPreview, EntryKind,

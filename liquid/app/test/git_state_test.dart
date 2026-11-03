@@ -153,7 +153,7 @@ void main() {
     await git.refresh();
     for (final ahead in [0, 1]) {
       backend.transferOutcome = BridgeGitOutcome(
-        kind: BridgeGitOutcomeKind.pushRejected,
+        kind: BridgeGitOutcomeKind.diverged,
         files: const [],
         running: const [],
         detail: '',
@@ -161,10 +161,12 @@ void main() {
       );
       await git.push(device: 'MacBook');
     }
-    backend.transferOutcome = outcomeOf(
-      BridgeGitOutcomeKind.signInFailed,
-      files: ['origin'],
+    backend.transferOutcome = BridgeGitOutcome(
+      kind: BridgeGitOutcomeKind.signInFailed,
+      files: const [],
+      running: const [],
       detail: 'Authentication failed',
+      transfer: transferOf(),
     );
     await git.push(device: 'MacBook');
     backend.transferOutcome = outcomeOf(
@@ -207,7 +209,7 @@ void main() {
     );
     expect(
       notices[4].$2,
-      'Could not pull: “Fix flaky sync test” is running in this checkout. Stop it or wait until it finishes.',
+      'Could not pull: “Fix flaky sync test” is running in this checkout. Stop it or wait until it finishes. Nothing was pulled.',
     );
   });
 
@@ -224,6 +226,111 @@ void main() {
       contains('Git or its hooks may have made changes.'),
     );
   });
+
+  testWidgets(
+    'a requested Fetch shares a pending background fetch and reports its failure',
+    (tester) async {
+      final pending = _PendingFetchBackend();
+      final state = GitState(
+        pending,
+        notify: (level, text) => notices.add((level, text)),
+      );
+      state.watch();
+      await tester.pump();
+      await tester.pump(fetchEvery);
+      var finished = false;
+      final requested = state.fetchNow().then((_) => finished = true);
+      await tester.pump();
+      expect(finished, isFalse);
+      pending.fetched.completeError('offline');
+      await tester.pump();
+      await requested;
+      expect(pending.calls.where((call) => call == 'fetch'), hasLength(1));
+      expect(notices.single.$1, BridgeLevel.error);
+      expect(
+        notices.single.$2,
+        contains('Could not fetch from origin: “offline”'),
+      );
+      state.stop();
+    },
+  );
+
+  testWidgets('background fetch waits while a push or pull runs', (
+    tester,
+  ) async {
+    for (final push in [true, false]) {
+      final state = GitState(
+        backend,
+        notify: (level, text) => notices.add((level, text)),
+      );
+      await state.refresh();
+      backend.transferGate = Completer<BridgeGitOutcome>();
+      state.watch();
+      final writing = push
+          ? state.push(device: 'MacBook')
+          : state.pull(device: 'MacBook');
+      await tester.pump();
+      expect(
+        state.progress.value,
+        isNotNull,
+        reason: 'transfer starts before the fetch tick',
+      );
+      await tester.pump(fetchEvery);
+      expect(fetches(), 0, reason: push ? 'push' : 'pull');
+      backend.transferGate!.complete(
+        BridgeGitOutcome(
+          kind: BridgeGitOutcomeKind.done,
+          files: const [],
+          running: const [],
+          detail: '',
+          transfer: transferOf(),
+        ),
+      );
+      await tester.pump();
+      await writing;
+      state.stop();
+    }
+  });
+
+  test(
+    'preflight and fetch failures guarantee that nothing was transferred',
+    () async {
+      for (final push in [true, false]) {
+        final action = push ? 'push' : 'pull';
+        final past = push ? 'pushed' : 'pulled';
+        for (final kind in [
+          BridgeGitOutcomeKind.preflightFailed,
+          BridgeGitOutcomeKind.fetchFailed,
+        ]) {
+          backend.transferOutcome = BridgeGitOutcome(
+            kind: kind,
+            files: const [],
+            running: const [],
+            detail: 'offline',
+            transfer: transferOf(),
+          );
+          await (push
+              ? git.push(device: 'MacBook')
+              : git.pull(device: 'MacBook'));
+          expect(
+            git.fetched,
+            isNull,
+            reason: 'failed fetches do not refresh the fetched time',
+          );
+          expect(notices.last.$1, BridgeLevel.error);
+          expect(notices.last.$2, startsWith('Could not $action:'));
+          expect(notices.last.$2, contains('Nothing was $past.'));
+          expect(notices.last.$2, isNot(contains('may have made changes')));
+          if (kind == BridgeGitOutcomeKind.fetchFailed) {
+            expect(
+              notices.last.$2,
+              contains('Could not fetch from origin: “offline”'),
+            );
+          }
+        }
+      }
+    },
+  );
 
   testWidgets('a pending fetch leaves checkout polling active', (tester) async {
     final pending = _PendingFetchBackend();

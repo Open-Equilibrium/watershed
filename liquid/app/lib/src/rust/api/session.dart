@@ -82,12 +82,8 @@ abstract class AgentSession implements RustOpaqueInterface {
   /// Streams the session's events; a session has one subscriber.
   Stream<BridgeEvent> events();
 
-  /// Fetches the remote of the branch's upstream, without credential prompts; returns whether
-  /// there was one.
+  /// Fetches the upstream remote, origin or the sole remote through checked destinations.
   Future<bool> fetch();
-
-  /// Explicit Fetch with the background fetch's checks; origin before the first push.
-  Future<bool> fetchNow();
 
   /// The checkout's branches.
   Future<BridgeBranches> gitBranches();
@@ -118,7 +114,7 @@ abstract class AgentSession implements RustOpaqueInterface {
   Future<BridgeGitOutcome> pull();
 
   /// Pushes the branch through the user's Git and hooks, without a checkout lock.
-  Future<BridgeGitOutcome> push({required bool confirmedDefault});
+  Future<BridgeGitOutcome> push({BridgePushConfirmation? confirmed});
 
   /// Up to `limit` stored sessions of this project, newest first, without the current one.
   Future<List<BridgeStoredSession>> recentSessions({required int limit});

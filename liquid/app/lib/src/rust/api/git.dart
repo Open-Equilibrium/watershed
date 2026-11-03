@@ -10,7 +10,7 @@ import 'history.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 // These functions are ignored because they are not marked as `pub`: `count`, `outcome`, `running_agents`, `transfer_outcome`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`, `from`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`, `from`, `from`
 
 /// A local or remote branch.
 class BridgeBranch {
@@ -274,14 +274,20 @@ enum BridgeGitOutcomeKind {
   /// Liquid cannot commit while a merge is in progress.
   mergeInProgress,
 
-  /// The destination is the repository's default branch; nothing was pushed.
+  /// A fresh approval is required; transfer carries destination, counts and exact identities.
   pushDefault,
 
   /// The upstream has commits the branch lacks; nothing was pushed or pulled.
-  pushRejected,
+  diverged,
 
-  /// The host's Git login failed, before the transfer.
+  /// The host's Git login failed before transfer; transfer names the remote.
   signInFailed,
+
+  /// A fetch failed before any push or merge; transfer names its remote.
+  fetchFailed,
+
+  /// A pre-check failed; no push or merge ran.
+  preflightFailed,
 
   /// Git failed; its own output describes any effects it completed.
   transferFailed,
@@ -300,6 +306,8 @@ class BridgeGitStatus {
 
   /// The upstream's remote, or origin when configured without an upstream.
   final String? remote;
+  final bool hasRemotes;
+  final bool gone;
 
   /// Commits the branch has that its upstream lacks.
   final PlatformInt64 ahead;
@@ -327,6 +335,8 @@ class BridgeGitStatus {
     this.commit,
     this.upstream,
     this.remote,
+    required this.hasRemotes,
+    required this.gone,
     required this.ahead,
     required this.behind,
     required this.changed,
@@ -342,6 +352,8 @@ class BridgeGitStatus {
       commit.hashCode ^
       upstream.hashCode ^
       remote.hashCode ^
+      hasRemotes.hashCode ^
+      gone.hashCode ^
       ahead.hashCode ^
       behind.hashCode ^
       changed.hashCode ^
@@ -359,6 +371,8 @@ class BridgeGitStatus {
           commit == other.commit &&
           upstream == other.upstream &&
           remote == other.remote &&
+          hasRemotes == other.hasRemotes &&
+          gone == other.gone &&
           ahead == other.ahead &&
           behind == other.behind &&
           changed == other.changed &&
@@ -368,7 +382,7 @@ class BridgeGitStatus {
           conflicts == other.conflicts;
 }
 
-/// A push or pull's destination and captured upstream counts, all names safe to show.
+/// A push or pull's display names, captured counts and opaque approval identities.
 class BridgeGitTransfer {
   final String branch;
   final String remote;
@@ -376,6 +390,13 @@ class BridgeGitTransfer {
   final PlatformInt64 ahead;
   final PlatformInt64 behind;
   final bool firstPush;
+  final bool gone;
+
+  /// The destination branch, safe to display.
+  final String destination;
+
+  /// Opaque approval identities; return unchanged, never display these strings.
+  final BridgePushConfirmation confirmation;
 
   const BridgeGitTransfer({
     required this.branch,
@@ -384,6 +405,9 @@ class BridgeGitTransfer {
     required this.ahead,
     required this.behind,
     required this.firstPush,
+    required this.gone,
+    required this.destination,
+    required this.confirmation,
   });
 
   @override
@@ -393,7 +417,10 @@ class BridgeGitTransfer {
       upstream.hashCode ^
       ahead.hashCode ^
       behind.hashCode ^
-      firstPush.hashCode;
+      firstPush.hashCode ^
+      gone.hashCode ^
+      destination.hashCode ^
+      confirmation.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -405,7 +432,39 @@ class BridgeGitTransfer {
           upstream == other.upstream &&
           ahead == other.ahead &&
           behind == other.behind &&
-          firstPush == other.firstPush;
+          firstPush == other.firstPush &&
+          gone == other.gone &&
+          destination == other.destination &&
+          confirmation == other.confirmation;
+}
+
+/// Exact identities returned unchanged by the default-branch confirmation dialog.
+class BridgePushConfirmation {
+  final String branch;
+  final String remote;
+  final String reference;
+  final String commit;
+
+  const BridgePushConfirmation({
+    required this.branch,
+    required this.remote,
+    required this.reference,
+    required this.commit,
+  });
+
+  @override
+  int get hashCode =>
+      branch.hashCode ^ remote.hashCode ^ reference.hashCode ^ commit.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgePushConfirmation &&
+          runtimeType == other.runtimeType &&
+          branch == other.branch &&
+          remote == other.remote &&
+          reference == other.reference &&
+          commit == other.commit;
 }
 
 /// A branch's stashed changes.
