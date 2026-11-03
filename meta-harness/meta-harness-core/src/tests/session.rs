@@ -149,6 +149,65 @@ while :; do sleep 1; done"#,
 }
 
 #[test]
+fn a_protocol_failure_stops_the_process_before_releasing_its_checkout_guard() {
+    run(async {
+        let project = super::checkpoint::Repo::new("protocol-failure-guard");
+        let script = r#"printf '%s\n' "$$" > .git/agent-pid
+until [ -e .git/release ]; do sleep 0.02; done
+i=0
+while [ "$i" -lt 256 ]; do
+    printf '%s\n' '{"type":"queue_update","steering":[],"followUp":[]}'
+    i=$((i+1))
+done
+printf '%s\n' 'not json'
+exec sleep 30"#;
+        let (session, mut events) = Session::start(&AgentCommand {
+            program: "/bin/sh".into(),
+            args: vec!["-c".into(), script.into()],
+            extension: EXTENSION.into(),
+            session: None,
+            cwd: project.0.clone(),
+        })
+        .expect("fake agent starts");
+        session
+            .checkpoints()
+            .capture(&super::checkpoint::at("t1", crate::Phase::Start))
+            .await
+            .expect("the turn holds its checkout guard");
+        let checkout = crate::checkout::Checkout::new(
+            project.0.join(".git/watershed"),
+            project.0.join(".git/watershed"),
+        );
+        assert!(matches!(
+            checkout.alone().await,
+            Err(crate::DiffError::AgentRunning(_))
+        ));
+        std::fs::write(project.0.join(".git/release"), "").expect("release the agent");
+        let exclusive = timeout(WAIT, async {
+            loop {
+                if let Ok(guard) = checkout.alone().await {
+                    break guard;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("the failed process releases the checkout");
+        let pid = std::fs::read_to_string(project.0.join(".git/agent-pid"))
+            .expect("the process recorded its id");
+        let alive = std::process::Command::new("kill")
+            .args(["-0", pid.trim()])
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success());
+        drop(exclusive);
+        drop(session);
+        while !matches!(next(&mut events).await, SessionEvent::Exited { .. }) {}
+        assert!(!alive, "the live process lost its checkout guard");
+    });
+}
+
+#[test]
 fn shutdown_kills_an_agent_that_ignores_it() {
     run(async {
         let (session, _events) = fake_agent(r#"trap '' TERM; while :; do sleep 1; done"#);
@@ -160,12 +219,12 @@ fn shutdown_kills_an_agent_that_ignores_it() {
 #[test]
 fn shutdown_ends_an_agent_whose_events_nobody_reads() {
     run(async {
-        // Fills the 256-event buffer, then breaks the protocol while nobody reads.
+        // Overfills the 256-event buffer while nobody reads; the agent stays alive until
+        // shutdown, independently of the protocol-failure teardown tested above.
         let written = marker("unread");
         let (session, _events) = fake_agent(&format!(
             r#"i=0
-while [ $i -lt 256 ]; do printf '%s\n' '{{"type":"queue_update","steering":[],"followUp":[]}}'; i=$((i+1)); done
-printf '%s\n' 'not json'
+while [ $i -lt 257 ]; do printf '%s\n' '{{"type":"queue_update","steering":[],"followUp":[]}}'; i=$((i+1)); done
 trap '' TERM; : > {}; while :; do sleep 1; done"#,
             super::shell_word(written.display())
         ));

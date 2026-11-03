@@ -97,6 +97,22 @@ impl Supervisor {
                 }
             }
         };
+        // Keep the checkout guard until the process is gone, even when publishing its
+        // failure will wait for room in the event buffer.
+        let stop = failure.is_some() || self.kill_requested;
+        let status = if stop {
+            None
+        } else {
+            self.unless_killed(child.wait()).await
+        };
+        let status = match status {
+            Some(status) => status,
+            None => {
+                let _ = child.start_kill();
+                child.wait().await
+            }
+        };
+        let success = status.is_ok_and(|status| status.success());
         {
             // Nothing is asked of a gone agent: open dialogs end with it, and their expiry
             // reports nothing after the exit.
@@ -111,28 +127,6 @@ impl Supervisor {
         // A capture in progress stops with its Git and the programs Git started, before the
         // exit is reported.
         self.checkpoints.close().await;
-        let stop = failure.is_some() || self.kill_requested;
-        if let Some(reason) = failure {
-            // A full event buffer must not keep a kill from ending the agent.
-            let events = self.events.clone();
-            let _ = self
-                .unless_killed(events.send(SessionEvent::Failed(reason)))
-                .await;
-        }
-        // An agent that closed its output may still run; a kill request ends the wait.
-        let status = if stop {
-            None
-        } else {
-            self.unless_killed(child.wait()).await
-        };
-        let status = match status {
-            Some(status) => status,
-            None => {
-                let _ = child.start_kill();
-                child.wait().await
-            }
-        };
-        let success = status.is_ok_and(|status| status.success());
         // Shutdown learns of the exit first; the event waits for buffer space.
         let _ = exit.send(success);
         if tokio::time::timeout(ERROR_OUTPUT_WAIT, &mut self.error_reader)
@@ -140,7 +134,7 @@ impl Supervisor {
             .is_err()
         {
             self.error_reader.abort();
-            let _ = self.error_reader.await;
+            let _ = (&mut self.error_reader).await;
         }
         let error_output = {
             let kept = self
@@ -149,6 +143,12 @@ impl Supervisor {
                 .unwrap_or_else(PoisonError::into_inner);
             String::from_utf8_lossy(&kept).trim().to_owned()
         };
+        if let Some(reason) = failure {
+            let events = self.events.clone();
+            let _ = self
+                .unless_killed(events.send(SessionEvent::Failed(reason)))
+                .await;
+        }
         // No resolution can follow: one being reported finishes first.
         let mut ended = self.ended.lock().await;
         *ended = true;
