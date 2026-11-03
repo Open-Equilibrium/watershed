@@ -89,7 +89,10 @@ async function assertHeadingExtraction(page) {
 }
 
 async function docsToCheck() {
-  const docs = ["docs/decisions/open-decisions.html"];
+  const docs = [
+    "docs/decisions/open-decisions.html",
+    "docs/design/mockups/liquid-git-prs-worktrees.html",
+  ];
   const conceptDir = path.join(repoRoot, "docs", "concept");
   const conceptFiles = await readdir(conceptDir);
   docs.push(
