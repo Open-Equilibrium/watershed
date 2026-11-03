@@ -861,4 +861,23 @@ void main() {
     await tester.pump();
     expect(focused(tester, 0), isFalse);
   });
+
+  testWidgets('a field left for another while ⏎ waits is written once', (
+    tester,
+  ) async {
+    await show(tester, ['A', 'B']);
+    await caret(tester, 0, 1);
+    fake.gate = Completer();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    await type(tester, 0, 'x');
+    await caret(tester, 1, 1);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    fake.gate!.complete();
+    await tester.pumpAndSettle();
+    expect(fake.textsOf(page), ['A', 'x', 'B', '']);
+  });
 }

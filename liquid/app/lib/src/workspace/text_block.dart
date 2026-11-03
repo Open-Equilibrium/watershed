@@ -100,7 +100,7 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
   @override
   void dispose() {
     // A composition still open, or anything else not yet sent, is written as it stands.
-    if (!_editor.isSource(this) && _stored != null && _text.text != _stored) {
+    if (!_editor.owns(this) && _stored != null && _text.text != _stored) {
       _send(_text.text);
     }
     _editor.left(this);

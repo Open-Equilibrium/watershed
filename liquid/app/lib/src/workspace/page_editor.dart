@@ -162,6 +162,12 @@ class PageEditor {
 
   bool isSource(EditorSource source) => identical(_source, source);
 
+  /// Every field the running change took input from; what they held belongs to the queue.
+  final _owned = <EditorSource>{};
+
+  /// Whether `source`'s input belongs to the running change, also after typing moved on.
+  bool owns(EditorSource source) => _owned.contains(source);
+
   /// Starts `key` in `target`, whose field is `source`: ⏎ or ⌫ at its start. While a change
   /// runs from another field, `source` becomes the field typing goes to, and its key waits
   /// its turn behind what the field before held.
@@ -169,6 +175,7 @@ class PageEditor {
     if (busy) {
       final left = _latest;
       _source = source;
+      _owned.add(source);
       _gone = false;
       _latest = source.typed;
       _linger(target);
@@ -206,6 +213,7 @@ class PageEditor {
 
   void _begin(EditorSource source) {
     _source = source;
+    _owned.add(source);
     _gone = false;
     _latest = source.typed;
     _state.finishing.add(_finish);
@@ -390,6 +398,7 @@ class PageEditor {
       }
     } finally {
       _source = null;
+      _owned.clear();
       _queue.clear();
       _state.finishing.remove(_finish);
       _written();
