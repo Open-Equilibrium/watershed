@@ -122,6 +122,19 @@ summary{cursor:pointer}summary h3{display:inline;margin:0}summary:focus-visible{
         <p><strong>Recommendation:</strong> A: agents are the threat ADR-0229 addresses, and the device owner is already inside the M3 boundary.</p>
         <p><strong>Acceptance criterion:</strong> SECURITY.md states per platform who can read the replica key, and the agent sandbox tests show that an agent reaches neither the Secret Service on Linux nor the Credential Manager from WSL.</p>
       </details>
+      <details id="d-084" class="decision">
+        <summary><h3>D-084 - How The Text Editor Keeps Typing During &#9166; And &#9003;</h3></summary>
+        <p><strong>Status:</strong> Open; blocks closing the review of the Flutter Explorer and Page pull request, whose Text Block editor stops at this question (AGENTS.md, open search space).</p>
+        <p><strong>Background:</strong> &#9166; (split), &#9003; at a Text Block's start (join) and the first character on an empty Page each ask the Rust core to change the Page's structure. The core answers within milliseconds, but Flutter must never wait for it (<a href="../concept/liquid-client-architecture.md">client architecture</a> rules 1 and 7), so keys typed in that gap must still land in the right Text Block. Three review rounds fixed the cases they found: typing right after &#9166; or during &#9003;, typing while the first Text Block is made or replaced, leaving the Page meanwhile, writes still queued when Liquid quits, stale reads and off-screen numbering. Each round found new variants of the same gap: an input-method composition started in it, a second &#9166; or a &#9003; inside it, quitting while a handover is not yet queued, a shortcut typed during the first line's handover, and the receiving Text Block briefly showing its old text. The current design patches each path, and nothing proves the whole gap closed.</p>
+        <p><strong>Question:</strong> How should the editor handle input that arrives while a structural change is on its way?</p>
+        <ul>
+          <li><strong>A: One ordered input queue per Page.</strong> From a structural key until the core answers, every key and text change on that Page goes into one queue, which then replays in order into the Text Block holding the caret; quitting waits for the queue. Pro: keeps the architecture rule that Dart holds only the focused Text Block's edit, and one mechanism covers split, join and the first line. Con: characters typed in that gap appear a few milliseconds late, and replaying a composition needs care.</li>
+          <li><strong>B: A local copy of the Page in Dart</strong>, as Notion's and AppFlowy's editors keep: &#9166; and &#9003; change the copy at once and send the same operations in order; the core's answers confirm them, and a refusal rolls the copy back. Pro: no visible delay and the most robust model for typing. Con: changes the architecture rule above, repeats split and join in Dart, and needs a rollback path.</li>
+          <li><strong>C: Ship with the gap documented</strong> and close it with the History slice, which groups keystrokes. Pro: fastest. Con: a writing tool that can drop keys in normal use.</li>
+        </ul>
+        <p><strong>Recommendation:</strong> A: it closes the gap with one finite mechanism inside the current architecture; B stays possible later if the delay shows.</p>
+        <p><strong>Acceptance criterion:</strong> a randomized test drives sequences of typing, &#9166;, &#9003;, compositions, leaving the Page and quitting against a fake core with random answer delays, and the stored text and caret always match what a person typed.</p>
+      </details>
     </div>
   </section>
 
