@@ -264,6 +264,11 @@ enum Command {
     Keys(LogicalKeyboardKey.keyN, meta: true),
     liquid: true,
   ),
+  newPage(
+    'New Page',
+    Area.app,
+    Keys(LogicalKeyboardKey.keyN, meta: true, shift: true),
+  ),
   settings('Settings…', Area.app, Keys(LogicalKeyboardKey.comma, meta: true)),
   chat(
     'Chat',

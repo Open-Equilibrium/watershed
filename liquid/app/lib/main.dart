@@ -32,9 +32,19 @@ Future<void> main() async {
     Platform.environment,
     defaultTargetPlatform,
   );
+  final launch = await launchFromEnvironment(Platform.environment);
+  // Without a session the Workspace still opens; the reason stays in the terminal.
+  if (launch.problem case final problem?) stderr.writeln('Liquid: $problem');
+  // Beside the settings, in the data folder agents are kept out of (ADR-0229).
+  final (workspace, workspaceProblem) = await openWorkspace(
+    '$settings/Workspace',
+    show: launch.state == null,
+  );
   runApp(
     LiquidApp(
-      launch: await launchFromEnvironment(Platform.environment),
+      launch: launch,
+      workspace: workspace,
+      workspaceProblem: workspaceProblem,
       shortcuts: await ShortcutController.load(
         ShortcutStore(File('$settings/shortcuts.json')),
         const ChannelLiquidKeyHost(),

@@ -19,6 +19,8 @@ import '../shortcuts/shortcuts_page.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import '../trajectory/trajectory_view.dart';
+import '../workspace/page_view.dart';
+import '../workspace/workspace_state.dart';
 import 'action_area.dart';
 import 'branch_menu.dart';
 import 'chat_view.dart';
@@ -29,20 +31,28 @@ import 'status_bar.dart';
 
 enum AgentTab { chat, trajectory, diff }
 
-/// The agent surface: sidebar, tabs, the active tab, the widget strip, the input area and the
-/// status bar. Every part keeps its position in every tab (guidelines, principle 8).
+/// The window: the sidebar with the Explorer and the agent session, and beside it the open
+/// Page or the agent surface with its tabs, the active tab, the widget strip, the input area
+/// and the status bar. Every part keeps its position in every tab (guidelines, principle 8).
 class AgentShell extends StatefulWidget {
   const AgentShell({
     super.key,
-    required this.state,
-    required this.info,
+    this.state,
+    this.info,
+    this.workspace,
+    this.workspaceProblem,
     this.shortcuts,
     this.diffSettings,
     this.appearance,
-  });
+  }) : assert((state == null) == (info == null));
 
-  final SessionState state;
-  final SessionInfo info;
+  /// The agent session, if one started.
+  final SessionState? state;
+  final SessionInfo? info;
+
+  /// The Workspace, or why it did not open.
+  final WorkspaceState? workspace;
+  final String? workspaceProblem;
 
   /// Theme and text size, which Settings change; without it Settings show only shortcuts.
   final AppearanceController? appearance;
@@ -73,7 +83,10 @@ class _AgentShellState extends State<AgentShell> {
   /// Stops the agent before the app exits, so no pi process outlives Liquid.
   late final _lifecycle = AppLifecycleListener(
     onExitRequested: () async {
-      await widget.state.dispose();
+      await widget.state?.dispose();
+      // Every edit asked for reaches the replica before Liquid exits.
+      await widget.workspace?.drain();
+      await widget.workspace?.dispose();
       return AppExitResponse.exit;
     },
   );
@@ -85,14 +98,18 @@ class _AgentShellState extends State<AgentShell> {
     // The kept choice counts every change read, also before the Diff tab opens.
     _diffSettings.addListener(_hideWhitespace);
     _hideWhitespace();
-    widget.state.draft.addListener(_applyDraft);
-    widget.state.requests.addListener(_requestsChanged);
-    unawaited(widget.state.loadStart());
-    widget.state.git.watch();
+    if (widget.state case final state?) {
+      state.draft.addListener(_applyDraft);
+      state.requests.addListener(_requestsChanged);
+      unawaited(state.loadStart());
+      state.git.watch();
+    }
+    widget.workspace?.open.addListener(_pageOpened);
     // A reopened Trajectory tab starts outside the comparison.
     _tab.addListener(() => _comparing.value = false);
-    _shortcuts.report = (problem) =>
-        widget.state.notify(BridgeLevel.error, problem);
+    _shortcuts.report = (problem) => widget.state != null
+        ? widget.state!.notify(BridgeLevel.error, problem)
+        : widget.workspace?.problem.value = problem;
     if (_shortcuts.firstStart) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _askProfile());
     }
@@ -103,8 +120,8 @@ class _AgentShellState extends State<AgentShell> {
     super.didUpdateWidget(oldWidget);
     // Only the shown session's checkout is fetched.
     if (oldWidget.state != widget.state) {
-      oldWidget.state.git.stop();
-      widget.state.git.watch();
+      oldWidget.state?.git.stop();
+      widget.state?.git.watch();
     }
   }
 
@@ -125,7 +142,7 @@ class _AgentShellState extends State<AgentShell> {
   /// or take the keys meant for it; once none is left, a first start asks for the profile
   /// again.
   void _requestsChanged() {
-    if (widget.state.asking) {
+    if (widget.state!.asking) {
       _settings.value = false;
       Navigator.of(context).popUntil((route) => route.isFirst);
     } else if (_shortcuts.firstStart && ModalRoute.of(context)!.isCurrent) {
@@ -135,7 +152,8 @@ class _AgentShellState extends State<AgentShell> {
 
   /// Text handed back to the input area goes before what the user typed meanwhile, which stays.
   void _applyDraft() {
-    final draft = widget.state.draft.value;
+    final state = widget.state!;
+    final draft = state.draft.value;
     if (draft == null) return;
     final typed = _composer.text.trim();
     final text = typed.isEmpty || typed == draft ? draft : '$draft\n\n$typed';
@@ -144,19 +162,20 @@ class _AgentShellState extends State<AgentShell> {
       selection: TextSelection.collapsed(offset: text.length),
     );
     // Taken, so the same text handed back again arrives again.
-    widget.state.draft.value = null;
+    state.draft.value = null;
   }
 
   /// Reads the changes as the Diff settings say, which own the choice.
   void _hideWhitespace() =>
-      widget.state.hideWhitespace.value = _diffSettings.value.hideWhitespace;
+      widget.state?.hideWhitespace.value = _diffSettings.value.hideWhitespace;
 
   @override
   void dispose() {
-    widget.state.git.stop();
+    widget.state?.git.stop();
+    widget.workspace?.open.removeListener(_pageOpened);
     _lifecycle.dispose();
-    widget.state.draft.removeListener(_applyDraft);
-    widget.state.requests.removeListener(_requestsChanged);
+    widget.state?.draft.removeListener(_applyDraft);
+    widget.state?.requests.removeListener(_requestsChanged);
     _composer.dispose();
     _composerFocus.dispose();
     _tab.dispose();
@@ -170,21 +189,55 @@ class _AgentShellState extends State<AgentShell> {
     super.dispose();
   }
 
-  /// Starts a new session in the chat, ready to describe the task.
-  void _newSession() {
-    _tab.value = AgentTab.chat;
-    _composerFocus.requestFocus();
-    unawaited(widget.state.newSession());
+  /// A Page opened from anywhere shows in place of Settings.
+  void _pageOpened() {
+    if (widget.workspace?.open.value != null) _settings.value = false;
   }
 
-  /// What each app-wide command does, in the menu bar and from its keys alike.
+  /// Shows the agent session in place of the open Page.
+  void _showSession() {
+    _settings.value = false;
+    widget.workspace?.open.value = null;
+  }
+
+  /// Shows the agent session at `tab`.
+  void _showTab(AgentTab tab) {
+    _showSession();
+    _tab.value = tab;
+  }
+
+  /// Starts a new session in the chat, ready to describe the task.
+  void _newSession() {
+    _showTab(AgentTab.chat);
+    _composerFocus.requestFocus();
+    unawaited(widget.state!.newSession());
+  }
+
+  /// A new Page in the open Page's area, or else in the first one (approved Pages mockups).
+  void _newPage() {
+    final workspace = widget.workspace!;
+    final area =
+        workspace.open.value?.area ?? workspace.areas.value.firstOrNull?.id;
+    if (area == null) return;
+    _settings.value = false;
+    unawaited(workspace.newPage(area).catchError((_) {}));
+  }
+
+  /// What each app-wide command does, in the menu bar and from its keys alike; the agent's
+  /// commands only with a session, the Workspace's only with a Workspace.
   late final Map<Command, VoidCallback> _actions = {
-    Command.chat: () => _tab.value = AgentTab.chat,
-    Command.trajectory: () => _tab.value = AgentTab.trajectory,
-    Command.diff: () => _tab.value = AgentTab.diff,
-    Command.focusInput: _composerFocus.requestFocus,
-    Command.newSession: _newSession,
-    Command.dismissNotice: widget.state.dismissNotice,
+    if (widget.state case final state?) ...{
+      Command.chat: () => _showTab(AgentTab.chat),
+      Command.trajectory: () => _showTab(AgentTab.trajectory),
+      Command.diff: () => _showTab(AgentTab.diff),
+      Command.focusInput: () {
+        _showSession();
+        _composerFocus.requestFocus();
+      },
+      Command.newSession: _newSession,
+      Command.dismissNotice: state.dismissNotice,
+    },
+    if (widget.workspace != null) Command.newPage: _newPage,
     Command.settings: _toggleSettings,
   };
 
@@ -218,6 +271,7 @@ class _AgentShellState extends State<AgentShell> {
             provided(PlatformProvidedMenuItemType.quit),
           ],
         ),
+        PlatformMenu(label: 'Page', menus: [item(Command.newPage)]),
         PlatformMenu(label: 'Session', menus: [item(Command.newSession)]),
         PlatformMenu(
           label: 'View',
@@ -273,92 +327,53 @@ class _AgentShellState extends State<AgentShell> {
                   Sidebar(
                     state: widget.state,
                     info: widget.info,
+                    workspace: widget.workspace,
+                    workspaceProblem: widget.workspaceProblem,
                     onSettings: _toggleSettings,
                     onNewSession: _newSession,
+                    onShowSession: _showSession,
                   ),
                   Expanded(
-                    child: ValueListenableBuilder(
-                      valueListenable: _settings,
-                      builder: (context, settings, main) => settings
-                          ? SettingsPage(
-                              shortcuts: _shortcuts,
-                              appearance: widget.appearance,
-                              onClose: _toggleSettings,
-                            )
-                          : main!,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          _Header(
-                            state: widget.state,
-                            project: widget.info.project,
-                          ),
-                          _Tabs(tab: _tab, state: widget.state),
-                          Expanded(
-                            child: ValueListenableBuilder(
-                              valueListenable: _tab,
-                              builder: (context, tab, _) {
-                                // The input area floats over the open tab's main column.
-                                final input = KeyedSubtree(
-                                  key: _inputKey,
-                                  child: Column(
-                                    mainAxisSize: MainAxisSize.min,
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.stretch,
-                                    children: [
-                                      WidgetStrip(state: widget.state),
-                                      ActionArea(
-                                        state: widget.state,
-                                        project: widget.info.project,
-                                        composer: _composer,
-                                        composerFocus: _composerFocus,
-                                      ),
-                                    ],
-                                  ),
-                                );
-                                return switch (tab) {
-                                  AgentTab.chat => ChatView(
-                                    state: widget.state,
-                                    info: widget.info,
-                                    input: input,
-                                    onOpenDiff: (turn) {
-                                      widget.state.diffScope.value = OneTurn(
-                                        turn,
-                                      );
-                                      _tab.value = AgentTab.diff;
-                                    },
-                                  ),
-                                  AgentTab.diff => DiffView(
-                                    state: widget.state,
-                                    settings: _diffSettings,
-                                    input: input,
-                                  ),
-                                  AgentTab.trajectory => TrajectoryView(
-                                    state: widget.state,
-                                    onBranched: _composerFocus.requestFocus,
-                                    comparing: _comparing,
-                                    input: input,
-                                  ),
-                                };
-                              },
-                            ),
-                          ),
-                          ListenableBuilder(
-                            listenable: Listenable.merge([_tab, _comparing]),
-                            builder: (context, _) => StatusBar(
-                              state: widget.state,
-                              keys: switch (_tab.value) {
-                                AgentTab.chat => '',
-                                AgentTab.diff => diffKeys(),
-                                AgentTab.trajectory =>
-                                  _comparing.value
-                                      ? compareKeys(keys)
-                                      : trajectoryKeys(keys),
-                              },
-                            ),
-                          ),
-                        ],
-                      ),
+                    child: ListenableBuilder(
+                      listenable: Listenable.merge([
+                        _settings,
+                        ?widget.workspace?.open,
+                      ]),
+                      builder: (context, agent) {
+                        if (_settings.value) {
+                          return SettingsPage(
+                            shortcuts: _shortcuts,
+                            appearance: widget.appearance,
+                            onClose: _toggleSettings,
+                          );
+                        }
+                        final open = widget.workspace?.open.value;
+                        // The agent surface stays built behind a Page, so it keeps its place.
+                        return IndexedStack(
+                          index: open == null ? 0 : 1,
+                          sizing: StackFit.expand,
+                          children: [
+                            agent ?? const SizedBox.shrink(),
+                            if (open != null)
+                              WorkspacePage(
+                                key: ValueKey(open.page),
+                                state: widget.workspace!,
+                                open: open,
+                              )
+                            else
+                              const SizedBox.shrink(),
+                          ],
+                        );
+                      },
+                      child: switch ((widget.state, widget.info)) {
+                        (final state?, final info?) => _agentSurface(
+                          context,
+                          keys,
+                          state,
+                          info,
+                        ),
+                        _ => null,
+                      },
                     ),
                   ),
                 ],
@@ -367,6 +382,80 @@ class _AgentShellState extends State<AgentShell> {
           ),
         ),
       ),
+    );
+  }
+
+  /// The agent surface: header, tabs, the active tab with the input area, and the status bar.
+  Widget _agentSurface(
+    BuildContext context,
+    ShortcutSettings keys,
+    SessionState state,
+    SessionInfo info,
+  ) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _Header(state: state, project: info.project),
+        _Tabs(tab: _tab, state: state),
+        Expanded(
+          child: ValueListenableBuilder(
+            valueListenable: _tab,
+            builder: (context, tab, _) {
+              // The input area floats over the open tab's main column.
+              final input = KeyedSubtree(
+                key: _inputKey,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    WidgetStrip(state: state),
+                    ActionArea(
+                      state: state,
+                      project: info.project,
+                      composer: _composer,
+                      composerFocus: _composerFocus,
+                    ),
+                  ],
+                ),
+              );
+              return switch (tab) {
+                AgentTab.chat => ChatView(
+                  state: state,
+                  info: info,
+                  input: input,
+                  onOpenDiff: (turn) {
+                    state.diffScope.value = OneTurn(turn);
+                    _tab.value = AgentTab.diff;
+                  },
+                ),
+                AgentTab.diff => DiffView(
+                  state: state,
+                  settings: _diffSettings,
+                  input: input,
+                ),
+                AgentTab.trajectory => TrajectoryView(
+                  state: state,
+                  onBranched: _composerFocus.requestFocus,
+                  comparing: _comparing,
+                  input: input,
+                ),
+              };
+            },
+          ),
+        ),
+        ListenableBuilder(
+          listenable: Listenable.merge([_tab, _comparing]),
+          builder: (context, _) => StatusBar(
+            state: state,
+            keys: switch (_tab.value) {
+              AgentTab.chat => '',
+              AgentTab.diff => diffKeys(),
+              AgentTab.trajectory =>
+                _comparing.value ? compareKeys(keys) : trajectoryKeys(keys),
+            },
+          ),
+        ),
+      ],
     );
   }
 }

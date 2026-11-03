@@ -1,6 +1,6 @@
 # Design guidelines
 
-These rules apply to every Watershed GUI. Every GUI change starts with HTML mockups that the maintainer approves; approved mockups live in [mockups/](mockups/liquid-agent-surface.html), [session flows](mockups/liquid-session-flows.html), [look](mockups/liquid-look.html), [navigation](mockups/liquid-trajectory-navigation.html), [checkpoints](mockups/liquid-checkpoints.html) and the Workspace's [Pages](mockups/liquid-workspace-pages.html), [Blocks](mockups/liquid-workspace-blocks.html), [History](mockups/liquid-workspace-history.html) and [Sections](mockups/liquid-workspace-text-sections.html). Design tokens are canonical in [tokens.css](tokens.css); components use tokens, never raw values. Flutter reads them from `liquid/app/lib/src/theme/tokens.g.dart`, which `scripts/design_tokens.py` generates; a tooling test fails when it falls out of date.
+These rules apply to every Watershed GUI. Every GUI change starts with HTML mockups that the maintainer approves; approved mockups live in [mockups/](mockups/liquid-agent-surface.html), [session flows](mockups/liquid-session-flows.html), [look](mockups/liquid-look.html), [navigation](mockups/liquid-trajectory-navigation.html), [checkpoints](mockups/liquid-checkpoints.html) and the Workspace's [Pages](mockups/liquid-workspace-pages.html), [Blocks](mockups/liquid-workspace-blocks.html), [History](mockups/liquid-workspace-history.html) and [Sections](mockups/liquid-workspace-text-sections.html), and the [Chats](mockups/liquid-chats.html) concept. Design tokens are canonical in [tokens.css](tokens.css); components use tokens, never raw values. Flutter reads them from `liquid/app/lib/src/theme/tokens.g.dart`, which `scripts/design_tokens.py` generates; a tooling test fails when it falls out of date.
 
 References: Notion, AppFlowy, Microsoft Loop and T3 Code.
 
@@ -19,10 +19,11 @@ References: Notion, AppFlowy, Microsoft Loop and T3 Code.
 ## Tokens
 
 - **Color:** Notion's warm neutrals (`canvas`, `subtle`, `surface`, `hover`, `selected`), very light borders, three text levels, Liquid azure as the accent (the logo's blue, AA contrast), status colors (`success`, `warning`, `danger`), GitHub-style diff and syntax colors and data-series colors. Surfaces are separated by background rather than borders. Light and dark values share names; a GUI selects `.theme-light` or `.theme-dark`, and system mode follows the operating system.
-- **Type:** Notion's platform UI font stack and a monospace font for code, with AppFlowy's sizes: display 32/40 bold, h1 24/32, h2 20/28 and h3 16/22 semibold, prose 16/24, UI 15/22, compact 13/20 for dense rows, chips and buttons, small 12/18, caption 11/14 for chart axes, badges and tags, mono 13/20.
+- **Type:** Notion's platform UI font stack and a monospace font for code, with AppFlowy's sizes: display 32/40 bold, h1 24/32, h2 20/28 and h3 16/22 semibold, prose 16/24, UI 15/22, sidebar 14/20, compact 13/20 for dense rows, chips and buttons, small 12/18, caption 11/14 for chart axes, badges and tags, mono 13/20.
 - **Spacing:** 4, 6, 8, 12, 16, 20, 24 and 32 px.
 - **Radii:** 4 for tags, 6 for buttons, inputs and list items, 8 for cards and panels, 12 for windows, dialogs and the input area.
-- **Rows:** 32 px for navigation items, 34 px for table rows.
+- **Rows:** 32 px for navigation items outside the sidebar, 34 px for table rows.
+- **Sidebar:** as dense as Notion's, AppFlowy's and Loop's: 240 px wide, one line per Page or Chat in 28 px rows.
 - **Text size:** Settings → Appearance scales text and rows together: Compact, Default (the sizes above) or Large.
 - **Motion:** 120 ms for hover and press, 200 ms for panels, ease-out; none when the user prefers reduced motion.
 - **Icons:** Lucide (ISC), 16 px in rows and buttons, in the text color of their context; status icons always come with text (principle 5).

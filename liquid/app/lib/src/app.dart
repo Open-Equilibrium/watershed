@@ -6,6 +6,7 @@ import 'diff/diff_settings.dart';
 import 'launch.dart';
 import 'shortcuts/shortcut_store.dart';
 import 'theme/theme.dart';
+import 'workspace/workspace_state.dart';
 
 /// The Liquid app. It holds no native state itself, so widget tests can build it without the
 /// Rust library.
@@ -16,9 +17,15 @@ class LiquidApp extends StatelessWidget {
     this.shortcuts,
     this.diffSettings,
     this.appearance,
+    this.workspace,
+    this.workspaceProblem,
   });
 
   final Launch launch;
+
+  /// The Workspace, or why it did not open.
+  final WorkspaceState? workspace;
+  final String? workspaceProblem;
   final ShortcutController? shortcuts;
   final DiffSettingsController? diffSettings;
 
@@ -39,10 +46,12 @@ class LiquidApp extends StatelessWidget {
         themeMode: chosen.theme.mode,
         builder: (context, child) =>
             UiScale(scale: chosen.textSize.scale, child: child!),
-        home: state != null
+        home: state != null || workspace != null
             ? AgentShell(
                 state: state,
-                info: launch.info!,
+                info: launch.info,
+                workspace: workspace,
+                workspaceProblem: workspaceProblem,
                 shortcuts: shortcuts,
                 diffSettings: diffSettings,
                 appearance: appearance,
@@ -52,7 +61,7 @@ class LiquidApp extends StatelessWidget {
                   child: Padding(
                     padding: const EdgeInsets.all(32),
                     child: Text(
-                      launch.problem ?? '',
+                      [?workspaceProblem, ?launch.problem].join('\n\n'),
                       textAlign: TextAlign.center,
                     ),
                   ),
