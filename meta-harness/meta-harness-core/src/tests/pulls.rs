@@ -143,6 +143,7 @@ fn a_fork_targets_its_parent_and_creates_only_the_reviewed_pull_request() {
         assert_eq!(pull.number, 42);
         assert_eq!(pull.state, PullRequestState::Draft);
         assert_eq!(pull.head, "bw:feature/retry-after");
+        // The head repository is named too, as GitHub requires when one organization owns both.
         let sent: serde_json::Value = serde_json::from_str(&pushed.read("input")).unwrap();
         assert_eq!(
             sent,
@@ -150,6 +151,7 @@ fn a_fork_targets_its_parent_and_creates_only_the_reviewed_pull_request() {
                 "title": "Return 429 with Retry-After",
                 "body": "Edited.",
                 "head": "bw:feature/retry-after",
+                "head_repo": "api",
                 "base": "develop",
                 "draft": true,
             })
