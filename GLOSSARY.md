@@ -134,7 +134,7 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **Automation** — A Workspace-owned event/condition/action rule over Liquid objects and permitted external actions. It is distinct from Meta-Harness agent scheduling and orchestration.
 - **Source** — An external or shared resource addressable from a Workspace. Sources appear beside Pages in the Explorer and use the same open/navigation flow, but are not authored Pages internally.
 - **Explorer** — Liquid's primary Workspace navigation surface, listing Pages and Sources as peer entries.
-- **Page template** — A reusable starting composition of Blocks, Views, Connections and Automations for one use case; it creates an ordinary Page.
+- **Page template** — A reusable starting composition of Blocks, Views, Connections and Automations for one use case, saved from Arrange mode; it creates an ordinary Page, asking by default for the Chats it shows (ADR-0241).
 - **PowerBar** — Liquid's command and creation surface for finding Workspace objects, adding Blocks and invoking permitted Workspace or agent actions. Without a prefix it searches and jumps; `/` adds a Block and `>` lists actions, as the approved [Pages mockups](docs/design/mockups/liquid-workspace-pages.html) show; `@` is kept for people (ADR-0236).
 - **Liquid key** — Caps Lock when the user opts in: a tap opens Liquid from any app, holding it in Liquid reveals shortcuts and ⇪ plus a key runs a Liquid command.
 - **Shortcut profile** — Liquid's set of shortcuts: Liquid key, Standard (⌘ only) or Custom.
@@ -166,7 +166,8 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **Headless Liquid replica** — Optional Liquid replica without a user interface. A Workspace must opt in before this replica can sync it; same-host agents then use Liquid's normal permission and action surfaces while user devices are offline.
 - **Text Block** — One paragraph, heading, list item, to-do or quote; ⏎ ends it and starts the next.
 - **Section** — Consecutive Text Blocks up to `---`, a Block of another type or the Page's edge; Arrange mode places it as one tile, inside which its Text Blocks can be arranged in columns. It is layout only and owns no content, rights or Views (ADR-0235).
-- **Chat** — Liquid's one kind of conversation, as in WhatsApp: one-to-one or a group, whose participants are people or agents alike; a Chat may belong to a Page. A planned replacement for separate agent sessions and projects (ADR-0239).
+- **Chat** — Liquid's one kind of conversation, as in WhatsApp: one-to-one or a group, whose participants are people or agents alike; a Block that Pages can show. A planned replacement for separate agent sessions and projects (ADR-0239, ADR-0241).
+- **Inbox** — Liquid's one list of what needs the person, from every Chat and Database: agents' approvals and questions, mentions, direct messages and tasks due soon, ordered by when they are due (ADR-0241).
 - **Arrange mode** — The explicit Page state that reveals the responsive grid and resize/reorder handles. Outside Arrange mode, a Page remains a content-first flow.
 - **Block SDK** — Versioned contract for reusable built-in and Block Registry Block Types: state/migrations, Views, ports/actions, permissions, lifecycle and responsive behavior. It is for product/community extension, not end-user app creation.
 - **Block Registry** — Official distribution catalog for reusable Block Types. Community packages are signed, sandboxed and capability-scoped; the initial model loads no arbitrary third-party native code.
