@@ -65,7 +65,7 @@ kbd{font-size:11px;padding:0 4px;border-radius:4px;border:1px solid currentColor
 .btn.pri{background:var(--ws-accent);color:var(--ws-on-accent);box-shadow:none}
 .btn.ghost{box-shadow:none;background:transparent;color:var(--ws-text-muted)}
 .pg{flex:1;overflow:hidden;padding:28px 0 0;-webkit-mask-image:linear-gradient(to top,transparent 0,#000 40px);mask-image:linear-gradient(to top,transparent 0,#000 40px)}
-.col{width:740px;margin:0 auto;display:flex;flex-direction:column;gap:14px}
+.col{width:var(--ws-width-reading);margin:0 auto;display:flex;flex-direction:column;gap:14px}
 .ttl{font-size:var(--ws-fs-display);line-height:var(--ws-lh-display);font-weight:var(--ws-fw-bold);margin:0 0 6px}
 .ttl.ph{color:var(--ws-text-faint)}
 .prose{font-size:var(--ws-fs-prose);line-height:var(--ws-lh-prose)}
@@ -243,11 +243,7 @@ h4.qh{margin:14px 0 6px;font-size:13px}
 .tabs3 span.on{color:var(--ws-accent)}
 .ann{position:absolute;z-index:4;background:#ffe9a8;color:#3d3000;font-size:12px;line-height:16px;padding:5px 8px;border-radius:6px;box-shadow:0 2px 6px rgba(0,0,0,.15);max-width:240px}
 
-/* Notion's scale, previewed here before tokens.css changes with its implementation. */
-:root{--ws-fs-ui:14px;--ws-lh-ui:20px;--ws-fs-display:40px;--ws-lh-display:48px;--ws-fs-h1:30px;--ws-lh-h1:38px;--ws-fs-h2:24px;--ws-lh-h2:32px;--ws-fs-h3:20px;--ws-lh-h3:28px;--ws-row-nav:28px;--ws-row-side:28px}
-.win{font-size:var(--ws-fs-ui);line-height:var(--ws-lh-ui)}
-.col{width:708px!important}
-.head{height:45px!important}
+.head{height:var(--ws-row-header)!important}
 .tabs{height:38px;display:flex;align-items:flex-end;gap:2px;padding:0 8px;box-shadow:inset 0 -1px 0 var(--ws-border);background:var(--ws-subtle);flex:none}
 .tab{height:32px;display:flex;align-items:center;gap:7px;padding:0 10px;border-radius:7px 7px 0 0;font-size:13px;color:var(--ws-text-muted);max-width:190px;white-space:nowrap;overflow:hidden}
 .tab.on{background:var(--ws-canvas);color:var(--ws-text);box-shadow:0 0 0 1px var(--ws-border);clip-path:inset(-1px -1px 0 -1px)}
@@ -295,7 +291,7 @@ h4.qh{margin:14px 0 6px;font-size:13px}
   
   <section>
     <h1>Liquid: the app with Chats (concept, revised)</h1>
-    <p class="sub">Revised after the maintainer's review of 2026-11-03, who approved the rail, Chats as Blocks, one way to open things beside each other, sections and filters in the chat list, and the Inbox, and asked for: the Inbox on top and including tasks and deadlines, T3 Code's Snooze and Settle, Templates made from arrangements, tabs with splits instead of a separate "Open beside", and Notion's scale for the whole app. This file previews that scale (UI text 14 px, Page title 40 px, headings 30, 24 and 20 px, reading width 708 px, 28 px rows); <code>tokens.css</code> changes with its implementation. Approved by the maintainer on 2026-11-03 as the app's structure; mockups for implementation follow per slice.</p>
+    <p class="sub">Revised after the maintainer's review of 2026-11-03, who approved the rail, Chats as Blocks, one way to open things beside each other, sections and filters in the chat list, and the Inbox, and asked for: the Inbox on top and including tasks and deadlines, T3 Code's Snooze and Settle, Templates made from arrangements, tabs with splits instead of a separate "Open beside", and Notion's scale for the whole app. Its sizes are Notion's, from <code>tokens.css</code> (UI text 14 px, Page title 40 px, headings 30, 24 and 20 px, reading width 708 px, 28 px rows). Approved by the maintainer on 2026-11-03 as the app's structure; mockups for implementation follow per slice.</p>
   </section>
   <section>
     <h3 class="sec">1 · Rail and tabs</h3>
