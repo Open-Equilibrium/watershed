@@ -325,4 +325,24 @@ void main() {
     await session.git.refresh();
     expect(backend.pullRequestReads, reads);
   });
+
+  test(
+    'a branch that only looks like the shown one reads its own pull request',
+    () async {
+      backend.git = gitStatusOf(
+        branch: 'fix/<U+202E>',
+        rawBranch: 'fix/<U+202E>',
+      );
+      await git.refresh();
+      await pumpEventQueue();
+      final reads = backend.pullRequestReads;
+      backend.git = gitStatusOf(
+        branch: 'fix/<U+202E>',
+        rawBranch: 'fix/\u202e',
+      );
+      await git.refresh();
+      await pumpEventQueue();
+      expect(backend.pullRequestReads, reads + 1);
+    },
+  );
 }

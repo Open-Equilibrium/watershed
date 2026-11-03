@@ -44,7 +44,7 @@ class PullRequests {
 
   String? get _statusKey => switch (_git.status.value) {
     final status? when status.branch != null =>
-      '${status.repository}\n${status.branch}\n${status.upstream}',
+      '${status.repository}\n${status.rawBranch}\n${status.upstream}',
     _ => null,
   };
 

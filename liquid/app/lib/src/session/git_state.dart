@@ -682,6 +682,8 @@ bool _sameStatus(BridgeGitStatus? a, BridgeGitStatus? b) =>
     (a != null &&
         b != null &&
         a.branch == b.branch &&
+        a.rawBranch == b.rawBranch &&
+        a.repository == b.repository &&
         a.commit == b.commit &&
         a.upstream == b.upstream &&
         a.remote == b.remote &&
