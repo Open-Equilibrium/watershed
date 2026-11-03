@@ -159,7 +159,7 @@ abstract interface class SessionBackend {
   Future<BridgePullRequestOutcome> pullRequest();
 
   /// The branches of `target` on GitHub, to choose a base from.
-  Future<List<BridgeName>> pullRequestBases(String host, String target);
+  Future<BridgePullRequestOutcome> pullRequestBases(String host, String target);
 
   Future<List<BridgeModel>> models();
 
@@ -342,8 +342,10 @@ class RustSessionBackend implements SessionBackend {
   @override
   Future<BridgePullRequestOutcome> pullRequest() => _session.pullRequest();
   @override
-  Future<List<BridgeName>> pullRequestBases(String host, String target) =>
-      _session.pullRequestBases(host: host, target: target);
+  Future<BridgePullRequestOutcome> pullRequestBases(
+    String host,
+    String target,
+  ) => _session.pullRequestBases(host: host, target: target);
   @override
   Future<List<BridgeModel>> models() => _session.models();
   @override

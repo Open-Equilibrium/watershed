@@ -1,7 +1,7 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../controls.dart';
 import '../format.dart';
@@ -9,12 +9,14 @@ import '../rust/api/events.dart';
 import '../rust/api/git.dart';
 import '../session/pull_requests.dart';
 import '../session/session_state.dart';
+import '../shortcuts/keymap.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'branch_menu.dart';
 import 'commit_dialog.dart';
 import 'git_actions.dart';
+import 'session_menus.dart';
 
 /// The approved "Create pull request" dialog for a pushed branch (pull request mockups §2–3).
 /// Its title and description start from the latest commit; a model writing them is a later
@@ -56,10 +58,15 @@ class _PullRequestDialog extends StatefulWidget {
 class _PullRequestDialogState extends State<_PullRequestDialog> {
   final _title = TextEditingController();
   final _body = TextEditingController();
+  final _titleFocus = FocusNode();
+  final _bodyFocus = FocusNode();
   bool _draft = false;
 
-  /// The latest outcome; null while GitHub is read.
-  BridgePullRequestOutcome? _outcome;
+  /// GitHub is being read.
+  bool _reading = true;
+
+  /// Why no plan could be read, shown while there is none.
+  BridgePullRequestOutcome? _refused;
 
   /// The latest plan; its title and description fill the fields only once.
   BridgePullRequestPlan? _plan;
@@ -69,9 +76,12 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
   int _seconds = 0;
   Timer? _elapsed;
 
-  /// Why the last creation failed, and whether its result is unknown.
+  /// Why the last read or creation failed, and whether a creation's result is unknown.
   String? _error;
   bool _unknown = false;
+
+  /// The last read failed, so the plan shown may be outdated; Create waits for another.
+  bool _stale = false;
   bool _changed = false;
   int _reads = 0;
 
@@ -81,6 +91,7 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
   void initState() {
     super.initState();
     _title.addListener(() => setState(() {}));
+    _bodyFocus.addListener(() => setState(() {}));
     unawaited(_read());
   }
 
@@ -89,38 +100,57 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
     _elapsed?.cancel();
     _title.dispose();
     _body.dispose();
+    _titleFocus.dispose();
+    _bodyFocus.dispose();
     super.dispose();
   }
 
   Future<void> _read({String? target, String? base}) async {
     final read = ++_reads;
-    setState(() => _outcome = null);
-    final BridgePullRequestOutcome outcome;
+    setState(() {
+      _reading = true;
+      _error = null;
+      _unknown = false;
+      _stale = false;
+      if (_plan == null) _refused = null;
+    });
+    BridgePullRequestOutcome outcome;
     try {
       _recorded ??= await _pulls.recordedBase();
       outcome = await _pulls.plan(target: target, base: base);
-    } on Object catch (error) {
-      if (mounted && read == _reads) {
-        setState(() {
-          _outcome = null;
-          _error = 'Could not read GitHub: $error';
-        });
-      }
-      return;
+    } on Object {
+      outcome = unansweredOutcome;
     }
     if (!mounted || read != _reads) return;
-    setState(() => _accept(outcome));
+    setState(() {
+      _reading = false;
+      if (outcome.plan != null) {
+        _accept(outcome.plan!);
+      } else if (_plan != null) {
+        // The last plan stays in view; Create waits for a read that succeeds.
+        _stale = true;
+        _error = pullRequestProblem(outcome, device: widget.device);
+      } else {
+        _refused = outcome;
+      }
+    });
   }
 
-  void _accept(BridgePullRequestOutcome outcome) {
-    _outcome = outcome;
-    final plan = outcome.plan;
-    if (plan == null) return;
+  /// Reads again what the dialog shows: the chosen target and base.
+  Future<void> _checkAgain() =>
+      _read(target: _plan?.target, base: _plan?.base?.name);
+
+  void _accept(BridgePullRequestPlan plan) {
     if (_plan == null) {
       _title.text = plan.subject;
       _body.text = plan.body;
+      // The form replaces the reading state, whose dialog took the focus first.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _titleFocus.requestFocus();
+      });
     }
     _plan = plan;
+    _refused = null;
     _existing = plan.open;
   }
 
@@ -133,12 +163,14 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
   bool get _ready {
     final plan = _plan;
     return plan != null &&
-        _outcome != null &&
+        !_reading &&
+        !_stale &&
         !_creating &&
         plan.target != null &&
         plan.base != null &&
         !plan.baseMissing &&
-        plan.comparison?.commits != 0 &&
+        plan.comparison != null &&
+        plan.comparison!.commits != 0 &&
         !_sameBranch &&
         _title.text.trim().isNotEmpty;
   }
@@ -157,7 +189,7 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
       const Duration(seconds: 1),
       (timer) => setState(() => _seconds = timer.tick),
     );
-    final BridgePullRequestOutcome outcome;
+    BridgePullRequestOutcome outcome;
     try {
       outcome = await _pulls.create(
         BridgePullRequestDraft(
@@ -169,14 +201,8 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
           draft: _draft,
         ),
       );
-    } on Object catch (error) {
-      if (mounted) {
-        setState(() {
-          _error = 'Could not create the pull request: $error';
-          _unknown = true;
-        });
-      }
-      return;
+    } on Object {
+      outcome = outcomeOf(BridgePullRequestOutcomeKind.unknown);
     } finally {
       _elapsed?.cancel();
       if (mounted) setState(() => _creating = false);
@@ -194,7 +220,7 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
         setState(() => _existing = outcome.pullRequest);
       case BridgePullRequestOutcomeKind.changed:
         setState(() {
-          _plan = outcome.plan;
+          _accept(outcome.plan!);
           _changed = true;
         });
       default:
@@ -214,17 +240,27 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
     final plan = _plan!;
     final target = plan.target;
     if (target == null) return;
-    List<BridgeName> names;
+    BridgePullRequestOutcome listed;
     try {
-      names = await _pulls.bases(plan.identity.host, target);
-    } on Object catch (error) {
-      setState(() => _error = 'Could not list the branches of $target: $error');
-      return;
+      listed = await _pulls.bases(plan.identity.host, target);
+    } on Object {
+      listed = unansweredOutcome;
     }
     if (!mounted) return;
+    if (listed.kind != BridgePullRequestOutcomeKind.done) {
+      setState(
+        () => _error = pullRequestProblem(listed, device: widget.device),
+      );
+      return;
+    }
     final chosen = await showDialog<BridgeName>(
       context: context,
-      builder: (context) => _BaseChoice(target: target, names: names),
+      builder: (context) => _BaseChoice(
+        target: target,
+        names: listed.bases,
+        more: listed.moreBases,
+        unknown: _recorded == null && plan.defaultBranch == null,
+      ),
     );
     if (chosen != null && mounted) {
       await _read(target: target, base: chosen.name);
@@ -252,33 +288,25 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
         ],
       );
     }
-    final outcome = _outcome;
     final plan = _plan;
-    if (plan == null) {
-      if (outcome == null) {
-        return ActionDialog(
-          title: 'Create pull request',
-          actions: const [],
+    if (plan != null) return _form(context, plan);
+    if (_refused case final refused?) return _refusal(context, refused);
+    return ActionDialog(
+      title: 'Create pull request',
+      actions: const [],
+      children: [
+        Row(
+          spacing: WsMetrics.space3,
           children: [
-            if (_error case final error?)
-              WarningNotice(error)
-            else
-              Row(
-                spacing: WsMetrics.space3,
-                children: [
-                  const SizedBox.square(
-                    dimension: 14,
-                    child: CircularProgressIndicator(strokeWidth: 1.5),
-                  ),
-                  Text('Reading GitHub…', style: text),
-                ],
-              ),
+            const SizedBox.square(
+              dimension: 14,
+              child: CircularProgressIndicator(strokeWidth: 1.5),
+            ),
+            Text('Reading GitHub…', style: text),
           ],
-        );
-      }
-      return _refusal(context, outcome);
-    }
-    return _form(context, plan);
+        ),
+      ],
+    );
   }
 
   Widget _refusal(BuildContext context, BridgePullRequestOutcome outcome) {
@@ -286,6 +314,10 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
     final problem = pullRequestProblem(outcome, device: widget.device)!;
     final uncommitted = widget.state.git.status.value?.changed ?? 0;
     void next(_Next next) => Navigator.of(context).pop(next);
+    final checkAgain = SecondaryButton(
+      label: 'Check again',
+      onPressed: _reading ? null : _checkAgain,
+    );
     final (title, actions) = switch (outcome.kind) {
       BridgePullRequestOutcomeKind.needsPush => (
         'Push before creating a pull request',
@@ -313,10 +345,18 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
         'Pull before creating a pull request',
         <Widget>[],
       ),
-      _ => (
+      BridgePullRequestOutcomeKind.notGitHub when outcome.page.isNotEmpty => (
         'Create pull request',
-        [SecondaryButton(label: 'Check again', onPressed: _read)],
+        [
+          PrimaryButton(
+            label: 'Open in browser ↗',
+            onPressed: () =>
+                unawaited(openInBrowser(widget.state, outcome.page)),
+          ),
+          checkAgain,
+        ],
       ),
+      _ => ('Create pull request', [checkAgain]),
     };
     return ActionDialog(
       title: title,
@@ -337,8 +377,9 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
     final ws = context.ws;
     final text = DangerDialog.text(context);
     final faint = TextStyle(color: ws.textFaint, fontSize: WsMetrics.fsSmall);
-    final reading = _outcome == null;
     final fork = plan.targets.length > 1;
+    // Targets and the head repository are owner/name values GitHub validated, which show as
+    // they are; the head branch shows only as `plan.head`.
     final target = plan.target;
     final base = plan.base;
     final remote = widget.state.git.status.value?.remote ?? 'the remote';
@@ -356,27 +397,36 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
       overflow: TextOverflow.ellipsis,
       style: monoStyle(context, color: ws.text),
     );
-    Widget chooser(String label, VoidCallback? onTap) => InkWell(
-      borderRadius: BorderRadius.circular(WsMetrics.radiusSm),
-      onTap: onTap,
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        spacing: WsMetrics.space1,
-        children: [
-          Flexible(child: mono(label)),
-          Icon(LucideIcons.chevronDown, size: 13, color: ws.textFaint),
-        ],
-      ),
-    );
+    Widget chooser(String label, String value, VoidCallback? onTap) =>
+        Semantics(
+          button: true,
+          enabled: onTap != null,
+          label: '$label: $value',
+          excludeSemantics: true,
+          onTap: onTap,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(WsMetrics.radiusSm),
+            onTap: onTap,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              spacing: WsMetrics.space1,
+              children: [
+                Flexible(child: mono(value)),
+                Icon(LucideIcons.chevronDown, size: 13, color: ws.textFaint),
+              ],
+            ),
+          ),
+        );
     final comparison = plan.comparison;
-    final head = plan.identity.headBranch;
     final compared = switch ((base, comparison)) {
       _ when plan.baseMissing =>
         '⚠ ${base?.shown} does not exist in $target on GitHub. Choose another base.',
       (_?, _) when _sameBranch =>
         '⚠ A pull request cannot merge ${base!.shown} into itself. Create a branch or choose a different base.',
+      (_?, _) when plan.comparisonFailed =>
+        '⚠ GitHub could not compare ${plan.head} with ${base!.shown}. Check again, or choose another base.',
       (_?, final comparison?) when comparison.commits == 0 =>
-        '⚠ $head has no commits beyond ${base!.shown}. Choose another base or commit a change.',
+        '⚠ ${plan.head} has no commits beyond ${base!.shown}. Choose another base or commit a change.',
       (_, final comparison?) =>
         '${plural(comparison.commits.toInt(), 'pushed commit')} · ${plural(comparison.files.toInt(), 'changed file')} · +${comparison.added} −${comparison.removed}',
       _ => null,
@@ -398,23 +448,34 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
       }
     }
 
+    final enter = !_bodyFocus.hasFocus;
     return ActionDialog(
       title: 'Create pull request',
+      bindings: {
+        if (_ready && enter)
+          const Keys(LogicalKeyboardKey.enter).activator: () =>
+              unawaited(_create()),
+      },
       actions: [
         PrimaryButton(
           label: _draft ? 'Create draft pull request' : 'Create pull request',
-          shortcut: '⏎',
+          shortcut: enter ? '⏎' : null,
           onPressed: _ready ? _create : null,
         ),
-        if (_unknown) SecondaryButton(label: 'Check again', onPressed: _read),
+        if (_unknown || _stale || plan.comparisonFailed)
+          SecondaryButton(
+            label: 'Check again',
+            onPressed: _reading || _creating ? null : _checkAgain,
+          ),
       ],
       children: [
         if (fork || plan.parentUnknown)
           row(
             'Target',
             chooser(
+              'Target',
               target ?? 'Choose a repository…',
-              reading ? null : retarget,
+              _reading ? null : retarget,
             ),
             target != null && fork && target == plan.targets.first
                 ? 'parent of ${plan.identity.headRepository}'
@@ -426,21 +487,22 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
         row(
           'Base',
           chooser(
+            'Base',
             base?.shown ?? 'Choose a branch…',
-            reading ? null : _chooseBase,
+            _reading || target == null ? null : _chooseBase,
           ),
           baseHint,
         ),
         if (plan.parentUnknown)
           const WarningNotice(
-            "Could not read the fork's parent from GitHub. Choose the target repository; Liquid does not guess it.",
+            "Could not read the fork's parent from GitHub, so only the fork itself can be targeted. Choose it as the target; Liquid does not guess the parent.",
           )
         else if (fork)
           Text(
             '$remote is the fork ${plan.identity.headRepository}; GitHub names ${plan.targets.first} as its parent. Pushes still go only to $remote.',
             style: text,
           ),
-        if (reading)
+        if (_reading)
           Text('Comparing on GitHub…', style: faint)
         else if (compared != null)
           Row(
@@ -448,12 +510,15 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
             children: [
               Flexible(child: Text(compared, style: text)),
               if (comparison != null && comparison.url.startsWith('https://'))
-                InkWell(
-                  onTap: () =>
-                      unawaited(openInBrowser(widget.state, comparison.url)),
-                  child: Text(
-                    'Compare on GitHub ↗',
-                    style: text.copyWith(color: ws.accent),
+                Semantics(
+                  button: true,
+                  child: InkWell(
+                    onTap: () =>
+                        unawaited(openInBrowser(widget.state, comparison.url)),
+                    child: Text(
+                      'Compare on GitHub ↗',
+                      style: text.copyWith(color: ws.accent),
+                    ),
                   ),
                 ),
             ],
@@ -461,6 +526,7 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
         TextField(
           key: const Key('pull-request-title'),
           controller: _title,
+          focusNode: _titleFocus,
           enabled: !_creating,
           onSubmitted: (_) => unawaited(_create()),
           style: const TextStyle(fontSize: WsMetrics.fsCompact),
@@ -472,6 +538,7 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
         TextField(
           key: const Key('pull-request-description'),
           controller: _body,
+          focusNode: _bodyFocus,
           enabled: !_creating,
           minLines: 3,
           maxLines: 8,
@@ -493,17 +560,18 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
             children: [
               Checkbox(
                 value: _draft,
+                semanticLabel: 'Create as draft',
                 onChanged: _creating
                     ? null
                     : (value) => setState(() => _draft = value ?? false),
               ),
-              Text('Create as draft', style: text),
+              ExcludeSemantics(child: Text('Create as draft', style: text)),
             ],
           ),
         ),
         if (_changed)
           WarningNotice(
-            '${plan.identity.headBranch} changed since this dialog opened. Review the updated commits before creating the pull request.',
+            '${plan.head} changed since this dialog opened. Review the updated commits before creating the pull request.',
           ),
         if (_error case final error?) WarningNotice(error),
         if (_creating)
@@ -551,10 +619,21 @@ class _TargetChoice extends StatelessWidget {
 
 /// The base branch, from the target's branches on GitHub.
 class _BaseChoice extends StatefulWidget {
-  const _BaseChoice({required this.target, required this.names});
+  const _BaseChoice({
+    required this.target,
+    required this.names,
+    required this.more,
+    required this.unknown,
+  });
 
   final String target;
   final List<BridgeName> names;
+
+  /// GitHub may list more branches than [names].
+  final bool more;
+
+  /// Liquid has no record of the branch's start, and GitHub's default is unknown.
+  final bool unknown;
 
   @override
   State<_BaseChoice> createState() => _BaseChoiceState();
@@ -575,29 +654,54 @@ class _BaseChoiceState extends State<_BaseChoice> {
     super.dispose();
   }
 
+  List<BridgeName> get _matches {
+    final query = _query.text.trim().toLowerCase();
+    return [
+      for (final name in widget.names)
+        if (name.shown.toLowerCase().contains(query)) name,
+    ];
+  }
+
+  void _submit() {
+    final typed = _query.text.trim();
+    if (_matches.firstOrNull case final first?) {
+      Navigator.of(context).pop(first);
+    } else if (widget.more && typed.isNotEmpty) {
+      // GitHub checks a branch Liquid did not list when the plan is read again.
+      Navigator.of(context).pop(BridgeName(name: typed, shown: typed));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final query = _query.text.trim().toLowerCase();
+    final matches = _matches;
+    final text = DangerDialog.text(context);
     return ActionDialog(
       title: 'Base branch',
       actions: const [],
       children: [
         TextField(
+          key: const Key('base-filter'),
           controller: _query,
           autofocus: true,
-          decoration: const InputDecoration(
-            hintText: 'Search branches on GitHub',
-          ),
+          decoration: const InputDecoration(hintText: 'Filter branches'),
+          onSubmitted: (_) => _submit(),
         ),
-        for (final name in widget.names)
-          if (name.shown.toLowerCase().contains(query))
-            _ChoiceRow(
-              label: name.shown,
-              onTap: () => Navigator.of(context).pop(name),
-            ),
+        for (final name in matches)
+          _ChoiceRow(
+            label: name.shown,
+            onTap: () => Navigator.of(context).pop(name),
+          ),
+        if (matches.isEmpty)
+          Text(
+            widget.more
+                ? 'No match among the first ${widget.names.length} branches. Press Enter to use the name as typed.'
+                : 'No branch matches.',
+            style: text,
+          ),
         Text(
-          'The base is the branch you want these commits to join. Only branches in ${widget.target} are listed.',
-          style: DangerDialog.text(context),
+          'The base is the branch you want these commits to join.${widget.unknown ? " Liquid has no record of where this branch started, and GitHub's default could not be read." : ''} Only branches in ${widget.target} are listed.',
+          style: text,
         ),
       ],
     );
@@ -640,311 +744,4 @@ class _ChoiceRow extends StatelessWidget {
       ),
     ),
   );
-}
-
-/// The PR chip beside the branch chip, and its summary (pull request mockups §4).
-class PullRequestChip extends StatelessWidget {
-  const PullRequestChip({super.key, required this.state, required this.device});
-
-  final SessionState state;
-  final String device;
-
-  @override
-  Widget build(BuildContext context) {
-    final pulls = state.pulls;
-    return ListenableBuilder(
-      listenable: Listenable.merge([pulls.current, pulls.failure]),
-      builder: (context, _) {
-        final pull = pulls.current.value;
-        if (pull == null) return const SizedBox.shrink();
-        final ws = context.ws;
-        final (mark, color) = _mark(context, pull.state);
-        void open() => unawaited(
-          showDialog<void>(
-            context: context,
-            barrierColor: Colors.transparent,
-            builder: (_) => _Summary(state: state),
-          ),
-        );
-        return Padding(
-          padding: const EdgeInsets.only(left: WsMetrics.space2),
-          child: Semantics(
-            key: const Key('pull-request-chip'),
-            button: true,
-            label: 'Pull request ${stateLabel(pull.state)} #${pull.number}',
-            excludeSemantics: true,
-            onTap: open,
-            child: InkWell(
-              borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
-              onTap: open,
-              child: Container(
-                height: 28,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: WsMetrics.space3,
-                ),
-                decoration: BoxDecoration(
-                  border: Border.all(color: ws.borderStrong),
-                  borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  spacing: WsMetrics.space2,
-                  children: [
-                    Text(mark, style: TextStyle(color: color)),
-                    Text(
-                      '${stateLabel(pull.state)} #${pull.number}',
-                      style: TextStyle(
-                        color: ws.text,
-                        fontSize: WsMetrics.fsCompact,
-                      ),
-                    ),
-                    if (pulls.failure.value != null)
-                      Icon(
-                        LucideIcons.triangleAlert,
-                        size: 13,
-                        color: ws.warning,
-                      ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        );
-      },
-    );
-  }
-}
-
-String stateLabel(BridgePullRequestState state) => switch (state) {
-  BridgePullRequestState.open => 'Open',
-  BridgePullRequestState.draft => 'Draft',
-  BridgePullRequestState.merged => 'Merged',
-  BridgePullRequestState.closed => 'Closed',
-};
-
-(String, Color) _mark(BuildContext context, BridgePullRequestState state) {
-  final ws = context.ws;
-  return switch (state) {
-    BridgePullRequestState.open => ('●', ws.success),
-    BridgePullRequestState.draft => ('◌', ws.textMuted),
-    BridgePullRequestState.merged => ('✓', ws.accent),
-    BridgePullRequestState.closed => ('×', ws.danger),
-  };
-}
-
-/// Checks by outcome, failed first; none reported differs from passed.
-String checksText(BridgePullRequest pull) {
-  final parts = [
-    if (pull.checksFailed > 0) '${pull.checksFailed} failed',
-    if (pull.checksPending > 0) '${pull.checksPending} pending',
-    if (pull.checksPassed > 0) '${pull.checksPassed} passed',
-  ];
-  return 'Checks: ${parts.isEmpty ? 'none reported' : parts.join(', ')}';
-}
-
-String reviewText(BridgePullRequest pull) =>
-    'Review: ${switch (pull.review) {
-      BridgeReviewDecision.approved => 'approved',
-      BridgeReviewDecision.changesRequested => 'changes requested',
-      BridgeReviewDecision.required_ => 'required',
-      null when pull.state == BridgePullRequestState.draft => 'draft, not requested',
-      null => 'no reviews',
-    }}';
-
-class _Summary extends StatefulWidget {
-  const _Summary({required this.state});
-
-  final SessionState state;
-
-  @override
-  State<_Summary> createState() => _SummaryState();
-}
-
-class _SummaryState extends State<_Summary> {
-  @override
-  void initState() {
-    super.initState();
-    // Status is read when the summary opens, never by polling.
-    unawaited(widget.state.pulls.refresh());
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final pulls = widget.state.pulls;
-    final ws = context.ws;
-    final text = DangerDialog.text(context);
-    final faint = TextStyle(color: ws.textFaint, fontSize: WsMetrics.fsSmall);
-    return Align(
-      alignment: Alignment.topRight,
-      child: Padding(
-        padding: const EdgeInsets.only(
-          top: WsMetrics.rowHeader,
-          right: WsMetrics.space7,
-        ),
-        child: Material(
-          color: ws.surface,
-          elevation: 4,
-          borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 380),
-            child: ListenableBuilder(
-              listenable: Listenable.merge([
-                pulls.current,
-                pulls.updated,
-                pulls.failure,
-              ]),
-              builder: (context, _) {
-                final pull = pulls.current.value;
-                if (pull == null) return const SizedBox.shrink();
-                final (mark, color) = _mark(context, pull.state);
-                final updated = pulls.updated.value;
-                final at = updated == null
-                    ? null
-                    : formatClockMs(updated.millisecondsSinceEpoch);
-                return Padding(
-                  padding: const EdgeInsets.all(WsMetrics.space4),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    spacing: WsMetrics.space2,
-                    children: [
-                      Row(
-                        spacing: WsMetrics.space2,
-                        children: [
-                          Text(mark, style: TextStyle(color: color)),
-                          Text(
-                            '${stateLabel(pull.state)} #${pull.number}',
-                            style: text.copyWith(color: ws.text),
-                          ),
-                          Text(pull.repository, style: faint),
-                        ],
-                      ),
-                      Text(
-                        pull.title,
-                        style: text.copyWith(
-                          color: ws.text,
-                          fontWeight: WsMetrics.fwMedium,
-                        ),
-                      ),
-                      Text(
-                        '${pull.head} → ${pull.base}',
-                        style: monoStyle(context, color: ws.textMuted),
-                      ),
-                      Text(switch (pull.state) {
-                        BridgePullRequestState.merged =>
-                          'Merged into ${pull.base} on GitHub. The branch remains until explicitly removed.',
-                        BridgePullRequestState.closed =>
-                          'Closed without merging. The branch stays available.',
-                        _ =>
-                          '${checksText(pull)} · ${reviewText(pull)}${pull.review == BridgeReviewDecision.approved ? " GitHub's merge rules still apply." : ''}',
-                      }, style: text),
-                      if (pulls.failure.value case final failure?)
-                        WarningNotice(
-                          'Status unavailable. Last known: ${stateLabel(pull.state)} #${pull.number}${at == null ? '' : ' · $at'}. $failure',
-                        ),
-                      SecondaryButton(
-                        label: 'Open in browser ↗',
-                        onPressed: () =>
-                            unawaited(openInBrowser(widget.state, pull.url)),
-                      ),
-                      Row(
-                        children: [
-                          Flexible(
-                            child: Text(
-                              at == null
-                                  ? 'Not yet updated from GitHub · '
-                                  : 'Updated from GitHub at $at · ',
-                              style: faint,
-                            ),
-                          ),
-                          InkWell(
-                            onTap: () => unawaited(pulls.refresh()),
-                            child: Text(
-                              'Refresh',
-                              style: faint.copyWith(color: ws.accent),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                );
-              },
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// After a push, offers a pull request directly above the input area until dismissed or one
-/// exists (pull request mockups §1).
-class PushedOffer extends StatelessWidget {
-  const PushedOffer({super.key, required this.state, required this.device});
-
-  final SessionState state;
-  final String device;
-
-  @override
-  Widget build(BuildContext context) => ValueListenableBuilder(
-    valueListenable: state.pulls.offer,
-    builder: (context, transfer, _) {
-      if (transfer == null) return const SizedBox.shrink();
-      final ws = context.ws;
-      final text = TextStyle(color: ws.textMuted, fontSize: WsMetrics.fsSmall);
-      return Padding(
-        padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space4),
-        child: Row(
-          spacing: WsMetrics.space3,
-          children: [
-            Flexible(
-              child: Text(
-                transfer.firstPush || transfer.gone
-                    ? 'Pushed ${transfer.branch} to ${transfer.remote}'
-                    : 'Pushed ${plural(transfer.ahead.toInt(), 'commit')} to ${transfer.upstream}',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: text,
-              ),
-            ),
-            InkWell(
-              onTap: () => unawaited(
-                showPullRequestDialog(context, state, device: device),
-              ),
-              child: Text(
-                'Create pull request…',
-                style: text.copyWith(color: ws.accent),
-              ),
-            ),
-            IconButton(
-              tooltip: 'Dismiss',
-              iconSize: 13,
-              visualDensity: VisualDensity.compact,
-              onPressed: state.pulls.dismissOffer,
-              icon: const Icon(LucideIcons.x),
-            ),
-          ],
-        ),
-      );
-    },
-  );
-}
-
-/// Opens a GitHub page in the system's browser; only HTTPS pages, and a failure is reported.
-Future<void> openInBrowser(SessionState state, String url) async {
-  if (!url.startsWith('https://')) {
-    state.notify(BridgeLevel.error, 'Could not open $url: not an HTTPS page.');
-    return;
-  }
-  try {
-    final result = await Process.run(Platform.isMacOS ? 'open' : 'xdg-open', [
-      url,
-    ]);
-    if (result.exitCode != 0) {
-      state.notify(BridgeLevel.error, 'Could not open $url: ${result.stderr}');
-    }
-  } on ProcessException catch (error) {
-    state.notify(BridgeLevel.error, 'Could not open $url: ${error.message}');
-  }
 }

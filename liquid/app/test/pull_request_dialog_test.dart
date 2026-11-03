@@ -1,9 +1,10 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/agent/git_actions.dart';
-import 'package:liquid/src/agent/pull_request.dart';
+import 'package:liquid/src/agent/pull_request_status.dart';
 import 'package:liquid/src/rust/api/git.dart';
 import 'package:liquid/src/session/branch_bases.dart';
 import 'package:liquid/src/session/session_state.dart';
@@ -298,13 +299,24 @@ void main() {
       expect(find.textContaining('Updated from GitHub at '), findsOneWidget);
 
       backend.current = pullRequestOutcomeOf(
-        kind: BridgePullRequestOutcomeKind.unreachable,
+        kind: BridgePullRequestOutcomeKind.signIn,
         host: 'github.com',
       );
       await tester.tap(find.text('Refresh'));
       await tester.pumpAndSettle();
       expect(find.textContaining('Status unavailable'), findsOneWidget);
       expect(find.textContaining('Last known: Open #42 · '), findsOneWidget);
+      expect(find.textContaining('Sign in on MacBook'), findsOneWidget);
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      expect(
+        tester.getSemantics(find.byKey(const Key('pull-request-chip'))),
+        matchesSemantics(
+          label: 'Pull request Open #42, status unavailable',
+          isButton: true,
+          hasTapAction: true,
+        ),
+      );
     },
   );
 
@@ -325,7 +337,7 @@ void main() {
       find.text('Pushed 2 commits to origin/feature/retry-after'),
       findsOneWidget,
     );
-    await tester.tap(find.text('Create pull request…'));
+    await tester.tap(button('Create pull request…'));
     await tester.pumpAndSettle();
     expect(backend.calls.last, 'plan - -');
     await tester.tap(find.text('Cancel'));
@@ -335,4 +347,237 @@ void main() {
     expect(find.textContaining('Pushed 2 commits'), findsNothing);
     await tester.pump(const Duration(seconds: 7));
   });
+
+  testWidgets(
+    'a failed re-read keeps the plan, says why and holds Create until one succeeds',
+    (tester) async {
+      await show(tester);
+      await openDialog(tester);
+      Finder create() => button('Create pull request');
+      expect(tester.widget<InkWell>(create()).onTap, isNotNull);
+
+      backend.baseBranches = [nameOf('main'), nameOf('develop')];
+      backend.planned = pullRequestOutcomeOf(
+        kind: BridgePullRequestOutcomeKind.signIn,
+        host: 'github.com',
+      );
+      await tester.tap(find.text('main').first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('develop'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Sign in on MacBook'), findsOneWidget);
+      expect(
+        find.text('2 pushed commits · 3 changed files · +12 −1'),
+        findsOneWidget,
+      );
+      expect(tester.widget<InkWell>(create()).onTap, isNull);
+
+      // A read the session did not answer keeps the plan and offers another.
+      final gate = backend.pullRequestPlanGate = Completer();
+      await tester.tap(button('Check again'));
+      await tester.pump();
+      gate.completeError(StateError('gone'));
+      await tester.pumpAndSettle();
+      expect(find.text('Could not read GitHub on MacBook.'), findsOneWidget);
+      expect(tester.widget<InkWell>(create()).onTap, isNull);
+
+      backend.pullRequestPlanGate = null;
+      backend.planned = pullRequestOutcomeOf(plan: planOf());
+      await tester.tap(button('Check again'));
+      await tester.pumpAndSettle();
+      expect(backend.calls.last, 'plan acme/api main');
+      expect(find.textContaining('Could not read GitHub'), findsNothing);
+      expect(tester.widget<InkWell>(create()).onTap, isNotNull);
+    },
+  );
+
+  testWidgets('a first read that fails offers to check again', (tester) async {
+    await show(tester);
+    final gate = backend.pullRequestPlanGate = Completer();
+    await tester.tap(find.byKey(const Key('git-menu')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Create pull request…').last);
+    await tester.pump();
+    gate.completeError(StateError('gone'));
+    await tester.pumpAndSettle();
+    expect(find.text('Could not read GitHub on MacBook.'), findsOneWidget);
+    backend.pullRequestPlanGate = null;
+    await tester.tap(button('Check again'));
+    await tester.pumpAndSettle();
+    expect(button('Create pull request'), findsOneWidget);
+  });
+
+  testWidgets(
+    'Create waits for a comparison, and the head shows its hidden characters',
+    (tester) async {
+      await show(tester);
+      backend.planned = pullRequestOutcomeOf(
+        plan: planOf(
+          comparison: null,
+          comparisonFailed: true,
+          head: 'feature/<U+202E>x',
+          headBranch: 'feature/\u202ex',
+        ),
+      );
+      await openDialog(tester);
+      expect(
+        find.text(
+          '⚠ GitHub could not compare feature/<U+202E>x with main. Check again, or choose another base.',
+        ),
+        findsOneWidget,
+      );
+      expect(
+        tester.widget<InkWell>(button('Create pull request')).onTap,
+        isNull,
+      );
+      expect(button('Check again'), findsOneWidget);
+
+      backend.planned = pullRequestOutcomeOf(
+        plan: planOf(
+          comparison: const BridgeComparison(
+            commits: 0,
+            files: 0,
+            added: 0,
+            removed: 0,
+            url: '',
+          ),
+          head: 'feature/<U+202E>x',
+          headBranch: 'feature/\u202ex',
+        ),
+      );
+      await tester.tap(button('Check again'));
+      await tester.pumpAndSettle();
+      expect(
+        find.textContaining('feature/<U+202E>x has no commits beyond main'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('\u202e'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'the base list filters, Enter picks the first match, and a long list says so',
+    (tester) async {
+      await show(tester);
+      backend.planned = pullRequestOutcomeOf(
+        plan: planOf(base: null, defaultBranch: null, comparison: null),
+      );
+      await openDialog(tester);
+      backend.baseBranches = [nameOf('main'), nameOf('release/1.2')];
+      backend.moreBases = true;
+      await tester.tap(find.text('Choose a branch…'));
+      await tester.pumpAndSettle();
+      expect(find.text('Filter branches'), findsOneWidget);
+      expect(
+        find.textContaining(
+          "Liquid has no record of where this branch started, and GitHub's default could not be read.",
+        ),
+        findsOneWidget,
+      );
+      await tester.enterText(find.byKey(const Key('base-filter')), 'rel');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+      expect(backend.calls.last, 'plan acme/api release/1.2');
+
+      await tester.tap(find.text('Choose a branch…'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const Key('base-filter')), 'hotfix/9');
+      await tester.pump();
+      expect(
+        find.textContaining('No match among the first 2 branches.'),
+        findsOneWidget,
+      );
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+      expect(backend.calls.last, 'plan acme/api hotfix/9');
+    },
+  );
+
+  testWidgets(
+    'a fork without a known parent chooses its target before a base',
+    (tester) async {
+      await show(tester);
+      backend.planned = pullRequestOutcomeOf(
+        plan: planOf(
+          targets: const ['bw/api'],
+          target: null,
+          base: null,
+          defaultBranch: null,
+          comparison: null,
+          parentUnknown: true,
+        ),
+      );
+      await openDialog(tester);
+      expect(
+        find.textContaining('only the fork itself can be targeted'),
+        findsOneWidget,
+      );
+      await tester.tap(find.text('Choose a branch…'));
+      await tester.pumpAndSettle();
+      expect(backend.calls, isNot(contains('bases bw/api')));
+      expect(
+        tester.getSemantics(find.text('Choose a repository…')),
+        matchesSemantics(
+          label: 'Target: Choose a repository…',
+          isButton: true,
+          hasEnabledState: true,
+          isEnabled: true,
+          hasTapAction: true,
+        ),
+      );
+    },
+  );
+
+  testWidgets('Enter creates unless the description has focus', (tester) async {
+    await show(tester);
+    await openDialog(tester);
+    await tester.tap(find.byKey(const Key('pull-request-description')));
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(backend.lastDraft, isNull);
+    // The title has focus when the dialog opens.
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    await openDialog(tester);
+    expect(
+      FocusManager.instance.primaryFocus?.context
+          ?.findAncestorWidgetOfExactType<TextField>()
+          ?.key,
+      const Key('pull-request-title'),
+    );
+    await tester.tap(find.text('Create as draft'));
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(backend.lastDraft?.draft, isTrue);
+    await tester.pump(const Duration(seconds: 7));
+  });
+
+  testWidgets(
+    'a remote on another host opens its page, and the menu orders Push, PR, Pull',
+    (tester) async {
+      await show(tester);
+      backend.planned = pullRequestOutcomeOf(
+        kind: BridgePullRequestOutcomeKind.notGitHub,
+        remote: 'origin',
+        host: 'gitlab.com',
+        page: 'https://gitlab.com/bw/api',
+      );
+      await openDialog(tester);
+      expect(
+        find.textContaining('open this repository in its host\'s browser'),
+        findsOneWidget,
+      );
+      expect(button('Open in browser ↗'), findsOneWidget);
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('git-menu')));
+      await tester.pumpAndSettle();
+      double top(String label) => tester.getTopLeft(find.text(label).last).dy;
+      expect(top('Push'), lessThan(top('Create pull request…')));
+      expect(top('Create pull request…'), lessThan(top('Pull')));
+    },
+  );
 }

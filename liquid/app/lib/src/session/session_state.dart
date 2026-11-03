@@ -121,7 +121,8 @@ class SessionState {
   final BranchBases _bases;
 
   /// The branch's pull request on GitHub.
-  late final pulls = PullRequests(_backend, git, _bases);
+  PullRequests get pulls => _pulls ??= PullRequests(_backend, git, _bases);
+  PullRequests? _pulls;
 
   /// Counts the changes of the session's stored history; the Trajectory reloads on each.
   final stored = ValueNotifier(0);
@@ -809,6 +810,7 @@ class SessionState {
   Future<void> dispose() async {
     _fade?.cancel();
     git.stop();
+    _pulls?.dispose();
     // The bridge's stream finishes cancelling only with its next event, which an idle agent
     // sends once it is shut down, so the agent stops first.
     final cancelled = _subscription.cancel();

@@ -26,7 +26,7 @@ import 'branch_menu.dart';
 import 'chat_view.dart';
 import 'git_actions.dart';
 import 'input_lane.dart';
-import 'pull_request.dart';
+import 'pull_request_status.dart';
 import 'sidebar.dart';
 import 'status_bar.dart';
 

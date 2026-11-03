@@ -28,7 +28,7 @@ class PullRequests {
   final updated = ValueNotifier<DateTime?>(null);
 
   /// Why the last refresh failed, which marks [current] stale.
-  final failure = ValueNotifier<String?>(null);
+  final failure = ValueNotifier<BridgePullRequestOutcome?>(null);
 
   /// The completed push the input area offers a pull request for, until dismissed or one
   /// exists.
@@ -37,6 +37,10 @@ class PullRequests {
   /// The branch and upstream [current] belongs to.
   String? _key;
   int _reads = 0;
+
+  /// The branch's remote is not on GitHub, as last read.
+  bool _notGitHub = false;
+  bool _disposed = false;
 
   String? get _statusKey => switch (_git.status.value) {
     final status? when status.branch != null =>
@@ -51,28 +55,59 @@ class PullRequests {
     current.value = null;
     updated.value = null;
     failure.value = null;
+    _notGitHub = false;
     if (offer.value?.branch != _git.status.value?.branch) offer.value = null;
     unawaited(refresh());
   }
 
-  /// Reads the branch's pull request again; a failure keeps the last one, marked stale.
-  Future<void> refresh() async {
+  Future<void>? _refreshing;
+  bool _again = false;
+
+  /// Reads the branch's pull request again; a failure keeps the last one, marked stale. A
+  /// read asked for meanwhile runs once after the current one instead of queueing.
+  Future<void> refresh() {
+    if (_refreshing case final refreshing?) {
+      _again = true;
+      return refreshing;
+    }
+    return _refreshing = _refresh();
+  }
+
+  Future<void> _refresh() async {
+    try {
+      do {
+        _again = false;
+        await _readOnce();
+      } while (_again && !_disposed);
+    } finally {
+      _refreshing = null;
+    }
+  }
+
+  Future<void> _readOnce() async {
     final key = _statusKey;
     final read = ++_reads;
     // Without a pushed upstream there is no pull request to read.
     if (key == null || _git.status.value?.upstream == null) return;
-    final BridgePullRequestOutcome outcome;
+    BridgePullRequestOutcome outcome;
     try {
       outcome = await _backend.pullRequest();
-    } on Object catch (error) {
-      if (read == _reads && key == _statusKey) failure.value = '$error';
-      return;
+    } on Object {
+      outcome = unansweredOutcome;
     }
-    if (read != _reads || key != _statusKey) return;
-    if (outcome.kind == BridgePullRequestOutcomeKind.done) {
-      _show(outcome.pullRequest);
-    } else {
-      failure.value = pullRequestProblem(outcome, device: null);
+    if (_disposed || read != _reads || key != _statusKey) return;
+    switch (outcome.kind) {
+      case BridgePullRequestOutcomeKind.done:
+        _notGitHub = false;
+        _show(outcome.pullRequest);
+      case BridgePullRequestOutcomeKind.notGitHub:
+        _notGitHub = true;
+        current.value = null;
+        updated.value = null;
+        failure.value = null;
+        offer.value = null;
+      default:
+        failure.value = outcome;
     }
   }
 
@@ -83,10 +118,12 @@ class PullRequests {
     if (isOpen(pull)) offer.value = null;
   }
 
-  /// After a push, offers a pull request unless one is open for the branch.
+  /// After a push, offers a pull request unless one is open or the remote is not on GitHub.
   Future<void> pushed(BridgeGitTransfer transfer) async {
     await refresh();
-    if (!isOpen(current.value) &&
+    if (!_disposed &&
+        !_notGitHub &&
+        !isOpen(current.value) &&
         _git.status.value?.branch == transfer.branch) {
       offer.value = transfer;
     }
@@ -109,21 +146,28 @@ class PullRequests {
         base: base ?? await recordedBase(),
       );
 
-  Future<List<BridgeName>> bases(String host, String target) =>
+  /// The target's branches to choose a base from.
+  Future<BridgePullRequestOutcome> bases(String host, String target) =>
       _backend.pullRequestBases(host, target);
 
-  /// Creates the reviewed pull request; a created or already open one becomes [current].
+  /// Creates the reviewed pull request; a created or already open one becomes [current] while
+  /// the same branch and upstream are checked out.
   Future<BridgePullRequestOutcome> create(BridgePullRequestDraft draft) async {
+    final key = _statusKey;
     final outcome = await _backend.createPullRequest(draft);
-    if (outcome.kind
-        case BridgePullRequestOutcomeKind.done ||
-            BridgePullRequestOutcomeKind.exists) {
+    if (!_disposed &&
+        key == _statusKey &&
+        (outcome.kind == BridgePullRequestOutcomeKind.done ||
+            outcome.kind == BridgePullRequestOutcomeKind.exists)) {
+      // A read that began before creating would show the branch without it.
+      _reads++;
       _show(outcome.pullRequest);
     }
     return outcome;
   }
 
   void dispose() {
+    _disposed = true;
     _git.status.removeListener(_statusChanged);
     current.dispose();
     updated.dispose();
@@ -131,6 +175,27 @@ class PullRequests {
     offer.dispose();
   }
 }
+
+/// An outcome of `kind` that names nothing.
+BridgePullRequestOutcome outcomeOf(BridgePullRequestOutcomeKind kind) =>
+    BridgePullRequestOutcome(
+      kind: kind,
+      bases: const [],
+      moreBases: false,
+      host: '',
+      remote: '',
+      branch: '',
+      upstream: '',
+      repository: '',
+      ahead: 0,
+      behind: 0,
+      first: false,
+      page: '',
+      detail: '',
+    );
+
+/// A plan, creation or read the session did not answer.
+final unansweredOutcome = outcomeOf(BridgePullRequestOutcomeKind.failed);
 
 bool isOpen(BridgePullRequest? pull) =>
     pull?.state == BridgePullRequestState.open ||
@@ -150,8 +215,7 @@ String? pullRequestProblem(
     BridgePullRequestOutcomeKind.exists => null,
     BridgePullRequestOutcomeKind.noBranch => 'There is no branch to publish. Create a branch before creating a pull request.',
     BridgePullRequestOutcomeKind.noCommit => 'No committed change can be published. Commit changes first; a checkpoint is not a branch commit.',
-    BridgePullRequestOutcomeKind.merging =>
-      'A merge is in progress. Finish or cancel it in Git before publishing.',
+    BridgePullRequestOutcomeKind.merging => 'A merge or rebase is in progress. Finish or cancel it in Git before publishing.',
     BridgePullRequestOutcomeKind.noRemote =>
       'This repository has no remote. Add a GitHub remote with Git $on before creating a pull request.',
     BridgePullRequestOutcomeKind.ambiguousRemote ||
@@ -159,7 +223,7 @@ String? pullRequestProblem(
     BridgePullRequestOutcomeKind.notGitHub when outcome.host.isEmpty =>
       '${outcome.remote} is not on GitHub. Pull requests through gh need a GitHub remote.',
     BridgePullRequestOutcomeKind.notGitHub =>
-      '${outcome.remote} is on ${outcome.host}, which gh $on has no login for. Pull requests through gh need GitHub; for GitHub Enterprise, sign in with gh auth login --hostname ${outcome.host}, then check again. Otherwise create the merge request in the host\'s browser.',
+      '${outcome.remote} is on ${outcome.host}, which gh $on has no login for. Pull requests through gh need GitHub; for GitHub Enterprise, sign in with gh auth login --hostname ${outcome.host}, then check again. Otherwise open this repository in its host\'s browser to create the host\'s merge request.',
     BridgePullRequestOutcomeKind.needsPush when outcome.first =>
       '${outcome.branch} is not on ${outcome.remote} yet. Push it before creating a pull request.',
     BridgePullRequestOutcomeKind.needsPush =>
@@ -169,14 +233,16 @@ String? pullRequestProblem(
     BridgePullRequestOutcomeKind.headMoved =>
       'GitHub\'s ${outcome.branch} is at another commit than this checkout. Fetch, then pull or push before creating a pull request.',
     BridgePullRequestOutcomeKind.ghMissing =>
-      'Could not run gh$detail. Install GitHub CLI $on, then check again. Git commits still work.',
+      'Could not run gh${outcome.detail.isEmpty ? '' : ': “${outcome.detail}”'}. Install GitHub CLI $on, then check again. Git commits still work.',
+    BridgePullRequestOutcomeKind.ghOutdated =>
+      'gh $on is too old for Liquid.$detail Update GitHub CLI $on, then check again.',
     BridgePullRequestOutcomeKind.signIn =>
       'Sign in $on with gh auth login${outcome.host == 'github.com' ? '' : ' --hostname ${outcome.host}'}, then check again. Liquid does not ask for the credential.',
     BridgePullRequestOutcomeKind.noAccess =>
       'gh cannot access ${outcome.repository} $on. Check the host\'s login and repository access, then check again.$detail',
     BridgePullRequestOutcomeKind.unreachable =>
       'Could not reach ${outcome.host}.$detail Try again when it is available.',
-    BridgePullRequestOutcomeKind.failed => 'gh failed.$detail',
+    BridgePullRequestOutcomeKind.failed => 'Could not read GitHub $on.$detail',
     BridgePullRequestOutcomeKind.notCreated =>
       'GitHub refused the pull request; none was created.$detail',
     BridgePullRequestOutcomeKind.unknown =>

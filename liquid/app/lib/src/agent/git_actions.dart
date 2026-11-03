@@ -193,7 +193,7 @@ class GitActions extends StatelessWidget {
         _GitAction.push: LucideIcons.arrowUp,
         _GitAction.pull: LucideIcons.arrowDown,
         _GitAction.create: LucideIcons.gitBranch,
-        _GitAction.pullRequest: LucideIcons.arrowLeftRight,
+        _GitAction.pullRequest: LucideIcons.gitPullRequest,
       };
       final hints = {
         _GitAction.commit:
@@ -217,7 +217,7 @@ class GitActions extends StatelessWidget {
                 : 'Create a branch from ${status.branch}.'),
         _GitAction.pullRequest:
             blockers[_GitAction.pullRequest] ??
-            'Create a pull request on GitHub for the pushed ${status.branch ?? 'branch'} through gh on $device.',
+            'Review a pull request for ${status.branch ?? 'this branch'} on GitHub before gh on $device creates it.',
       };
       final counts = {
         _GitAction.commit: enabled[_GitAction.commit]!
@@ -356,6 +356,7 @@ class GitActions extends StatelessWidget {
                       : '',
                 ),
                 item(_GitAction.push, 'Push', counts[_GitAction.push]!),
+                item(_GitAction.pullRequest, 'Create pull request…', ''),
                 item(
                   _GitAction.pull,
                   'Pull',
@@ -368,7 +369,6 @@ class GitActions extends StatelessWidget {
                 ),
                 item(_GitAction.fetch, 'Fetch', remote ?? ''),
                 const PopupMenuDivider(),
-                item(_GitAction.pullRequest, 'Create pull request…', ''),
                 item(_GitAction.create, 'Create branch…', ''),
               ],
             ),

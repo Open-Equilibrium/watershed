@@ -516,7 +516,13 @@ class FakeBackend implements SessionBackend {
   );
   BridgePullRequestOutcome current = pullRequestOutcomeOf();
   Completer<BridgePullRequestOutcome>? createGate;
+  Completer<BridgePullRequestOutcome>? pullRequestPlanGate;
+  Completer<BridgePullRequestOutcome>? currentGate;
   List<BridgeName> baseBranches = const [];
+  bool moreBases = false;
+
+  /// What listing bases returns instead of [baseBranches], until cleared.
+  BridgePullRequestOutcome? basesOutcome;
   BridgePullRequestDraft? lastDraft;
 
   @override
@@ -525,6 +531,7 @@ class FakeBackend implements SessionBackend {
     String? base,
   }) async {
     calls.add('plan ${target ?? '-'} ${base ?? '-'}');
+    if (pullRequestPlanGate case final gate?) return gate.future;
     return planned;
   }
 
@@ -545,13 +552,18 @@ class FakeBackend implements SessionBackend {
   @override
   Future<BridgePullRequestOutcome> pullRequest() async {
     pullRequestReads++;
+    if (currentGate case final gate?) return gate.future;
     return current;
   }
 
   @override
-  Future<List<BridgeName>> pullRequestBases(String host, String target) async {
+  Future<BridgePullRequestOutcome> pullRequestBases(
+    String host,
+    String target,
+  ) async {
     calls.add('bases $target');
-    return baseBranches;
+    return basesOutcome ??
+        pullRequestOutcomeOf(bases: baseBranches, moreBases: moreBases);
   }
 
   /// What reverting to before a turn would change.
@@ -952,6 +964,8 @@ BridgePullRequestOutcome pullRequestOutcomeOf({
   BridgePullRequestOutcomeKind kind = BridgePullRequestOutcomeKind.done,
   BridgePullRequestPlan? plan,
   BridgePullRequest? pullRequest,
+  List<BridgeName> bases = const [],
+  bool moreBases = false,
   String host = '',
   String remote = '',
   String branch = '',
@@ -960,11 +974,15 @@ BridgePullRequestOutcome pullRequestOutcomeOf({
   int ahead = 0,
   int behind = 0,
   bool first = false,
+  String page = '',
   String detail = '',
 }) => BridgePullRequestOutcome(
   kind: kind,
   plan: plan,
   pullRequest: pullRequest,
+  bases: bases,
+  moreBases: moreBases,
+  page: page,
   host: host,
   remote: remote,
   branch: branch,
@@ -1015,6 +1033,7 @@ BridgePullRequestPlan planOf({
     removed: 1,
     url: 'https://github.com/acme/api/compare/main...feature/retry-after',
   ),
+  bool comparisonFailed = false,
   bool baseMissing = false,
   bool parentUnknown = false,
   BridgePullRequest? open,
@@ -1022,11 +1041,12 @@ BridgePullRequestPlan planOf({
   String subject = 'Return 429 with Retry-After on /login',
   String body = 'Blocked login attempts now get 429.',
   String commit = 'c0ffee',
+  String headBranch = 'feature/retry-after',
 }) => BridgePullRequestPlan(
   identity: BridgePullRequestHead(
     host: 'github.com',
     headRepository: targets.last,
-    headBranch: 'feature/retry-after',
+    headBranch: headBranch,
     headCommit: commit,
   ),
   host: 'github.com',
@@ -1037,6 +1057,7 @@ BridgePullRequestPlan planOf({
   defaultBranch: defaultBranch == null ? null : nameOf(defaultBranch),
   base: base == null ? null : nameOf(base),
   comparison: comparison,
+  comparisonFailed: comparisonFailed,
   baseMissing: baseMissing,
   open: open,
   uncommitted: uncommitted,
