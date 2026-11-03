@@ -16,7 +16,7 @@ import 'commit_dialog.dart';
 import 'pull_request.dart';
 
 /// Pushes the branch, asking first before pushing to the remote's default branch; a completed
-/// push offers a pull request.
+/// push to another branch offers a pull request.
 Future<void> pushBranch(
   BuildContext context,
   SessionState state, {
@@ -26,7 +26,7 @@ Future<void> pushBranch(
   BridgePushConfirmation? confirmed;
   while (context.mounted && generation == state.generation) {
     final outcome = await state.git.push(device: device, confirmed: confirmed);
-    if (outcome?.kind == BridgeGitOutcomeKind.done) {
+    if (outcome?.kind == BridgeGitOutcomeKind.done && confirmed == null) {
       unawaited(state.pulls.pushed(outcome!.transfer!));
     }
     if (outcome?.kind != BridgeGitOutcomeKind.pushDefault ||

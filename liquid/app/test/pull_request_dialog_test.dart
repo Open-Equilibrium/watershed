@@ -348,6 +348,19 @@ void main() {
     await tester.pump(const Duration(seconds: 7));
   });
 
+  testWidgets('a confirmed push to the default branch offers no pull request', (
+    tester,
+  ) async {
+    await show(tester, status: gitStatusOf(ahead: 1, defaultBranch: 'main'));
+    await tester.tap(find.byKey(const Key('git-next')));
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(backend.calls, contains('push true'));
+    expect(find.textContaining('Pushed 1 commit'), findsNothing);
+    await tester.pump(const Duration(seconds: 7));
+  });
+
   testWidgets(
     'a failed re-read keeps the plan, says why and holds Create until one succeeds',
     (tester) async {
