@@ -54,7 +54,7 @@ p.sub{margin:0 0 10px;font-size:13px;color:var(--muted-foreground);line-height:1
 .egrid span.on{background:var(--ws-hover)}
 .foot{margin-top:auto;padding-top:6px;box-shadow:inset 0 1px 0 var(--ws-border)}
 .main{flex:1;display:flex;flex-direction:column;min-width:0;position:relative}
-.head{height:44px;flex:none;display:flex;align-items:center;gap:8px;padding:0 16px 0 24px;font-size:14px}
+.head{height:var(--ws-row-header);flex:none;display:flex;align-items:center;gap:8px;padding:0 16px 0 24px;font-size:14px}
 .crumb{color:var(--ws-text-muted);display:flex;gap:6px;align-items:center;white-space:nowrap}
 .crumb b{color:var(--ws-text);font-weight:500}
 .head .end{margin-left:auto;display:flex;gap:4px;align-items:center}
@@ -65,7 +65,7 @@ kbd{font-size:11px;padding:0 4px;border-radius:4px;border:1px solid currentColor
 .btn.pri{background:var(--ws-accent);color:var(--ws-on-accent);box-shadow:none}
 .btn.ghost{box-shadow:none;background:transparent;color:var(--ws-text-muted)}
 .pg{flex:1;overflow:hidden;padding:28px 0 0;-webkit-mask-image:linear-gradient(to top,transparent 0,#000 40px);mask-image:linear-gradient(to top,transparent 0,#000 40px)}
-.col{width:740px;margin:0 auto;display:flex;flex-direction:column;gap:14px}
+.col{width:var(--ws-width-reading);margin:0 auto;display:flex;flex-direction:column;gap:14px}
 .ttl{font-size:var(--ws-fs-display);line-height:var(--ws-lh-display);font-weight:var(--ws-fw-bold);margin:0 0 6px}
 .ttl.ph{color:var(--ws-text-faint)}
 .prose{font-size:var(--ws-fs-prose);line-height:var(--ws-lh-prose)}
@@ -127,7 +127,7 @@ kbd{font-size:11px;padding:0 4px;border-radius:4px;border:1px solid currentColor
 .tile .rs{position:absolute;right:-5px;top:50%;width:8px;height:28px;margin-top:-14px;border-radius:4px;background:var(--ws-surface);box-shadow:0 0 0 1px var(--ws-border-strong)}
 .tile.sel .rs{background:var(--ws-accent);box-shadow:none}
 .tile .span{position:absolute;right:10px;bottom:-11px;font-size:11px;line-height:18px;padding:0 6px;border-radius:4px;background:var(--ws-accent);color:var(--ws-on-accent)}
-.armode{height:44px;flex:none;display:flex;align-items:center;gap:12px;padding:0 16px 0 24px;background:var(--ws-accent-subtle);font-size:13px;color:var(--ws-accent)}
+.armode{height:var(--ws-row-header);flex:none;display:flex;align-items:center;gap:12px;padding:0 16px 0 24px;background:var(--ws-accent-subtle);font-size:13px;color:var(--ws-accent)}
 .armode b{font-weight:600}
 .armode .end{margin-left:auto;display:flex;gap:8px;align-items:center}
 .sg2{display:inline-flex;background:var(--ws-canvas);border-radius:6px;padding:2px;font-size:13px;box-shadow:inset 0 0 0 1px var(--ws-border)}
@@ -193,7 +193,7 @@ h4.qh{margin:14px 0 6px;font-size:13px}
 .turn{display:flex;gap:8px;align-items:center;margin-top:6px;font-size:12px;color:var(--ws-text-muted)}
 .turn .chip{height:22px;font-size:12px}
 .comp2{margin:0 24px 16px;border-radius:10px;box-shadow:0 0 0 1px var(--ws-border-strong);padding:10px 12px;display:flex;align-items:center;gap:8px;color:var(--ws-text-faint);font-size:14px;background:var(--ws-canvas)}
-.chead{height:44px;display:flex;align-items:center;gap:10px;padding:0 16px 0 24px;box-shadow:inset 0 -1px 0 var(--ws-border);font-size:14px}
+.chead{height:var(--ws-row-header);display:flex;align-items:center;gap:10px;padding:0 16px 0 24px;box-shadow:inset 0 -1px 0 var(--ws-border);font-size:14px}
 .chead b{font-weight:500}
 .panel2{width:380px;flex:none;box-shadow:inset 1px 0 0 var(--ws-border);display:flex;flex-direction:column;background:var(--ws-canvas)}
 .appr{border-radius:10px;box-shadow:0 0 0 2px var(--ws-warning),0 3px 6px rgba(15,15,15,.08);padding:10px 12px;display:flex;flex-direction:column;gap:8px;font-size:13px;max-width:78%}
@@ -218,7 +218,7 @@ h4.qh{margin:14px 0 6px;font-size:13px}
 .wa.on{background:var(--ws-selected)}
 .wa .av{width:30px;height:30px;font-size:12px}
 .wa .t{flex:1;min-width:0;display:flex;flex-direction:column;line-height:17px}
-.wa .t b{font-weight:500;font-size:13.5px;color:var(--ws-text);display:flex;gap:6px;align-items:center}
+.wa .t b{font-weight:500;font-size:var(--ws-fs-side);color:var(--ws-text);display:flex;gap:6px;align-items:center}
 .wa .t span{font-size:12px;color:var(--ws-text-faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .wa .t span.u{color:var(--ws-text-muted)}
 .wa .m{display:flex;flex-direction:column;align-items:flex-end;gap:3px;font-size:11px;color:var(--ws-text-faint)}
@@ -243,11 +243,7 @@ h4.qh{margin:14px 0 6px;font-size:13px}
 .tabs3 span.on{color:var(--ws-accent)}
 .ann{position:absolute;z-index:4;background:#ffe9a8;color:#3d3000;font-size:12px;line-height:16px;padding:5px 8px;border-radius:6px;box-shadow:0 2px 6px rgba(0,0,0,.15);max-width:240px}
 
-/* Notion's scale, previewed here before tokens.css changes with its implementation. */
-:root{--ws-fs-ui:14px;--ws-lh-ui:20px;--ws-fs-display:40px;--ws-lh-display:48px;--ws-fs-h1:30px;--ws-lh-h1:38px;--ws-fs-h2:24px;--ws-lh-h2:32px;--ws-fs-h3:20px;--ws-lh-h3:28px;--ws-row-nav:28px;--ws-row-side:28px}
-.win{font-size:var(--ws-fs-ui);line-height:var(--ws-lh-ui)}
-.col{width:708px!important}
-.head{height:45px!important}
+
 .tabs{height:38px;display:flex;align-items:flex-end;gap:2px;padding:0 8px;box-shadow:inset 0 -1px 0 var(--ws-border);background:var(--ws-subtle);flex:none}
 .tab{height:32px;display:flex;align-items:center;gap:7px;padding:0 10px;border-radius:7px 7px 0 0;font-size:13px;color:var(--ws-text-muted);max-width:190px;white-space:nowrap;overflow:hidden}
 .tab.on{background:var(--ws-canvas);color:var(--ws-text);box-shadow:0 0 0 1px var(--ws-border);clip-path:inset(-1px -1px 0 -1px)}
@@ -295,7 +291,7 @@ h4.qh{margin:14px 0 6px;font-size:13px}
   
   <section>
     <h1>Liquid: the app with Chats (concept, revised)</h1>
-    <p class="sub">Revised after the maintainer's review of 2026-11-03, who approved the rail, Chats as Blocks, one way to open things beside each other, sections and filters in the chat list, and the Inbox, and asked for: the Inbox on top and including tasks and deadlines, T3 Code's Snooze and Settle, Templates made from arrangements, tabs with splits instead of a separate "Open beside", and Notion's scale for the whole app. This file previews that scale (UI text 14 px, Page title 40 px, headings 30, 24 and 20 px, reading width 708 px, 28 px rows); <code>tokens.css</code> changes with its implementation. Approved by the maintainer on 2026-11-03 as the app's structure; mockups for implementation follow per slice.</p>
+    <p class="sub">Revised after the maintainer's review of 2026-11-03, who approved the rail, Chats as Blocks, one way to open things beside each other, sections and filters in the chat list, and the Inbox, and asked for: the Inbox on top and including tasks and deadlines, T3 Code's Snooze and Settle, Templates made from arrangements, tabs with splits instead of a separate "Open beside", and Notion's scale for the whole app. Its sizes are Notion's, from <code>tokens.css</code> (UI text 14 px, Page title 40 px, headings 30, 24 and 20 px, reading width 708 px, 28 px rows). Approved by the maintainer on 2026-11-03 as the app's structure; mockups for implementation follow per slice.</p>
   </section>
   <section>
     <h3 class="sec">1 · Rail and tabs</h3>
@@ -347,6 +343,8 @@ h4.qh{margin:14px 0 6px;font-size:13px}
       <li>Save as Template opens the Template as an editable copy in a large window, with each data-holding Block's options on the right (a Chat: ask each time, a new Chat, or always the same).</li>
       <li>The Inbox ordered by when things are due, agents waiting first, items without a date last; sidebar views Waiting, Due, Mentions, Snoozed and Settled, with the next due items below.</li>
     </ol>
+    <h4 class="qh">Decided with the mockup review (2026-11-03)</h4>
+    <ol class="qs"><li>⌘N starts a new Chat; ⇧⌘N stays New Page.</li><li>Automations and History stay at the foot of the Pages sidebar and open as dialogs; Settings is on the rail.</li><li>Branching from an agent's answer makes a branch within the same Chat, as the Trajectory shows it.</li><li>Liquid's own starting Templates and the person's saved ones share one list, all editable.</li></ol>
     <h4 class="qh">Later</h4>
     <ol class="qs"><li>Calls and meetings as Blocks with a rail icon, as Chats are, once the core works.</li></ol>
   </section>
@@ -384,25 +382,7 @@ const E={budget:'💰',review:'📊',trip:'🧳',road:'🗺️',api:'🧩',plan:
 const em=e=>`<span class="em">${e}</span>`;
 const modal=(title,body,o={})=>`<div class="scrim"></div><div class="modal" style="width:${o.w||1000}px"><div class="mh">${title}<span class="end">${o.right||''}<span class="ib">✕</span></span></div><div class="mb">${body}</div></div>`;
 const nav=(d,ic,label,o={})=>`<div class="nav ${o.on?'on':''}" style="--d:${d}"><span class="tw">${o.tw||''}</span><span class="ico">${ic}</span><span>${label}</span>${o.r?`<span class="r ${o.warn?'warn':''}">${o.r}</span>`:''}</div>`;
-function side(o={}){const s=o.sel||'budget';const e=(k)=>s==k;
-return `<div class="side"><div class="wsw"><span class="av">B</span>Benni's Workspace<span style="margin-left:auto;color:var(--ws-text-faint)">⌄</span></div>
-<div class="srch">${I.srch}<span>Search or run a command</span><kbd>⌘K</kbd></div>
-<h6>Private<span class="a">${o.plus?'<span style="color:var(--ws-text-muted)">···  ＋</span>':''}</span></h6>
-${nav(0,em(E.budget),'Household budget',{tw:'⌄',on:e('budget')})}
-${nav(1,em(E.review),'Monthly review',{on:e('review')})}
-${o.newp?nav(0,o.newp=='Untitled'?I.page:em(E.plan),o.newp,{on:e('new')}):''}
-${nav(0,em(E.trip),'Trip to Lisbon',{tw:'›',on:e('trip')})}
-${nav(0,I.file,'bank-export.csv',{on:e('csv')})}
-<h6>Acme API</h6>
-${nav(0,em(E.road),'Roadmap',{on:e('road')})}
-${nav(0,em(E.api),'API design',{on:e('api')})}
-${nav(0,I.dir,'acme-api',{tw:'›',on:e('docs')})}
-${chats(o.chat)}
-<div class="foot">${nav(0,I.zap,'Automations',Object.assign({on:e('auto')},o.att?{r:'⚠ 1',warn:true}:{}))}${nav(0,I.clock,'History',{on:e('hist')})}${nav(0,I.cog,'Settings',{on:e('set')})}</div>
-${o.menu||''}</div>`}
 function head(crumb,o={}){return `<div class="head"><span class="crumb">${crumb}</span><span class="end">${o.right!==undefined?o.right:`<span class="ib ${o.arr?'on':''}">${I.grid}Arrange</span><span class="ib" title="Page history">${I.clock}</span><span class="ib">${I.more}</span>`}</span></div>`}
-function frame(id,o){document.getElementById(id).innerHTML=`<div class="tbar"><div class="lights"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></div></div>
-<div class="body" style="--h:${o.h}px">${side(o.side||{})}<div class="main">${o.head||''}${o.main}</div>${o.over||''}</div>`}
 
 
 
@@ -425,7 +405,7 @@ function rail(on){const ri=(k,i,b,o='')=>`<span class="ri ${on==k?'on':''} ${o}"
 return `<div class="rail"><span class="wsav">B</span>${ri('inbox',R.inbox,'<span class="bd w">4</span>')}${ri('pages',R.pages)}${ri('chats',R.chat,'<span class="dt"></span>')}<span class="sep"></span>${ri('files',R.files,'','later')}${ri('media',R.media,'','later')}<span style="flex:1"></span>${ri('set',R.gear)}<span class="ri">${avatar('me','BW')}</span></div>`}
 const tree=(sel)=>`<div class="side2"><div class="ttl2">Benni's Workspace</div>
 <h6>Private<span style="color:var(--ws-text-muted)">＋</span></h6>${nav(0,em(E.budget),'Household budget',{tw:'⌄'})}${nav(1,em(E.review),'Monthly review')}${nav(0,em(E.trip),'Trip to Lisbon',{tw:'›',on:sel=='trip'})}${nav(0,I.file,'bank-export.csv')}
-<h6>Acme API</h6>${nav(0,em(E.road),'Roadmap')}${nav(0,em(E.api),'API design')}${nav(0,I.db,'Tasks')}${nav(0,I.dir,'acme-api',{tw:'›'})}</div>`;
+<h6>Acme API</h6>${nav(0,em(E.road),'Roadmap')}${nav(0,em(E.api),'API design')}${nav(0,I.db,'Tasks')}${nav(0,I.dir,'acme-api',{tw:'›'})}<div class="foot">${nav(0,I.zap,'Automations')}${nav(0,I.clock,'History')}</div></div>`;
 const wa=(av,name,last,time,o={})=>`<div class="wa ${o.on?'on':''}">${av}<span class="t"><b>${name}${o.run?'<span class="dot" style="background:var(--ws-accent)"></span>':''}</b><span class="${o.n?'u':''}">${last}</span></span><span class="m">${time}${o.n?`<span class="n ${o.w?'w':''}">${o.n}</span>`:''}</span></div>`;
 const chatMenu=`<div class="menu" style="left:300px;top:200px"><div>Pin</div><div class="on">Snooze<span class="r">›</span></div><div>Settle</div><div>Move to section<span class="r">›</span></div><hr><div>Open to the side<span class="r">⌥-click</span></div></div><div class="menu" style="left:516px;top:222px;width:180px"><div>Until a new message</div><div class="on">Later today<span class="r">18:00</span></div><div>Tomorrow<span class="r">09:00</span></div><div>Next week</div><div>Choose a time…</div></div>`;
 const chatList=`<div class="side2" style="gap:2px"><div class="ttl2">Chats<span style="margin-left:auto;color:var(--ws-text-muted)">＋</span></div>
@@ -455,7 +435,7 @@ shell('w-ws',{h:640,rail:'pages',side:tree('trip'),main:tabs(T)+pageHead()+pageB
 shell('w-chats',{h:620,rail:'chats',side:chatList,main:tabs([[em(E.trip),'Trip to Lisbon'],[avatar('grp','👥').replace('class="av','class="av sm'),'Lisbon trip',1]])+groupChat,over:chatMenu});
 const besideChat=`<div class="chead" style="padding-left:14px">${avatar('ag','🧳')}<b>Trip to Lisbon</b><span class="cap">this Page's Chat · You, Planner</span></div>
 <div class="msgs" style="flex:1;justify-content:flex-end;padding:14px 16px">${msg('',avatar('me','B'),'Add a day trip if the weather holds.',{mine:1,t:'09:12'})}${msg('Planner',AG,'Added “Day trip to Sintra” under Ideas, 9:11 from Rossio.',{t:'09:15',extra:`<div class="turn"><span class="chip">1 change · Undo</span></div>`})}</div><div class="comp2" style="margin:0 14px 14px">Message…</div>`;
-shell('w-split',{h:560,rail:'pages',side:tree('trip'),main:`<div class="split"><div class="group">${tabs([[em(E.trip),'Trip to Lisbon',1],[em(E.budget),'Household budget']])}${pageHead()}<div class="pg"><div class="col" style="width:460px!important"><div class="ttl" style="font-size:32px;line-height:40px"><span class="tic">🧳</span>Trip to Lisbon</div><div class="prose"><h2>Ideas</h2><p style="background:var(--ws-accent-subtle);border-radius:4px;padding:0 4px">Day trip to Sintra, 9:11 from Rossio.</p></div></div></div></div><span class="grip"></span><div class="group" style="flex:none;width:420px">${tabs([[avatar('ag','🧳').replace('class="av','class="av sm'),'Trip to Lisbon · Chat',1],[AG.replace('class="av','class="av sm'),'Coder']])}${besideChat}</div></div>`});
+shell('w-split',{h:560,rail:'pages',side:tree('trip'),main:`<div class="split"><div class="group">${tabs([[em(E.trip),'Trip to Lisbon',1],[em(E.budget),'Household budget']])}${pageHead()}<div class="pg"><div class="col" style="width:460px!important"><div class="ttl" style="font-size:var(--ws-fs-h1);line-height:var(--ws-lh-h1)"><span class="tic">🧳</span>Trip to Lisbon</div><div class="prose"><h2>Ideas</h2><p style="background:var(--ws-accent-subtle);border-radius:4px;padding:0 4px">Day trip to Sintra, 9:11 from Rossio.</p></div></div></div></div><span class="grip"></span><div class="group" style="flex:none;width:420px">${tabs([[avatar('ag','🧳').replace('class="av','class="av sm'),'Trip to Lisbon · Chat',1],[AG.replace('class="av','class="av sm'),'Coder']])}${besideChat}</div></div>`});
 const tl=(span,body,o={})=>`<div class="tile ${o.sel?'sel':''}" style="grid-column:span ${span};${o.style||''}">${o.h?'<span class="mv">• • •</span><span class="rs"></span>':''}${o.sp?`<span class="span">${o.sp}</span>`:''}${body}</div>`;
 const saveDlg=`<div class="scrim"></div><div class="tpl"><div class="th">${I.tpl}<b style="font-weight:600">New Template</b><span class="sel2" style="margin-left:6px">Trip plan</span><span class="cap">from 🧳 Trip to Lisbon · edit it here; the Page stays as it is</span><span class="end" style="margin-left:auto;display:flex;gap:8px"><span class="btn">Cancel</span><span class="btn pri">Save Template</span></span></div>
 <div class="tb2"><div class="pv"><div class="paper"><div class="ttl" style="font-size:30px;line-height:38px">🧳 <span style="color:var(--ws-text-faint)">Trip to …</span><span class="caret" style="height:28px;margin-left:2px"></span></div>

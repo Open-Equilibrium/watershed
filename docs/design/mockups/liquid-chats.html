@@ -54,7 +54,7 @@ p.sub{margin:0 0 10px;font-size:13px;color:var(--muted-foreground);line-height:1
 .egrid span.on{background:var(--ws-hover)}
 .foot{margin-top:auto;padding-top:6px;box-shadow:inset 0 1px 0 var(--ws-border)}
 .main{flex:1;display:flex;flex-direction:column;min-width:0;position:relative}
-.head{height:44px;flex:none;display:flex;align-items:center;gap:8px;padding:0 16px 0 24px;font-size:14px}
+.head{height:var(--ws-row-header);flex:none;display:flex;align-items:center;gap:8px;padding:0 16px 0 24px;font-size:14px}
 .crumb{color:var(--ws-text-muted);display:flex;gap:6px;align-items:center;white-space:nowrap}
 .crumb b{color:var(--ws-text);font-weight:500}
 .head .end{margin-left:auto;display:flex;gap:4px;align-items:center}
@@ -65,7 +65,7 @@ kbd{font-size:11px;padding:0 4px;border-radius:4px;border:1px solid currentColor
 .btn.pri{background:var(--ws-accent);color:var(--ws-on-accent);box-shadow:none}
 .btn.ghost{box-shadow:none;background:transparent;color:var(--ws-text-muted)}
 .pg{flex:1;overflow:hidden;padding:28px 0 0;-webkit-mask-image:linear-gradient(to top,transparent 0,#000 40px);mask-image:linear-gradient(to top,transparent 0,#000 40px)}
-.col{width:740px;margin:0 auto;display:flex;flex-direction:column;gap:14px}
+.col{width:var(--ws-width-reading);margin:0 auto;display:flex;flex-direction:column;gap:14px}
 .ttl{font-size:var(--ws-fs-display);line-height:var(--ws-lh-display);font-weight:var(--ws-fw-bold);margin:0 0 6px}
 .ttl.ph{color:var(--ws-text-faint)}
 .prose{font-size:var(--ws-fs-prose);line-height:var(--ws-lh-prose)}
@@ -127,7 +127,7 @@ kbd{font-size:11px;padding:0 4px;border-radius:4px;border:1px solid currentColor
 .tile .rs{position:absolute;right:-5px;top:50%;width:8px;height:28px;margin-top:-14px;border-radius:4px;background:var(--ws-surface);box-shadow:0 0 0 1px var(--ws-border-strong)}
 .tile.sel .rs{background:var(--ws-accent);box-shadow:none}
 .tile .span{position:absolute;right:10px;bottom:-11px;font-size:11px;line-height:18px;padding:0 6px;border-radius:4px;background:var(--ws-accent);color:var(--ws-on-accent)}
-.armode{height:44px;flex:none;display:flex;align-items:center;gap:12px;padding:0 16px 0 24px;background:var(--ws-accent-subtle);font-size:13px;color:var(--ws-accent)}
+.armode{height:var(--ws-row-header);flex:none;display:flex;align-items:center;gap:12px;padding:0 16px 0 24px;background:var(--ws-accent-subtle);font-size:13px;color:var(--ws-accent)}
 .armode b{font-weight:600}
 .armode .end{margin-left:auto;display:flex;gap:8px;align-items:center}
 .sg2{display:inline-flex;background:var(--ws-canvas);border-radius:6px;padding:2px;font-size:13px;box-shadow:inset 0 0 0 1px var(--ws-border)}
@@ -193,7 +193,7 @@ h4.qh{margin:14px 0 6px;font-size:13px}
 .turn{display:flex;gap:8px;align-items:center;margin-top:6px;font-size:12px;color:var(--ws-text-muted)}
 .turn .chip{height:22px;font-size:12px}
 .comp2{margin:0 24px 16px;border-radius:10px;box-shadow:0 0 0 1px var(--ws-border-strong);padding:10px 12px;display:flex;align-items:center;gap:8px;color:var(--ws-text-faint);font-size:14px;background:var(--ws-canvas)}
-.chead{height:44px;display:flex;align-items:center;gap:10px;padding:0 16px 0 24px;box-shadow:inset 0 -1px 0 var(--ws-border);font-size:14px}
+.chead{height:var(--ws-row-header);display:flex;align-items:center;gap:10px;padding:0 16px 0 24px;box-shadow:inset 0 -1px 0 var(--ws-border);font-size:14px}
 .chead b{font-weight:500}
 .panel2{width:380px;flex:none;box-shadow:inset 1px 0 0 var(--ws-border);display:flex;flex-direction:column;background:var(--ws-canvas)}
 .appr{border-radius:10px;box-shadow:0 0 0 2px var(--ws-warning),0 3px 6px rgba(15,15,15,.08);padding:10px 12px;display:flex;flex-direction:column;gap:8px;font-size:13px;max-width:78%}
@@ -230,7 +230,7 @@ h4.qh{margin:14px 0 6px;font-size:13px}
   </section>
   <section>
     <h3 class="sec">4 · An agent is a participant</h3>
-    <p class="sub">A click on an agent's name shows its profile: the durable part, which outlives every Chat. It names its harness, model and instructions, its work folder and its rights, which a person grants (ADR-0223). A new Chat with the same agent starts a fresh history; branching from a message starts a new Chat.</p>
+    <p class="sub">A click on an agent's name shows its profile: the durable part, which outlives every Chat. It names its harness, model and instructions, its work folder and its rights, which a person grants (ADR-0223). A new Chat with the same agent starts a fresh history; branching from a message makes a branch within the same Chat, as the Trajectory shows it (ADR-0241).</p>
     <div class="stage"><div class="scaler"><div class="win" id="w-prof" data-w="1240"></div></div></div>
   </section>
   <section>
