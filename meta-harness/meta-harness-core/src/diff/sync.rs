@@ -40,7 +40,7 @@ pub struct GitTransfer {
 }
 
 impl WorkingTree {
-    async fn configured_upstream(
+    pub(super) async fn configured_upstream(
         &self,
         branch: &str,
     ) -> Result<Option<(String, String)>, DiffError> {
@@ -80,7 +80,7 @@ impl WorkingTree {
         Ok((remote.map(str::to_owned), !names.is_empty()))
     }
 
-    async fn destination(&self) -> Result<(GitTransfer, GitStatus), DiffError> {
+    pub(super) async fn destination(&self) -> Result<(GitTransfer, GitStatus), DiffError> {
         let status = self.status().await?;
         let branch = status.branch.clone().ok_or(DiffError::NoBranch)?;
         let commit = status
@@ -241,7 +241,10 @@ impl WorkingTree {
 
     /// Keep the default-branch check and push on the same single repository. Git resolves
     /// URL rewrites; compare only after removing any URL credentials, and never report URLs.
-    async fn check_push_destination(&self, transfer: &GitTransfer) -> Result<(), DiffError> {
+    pub(super) async fn check_push_destination(
+        &self,
+        transfer: &GitTransfer,
+    ) -> Result<(), DiffError> {
         let fetch = self.remote_urls(&transfer.remote, false).await?;
         let push = self.remote_urls(&transfer.remote, true).await?;
         if fetch.len() != 1 || push != fetch {
@@ -262,7 +265,11 @@ impl WorkingTree {
         Ok(())
     }
 
-    async fn remote_urls(&self, remote: &str, push: bool) -> Result<Vec<String>, DiffError> {
+    pub(super) async fn remote_urls(
+        &self,
+        remote: &str,
+        push: bool,
+    ) -> Result<Vec<String>, DiffError> {
         let mut args = vec!["remote", "get-url", "--all"];
         if push {
             args.push("--push");

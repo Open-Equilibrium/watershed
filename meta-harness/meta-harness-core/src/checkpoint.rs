@@ -148,6 +148,8 @@ pub struct Checkpoints {
     running: std::sync::Mutex<Option<(Checkpoint, Running)>>,
     /// Whether a turn's start waits for a revert in the checkout.
     waiting: watch::Sender<bool>,
+    /// The host's GitHub CLI.
+    gh: std::ffi::OsString,
 }
 
 #[derive(Debug, Clone)]
@@ -175,6 +177,7 @@ impl Checkpoints {
             captures: tokio::sync::Mutex::new(()),
             running: std::sync::Mutex::new(None),
             waiting: watch::Sender::new(false),
+            gh: "gh".into(),
         }
     }
 
@@ -578,6 +581,12 @@ impl Checkpoints {
     #[cfg(test)]
     pub(crate) fn set_attribution_timeout(&mut self, timeout: Duration) {
         self.attribution_timeout = timeout;
+    }
+
+    /// Runs `program` in place of the host's `gh`.
+    #[cfg(test)]
+    pub(crate) fn set_gh(&mut self, program: &Path) {
+        self.gh = program.into();
     }
 
     /// Holds the turn of captures, as a capture in progress does.

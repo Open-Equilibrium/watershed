@@ -163,6 +163,28 @@ async fn user_output(mut child: Git) -> Result<String, DiffError> {
     Ok(String::from_utf8_lossy(&output).into_owned())
 }
 
+/// Runs the host's `gh` (`program`) in `dir` with bounded output and optional input. It never
+/// prompts, and its login stays its own: Liquid passes no credential.
+pub(super) async fn gh(
+    dir: &Path,
+    program: &std::ffi::OsStr,
+    args: &[&str],
+    input: Option<&[u8]>,
+) -> Result<Vec<u8>, DiffError> {
+    let mut command = Command::new(program);
+    command.args(args).current_dir(dir);
+    let mut command = piped(command, &NO_PROMPTS);
+    command.envs([
+        ("GH_PROMPT_DISABLED", "1"),
+        ("GH_NO_UPDATE_NOTIFIER", "1"),
+        ("GH_NO_EXTENSION_UPDATE_NOTIFIER", "1"),
+        ("GH_SPINNER_DISABLED", "1"),
+        ("GH_PAGER", "cat"),
+        ("NO_COLOR", "1"),
+    ]);
+    output(command, false, input).await
+}
+
 /// Keeps Git and its credential helpers from asking on a terminal or in a window, as T3 Code
 /// does.
 pub(super) const NO_PROMPTS: [(&str, &str); 5] = [
