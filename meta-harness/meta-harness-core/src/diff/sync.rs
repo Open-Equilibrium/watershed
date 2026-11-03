@@ -273,8 +273,9 @@ impl WorkingTree {
                 "Git could not resolve this remote's destinations. Push it with Git.".to_owned(),
             )
         })?;
+        // Git separates URLs with LF; a CR remains part of the destination.
         Ok(output
-            .lines()
+            .split_terminator('\n')
             .map(destination_without_credentials)
             .collect())
     }

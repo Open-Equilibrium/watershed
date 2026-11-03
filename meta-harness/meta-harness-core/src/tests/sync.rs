@@ -778,6 +778,57 @@ fn push_destination_comparison_preserves_repository_paths() {
 }
 
 #[test]
+fn push_destination_comparison_preserves_trailing_carriage_returns() {
+    run(async {
+        for same in [false, true] {
+            let remote = Remote::new(&format!("push-destination-carriage-{same}"));
+            let fetched = Repo(format!("{}\r", remote.bare.path().display()).into());
+            remote.repo.git(&[
+                "clone",
+                "--bare",
+                remote.bare.path().to_str().unwrap(),
+                fetched.path().to_str().unwrap(),
+            ]);
+            remote.repo.git(&[
+                "config",
+                "remote.origin.url",
+                fetched.path().to_str().unwrap(),
+            ]);
+            remote.repo.git(&[
+                "config",
+                "remote.origin.pushurl",
+                if same {
+                    fetched.path()
+                } else {
+                    remote.bare.path()
+                }
+                .to_str()
+                .unwrap(),
+            ]);
+            remote.repo.git(&["switch", "-c", "feature/carriage"]);
+            Remote::commit(&remote.repo, "local.txt");
+            let before_fetch = fetched.git(&["show-ref"]);
+            let before_push = remote.bare.git(&["show-ref"]);
+            let result = Checkpoints::new(remote.repo.path()).push(None).await;
+            if same {
+                result.expect("the same carriage-return path remains a valid destination");
+                assert_eq!(
+                    fetched.git(&["rev-parse", "feature/carriage"]),
+                    remote.repo.git(&["rev-parse", "HEAD"])
+                );
+            } else {
+                assert!(
+                    matches!(result, Err(DiffError::PushDestinations)),
+                    "{result:?}"
+                );
+                assert_eq!(fetched.git(&["show-ref"]), before_fetch);
+            }
+            assert_eq!(remote.bare.git(&["show-ref"]), before_push);
+        }
+    });
+}
+
+#[test]
 fn push_never_recurses_into_submodules_despite_configuration() {
     use std::os::unix::fs::PermissionsExt;
     run(async {
