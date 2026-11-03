@@ -134,7 +134,7 @@ class PullRequests {
   /// The branch the checked-out branch was created from, as Liquid recorded it.
   Future<String?> recordedBase() async {
     final status = _git.status.value;
-    final branch = status?.branch;
+    final branch = status?.rawBranch;
     if (status == null || branch == null) return null;
     return _bases.baseOf(status.repository, branch);
   }

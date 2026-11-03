@@ -336,6 +336,9 @@ class BridgeGitStatus {
   /// The branch checked out, or none when HEAD names a commit.
   final String? branch;
 
+  /// `branch` exactly as Git names it, to record and look up; never shown.
+  final String? rawBranch;
+
   /// The commit HEAD names, shortened; none before the first commit.
   final String? commit;
 
@@ -373,6 +376,7 @@ class BridgeGitStatus {
 
   const BridgeGitStatus({
     this.branch,
+    this.rawBranch,
     this.commit,
     this.upstream,
     this.remote,
@@ -391,6 +395,7 @@ class BridgeGitStatus {
   @override
   int get hashCode =>
       branch.hashCode ^
+      rawBranch.hashCode ^
       commit.hashCode ^
       upstream.hashCode ^
       remote.hashCode ^
@@ -411,6 +416,7 @@ class BridgeGitStatus {
       other is BridgeGitStatus &&
           runtimeType == other.runtimeType &&
           branch == other.branch &&
+          rawBranch == other.rawBranch &&
           commit == other.commit &&
           upstream == other.upstream &&
           remote == other.remote &&

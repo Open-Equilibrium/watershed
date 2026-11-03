@@ -65,6 +65,57 @@ void main() {
     },
   );
 
+  test(
+    'queued branch creations record the branch each one started from',
+    () async {
+      backend.onCreateBranch = (name) =>
+          backend.git = gitStatusOf(branch: name);
+      await Future.wait([
+        git.create('one'),
+        git.create('two'),
+        git.commit(['a.txt'], 'Fix', snapshot: 's', branch: 'fix/typo'),
+      ]);
+
+      final reloaded = stored();
+      expect(await reloaded.baseOf('/work/api/.git', 'one'), 'main');
+      expect(await reloaded.baseOf('/work/api/.git', 'two'), 'one');
+      expect(await reloaded.baseOf('/work/api/.git', 'fix/typo'), 'two');
+    },
+  );
+
+  test('a branch created before a hook failed remembers its base', () async {
+    backend.outcome = const BridgeGitOutcome(
+      kind: BridgeGitOutcomeKind.hookFailed,
+      files: [],
+      running: [],
+      detail: 'post-checkout exited 1',
+    );
+    await git.create('feature/retry-after');
+
+    expect(
+      await stored().baseOf('/work/api/.git', 'feature/retry-after'),
+      'main',
+    );
+  });
+
+  test('base records keep the raw branch behind its displayed name', () async {
+    backend.git = gitStatusOf(
+      branch: 'release/<U+202E>',
+      rawBranch: 'release/\u202e',
+    );
+    await git.refresh();
+    await git.create('fix/\u202e');
+    expect(
+      await stored().baseOf('/work/api/.git', 'fix/\u202e'),
+      'release/\u202e',
+    );
+
+    backend.git = gitStatusOf(branch: 'fix/<U+202E>', rawBranch: 'fix/\u202e');
+    await git.refresh();
+    await pulls.plan();
+    expect(backend.calls.last, 'plan - release/\u202e');
+  });
+
   test('the summary keeps its last update when a refresh fails and resets per branch', () async {
     backend.git = gitStatusOf(branch: 'feature/retry-after');
     backend.current = pullRequestOutcomeOf(pullRequest: pullRequestOf());

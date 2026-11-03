@@ -3503,23 +3503,24 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeGitStatus dco_decode_bridge_git_status(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 14)
-      throw Exception('unexpected arr length: expect 14 but see ${arr.length}');
+    if (arr.length != 15)
+      throw Exception('unexpected arr length: expect 15 but see ${arr.length}');
     return BridgeGitStatus(
       branch: dco_decode_opt_String(arr[0]),
-      commit: dco_decode_opt_String(arr[1]),
-      upstream: dco_decode_opt_String(arr[2]),
-      remote: dco_decode_opt_String(arr[3]),
-      hasRemotes: dco_decode_bool(arr[4]),
-      gone: dco_decode_bool(arr[5]),
-      ahead: dco_decode_i_64(arr[6]),
-      behind: dco_decode_i_64(arr[7]),
-      changed: dco_decode_i_64(arr[8]),
-      stash: dco_decode_opt_box_autoadd_bridge_stash(arr[9]),
-      defaultBranch: dco_decode_opt_String(arr[10]),
-      merging: dco_decode_bool(arr[11]),
-      conflicts: dco_decode_list_String(arr[12]),
-      repository: dco_decode_String(arr[13]),
+      rawBranch: dco_decode_opt_String(arr[1]),
+      commit: dco_decode_opt_String(arr[2]),
+      upstream: dco_decode_opt_String(arr[3]),
+      remote: dco_decode_opt_String(arr[4]),
+      hasRemotes: dco_decode_bool(arr[5]),
+      gone: dco_decode_bool(arr[6]),
+      ahead: dco_decode_i_64(arr[7]),
+      behind: dco_decode_i_64(arr[8]),
+      changed: dco_decode_i_64(arr[9]),
+      stash: dco_decode_opt_box_autoadd_bridge_stash(arr[10]),
+      defaultBranch: dco_decode_opt_String(arr[11]),
+      merging: dco_decode_bool(arr[12]),
+      conflicts: dco_decode_list_String(arr[13]),
+      repository: dco_decode_String(arr[14]),
     );
   }
 
@@ -5530,6 +5531,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeGitStatus sse_decode_bridge_git_status(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_branch = sse_decode_opt_String(deserializer);
+    var var_rawBranch = sse_decode_opt_String(deserializer);
     var var_commit = sse_decode_opt_String(deserializer);
     var var_upstream = sse_decode_opt_String(deserializer);
     var var_remote = sse_decode_opt_String(deserializer);
@@ -5545,6 +5547,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_repository = sse_decode_String(deserializer);
     return BridgeGitStatus(
       branch: var_branch,
+      rawBranch: var_rawBranch,
       commit: var_commit,
       upstream: var_upstream,
       remote: var_remote,
@@ -8082,6 +8085,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_opt_String(self.branch, serializer);
+    sse_encode_opt_String(self.rawBranch, serializer);
     sse_encode_opt_String(self.commit, serializer);
     sse_encode_opt_String(self.upstream, serializer);
     sse_encode_opt_String(self.remote, serializer);

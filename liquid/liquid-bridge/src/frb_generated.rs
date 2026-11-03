@@ -3951,6 +3951,7 @@ impl SseDecode for crate::api::git::BridgeGitStatus {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut var_branch = <Option<String>>::sse_decode(deserializer);
+        let mut var_rawBranch = <Option<String>>::sse_decode(deserializer);
         let mut var_commit = <Option<String>>::sse_decode(deserializer);
         let mut var_upstream = <Option<String>>::sse_decode(deserializer);
         let mut var_remote = <Option<String>>::sse_decode(deserializer);
@@ -3966,6 +3967,7 @@ impl SseDecode for crate::api::git::BridgeGitStatus {
         let mut var_repository = <String>::sse_decode(deserializer);
         return crate::api::git::BridgeGitStatus {
             branch: var_branch,
+            raw_branch: var_rawBranch,
             commit: var_commit,
             upstream: var_upstream,
             remote: var_remote,
@@ -7027,6 +7029,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::git::BridgeGitStatus {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
             self.branch.into_into_dart().into_dart(),
+            self.raw_branch.into_into_dart().into_dart(),
             self.commit.into_into_dart().into_dart(),
             self.upstream.into_into_dart().into_dart(),
             self.remote.into_into_dart().into_dart(),
@@ -8895,6 +8898,7 @@ impl SseEncode for crate::api::git::BridgeGitStatus {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <Option<String>>::sse_encode(self.branch, serializer);
+        <Option<String>>::sse_encode(self.raw_branch, serializer);
         <Option<String>>::sse_encode(self.commit, serializer);
         <Option<String>>::sse_encode(self.upstream, serializer);
         <Option<String>>::sse_encode(self.remote, serializer);

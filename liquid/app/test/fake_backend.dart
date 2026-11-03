@@ -302,6 +302,7 @@ class FakeBackend implements SessionBackend {
         ? null
         : BridgeGitStatus(
             branch: now.branch,
+            rawBranch: now.rawBranch,
             commit: now.commit,
             upstream: now.upstream,
             remote: now.remote,
@@ -336,8 +337,12 @@ class FakeBackend implements SessionBackend {
   @override
   Future<BridgeGitOutcome> createBranch(String name) async {
     calls.add('create $name');
+    onCreateBranch?.call(name);
     return outcome;
   }
+
+  /// Runs when a branch is created, as Git would switch to it.
+  void Function(String name)? onCreateBranch;
 
   BridgeCommitPlan commitPlanned = const BridgeCommitPlan(
     snapshot: 'snapshot',
@@ -858,6 +863,7 @@ BridgeTurn turnOf(
 BridgeGitStatus gitStatusOf({
   String? commit = '1a2b3c4',
   String? branch = 'main',
+  String? rawBranch,
   String? upstream = 'origin/main',
   String? remote = 'origin',
   bool? hasRemotes,
@@ -871,6 +877,7 @@ BridgeGitStatus gitStatusOf({
   String repository = '/work/api/.git',
 }) => BridgeGitStatus(
   branch: branch,
+  rawBranch: rawBranch ?? branch,
   commit: commit,
   upstream: upstream,
   remote: remote,

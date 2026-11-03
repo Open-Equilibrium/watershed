@@ -1576,6 +1576,22 @@ fn git_remote_status_redacts_synthetic_url_credentials() {
 }
 
 #[test]
+fn git_status_keeps_the_raw_branch_behind_its_displayed_name() {
+    let repo = repository("git-raw-branch");
+    git(&repo, &["switch", "-c", "feature/\u{202e}"]);
+    let session = launch(
+        gated("IFS= read -r line || exit 0"),
+        repo.display().to_string(),
+    )
+    .unwrap();
+    let status = session.git_status().unwrap().unwrap();
+    assert!(call(session.shutdown()));
+    let _ = std::fs::remove_dir_all(repo);
+    assert_eq!(status.branch.as_deref(), Some("feature/<U+202E>"));
+    assert_eq!(status.raw_branch.as_deref(), Some("feature/\u{202e}"));
+}
+
+#[test]
 fn git_remote_transfer_display_redacts_synthetic_url_credentials() {
     use crate::api::git::BridgeGitTransfer;
     let remote = "https://fixture:placeholder@example.invalid/repo.git";

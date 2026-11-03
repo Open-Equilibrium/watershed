@@ -16,6 +16,8 @@ use crate::api::session::{AgentSession, RUNTIME, branch_turns, open, shown, whit
 pub struct BridgeGitStatus {
     /// The branch checked out, or none when HEAD names a commit.
     pub branch: Option<String>,
+    /// `branch` exactly as Git names it, to record and look up; never shown.
+    pub raw_branch: Option<String>,
     /// The commit HEAD names, shortened; none before the first commit.
     pub commit: Option<String>,
     /// The upstream the branch tracks, such as `origin/main`.
@@ -626,6 +628,7 @@ impl AgentSession {
             };
             Ok(Some(BridgeGitStatus {
                 branch: status.branch.as_deref().map(visible_name),
+                raw_branch: status.branch.clone(),
                 commit: status.commit.map(|commit| commit.chars().take(7).collect()),
                 upstream: status
                     .upstream

@@ -296,13 +296,17 @@ class GitState {
 
   /// Creates the branch `name` at the current commit and switches to it.
   Future<BridgeGitOutcome?> create(String name) async {
-    final from = status.value;
-    final outcome = await _write(
-      'create the branch',
-      () => _backend.createBranch(name),
-      done: (_, _) => 'Created and switched to $name.',
-    );
-    if (outcome?.kind == BridgeGitOutcomeKind.done) {
+    // Read when the write starts, after the writes queued before it.
+    BridgeGitStatus? from;
+    final outcome = await _write('create the branch', () {
+      from = status.value;
+      return _backend.createBranch(name);
+    }, done: (_, _) => 'Created and switched to $name.');
+    // Git created the branch, also when a hook failed after.
+    if ({
+      BridgeGitOutcomeKind.done,
+      BridgeGitOutcomeKind.hookFailed,
+    }.contains(outcome?.kind)) {
       await _recordBase(from, name);
     }
     return outcome;
@@ -310,14 +314,14 @@ class GitState {
 
   /// Remembers the branch `from` was on as the base of the new branch `name`.
   Future<void> _recordBase(BridgeGitStatus? from, String name) async {
-    final base = from?.branch;
+    final base = from?.rawBranch;
     if (from == null || base == null) return;
     try {
       await _bases.record(from.repository, name, base);
     } on Object catch (error) {
       notify(
         BridgeLevel.warning,
-        'Could not remember that $name was created from $base: $error',
+        'Could not remember that $name was created from ${from.branch}: $error',
       );
     }
   }
@@ -360,10 +364,13 @@ class GitState {
     required String snapshot,
     String? branch,
   }) async {
-    final from = status.value;
+    BridgeGitStatus? from;
     final outcome = await _write(
       'commit',
-      () => _backend.commitFiles(snapshot, paths, message, branch),
+      () {
+        from = status.value;
+        return _backend.commitFiles(snapshot, paths, message, branch);
+      },
       done: (now, outcome) {
         final commit = outcome.commit!;
         final text =
