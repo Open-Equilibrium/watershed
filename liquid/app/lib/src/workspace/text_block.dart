@@ -80,6 +80,7 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
   void initState() {
     super.initState();
     _text.addListener(_typed);
+    _state.finishing.add(_typed);
     widget.views.caret.addListener(_takeCaret);
     _followed = follow(
       _state.workspace,
@@ -98,6 +99,7 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
   @override
   void dispose() {
     _editor.left(this);
+    _state.finishing.remove(_typed);
     unawaited(_followed?.cancel());
     unawaited(_settled?.cancel());
     widget.views.caret.removeListener(_takeCaret);
@@ -219,7 +221,8 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
       _editor.typed(this);
       return;
     }
-    if (_composing) return;
+    // On quitting, a composition still open is written as it stands.
+    if (_composing && !_state.quitting) return;
     final text = _text.text;
     if (text == stored) return;
     if (_style == BridgeTextStyle.paragraph) {

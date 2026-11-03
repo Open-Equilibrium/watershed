@@ -233,8 +233,13 @@ class WorkspaceState {
     if (!_disposed) _trees[area]!.value = read;
   }
 
-  /// What to tell open input queues when Liquid quits, so none waits for a composition.
+  /// What to tell open fields and input queues when Liquid quits, so a composition still
+  /// open is written as it stands and none waits for it.
   final finishing = <VoidCallback>{};
+
+  /// Set once Liquid quits.
+  bool get quitting => _quitting;
+  bool _quitting = false;
 
   /// Work that will ask for writes, such as a Page's input queue (ADR-0240).
   final _tracked = <Future<void>>{};
@@ -248,6 +253,7 @@ class WorkspaceState {
   /// Waits for every write asked for so far, and for those asked meanwhile, so that closing
   /// the window loses none.
   Future<void> drain() async {
+    _quitting = true;
     for (final finish in [...finishing]) {
       finish();
     }

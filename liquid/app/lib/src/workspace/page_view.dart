@@ -39,14 +39,23 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
   final _first = TextEditingController();
   late final _firstFocus = FocusNode(
     debugLabel: 'First line',
-    // A composition takes its own ⏎.
+    // A composition takes its own ⏎, and Flutter's field the keys with modifiers.
     onKeyEvent: (_, event) =>
         event is KeyUpEvent ||
             !_first.value.composing.isCollapsed ||
+            !_plain ||
             !_views.editor.isSource(this)
         ? KeyEventResult.ignored
         : _views.editor.queue(this, event),
   );
+
+  static bool get _plain {
+    final keys = HardwareKeyboard.instance;
+    return !keys.isShiftPressed &&
+        !keys.isMetaPressed &&
+        !keys.isControlPressed &&
+        !keys.isAltPressed;
+  }
 
   /// Keeps the first line, its focus and composition included, while it moves out of sight.
   final _firstLineKey = GlobalKey(debugLabel: 'first-line');
@@ -66,6 +75,7 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
     _title.text = _page?.title ?? '';
     _tree.addListener(_titleChanged);
     _first.addListener(_typedFirst);
+    widget.state.finishing.add(_typedFirst);
     // After the frame, so it wins over the window's own first focus.
     if (widget.open.fresh) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -77,6 +87,7 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
   @override
   void dispose() {
     _views.editor.left(this);
+    widget.state.finishing.remove(_typedFirst);
     _tree.removeListener(_titleChanged);
     _title.dispose();
     _titleFocus.dispose();
@@ -133,7 +144,11 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
       editor.typed(this);
       return;
     }
-    if (_first.text.isEmpty || !_first.value.composing.isCollapsed) return;
+    // On quitting, a composition still open is written as it stands.
+    if (_first.text.isEmpty ||
+        !_first.value.composing.isCollapsed && !widget.state.quitting) {
+      return;
+    }
     if (editor.busy) return;
     setState(() => _handing = true);
     editor.first(this);

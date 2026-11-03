@@ -258,8 +258,13 @@ class _PageRow extends StatelessWidget {
                         ? Semantics(
                             label: expanded ? 'Collapse' : 'Expand',
                             button: true,
-                            child: GestureDetector(
+                            // Reachable with Tab and opened with ⏎ or space too.
+                            child: InkWell(
+                              key: const Key('disclosure'),
                               onTap: onToggle,
+                              borderRadius: BorderRadius.circular(
+                                WsMetrics.radiusSm,
+                              ),
                               child: Icon(
                                 expanded
                                     ? LucideIcons.chevronDown

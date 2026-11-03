@@ -129,8 +129,6 @@ class PageEditor {
   EditorSource? _source;
   bool _gone = false;
 
-  /// Set when Liquid quits: a composition still open is taken as it stands.
-  bool _finishing = false;
   TextEditingValue _latest = TextEditingValue.empty;
   final _queue = Queue<_Queued>();
   Completer<void>? _wake;
@@ -176,16 +174,13 @@ class PageEditor {
   void _begin(EditorSource source) {
     _source = source;
     _gone = false;
-    _finishing = false;
     _latest = source.typed;
     _state.finishing.add(_finish);
     _write();
   }
 
-  void _finish() {
-    _finishing = true;
-    _wakeUp();
-  }
+  /// Liquid quits: a composition still open is taken as it stands.
+  void _finish() => _wakeUp();
 
   /// Marks that input waits to be written, so quitting waits for it.
   void _write() {
@@ -286,7 +281,7 @@ class PageEditor {
         } else {
           // A composition ends before its text moves, unless its field is gone or Liquid
           // quits.
-          while (!_gone && !_finishing && !_latest.composing.isCollapsed) {
+          while (!_gone && !_state.quitting && !_latest.composing.isCollapsed) {
             await _sleep();
           }
           if (_queue.isNotEmpty) continue;
@@ -432,11 +427,9 @@ class PageEditor {
     if (key == LogicalKeyboardKey.backspace) return _backspace(target);
     if (key == LogicalKeyboardKey.delete) {
       if (target.caret >= target.text.length) return target;
-      final at = target.caret;
-      final wide =
-          at + 1 < target.text.length &&
-          (target.text.codeUnitAt(at) & 0xFC00) == 0xD800;
-      return _replace(target, at, at + (wide ? 2 : 1), '');
+      // A whole character as a person sees it, as Flutter's own ⌦ deletes.
+      final next = target.text.substring(target.caret).characters.first;
+      return _replace(target, target.caret, target.caret + next.length, '');
     }
     return _enter(target);
   }
@@ -505,11 +498,9 @@ class PageEditor {
   /// mockups and Notion do.
   Future<EditorTarget> _backspace(EditorTarget target) async {
     if (target.caret > 0) {
-      var start = target.caret - 1;
-      if (start > 0 && (target.text.codeUnitAt(start) & 0xFC00) == 0xDC00) {
-        start--;
-      }
-      return _replace(target, start, target.caret, '');
+      // A whole character as a person sees it, as Flutter's own ⌫ deletes.
+      final last = target.text.substring(0, target.caret).characters.last;
+      return _replace(target, target.caret - last.length, target.caret, '');
     }
     if (target.boundary && target.index > 0) {
       await _apply(

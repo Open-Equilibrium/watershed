@@ -30,8 +30,10 @@ class _Typed {
 
   void backspace() {
     if (column > 0) {
-      lines[line] = lines[line].replaceRange(column - 1, column, '');
-      column--;
+      // A whole character as a person sees it.
+      final last = lines[line].substring(0, column).characters.last;
+      lines[line] = lines[line].replaceRange(column - last.length, column, '');
+      column -= last.length;
     } else if (line > 0) {
       final text = lines.removeAt(line);
       column = lines[--line].length;
@@ -115,6 +117,10 @@ void main() {
               ),
             );
             typed.insert('你');
+          case 6:
+            // A character built from two code points.
+            input(inserted('e\u0301'));
+            typed.insert('e\u0301');
           default:
             final letter = String.fromCharCode(97 + random.nextInt(26));
             input(inserted(letter));

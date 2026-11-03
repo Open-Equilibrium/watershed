@@ -232,4 +232,42 @@ void main() {
       expect(inSidebar('the replica is read-only'), findsOneWidget);
     },
   );
+
+  testWidgets('a nested Page’s disclosure opens from the keyboard', (
+    tester,
+  ) async {
+    await show(tester);
+    await tester.enterText(find.byKey(const Key('page-title')), 'Trip');
+    await tester.pumpAndSettle();
+    await tester.tapAt(
+      tester.getCenter(inSidebar('Trip')),
+      buttons: kSecondaryButton,
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Add a page inside'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.bySemanticsLabel('Collapse'));
+    await tester.pumpAndSettle();
+    expect(inSidebar('Untitled'), findsNothing);
+
+    final disclosure = find.byKey(const Key('disclosure'));
+    for (var press = 0; press < 30; press++) {
+      final focused = FocusManager.instance.primaryFocus?.context;
+      if (focused != null &&
+          find
+              .descendant(
+                of: disclosure,
+                matching: find.byElementPredicate((e) => e == focused),
+              )
+              .evaluate()
+              .isNotEmpty) {
+        break;
+      }
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.pump();
+    }
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(inSidebar('Untitled'), findsOneWidget);
+  });
 }

@@ -585,4 +585,75 @@ void main() {
     }
     expect(fake.textsOf(page), ['PlanBefore we go']);
   });
+
+  testWidgets('quitting writes a composition still open in a Text Block', (
+    tester,
+  ) async {
+    await show(tester, ['One']);
+    await caret(tester, 0, 3);
+    tester.testTextInput.updateEditingValue(
+      const TextEditingValue(
+        text: 'Oneni',
+        selection: TextSelection.collapsed(offset: 5),
+        composing: TextRange(start: 3, end: 5),
+      ),
+    );
+    await tester.pump();
+    var drained = false;
+    unawaited(workspace.drain().then((_) => drained = true));
+    await tester.pump();
+    expect(drained, isTrue);
+    expect(fake.textsOf(page), ['Oneni']);
+  });
+
+  testWidgets('quitting writes a composition still open in the first line', (
+    tester,
+  ) async {
+    await show(tester);
+    await tester.tap(find.byKey(const Key('first-line')));
+    await tester.pump();
+    tester.testTextInput.updateEditingValue(
+      const TextEditingValue(
+        text: 'ni',
+        selection: TextSelection.collapsed(offset: 2),
+        composing: TextRange(start: 0, end: 2),
+      ),
+    );
+    await tester.pump();
+    var drained = false;
+    unawaited(workspace.drain().then((_) => drained = true));
+    await tester.pump();
+    await tester.pump();
+    expect(drained, isTrue);
+    expect(fake.textsOf(page), ['ni']);
+  });
+
+  testWidgets('⌫ replayed after ⏎ deletes a whole character', (tester) async {
+    await show(tester, ['One']);
+    await caret(tester, 0, 3);
+    fake.gate = Completer();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    await type(tester, 0, 'e\u0301');
+    await tester.sendKeyEvent(LogicalKeyboardKey.backspace);
+    fake.gate!.complete();
+    await tester.pumpAndSettle();
+    expect(fake.textsOf(page), ['One', '']);
+  });
+
+  testWidgets(
+    '⌘⌫ in the first line deletes as the field does while its Block is made',
+    (tester) async {
+      await show(tester);
+      fake.gate = Completer();
+      await tester.enterText(find.byKey(const Key('first-line')), 'abc');
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.backspace);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+      fake.gate!.complete();
+      await tester.pumpAndSettle();
+      expect(fake.textsOf(page), ['']);
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.macOS),
+  );
 }
