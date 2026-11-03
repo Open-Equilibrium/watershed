@@ -1,3 +1,4 @@
+mod database;
 mod workspace;
 
 use meta_harness_core::{

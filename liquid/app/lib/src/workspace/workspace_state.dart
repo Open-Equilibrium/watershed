@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import '../rust/api/database.dart';
 import '../rust/api/workspace.dart';
 import 'follow.dart';
 
@@ -22,6 +23,11 @@ BridgeMutation mutation(
   int delete = 0,
   BridgeTextStyle style = BridgeTextStyle.paragraph,
   bool boundary = false,
+  String? field,
+  String? row,
+  BridgeFieldKind? fieldKind,
+  int color = 0,
+  BridgeCell? cell,
 }) => BridgeMutation(
   kind: kind,
   area: area,
@@ -35,6 +41,11 @@ BridgeMutation mutation(
   delete: delete,
   style: style,
   boundary: boundary,
+  field: field,
+  row: row,
+  fieldKind: fieldKind,
+  color: color,
+  cell: cell,
 );
 
 /// A query with the parts its kind does not use left out.
@@ -45,6 +56,8 @@ BridgeQuery query(
   String? block,
   int start = 0,
   int limit = window,
+  BridgeSort? sort,
+  BridgeFilter? filter,
 }) => BridgeQuery(
   kind: kind,
   area: area,
@@ -52,6 +65,8 @@ BridgeQuery query(
   block: block,
   start: start,
   limit: limit,
+  sort: sort,
+  filter: filter,
 );
 
 /// The Page the window shows.

@@ -28,7 +28,10 @@ mod sort_key;
 mod store;
 mod workspace;
 
-pub use database::{Database, Field, Filter, Match, Row, RowQuery, Rows, SelectOption, Sort};
+pub use database::{
+    Database, Field, Filter, MAX_FIELDS, MAX_OPTIONS, Match, Row, RowQuery, Rows, SelectOption,
+    Sort,
+};
 pub use history::{Action, Document, Operation, Permission};
 pub use id::{ActionId, AreaId, BlockId, FieldId, OptionId, PageId, PersonId, RowId, ViewId};
 pub use model::{Area, PageEntry, View};

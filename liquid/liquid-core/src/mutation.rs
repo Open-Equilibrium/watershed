@@ -360,6 +360,9 @@ pub enum Error {
     SectionBoundary,
     /// A cell's value is not of its field's kind, or is no valid value of it.
     WrongKind,
+    /// A Database holds [`crate::MAX_FIELDS`] fields, or a select field
+    /// [`crate::MAX_OPTIONS`] options, already.
+    TooMany,
     /// The system's random source failed, so no new identity could be made.
     Random,
     /// The CRDT library failed; the message is its own.

@@ -12,7 +12,7 @@ use crate::keys::Keys;
 
 /// A keychain in memory.
 #[derive(Default)]
-struct Memory(Mutex<Option<[u8; 32]>>);
+pub(super) struct Memory(Mutex<Option<[u8; 32]>>);
 
 impl Keys for Memory {
     fn read(&self) -> Result<Option<[u8; 32]>, String> {
@@ -26,10 +26,10 @@ impl Keys for Memory {
 }
 
 /// A fresh replica folder, removed when dropped.
-struct Folder(PathBuf);
+pub(super) struct Folder(pub(super) PathBuf);
 
 impl Folder {
-    fn new(name: &str) -> Self {
+    pub(super) fn new(name: &str) -> Self {
         let path = std::env::temp_dir().join(format!(
             "liquid-bridge-{name}-{}-{:?}",
             std::process::id(),
@@ -46,7 +46,7 @@ impl Drop for Folder {
     }
 }
 
-fn mutation(kind: BridgeMutationKind) -> BridgeMutation {
+pub(super) fn mutation(kind: BridgeMutationKind) -> BridgeMutation {
     BridgeMutation {
         kind,
         area: None,
@@ -60,10 +60,15 @@ fn mutation(kind: BridgeMutationKind) -> BridgeMutation {
         delete: 0,
         style: BridgeTextStyle::Paragraph,
         boundary: false,
+        field: None,
+        row: None,
+        field_kind: None,
+        color: 0,
+        cell: None,
     }
 }
 
-fn query(kind: BridgeQueryKind) -> BridgeQuery {
+pub(super) fn query(kind: BridgeQueryKind) -> BridgeQuery {
     BridgeQuery {
         kind,
         area: None,
@@ -71,10 +76,12 @@ fn query(kind: BridgeQueryKind) -> BridgeQuery {
         block: None,
         start: 0,
         limit: MAX_WINDOW,
+        sort: None,
+        filter: None,
     }
 }
 
-fn resource(kind: BridgeResourceKind) -> BridgeResource {
+pub(super) fn resource(kind: BridgeResourceKind) -> BridgeResource {
     BridgeResource {
         kind,
         area: None,
@@ -84,7 +91,7 @@ fn resource(kind: BridgeResourceKind) -> BridgeResource {
 }
 
 /// A Workspace with the area "Trips", its Page "Lisbon" and a Text Block on it.
-fn lisbon(workspace: &LiquidWorkspace) -> (String, String, String, String) {
+pub(super) fn lisbon(workspace: &LiquidWorkspace) -> (String, String, String, String) {
     let area = workspace
         .apply(BridgeMutation {
             text: Some("Trips".into()),

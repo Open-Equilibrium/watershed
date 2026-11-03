@@ -14,10 +14,14 @@ use std::path::Path;
 use std::sync::{Mutex, PoisonError};
 
 use liquid_core::{
-    Actor, AreaId, BlockId, Changed, Created, Error, Mutation, Origin, PageId, PersonId, Request,
-    TextStyle, ViewId, Workspace,
+    Actor, AreaId, BlockId, Changed, Created, Error, FieldId, Mutation, Origin, PageId, PersonId,
+    Request, RowId, TextStyle, ViewId, Workspace,
 };
 use liquid_storage::Sqlite;
+
+use super::database::{
+    BridgeCell, BridgeDatabase, BridgeFieldKind, BridgeFilter, BridgeRow, BridgeSort, row_query,
+};
 
 use crate::frb_generated::StreamSink;
 use crate::keys::{Keychain, Keys};
@@ -50,6 +54,28 @@ pub enum BridgeMutationKind {
     SetTextStyle,
     /// Starts a Section at `view` on `page`, or stops one, as `boundary` says.
     SetSectionBoundary,
+    /// Adds a Database Block named `text`, with a text field "Name", to `page`, after the
+    /// View `after` or first.
+    AddDatabaseBlock,
+    /// Renames the Database `block` on its home `page` to `text`.
+    RenameDatabase,
+    /// Adds a field named `text` of `field_kind` to the Database `block` on its home `page`,
+    /// after the field `after` or first.
+    AddField,
+    /// Renames `field` of the Database `block` on its home `page` to `text`.
+    RenameField,
+    /// Removes `field` from the Database `block` on its home `page`.
+    RemoveField,
+    /// Adds an option named `text` of `color` to the select `field` of the Database `block`
+    /// on its home `page`.
+    AddOption,
+    /// Adds an empty row to the Database `block` on its home `page`, after the row `after`
+    /// or first.
+    AddRow,
+    /// Removes `row` from the Database `block` on its home `page`.
+    RemoveRow,
+    /// Sets `row`'s cell of `field` in the Database `block` on its home `page` to `cell`.
+    SetCell,
 }
 
 /// How a Text Block reads.
@@ -106,7 +132,7 @@ impl BridgeTextStyle {
 }
 
 /// One write, as Dart sends it.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct BridgeMutation {
     /// What the write does.
     pub kind: BridgeMutationKind,
@@ -120,7 +146,7 @@ pub struct BridgeMutation {
     pub block: Option<String>,
     /// A View.
     pub view: Option<String>,
-    /// The View a new Block follows.
+    /// The View, field or row a new one follows.
     pub after: Option<String>,
     /// A name, title or text.
     pub text: Option<String>,
@@ -132,6 +158,16 @@ pub struct BridgeMutation {
     pub style: BridgeTextStyle,
     /// Whether a Section starts at `view`.
     pub boundary: bool,
+    /// A Database field.
+    pub field: Option<String>,
+    /// A Database row.
+    pub row: Option<String>,
+    /// A new field's kind.
+    pub field_kind: Option<BridgeFieldKind>,
+    /// A new option's color, an index into the tag colors.
+    pub color: i64,
+    /// A cell's new value.
+    pub cell: Option<BridgeCell>,
 }
 
 /// What an applied write recorded and created.
@@ -147,6 +183,12 @@ pub struct BridgeApplied {
     pub block: Option<String>,
     /// The new Block's View.
     pub view: Option<String>,
+    /// A new Database field.
+    pub field: Option<String>,
+    /// A new Database row.
+    pub row: Option<String>,
+    /// A new option of a select field.
+    pub option: Option<String>,
 }
 
 /// What a [`BridgeQuery`] reads; each kind names the parts it uses and fills.
@@ -161,10 +203,16 @@ pub enum BridgeQueryKind {
     /// `block`'s text and style on its home `page` into `text` and `style`; none once the
     /// Block is removed.
     Text,
+    /// The Database `block`'s name and fields on its home `page` into `database`; none
+    /// once the Block is removed or if it is no Database.
+    Database,
+    /// A window of the Database `block`'s rows on its home `page` into `rows`, kept by
+    /// `filter` and ordered by `sort`, and the number of rows `filter` keeps into `count`.
+    Rows,
 }
 
 /// One read, as Dart sends it.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct BridgeQuery {
     /// What it reads.
     pub kind: BridgeQueryKind,
@@ -178,6 +226,10 @@ pub struct BridgeQuery {
     pub start: i64,
     /// How many items a window takes, at most [`MAX_WINDOW`].
     pub limit: i64,
+    /// How a row window is ordered; the rows' own order without one.
+    pub sort: Option<BridgeSort>,
+    /// Which rows a row window keeps; all without one.
+    pub filter: Option<BridgeFilter>,
 }
 
 /// An area in the Explorer.
@@ -212,7 +264,7 @@ pub struct BridgeView {
 }
 
 /// The answer to a query; the query's kind names the parts it fills.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct BridgeAnswer {
     /// Areas.
     pub areas: Vec<BridgeArea>,
@@ -226,6 +278,10 @@ pub struct BridgeAnswer {
     pub text: Option<String>,
     /// A Text Block's style, with its text.
     pub style: Option<BridgeTextStyle>,
+    /// A Database's name and fields.
+    pub database: Option<BridgeDatabase>,
+    /// A Database's rows.
+    pub rows: Vec<BridgeRow>,
 }
 
 /// What kind of resource a subscription follows; each kind names the parts it uses.
@@ -295,6 +351,7 @@ fn message(error: Error) -> String {
         Error::NoChange => "the write changes nothing".into(),
         Error::SectionBoundary => "the Text Block starts a Section".into(),
         Error::WrongKind => "the value is not of its field's kind".into(),
+        Error::TooMany => "the Database holds the most fields or options it may".into(),
         Error::Random => "the random source failed".into(),
         Error::Document(message) | Error::Storage(message) => message,
     }
@@ -306,7 +363,11 @@ fn random_hex() -> Result<String, String> {
     Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
 }
 
-fn id<T>(text: &Option<String>, parse: fn(&str) -> Option<T>, what: &str) -> Result<T, String> {
+pub(crate) fn id<T>(
+    text: &Option<String>,
+    parse: fn(&str) -> Option<T>,
+    what: &str,
+) -> Result<T, String> {
     text.as_deref()
         .and_then(parse)
         .ok_or_else(|| format!("{what} is missing or no identity"))
@@ -331,6 +392,10 @@ impl BridgeMutation {
                 .clone()
                 .ok_or_else(|| "text is missing".to_string())
         };
+        let page = || id(&self.page, PageId::parse, "page");
+        let block = || id(&self.block, BlockId::parse, "block");
+        let field = || id(&self.field, FieldId::parse, "field");
+        let row = || id(&self.row, RowId::parse, "row");
         Ok(match self.kind {
             BridgeMutationKind::CreateArea => Mutation::CreateArea { name: text()? },
             BridgeMutationKind::CreatePage => Mutation::CreatePage {
@@ -378,6 +443,58 @@ impl BridgeMutation {
                 page: id(&self.page, PageId::parse, "page")?,
                 view: id(&self.view, ViewId::parse, "view")?,
                 boundary: self.boundary,
+            },
+            BridgeMutationKind::AddDatabaseBlock => Mutation::AddDatabaseBlock {
+                page: page()?,
+                after: optional_id(&self.after, ViewId::parse, "after")?,
+                name: text()?,
+            },
+            BridgeMutationKind::RenameDatabase => Mutation::RenameDatabase {
+                page: page()?,
+                block: block()?,
+                name: text()?,
+            },
+            BridgeMutationKind::AddField => Mutation::AddField {
+                page: page()?,
+                block: block()?,
+                after: optional_id(&self.after, FieldId::parse, "after")?,
+                name: text()?,
+                kind: self.field_kind.ok_or("field kind is missing")?.to_core(),
+            },
+            BridgeMutationKind::RenameField => Mutation::RenameField {
+                page: page()?,
+                block: block()?,
+                field: field()?,
+                name: text()?,
+            },
+            BridgeMutationKind::RemoveField => Mutation::RemoveField {
+                page: page()?,
+                block: block()?,
+                field: field()?,
+            },
+            BridgeMutationKind::AddOption => Mutation::AddOption {
+                page: page()?,
+                block: block()?,
+                field: field()?,
+                name: text()?,
+                color: u8::try_from(self.color).map_err(|_| "color is out of range")?,
+            },
+            BridgeMutationKind::AddRow => Mutation::AddRow {
+                page: page()?,
+                block: block()?,
+                after: optional_id(&self.after, RowId::parse, "after")?,
+            },
+            BridgeMutationKind::RemoveRow => Mutation::RemoveRow {
+                page: page()?,
+                block: block()?,
+                row: row()?,
+            },
+            BridgeMutationKind::SetCell => Mutation::SetCell {
+                page: page()?,
+                block: block()?,
+                row: row()?,
+                field: field()?,
+                value: self.cell.as_ref().ok_or("cell is missing")?.to_core()?,
             },
         })
     }
@@ -558,14 +675,25 @@ impl LiquidWorkspace {
     pub fn apply(&self, mutation: BridgeMutation) -> Result<BridgeApplied, String> {
         let mutation = mutation.to_core()?;
         let mutation_page = match &mutation {
+            Mutation::CreateArea { .. }
+            | Mutation::CreatePage { .. }
+            | Mutation::RenamePage { .. } => None,
             Mutation::AddTextBlock { page, .. }
             | Mutation::EditText { page, .. }
             | Mutation::RemoveView { page, .. }
             | Mutation::SplitTextBlock { page, .. }
             | Mutation::JoinTextBlock { page, .. }
             | Mutation::SetTextStyle { page, .. }
-            | Mutation::SetSectionBoundary { page, .. } => Some(page.clone()),
-            _ => None,
+            | Mutation::SetSectionBoundary { page, .. }
+            | Mutation::AddDatabaseBlock { page, .. }
+            | Mutation::RenameDatabase { page, .. }
+            | Mutation::AddField { page, .. }
+            | Mutation::RenameField { page, .. }
+            | Mutation::RemoveField { page, .. }
+            | Mutation::AddOption { page, .. }
+            | Mutation::AddRow { page, .. }
+            | Mutation::RemoveRow { page, .. }
+            | Mutation::SetCell { page, .. } => Some(page.clone()),
         };
         let mut inner = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
         let actor = Actor::Person(inner.workspace.owner().clone());
@@ -599,6 +727,9 @@ impl LiquidWorkspace {
             page: None,
             block: None,
             view: None,
+            field: None,
+            row: None,
+            option: None,
         };
         match applied.created {
             Some(Created::Area(area)) => answer.area = Some(area.to_string()),
@@ -607,13 +738,15 @@ impl LiquidWorkspace {
                 answer.block = Some(block.to_string());
                 answer.view = Some(view.to_string());
             }
-            // The bridge writes no Database Blocks yet.
-            Some(Created::Field(_) | Created::Row(_) | Created::Option(_)) | None => {}
+            Some(Created::Field(field)) => answer.field = Some(field.to_string()),
+            Some(Created::Row(row)) => answer.row = Some(row.to_string()),
+            Some(Created::Option(option)) => answer.option = Some(option.to_string()),
+            None => {}
         }
         Ok(answer)
     }
 
-    /// Reads one bounded window or one Block's text.
+    /// Reads one bounded window, one Block's text or one Database's fields.
     pub fn query(&self, query: BridgeQuery) -> Result<BridgeAnswer, String> {
         let mut inner = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
         let (start, limit) = window(query.start, query.limit)?;
@@ -639,6 +772,8 @@ impl LiquidWorkspace {
             count: 0,
             text: None,
             style: None,
+            database: None,
+            rows: Vec::new(),
         };
         match query.kind {
             BridgeQueryKind::Areas => {
@@ -694,6 +829,24 @@ impl LiquidWorkspace {
                     .style(&page, &block)
                     .map_err(message)?
                     .map(BridgeTextStyle::of);
+            }
+            BridgeQueryKind::Database => {
+                let page = id(&query.page, PageId::parse, "page")?;
+                *read = Some(page.clone());
+                let block = id(&query.block, BlockId::parse, "block")?;
+                answer.database = workspace
+                    .database(&page, &block)
+                    .map_err(message)?
+                    .map(BridgeDatabase::of);
+            }
+            BridgeQueryKind::Rows => {
+                let page = id(&query.page, PageId::parse, "page")?;
+                *read = Some(page.clone());
+                let block = id(&query.block, BlockId::parse, "block")?;
+                let rows = row_query(&query.sort, &query.filter, start, limit)?;
+                let rows = workspace.rows(&page, &block, &rows).map_err(message)?;
+                answer.count = rows.count as i64;
+                answer.rows = rows.rows.into_iter().map(BridgeRow::of).collect();
             }
         }
         Ok(answer)
