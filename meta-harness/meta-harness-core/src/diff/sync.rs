@@ -44,9 +44,13 @@ impl WorkingTree {
         &self,
         branch: &str,
     ) -> Result<Option<(String, String)>, DiffError> {
-        let merge = git_config(&self.root, &["--get", &format!("branch.{branch}.merge")]).await?;
+        let merge = git_config(
+            &self.root,
+            &["--get-all", &format!("branch.{branch}.merge")],
+        )
+        .await?;
         let remote = git_config(&self.root, &["--get", &format!("branch.{branch}.remote")]).await?;
-        let merge = merge.trim_end_matches('\n');
+        let merge = merge.split('\n').next().unwrap_or("");
         let remote = remote.trim_end_matches('\n');
         Ok(
             (!merge.is_empty() && !remote.is_empty())
@@ -147,17 +151,10 @@ impl WorkingTree {
         }
         self.check_push_destination(&transfer).await?;
         self.fetch_transfer(&transfer).await?;
-        self.transfer_counts(&mut transfer).await?;
+        let advertised = self.transfer_counts(&mut transfer).await?;
         if transfer.behind > 0 {
             return Err(DiffError::Diverged(Box::new(transfer), String::new()));
         }
-        let advertised = git(
-            &self.root,
-            &no_prompts(),
-            &["ls-remote", "--symref", "--", &transfer.remote, "HEAD"],
-        )
-        .await
-        .map_err(|error| fetch_error(&transfer, error))?;
         let reference = &transfer.confirmation.reference;
         let default = status
             .default_branch
@@ -197,6 +194,7 @@ impl WorkingTree {
         )
         .await;
         match result {
+            Ok(_) if !transfer.first_push => Ok(transfer),
             Ok(_) => {
                 // Git cannot infer a local branch from an OID source. Track only the captured
                 // branch, even if another process switched HEAD while the push ran.
@@ -209,6 +207,7 @@ impl WorkingTree {
                         &[],
                         &[
                             "config",
+                            "--replace-all",
                             &format!("branch.{}.{key}", transfer.branch),
                             value,
                         ],
@@ -289,28 +288,32 @@ impl WorkingTree {
         Ok(())
     }
 
+    /// Counts against the advertised destination and returns its listing for default detection.
     pub(crate) async fn transfer_counts(
         &self,
         transfer: &mut GitTransfer,
-    ) -> Result<(), DiffError> {
-        let upstream = git_ref_output(
+    ) -> Result<String, DiffError> {
+        let advertised = git(
             &self.root,
+            &no_prompts(),
             &[
-                "-c",
-                &format!("branch.{}.remote={}", transfer.branch, transfer.remote),
-                "-c",
-                &format!(
-                    "branch.{}.merge={}",
-                    transfer.branch, transfer.confirmation.reference
-                ),
-                "for-each-ref",
-                "--format=%(upstream)",
-                &format!("refs/heads/{}", transfer.branch),
+                "ls-remote",
+                "--symref",
+                "--",
+                &transfer.remote,
+                "HEAD",
+                &transfer.confirmation.reference,
             ],
         )
-        .await?;
-        let upstream = upstream.trim_end_matches('\n');
-        if upstream.is_empty() || self.resolve(upstream).await?.is_none() {
+        .await
+        .map_err(|error| fetch_error(transfer, error))?;
+        let upstream = advertised
+            .lines()
+            .filter_map(|line| line.split_once('\t'))
+            .find_map(|(oid, reference)| {
+                (reference == transfer.confirmation.reference).then_some(oid)
+            });
+        let Some(upstream) = upstream else {
             // Only a true first publication counts all history when no destination exists.
             transfer.ahead = if transfer.first_push {
                 git_ref_output(
@@ -325,7 +328,23 @@ impl WorkingTree {
                 0
             };
             transfer.behind = 0;
-            return Ok(());
+            return Ok(advertised);
+        };
+        if upstream.len() != transfer.confirmation.commit.len()
+            || !upstream.bytes().all(|byte| byte.is_ascii_hexdigit())
+        {
+            return Err(DiffError::Git(
+                "Git returned an invalid destination commit.".to_owned(),
+            ));
+        }
+        if self
+            .resolve(&format!("{upstream}^{{commit}}"))
+            .await?
+            .is_none()
+        {
+            self.fetch_remote_commit(&transfer.remote, upstream)
+                .await
+                .map_err(|error| fetch_error(transfer, error))?;
         }
         let range = format!("{}...{upstream}", transfer.confirmation.commit);
         let counts = git_ref_output(
@@ -338,7 +357,7 @@ impl WorkingTree {
             |_| DiffError::Git("Git returned invalid ahead and behind counts.".to_owned());
         transfer.ahead = counts.next().unwrap_or("0").parse().map_err(invalid)?;
         transfer.behind = counts.next().unwrap_or("0").parse().map_err(invalid)?;
-        Ok(())
+        Ok(advertised)
     }
 
     pub(crate) async fn prepare_pull(&self) -> Result<GitTransfer, DiffError> {

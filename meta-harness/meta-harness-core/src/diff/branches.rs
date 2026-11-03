@@ -451,31 +451,45 @@ impl WorkingTree {
                 }
             }
         }
-        git(
-            &self.root,
-            &process::no_prompts(),
-            &[
-                // Bundle imports write refs outside the checked remote refspecs.
-                "-c",
-                "fetch.bundleURI=",
-                "fetch",
-                "--quiet",
-                "--no-tags",
-                // Pruning settings otherwise add a tag refspec even with `--no-tags`.
-                "--no-prune-tags",
-                "--no-auto-gc",
-                "--no-write-commit-graph",
-                "--no-write-fetch-head",
-                "--no-recurse-submodules",
-                "--",
-                remote,
-            ],
-        )
-        .await
-        .map_err(|error| match error {
-            DiffError::Git(reason) => DiffError::Git(without_credentials(&reason)),
-            error => error,
-        })?;
+        self.git_fetch(remote, None).await
+    }
+
+    /// Fetch one advertised commit without updating refs or FETCH_HEAD.
+    pub(super) async fn fetch_remote_commit(
+        &self,
+        remote: &str,
+        commit: &str,
+    ) -> Result<(), DiffError> {
+        let _fetching = self.checkout().fetch_alone().await?;
+        self.git_fetch(remote, Some(commit)).await
+    }
+
+    async fn git_fetch(&self, remote: &str, commit: Option<&str>) -> Result<(), DiffError> {
+        let mut args = vec![
+            // Bundle imports write refs outside the checked remote refspecs.
+            "-c",
+            "fetch.bundleURI=",
+            "fetch",
+            "--quiet",
+            "--no-tags",
+            // Pruning settings otherwise add a tag refspec even with `--no-tags`.
+            "--no-prune-tags",
+            "--no-auto-gc",
+            "--no-write-commit-graph",
+            "--no-write-fetch-head",
+            "--no-recurse-submodules",
+        ];
+        if commit.is_some() {
+            args.extend(["--refmap=", "--no-prune"]);
+        }
+        args.extend(["--", remote]);
+        args.extend(commit);
+        git(&self.root, &process::no_prompts(), &args)
+            .await
+            .map_err(|error| match error {
+                DiffError::Git(reason) => DiffError::Git(without_credentials(&reason)),
+                error => error,
+            })?;
         Ok(())
     }
 }

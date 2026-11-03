@@ -48,7 +48,7 @@ impl Checkpoints {
         if let Err(DiffError::Diverged(mut transfer, detail)) = pushed {
             self.bounded(async {
                 tree.fetch_transfer(&transfer).await?;
-                tree.transfer_counts(&mut transfer).await
+                tree.transfer_counts(&mut transfer).await.map(|_| ())
             })
             .await?;
             return Err(DiffError::Diverged(transfer, detail));

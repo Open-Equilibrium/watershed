@@ -816,6 +816,125 @@ fn fetches_serialize_across_instances_and_processes_after_remote_advances() {
 }
 
 #[test]
+fn push_uses_the_first_configured_merge_ref_like_git() {
+    run(async {
+        let remote = Remote::new("push-multiple-merge-refs");
+        remote
+            .repo
+            .git(&["push", "origin", "HEAD:refs/heads/release"]);
+        remote.repo.git(&["switch", "-c", "topic"]);
+        Remote::commit(&remote.repo, "local.txt");
+        remote
+            .repo
+            .git(&["config", "branch.topic.remote", "origin"]);
+        for reference in ["refs/heads/main", "refs/heads/release"] {
+            remote
+                .repo
+                .git(&["config", "--add", "branch.topic.merge", reference]);
+        }
+        assert_eq!(
+            remote.repo.git(&[
+                "for-each-ref",
+                "--format=%(upstream:short)",
+                "refs/heads/topic"
+            ]),
+            "origin/main\n"
+        );
+        let before = remote.bare.git(&["show-ref"]);
+        let DiffError::PushDefault(confirmation) = Checkpoints::new(remote.repo.path())
+            .push(None)
+            .await
+            .unwrap_err()
+        else {
+            panic!("confirmation required")
+        };
+        assert_eq!(confirmation.confirmation.reference, "refs/heads/main");
+        assert_eq!(confirmation.upstream, "origin/main");
+        assert_eq!(confirmation.ahead, 1);
+        assert_eq!(remote.bare.git(&["show-ref"]), before);
+        let release = remote.bare.git(&["rev-parse", "release"]);
+        Checkpoints::new(remote.repo.path())
+            .push(Some(confirmation.confirmation))
+            .await
+            .unwrap();
+        assert_eq!(
+            remote.bare.git(&["rev-parse", "main"]),
+            remote.repo.git(&["rev-parse", "HEAD"])
+        );
+        assert_eq!(remote.bare.git(&["rev-parse", "release"]), release);
+        assert_eq!(
+            remote
+                .repo
+                .git(&["config", "--get-all", "branch.topic.merge"]),
+            "refs/heads/main\nrefs/heads/release\n"
+        );
+    });
+}
+
+#[test]
+fn push_counts_use_the_advertised_destination_when_fetch_omits_it() {
+    run(async {
+        for state in ["ahead", "behind", "diverged", "excluded"] {
+            let remote = Remote::new(&format!("push-unmapped-counts-{state}"));
+            remote
+                .repo
+                .git(&["push", "origin", "HEAD:refs/heads/release"]);
+            remote.repo.git(&["switch", "-c", "topic"]);
+            remote
+                .repo
+                .git(&["config", "branch.topic.remote", "origin"]);
+            remote
+                .repo
+                .git(&["config", "branch.topic.merge", "refs/heads/main"]);
+            if state == "excluded" {
+                remote
+                    .repo
+                    .git(&["config", "--add", "remote.origin.fetch", "^refs/heads/main"]);
+            } else {
+                remote.repo.git(&[
+                    "config",
+                    "remote.origin.fetch",
+                    "+refs/heads/release:refs/remotes/origin/release",
+                ]);
+            }
+            if state != "ahead" {
+                remote.advance();
+            }
+            if state == "ahead" || state == "diverged" {
+                Remote::commit(&remote.repo, "local.txt");
+            }
+            let before = remote.bare.git(&["show-ref"]);
+            let local = remote.repo.git(&["show-ref"]);
+            let fetch_head = std::fs::read(remote.repo.path().join(".git/FETCH_HEAD")).unwrap();
+            let error = Checkpoints::new(remote.repo.path())
+                .push(None)
+                .await
+                .unwrap_err();
+            match (state, error) {
+                ("ahead", DiffError::PushDefault(confirmation)) => {
+                    assert_eq!((confirmation.ahead, confirmation.behind), (1, 0));
+                    assert_eq!(confirmation.confirmation.reference, "refs/heads/main");
+                }
+                (_, DiffError::Diverged(transfer, _)) => {
+                    assert_eq!(
+                        (transfer.ahead, transfer.behind),
+                        (u64::from(state == "diverged"), 1)
+                    );
+                }
+                (_, error) => panic!("{state}: {error:?}"),
+            }
+            assert_eq!(remote.bare.git(&["show-ref"]), before);
+            assert_eq!(remote.repo.git(&["show-ref"]), local);
+            assert_eq!(
+                std::fs::read(remote.repo.path().join(".git/FETCH_HEAD")).unwrap(),
+                fetch_head
+            );
+            assert!(remote.repo.git(&["status", "--porcelain"]).is_empty());
+        }
+    });
+}
+
+#[test]
 fn first_push_ignores_a_merge_ref_without_a_remote() {
     run(async {
         let remote = Remote::new("push-incomplete-upstream");
