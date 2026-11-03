@@ -3,8 +3,9 @@
 //! ```text
 //! Workspace document  { owner, areas: { <area>: { name, sort, deleted } } }
 //! area document       { pages: { <page>: { title, parent?, sort, deleted } } }
-//! Page document       { blocks: { <block>: { kind, text, deleted } },
-//!                       views: { <view>: { block, sort, deleted } } }
+//! Page document       { blocks: { <block>: { kind, text, style, deleted } },
+//!                       (a Database Block's entry is in `database.rs`)
+//!                       views: { <view>: { block, sort, boundary, deleted } } }
 //! ```
 
 use std::collections::HashMap;
