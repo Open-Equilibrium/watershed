@@ -5,7 +5,7 @@ use std::collections::HashSet;
 
 use automerge::AutoCommit;
 
-use crate::model::{self, BLOCK, BLOCKS, SORT, VIEWS};
+use crate::model::{self, BLOCK, BLOCKS, BOUNDARY, SORT, VIEWS};
 use crate::{BlockId, Error, View, ViewId};
 
 /// One live View with its sort key.
@@ -35,6 +35,7 @@ impl Order {
                     view: View {
                         id: ViewId::stored(&entry.id),
                         block: BlockId::stored(block),
+                        boundary: entry.get(BOUNDARY) == Some("true"),
                     },
                 })
             })
@@ -73,6 +74,22 @@ impl Order {
         self.placed
             .iter()
             .any(|placed| &placed.view.block == block && &placed.view.id != besides)
+    }
+
+    pub(crate) fn view(&self, view: &ViewId) -> Option<&View> {
+        self.position(view).map(|index| &self.placed[index].view)
+    }
+
+    /// The View just above `view`, if any.
+    pub(crate) fn above(&self, view: &ViewId) -> Option<&View> {
+        let index = self.position(view)?;
+        index.checked_sub(1).map(|above| &self.placed[above].view)
+    }
+
+    pub(crate) fn set_boundary(&mut self, view: &ViewId, boundary: bool) {
+        if let Some(index) = self.position(view) {
+            self.placed[index].view.boundary = boundary;
+        }
     }
 
     pub(crate) fn len(&self) -> usize {

@@ -15,7 +15,7 @@ use std::sync::{Mutex, PoisonError};
 
 use liquid_core::{
     Actor, AreaId, BlockId, Changed, Created, Error, Mutation, Origin, PageId, PersonId, Request,
-    ViewId, Workspace,
+    TextStyle, ViewId, Workspace,
 };
 use liquid_storage::Sqlite;
 
@@ -41,6 +41,68 @@ pub enum BridgeMutationKind {
     EditText,
     /// Removes `view` from `page`.
     RemoveView,
+    /// Ends `block`, shown by `view` on its home `page`, at `at`, as ⏎ does: the text from
+    /// there moves to a new Text Block of `style` after `view`.
+    SplitTextBlock,
+    /// Appends the Text Block of `view` on `page` to the one above, as ⌫ at its start does.
+    JoinTextBlock,
+    /// Sets `block`'s `style` on its home `page`.
+    SetTextStyle,
+    /// Starts a Section at `view` on `page`, or stops one, as `boundary` says.
+    SetSectionBoundary,
+}
+
+/// How a Text Block reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BridgeTextStyle {
+    /// A paragraph.
+    Paragraph,
+    /// A heading of level 1.
+    Heading1,
+    /// A heading of level 2.
+    Heading2,
+    /// A heading of level 3.
+    Heading3,
+    /// A bulleted list item.
+    Bullet,
+    /// A numbered list item.
+    Numbered,
+    /// A to-do not yet done.
+    Todo,
+    /// A done to-do.
+    Done,
+    /// A quote.
+    Quote,
+}
+
+impl BridgeTextStyle {
+    fn to_core(self) -> TextStyle {
+        match self {
+            Self::Paragraph => TextStyle::Paragraph,
+            Self::Heading1 => TextStyle::Heading(1),
+            Self::Heading2 => TextStyle::Heading(2),
+            Self::Heading3 => TextStyle::Heading(3),
+            Self::Bullet => TextStyle::Bullet,
+            Self::Numbered => TextStyle::Numbered,
+            Self::Todo => TextStyle::Todo { done: false },
+            Self::Done => TextStyle::Todo { done: true },
+            Self::Quote => TextStyle::Quote,
+        }
+    }
+
+    fn of(style: TextStyle) -> Self {
+        match style {
+            TextStyle::Heading(1) => Self::Heading1,
+            TextStyle::Heading(2) => Self::Heading2,
+            TextStyle::Heading(_) => Self::Heading3,
+            TextStyle::Bullet => Self::Bullet,
+            TextStyle::Numbered => Self::Numbered,
+            TextStyle::Todo { done: false } => Self::Todo,
+            TextStyle::Todo { done: true } => Self::Done,
+            TextStyle::Quote => Self::Quote,
+            TextStyle::Paragraph => Self::Paragraph,
+        }
+    }
 }
 
 /// One write, as Dart sends it.
@@ -66,6 +128,10 @@ pub struct BridgeMutation {
     pub at: i64,
     /// How many units an edit removes.
     pub delete: i64,
+    /// A Text Block's style.
+    pub style: BridgeTextStyle,
+    /// Whether a Section starts at `view`.
+    pub boundary: bool,
 }
 
 /// What an applied write recorded and created.
@@ -92,7 +158,8 @@ pub enum BridgeQueryKind {
     Pages,
     /// A window of `page`'s Views into `views`, and their number into `count`.
     Views,
-    /// `block`'s text on its home `page` into `text`; none once the Block is removed.
+    /// `block`'s text and style on its home `page` into `text` and `style`; none once the
+    /// Block is removed.
     Text,
 }
 
@@ -140,6 +207,8 @@ pub struct BridgeView {
     pub id: String,
     /// The Block it shows.
     pub block: String,
+    /// Whether a Section starts here.
+    pub boundary: bool,
 }
 
 /// The answer to a query; the query's kind names the parts it fills.
@@ -155,6 +224,8 @@ pub struct BridgeAnswer {
     pub count: i64,
     /// A Block's text.
     pub text: Option<String>,
+    /// A Text Block's style, with its text.
+    pub style: Option<BridgeTextStyle>,
 }
 
 /// What kind of resource a subscription follows; each kind names the parts it uses.
@@ -222,6 +293,7 @@ fn message(error: Error) -> String {
         Error::NotFound => "not found".into(),
         Error::OutOfRange => "text position out of range".into(),
         Error::NoChange => "the write changes nothing".into(),
+        Error::SectionBoundary => "the Text Block starts a Section".into(),
         Error::Random => "the random source failed".into(),
         Error::Document(message) | Error::Storage(message) => message,
     }
@@ -284,6 +356,27 @@ impl BridgeMutation {
             BridgeMutationKind::RemoveView => Mutation::RemoveView {
                 page: id(&self.page, PageId::parse, "page")?,
                 view: id(&self.view, ViewId::parse, "view")?,
+            },
+            BridgeMutationKind::SplitTextBlock => Mutation::SplitTextBlock {
+                page: id(&self.page, PageId::parse, "page")?,
+                block: id(&self.block, BlockId::parse, "block")?,
+                view: id(&self.view, ViewId::parse, "view")?,
+                at: units(self.at, "at")?,
+                style: self.style.to_core(),
+            },
+            BridgeMutationKind::JoinTextBlock => Mutation::JoinTextBlock {
+                page: id(&self.page, PageId::parse, "page")?,
+                view: id(&self.view, ViewId::parse, "view")?,
+            },
+            BridgeMutationKind::SetTextStyle => Mutation::SetTextStyle {
+                page: id(&self.page, PageId::parse, "page")?,
+                block: id(&self.block, BlockId::parse, "block")?,
+                style: self.style.to_core(),
+            },
+            BridgeMutationKind::SetSectionBoundary => Mutation::SetSectionBoundary {
+                page: id(&self.page, PageId::parse, "page")?,
+                view: id(&self.view, ViewId::parse, "view")?,
+                boundary: self.boundary,
             },
         })
     }
@@ -352,6 +445,32 @@ impl BridgeResource {
     }
 }
 
+/// Opens the replica folder's lock file without truncating it, and refuses one that is a
+/// link or no plain file, so opening never writes to a file elsewhere.
+fn open_lock(path: &Path) -> Result<File, String> {
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true).write(true).create(true).truncate(false);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::custom_flags(
+        &mut options,
+        rustix::fs::OFlags::NOFOLLOW.bits() as i32,
+    );
+    let lock = options
+        .open(path)
+        .map_err(|error| format!("the replica lock {}: {error}", path.display()))?;
+    let plain = lock
+        .metadata()
+        .map_err(|error| error.to_string())?
+        .is_file();
+    if !plain {
+        return Err(format!(
+            "the replica lock {} is no plain file",
+            path.display()
+        ));
+    }
+    Ok(lock)
+}
+
 /// The window `start..start + limit`, with `limit` capped at [`MAX_WINDOW`].
 fn window(start: i64, limit: i64) -> Result<(usize, usize), String> {
     Ok((
@@ -376,7 +495,7 @@ impl LiquidWorkspace {
         std::fs::create_dir_all(dir).map_err(|error| error.to_string())?;
         // Taken before the key is read or made, so two sessions opening a new folder at once
         // cannot each store a key of their own.
-        let lock = File::create(dir.join("replica.lock")).map_err(|error| error.to_string())?;
+        let lock = open_lock(&dir.join("replica.lock"))?;
         match lock.try_lock() {
             Ok(()) => {}
             Err(TryLockError::WouldBlock) => {
@@ -425,7 +544,11 @@ impl LiquidWorkspace {
         let mutation_page = match &mutation {
             Mutation::AddTextBlock { page, .. }
             | Mutation::EditText { page, .. }
-            | Mutation::RemoveView { page, .. } => Some(page.clone()),
+            | Mutation::RemoveView { page, .. }
+            | Mutation::SplitTextBlock { page, .. }
+            | Mutation::JoinTextBlock { page, .. }
+            | Mutation::SetTextStyle { page, .. }
+            | Mutation::SetSectionBoundary { page, .. } => Some(page.clone()),
             _ => None,
         };
         let mut inner = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
@@ -498,6 +621,7 @@ impl LiquidWorkspace {
             views: Vec::new(),
             count: 0,
             text: None,
+            style: None,
         };
         match query.kind {
             BridgeQueryKind::Areas => {
@@ -540,6 +664,7 @@ impl LiquidWorkspace {
                     .map(|view| BridgeView {
                         id: view.id.to_string(),
                         block: view.block.to_string(),
+                        boundary: view.boundary,
                     })
                     .collect();
             }
@@ -548,6 +673,10 @@ impl LiquidWorkspace {
                 *read = Some(page.clone());
                 let block = id(&query.block, BlockId::parse, "block")?;
                 answer.text = workspace.text(&page, &block).map_err(message)?;
+                answer.style = workspace
+                    .style(&page, &block)
+                    .map_err(message)?
+                    .map(BridgeTextStyle::of);
             }
         }
         Ok(answer)
