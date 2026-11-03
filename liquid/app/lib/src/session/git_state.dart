@@ -38,6 +38,9 @@ class GitState {
 
   /// Whether a Git write is queued or running in this window.
   final writing = ValueNotifier(false);
+
+  /// The explicit network operation and elapsed seconds shown by the split button.
+  final progress = ValueNotifier<String?>(null);
   int _writes = 0;
   bool _initializing = false;
 
@@ -54,8 +57,12 @@ class GitState {
   bool _watching = false;
   int _failures = 0;
   DateTime? _fetched;
-  DateTime? get fetched => _fetched;
-  bool _fetching = false;
+  String? _fetchedRemote;
+  DateTime? get fetched =>
+      _fetchedRemote == status.value?.remote ? _fetched : null;
+  Future<void>? _fetching;
+  String? _fetchRemote;
+  bool _fetchRequested = false;
 
   /// Reads of the state left until the next fetch; the state is read every [fetchEvery]
   /// regardless.
@@ -92,44 +99,110 @@ class GitState {
 
   Future<void> _tick(int watch) async {
     final upstream = status.value?.upstream;
-    if (!_fetching && upstream != null && --_untilFetch <= 0) {
-      unawaited(_fetch(watch, upstream));
+    if (_fetching == null &&
+        progress.value == null &&
+        upstream != null &&
+        --_untilFetch <= 0) {
+      unawaited(_fetch(watch, status.value!.remote!));
     }
     await refresh();
     if (watch == _watches) _next = Timer(fetchEvery, () => _tick(watch));
   }
 
-  /// Fetching can wait on a remote while checkout polling continues.
-  Future<void> _fetch(int watch, String upstream) async {
-    _fetching = true;
+  /// Shares a fetch for the same remote; a changed destination waits its turn.
+  Future<void> _fetch(
+    int watch,
+    String remote, {
+    bool requested = false,
+  }) async {
+    final pending = _fetching;
+    if (pending != null) {
+      if (_fetchRemote == remote) {
+        _fetchRequested |= requested;
+        return pending;
+      }
+      await pending;
+      if (watch != _watches) return;
+      final current = status.value?.remote;
+      if (current != null) await _fetch(watch, current, requested: requested);
+      return;
+    }
+    _fetchRemote = remote;
+    _fetchRequested = requested;
+    await (_fetching = _runFetch(watch, remote));
+  }
+
+  Future<void> _runFetch(int watch, String remote) async {
     try {
-      await _backend.fetch();
+      final fetched = await _backend.fetch();
       if (watch != _watches) return;
       _failures = 0;
-      _fetched = DateTime.now();
+      if (fetched) {
+        _fetched = DateTime.now();
+        _fetchedRemote = remote;
+      }
       await refresh();
     } on Object catch (error) {
       if (watch != _watches) return;
       // A streak of failures tells once.
-      if (_failures++ == 0) {
-        final remote = upstream.split('/').first;
-        final since = switch (_fetched) {
+      if (_failures++ == 0 || _fetchRequested) {
+        final since = switch (_fetchedRemote == remote ? _fetched : null) {
           final at? =>
             ' The ahead and behind counts are from ${formatClockMs(at.millisecondsSinceEpoch)}.',
           null => '',
         };
         notify(
-          BridgeLevel.warning,
-          'Could not fetch from $remote: $error.$since',
+          _fetchRequested ? BridgeLevel.error : BridgeLevel.warning,
+          '${fetchFailure(remote, '$error')}.$since',
         );
       }
     } finally {
-      _fetching = false;
+      _fetching = null;
+      _fetchRemote = null;
+      _fetchRequested = false;
       if (watch == _watches) {
         _untilFetch = fetchWait(_failures).inSeconds ~/ fetchEvery.inSeconds;
       }
     }
   }
+
+  /// A click bypasses the background retry wait, without overlapping another fetch.
+  Future<void> fetchNow() async {
+    final remote = status.value?.remote;
+    if (remote == null) return;
+    await _fetch(_watches, remote, requested: true);
+  }
+
+  Future<BridgeGitOutcome?> push({
+    required String device,
+    BridgePushConfirmation? confirmed,
+  }) => _write(
+    'push',
+    () => _backend.push(confirmed),
+    device: device,
+    progressLabel: status.value?.remote == null
+        ? 'Pushing'
+        : 'Pushing to ${status.value!.remote}',
+    done: (_, outcome) {
+      final transfer = outcome.transfer!;
+      return transfer.firstPush || transfer.gone
+          ? 'Pushed ${transfer.branch} to ${transfer.remote}; it now tracks ${transfer.upstream}'
+          : 'Pushed ${plural(transfer.ahead, 'commit')} to ${transfer.upstream}';
+    },
+  );
+
+  Future<BridgeGitOutcome?> pull({required String device}) => _write(
+    'pull',
+    _backend.pull,
+    device: device,
+    progressLabel: status.value?.remote == null
+        ? 'Pulling'
+        : 'Pulling from ${status.value!.remote}',
+    done: (_, outcome) {
+      final transfer = outcome.transfer!;
+      return 'Pulled ${plural(transfer.behind, 'commit')} from ${transfer.upstream}';
+    },
+  );
 
   /// Reads the branch, its counts and its stash again.
   Future<void> refresh() => _latestRefresh = _refresh(++_reads);
@@ -266,7 +339,7 @@ class GitState {
     done: (now, outcome) {
       final commit = outcome.commit!;
       final text =
-          'Committed ${commit.count} ${commit.count == 1 ? 'file' : 'files'} on ${commit.branch}';
+          'Committed ${plural(commit.count, 'file')} on ${commit.branch}';
       return commit.subject == null ? '$text.' : '$text: “${commit.subject}”';
     },
   );
@@ -299,8 +372,7 @@ class GitState {
     await _write(
       'restore',
       () => _backend.restoreStash(stashed.id),
-      done: (_, _) =>
-          'Restored $files stashed ${files == 1 ? 'file' : 'files'} on $branch',
+      done: (_, _) => 'Restored ${plural(files, 'stashed file')} on $branch',
     );
   }
 
@@ -316,6 +388,8 @@ class GitState {
   Future<BridgeGitOutcome?> _write(
     String action,
     Future<BridgeGitOutcome> Function() run, {
+    String? device,
+    String? progressLabel,
     required String Function(BridgeGitStatus? now, BridgeGitOutcome outcome)
     done,
   }) async {
@@ -326,20 +400,81 @@ class GitState {
     _pendingWrite = finished.future;
     await previous;
     _writing = true;
+    Timer? elapsed;
+    if (progressLabel != null) {
+      var seconds = 0;
+      void tick() => progress.value = '$progressLabel… $seconds s';
+      tick();
+      elapsed = Timer.periodic(const Duration(seconds: 1), (timer) {
+        seconds = timer.tick;
+        tick();
+      });
+    }
     try {
       final BridgeGitOutcome outcome;
       try {
         outcome = await run();
       } on Object catch (error) {
-        notify(BridgeLevel.error, 'Could not $action: $error');
+        notify(
+          BridgeLevel.error,
+          'Could not $action: $error${nothingTransferred(action)}',
+        );
         // Git may have changed something before it failed.
         await _refreshAfterWrite();
         return null;
+      }
+      if (outcome.transfer case final transfer?
+          when transfer.remote != '.' &&
+              {
+                BridgeGitOutcomeKind.done,
+                BridgeGitOutcomeKind.pushDefault,
+                BridgeGitOutcomeKind.diverged,
+                BridgeGitOutcomeKind.transferFailed,
+              }.contains(outcome.kind)) {
+        _fetched = DateTime.now();
+        _fetchedRemote = transfer.remote;
       }
       await _refreshAfterWrite();
       final now = problem.value == null ? status.value : null;
       final files = outcome.files.join(', ');
       switch (outcome.kind) {
+        case BridgeGitOutcomeKind.pushDefault:
+          // The caller opens the approved confirmation dialog; no push ran.
+          break;
+        case BridgeGitOutcomeKind.diverged:
+          final transfer = outcome.transfer!;
+          final explanation = transfer.ahead > 0
+              ? divergedHint(
+                  transfer.branch,
+                  transfer.upstream,
+                  ahead: transfer.ahead,
+                  behind: transfer.behind,
+                )
+              : behindHint(transfer.branch, transfer.upstream, transfer.behind);
+          notify(
+            BridgeLevel.error,
+            'Could not $action: $explanation${nothingTransferred(action)}${outcome.detail.isEmpty ? '' : ' “${outcome.detail}”'}',
+          );
+        case BridgeGitOutcomeKind.signInFailed:
+          notify(
+            BridgeLevel.error,
+            'Could not $action: Git could not sign in to ${outcome.transfer!.remote}. Liquid uses the Git login of $device; sign in there with git or gh, then $action again. Nothing was ${action == 'push' ? 'pushed' : 'pulled'}. “${outcome.detail}”',
+          );
+        case BridgeGitOutcomeKind.fetchFailed:
+          notify(
+            BridgeLevel.error,
+            'Could not $action: ${fetchFailure(outcome.transfer!.remote, outcome.detail)}.${nothingTransferred(action)}',
+          );
+        case BridgeGitOutcomeKind.preflightFailed:
+          notify(
+            BridgeLevel.error,
+            'Could not $action: ${outcome.detail}${nothingTransferred(action)}',
+          );
+        case BridgeGitOutcomeKind.transferFailed:
+          notify(
+            BridgeLevel.error,
+            'Could not $action: Git failed. “${outcome.detail}” Git or its hooks may have made changes.',
+          );
         case BridgeGitOutcomeKind.done:
           final text = done(now, outcome);
           notify(
@@ -352,7 +487,12 @@ class GitState {
             '${done(now, outcome)} A hook failed after: ${outcome.detail}',
           );
         case BridgeGitOutcomeKind.mergeInProgress:
-          notify(BridgeLevel.warning, mergeHint(status.value));
+          notify(
+            progressLabel == null ? BridgeLevel.warning : BridgeLevel.error,
+            progressLabel == null
+                ? mergeHint(status.value)
+                : 'Could not $action: ${mergeHint(status.value)}${nothingTransferred(action)}',
+          );
         case BridgeGitOutcomeKind.commitBranchFailed:
           notify(
             BridgeLevel.error,
@@ -370,8 +510,8 @@ class GitState {
           );
         case BridgeGitOutcomeKind.agentRunning:
           notify(
-            BridgeLevel.warning,
-            'Could not $action: ${whoRuns(outcome.running)}. ${stopFirst(outcome.running)}.',
+            progressLabel == null ? BridgeLevel.warning : BridgeLevel.error,
+            'Could not $action: ${whoRuns(outcome.running)}. ${stopFirst(outcome.running)}.${nothingTransferred(action)}',
           );
         case BridgeGitOutcomeKind.conflicts:
           notify(
@@ -408,11 +548,18 @@ class GitState {
             'Could not restore: Git would overwrite your uncommitted changes in $files. The '
             'stash stays; commit or discard those changes, then restore.',
           );
+        case BridgeGitOutcomeKind.wouldOverwrite when action == 'pull':
+          notify(
+            BridgeLevel.error,
+            'Could not pull: Git would overwrite your uncommitted changes in $files. Commit them first. Nothing was pulled.',
+          );
         case BridgeGitOutcomeKind.wouldOverwrite:
       }
       if (_arrived case final arrived?) notify(BridgeLevel.info, arrived);
       return outcome;
     } finally {
+      elapsed?.cancel();
+      progress.value = null;
       _writing = false;
       writing.value = --_writes > 0;
       _arrived = null;
@@ -491,6 +638,9 @@ bool _sameStatus(BridgeGitStatus? a, BridgeGitStatus? b) =>
         a.branch == b.branch &&
         a.commit == b.commit &&
         a.upstream == b.upstream &&
+        a.remote == b.remote &&
+        a.hasRemotes == b.hasRemotes &&
+        a.gone == b.gone &&
         a.ahead == b.ahead &&
         a.behind == b.behind &&
         a.changed == b.changed &&
@@ -499,3 +649,29 @@ bool _sameStatus(BridgeGitStatus? a, BridgeGitStatus? b) =>
         listEquals(a.conflicts, b.conflicts) &&
         a.stash?.id == b.stash?.id &&
         a.stash?.current == b.stash?.current);
+
+/// The Git action messages shared by the split button and transfer notices.
+const noRemoteHint =
+    'No remote: commits stay in this repository. Push needs a remote added in Git.';
+const noUpstreamRemoteHint = 'No upstream: set one in Git to push this branch.';
+const noUpstreamHint = 'This branch has no upstream. Push it first.';
+
+String fetchFailure(String remote, String detail) =>
+    'Could not fetch from $remote: “$detail”';
+
+String behindHint(String branch, String upstream, int behind) =>
+    '$upstream has ${plural(behind, 'commit')} that $branch lacks. Pull them, then push.';
+
+String divergedHint(
+  String branch,
+  String upstream, {
+  int? ahead,
+  int? behind,
+}) =>
+    '$branch and $upstream have diverged${ahead == null ? '' : ', ${plural(ahead, 'commit')} here and $behind there'}. Merge or rebase in a terminal, then push.';
+
+String nothingTransferred(String action) => switch (action) {
+  'push' => ' Nothing was pushed.',
+  'pull' => ' Nothing was pulled.',
+  _ => '',
+};

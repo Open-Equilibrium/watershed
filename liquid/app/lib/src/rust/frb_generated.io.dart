@@ -126,6 +126,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeGitStatus dco_decode_box_autoadd_bridge_git_status(dynamic raw);
 
   @protected
+  BridgeGitTransfer dco_decode_box_autoadd_bridge_git_transfer(dynamic raw);
+
+  @protected
   BridgeItem dco_decode_box_autoadd_bridge_item(dynamic raw);
 
   @protected
@@ -136,6 +139,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeMutation dco_decode_box_autoadd_bridge_mutation(dynamic raw);
+
+  @protected
+  BridgePushConfirmation dco_decode_box_autoadd_bridge_push_confirmation(
+    dynamic raw,
+  );
 
   @protected
   BridgeQuery dco_decode_box_autoadd_bridge_query(dynamic raw);
@@ -285,6 +293,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeGitStatus dco_decode_bridge_git_status(dynamic raw);
 
   @protected
+  BridgeGitTransfer dco_decode_bridge_git_transfer(dynamic raw);
+
+  @protected
   BridgeHistory dco_decode_bridge_history(dynamic raw);
 
   @protected
@@ -313,6 +324,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgePage dco_decode_bridge_page(dynamic raw);
+
+  @protected
+  BridgePushConfirmation dco_decode_bridge_push_confirmation(dynamic raw);
 
   @protected
   BridgeQuery dco_decode_bridge_query(dynamic raw);
@@ -539,6 +553,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeGitStatus? dco_decode_opt_box_autoadd_bridge_git_status(dynamic raw);
 
   @protected
+  BridgeGitTransfer? dco_decode_opt_box_autoadd_bridge_git_transfer(
+    dynamic raw,
+  );
+
+  @protected
   BridgeItem? dco_decode_opt_box_autoadd_bridge_item(dynamic raw);
 
   @protected
@@ -546,6 +565,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeLevel? dco_decode_opt_box_autoadd_bridge_level(dynamic raw);
+
+  @protected
+  BridgePushConfirmation? dco_decode_opt_box_autoadd_bridge_push_confirmation(
+    dynamic raw,
+  );
 
   @protected
   BridgeQuestion? dco_decode_opt_box_autoadd_bridge_question(dynamic raw);
@@ -714,6 +738,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeGitTransfer sse_decode_box_autoadd_bridge_git_transfer(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   BridgeItem sse_decode_box_autoadd_bridge_item(SseDeserializer deserializer);
 
   @protected
@@ -726,6 +755,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeMutation sse_decode_box_autoadd_bridge_mutation(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgePushConfirmation sse_decode_box_autoadd_bridge_push_confirmation(
     SseDeserializer deserializer,
   );
 
@@ -905,6 +939,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeGitStatus sse_decode_bridge_git_status(SseDeserializer deserializer);
 
   @protected
+  BridgeGitTransfer sse_decode_bridge_git_transfer(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   BridgeHistory sse_decode_bridge_history(SseDeserializer deserializer);
 
   @protected
@@ -935,6 +974,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgePage sse_decode_bridge_page(SseDeserializer deserializer);
+
+  @protected
+  BridgePushConfirmation sse_decode_bridge_push_confirmation(
+    SseDeserializer deserializer,
+  );
 
   @protected
   BridgeQuery sse_decode_bridge_query(SseDeserializer deserializer);
@@ -1225,6 +1269,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeGitTransfer? sse_decode_opt_box_autoadd_bridge_git_transfer(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   BridgeItem? sse_decode_opt_box_autoadd_bridge_item(
     SseDeserializer deserializer,
   );
@@ -1236,6 +1285,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeLevel? sse_decode_opt_box_autoadd_bridge_level(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgePushConfirmation? sse_decode_opt_box_autoadd_bridge_push_confirmation(
     SseDeserializer deserializer,
   );
 
@@ -1450,6 +1504,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_box_autoadd_bridge_git_transfer(
+    BridgeGitTransfer self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_box_autoadd_bridge_item(
     BridgeItem self,
     SseSerializer serializer,
@@ -1470,6 +1530,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_box_autoadd_bridge_mutation(
     BridgeMutation self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_bridge_push_confirmation(
+    BridgePushConfirmation self,
     SseSerializer serializer,
   );
 
@@ -1729,6 +1795,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_bridge_git_transfer(
+    BridgeGitTransfer self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_bridge_history(BridgeHistory self, SseSerializer serializer);
 
   @protected
@@ -1766,6 +1838,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_bridge_page(BridgePage self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_bridge_push_confirmation(
+    BridgePushConfirmation self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_bridge_query(BridgeQuery self, SseSerializer serializer);
@@ -2149,6 +2227,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_opt_box_autoadd_bridge_git_transfer(
+    BridgeGitTransfer? self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_opt_box_autoadd_bridge_item(
     BridgeItem? self,
     SseSerializer serializer,
@@ -2163,6 +2247,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_opt_box_autoadd_bridge_level(
     BridgeLevel? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_bridge_push_confirmation(
+    BridgePushConfirmation? self,
     SseSerializer serializer,
   );
 

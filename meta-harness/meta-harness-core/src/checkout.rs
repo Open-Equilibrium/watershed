@@ -136,7 +136,16 @@ impl Checkout {
     /// Holds Git's shared stash list across worktrees. Keep it from the first lookup through
     /// the last mutation, since a push changes the positions used by pop and drop.
     pub(crate) async fn stash_alone(&self) -> Result<Alone, DiffError> {
-        let lock = lock_file(&self.repository, "stash.lock")?;
+        self.repository_write("stash.lock").await
+    }
+
+    /// Serializes fetches across instances, processes and linked worktrees sharing refs.
+    pub(crate) async fn fetch_alone(&self) -> Result<Alone, DiffError> {
+        self.repository_write("fetch.lock").await
+    }
+
+    async fn repository_write(&self, name: &str) -> Result<Alone, DiffError> {
+        let lock = lock_file(&self.repository, name)?;
         loop {
             match lock.try_lock() {
                 Ok(()) => return Ok(Alone { _lock: lock }),

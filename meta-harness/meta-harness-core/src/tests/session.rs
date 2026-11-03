@@ -1818,6 +1818,104 @@ printf '%s\n' "$!" > {}/holder"#,
 }
 
 #[test]
+fn an_exited_agents_stdout_drain_stops_at_the_aggregate_byte_cap() {
+    post_exit_output(32 * 1024 * 1024);
+}
+
+#[test]
+fn an_exited_agents_stdout_drain_preserves_the_byte_cap_boundary() {
+    for bytes in [16 * 1024 * 1024 - 1, 16 * 1024 * 1024, 16 * 1024 * 1024 + 1] {
+        post_exit_output(bytes);
+    }
+}
+
+fn post_exit_output(bytes: usize) {
+    run(async {
+        use std::io::Write;
+
+        const CAP: usize = 16 * 1024 * 1024;
+        const RECORD: usize = 64 * 1024;
+        let dir = marker(&format!("stdout-cap-{bytes}"));
+        std::fs::create_dir_all(&dir).expect("temporary directory");
+        let mut payload = std::io::BufWriter::new(
+            std::fs::File::create(dir.join("payload")).expect("output fixture"),
+        );
+        // Stretch the last record by one byte for the boundary cases.
+        let count = (bytes + RECORD / 2) / RECORD;
+        for i in 0..count {
+            let length = if i + 1 == count {
+                bytes - i * RECORD
+            } else {
+                RECORD
+            };
+            let mut record = format!(
+                r#"{{"type":"extension_ui_request","method":"notify","message":"{i}","notifyType":"info"}}"#
+            ).into_bytes();
+            record.resize(length - 1, b' ');
+            record.push(b'\n');
+            payload.write_all(&record).expect("fixture record");
+        }
+        payload.flush().expect("flush output fixture");
+        drop(payload);
+        let script = format!(
+            r#"IFS= read -r line
+/bin/sh -c '
+while kill -0 "$1" 2>/dev/null; do sleep 0.01; done
+: > "$2/ready"
+until [ -e "$2/release" ]; do sleep 0.01; done
+if cat "$2/payload"; then : > "$2/written"; else : > "$2/closed"; fi
+: > "$2/done"
+' holder "$$" {} 2>/dev/null &"#,
+            super::shell_word(dir.display())
+        );
+        let (mut session, mut events) = fake_agent(&script);
+        let pending = session.abort().await.expect("command sent");
+        reached(&dir.join("ready")).await;
+        std::fs::write(dir.join("release"), "").expect("release post-exit writer");
+        // No events are consumed until collection has stopped and released the writer.
+        reached(&dir.join("done")).await;
+        if bytes > CAP + RECORD {
+            assert!(
+                dir.join("closed").exists(),
+                "collection must close the pipe at the cap"
+            );
+        }
+        let complete = if bytes > CAP && bytes < CAP + RECORD {
+            CAP / RECORD - 1
+        } else {
+            count.min(CAP / RECORD)
+        };
+        for i in 0..complete {
+            assert_eq!(
+                next(&mut events).await,
+                SessionEvent::Agent(AgentEvent::Notification {
+                    level: NotificationLevel::Info,
+                    message: i.to_string(),
+                }),
+                "record {i}, {bytes} bytes"
+            );
+        }
+        if bytes >= CAP {
+            assert_eq!(
+                next(&mut events).await,
+                SessionEvent::Agent(AgentEvent::Notification {
+                    level: NotificationLevel::Warning,
+                    message: "Some agent output may be missing.".to_owned(),
+                })
+            );
+        }
+        assert_eq!(pending.accepted().await, Err(CommandError::Closed));
+        assert_eq!(next(&mut events).await, exited(true));
+        drop(session);
+        assert!(
+            events.recv().await.is_none(),
+            "no duplicate warning or later records"
+        );
+        std::fs::remove_dir_all(&dir).expect("remove temporary directory");
+    });
+}
+
+#[test]
 fn an_exited_agents_unread_stdin_cannot_block_collected_output_or_completion() {
     run(async {
         let dir = marker("stdin-after-exit");

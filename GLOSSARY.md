@@ -16,6 +16,7 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **Offline after provisioning** — The state in which installed Watershed binaries, approved model/runtime artifacts, required Global Flow configuration, one applicable Runtime binding and local-runtime readiness are already present, so the core local Flow, control and Workspace paths operate with network interfaces disabled. Requested remote-only actions fail visibly when unavailable; sync reports offline/stale state and waits resumably without blocking local work.
 - **Topic branch** — Short-lived Git branch for one logical change; can span multiple sessions and is PR'd back to `main`.
 - **Git upstream** — Remote-tracking branch a local branch uses by default for pull/push; topic branches must not use `origin/main`.
+- **Fast-forward pull** — Fetches the Git upstream and advances the local branch only when it has no commits of its own to merge; diverged branches require a merge or rebase in a terminal.
 - **Commit metadata** — Commit subject, body, comment text and trailers; metadata changes must not change file content.
 - **Unpublished commit** — Commit not yet pushed or otherwise shared; only these commits may be reworded for metadata corrections.
 

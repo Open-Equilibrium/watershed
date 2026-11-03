@@ -1,9 +1,7 @@
 //! The checkout's branch and its upstream, listing, switching and creating branches, and
 //! fetching the upstream's remote ([mockups](../../../../docs/design/mockups/liquid-git-branches.html)).
 
-use super::process::{
-    NO_PROMPTS, git_bytes, git_config, git_ref_output, ref_text, timestamp_ms, user_git,
-};
+use super::process::{git_bytes, git_config, git_ref_output, ref_text, timestamp_ms, user_git};
 use super::stash::listed_files;
 use super::*;
 
@@ -16,6 +14,12 @@ pub struct GitStatus {
     pub commit: Option<String>,
     /// The upstream the branch tracks, such as `origin/main`.
     pub upstream: Option<String>,
+    /// The upstream's remote, origin or the sole configured remote.
+    pub remote: Option<String>,
+    /// At least one remote is configured, even when no default destination can be selected.
+    pub has_remotes: bool,
+    /// The configured upstream no longer has a local remote-tracking ref.
+    pub gone: bool,
     /// Commits the branch has that its upstream lacks.
     pub ahead: u64,
     /// Commits the upstream has that the branch lacks, as last fetched.
@@ -95,6 +99,9 @@ impl WorkingTree {
             branch: None,
             commit: None,
             upstream: None,
+            remote: None,
+            has_remotes: false,
+            gone: false,
             ahead: 0,
             behind: 0,
             changed: 0,
@@ -148,33 +155,20 @@ impl WorkingTree {
                 status.changed += 1;
             }
         }
+        (status.remote, status.has_remotes) = self.remote(status.branch.as_deref()).await?;
+        status.gone = status.upstream.is_some() && self.resolve("@{upstream}").await?.is_none();
         status.default_branch = self
-            .default_branch(status.branch.as_deref())
+            .default_branch(status.remote.as_deref())
             .await
             .unwrap_or(None);
         Ok(status)
     }
 
-    async fn default_branch(&self, branch: Option<&str>) -> Result<Option<String>, DiffError> {
-        let remote = match branch {
-            Some(branch) => {
-                git_ref_output(
-                    &self.root,
-                    &[
-                        "for-each-ref",
-                        "--format=%(upstream:remotename)",
-                        &format!("refs/heads/{branch}"),
-                    ],
-                )
-                .await?
-            }
-            None => String::new(),
-        };
-        let remote = match remote.trim() {
-            "." => return Ok(None),
-            "" => "origin",
-            remote => remote,
-        };
+    async fn default_branch(&self, remote: Option<&str>) -> Result<Option<String>, DiffError> {
+        let remote = remote.unwrap_or("origin");
+        if remote == "." {
+            return Ok(None);
+        }
         let prefix = format!("refs/remotes/{remote}/");
         match git_ref_output(
             &self.root,
@@ -382,28 +376,20 @@ impl WorkingTree {
         Ok((name, self.resolve("HEAD").await?))
     }
 
-    /// Fetches the remote of the branch's upstream into its remote-tracking branches, without
-    /// tags, maintenance or credential prompts, as T3 Code's background fetch does; returns
-    /// whether there was one to fetch.
+    /// Fetches the upstream remote, origin or the sole remote, through checked destinations.
     pub async fn fetch(&self) -> Result<bool, DiffError> {
-        let Some(branch) = self.branch().await? else {
+        let branch = self.branch().await?;
+        let (remote, _) = self.remote(branch.as_deref()).await?;
+        let Some(remote) = remote.filter(|remote| remote != ".") else {
             return Ok(false);
         };
-        let reference = format!("refs/heads/{branch}");
-        let remote = git_ref_output(
-            &self.root,
-            &[
-                "for-each-ref",
-                "--format=%(upstream:remotename)",
-                &reference,
-            ],
-        )
-        .await?;
-        let remote = remote.trim_end_matches('\n');
-        // A branch tracking another local branch names the repository itself.
-        if remote.is_empty() || remote == "." {
-            return Ok(false);
-        }
+        self.fetch_remote(&remote).await?;
+        Ok(true)
+    }
+
+    /// Fetches this named remote through the same destination checks for all callers.
+    pub(super) async fn fetch_remote(&self, remote: &str) -> Result<(), DiffError> {
+        let _fetching = self.checkout().fetch_alone().await?;
         // Legacy remote files can add mappings absent from Git configuration. Refuse their
         // presence without reading URLs; both locations are shared by linked worktrees.
         if remote != ".." && !remote.contains('/') {
@@ -411,7 +397,7 @@ impl WorkingTree {
                 match std::fs::symlink_metadata(self.common.join(directory).join(remote)) {
                     Ok(_) => {
                         return Err(DiffError::Git(
-                            "Automatic fetch cannot use legacy remote definitions. Configure \
+                            "Fetch cannot use legacy remote definitions. Configure \
                              this remote in Git configuration instead."
                                 .to_owned(),
                         ));
@@ -434,7 +420,7 @@ impl WorkingTree {
             .count();
         if members > 1 {
             return Err(DiffError::Git(
-                "Git remote groups cannot be expanded by automatic fetch.".to_owned(),
+                "Git remote groups cannot be expanded by Fetch.".to_owned(),
             ));
         }
         check_remote_ref_storage(&self.common)?;
@@ -465,36 +451,46 @@ impl WorkingTree {
                 }
             }
         }
-        let env: Vec<(&str, OsString)> = NO_PROMPTS
-            .iter()
-            .map(|(name, value)| (*name, OsString::from(value)))
-            .collect();
-        git(
-            &self.root,
-            &env,
-            &[
-                // Bundle imports write refs outside the checked remote refspecs.
-                "-c",
-                "fetch.bundleURI=",
-                "fetch",
-                "--quiet",
-                "--no-tags",
-                // Pruning settings otherwise add a tag refspec even with `--no-tags`.
-                "--no-prune-tags",
-                "--no-auto-gc",
-                "--no-write-commit-graph",
-                "--no-write-fetch-head",
-                "--no-recurse-submodules",
-                "--",
-                remote,
-            ],
-        )
-        .await
-        .map_err(|error| match error {
-            DiffError::Git(reason) => DiffError::Git(without_credentials(&reason)),
-            error => error,
-        })?;
-        Ok(true)
+        self.git_fetch(remote, None).await
+    }
+
+    /// Fetch one advertised commit without updating refs or FETCH_HEAD.
+    pub(super) async fn fetch_remote_commit(
+        &self,
+        remote: &str,
+        commit: &str,
+    ) -> Result<(), DiffError> {
+        let _fetching = self.checkout().fetch_alone().await?;
+        self.git_fetch(remote, Some(commit)).await
+    }
+
+    async fn git_fetch(&self, remote: &str, commit: Option<&str>) -> Result<(), DiffError> {
+        let mut args = vec![
+            // Bundle imports write refs outside the checked remote refspecs.
+            "-c",
+            "fetch.bundleURI=",
+            "fetch",
+            "--quiet",
+            "--no-tags",
+            // Pruning settings otherwise add a tag refspec even with `--no-tags`.
+            "--no-prune-tags",
+            "--no-auto-gc",
+            "--no-write-commit-graph",
+            "--no-write-fetch-head",
+            "--no-recurse-submodules",
+        ];
+        if commit.is_some() {
+            args.extend(["--refmap=", "--no-prune"]);
+        }
+        args.extend(["--", remote]);
+        args.extend(commit);
+        git(&self.root, &process::no_prompts(), &args)
+            .await
+            .map_err(|error| match error {
+                DiffError::Git(reason) => DiffError::Git(without_credentials(&reason)),
+                error => error,
+            })?;
+        Ok(())
     }
 }
 
@@ -505,7 +501,7 @@ fn check_remote_ref_storage(common: &Path) -> Result<(), DiffError> {
     const MAX_ENTRIES: usize = 100_000;
     let unsupported = || {
         DiffError::Git(
-            "Automatic fetch cannot use symbolic links or special files in remote-ref \
+            "Fetch cannot use symbolic links or special files in remote-ref \
              storage. Fetch with Git instead."
                 .to_owned(),
         )
@@ -528,7 +524,7 @@ fn check_remote_ref_storage(common: &Path) -> Result<(), DiffError> {
             entries += 1;
             if entries > MAX_ENTRIES {
                 return Err(DiffError::Git(format!(
-                    "Automatic fetch cannot inspect more than {MAX_ENTRIES} remote-ref entries. \
+                    "Fetch cannot inspect more than {MAX_ENTRIES} remote-ref entries. \
                      Fetch with Git instead."
                 )));
             }
@@ -553,7 +549,7 @@ fn branch_name(name: &str) -> Result<&str, DiffError> {
 
 /// `text` with the user name and password of each URL taken out, as a remote's URL may hold
 /// them.
-fn without_credentials(text: &str) -> String {
+pub fn without_credentials(text: &str) -> String {
     let mut kept = String::with_capacity(text.len());
     let mut rest = text;
     while let Some(at) = rest.find("://") {

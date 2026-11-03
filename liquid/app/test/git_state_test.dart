@@ -108,6 +108,292 @@ void main() {
 
   int fetches() => backend.calls.where((call) => call == 'fetch').length;
 
+  test(
+    'push and pull notices report the actual destination and captured counts',
+    () async {
+      await git.refresh();
+      backend.transferOutcome = BridgeGitOutcome(
+        kind: BridgeGitOutcomeKind.done,
+        files: const [],
+        running: const [],
+        detail: '',
+        transfer: transferOf(ahead: 1),
+      );
+      await git.push(device: 'MacBook');
+      expect(git.fetched, isNotNull);
+      backend.transferOutcome = BridgeGitOutcome(
+        kind: BridgeGitOutcomeKind.done,
+        files: const [],
+        running: const [],
+        detail: '',
+        transfer: transferOf(
+          branch: 'feature/retry-after',
+          upstream: 'origin/feature/retry-after',
+          firstPush: true,
+        ),
+      );
+      await git.push(device: 'MacBook');
+      backend.transferOutcome = BridgeGitOutcome(
+        kind: BridgeGitOutcomeKind.done,
+        files: const [],
+        running: const [],
+        detail: '',
+        transfer: transferOf(behind: 3),
+      );
+      await git.pull(device: 'MacBook');
+      expect(notices.map((notice) => notice.$2), [
+        'Pushed 1 commit to origin/main',
+        'Pushed feature/retry-after to origin; it now tracks origin/feature/retry-after',
+        'Pulled 3 commits from origin/main',
+      ]);
+    },
+  );
+
+  test('push rejection, sign-in and pull refusals use the approved recovery wording', () async {
+    await git.refresh();
+    for (final ahead in [0, 1]) {
+      backend.transferOutcome = BridgeGitOutcome(
+        kind: BridgeGitOutcomeKind.diverged,
+        files: const [],
+        running: const [],
+        detail: '',
+        transfer: transferOf(ahead: ahead, behind: 3),
+      );
+      await git.push(device: 'MacBook');
+    }
+    backend.transferOutcome = BridgeGitOutcome(
+      kind: BridgeGitOutcomeKind.signInFailed,
+      files: const [],
+      running: const [],
+      detail: 'Authentication failed',
+      transfer: transferOf(),
+    );
+    await git.push(device: 'MacBook');
+    backend.transferOutcome = outcomeOf(
+      BridgeGitOutcomeKind.wouldOverwrite,
+      files: ['src/routes/login.ts'],
+    );
+    await git.pull(device: 'MacBook');
+    backend.transferOutcome = outcomeOf(
+      BridgeGitOutcomeKind.agentRunning,
+      running: [
+        const BridgeRunningAgent(own: false, title: 'Fix flaky sync test'),
+      ],
+    );
+    await git.pull(device: 'MacBook');
+    expect(
+      notices[0].$2,
+      startsWith(
+        'Could not push: origin/main has 3 commits that main lacks. Pull them, then push.',
+      ),
+    );
+    expect(
+      notices[1].$2,
+      startsWith(
+        'Could not push: main and origin/main have diverged, 1 commit here and 3 there. Merge or rebase in a terminal, then push.',
+      ),
+    );
+    expect(
+      notices[2].$2,
+      startsWith(
+        'Could not push: Git could not sign in to origin. Liquid uses the Git login of MacBook; sign in there with git or gh, then push again.',
+      ),
+    );
+    expect(notices[2].$2, contains('Nothing was pushed.'));
+    expect(notices[2].$2, contains('“Authentication failed”'));
+    expect(
+      notices[3].$2,
+      startsWith(
+        'Could not pull: Git would overwrite your uncommitted changes in src/routes/login.ts. Commit them first.',
+      ),
+    );
+    expect(
+      notices[4].$2,
+      'Could not pull: “Fix flaky sync test” is running in this checkout. Stop it or wait until it finishes. Nothing was pulled.',
+    );
+    expect(notices.map((notice) => notice.$1), everyElement(BridgeLevel.error));
+  });
+
+  test(
+    'unsupported push destinations use the preflight error notice',
+    () async {
+      backend.transferOutcome = outcomeOf(
+        BridgeGitOutcomeKind.preflightFailed,
+        detail: 'This remote pushes to other or several repositories. Push it with Git.',
+      );
+      await git.push(device: 'MacBook');
+      expect(notices.single, (
+        BridgeLevel.error,
+        'Could not push: This remote pushes to other or several repositories. Push it with Git. Nothing was pushed.',
+      ));
+    },
+  );
+
+  test('a transfer failure shows Git output and states that its effects are uncertain', () async {
+    backend.transferOutcome = outcomeOf(
+      BridgeGitOutcomeKind.transferFailed,
+      detail: 'Could not resolve host: github.com',
+    );
+    await git.push(device: 'MacBook');
+    expect(notices.single.$2, startsWith('Could not push: Git failed.'));
+    expect(notices.single.$2, contains('“Could not resolve host: github.com”'));
+    expect(
+      notices.single.$2,
+      contains('Git or its hooks may have made changes.'),
+    );
+  });
+
+  testWidgets(
+    'a requested Fetch shares a pending background fetch and reports its failure',
+    (tester) async {
+      final pending = _PendingFetchBackend();
+      final state = GitState(
+        pending,
+        notify: (level, text) => notices.add((level, text)),
+      );
+      state.watch();
+      await tester.pump();
+      await tester.pump(fetchEvery);
+      var finished = false;
+      final requested = state.fetchNow().then((_) => finished = true);
+      await tester.pump();
+      expect(finished, isFalse);
+      pending.fetched.completeError('offline');
+      await tester.pump();
+      await requested;
+      expect(pending.calls.where((call) => call == 'fetch'), hasLength(1));
+      expect(notices.single.$1, BridgeLevel.error);
+      expect(
+        notices.single.$2,
+        contains('Could not fetch from origin: “offline”'),
+      );
+      state.stop();
+    },
+  );
+
+  testWidgets('a requested Fetch queues behind a fetch for another remote', (
+    tester,
+  ) async {
+    for (final stopped in [false, true]) {
+      final pending = _QueuedFetchBackend();
+      final state = GitState(
+        pending,
+        notify: (level, text) => notices.add((level, text)),
+      );
+      addTearDown(state.stop);
+      state.watch();
+      await tester.pump();
+      await tester.pump(fetchEvery);
+      expect(pending.remotes, ['origin']);
+      pending.git = gitStatusOf(remote: 'other', upstream: 'other/main');
+      await state.refresh();
+      var finished = false;
+      final requested = state.fetchNow().then((_) => finished = true);
+      final shared = state.fetchNow();
+      await tester.pump();
+      expect(finished, isFalse);
+      expect(pending.remotes, ['origin']);
+      if (stopped) state.stop();
+      pending.fetches.first.complete(true);
+      await tester.pump();
+      if (!stopped) {
+        expect(pending.remotes, ['origin', 'other']);
+        expect(finished, isFalse);
+        expect(state.fetched, isNull);
+        pending.fetches.last.completeError('offline');
+        await tester.pump();
+        expect(notices.single.$1, BridgeLevel.error);
+        expect(
+          notices.single.$2,
+          contains('Could not fetch from other: “offline”'),
+        );
+      } else {
+        expect(pending.remotes, ['origin']);
+      }
+      await requested;
+      await shared;
+      state.stop();
+      notices.clear();
+    }
+  });
+
+  testWidgets('background fetch waits while a push or pull runs', (
+    tester,
+  ) async {
+    for (final push in [true, false]) {
+      final state = GitState(
+        backend,
+        notify: (level, text) => notices.add((level, text)),
+      );
+      await state.refresh();
+      backend.transferGate = Completer<BridgeGitOutcome>();
+      state.watch();
+      final writing = push
+          ? state.push(device: 'MacBook')
+          : state.pull(device: 'MacBook');
+      await tester.pump();
+      expect(
+        state.progress.value,
+        isNotNull,
+        reason: 'transfer starts before the fetch tick',
+      );
+      await tester.pump(fetchEvery);
+      expect(fetches(), 0, reason: push ? 'push' : 'pull');
+      backend.transferGate!.complete(
+        BridgeGitOutcome(
+          kind: BridgeGitOutcomeKind.done,
+          files: const [],
+          running: const [],
+          detail: '',
+          transfer: transferOf(),
+        ),
+      );
+      await tester.pump();
+      await writing;
+      state.stop();
+    }
+  });
+
+  test(
+    'preflight and fetch failures guarantee that nothing was transferred',
+    () async {
+      for (final push in [true, false]) {
+        final action = push ? 'push' : 'pull';
+        final past = push ? 'pushed' : 'pulled';
+        for (final kind in [
+          BridgeGitOutcomeKind.preflightFailed,
+          BridgeGitOutcomeKind.fetchFailed,
+        ]) {
+          backend.transferOutcome = BridgeGitOutcome(
+            kind: kind,
+            files: const [],
+            running: const [],
+            detail: 'offline',
+            transfer: transferOf(),
+          );
+          await (push
+              ? git.push(device: 'MacBook')
+              : git.pull(device: 'MacBook'));
+          expect(
+            git.fetched,
+            isNull,
+            reason: 'failed fetches do not refresh the fetched time',
+          );
+          expect(notices.last.$1, BridgeLevel.error);
+          expect(notices.last.$2, startsWith('Could not $action:'));
+          expect(notices.last.$2, contains('Nothing was $past.'));
+          expect(notices.last.$2, isNot(contains('may have made changes')));
+          if (kind == BridgeGitOutcomeKind.fetchFailed) {
+            expect(
+              notices.last.$2,
+              contains('Could not fetch from origin: “offline”'),
+            );
+          }
+        }
+      }
+    },
+  );
+
   testWidgets('a pending fetch leaves checkout polling active', (tester) async {
     final pending = _PendingFetchBackend();
     final state = GitState(
@@ -574,6 +860,19 @@ class _PendingFetchBackend extends FakeBackend {
   @override
   Future<bool> fetch() {
     calls.add('fetch');
+    return fetched.future;
+  }
+}
+
+class _QueuedFetchBackend extends FakeBackend {
+  final remotes = <String?>[];
+  final fetches = <Completer<bool>>[];
+
+  @override
+  Future<bool> fetch() {
+    remotes.add(git?.remote);
+    final fetched = Completer<bool>();
+    fetches.add(fetched);
     return fetched.future;
   }
 }

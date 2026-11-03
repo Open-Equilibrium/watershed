@@ -275,6 +275,9 @@ class FakeBackend implements SessionBackend {
   Completer<BridgeGitStatus?>? statusGate;
   Completer<BridgeCommitPlan>? planGate;
   Completer<void>? commitGate;
+  Completer<BridgeGitOutcome>? transferGate;
+  BridgeGitOutcome? transferOutcome;
+  BridgePushConfirmation? lastConfirmation;
   Completer<BridgeGitOutcome>? initializeGate;
   BridgeBranches branches = const BridgeBranches(branches: [], running: []);
   BridgeStash? stashed;
@@ -301,6 +304,9 @@ class FakeBackend implements SessionBackend {
             branch: now.branch,
             commit: now.commit,
             upstream: now.upstream,
+            remote: now.remote,
+            hasRemotes: now.hasRemotes,
+            gone: now.gone,
             ahead: now.ahead,
             behind: now.behind,
             changed: now.changed,
@@ -453,6 +459,53 @@ class FakeBackend implements SessionBackend {
     calls.add('fetch');
     if (fetchError case final error?) throw error;
     return true;
+  }
+
+  @override
+  Future<BridgeGitOutcome> push(BridgePushConfirmation? confirmed) async {
+    calls.add('push ${confirmed != null}');
+    lastConfirmation = confirmed;
+    if (transferGate case final gate?) return gate.future;
+    if (transferOutcome case final outcome?) return outcome;
+    final now = git!;
+    if (confirmed == null &&
+        now.defaultBranch != null &&
+        (now.upstream ?? '${now.remote}/${now.branch}') ==
+            '${now.remote}/${now.defaultBranch}') {
+      return BridgeGitOutcome(
+        kind: BridgeGitOutcomeKind.pushDefault,
+        files: const [],
+        running: const [],
+        detail: now.defaultBranch!,
+        transfer: transferOf(ahead: now.ahead.toInt()),
+      );
+    }
+    return BridgeGitOutcome(
+      kind: BridgeGitOutcomeKind.done,
+      files: const [],
+      running: const [],
+      detail: '',
+      transfer: transferOf(
+        branch: now.branch!,
+        upstream: now.upstream ?? '${now.remote}/${now.branch}',
+        ahead: now.ahead.toInt(),
+        firstPush: now.upstream == null,
+      ),
+    );
+  }
+
+  @override
+  Future<BridgeGitOutcome> pull() async {
+    calls.add('pull');
+    if (transferGate case final gate?) return gate.future;
+    if (transferOutcome case final outcome?) return outcome;
+    return BridgeGitOutcome(
+      kind: BridgeGitOutcomeKind.done,
+      files: const [],
+      running: const [],
+      detail: '',
+      transfer: transferOf(behind: git!.behind.toInt()),
+    );
   }
 
   /// What reverting to before a turn would change.
@@ -745,8 +798,12 @@ BridgeTurn turnOf(
 );
 
 BridgeGitStatus gitStatusOf({
+  String? commit = '1a2b3c4',
   String? branch = 'main',
   String? upstream = 'origin/main',
+  String? remote = 'origin',
+  bool? hasRemotes,
+  bool gone = false,
   int ahead = 0,
   int behind = 0,
   int changed = 0,
@@ -755,8 +812,11 @@ BridgeGitStatus gitStatusOf({
   List<String> conflicts = const [],
 }) => BridgeGitStatus(
   branch: branch,
-  commit: '1a2b3c4',
+  commit: commit,
   upstream: upstream,
+  remote: remote,
+  hasRemotes: hasRemotes ?? remote != null,
+  gone: gone,
   ahead: ahead,
   behind: behind,
   changed: changed,
@@ -764,6 +824,31 @@ BridgeGitStatus gitStatusOf({
   defaultBranch: defaultBranch,
   merging: merging,
   conflicts: conflicts,
+);
+
+BridgeGitTransfer transferOf({
+  String branch = 'main',
+  String remote = 'origin',
+  String upstream = 'origin/main',
+  int ahead = 0,
+  int behind = 0,
+  bool firstPush = false,
+  bool gone = false,
+}) => BridgeGitTransfer(
+  branch: branch,
+  remote: remote,
+  upstream: upstream,
+  ahead: ahead,
+  behind: behind,
+  firstPush: firstPush,
+  gone: gone,
+  destination: upstream.split('/').skip(1).join('/'),
+  confirmation: BridgePushConfirmation(
+    branch: branch,
+    remote: remote,
+    reference: 'refs/heads/${upstream.split('/').skip(1).join('/')}',
+    commit: '1a2b3c4',
+  ),
 );
 
 BridgeBranch branchOf(

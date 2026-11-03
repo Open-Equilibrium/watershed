@@ -395,7 +395,7 @@ class _AgentShellState extends State<AgentShell> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _Header(state: state, project: info.project),
+        _Header(state: state, project: info.project, device: info.device),
         _Tabs(tab: _tab, state: state),
         Expanded(
           child: ValueListenableBuilder(
@@ -463,10 +463,15 @@ class _AgentShellState extends State<AgentShell> {
 /// The session's title with its project and model as chips (approved look mockup), and at the
 /// right the checkout's branch (approved Git mockups).
 class _Header extends StatelessWidget {
-  const _Header({required this.state, required this.project});
+  const _Header({
+    required this.state,
+    required this.project,
+    required this.device,
+  });
 
   final SessionState state;
   final String project;
+  final String device;
 
   @override
   Widget build(BuildContext context) {
@@ -515,7 +520,7 @@ class _Header extends StatelessWidget {
           ),
           Flexible(child: BranchChip(state: state)),
           const SizedBox(width: WsMetrics.space2),
-          GitActions(state: state),
+          GitActions(state: state, device: device),
         ],
       ),
     );

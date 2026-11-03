@@ -640,14 +640,14 @@ void main() {
       expect(find.text('Commit…'), findsOneWidget);
       expect(find.text('Create branch…'), findsOneWidget);
       for (final item in ['Push', 'Pull', 'Fetch']) {
-        expect(find.text(item), findsNothing);
+        expect(find.text(item), findsOneWidget);
       }
       await tester.sendKeyEvent(LogicalKeyboardKey.escape);
       await tester.pumpAndSettle();
       backend.git = gitStatusOf(ahead: 1);
       await state.git.refresh();
       await tester.pumpAndSettle();
-      expect(find.byTooltip('Nothing to commit.'), findsOneWidget);
+      expect(find.byTooltip('Push 1 commit to origin/main.'), findsOneWidget);
       backend.git = gitStatusOf(changed: 1);
       await state.git.refresh();
       await tester.pumpAndSettle();

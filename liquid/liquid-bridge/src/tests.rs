@@ -1552,6 +1552,170 @@ fn commit_bridge_exposes_attribution_whole_files_and_safe_notices() {
 }
 
 #[test]
+fn git_remote_status_redacts_synthetic_url_credentials() {
+    let repo = repository("git-remote-url");
+    git(&repo, &["branch", "-M", "main"]);
+    git(
+        &repo,
+        &[
+            "config",
+            "branch.main.remote",
+            "https://fixture:placeholder@example.invalid/repo.git",
+        ],
+    );
+    git(&repo, &["config", "branch.main.merge", "refs/heads/main"]);
+    let session = launch(
+        gated("IFS= read -r line || exit 0"),
+        repo.display().to_string(),
+    )
+    .unwrap();
+    let remote = session.git_status().unwrap().unwrap().remote;
+    assert!(call(session.shutdown()));
+    let _ = std::fs::remove_dir_all(repo);
+    assert_eq!(remote.as_deref(), Some("https://example.invalid/repo.git"));
+}
+
+#[test]
+fn git_remote_transfer_display_redacts_synthetic_url_credentials() {
+    use crate::api::git::BridgeGitTransfer;
+    let remote = "https://fixture:placeholder@example.invalid/repo.git";
+    let transfer = BridgeGitTransfer::from(meta_harness_core::GitTransfer {
+        branch: "topic".into(),
+        remote: remote.into(),
+        upstream: format!("{remote}/main"),
+        ahead: 1,
+        behind: 0,
+        first_push: false,
+        gone: false,
+        confirmation: meta_harness_core::PushConfirmation {
+            branch: "topic".into(),
+            remote: remote.into(),
+            reference: "refs/heads/main".into(),
+            commit: "a".repeat(40),
+        },
+    });
+    assert_eq!(transfer.remote, "https://example.invalid/repo.git");
+    assert_eq!(transfer.upstream, "https://example.invalid/repo.git/main");
+    assert_eq!(transfer.confirmation.remote, remote);
+}
+
+#[test]
+fn git_transfer_bridge_confirms_push_tracks_and_pulls() {
+    use crate::api::git::BridgeGitOutcomeKind;
+    let repo = repository("sync-bridge");
+    git(&repo, &["branch", "-M", "main"]);
+    let bare = repo.with_extension("bare");
+    let other = repo.with_extension("other");
+    let _ = std::fs::remove_dir_all(&bare);
+    let _ = std::fs::remove_dir_all(&other);
+    git(&repo, &["clone", "--bare", ".", bare.to_str().unwrap()]);
+    git(&repo, &["remote", "add", "origin", bare.to_str().unwrap()]);
+    git(&repo, &["fetch", "origin"]);
+    git(&repo, &["branch", "--set-upstream-to=origin/main"]);
+    git(&repo, &["remote", "set-head", "origin", "main"]);
+    let session = launch(
+        gated("IFS= read -r line || exit 0"),
+        repo.display().to_string(),
+    )
+    .unwrap();
+    assert_eq!(
+        session.git_status().unwrap().unwrap().remote.as_deref(),
+        Some("origin")
+    );
+    std::fs::write(repo.join("a.txt"), "local change\n").unwrap();
+    git(&repo, &["commit", "-am", "Local"]);
+    git(&repo, &["config", "branch.main.merge", "main"]);
+    let invalid = session.push(None).unwrap();
+    assert_eq!(invalid.kind, BridgeGitOutcomeKind::PreflightFailed);
+    assert!(invalid.transfer.is_none());
+    assert!(invalid.files.is_empty());
+    git(&repo, &["config", "branch.main.merge", "refs/heads/main"]);
+    git(
+        &repo,
+        &[
+            "config",
+            "remote.origin.pushurl",
+            repo.with_extension("publication").to_str().unwrap(),
+        ],
+    );
+    let unsupported = session.push(None).unwrap();
+    assert_eq!(unsupported.kind, BridgeGitOutcomeKind::PreflightFailed);
+    assert_eq!(
+        unsupported.detail,
+        "This remote pushes to other or several repositories. Push it with Git."
+    );
+    assert!(unsupported.transfer.is_none());
+    git(&repo, &["config", "--unset", "remote.origin.pushurl"]);
+    let confirmation = session.push(None).unwrap();
+    assert_eq!(confirmation.kind, BridgeGitOutcomeKind::PushDefault);
+    assert!(confirmation.files.is_empty());
+    assert!(confirmation.detail.is_empty());
+    let transfer = confirmation.transfer.unwrap();
+    assert_eq!(transfer.ahead, 1);
+    assert_eq!(transfer.confirmation.remote, "origin");
+    assert_eq!(transfer.confirmation.reference, "refs/heads/main");
+    assert!(transfer.confirmation.commit.len() >= 40);
+    std::fs::write(repo.join("a.txt"), "later change\n").unwrap();
+    git(&repo, &["commit", "-am", "Later"]);
+    let renewed = session.push(Some(transfer.confirmation)).unwrap();
+    assert_eq!(renewed.kind, BridgeGitOutcomeKind::PushDefault);
+    let pushed = session
+        .push(Some(renewed.transfer.unwrap().confirmation))
+        .unwrap();
+    assert_eq!(pushed.kind, BridgeGitOutcomeKind::Done);
+    assert_eq!(pushed.transfer.unwrap().ahead, 2);
+    git(
+        &repo,
+        &[
+            "config",
+            "remote.origin.uploadpack",
+            "sh -c 'echo offline >&2; exit 1'",
+        ],
+    );
+    let failed = session.push(None).unwrap();
+    assert_eq!(failed.kind, BridgeGitOutcomeKind::FetchFailed);
+    assert_eq!(failed.transfer.unwrap().remote, "origin");
+    assert!(failed.files.is_empty());
+    git(&repo, &["config", "--unset", "remote.origin.uploadpack"]);
+    git(&repo, &["switch", "-c", "feature/bridge"]);
+    let pushed = session.push(None).unwrap();
+    assert_eq!(pushed.kind, BridgeGitOutcomeKind::Done);
+    assert!(pushed.transfer.unwrap().first_push);
+    git(
+        &repo,
+        &["clone", bare.to_str().unwrap(), other.to_str().unwrap()],
+    );
+    git(&other, &["switch", "feature/bridge"]);
+    std::fs::write(other.join("a.txt"), "remote change\n").unwrap();
+    git(&other, &["commit", "-am", "Remote"]);
+    git(&other, &["push"]);
+    assert!(session.fetch().unwrap());
+    assert_eq!(session.git_status().unwrap().unwrap().behind, 1);
+    assert_eq!(
+        session.push(None).unwrap().kind,
+        BridgeGitOutcomeKind::Diverged
+    );
+    let pulled = session.pull().unwrap();
+    assert_eq!(pulled.kind, BridgeGitOutcomeKind::Done);
+    assert_eq!(pulled.transfer.unwrap().behind, 1);
+    assert_eq!(
+        std::fs::read_to_string(repo.join("a.txt")).unwrap(),
+        "remote change\n"
+    );
+    std::fs::write(other.join("a.txt"), "remote next\n").unwrap();
+    git(&other, &["commit", "-am", "Remote next"]);
+    git(&other, &["push"]);
+    std::fs::write(repo.join("a.txt"), "unsaved\n").unwrap();
+    let refused = session.pull().unwrap();
+    assert_eq!(refused.kind, BridgeGitOutcomeKind::WouldOverwrite);
+    assert_eq!(refused.files, ["a.txt"]);
+    assert!(call(session.shutdown()));
+    for dir in [repo, bare, other] {
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}
+
+#[test]
 fn commit_bridge_distinguishes_unavailable_attribution_from_no_session_changes() {
     use crate::api::git::BridgeCommitFile;
     for available in [false, true] {

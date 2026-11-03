@@ -447,6 +447,9 @@ kbd{font-size:11px;padding:0 4px;border-radius:4px;border:1px solid currentColor
   <section>
     <h3 class="sec">Decisions</h3>
     <ol class="qs">
+      <li>Push requires the same single resolved fetch/push repository; other or multiple destinations fail before any push or hook: “This remote pushes to other or several repositories. Push it with Git.” Error notice, “Nothing was pushed.” URL comparison strips credentials; see <a href="../../../SECURITY.md#mvp-vcs-boundary">SECURITY.md</a> (decided 2026-11-03).</li>
+      <li>Failures of requested Fetch, Push and Pull use error notices; background fetch failures remain warnings (decided 2026-11-03).</li>
+      <li>Without an upstream, Push uses origin or the sole configured remote. With several remotes and no origin: “No upstream: set one in Git to push this branch.” “No remote…” applies only with no remotes (decided 2026-11-03).</li>
       <li>Unavailable commit attribution has no label; only line counts remain. Long attribution ends with an ellipsis, gives the filename priority, and shows its full text in a tooltip (decided 2026-11-03).</li>
       <li>Commit failures say “Could not commit: nothing was committed.” followed by Git’s output, through the existing notice viewer (decided 2026-11-02).</li>
       <li>The branch and the Git actions live at the right of the session header, in every tab (question 1).</li>
@@ -457,7 +460,7 @@ kbd{font-size:11px;padding:0 4px;border-radius:4px;border:1px solid currentColor
       <li>Switching with uncommitted changes asks, as GitHub Desktop does: leave them stashed on the branch, or bring them along; a branch's stashed changes show in the Diff tab with Restore and Discard, and stash, restore and discard are refused while an agent runs in the checkout (question 6).</li>
       <li>Liquid fetches in the background every 15 seconds while the session is open, as T3 Code does, so ahead and behind stay current; "Fetch" in the menu fetches at once. This is the one Git write without a user action besides checkpoints, recorded in the ADR log (question 7).</li>
       <li>The split button's main part runs the next single step: commit, push or pull (question 8).</li>
-      <li>A push asks first only for the default branch (question 9).</li>
+      <li>A push asks first only for the default branch (question 9); the answer is bound to the local branch, remote, destination ref and commit, and any change asks again.</li>
       <li>Pull is fast-forward only; when the branches diverged, Liquid points to the terminal (question 10).</li>
       <li>A folder without Git offers "Initialize Git" (question 11).</li>
       <li>With a detached HEAD, commit and push need a branch; the button offers "Create branch …" (question 12).</li>

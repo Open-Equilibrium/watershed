@@ -32,6 +32,39 @@ pub struct CommitPlan {
 }
 
 impl Checkpoints {
+    /// Preflight reads are bounded; the user's push and hooks run to completion.
+    pub async fn push(
+        &self,
+        confirmed: Option<crate::PushConfirmation>,
+    ) -> Result<crate::GitTransfer, DiffError> {
+        let tree = self.tree().await?;
+        let transfer = self.bounded(tree.prepare_push(confirmed.as_ref())).await?;
+        let pushed = tokio::spawn({
+            let tree = tree.clone();
+            async move { tree.push(transfer).await }
+        })
+        .await
+        .map_err(|error| DiffError::Io(std::io::Error::other(error)))?;
+        if let Err(DiffError::Diverged(mut transfer, detail)) = pushed {
+            self.bounded(async {
+                tree.fetch_transfer(&transfer).await?;
+                tree.transfer_counts(&mut transfer).await.map(|_| ())
+            })
+            .await?;
+            return Err(DiffError::Diverged(transfer, detail));
+        }
+        pushed
+    }
+
+    /// Fetch without holding the checkout; acquire it again only for the local fast-forward.
+    pub async fn pull(&self) -> Result<crate::GitTransfer, DiffError> {
+        let tree = self.tree().await?;
+        drop(tree.checkout().alone().await?);
+        let fetched = self.bounded(tree.prepare_pull()).await?;
+        self.user_write(move |tree| async move { tree.pull(&fetched).await })
+            .await
+    }
+
     /// Compared tree identities and files, including untracked files.
     pub async fn uncommitted_changes(
         &self,

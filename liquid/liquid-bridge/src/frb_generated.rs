@@ -41,7 +41,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.13.0";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 1998495386;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 404924944;
 
 // Section: executor
 
@@ -1372,6 +1372,107 @@ fn wire__crate__api__session__AgentSession_new_session_impl(
                     let api_that_guard = api_that_guard.unwrap();
                     let output_ok =
                         crate::api::session::AgentSession::new_session(&*api_that_guard)?;
+                    std::result::Result::Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__api__session__AgentSession_pull_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "AgentSession_pull",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_that = <RustOpaqueMoi<
+                flutter_rust_bridge::for_generated::RustAutoOpaqueInner<AgentSession>,
+            >>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let mut api_that_guard = None;
+                    let decode_indices_ =
+                        flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![
+                            flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                &api_that, 0, false,
+                            ),
+                        ]);
+                    for i in decode_indices_ {
+                        match i {
+                            0 => api_that_guard = Some(api_that.lockable_decode_sync_ref()),
+                            _ => unreachable!(),
+                        }
+                    }
+                    let api_that_guard = api_that_guard.unwrap();
+                    let output_ok = crate::api::session::AgentSession::pull(&*api_that_guard)?;
+                    std::result::Result::Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__api__session__AgentSession_push_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "AgentSession_push",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_that = <RustOpaqueMoi<
+                flutter_rust_bridge::for_generated::RustAutoOpaqueInner<AgentSession>,
+            >>::sse_decode(&mut deserializer);
+            let api_confirmed =
+                <Option<crate::api::git::BridgePushConfirmation>>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let mut api_that_guard = None;
+                    let decode_indices_ =
+                        flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![
+                            flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                &api_that, 0, false,
+                            ),
+                        ]);
+                    for i in decode_indices_ {
+                        match i {
+                            0 => api_that_guard = Some(api_that.lockable_decode_sync_ref()),
+                            _ => unreachable!(),
+                        }
+                    }
+                    let api_that_guard = api_that_guard.unwrap();
+                    let output_ok =
+                        crate::api::session::AgentSession::push(&*api_that_guard, api_confirmed)?;
                     std::result::Result::Ok(output_ok)
                 })())
             }
@@ -3573,12 +3674,15 @@ impl SseDecode for crate::api::git::BridgeGitOutcome {
             <Vec<crate::api::history::BridgeRunningAgent>>::sse_decode(deserializer);
         let mut var_detail = <String>::sse_decode(deserializer);
         let mut var_commit = <Option<crate::api::git::BridgeCommit>>::sse_decode(deserializer);
+        let mut var_transfer =
+            <Option<crate::api::git::BridgeGitTransfer>>::sse_decode(deserializer);
         return crate::api::git::BridgeGitOutcome {
             kind: var_kind,
             files: var_files,
             running: var_running,
             detail: var_detail,
             commit: var_commit,
+            transfer: var_transfer,
         };
     }
 }
@@ -3600,6 +3704,12 @@ impl SseDecode for crate::api::git::BridgeGitOutcomeKind {
             9 => crate::api::git::BridgeGitOutcomeKind::HookChanged,
             10 => crate::api::git::BridgeGitOutcomeKind::CommitBranchFailed,
             11 => crate::api::git::BridgeGitOutcomeKind::MergeInProgress,
+            12 => crate::api::git::BridgeGitOutcomeKind::PushDefault,
+            13 => crate::api::git::BridgeGitOutcomeKind::Diverged,
+            14 => crate::api::git::BridgeGitOutcomeKind::SignInFailed,
+            15 => crate::api::git::BridgeGitOutcomeKind::FetchFailed,
+            16 => crate::api::git::BridgeGitOutcomeKind::PreflightFailed,
+            17 => crate::api::git::BridgeGitOutcomeKind::TransferFailed,
             _ => unreachable!("Invalid variant for BridgeGitOutcomeKind: {}", inner),
         };
     }
@@ -3611,6 +3721,9 @@ impl SseDecode for crate::api::git::BridgeGitStatus {
         let mut var_branch = <Option<String>>::sse_decode(deserializer);
         let mut var_commit = <Option<String>>::sse_decode(deserializer);
         let mut var_upstream = <Option<String>>::sse_decode(deserializer);
+        let mut var_remote = <Option<String>>::sse_decode(deserializer);
+        let mut var_hasRemotes = <bool>::sse_decode(deserializer);
+        let mut var_gone = <bool>::sse_decode(deserializer);
         let mut var_ahead = <i64>::sse_decode(deserializer);
         let mut var_behind = <i64>::sse_decode(deserializer);
         let mut var_changed = <i64>::sse_decode(deserializer);
@@ -3622,6 +3735,9 @@ impl SseDecode for crate::api::git::BridgeGitStatus {
             branch: var_branch,
             commit: var_commit,
             upstream: var_upstream,
+            remote: var_remote,
+            has_remotes: var_hasRemotes,
+            gone: var_gone,
             ahead: var_ahead,
             behind: var_behind,
             changed: var_changed,
@@ -3629,6 +3745,33 @@ impl SseDecode for crate::api::git::BridgeGitStatus {
             default_branch: var_defaultBranch,
             merging: var_merging,
             conflicts: var_conflicts,
+        };
+    }
+}
+
+impl SseDecode for crate::api::git::BridgeGitTransfer {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_branch = <String>::sse_decode(deserializer);
+        let mut var_remote = <String>::sse_decode(deserializer);
+        let mut var_upstream = <String>::sse_decode(deserializer);
+        let mut var_ahead = <i64>::sse_decode(deserializer);
+        let mut var_behind = <i64>::sse_decode(deserializer);
+        let mut var_firstPush = <bool>::sse_decode(deserializer);
+        let mut var_gone = <bool>::sse_decode(deserializer);
+        let mut var_destination = <String>::sse_decode(deserializer);
+        let mut var_confirmation =
+            <crate::api::git::BridgePushConfirmation>::sse_decode(deserializer);
+        return crate::api::git::BridgeGitTransfer {
+            branch: var_branch,
+            remote: var_remote,
+            upstream: var_upstream,
+            ahead: var_ahead,
+            behind: var_behind,
+            first_push: var_firstPush,
+            gone: var_gone,
+            destination: var_destination,
+            confirmation: var_confirmation,
         };
     }
 }
@@ -3829,6 +3972,22 @@ impl SseDecode for crate::api::workspace::BridgePage {
             id: var_id,
             parent: var_parent,
             title: var_title,
+        };
+    }
+}
+
+impl SseDecode for crate::api::git::BridgePushConfirmation {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_branch = <String>::sse_decode(deserializer);
+        let mut var_remote = <String>::sse_decode(deserializer);
+        let mut var_reference = <String>::sse_decode(deserializer);
+        let mut var_commit = <String>::sse_decode(deserializer);
+        return crate::api::git::BridgePushConfirmation {
+            branch: var_branch,
+            remote: var_remote,
+            reference: var_reference,
+            commit: var_commit,
         };
     }
 }
@@ -4895,6 +5054,19 @@ impl SseDecode for Option<crate::api::git::BridgeGitStatus> {
     }
 }
 
+impl SseDecode for Option<crate::api::git::BridgeGitTransfer> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<crate::api::git::BridgeGitTransfer>::sse_decode(
+                deserializer,
+            ));
+        } else {
+            return None;
+        }
+    }
+}
+
 impl SseDecode for Option<crate::api::events::BridgeItem> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -4924,6 +5096,19 @@ impl SseDecode for Option<crate::api::events::BridgeLevel> {
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         if (<bool>::sse_decode(deserializer)) {
             return Some(<crate::api::events::BridgeLevel>::sse_decode(deserializer));
+        } else {
+            return None;
+        }
+    }
+}
+
+impl SseDecode for Option<crate::api::git::BridgePushConfirmation> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<crate::api::git::BridgePushConfirmation>::sse_decode(
+                deserializer,
+            ));
         } else {
             return None;
         }
@@ -5247,161 +5432,163 @@ fn pde_ffi_dispatcher_primary_impl(
             rust_vec_len,
             data_len,
         ),
-        26 => wire__crate__api__session__AgentSession_recent_sessions_impl(
+        26 => wire__crate__api__session__AgentSession_pull_impl(port, ptr, rust_vec_len, data_len),
+        27 => wire__crate__api__session__AgentSession_push_impl(port, ptr, rust_vec_len, data_len),
+        28 => wire__crate__api__session__AgentSession_recent_sessions_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        27 => wire__crate__api__session__AgentSession_remove_all_checkpoints_impl(
+        29 => wire__crate__api__session__AgentSession_remove_all_checkpoints_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        28 => wire__crate__api__session__AgentSession_restore_stash_impl(
+        30 => wire__crate__api__session__AgentSession_restore_stash_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        29 => wire__crate__api__session__AgentSession_revert_plan_impl(
+        31 => wire__crate__api__session__AgentSession_revert_plan_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        30 => wire__crate__api__session__AgentSession_revert_to_turn_impl(
+        32 => wire__crate__api__session__AgentSession_revert_to_turn_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        31 => wire__crate__api__session__AgentSession_send_impl(port, ptr, rust_vec_len, data_len),
-        32 => wire__crate__api__session__AgentSession_session_file_impl(
+        33 => wire__crate__api__session__AgentSession_send_impl(port, ptr, rust_vec_len, data_len),
+        34 => wire__crate__api__session__AgentSession_session_file_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        33 => wire__crate__api__session__AgentSession_set_approval_mode_impl(
+        35 => wire__crate__api__session__AgentSession_set_approval_mode_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        34 => wire__crate__api__session__AgentSession_set_model_impl(
+        36 => wire__crate__api__session__AgentSession_set_model_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        35 => {
+        37 => {
             wire__crate__api__session__AgentSession_shutdown_impl(port, ptr, rust_vec_len, data_len)
         }
-        36 => wire__crate__api__session__AgentSession_start_impl(port, ptr, rust_vec_len, data_len),
-        37 => wire__crate__api__session__AgentSession_stash_changes_impl(
+        38 => wire__crate__api__session__AgentSession_start_impl(port, ptr, rust_vec_len, data_len),
+        39 => wire__crate__api__session__AgentSession_stash_changes_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        38 => wire__crate__api__session__AgentSession_stash_patch_impl(
+        40 => wire__crate__api__session__AgentSession_stash_patch_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        39 => wire__crate__api__session__AgentSession_stored_turns_impl(
+        41 => wire__crate__api__session__AgentSession_stored_turns_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        40 => wire__crate__api__session__AgentSession_switch_branch_impl(
+        42 => wire__crate__api__session__AgentSession_switch_branch_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        41 => wire__crate__api__session__AgentSession_switch_session_impl(
+        43 => wire__crate__api__session__AgentSession_switch_session_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        42 => wire__crate__api__session__AgentSession_title_impl(port, ptr, rust_vec_len, data_len),
-        43 => wire__crate__api__session__AgentSession_transcript_impl(
+        44 => wire__crate__api__session__AgentSession_title_impl(port, ptr, rust_vec_len, data_len),
+        45 => wire__crate__api__session__AgentSession_transcript_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        44 => wire__crate__api__session__AgentSession_turn_changes_impl(
+        46 => wire__crate__api__session__AgentSession_turn_changes_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        45 => wire__crate__api__session__AgentSession_turn_patch_impl(
+        47 => wire__crate__api__session__AgentSession_turn_patch_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        46 => wire__crate__api__session__AgentSession_turns_impl(port, ptr, rust_vec_len, data_len),
-        47 => wire__crate__api__session__AgentSession_uncommitted_changes_impl(
+        48 => wire__crate__api__session__AgentSession_turns_impl(port, ptr, rust_vec_len, data_len),
+        49 => wire__crate__api__session__AgentSession_uncommitted_changes_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        48 => wire__crate__api__session__AgentSession_uncommitted_patch_impl(
+        50 => wire__crate__api__session__AgentSession_uncommitted_patch_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        49 => wire__crate__api__workspace__LiquidWorkspace_apply_impl(
+        51 => wire__crate__api__workspace__LiquidWorkspace_apply_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        50 => wire__crate__api__workspace__LiquidWorkspace_close_impl(
+        52 => wire__crate__api__workspace__LiquidWorkspace_close_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        51 => wire__crate__api__workspace__LiquidWorkspace_open_impl(
+        53 => wire__crate__api__workspace__LiquidWorkspace_open_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        52 => wire__crate__api__workspace__LiquidWorkspace_query_impl(
+        54 => wire__crate__api__workspace__LiquidWorkspace_query_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        53 => wire__crate__api__workspace__LiquidWorkspace_subscribe_impl(
-            port,
-            ptr,
-            rust_vec_len,
-            data_len,
-        ),
-        54 => {
-            wire__crate__api__events__bridge_queue_default_impl(port, ptr, rust_vec_len, data_len)
-        }
-        55 => wire__crate__api__history__bridge_tool_outcome_default_impl(
+        55 => wire__crate__api__workspace__LiquidWorkspace_subscribe_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
         56 => {
+            wire__crate__api__events__bridge_queue_default_impl(port, ptr, rust_vec_len, data_len)
+        }
+        57 => wire__crate__api__history__bridge_tool_outcome_default_impl(
+            port,
+            ptr,
+            rust_vec_len,
+            data_len,
+        ),
+        58 => {
             wire__crate__api__events__bridge_usage_default_impl(port, ptr, rust_vec_len, data_len)
         }
         _ => unreachable!(),
@@ -6205,6 +6392,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::git::BridgeGitOutcome {
             self.running.into_into_dart().into_dart(),
             self.detail.into_into_dart().into_dart(),
             self.commit.into_into_dart().into_dart(),
+            self.transfer.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -6236,6 +6424,12 @@ impl flutter_rust_bridge::IntoDart for crate::api::git::BridgeGitOutcomeKind {
             Self::HookChanged => 9.into_dart(),
             Self::CommitBranchFailed => 10.into_dart(),
             Self::MergeInProgress => 11.into_dart(),
+            Self::PushDefault => 12.into_dart(),
+            Self::Diverged => 13.into_dart(),
+            Self::SignInFailed => 14.into_dart(),
+            Self::FetchFailed => 15.into_dart(),
+            Self::PreflightFailed => 16.into_dart(),
+            Self::TransferFailed => 17.into_dart(),
             _ => unreachable!(),
         }
     }
@@ -6258,6 +6452,9 @@ impl flutter_rust_bridge::IntoDart for crate::api::git::BridgeGitStatus {
             self.branch.into_into_dart().into_dart(),
             self.commit.into_into_dart().into_dart(),
             self.upstream.into_into_dart().into_dart(),
+            self.remote.into_into_dart().into_dart(),
+            self.has_remotes.into_into_dart().into_dart(),
+            self.gone.into_into_dart().into_dart(),
             self.ahead.into_into_dart().into_dart(),
             self.behind.into_into_dart().into_dart(),
             self.changed.into_into_dart().into_dart(),
@@ -6277,6 +6474,34 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::git::BridgeGitStatus>
     for crate::api::git::BridgeGitStatus
 {
     fn into_into_dart(self) -> crate::api::git::BridgeGitStatus {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::git::BridgeGitTransfer {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.branch.into_into_dart().into_dart(),
+            self.remote.into_into_dart().into_dart(),
+            self.upstream.into_into_dart().into_dart(),
+            self.ahead.into_into_dart().into_dart(),
+            self.behind.into_into_dart().into_dart(),
+            self.first_push.into_into_dart().into_dart(),
+            self.gone.into_into_dart().into_dart(),
+            self.destination.into_into_dart().into_dart(),
+            self.confirmation.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::git::BridgeGitTransfer
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::git::BridgeGitTransfer>
+    for crate::api::git::BridgeGitTransfer
+{
+    fn into_into_dart(self) -> crate::api::git::BridgeGitTransfer {
         self
     }
 }
@@ -6538,6 +6763,29 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::workspace::BridgePage>
     for crate::api::workspace::BridgePage
 {
     fn into_into_dart(self) -> crate::api::workspace::BridgePage {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::git::BridgePushConfirmation {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.branch.into_into_dart().into_dart(),
+            self.remote.into_into_dart().into_dart(),
+            self.reference.into_into_dart().into_dart(),
+            self.commit.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::git::BridgePushConfirmation
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::git::BridgePushConfirmation>
+    for crate::api::git::BridgePushConfirmation
+{
+    fn into_into_dart(self) -> crate::api::git::BridgePushConfirmation {
         self
     }
 }
@@ -7769,6 +8017,7 @@ impl SseEncode for crate::api::git::BridgeGitOutcome {
         <Vec<crate::api::history::BridgeRunningAgent>>::sse_encode(self.running, serializer);
         <String>::sse_encode(self.detail, serializer);
         <Option<crate::api::git::BridgeCommit>>::sse_encode(self.commit, serializer);
+        <Option<crate::api::git::BridgeGitTransfer>>::sse_encode(self.transfer, serializer);
     }
 }
 
@@ -7789,6 +8038,12 @@ impl SseEncode for crate::api::git::BridgeGitOutcomeKind {
                 crate::api::git::BridgeGitOutcomeKind::HookChanged => 9,
                 crate::api::git::BridgeGitOutcomeKind::CommitBranchFailed => 10,
                 crate::api::git::BridgeGitOutcomeKind::MergeInProgress => 11,
+                crate::api::git::BridgeGitOutcomeKind::PushDefault => 12,
+                crate::api::git::BridgeGitOutcomeKind::Diverged => 13,
+                crate::api::git::BridgeGitOutcomeKind::SignInFailed => 14,
+                crate::api::git::BridgeGitOutcomeKind::FetchFailed => 15,
+                crate::api::git::BridgeGitOutcomeKind::PreflightFailed => 16,
+                crate::api::git::BridgeGitOutcomeKind::TransferFailed => 17,
                 _ => {
                     unimplemented!("");
                 }
@@ -7804,6 +8059,9 @@ impl SseEncode for crate::api::git::BridgeGitStatus {
         <Option<String>>::sse_encode(self.branch, serializer);
         <Option<String>>::sse_encode(self.commit, serializer);
         <Option<String>>::sse_encode(self.upstream, serializer);
+        <Option<String>>::sse_encode(self.remote, serializer);
+        <bool>::sse_encode(self.has_remotes, serializer);
+        <bool>::sse_encode(self.gone, serializer);
         <i64>::sse_encode(self.ahead, serializer);
         <i64>::sse_encode(self.behind, serializer);
         <i64>::sse_encode(self.changed, serializer);
@@ -7811,6 +8069,21 @@ impl SseEncode for crate::api::git::BridgeGitStatus {
         <Option<String>>::sse_encode(self.default_branch, serializer);
         <bool>::sse_encode(self.merging, serializer);
         <Vec<String>>::sse_encode(self.conflicts, serializer);
+    }
+}
+
+impl SseEncode for crate::api::git::BridgeGitTransfer {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.branch, serializer);
+        <String>::sse_encode(self.remote, serializer);
+        <String>::sse_encode(self.upstream, serializer);
+        <i64>::sse_encode(self.ahead, serializer);
+        <i64>::sse_encode(self.behind, serializer);
+        <bool>::sse_encode(self.first_push, serializer);
+        <bool>::sse_encode(self.gone, serializer);
+        <String>::sse_encode(self.destination, serializer);
+        <crate::api::git::BridgePushConfirmation>::sse_encode(self.confirmation, serializer);
     }
 }
 
@@ -7974,6 +8247,16 @@ impl SseEncode for crate::api::workspace::BridgePage {
         <String>::sse_encode(self.id, serializer);
         <Option<String>>::sse_encode(self.parent, serializer);
         <String>::sse_encode(self.title, serializer);
+    }
+}
+
+impl SseEncode for crate::api::git::BridgePushConfirmation {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.branch, serializer);
+        <String>::sse_encode(self.remote, serializer);
+        <String>::sse_encode(self.reference, serializer);
+        <String>::sse_encode(self.commit, serializer);
     }
 }
 
@@ -8769,6 +9052,16 @@ impl SseEncode for Option<crate::api::git::BridgeGitStatus> {
     }
 }
 
+impl SseEncode for Option<crate::api::git::BridgeGitTransfer> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <crate::api::git::BridgeGitTransfer>::sse_encode(value, serializer);
+        }
+    }
+}
+
 impl SseEncode for Option<crate::api::events::BridgeItem> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -8795,6 +9088,16 @@ impl SseEncode for Option<crate::api::events::BridgeLevel> {
         <bool>::sse_encode(self.is_some(), serializer);
         if let Some(value) = self {
             <crate::api::events::BridgeLevel>::sse_encode(value, serializer);
+        }
+    }
+}
+
+impl SseEncode for Option<crate::api::git::BridgePushConfirmation> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <crate::api::git::BridgePushConfirmation>::sse_encode(value, serializer);
         }
     }
 }

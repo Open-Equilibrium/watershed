@@ -343,6 +343,13 @@ pub struct LiquidWorkspace {
     _lock: File,
 }
 
+impl Drop for LiquidWorkspace {
+    fn drop(&mut self) {
+        // A concurrently spawned child may still hold an inherited descriptor until exec.
+        let _ = self._lock.unlock();
+    }
+}
+
 fn message(error: Error) -> String {
     match error {
         Error::NotAllowed => "not allowed".into(),

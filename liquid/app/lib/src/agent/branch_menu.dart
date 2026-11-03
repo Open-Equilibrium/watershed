@@ -62,6 +62,7 @@ class BranchChip extends StatelessWidget {
             if (status.ahead > 0) '${status.ahead} ahead',
             if (status.behind > 0) '${status.behind} behind',
             if (!status.merging &&
+                status.remote != null &&
                 status.branch != null &&
                 status.upstream == null)
               'no upstream',
@@ -90,6 +91,7 @@ class BranchChip extends StatelessWidget {
                     style: small.copyWith(color: ws.warning),
                   ),
                 if (!status.merging &&
+                    status.remote != null &&
                     status.branch != null &&
                     status.upstream == null)
                   Text('no upstream', style: small),

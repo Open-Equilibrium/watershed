@@ -50,3 +50,6 @@ String formatAgo(int ms, DateTime now) {
     _ => count(ago.inDays ~/ 365, 'year'),
   };
 }
+
+/// A count and a noun with its regular plural.
+String plural(int count, String noun) => '$count $noun${count == 1 ? '' : 's'}';

@@ -3,6 +3,7 @@
 
 use meta_harness_core::{
     BranchTarget, Changes, DiffError, session_id, session_title_of, visible_lines, visible_name,
+    without_credentials,
 };
 
 use crate::api::events::BridgeFileChange;
@@ -18,6 +19,10 @@ pub struct BridgeGitStatus {
     pub commit: Option<String>,
     /// The upstream the branch tracks, such as `origin/main`.
     pub upstream: Option<String>,
+    /// The upstream's remote, or else origin or the only configured remote.
+    pub remote: Option<String>,
+    pub has_remotes: bool,
+    pub gone: bool,
     /// Commits the branch has that its upstream lacks.
     pub ahead: i64,
     /// Commits the upstream has that the branch lacks, as last fetched.
@@ -101,6 +106,18 @@ pub enum BridgeGitOutcomeKind {
     CommitBranchFailed,
     /// Liquid cannot commit while a merge is in progress.
     MergeInProgress,
+    /// A fresh approval is required; transfer carries destination, counts and exact identities.
+    PushDefault,
+    /// The upstream has commits the branch lacks; nothing was pushed or pulled.
+    Diverged,
+    /// The host's Git login failed before transfer; transfer names the remote.
+    SignInFailed,
+    /// A fetch failed before any push or merge; transfer names its remote.
+    FetchFailed,
+    /// A pre-check failed; no push or merge ran.
+    PreflightFailed,
+    /// Git failed; its own output describes any effects it completed.
+    TransferFailed,
 }
 
 /// How a Git write the user asked for ended.
@@ -115,6 +132,71 @@ pub struct BridgeGitOutcome {
     pub detail: String,
     /// A completed commit, or a created branch when its commit failed.
     pub commit: Option<BridgeCommit>,
+    /// The destination and counts captured for this push or pull.
+    pub transfer: Option<BridgeGitTransfer>,
+}
+
+/// A push or pull's display names, captured counts and opaque approval identities.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgeGitTransfer {
+    pub branch: String,
+    pub remote: String,
+    pub upstream: String,
+    pub ahead: i64,
+    pub behind: i64,
+    pub first_push: bool,
+    pub gone: bool,
+    /// The destination branch, safe to display.
+    pub destination: String,
+    /// Opaque approval identities; return unchanged, never display these strings.
+    pub confirmation: BridgePushConfirmation,
+}
+
+/// Exact identities returned unchanged by the default-branch confirmation dialog.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgePushConfirmation {
+    pub branch: String,
+    pub remote: String,
+    pub reference: String,
+    pub commit: String,
+}
+
+impl From<BridgePushConfirmation> for meta_harness_core::PushConfirmation {
+    fn from(value: BridgePushConfirmation) -> Self {
+        Self {
+            branch: value.branch,
+            remote: value.remote,
+            reference: value.reference,
+            commit: value.commit,
+        }
+    }
+}
+
+impl From<meta_harness_core::GitTransfer> for BridgeGitTransfer {
+    fn from(transfer: meta_harness_core::GitTransfer) -> Self {
+        Self {
+            branch: visible_name(&transfer.branch),
+            remote: visible_name(&without_credentials(&transfer.remote)),
+            upstream: visible_name(&without_credentials(&transfer.upstream)),
+            ahead: count(transfer.ahead),
+            behind: count(transfer.behind),
+            first_push: transfer.first_push,
+            gone: transfer.gone,
+            destination: visible_name(
+                transfer
+                    .confirmation
+                    .reference
+                    .strip_prefix("refs/heads/")
+                    .unwrap_or(&transfer.confirmation.reference),
+            ),
+            confirmation: BridgePushConfirmation {
+                branch: transfer.confirmation.branch,
+                remote: transfer.confirmation.remote,
+                reference: transfer.confirmation.reference,
+                commit: transfer.confirmation.commit,
+            },
+        }
+    }
 }
 
 /// Commit details, including the branch created when the subsequent commit failed.
@@ -178,7 +260,16 @@ impl AgentSession {
             Ok(Some(BridgeGitStatus {
                 branch: status.branch.as_deref().map(visible_name),
                 commit: status.commit.map(|commit| commit.chars().take(7).collect()),
-                upstream: status.upstream.as_deref().map(visible_name),
+                upstream: status
+                    .upstream
+                    .as_deref()
+                    .map(|name| visible_name(&without_credentials(name))),
+                remote: status
+                    .remote
+                    .as_deref()
+                    .map(|name| visible_name(&without_credentials(name))),
+                has_remotes: status.has_remotes,
+                gone: status.gone,
                 ahead: count(status.ahead),
                 behind: count(status.behind),
                 changed: count(status.changed),
@@ -405,10 +496,48 @@ impl AgentSession {
         })
     }
 
-    /// Fetches the remote of the branch's upstream, without credential prompts; returns whether
-    /// there was one.
+    /// Fetches the upstream remote, origin or the sole remote through checked destinations.
     pub fn fetch(&self) -> Result<bool, String> {
         RUNTIME.block_on(async { self.checkpoints.fetch().await.map_err(shown) })
+    }
+
+    /// Pushes the branch through the user's Git and hooks, without a checkout lock.
+    pub fn push(
+        &self,
+        confirmed: Option<BridgePushConfirmation>,
+    ) -> Result<BridgeGitOutcome, String> {
+        RUNTIME.block_on(async {
+            self.transfer_outcome(self.checkpoints.push(confirmed.map(Into::into)).await)
+                .await
+        })
+    }
+
+    /// Pulls fast-forward only under the checkout lock, refusing any running agent.
+    pub fn pull(&self) -> Result<BridgeGitOutcome, String> {
+        RUNTIME.block_on(async { self.transfer_outcome(self.checkpoints.pull().await).await })
+    }
+
+    async fn transfer_outcome(
+        &self,
+        result: Result<meta_harness_core::GitTransfer, DiffError>,
+    ) -> Result<BridgeGitOutcome, String> {
+        match result {
+            Ok(transfer) => Ok(BridgeGitOutcome {
+                transfer: Some(transfer.into()),
+                ..self.outcome(Ok(())).await?
+            }),
+            Err(error) => match self.outcome(Err(error)).await {
+                Ok(outcome) => Ok(outcome),
+                Err(detail) => Ok(BridgeGitOutcome {
+                    kind: BridgeGitOutcomeKind::PreflightFailed,
+                    detail,
+                    files: Vec::new(),
+                    running: Vec::new(),
+                    commit: None,
+                    transfer: None,
+                }),
+            },
+        }
     }
 
     /// `result` as Dart shows it.
@@ -419,12 +548,36 @@ impl AgentSession {
             running: Vec::new(),
             detail: String::new(),
             commit: None,
+            transfer: None,
         };
         match result {
             Ok(()) => Ok(outcome(BridgeGitOutcomeKind::Done, Vec::new())),
             Err(DiffError::WouldOverwrite(files)) => {
                 Ok(outcome(BridgeGitOutcomeKind::WouldOverwrite, files))
             }
+            Err(DiffError::PushDefault(transfer)) => Ok(BridgeGitOutcome {
+                transfer: Some((*transfer).into()),
+                ..outcome(BridgeGitOutcomeKind::PushDefault, Vec::new())
+            }),
+            Err(DiffError::Diverged(transfer, detail)) => Ok(BridgeGitOutcome {
+                transfer: Some((*transfer).into()),
+                detail: visible_lines(&detail),
+                ..outcome(BridgeGitOutcomeKind::Diverged, Vec::new())
+            }),
+            Err(DiffError::SignInFailed(transfer, detail)) => Ok(BridgeGitOutcome {
+                transfer: Some((*transfer).into()),
+                detail: visible_lines(&detail),
+                ..outcome(BridgeGitOutcomeKind::SignInFailed, Vec::new())
+            }),
+            Err(DiffError::FetchFailed(transfer, detail)) => Ok(BridgeGitOutcome {
+                transfer: Some((*transfer).into()),
+                detail: visible_lines(&detail),
+                ..outcome(BridgeGitOutcomeKind::FetchFailed, Vec::new())
+            }),
+            Err(DiffError::TransferFailed(detail)) => Ok(BridgeGitOutcome {
+                detail: visible_lines(&detail),
+                ..outcome(BridgeGitOutcomeKind::TransferFailed, Vec::new())
+            }),
             Err(DiffError::RestoredWithConflicts(files)) => {
                 Ok(outcome(BridgeGitOutcomeKind::Conflicts, files))
             }
