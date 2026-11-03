@@ -24,6 +24,7 @@ mod commit;
 mod process;
 mod revert;
 mod stash;
+mod sync;
 
 pub use branches::{Branch, BranchTarget, Changes, GitStatus};
 pub use commit::Commit;
@@ -31,6 +32,7 @@ pub use commit::Commit;
 pub use stash::Stash;
 #[cfg(test)]
 pub(crate) use stash::{before_drop, before_stash_identity};
+pub use sync::GitTransfer;
 
 use process::{Git, git, git_command, git_path, git_path_output, git_ref_output, unreadable};
 #[cfg(test)]
@@ -164,6 +166,14 @@ pub enum DiffError {
     },
     /// Explicit commits do not finish merges.
     MergeInProgress,
+    /// The destination is the default branch and needs explicit confirmation.
+    PushDefault(String, GitTransfer),
+    /// Git refused a non-fast-forward push or pull, with fresh upstream counts.
+    PushRejected(GitTransfer, String),
+    /// The host's Git login could not authenticate to the named remote.
+    SignInFailed(String, String),
+    /// A network Git write failed; Git or its hooks may have made changes.
+    TransferFailed(String),
 }
 
 impl fmt::Display for DiffError {
@@ -221,6 +231,11 @@ impl fmt::Display for DiffError {
                 write!(f, "committing on {branch} failed: {error}")
             }
             Self::MergeInProgress => f.write_str("A merge is in progress."),
+            Self::PushDefault(branch, _) => write!(f, "Push to {branch}?"),
+            Self::PushRejected(_, detail) | Self::TransferFailed(detail) => f.write_str(detail),
+            Self::SignInFailed(remote, detail) => {
+                write!(f, "Git could not sign in to {remote}: {detail}")
+            }
             Self::CommitFailed(output) => f.write_str(output),
             Self::FetchOutsideRemotes(spec) => write!(
                 f,

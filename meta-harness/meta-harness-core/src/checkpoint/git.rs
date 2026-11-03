@@ -32,6 +32,28 @@ pub struct CommitPlan {
 }
 
 impl Checkpoints {
+    /// Push runs to completion without a checkout lock: it changes no checkout files and is
+    /// allowed during an agent turn. Hooks run as in the user's terminal.
+    pub async fn push(&self, confirmed_default: bool) -> Result<crate::GitTransfer, DiffError> {
+        let tree = self.tree().await?;
+        tokio::spawn(async move { tree.push(confirmed_default).await })
+            .await
+            .map_err(|error| DiffError::Io(std::io::Error::other(error)))?
+    }
+
+    /// Pull changes checkout files and holds the same lock as commit until Git finishes.
+    pub async fn pull(&self) -> Result<crate::GitTransfer, DiffError> {
+        self.user_write(move |tree| async move { tree.pull().await })
+            .await
+    }
+
+    /// Explicit Fetch uses the background fetch's destination checks, including before the
+    /// branch has an upstream.
+    pub async fn fetch_now(&self) -> Result<bool, DiffError> {
+        let tree = self.tree().await?;
+        self.bounded(tree.fetch_now()).await
+    }
+
     /// Compared tree identities and files, including untracked files.
     pub async fn uncommitted_changes(
         &self,

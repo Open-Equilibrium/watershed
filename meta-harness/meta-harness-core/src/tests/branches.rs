@@ -232,6 +232,7 @@ fn the_status_counts_commits_against_the_upstream_and_uncommitted_files() {
                 branch: Some("main".to_owned()),
                 commit: status.commit.clone(),
                 upstream: Some("origin/main".to_owned()),
+                remote: Some("origin".to_owned()),
                 ahead: 1,
                 behind: 2,
                 changed: 3,

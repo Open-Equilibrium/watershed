@@ -20,8 +20,8 @@ pub use checkpoint::{
     Branches, Checkpoint, Checkpoints, CommitFile, CommitPlan, Phase, RevertFile, RevertPlan,
 };
 pub use diff::{
-    Branch, BranchTarget, ChangeStatus, Changes, Commit, DiffError, FileChange, GitStatus, Stash,
-    Whitespace,
+    Branch, BranchTarget, ChangeStatus, Changes, Commit, DiffError, FileChange, GitStatus,
+    GitTransfer, Stash, Whitespace,
 };
 pub use event::{
     AgentEvent, Answer, ChangedLines, Decision, Delivery, EditChange, EditPreview, EntryKind,

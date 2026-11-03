@@ -16,6 +16,8 @@ pub struct GitStatus {
     pub commit: Option<String>,
     /// The upstream the branch tracks, such as `origin/main`.
     pub upstream: Option<String>,
+    /// The upstream's remote, or origin when configured without an upstream.
+    pub remote: Option<String>,
     /// Commits the branch has that its upstream lacks.
     pub ahead: u64,
     /// Commits the upstream has that the branch lacks, as last fetched.
@@ -95,6 +97,7 @@ impl WorkingTree {
             branch: None,
             commit: None,
             upstream: None,
+            remote: None,
             ahead: 0,
             behind: 0,
             changed: 0,
@@ -152,6 +155,7 @@ impl WorkingTree {
             .default_branch(status.branch.as_deref())
             .await
             .unwrap_or(None);
+        status.remote = self.remote(status.branch.as_deref()).await?;
         Ok(status)
     }
 
@@ -404,6 +408,12 @@ impl WorkingTree {
         if remote.is_empty() || remote == "." {
             return Ok(false);
         }
+        self.fetch_remote(remote).await?;
+        Ok(true)
+    }
+
+    /// Fetches this named remote through the same destination checks for all callers.
+    pub(super) async fn fetch_remote(&self, remote: &str) -> Result<(), DiffError> {
         // Legacy remote files can add mappings absent from Git configuration. Refuse their
         // presence without reading URLs; both locations are shared by linked worktrees.
         if remote != ".." && !remote.contains('/') {
@@ -494,7 +504,7 @@ impl WorkingTree {
             DiffError::Git(reason) => DiffError::Git(without_credentials(&reason)),
             error => error,
         })?;
-        Ok(true)
+        Ok(())
     }
 }
 
@@ -553,7 +563,7 @@ fn branch_name(name: &str) -> Result<&str, DiffError> {
 
 /// `text` with the user name and password of each URL taken out, as a remote's URL may hold
 /// them.
-fn without_credentials(text: &str) -> String {
+pub(super) fn without_credentials(text: &str) -> String {
     let mut kept = String::with_capacity(text.len());
     let mut rest = text;
     while let Some(at) = rest.find("://") {
