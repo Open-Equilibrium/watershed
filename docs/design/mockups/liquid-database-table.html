@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en"><head><title>Liquid: Database Table View mockups</title>
+<html lang="en"><head><title>Liquid: Table View mockups</title>
 <link rel="stylesheet" href="../tokens.css"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
 .chrome{--foreground:var(--ws-text);--muted-foreground:var(--ws-text-muted);--muted:var(--ws-subtle);--border:var(--ws-border-strong);--secondary:var(--ws-hover);background:var(--ws-canvas);padding:24px}
@@ -113,8 +113,8 @@ h4.qh{margin:14px 0 6px;font-size:13px}
     <div>Size <span class="seg" id="size"><button data-v="fit" class="on">Fit</button><button data-v="full">100 %</button></span></div>
   </div>
   <section>
-    <h1>Liquid Workspace: Database Table View</h1>
-    <p class="sub">Mockups for the Table View of M3a's Database slice in <a href="../../../PLAN.md#m3a--local-workspace-foundation">PLAN.md</a>, over the merged core and bridge: text, number, select, date and checkbox fields (ADR-0242, ADR-0243), rows read in windows (client architecture rule 3). The table's look follows the approved <a href="liquid-workspace-blocks.html">Blocks mockups</a>, and the app's frame <a href="liquid-app-concept.html">the app's structure</a> (ADR-0241), at Notion's scale; frames here show only the Page. Approved by the maintainer on 2026-11-03, with sort and filter deferred to the Views slice and long tables scrolling inside a fixed height.</p>
+    <h1>Liquid Workspace: Table View</h1>
+    <p class="sub">Mockups for the Table View of M3a's Database slice in <a href="../../../PLAN.md#m3a--local-workspace-foundation">PLAN.md</a>, over the merged core and bridge: text, number, select, date and checkbox fields (ADR-0242, ADR-0243), rows read in windows (client architecture rule 3). The table's look follows the approved <a href="liquid-workspace-blocks.html">Blocks mockups</a>, and the app's frame <a href="liquid-app-concept.html">the app's structure</a> (ADR-0241), at Notion's scale; frames here show only the Page. Approved by the maintainer on 2026-11-03, with sort and filter deferred to the Views slice and long tables scrolling inside a fixed height. The Block is called Table in the app (ADR-0244, <a href="liquid-tables-concept.html">concept</a>).</p>
   </section>
   <section>
     <h3 class="sec">1 · A table on a Page</h3>
@@ -232,7 +232,7 @@ const slash=`<div class="pop" style="left:166px;top:178px;width:300px"><div clas
 <div class="it"><span class="bi">${I.list}</span><span class="tx">Bulleted list</span><span class="r">-</span></div>
 <div class="it"><span class="bi">${I.check}</span><span class="tx">To-do list</span><span class="r">[]</span></div>
 <div class="it"><span class="bi">${I.quote}</span><span class="tx">Quote</span><span class="r">"</span></div>
-<div class="lbl">Database</div>
+<div class="lbl">Table</div>
 <div class="it on"><span class="bi">${I.db}</span><span class="tx">Table<small>Fields and rows, sorted and filtered</small></span></div>
 <hr><div class="it" style="color:var(--ws-text-faint);font-size:12px">Type to filter · ↑↓ · ⏎</div></div>`;
 const fresh=`<div class="blk">${bhead({name:'Untitled',ph:true,caret:true,tools:false})}<div class="tbl" style="--cols:1fr 40px"><div class="tr hd"><span><span class="ico">${I.text}</span>Name</span><span style="justify-content:center">${I.plus}</span></div><div class="tr add"><span style="grid-column:1/-1">${I.plus}&nbsp;New</span></div></div></div>`;

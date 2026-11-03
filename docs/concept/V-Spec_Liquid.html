@@ -114,7 +114,7 @@ Liquid        = local-first workspace and App platform</code></pre>
         <li>Accepted target (ADR-0228): Pages and Blocks in M3; files like a drive and media like a photo library later, as views on the same store. M3 builds attachments only.</li>
         <li>Metadata lives in one CRDT document per Page; Pages group into areas, the unit for Roles, replication and keys.</li>
         <li>Contents are content-addressed, chunked, encrypted blobs outside the CRDT, loaded on demand; a device indexes a file for search when it first loads it. Binary files cannot merge, so concurrent edits keep both versions.</li>
-        <li>Rich text is text with formatting marks, Databases are typed fields and rows (text, number, select, date, checkbox, file, link to a row, formula and button; a new Database starts with a text field "Name"), kept in their home Page's document and read in windows that Rust filters and sorts, and Markdown and HTML serve only import and export. Later drive and media views add OS integration (macOS File Provider, Windows Cloud Files, Linux FUSE) and on-device previews and indexing.</li>
+        <li>Rich text is text with formatting marks, Tables (the core's Database Blocks, ADR-0244) are typed fields and rows (text, number, select, date, checkbox, file, link to a row, formula and button; a new Table starts with a text field "Name"), with a total row, kept in their home Page's document and read in windows that Rust filters and sorts, and Markdown and HTML serve only import and export. Later drive and media views add OS integration (macOS File Provider, Windows Cloud Files, Linux FUSE) and on-device previews and indexing.</li>
       </ul>
     </div></section>
 
