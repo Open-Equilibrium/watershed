@@ -816,6 +816,68 @@ fn fetches_serialize_across_instances_and_processes_after_remote_advances() {
 }
 
 #[test]
+fn first_push_ignores_a_merge_ref_without_a_remote() {
+    run(async {
+        let remote = Remote::new("push-incomplete-upstream");
+        remote
+            .repo
+            .git(&["push", "origin", "HEAD:refs/heads/release"]);
+        remote.repo.git(&["switch", "-c", "topic"]);
+        Remote::commit(&remote.repo, "local.txt");
+        remote
+            .repo
+            .git(&["config", "branch.topic.merge", "refs/heads/release"]);
+        let release = remote.bare.git(&["rev-parse", "release"]);
+        let pushed = Checkpoints::new(remote.repo.path())
+            .push(None)
+            .await
+            .unwrap();
+        assert!(pushed.first_push);
+        assert_eq!(pushed.confirmation.reference, "refs/heads/topic");
+        assert_eq!(pushed.upstream, "origin/topic");
+        assert_eq!(remote.bare.git(&["rev-parse", "release"]), release);
+        assert_eq!(
+            remote.bare.git(&["rev-parse", "topic"]),
+            remote.repo.git(&["rev-parse", "HEAD"])
+        );
+    });
+}
+
+#[test]
+fn push_confirmation_names_an_unmapped_destination_branch() {
+    run(async {
+        let remote = Remote::new("push-unmapped-destination");
+        remote
+            .repo
+            .git(&["push", "origin", "HEAD:refs/heads/release"]);
+        remote.repo.git(&["switch", "-c", "topic"]);
+        Remote::commit(&remote.repo, "local.txt");
+        remote
+            .repo
+            .git(&["config", "branch.topic.remote", "origin"]);
+        remote
+            .repo
+            .git(&["config", "branch.topic.merge", "refs/heads/main"]);
+        remote.repo.git(&[
+            "config",
+            "remote.origin.fetch",
+            "+refs/heads/release:refs/remotes/origin/release",
+        ]);
+        let before = remote.bare.git(&["show-ref"]);
+        let DiffError::PushDefault(confirmation) = Checkpoints::new(remote.repo.path())
+            .push(None)
+            .await
+            .unwrap_err()
+        else {
+            panic!("confirmation required")
+        };
+        assert_eq!(confirmation.confirmation.reference, "refs/heads/main");
+        assert_eq!(confirmation.upstream, "origin/main");
+        assert_eq!(remote.bare.git(&["show-ref"]), before);
+    });
+}
+
+#[test]
 fn push_preserves_the_configured_remote_without_a_tracking_ref_mapping() {
     run(async {
         let origin = Remote::new("push-unmapped-origin");

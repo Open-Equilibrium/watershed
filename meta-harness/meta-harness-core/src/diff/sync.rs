@@ -23,7 +23,7 @@ pub struct PushConfirmation {
 pub struct GitTransfer {
     /// The local branch.
     pub branch: String,
-    /// The named remote; no URL or credentials.
+    /// The exact remote; strip URL credentials before display.
     pub remote: String,
     /// The upstream name as Git shows it.
     pub upstream: String,
@@ -40,6 +40,20 @@ pub struct GitTransfer {
 }
 
 impl WorkingTree {
+    async fn configured_upstream(
+        &self,
+        branch: &str,
+    ) -> Result<Option<(String, String)>, DiffError> {
+        let merge = git_config(&self.root, &["--get", &format!("branch.{branch}.merge")]).await?;
+        let remote = git_config(&self.root, &["--get", &format!("branch.{branch}.remote")]).await?;
+        let merge = merge.trim_end_matches('\n');
+        let remote = remote.trim_end_matches('\n');
+        Ok(
+            (!merge.is_empty() && !remote.is_empty())
+                .then(|| (remote.to_owned(), merge.to_owned())),
+        )
+    }
+
     /// One destination policy for status, Fetch and transfers: upstream, origin, sole remote.
     pub(super) async fn remote(
         &self,
@@ -47,15 +61,10 @@ impl WorkingTree {
     ) -> Result<(Option<String>, bool), DiffError> {
         let remotes = git_ref_output(&self.root, &["remote"]).await?;
         let names: Vec<_> = remotes.lines().collect();
-        if let Some(branch) = branch {
-            let merge =
-                git_config(&self.root, &["--get", &format!("branch.{branch}.merge")]).await?;
-            let remote =
-                git_config(&self.root, &["--get", &format!("branch.{branch}.remote")]).await?;
-            let remote = remote.trim_end_matches('\n');
-            if !merge.is_empty() && !remote.is_empty() {
-                return Ok((Some(remote.to_owned()), !names.is_empty()));
-            }
+        if let Some(branch) = branch
+            && let Some((remote, _)) = self.configured_upstream(branch).await?
+        {
+            return Ok((Some(remote), !names.is_empty()));
         }
         let remote = if names.contains(&"origin") {
             Some("origin")
@@ -84,14 +93,11 @@ impl WorkingTree {
                 .to_owned(),
             )
         })?;
-        let configured =
-            git_config(&self.root, &["--get", &format!("branch.{branch}.merge")]).await?;
-        let first_push = configured.is_empty();
-        let reference = if first_push {
-            format!("refs/heads/{branch}")
-        } else {
-            configured.trim_end_matches('\n').to_owned()
-        };
+        let configured = self.configured_upstream(&branch).await?;
+        let first_push = configured.is_none();
+        let reference = configured
+            .map(|(_, reference)| reference)
+            .unwrap_or_else(|| format!("refs/heads/{branch}"));
         // Never let a short or malformed merge target bypass the default-branch comparison.
         if !reference.starts_with("refs/heads/")
             || git(&self.root, &[], &["check-ref-format", &reference])
@@ -103,6 +109,12 @@ impl WorkingTree {
                     .to_owned(),
             ));
         }
+        let upstream = status.upstream.clone().unwrap_or_else(|| {
+            format!(
+                "{remote}/{}",
+                reference.strip_prefix("refs/heads/").unwrap()
+            )
+        });
         let confirmation = PushConfirmation {
             branch: branch.clone(),
             remote: remote.clone(),
@@ -111,10 +123,7 @@ impl WorkingTree {
         };
         Ok((
             GitTransfer {
-                upstream: status
-                    .upstream
-                    .clone()
-                    .unwrap_or_else(|| format!("{remote}/{branch}")),
+                upstream,
                 branch,
                 remote,
                 ahead: 0,
