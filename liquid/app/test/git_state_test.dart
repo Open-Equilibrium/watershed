@@ -169,6 +169,43 @@ void main() {
     ]);
   });
 
+  for (final kind in [
+    BridgeGitOutcomeKind.done,
+    BridgeGitOutcomeKind.hookFailed,
+  ]) {
+    test(
+      'a $kind switch with a failed refresh names the destination',
+      () async {
+        await git.refresh();
+        backend.git = gitStatusOf(branch: 'feature');
+        backend.gitError = 'status read failed';
+        backend.outcome = BridgeGitOutcome(
+          kind: kind,
+          files: const [],
+          running: const [],
+          detail: kind == BridgeGitOutcomeKind.hookFailed ? 'hook refused' : '',
+        );
+
+        await git.switchTo(
+          branchOf('feature'),
+          leaveChanges: false,
+          fromBranch: null,
+          replacingStash: null,
+        );
+
+        expect(git.problem.value, 'status read failed');
+        expect(notices.single, (
+          kind == BridgeGitOutcomeKind.done
+              ? BridgeLevel.info
+              : BridgeLevel.warning,
+          kind == BridgeGitOutcomeKind.done
+              ? 'Switched to feature.'
+              : 'Switched to feature. A hook failed after: hook refused',
+        ));
+      },
+    );
+  }
+
   testWidgets('a write waits for the latest read to publish its own switch', (
     tester,
   ) async {

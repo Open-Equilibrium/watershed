@@ -337,10 +337,11 @@ class GitState {
         return null;
       }
       await _refreshAfterWrite();
+      final now = problem.value == null ? status.value : null;
       final files = outcome.files.join(', ');
       switch (outcome.kind) {
         case BridgeGitOutcomeKind.done:
-          final text = done(status.value, outcome);
+          final text = done(now, outcome);
           notify(
             outcome.detail.isEmpty ? BridgeLevel.info : BridgeLevel.warning,
             outcome.detail.isEmpty ? text : '$text ${outcome.detail}',
@@ -348,7 +349,7 @@ class GitState {
         case BridgeGitOutcomeKind.hookFailed:
           notify(
             BridgeLevel.warning,
-            '${done(status.value, outcome)} A hook failed after: ${outcome.detail}',
+            '${done(now, outcome)} A hook failed after: ${outcome.detail}',
           );
         case BridgeGitOutcomeKind.mergeInProgress:
           notify(BridgeLevel.warning, mergeHint(status.value));
@@ -365,7 +366,7 @@ class GitState {
         case BridgeGitOutcomeKind.hookChanged:
           notify(
             BridgeLevel.warning,
-            '${done(status.value, outcome)} A hook also changed $files, which ${outcome.files.length == 1 ? 'stays' : 'stay'} uncommitted.',
+            '${done(now, outcome)} A hook also changed $files, which ${outcome.files.length == 1 ? 'stays' : 'stay'} uncommitted.',
           );
         case BridgeGitOutcomeKind.agentRunning:
           notify(
