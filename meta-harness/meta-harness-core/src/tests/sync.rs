@@ -172,6 +172,30 @@ fn pull_fast_forwards_and_refuses_divergence_and_overwriting_changes() {
 }
 
 #[test]
+fn pull_refuses_an_upstream_omitted_by_fetch_before_merging() {
+    use std::os::unix::fs::PermissionsExt;
+    run(async {
+        let remote = Remote::new("pull-excluded-upstream");
+        remote.advance();
+        remote.repo.git(&["fetch", "origin"]);
+        Remote::commit(&remote.other, "latest.txt");
+        remote.other.git(&["push", "origin", "main"]);
+        remote
+            .repo
+            .git(&["config", "--add", "remote.origin.fetch", "^refs/heads/main"]);
+        let hook = remote.repo.path().join(".git/hooks/post-merge");
+        std::fs::write(&hook, "#!/bin/sh\ntouch .git/merge-finished\n").unwrap();
+        std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let before = remote.repo.git(&["rev-parse", "HEAD"]);
+        let result = Checkpoints::new(remote.repo.path()).pull().await;
+        assert!(matches!(result, Err(DiffError::Git(_))), "{result:?}");
+        assert_eq!(remote.repo.git(&["rev-parse", "HEAD"]), before);
+        assert!(!remote.repo.path().join(".git/merge-finished").exists());
+        assert!(remote.repo.git(&["status", "--porcelain"]).is_empty());
+    });
+}
+
+#[test]
 fn pull_advances_head_despite_configured_squash_mode() {
     run(async {
         let remote = Remote::new("pull-configured-squash");

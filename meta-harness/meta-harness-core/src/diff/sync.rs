@@ -288,12 +288,8 @@ impl WorkingTree {
         Ok(())
     }
 
-    /// Counts against the advertised destination and returns its listing for default detection.
-    pub(crate) async fn transfer_counts(
-        &self,
-        transfer: &mut GitTransfer,
-    ) -> Result<String, DiffError> {
-        let advertised = git(
+    async fn advertised_destination(&self, transfer: &GitTransfer) -> Result<String, DiffError> {
+        git(
             &self.root,
             &no_prompts(),
             &[
@@ -306,13 +302,16 @@ impl WorkingTree {
             ],
         )
         .await
-        .map_err(|error| fetch_error(transfer, error))?;
-        let upstream = advertised
-            .lines()
-            .filter_map(|line| line.split_once('\t'))
-            .find_map(|(oid, reference)| {
-                (reference == transfer.confirmation.reference).then_some(oid)
-            });
+        .map_err(|error| fetch_error(transfer, error))
+    }
+
+    /// Counts against the advertised destination and returns its listing for default detection.
+    pub(crate) async fn transfer_counts(
+        &self,
+        transfer: &mut GitTransfer,
+    ) -> Result<String, DiffError> {
+        let advertised = self.advertised_destination(transfer).await?;
+        let upstream = advertised_commit(&advertised, transfer)?;
         let Some(upstream) = upstream else {
             // Only a true first publication counts all history when no destination exists.
             transfer.ahead = if transfer.first_push {
@@ -330,13 +329,6 @@ impl WorkingTree {
             transfer.behind = 0;
             return Ok(advertised);
         };
-        if upstream.len() != transfer.confirmation.commit.len()
-            || !upstream.bytes().all(|byte| byte.is_ascii_hexdigit())
-        {
-            return Err(DiffError::Git(
-                "Git returned an invalid destination commit.".to_owned(),
-            ));
-        }
         if self
             .resolve(&format!("{upstream}^{{commit}}"))
             .await?
@@ -364,6 +356,13 @@ impl WorkingTree {
         let (transfer, status) = self.destination().await?;
         check_pull_status(&status)?;
         self.fetch_transfer(&transfer).await?;
+        let advertised = self.advertised_destination(&transfer).await?;
+        let upstream = advertised_commit(&advertised, &transfer)?;
+        if upstream.is_none() || self.resolve("@{upstream}").await?.as_deref() != upstream {
+            return Err(DiffError::Git(
+                "Git did not update this upstream. Pull it with Git.".to_owned(),
+            ));
+        }
         Ok(transfer)
     }
 
@@ -399,6 +398,25 @@ impl WorkingTree {
             ))),
         }
     }
+}
+
+fn advertised_commit<'a>(
+    advertised: &'a str,
+    transfer: &GitTransfer,
+) -> Result<Option<&'a str>, DiffError> {
+    let upstream = advertised
+        .lines()
+        .filter_map(|line| line.split_once('\t'))
+        .find_map(|(oid, reference)| (reference == transfer.confirmation.reference).then_some(oid));
+    if upstream.is_some_and(|oid| {
+        oid.len() != transfer.confirmation.commit.len()
+            || !oid.bytes().all(|byte| byte.is_ascii_hexdigit())
+    }) {
+        return Err(DiffError::Git(
+            "Git returned an invalid destination commit.".to_owned(),
+        ));
+    }
+    Ok(upstream)
 }
 
 fn check_pull_status(status: &GitStatus) -> Result<(), DiffError> {
