@@ -13,7 +13,7 @@ const _chunk = 100;
 /// Where the caret goes once a Text Block's View is built.
 @immutable
 class Caret {
-  const Caret(this.view, this.offset, {this.text});
+  const Caret(this.view, this.offset, {this.text, this.style});
 
   final String view;
 
@@ -23,6 +23,9 @@ class Caret {
   /// What the Text Block holds, when the Page's input queue wrote it last, so it can take
   /// the caret before reading its text.
   final String? text;
+
+  /// How that Text Block reads, as the input queue last set it.
+  final BridgeTextStyle? style;
 }
 
 /// An open Page's Views in order, read in windows as the Page scrolls to them, never the
@@ -222,6 +225,8 @@ class PageViews extends ChangeNotifier {
           read[chunk] = answer.views;
         }
         if (_disposed || generation != _generation) return;
+        // Windows read across a change may disagree; read them all again first.
+        if (_again) continue;
         _count = count;
         _chunks
           ..clear()

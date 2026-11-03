@@ -216,20 +216,31 @@ class PageEditor {
 
   Future<void> _sleep() => (_wake ??= Completer()).future;
 
-  /// A key on a field while the structure changes: on the source, ⏎, ⌫ and ⌦ wait their
-  /// turn; anywhere, the arrows do nothing; the rest types into the field.
+  /// Changes of structure asked for in another field while one runs, each started once the
+  /// one before is done.
+  final _later = Queue<VoidCallback>();
+
+  /// Starts `change` once the Page's structure is no longer changing.
+  void later(VoidCallback change) => _later.add(change);
+
+  void _startLater() {
+    while (!busy && _later.isNotEmpty) {
+      _later.removeFirst()();
+    }
+  }
+
+  /// A key on the source's field while the structure changes: ⏎, ⌫ and ⌦ wait their turn,
+  /// the arrows do nothing, and the rest types into the field.
   KeyEventResult queue(EditorSource source, KeyEvent event) {
     final key = event.logicalKey;
     if (key == LogicalKeyboardKey.enter ||
         key == LogicalKeyboardKey.numpadEnter ||
         key == LogicalKeyboardKey.backspace ||
         key == LogicalKeyboardKey.delete) {
-      if (isSource(source)) {
-        _queue.add((source.typed, key));
-        source.collapse();
-        _write();
-        _wakeUp();
-      }
+      _queue.add((source.typed, key));
+      source.collapse();
+      _write();
+      _wakeUp();
       return KeyEventResult.handled;
     }
     if (key == LogicalKeyboardKey.arrowUp ||
@@ -344,6 +355,7 @@ class PageEditor {
       _state.finishing.remove(_finish);
       _written();
       if (!views.closed) lingering.value = null;
+      if (!views.closed) scheduleMicrotask(_startLater);
     }
   }
 
@@ -351,7 +363,7 @@ class PageEditor {
       value.selection.isValid ? value.selection.baseOffset : value.text.length;
 
   static Caret _caretOf(EditorTarget target) =>
-      Caret(target.view, target.caret, text: target.text);
+      Caret(target.view, target.caret, text: target.text, style: target.style);
 
   /// Offers the caret to the target's Text Block. True once it took it or the Page closed;
   /// false when more input came first, which then takes its turn.

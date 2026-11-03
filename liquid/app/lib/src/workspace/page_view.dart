@@ -86,7 +86,12 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
 
   @override
   void dispose() {
-    _views.editor.left(this);
+    // A composition still open in the first line is written as it stands.
+    final editor = _views.editor;
+    if (!editor.isSource(this) && !editor.busy && _first.text.isNotEmpty) {
+      editor.first(this);
+    }
+    editor.left(this);
     widget.state.finishing.remove(_typedFirst);
     _tree.removeListener(_titleChanged);
     _title.dispose();

@@ -656,4 +656,86 @@ void main() {
     },
     variant: TargetPlatformVariant.only(TargetPlatform.macOS),
   );
+
+  testWidgets('leaving the Page writes a composition still open', (
+    tester,
+  ) async {
+    await show(tester, ['One']);
+    await caret(tester, 0, 3);
+    tester.testTextInput.updateEditingValue(
+      const TextEditingValue(
+        text: 'Oneni',
+        selection: TextSelection.collapsed(offset: 5),
+        composing: TextRange(start: 3, end: 5),
+      ),
+    );
+    await tester.pump();
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    expect(fake.textsOf(page), ['Oneni']);
+  });
+
+  testWidgets('leaving an empty Page writes its first line', (tester) async {
+    await show(tester);
+    await tester.tap(find.byKey(const Key('first-line')));
+    await tester.pump();
+    tester.testTextInput.updateEditingValue(
+      const TextEditingValue(
+        text: 'ni',
+        selection: TextSelection.collapsed(offset: 2),
+        composing: TextRange(start: 0, end: 2),
+      ),
+    );
+    await tester.pump();
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    expect(fake.textsOf(page), ['ni']);
+  });
+
+  testWidgets('another Text Block edits as usual while ⏎ waits', (
+    tester,
+  ) async {
+    await show(tester, ['A', 'Bc']);
+    await caret(tester, 0, 1);
+    fake.gate = Completer();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    await caret(tester, 1, 2);
+    await tester.sendKeyEvent(LogicalKeyboardKey.backspace);
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    fake.gate!.complete();
+    for (var frame = 0; frame < 60; frame++) {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    expect(fake.textsOf(page), ['A', '', 'B', '']);
+  });
+
+  testWidgets('the new Text Block keeps its list style before it reads it', (
+    tester,
+  ) async {
+    await show(tester, ['Pack'], BridgeTextStyle.bullet);
+    await caret(tester, 0, 4);
+    fake.deferredKinds = {BridgeQueryKind.text};
+    fake.deferred = [];
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    for (var frame = 0; frame < 10; frame++) {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    expect(focused(tester, 1), isTrue);
+    // ⏎ in an empty item ends the list rather than starting another item.
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    for (var frame = 0; frame < 10; frame++) {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    final held = fake.deferred!;
+    fake.deferred = null;
+    for (final release in held) {
+      release.complete();
+    }
+    await tester.pumpAndSettle();
+    expect(fake.textsOf(page), ['Pack', '']);
+    expect(styleOf(1), BridgeTextStyle.paragraph);
+  });
 }

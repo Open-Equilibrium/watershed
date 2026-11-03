@@ -98,6 +98,10 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
 
   @override
   void dispose() {
+    // A composition still open, or anything else not yet sent, is written as it stands.
+    if (!_editor.isSource(this) && _stored != null && _text.text != _stored) {
+      _send(_text.text);
+    }
     _editor.left(this);
     _state.finishing.remove(_typed);
     unawaited(_followed?.cancel());
@@ -193,6 +197,9 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     if (caret.text case final text?) {
       _stored = text;
       if (_text.text != text) _set(text, text.length);
+    }
+    if (caret.style case final style? when style != _style) {
+      setState(() => _style = style);
     }
     if (_stored == null) return;
     // Takes the caret once the field is built editable, so it opens its text input.
@@ -295,7 +302,10 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
         !keys.isControlPressed &&
         !keys.isAltPressed;
     if (!plain) return KeyEventResult.ignored;
-    if (_editor.busy) return _editor.queue(this, event);
+    if (_editor.isSource(this)) return _editor.queue(this, event);
+    // Another Text Block's change of structure is still running: this field types and
+    // deletes as usual, and its own ⏎ or ⌫ at the start waits for that change.
+    final waiting = _editor.busy;
     final selection = _text.selection;
     if (!selection.isValid) return KeyEventResult.ignored;
     final at = selection.baseOffset;
@@ -311,10 +321,10 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
           _set(text, selection.start);
           _send(text);
         }
-        _structure(LogicalKeyboardKey.enter);
+        _structureWhenFree(LogicalKeyboardKey.enter, waiting);
         return KeyEventResult.handled;
       case LogicalKeyboardKey.backspace when collapsed && at == 0:
-        _structure(LogicalKeyboardKey.backspace);
+        _structureWhenFree(LogicalKeyboardKey.backspace, waiting);
         return KeyEventResult.handled;
       case LogicalKeyboardKey.arrowUp when collapsed && _onLine(first: true):
       case LogicalKeyboardKey.arrowLeft when collapsed && at == 0:
@@ -326,6 +336,13 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
       default:
         return KeyEventResult.ignored;
     }
+  }
+
+  void _structureWhenFree(LogicalKeyboardKey key, bool waiting) {
+    if (!waiting) return _structure(key);
+    _editor.later(() {
+      if (mounted && _stored != null) _structure(key);
+    });
   }
 
   /// Hands ⏎ or ⌫ at the start to the Page's input queue, which changes the structure.
@@ -374,6 +391,8 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
 
   /// Puts the caret into the neighbouring Text Block: at the end above, at the start below.
   bool _move(int by) {
+    // The caret is the input queue's to place while the structure changes.
+    if (_editor.busy) return false;
     final neighbour = widget.views.at(widget.index + by);
     if (neighbour == null) return false;
     widget.views.caret.value = Caret(neighbour.id, by < 0 ? _end : 0);

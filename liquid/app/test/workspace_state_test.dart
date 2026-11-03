@@ -180,6 +180,40 @@ void main() {
       expect(views.at(150), isNull);
     });
 
+    test('never show windows read across a change of order', () async {
+      expect(views.at(120), isNull);
+      await pumpEventQueue();
+      final shown = <List<String?>>[];
+      views.addListener(
+        () => shown.add([
+          for (var index = 95; index < 105; index++) views.at(index)?.id,
+        ]),
+      );
+      fake.deferredKinds = {BridgeQueryKind.views};
+      fake.deferred = [];
+      Future<void> addAt(int index) => state.apply(
+        mutation(
+          BridgeMutationKind.addTextBlock,
+          page: page,
+          after: fake.views[page]![index].id,
+          text: 'new',
+        ),
+      );
+      await addAt(98);
+      await pumpEventQueue();
+      // A second change while the first window of the reread is on its way.
+      await addAt(98);
+      await pumpEventQueue();
+      while (fake.deferred!.isNotEmpty) {
+        fake.deferred!.removeAt(0).complete();
+        await pumpEventQueue();
+      }
+      for (final ids in shown) {
+        final present = ids.whereType<String>().toList();
+        expect(present.toSet(), hasLength(present.length), reason: '$ids');
+      }
+    });
+
     test(
       'read a window again when the Page changed while it was read',
       () async {
