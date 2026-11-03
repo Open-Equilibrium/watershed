@@ -26,6 +26,7 @@ import 'branch_menu.dart';
 import 'chat_view.dart';
 import 'git_actions.dart';
 import 'input_lane.dart';
+import 'pull_request.dart';
 import 'sidebar.dart';
 import 'status_bar.dart';
 
@@ -82,6 +83,8 @@ class _AgentShellState extends State<AgentShell> {
 
   /// Stops the agent before the app exits, so no pi process outlives Liquid.
   late final _lifecycle = AppLifecycleListener(
+    // The pull request summary is read again when the window regains focus.
+    onResume: () => unawaited(widget.state?.pulls.refresh()),
     onExitRequested: () async {
       await widget.state?.dispose();
       // Every edit asked for reaches the replica before Liquid exits.
@@ -409,6 +412,7 @@ class _AgentShellState extends State<AgentShell> {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     WidgetStrip(state: state),
+                    PushedOffer(state: state, device: info.device),
                     ActionArea(
                       state: state,
                       project: info.project,
@@ -461,7 +465,7 @@ class _AgentShellState extends State<AgentShell> {
 }
 
 /// The session's title with its project and model as chips (approved look mockup), and at the
-/// right the checkout's branch (approved Git mockups).
+/// right the checkout's branch, its pull request and the Git action (approved Git mockups).
 class _Header extends StatelessWidget {
   const _Header({
     required this.state,
@@ -519,6 +523,7 @@ class _Header extends StatelessWidget {
             ),
           ),
           Flexible(child: BranchChip(state: state)),
+          PullRequestChip(state: state, device: device),
           const SizedBox(width: WsMetrics.space2),
           GitActions(state: state, device: device),
         ],

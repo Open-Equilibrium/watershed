@@ -13,69 +13,76 @@ import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'branch_menu.dart';
 import 'commit_dialog.dart';
+import 'pull_request.dart';
 
-enum _GitAction { commit, push, pull, fetch, create }
+/// Pushes the branch, asking first before pushing to the remote's default branch; a completed
+/// push offers a pull request.
+Future<void> pushBranch(
+  BuildContext context,
+  SessionState state, {
+  required String device,
+}) async {
+  final generation = state.generation;
+  BridgePushConfirmation? confirmed;
+  while (context.mounted && generation == state.generation) {
+    final outcome = await state.git.push(device: device, confirmed: confirmed);
+    if (outcome?.kind == BridgeGitOutcomeKind.done) {
+      unawaited(state.pulls.pushed(outcome!.transfer!));
+    }
+    if (outcome?.kind != BridgeGitOutcomeKind.pushDefault ||
+        !context.mounted ||
+        generation != state.generation) {
+      return;
+    }
+    final branch = outcome!.transfer!.destination;
+    final transfer = outcome.transfer!;
+    final upstream = transfer.upstream;
+    final count = transfer.ahead;
+    final decision = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        void push() => Navigator.of(context).pop(true);
+        return ActionDialog(
+          title: 'Push to $branch?',
+          bindings: {const Keys(LogicalKeyboardKey.enter).activator: push},
+          actions: [
+            PrimaryButton(
+              label: 'Push to $branch',
+              shortcut: '⏎',
+              onPressed: push,
+            ),
+            SecondaryButton(
+              label: 'Create branch…',
+              onPressed: () => Navigator.of(context).pop(false),
+            ),
+          ],
+          children: [
+            Text(
+              "This pushes ${plural(count, 'commit')} directly to $upstream, the repository's default branch. You can push it as it is, or create a branch first and push that.",
+              style: DangerDialog.text(context),
+            ),
+          ],
+        );
+      },
+    );
+    if (!context.mounted || generation != state.generation) return;
+    if (decision == true) {
+      confirmed = transfer.confirmation;
+      continue;
+    } else if (decision == false) {
+      await showBranchMenu(context, state);
+    }
+    return;
+  }
+}
+
+enum _GitAction { commit, push, pull, fetch, create, pullRequest }
 
 /// The next single Git step and the approved, explicitly invoked Git menu.
 class GitActions extends StatelessWidget {
   const GitActions({super.key, required this.state, required this.device});
   final SessionState state;
   final String device;
-
-  Future<void> _push(BuildContext context) async {
-    final generation = state.generation;
-    BridgePushConfirmation? confirmed;
-    while (context.mounted && generation == state.generation) {
-      final outcome = await state.git.push(
-        device: device,
-        confirmed: confirmed,
-      );
-      if (outcome?.kind != BridgeGitOutcomeKind.pushDefault ||
-          !context.mounted ||
-          generation != state.generation) {
-        return;
-      }
-      final branch = outcome!.transfer!.destination;
-      final transfer = outcome.transfer!;
-      final upstream = transfer.upstream;
-      final count = transfer.ahead;
-      final decision = await showDialog<bool>(
-        context: context,
-        builder: (context) {
-          void push() => Navigator.of(context).pop(true);
-          return ActionDialog(
-            title: 'Push to $branch?',
-            bindings: {const Keys(LogicalKeyboardKey.enter).activator: push},
-            actions: [
-              PrimaryButton(
-                label: 'Push to $branch',
-                shortcut: '⏎',
-                onPressed: push,
-              ),
-              SecondaryButton(
-                label: 'Create branch…',
-                onPressed: () => Navigator.of(context).pop(false),
-              ),
-            ],
-            children: [
-              Text(
-                "This pushes ${plural(count, 'commit')} directly to $upstream, the repository's default branch. You can push it as it is, or create a branch first and push that.",
-                style: DangerDialog.text(context),
-              ),
-            ],
-          );
-        },
-      );
-      if (!context.mounted || generation != state.generation) return;
-      if (decision == true) {
-        confirmed = transfer.confirmation;
-        continue;
-      } else if (decision == false) {
-        await showBranchMenu(context, state);
-      }
-      return;
-    }
-  }
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
@@ -116,7 +123,9 @@ class GitActions extends StatelessWidget {
         if (status.merging && action != _GitAction.fetch) {
           return mergeHint(status);
         }
-        if (action == _GitAction.create) return null;
+        if (action == _GitAction.create || action == _GitAction.pullRequest) {
+          return null;
+        }
         if (detached && action != _GitAction.fetch) return detachedCommitHint;
         switch (action) {
           case _GitAction.commit:
@@ -148,7 +157,7 @@ class GitActions extends StatelessWidget {
                 : null;
           case _GitAction.fetch:
             return remote == null || remote == '.' ? noDestination : null;
-          case _GitAction.create:
+          case _GitAction.create || _GitAction.pullRequest:
             return null;
         }
       }
@@ -184,6 +193,7 @@ class GitActions extends StatelessWidget {
         _GitAction.push: LucideIcons.arrowUp,
         _GitAction.pull: LucideIcons.arrowDown,
         _GitAction.create: LucideIcons.gitBranch,
+        _GitAction.pullRequest: LucideIcons.arrowLeftRight,
       };
       final hints = {
         _GitAction.commit:
@@ -205,6 +215,9 @@ class GitActions extends StatelessWidget {
             (detached
                 ? detachedCommitHint
                 : 'Create a branch from ${status.branch}.'),
+        _GitAction.pullRequest:
+            blockers[_GitAction.pullRequest] ??
+            'Create a pull request on GitHub for the pushed ${status.branch ?? 'branch'} through gh on $device.',
       };
       final counts = {
         _GitAction.commit: enabled[_GitAction.commit]!
@@ -220,13 +233,15 @@ class GitActions extends StatelessWidget {
           case _GitAction.commit:
             unawaited(showCommitDialog(context, state));
           case _GitAction.push:
-            unawaited(_push(context));
+            unawaited(pushBranch(context, state, device: device));
           case _GitAction.pull:
             unawaited(git.pull(device: device));
           case _GitAction.fetch:
             unawaited(git.fetchNow());
           case _GitAction.create:
             unawaited(showBranchMenu(context, state));
+          case _GitAction.pullRequest:
+            unawaited(showPullRequestDialog(context, state, device: device));
         }
       }
 
@@ -251,7 +266,13 @@ class GitActions extends StatelessWidget {
                     : Icon(icons[action], size: 14),
               ),
               const SizedBox(width: WsMetrics.space3),
-              Text(label),
+              Flexible(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
               const Spacer(),
               if (trailing.isNotEmpty) Text(trailing),
             ],
@@ -347,6 +368,7 @@ class GitActions extends StatelessWidget {
                 ),
                 item(_GitAction.fetch, 'Fetch', remote ?? ''),
                 const PopupMenuDivider(),
+                item(_GitAction.pullRequest, 'Create pull request…', ''),
                 item(_GitAction.create, 'Create branch…', ''),
               ],
             ),

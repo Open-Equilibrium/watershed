@@ -538,9 +538,13 @@ class FakeBackend implements SessionBackend {
     return created;
   }
 
+  /// Pull request reads, which follow every status read with an upstream, so they stay out
+  /// of [calls].
+  int pullRequestReads = 0;
+
   @override
   Future<BridgePullRequestOutcome> pullRequest() async {
-    calls.add('pull request');
+    pullRequestReads++;
     return current;
   }
 
