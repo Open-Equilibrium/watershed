@@ -11,6 +11,8 @@ import '../theme/icons.dart';
 import '../theme/logo.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
+import '../workspace/explorer.dart';
+import '../workspace/workspace_state.dart';
 import 'session_menus.dart';
 
 /// What the sidebar shows about a session.
@@ -50,29 +52,40 @@ class SessionTitle extends StatelessWidget {
   );
 }
 
-/// Width of the sidebar at the default text size (approved look mockup).
-const sidebarWidth = 280.0;
+/// No Page is open without a Workspace.
+final _noPage = ValueNotifier<OpenPage?>(null);
 
-/// Session navigation with project, harness and device per session, and Settings in its
-/// footer (approved look mockup).
+/// The Explorer above the agent sessions with project, harness and device per session, and
+/// Settings in its footer (approved look and Pages mockups).
 class Sidebar extends StatelessWidget {
   const Sidebar({
     super.key,
-    required this.state,
-    required this.info,
+    this.state,
+    this.info,
+    this.workspace,
+    this.workspaceProblem,
     this.onSettings,
     this.onNewSession,
+    this.onShowSession,
   });
 
-  final SessionState state;
-  final SessionInfo info;
+  /// The agent session, if one started.
+  final SessionState? state;
+  final SessionInfo? info;
+
+  /// The Workspace, or why it did not open.
+  final WorkspaceState? workspace;
+  final String? workspaceProblem;
   final VoidCallback? onSettings;
 
   /// Starts a new session as ⌘N does: in the chat, ready to describe the task.
   final VoidCallback? onNewSession;
 
+  /// Shows the session in place of the open Page.
+  final VoidCallback? onShowSession;
+
   /// Asks before deleting the open session, which a new session then replaces.
-  Future<void> _deleteOpen(BuildContext context) async {
+  Future<void> _deleteOpen(BuildContext context, SessionState state) async {
     final String? path;
     try {
       path = await state.sessionFile();
@@ -96,6 +109,139 @@ class Sidebar extends StatelessWidget {
     );
   }
 
+  /// The project and the session's card, which shows the session when tapped.
+  List<Widget> _session(
+    BuildContext context,
+    SessionState state,
+    SessionInfo info,
+    TextStyle small,
+  ) {
+    final ws = context.ws;
+    return [
+      RowMenu(
+        actions: [
+          if (info.path case final path?)
+            RowAction(
+              Platform.isMacOS ? 'Open in Finder' : 'Open in file manager',
+              () => openInFileManager(state, path),
+            ),
+          RowAction(
+            'New agent session',
+            onNewSession ?? () => unawaited(state.newSession()),
+            shortcut: Keymap.of(context).label(Command.newSession),
+          ),
+          null,
+          RowAction(
+            'Remove all checkpoints…',
+            () => confirmRemoveCheckpoints(context, state, info.project),
+            danger: true,
+          ),
+        ],
+        child: Padding(
+          padding: const EdgeInsets.symmetric(
+            horizontal: WsMetrics.space3,
+            vertical: WsMetrics.space2,
+          ),
+          child: Text(
+            info.project,
+            style: TextStyle(
+              color: ws.textMuted,
+              fontWeight: WsMetrics.fwMedium,
+            ),
+          ),
+        ),
+      ),
+      RowMenu(
+        actions: [
+          RowAction(
+            'Delete session…',
+            () => _deleteOpen(context, state),
+            danger: true,
+          ),
+        ],
+        // Marked while it shows rather than a Page.
+        child: ValueListenableBuilder(
+          valueListenable: workspace?.open ?? _noPage,
+          builder: (context, open, card) => Semantics(
+            selected: open == null,
+            child: Shortcuts(
+              shortcuts: activateKeys,
+              child: InkWell(
+                key: const Key('session-card'),
+                onTap: onShowSession,
+                borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
+                child: Ink(
+                  decoration: BoxDecoration(
+                    color: open == null ? ws.hover : null,
+                    borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
+                  ),
+                  child: card,
+                ),
+              ),
+            ),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(
+              WsMetrics.space6,
+              WsMetrics.space2,
+              WsMetrics.space3,
+              WsMetrics.space2,
+            ),
+            child: ValueListenableBuilder(
+              valueListenable: state.status,
+              builder: (context, status, _) {
+                final (label, color) = statusLabel(context, status);
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          width: 7,
+                          height: 7,
+                          decoration: BoxDecoration(
+                            color: color,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        const SizedBox(width: WsMetrics.space3),
+                        Expanded(child: SessionTitle(state: state)),
+                        Text(
+                          label,
+                          style: TextStyle(
+                            color: color,
+                            fontSize: WsMetrics.fsSmall,
+                          ),
+                        ),
+                      ],
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.only(left: 15),
+                      // The checkout's branch, live (approved Git mockups).
+                      child: ValueListenableBuilder(
+                        valueListenable: state.git.status,
+                        builder: (context, git, _) => Text(
+                          [
+                            info.harness,
+                            ?(git?.branch ?? git?.commit),
+                            info.device,
+                          ].join(' · '),
+                          style: small,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+          ),
+        ),
+      ),
+    ];
+  }
+
   @override
   Widget build(BuildContext context) {
     final ws = context.ws;
@@ -105,7 +251,7 @@ class Sidebar extends StatelessWidget {
       height: WsMetrics.lhSmall / WsMetrics.fsSmall,
     );
     return Container(
-      width: sidebarWidth,
+      width: WsMetrics.widthSide,
       decoration: BoxDecoration(
         color: ws.subtle,
         border: Border(right: BorderSide(color: ws.border)),
@@ -133,116 +279,41 @@ class Sidebar extends StatelessWidget {
               ],
             ),
           ),
-          const SizedBox(height: WsMetrics.space5),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space3),
-            child: Row(children: [Text('Agent sessions', style: small)]),
-          ),
-          const SizedBox(height: WsMetrics.space2),
-          RowMenu(
-            actions: [
-              if (info.path case final path?)
-                RowAction(
-                  Platform.isMacOS ? 'Open in Finder' : 'Open in file manager',
-                  () => openInFileManager(state, path),
-                ),
-              RowAction(
-                'New agent session',
-                onNewSession ?? () => unawaited(state.newSession()),
-                shortcut: Keymap.of(context).label(Command.newSession),
-              ),
-              null,
-              RowAction(
-                'Remove all checkpoints…',
-                () => confirmRemoveCheckpoints(context, state, info.project),
-                danger: true,
-              ),
-            ],
-            child: Padding(
-              padding: const EdgeInsets.symmetric(
-                horizontal: WsMetrics.space3,
-                vertical: WsMetrics.space2,
-              ),
-              child: Text(
-                info.project,
-                style: TextStyle(
-                  color: ws.textMuted,
-                  fontWeight: WsMetrics.fwMedium,
-                ),
-              ),
+          const SizedBox(height: WsMetrics.space3),
+          Expanded(
+            child: ListView(
+              children: [
+                if (workspace case final workspace?) Explorer(state: workspace),
+                if (workspaceProblem case final problem?)
+                  Padding(
+                    padding: const EdgeInsets.only(top: WsMetrics.space3),
+                    child: WarningNotice(problem),
+                  ),
+                // A Page shows the Workspace's latest problem itself; without one, it shows
+                // here.
+                if (workspace case final workspace?)
+                  ListenableBuilder(
+                    listenable: Listenable.merge([
+                      workspace.problem,
+                      workspace.open,
+                    ]),
+                    builder: (context, _) => switch ((
+                      workspace.problem.value,
+                      workspace.open.value,
+                    )) {
+                      (final problem?, null) => Padding(
+                        padding: const EdgeInsets.only(top: WsMetrics.space3),
+                        child: WarningNotice(problem),
+                      ),
+                      _ => const SizedBox.shrink(),
+                    },
+                  ),
+                const SidebarHeading('Agent sessions'),
+                if ((state, info) case (final state?, final info?))
+                  ..._session(context, state, info, small),
+              ],
             ),
           ),
-          RowMenu(
-            actions: [
-              RowAction(
-                'Delete session…',
-                () => _deleteOpen(context),
-                danger: true,
-              ),
-            ],
-            child: Container(
-              padding: const EdgeInsets.fromLTRB(
-                WsMetrics.space6,
-                WsMetrics.space2,
-                WsMetrics.space3,
-                WsMetrics.space2,
-              ),
-              decoration: BoxDecoration(
-                color: ws.hover,
-                borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
-              ),
-              child: ValueListenableBuilder(
-                valueListenable: state.status,
-                builder: (context, status, _) {
-                  final (label, color) = statusLabel(context, status);
-                  return Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Container(
-                            width: 7,
-                            height: 7,
-                            decoration: BoxDecoration(
-                              color: color,
-                              shape: BoxShape.circle,
-                            ),
-                          ),
-                          const SizedBox(width: WsMetrics.space3),
-                          Expanded(child: SessionTitle(state: state)),
-                          Text(
-                            label,
-                            style: TextStyle(
-                              color: color,
-                              fontSize: WsMetrics.fsSmall,
-                            ),
-                          ),
-                        ],
-                      ),
-                      Padding(
-                        padding: const EdgeInsets.only(left: 15),
-                        // The checkout's branch, live (approved Git mockups).
-                        child: ValueListenableBuilder(
-                          valueListenable: state.git.status,
-                          builder: (context, git, _) => Text(
-                            [
-                              info.harness,
-                              ?(git?.branch ?? git?.commit),
-                              info.device,
-                            ].join(' · '),
-                            style: small,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      ),
-                    ],
-                  );
-                },
-              ),
-            ),
-          ),
-          const Spacer(),
           if (onSettings case final onSettings?)
             Tooltip(
               message: 'Settings',
@@ -252,7 +323,7 @@ class Sidebar extends StatelessWidget {
                   onTap: onSettings,
                   borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
                   child: Container(
-                    height: WsMetrics.rowNav,
+                    height: WsMetrics.rowSide,
                     padding: const EdgeInsets.symmetric(
                       horizontal: WsMetrics.space3,
                     ),

@@ -3,8 +3,10 @@ import 'dart:io';
 
 import 'agent/sidebar.dart';
 import 'rust/api/session.dart';
+import 'rust/api/workspace.dart';
 import 'session/backend.dart';
 import 'session/session_state.dart';
+import 'workspace/workspace_state.dart';
 
 /// The session the app opens, or why it opened none.
 class Launch {
@@ -78,4 +80,34 @@ Future<Launch> launchFromEnvironment(Map<String, String> environment) async {
   } on Object catch (error) {
     return Launch.problem('pi did not start: $error');
   }
+}
+
+/// Opens the Workspace whose replica lives in `dir` and follows it, or says why it did not
+/// open. `show` opens its first Page.
+Future<(WorkspaceState?, String?)> openWorkspace(
+  String dir, {
+  required bool show,
+}) async {
+  final LiquidWorkspace workspace;
+  try {
+    workspace = await LiquidWorkspace.open(dir: dir);
+  } on Object catch (error) {
+    return (null, 'The Workspace did not open: $error');
+  }
+  return startWorkspace(workspace, show: show);
+}
+
+/// Follows an open Workspace; a failed first read is said in the sidebar, since no Page may
+/// be open to say it.
+Future<(WorkspaceState, String?)> startWorkspace(
+  LiquidWorkspace workspace, {
+  required bool show,
+}) async {
+  final state = WorkspaceState(workspace);
+  try {
+    await state.start(show: show);
+  } on Object catch (error) {
+    return (state, 'The Workspace did not load: $error');
+  }
+  return (state, null);
 }

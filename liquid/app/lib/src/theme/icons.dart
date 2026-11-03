@@ -32,4 +32,5 @@ abstract final class LucideIcons {
   static const arrowLeftRight = IconData(0xe24a, fontFamily: _family);
   static const undo2 = IconData(0xe2a1, fontFamily: _family);
   static const ellipsis = IconData(0xe0b6, fontFamily: _family);
+  static const file = IconData(0xe0c0, fontFamily: _family);
 }

@@ -46,6 +46,7 @@ const List<_Group> _left = [
     'menu bar shows ⌘',
     [
       _Entry(Command.newSession),
+      _Entry(Command.newPage),
       _Entry(Command.settings),
       _Entry(Command.chat),
       _Entry(Command.trajectory),
