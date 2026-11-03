@@ -50,6 +50,9 @@ class PageViews extends ChangeNotifier {
 
   final _chunks = <int, List<BridgeView>>{};
   final _loading = <int, Future<void>>{};
+
+  /// Windows asked for while a reread ran, which it reads too.
+  final _wanted = <int>{};
   StreamSubscription<BridgeChange>? _followed;
   int _generation = 0;
   bool _disposed = false;
@@ -163,7 +166,12 @@ class PageViews extends ChangeNotifier {
           query: query(BridgeQueryKind.text, page: page, block: view.block),
         );
         style = answer.style ?? BridgeTextStyle.paragraph;
-        setStyle(view.block, style);
+        // A Text Block's own read, which may be newer, wins.
+        if (styles.value.containsKey(view.block)) {
+          style = styles.value[view.block];
+        } else {
+          setStyle(view.block, style);
+        }
       }
       if (style != BridgeTextStyle.numbered || view.boundary) return;
     }
@@ -186,6 +194,12 @@ class PageViews extends ChangeNotifier {
         ),
       );
       if (_disposed) return;
+      // A reread running now reads this window too, so no order mixes with another.
+      if (_reading) {
+        _wanted.add(chunk);
+        _again = true;
+        return;
+      }
       if (generation != _generation) {
         // Read again once this read has left the list of running ones.
         scheduleMicrotask(() => unawaited(_load(chunk)));
@@ -212,7 +226,7 @@ class PageViews extends ChangeNotifier {
         final generation = ++_generation;
         final read = <int, List<BridgeView>>{};
         var count = 0;
-        for (final chunk in {0, ..._chunks.keys}) {
+        for (final chunk in {0, ..._chunks.keys, ..._wanted}) {
           final answer = await state.workspace.query(
             query: query(
               BridgeQueryKind.views,
@@ -227,6 +241,7 @@ class PageViews extends ChangeNotifier {
         if (_disposed || generation != _generation) return;
         // Windows read across a change may disagree; read them all again first.
         if (_again) continue;
+        _wanted.clear();
         _count = count;
         _chunks
           ..clear()

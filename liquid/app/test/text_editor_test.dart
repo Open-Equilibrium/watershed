@@ -738,4 +738,56 @@ void main() {
     expect(fake.textsOf(page), ['Pack', '']);
     expect(styleOf(1), BridgeTextStyle.paragraph);
   });
+
+  testWidgets('⏎ in another Text Block while ⏎ waits survives leaving', (
+    tester,
+  ) async {
+    await show(tester, ['A', 'B']);
+    await caret(tester, 0, 1);
+    fake.gate = Completer();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    await caret(tester, 1, 1);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    fake.gate!.complete();
+    await tester.pumpAndSettle();
+    expect(fake.textsOf(page), ['A', '', 'B', '']);
+  });
+
+  testWidgets('typing after ⏎ in another Text Block lands after its split', (
+    tester,
+  ) async {
+    await show(tester, ['A', 'BC']);
+    await caret(tester, 0, 1);
+    fake.gate = Completer();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    await caret(tester, 1, 1);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    await type(tester, 1, 'x');
+    fake.gate!.complete();
+    for (var frame = 0; frame < 60; frame++) {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    expect(fake.textsOf(page), ['A', '', 'B', 'xC']);
+  });
+
+  testWidgets('--- typed in a list item while ⏎ waits starts a Section', (
+    tester,
+  ) async {
+    await show(tester, ['Item'], BridgeTextStyle.bullet);
+    await caret(tester, 0, 4);
+    fake.gate = Completer();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    await type(tester, 0, '---');
+    fake.gate!.complete();
+    await tester.pumpAndSettle();
+    expect(fake.textsOf(page), ['Item', '']);
+    expect(fake.views[page]![1].boundary, isTrue);
+  });
 }

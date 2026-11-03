@@ -303,9 +303,8 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
         !keys.isAltPressed;
     if (!plain) return KeyEventResult.ignored;
     if (_editor.isSource(this)) return _editor.queue(this, event);
-    // Another Text Block's change of structure is still running: this field types and
-    // deletes as usual, and its own ⏎ or ⌫ at the start waits for that change.
-    final waiting = _editor.busy;
+    // While another Text Block's change of structure runs, this field types and deletes as
+    // usual, and its own ⏎ or ⌫ at the start joins the queue behind that change.
     final selection = _text.selection;
     if (!selection.isValid) return KeyEventResult.ignored;
     final at = selection.baseOffset;
@@ -321,10 +320,10 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
           _set(text, selection.start);
           _send(text);
         }
-        _structureWhenFree(LogicalKeyboardKey.enter, waiting);
+        _structure(LogicalKeyboardKey.enter);
         return KeyEventResult.handled;
       case LogicalKeyboardKey.backspace when collapsed && at == 0:
-        _structureWhenFree(LogicalKeyboardKey.backspace, waiting);
+        _structure(LogicalKeyboardKey.backspace);
         return KeyEventResult.handled;
       case LogicalKeyboardKey.arrowUp when collapsed && _onLine(first: true):
       case LogicalKeyboardKey.arrowLeft when collapsed && at == 0:
@@ -336,13 +335,6 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
       default:
         return KeyEventResult.ignored;
     }
-  }
-
-  void _structureWhenFree(LogicalKeyboardKey key, bool waiting) {
-    if (!waiting) return _structure(key);
-    _editor.later(() {
-      if (mounted && _stored != null) _structure(key);
-    });
   }
 
   /// Hands ⏎ or ⌫ at the start to the Page's input queue, which changes the structure.

@@ -109,8 +109,18 @@ class EditorTarget {
   bool boundary;
 }
 
-/// A key waiting for the change before it, with what the field held when it was pressed.
-typedef _Queued = (TextEditingValue typed, LogicalKeyboardKey key);
+/// A key waiting for the change before it, with what its field held when it was pressed.
+/// A key from another field also names that field, its Text Block and what the field before
+/// held last, all of which is written before the key.
+class _Queued {
+  _Queued(this.typed, this.key, {this.source, this.target, this.left});
+
+  final TextEditingValue typed;
+  final LogicalKeyboardKey key;
+  final EditorSource? source;
+  final EditorTarget? target;
+  final TextEditingValue? left;
+}
 
 /// A Page's ordered input queue (ADR-0240). ⏎, ⌫ at a Text Block's start and the first
 /// character on an empty Page change the Page's structure, which the core answers within
@@ -149,9 +159,32 @@ class PageEditor {
 
   bool isSource(EditorSource source) => identical(_source, source);
 
-  /// Starts `key` in `target`, whose field is `source`: ⏎ or ⌫ at its start.
+  /// Starts `key` in `target`, whose field is `source`: ⏎ or ⌫ at its start. While a change
+  /// runs from another field, `source` becomes the field typing goes to, and its key waits
+  /// its turn behind what the field before held.
   void start(EditorSource source, EditorTarget target, LogicalKeyboardKey key) {
+    if (busy) {
+      final left = _latest;
+      _source = source;
+      _gone = false;
+      _latest = source.typed;
+      _linger(target);
+      _known[target.block] = target.text;
+      _queue.add(
+        _Queued(_latest, key, source: source, target: target, left: left),
+      );
+      _write();
+      _wakeUp();
+      return;
+    }
     _begin(source);
+    _linger(target);
+    _known[target.block] = target.text;
+    _queue.add(_Queued(_latest, key));
+    unawaited(_drive(target, null));
+  }
+
+  void _linger(EditorTarget target) {
     lingering.value = (
       BridgeView(
         id: target.view,
@@ -160,9 +193,6 @@ class PageEditor {
       ),
       target.index,
     );
-    _known[target.block] = target.text;
-    _queue.add((_latest, key));
-    unawaited(_drive(target, null));
   }
 
   /// Makes the first Text Block of an empty Page from what `source` holds.
@@ -216,19 +246,6 @@ class PageEditor {
 
   Future<void> _sleep() => (_wake ??= Completer()).future;
 
-  /// Changes of structure asked for in another field while one runs, each started once the
-  /// one before is done.
-  final _later = Queue<VoidCallback>();
-
-  /// Starts `change` once the Page's structure is no longer changing.
-  void later(VoidCallback change) => _later.add(change);
-
-  void _startLater() {
-    while (!busy && _later.isNotEmpty) {
-      _later.removeFirst()();
-    }
-  }
-
   /// A key on the source's field while the structure changes: ⏎, ⌫ and ⌦ wait their turn,
   /// the arrows do nothing, and the rest types into the field.
   KeyEventResult queue(EditorSource source, KeyEvent event) {
@@ -237,7 +254,7 @@ class PageEditor {
         key == LogicalKeyboardKey.numpadEnter ||
         key == LogicalKeyboardKey.backspace ||
         key == LogicalKeyboardKey.delete) {
-      _queue.add((source.typed, key));
+      _queue.add(_Queued(source.typed, key));
       source.collapse();
       _write();
       _wakeUp();
@@ -256,7 +273,8 @@ class PageEditor {
       views.write(change, blocks);
 
   Future<void> _drive(EditorTarget? target, TextEditingValue? first) async {
-    final source = _source!;
+    var source = _source!;
+    final sources = [source];
     var prev = first ?? _latest;
     try {
       if (first != null) {
@@ -286,9 +304,20 @@ class PageEditor {
           (base + field - boundary).clamp(0, target!.text.length);
       while (true) {
         final _Queued? next = _queue.isEmpty ? null : _queue.removeFirst();
+        if (next?.left case final left?) {
+          // What the field before still held goes in before the other field's key.
+          await _route(target!, prev, left, boundary, base);
+          await _markdown(target, target.text);
+          source = next!.source!;
+          sources.add(source);
+          target = next.target!;
+          prev = next.typed;
+          boundary = _caret(prev);
+          base = target.caret = _caret(prev);
+        }
         final TextEditingValue snapshot;
         if (next != null) {
-          snapshot = next.$1;
+          snapshot = next.typed;
         } else {
           // A composition ends before its text moves, unless its field is gone or Liquid
           // quits.
@@ -308,7 +337,7 @@ class PageEditor {
         if (next != null) {
           // The key acts where the field's caret or selection was when it was pressed.
           final selection = snapshot.selection;
-          final key = next.$2;
+          final key = next.key;
           if (selection.isValid) {
             final (start, end) = (place(selection.start), place(selection.end));
             if (end > start) {
@@ -340,22 +369,25 @@ class PageEditor {
         }
         if (await _handOver(target, prev)) break;
       }
-      final block = source.block;
-      source.settle(block == null ? null : _known[block]);
-      if (block == target.block) views.moveCaret(_caretOf(target));
-      // Both Text Blocks read their text and style again, now that the queue let go.
-      if (block != null) views.reread(block);
+      for (final settled in sources) {
+        final block = settled.block;
+        settled.settle(block == null ? null : _known[block]);
+        if (block == target.block) views.moveCaret(_caretOf(target));
+        // Each Text Block reads its text and style again, now that the queue let go.
+        if (block != null) views.reread(block);
+      }
       views.reread(target.block);
     } on Object {
       // The problem shows on the Page; the stored text stays as the core has it.
-      source.settle(null);
+      for (final settled in sources) {
+        settled.settle(null);
+      }
     } finally {
       _source = null;
       _queue.clear();
       _state.finishing.remove(_finish);
       _written();
       if (!views.closed) lingering.value = null;
-      if (!views.closed) scheduleMicrotask(_startLater);
     }
   }
 
@@ -586,6 +618,7 @@ class PageEditor {
   /// A Markdown shortcut just typed at a paragraph's start formats it, and `---` typed
   /// alone starts a Section, as typing in a Text Block does; true if one applied.
   Future<bool> _markdown(EditorTarget target, String before) async {
+    if (await _sectionBreak(target, before)) return true;
     if (target.style != BridgeTextStyle.paragraph) return false;
     for (final MapEntry(key: typed, value: style)
         in markdownShortcuts.entries) {
@@ -598,7 +631,12 @@ class PageEditor {
       await _restyle(target, style);
       return true;
     }
-    // A boundary already exists at the Page's start (approved Section mockups).
+    return false;
+  }
+
+  /// `---` typed alone starts a Section, in any Text Block but the Page's first, where a
+  /// boundary already exists (approved Section mockups).
+  Future<bool> _sectionBreak(EditorTarget target, String before) async {
     if (target.text == sectionBreak &&
         before != sectionBreak &&
         target.index > 0 &&

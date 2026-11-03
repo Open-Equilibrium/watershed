@@ -180,6 +180,51 @@ void main() {
       expect(views.at(150), isNull);
     });
 
+    test('never show a window read beside an older one', () async {
+      final shown = <List<String?>>[];
+      views.addListener(
+        () => shown.add([
+          for (var index = 95; index < 105; index++) views.at(index)?.id,
+        ]),
+      );
+      fake.deferredKinds = {BridgeQueryKind.views};
+      fake.deferred = [];
+      // A change at the start, whose reread waits, then a window asked for meanwhile.
+      await state.apply(
+        mutation(BridgeMutationKind.addTextBlock, page: page, text: 'new'),
+      );
+      await pumpEventQueue();
+      expect(views.at(120), isNull);
+      await pumpEventQueue();
+      while (fake.deferred!.isNotEmpty) {
+        fake.deferred!.removeLast().complete();
+        await pumpEventQueue();
+      }
+      await pumpEventQueue();
+      for (final ids in shown) {
+        final present = ids.whereType<String>().toList();
+        expect(present.toSet(), hasLength(present.length), reason: '$ids');
+      }
+      expect(views.indexOf(fake.views[page]![120].id), 120);
+    });
+
+    test('a numbering read never undoes a newer style', () async {
+      final block = fake.views[page]![1].block;
+      fake.deferredKinds = {BridgeQueryKind.text};
+      fake.deferred = [];
+      fake.styles[block] = BridgeTextStyle.numbered;
+      final run = views.readRun(2);
+      await pumpEventQueue();
+      // The Text Block read its new style meanwhile.
+      views.setStyle(block, BridgeTextStyle.paragraph);
+      for (final release in fake.deferred!) {
+        release.complete();
+      }
+      fake.deferred = null;
+      await run;
+      expect(views.styles.value[block], BridgeTextStyle.paragraph);
+    });
+
     test('never show windows read across a change of order', () async {
       expect(views.at(120), isNull);
       await pumpEventQueue();
