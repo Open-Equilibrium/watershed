@@ -214,6 +214,41 @@ fn pull_advances_head_despite_configured_squash_mode() {
 }
 
 #[test]
+fn pull_reports_autostash_conflicts_after_advancing_the_branch() {
+    run(async {
+        for (setting, value) in [
+            ("merge.autoStash", "true"),
+            ("branch.main.mergeOptions", "--autostash"),
+        ] {
+            let remote = Remote::new(&format!("pull-autostash-{setting}"));
+            remote.repo.git(&["config", setting, value]);
+            remote.other.write("a.txt", "remote change\n");
+            remote.other.git(&["commit", "-am", "Remote change"]);
+            remote.other.git(&["push", "origin", "main"]);
+            remote.repo.write("a.txt", "unsaved local change\n");
+            let result = Checkpoints::new(remote.repo.path()).pull().await;
+            assert!(
+                matches!(result, Err(DiffError::TransferFailed(ref detail))
+                    if detail.contains("conflicts") && detail.contains("Resolve") && detail.contains("stash")),
+                "{setting}: {result:?}"
+            );
+            assert_eq!(
+                remote.repo.git(&["rev-parse", "HEAD"]),
+                remote.bare.git(&["rev-parse", "main"])
+            );
+            assert_eq!(
+                remote.repo.git(&["diff", "--name-only", "--diff-filter=U"]),
+                "a.txt\n"
+            );
+            assert_eq!(
+                remote.repo.git(&["show", "stash@{0}:a.txt"]),
+                "unsaved local change\n"
+            );
+        }
+    });
+}
+
+#[test]
 fn pull_refuses_a_running_agent_before_fetching() {
     run(async {
         let remote = Remote::new("pull-agent");

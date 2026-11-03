@@ -389,7 +389,17 @@ impl WorkingTree {
         )
         .await
         {
-            Ok(_) => Ok(transfer),
+            Ok(output) => {
+                let status = self.status().await.map_err(|error| {
+                    DiffError::TransferFailed(without_credentials(&error.to_string()))
+                })?;
+                if !status.conflicts.is_empty() {
+                    return Err(DiffError::TransferFailed(without_credentials(&format!(
+                        "Git left conflicts after pulling. Resolve them in an editor or terminal; check Git's stash list for autostashed changes.\n{output}"
+                    ))));
+                }
+                Ok(transfer)
+            }
             Err(DiffError::Git(detail)) if detail.contains("would be overwritten by merge") => {
                 Err(DiffError::WouldOverwrite(listed_files(&detail)))
             }
