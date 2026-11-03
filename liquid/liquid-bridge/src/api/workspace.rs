@@ -257,8 +257,10 @@ pub struct BridgePage {
 pub enum BridgeBlockKind {
     /// A Text Block.
     Text,
-    /// A Database Block, which the app calls a Table (ADR-0244).
+    /// A Database Block.
     Database,
+    /// A Block of a kind a later version adds, which shows as a placeholder (ADR-0245).
+    Unknown,
 }
 
 /// A View on a Page.
@@ -838,6 +840,7 @@ impl LiquidWorkspace {
                         kind: match view.kind {
                             BlockKind::Text => BridgeBlockKind::Text,
                             BlockKind::Database => BridgeBlockKind::Database,
+                            BlockKind::Unknown => BridgeBlockKind::Unknown,
                         },
                     })
                     .collect();

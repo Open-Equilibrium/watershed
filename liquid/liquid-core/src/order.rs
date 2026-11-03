@@ -20,12 +20,11 @@ pub(crate) struct Order {
 }
 
 impl Order {
-    /// The order as the Page document holds it: Views of removed Blocks, and of Blocks of a
-    /// kind this version does not know, are left out.
+    /// The order as the Page document holds it: Views of removed Blocks are left out.
     pub(crate) fn read(doc: &AutoCommit) -> Self {
         let blocks: HashMap<String, BlockKind> = model::sorted(doc, BLOCKS)
             .into_iter()
-            .filter_map(|entry| Some((entry.id.clone(), BlockKind::of(entry.get(KIND)?)?)))
+            .map(|entry| (entry.id.clone(), BlockKind::of(entry.get(KIND))))
             .collect();
         let placed = model::sorted(doc, VIEWS)
             .into_iter()
@@ -125,10 +124,10 @@ mod tests {
     use crate::BlockKind;
     use crate::model::{self, BLOCK, BLOCKS, KIND, SORT, VIEWS};
 
-    /// A Block of a kind a later version adds, such as a Chart, shows no View here rather
-    /// than one that would treat it as text.
+    /// A Block of a kind a later version adds, such as a Chart, keeps its View, which shows a
+    /// placeholder (ADR-0245).
     #[test]
-    fn a_block_of_an_unknown_kind_shows_no_view() {
+    fn a_block_of_an_unknown_kind_keeps_its_view() {
         let mut doc = model::document(&ActorId::random());
         model::create_maps(&mut doc, &[BLOCKS, VIEWS]).unwrap();
         for (block, kind, sort) in [("b1", "text", "a0"), ("b2", "chart", "a1")] {
@@ -142,6 +141,6 @@ mod tests {
             .iter()
             .map(|placed| (placed.view.block.as_str(), placed.view.kind))
             .collect();
-        assert_eq!(shown, [("b1", BlockKind::Text)]);
+        assert_eq!(shown, [("b1", BlockKind::Text), ("b2", BlockKind::Unknown)]);
     }
 }

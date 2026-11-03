@@ -72,17 +72,19 @@ pub struct View {
 pub enum BlockKind {
     /// A Text Block.
     Text,
-    /// A Database Block, which the app calls a Table (ADR-0244).
+    /// A Database Block.
     Database,
+    /// A Block of a kind a later version adds, which shows as a placeholder (ADR-0245).
+    Unknown,
 }
 
 impl BlockKind {
-    /// The kind a Block's entry names; none for a kind this version does not know.
-    pub(crate) fn of(name: &str) -> Option<Self> {
+    /// The kind a Block's entry names.
+    pub(crate) fn of(name: Option<&str>) -> Self {
         match name {
-            "text" => Some(Self::Text),
-            "database" => Some(Self::Database),
-            _ => None,
+            Some("text") => Self::Text,
+            Some("database") => Self::Database,
+            _ => Self::Unknown,
         }
     }
 }

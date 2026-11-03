@@ -193,8 +193,11 @@ enum BridgeBlockKind {
   /// A Text Block.
   text,
 
-  /// A Database Block, which the app calls a Table (ADR-0244).
+  /// A Database Block.
   database,
+
+  /// A Block of a kind a later version adds, which shows as a placeholder (ADR-0245).
+  unknown,
 }
 
 /// A resource changed; `seq` counts its changes since this Workspace opened, so a reader

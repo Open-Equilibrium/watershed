@@ -3252,6 +3252,7 @@ impl SseDecode for crate::api::workspace::BridgeBlockKind {
         return match inner {
             0 => crate::api::workspace::BridgeBlockKind::Text,
             1 => crate::api::workspace::BridgeBlockKind::Database,
+            2 => crate::api::workspace::BridgeBlockKind::Unknown,
             _ => unreachable!("Invalid variant for BridgeBlockKind: {}", inner),
         };
     }
@@ -5780,6 +5781,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::workspace::BridgeBlockKind {
         match self {
             Self::Text => 0.into_dart(),
             Self::Database => 1.into_dart(),
+            Self::Unknown => 2.into_dart(),
             _ => unreachable!(),
         }
     }
@@ -7718,6 +7720,7 @@ impl SseEncode for crate::api::workspace::BridgeBlockKind {
             match self {
                 crate::api::workspace::BridgeBlockKind::Text => 0,
                 crate::api::workspace::BridgeBlockKind::Database => 1,
+                crate::api::workspace::BridgeBlockKind::Unknown => 2,
                 _ => {
                     unimplemented!("");
                 }

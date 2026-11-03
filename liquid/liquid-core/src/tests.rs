@@ -327,7 +327,7 @@ fn a_closed_page_leaves_memory_and_loads_again_unchanged() {
 }
 
 #[test]
-fn a_block_of_an_unknown_kind_is_neither_read_nor_edited_as_text() {
+fn a_block_of_an_unknown_kind_is_neither_read_nor_changed_as_text() {
     use automerge::transaction::Transactable;
 
     let owner = Actor::Person(PersonId::new("benni"));
@@ -361,7 +361,17 @@ fn a_block_of_an_unknown_kind_is_neither_read_nor_edited_as_text() {
         after: None,
         text: "Five days".into(),
     };
-    let Ok(Some(Created::Block { block, .. })) = apply(&mut workspace, add).map(|a| a.created)
+    let Ok(Some(Created::Block { block, view })) = apply(&mut workspace, add).map(|a| a.created)
+    else {
+        panic!("a Text Block")
+    };
+    let below = Mutation::AddTextBlock {
+        page: page.clone(),
+        after: Some(view.clone()),
+        text: "Porto".into(),
+    };
+    let Ok(Some(Created::Block { view: below, .. })) =
+        apply(&mut workspace, below).map(|a| a.created)
     else {
         panic!("a Text Block")
     };
@@ -372,17 +382,30 @@ fn a_block_of_an_unknown_kind_is_neither_read_nor_edited_as_text() {
         .unwrap();
     let entry = crate::model::live(&loaded.doc, crate::model::BLOCKS, block.as_str()).unwrap();
     loaded.doc.put(&entry, crate::model::KIND, "chart").unwrap();
+    // Committed, so a refused write's rollback keeps it, as it keeps a received change.
+    loaded.doc.commit();
 
     assert_eq!(workspace.text(&page, &block), Ok(None));
     let edit = Mutation::EditText {
-        page,
-        block,
+        page: page.clone(),
+        block: block.clone(),
         at: 0,
         delete: 0,
         insert: "x".into(),
     };
-    assert_eq!(
-        apply(&mut workspace, edit).map(|_| ()),
-        Err(Error::NotFound)
-    );
+    let split = Mutation::SplitTextBlock {
+        page: page.clone(),
+        block,
+        view,
+        at: 0,
+        style: crate::TextStyle::Paragraph,
+    };
+    // ⌫ at the start of the Text Block below does not join it into the Chart.
+    let join = Mutation::JoinTextBlock { page, view: below };
+    for refused in [edit, split, join] {
+        assert_eq!(
+            apply(&mut workspace, refused).map(|_| ()),
+            Err(Error::NotFound)
+        );
+    }
 }
