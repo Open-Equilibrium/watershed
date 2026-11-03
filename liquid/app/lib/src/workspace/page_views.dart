@@ -12,15 +12,12 @@ const _chunk = 100;
 /// Where the caret goes once a Text Block's View is built.
 @immutable
 class Caret {
-  const Caret(this.view, this.offset, {this.insert = ''});
+  const Caret(this.view, this.offset);
 
   final String view;
 
   /// In UTF-16 units, as Dart and the core count text; past the end means the end.
   final int offset;
-
-  /// Text typed for that Text Block before it was built, inserted at the caret.
-  final String insert;
 }
 
 /// An open Page's Views in order, read in windows as the Page scrolls to them, never the
@@ -78,6 +75,11 @@ class PageViews extends ChangeNotifier {
       if (at >= 0) return chunk * _chunk + at;
     }
     return null;
+  }
+
+  /// Puts the caret's next place, unless the Page has closed.
+  void moveCaret(Caret caret) {
+    if (!_disposed) this.caret.value = caret;
   }
 
   void setStyle(String block, BridgeTextStyle style) {

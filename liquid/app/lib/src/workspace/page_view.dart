@@ -37,7 +37,11 @@ class _WorkspacePageState extends State<WorkspacePage> {
   /// The line a Page without Blocks offers; typing there creates the first Text Block.
   final _first = TextEditingController();
   final _firstFocus = FocusNode(debugLabel: 'First line');
-  bool _creating = false;
+  bool _syncing = false;
+
+  /// The first Text Block once made, and the text it holds.
+  (String block, String view)? _made;
+  String _sent = '';
 
   ValueListenable<List<BridgePage>> get _tree =>
       widget.state.pages(widget.open.area);
@@ -92,7 +96,10 @@ class _WorkspacePageState extends State<WorkspacePage> {
 
   /// ⏎ or ↓ in the title goes to the first Text Block, as in Notion.
   KeyEventResult _titleKey(KeyEvent event) {
-    if (event is KeyUpEvent) return KeyEventResult.ignored;
+    // A composition takes its own ⏎ and arrows.
+    if (event is KeyUpEvent || !_title.value.composing.isCollapsed) {
+      return KeyEventResult.ignored;
+    }
     if (event.logicalKey != LogicalKeyboardKey.enter &&
         event.logicalKey != LogicalKeyboardKey.arrowDown) {
       return KeyEventResult.ignored;
@@ -105,40 +112,65 @@ class _WorkspacePageState extends State<WorkspacePage> {
     return KeyEventResult.handled;
   }
 
-  /// The first character typed on an empty Page, once any composition ends, creates its
-  /// first Text Block, which then takes everything typed meanwhile and the caret.
+  /// What is typed on an empty Page, once any composition ends, makes its first Text Block
+  /// and keeps it in step until the line is left with nothing new: then that Text Block takes
+  /// the caret, formatted by a Markdown shortcut typed at its start.
   Future<void> _typedFirst() async {
-    final text = _first.text;
-    if (_creating || text.isEmpty || !_first.value.composing.isCollapsed) {
-      return;
-    }
-    _creating = true;
+    if (_syncing) return;
+    _syncing = true;
+    final page = widget.open.page;
     try {
-      final created = await widget.state.apply(
-        mutation(
-          BridgeMutationKind.addTextBlock,
-          page: widget.open.page,
-          text: text,
-        ),
-      );
-      final typed = _first.value;
-      if (typed.text != text) {
-        await widget.state.apply(
-          textEdit(widget.open.page, created.block!, text, typed.text),
-        );
+      while (mounted) {
+        final typed = _first.value;
+        if (!typed.composing.isCollapsed) return;
+        final made = _made;
+        if (made == null) {
+          if (typed.text.isEmpty) return;
+          final created = await widget.state.apply(
+            mutation(
+              BridgeMutationKind.addTextBlock,
+              page: page,
+              text: typed.text,
+            ),
+          );
+          if (!mounted) return;
+          setState(() => _made = (created.block!, created.view!));
+          _sent = typed.text;
+        } else if (typed.text != _sent) {
+          await widget.state.apply(textEdit(page, made.$1, _sent, typed.text));
+          _sent = typed.text;
+        } else {
+          var offset = typed.selection.isValid
+              ? typed.selection.baseOffset
+              : typed.text.length;
+          for (final MapEntry(key: prefix, value: style)
+              in markdownShortcuts.entries) {
+            if (!_sent.startsWith(prefix)) continue;
+            final rest = _sent.substring(prefix.length);
+            await widget.state.apply(textEdit(page, made.$1, _sent, rest));
+            await widget.state.apply(
+              mutation(
+                BridgeMutationKind.setTextStyle,
+                page: page,
+                block: made.$1,
+                style: style,
+              ),
+            );
+            offset = (offset - prefix.length).clamp(0, rest.length);
+            break;
+          }
+          if (!mounted) return;
+          _views.moveCaret(Caret(made.$2, offset));
+          setState(() => _made = null);
+          _sent = '';
+          _first.clear();
+          return;
+        }
       }
-      if (!mounted) return;
-      _views.caret.value = Caret(
-        created.view!,
-        typed.selection.isValid
-            ? typed.selection.baseOffset
-            : typed.text.length,
-      );
-      _first.clear();
     } on Object {
       // The problem shows above the Page; what was typed stays in the line.
     } finally {
-      _creating = false;
+      _syncing = false;
     }
   }
 
@@ -217,7 +249,8 @@ class _WorkspacePageState extends State<WorkspacePage> {
                     WsMetrics.space7,
                     WsMetrics.space8,
                   ),
-                  sliver: _views.count == 0
+                  // The line stays until its Text Block took over what was typed.
+                  sliver: _views.count == 0 || _made != null
                       ? SliverToBoxAdapter(
                           child: _column(
                             TextField(

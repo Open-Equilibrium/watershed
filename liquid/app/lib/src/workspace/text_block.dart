@@ -38,6 +38,9 @@ BridgeTextStyle nextStyle(BridgeTextStyle style) => switch (style) {
   _ => BridgeTextStyle.paragraph,
 };
 
+/// A caret offset that means a Text Block's end.
+const _end = 1 << 30;
+
 bool _listed(BridgeTextStyle style) =>
     nextStyle(style) != BridgeTextStyle.paragraph;
 
@@ -112,11 +115,16 @@ class _TextBlockState extends State<TextBlock> {
   /// While the text changes from the core or a key, not from typing.
   bool _quiet = false;
 
-  /// While ⏎'s split is on its way: what is typed meanwhile goes to the new Text Block.
-  bool _splitting = false;
+  /// While a split or join is on its way: typing then stays here, in [_latest], and goes to
+  /// the Text Block that holds the caret afterwards, even once this one is gone.
+  bool _handing = false;
+  TextEditingValue _latest = TextEditingValue.empty;
 
   /// Reads asked for, so only the latest shows.
   int _reads = 0;
+
+  /// A caret place past the text shown, which a write on its way makes room for.
+  int? _wanted;
   StreamSubscription<BridgeChange>? _followed;
 
   WorkspaceState get _state => widget.views.state;
@@ -167,19 +175,23 @@ class _TextBlockState extends State<TextBlock> {
       return;
     }
     if (!mounted || read != _reads) return;
+    final text = answer.text;
+    if (text == null || !clean || _pending > 0 || sent != _sent) return;
     final style = answer.style ?? BridgeTextStyle.paragraph;
     widget.views.setStyle(_block, style);
     if (style == BridgeTextStyle.numbered) {
       unawaited(widget.views.readRun(widget.index).catchError(_report));
     }
     if (style != _style) setState(() => _style = style);
-    final text = answer.text;
-    if (text == null || !clean || _pending > 0 || sent != _sent) return;
     // Editable once the text is known, so nothing typed before is lost.
     if (_stored == null) setState(() {});
     _stored = text;
     if (_text.text != text && !_composing) {
-      final offset = _text.selection.baseOffset.clamp(0, text.length);
+      final offset = (_wanted ?? _text.selection.baseOffset).clamp(
+        0,
+        text.length,
+      );
+      if ((_wanted ?? 0) <= text.length) _wanted = null;
       _set(text, offset);
     }
     _takeCaret();
@@ -203,20 +215,21 @@ class _TextBlockState extends State<TextBlock> {
     }
     widget.views.caret.value = null;
     _focus.requestFocus();
-    final offset = caret.offset.clamp(0, _text.text.length);
-    if (caret.insert.isEmpty) {
-      _text.selection = TextSelection.collapsed(offset: offset);
-      return;
-    }
-    final text = _text.text.replaceRange(offset, offset, caret.insert);
-    _set(text, offset + caret.insert.length);
-    _send(text);
+    final length = _text.text.length;
+    if (caret.offset > length && caret.offset < _end) _wanted = caret.offset;
+    _text.selection = TextSelection.collapsed(
+      offset: caret.offset.clamp(0, length),
+    );
   }
 
   /// Sends what typing changed, or applies a shortcut typed at the start.
   void _typed() {
     final stored = _stored;
-    if (_quiet || _splitting || stored == null || _composing) return;
+    if (_quiet || stored == null || _composing) return;
+    if (_handing) {
+      _latest = _text.value;
+      return;
+    }
     final text = _text.text;
     if (text == stored) return;
     if (_style == BridgeTextStyle.paragraph) {
@@ -289,9 +302,10 @@ class _TextBlockState extends State<TextBlock> {
     if (event is KeyUpEvent || _composing || _stored == null) {
       return KeyEventResult.ignored;
     }
-    // A second ⏎ before the first split arrived is dropped rather than typed as a line.
-    if (_splitting) {
-      return event.logicalKey == LogicalKeyboardKey.enter
+    // ⏎ or ⌫ before a split or join arrived is dropped rather than typed or deleted here.
+    if (_handing) {
+      return event.logicalKey == LogicalKeyboardKey.enter ||
+              event.logicalKey == LogicalKeyboardKey.backspace
           ? KeyEventResult.handled
           : KeyEventResult.ignored;
     }
@@ -357,7 +371,7 @@ class _TextBlockState extends State<TextBlock> {
   bool _move(int by) {
     final neighbour = widget.views.at(widget.index + by);
     if (neighbour == null) return false;
-    widget.views.caret.value = Caret(neighbour.id, by < 0 ? 1 << 30 : 0);
+    widget.views.caret.value = Caret(neighbour.id, by < 0 ? _end : 0);
     return true;
   }
 
@@ -390,21 +404,66 @@ class _TextBlockState extends State<TextBlock> {
     // here.
     if (at == 0) return;
     final head = text.substring(0, at);
+    final tail = text.substring(at);
     _stored = head;
     _set(head, at);
-    _splitting = true;
+    _handOver(split, (applied, typed) {
+      final created = applied?.block;
+      final view = applied?.view;
+      if (created == null || view == null) return null;
+      // Typed after the split: it begins the new Text Block, before the text that moved.
+      if (!typed.text.startsWith(head)) return null;
+      final extra = typed.text.substring(head.length);
+      if (mounted) _set(head, head.length);
+      return (
+        extra.isEmpty ? null : textEdit(_page, created, tail, extra + tail),
+        Caret(view, extra.length),
+      );
+    });
+  }
+
+  /// Keeps typing here while `change` is on its way, then lets `moved` say which edit carries
+  /// it to the Text Block that holds the caret, and where the caret goes; without one, it is
+  /// an edit of this Text Block. It works on when this Text Block is gone meanwhile.
+  void _handOver(
+    Future<BridgeApplied?> change,
+    (BridgeMutation?, Caret)? Function(
+      BridgeApplied? applied,
+      TextEditingValue typed,
+    )
+    moved,
+  ) {
+    _handing = true;
+    _latest = _text.value;
+    final (state, views, page, block) = (_state, widget.views, _page, _block);
+    final stored = _stored;
     unawaited(
-      split.then((applied) {
-        _splitting = false;
-        if (!mounted) return;
-        final typed = _text.text;
-        final extra = typed.startsWith(head)
-            ? typed.substring(head.length)
-            : '';
-        if (typed != head) _set(head, head.length);
-        if (applied?.view case final view?) {
-          widget.views.caret.value = Caret(view, 0, insert: extra);
+      change.then((applied) {
+        _handing = false;
+        final typed = _latest;
+        final carried = moved(applied, typed);
+        if (carried == null) {
+          if (stored != null && typed.text != stored) {
+            if (mounted) {
+              _send(typed.text);
+            } else {
+              _stored = typed.text;
+              unawaited(
+                state
+                    .apply(textEdit(page, block, stored, typed.text))
+                    .then<void>((_) {}, onError: (Object _) {}),
+              );
+            }
+          }
+          return;
         }
+        final (edit, caret) = carried;
+        if (edit != null) {
+          unawaited(
+            state.apply(edit).then<void>((_) {}, onError: (Object _) {}),
+          );
+        }
+        views.moveCaret(caret);
       }),
     );
   }
@@ -429,26 +488,45 @@ class _TextBlockState extends State<TextBlock> {
     }
     final above = widget.index > 0 ? widget.views.at(widget.index - 1) : null;
     if (above == null) return;
-    await _state.settled;
-    final BridgeAnswer answer;
-    try {
-      answer = await _state.workspace.query(
-        query: query(BridgeQueryKind.text, page: _page, block: above.block),
+    final joined = _stored!;
+    final (page, view) = (_page, widget.view.id);
+    // The text above, read once every earlier write arrived, says where the caret goes.
+    final join = _state.settled.then((_) async {
+      final answer = await _state.workspace.query(
+        query: query(BridgeQueryKind.text, page: page, block: above.block),
       );
-    } on Object catch (error) {
-      _report(error);
-      return;
-    }
-    final joined = await _apply(
-      mutation(
-        BridgeMutationKind.joinTextBlock,
-        page: _page,
-        view: widget.view.id,
-      ),
+      final applied = await _state.apply(
+        mutation(BridgeMutationKind.joinTextBlock, page: page, view: view),
+      );
+      return (applied, answer.text ?? '');
+    });
+    String aboveText = '';
+    _handOver(
+      join
+          .then((result) {
+            aboveText = result.$2;
+            return result.$1;
+          })
+          .then<BridgeApplied?>(
+            (applied) => applied,
+            onError: (Object _) => null,
+          ),
+      (applied, typed) {
+        if (applied == null) return null;
+        final offset = typed.selection.isValid ? typed.selection.baseOffset : 0;
+        return (
+          typed.text == joined
+              ? null
+              : textEdit(
+                  page,
+                  above.block,
+                  aboveText + joined,
+                  aboveText + typed.text,
+                ),
+          Caret(above.id, aboveText.length + offset),
+        );
+      },
     );
-    if (joined != null) {
-      widget.views.caret.value = Caret(above.id, answer.text?.length ?? 0);
-    }
   }
 
   @override

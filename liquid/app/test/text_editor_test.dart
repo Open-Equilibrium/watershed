@@ -361,4 +361,88 @@ void main() {
     expect(find.text('1.'), findsNothing);
     expect(find.text('150.'), findsOneWidget);
   });
+
+  testWidgets('typing while ⌫ joins lands in the joined Text Block', (
+    tester,
+  ) async {
+    await show(tester, ['Five days', ' in Lisbon']);
+    await caret(tester, 1, 0);
+    fake.gate = Completer();
+    await tester.sendKeyEvent(LogicalKeyboardKey.backspace);
+    await tester.pump();
+    await type(tester, 1, '!');
+    fake.gate!.complete();
+    await tester.pumpAndSettle();
+    expect(fake.textsOf(page), ['Five days! in Lisbon']);
+    expect(focused(tester, 0), isTrue);
+    expect(field(tester, 0).controller!.selection.baseOffset, 10);
+  });
+
+  testWidgets('typing after ⏎ survives leaving the Page at once', (
+    tester,
+  ) async {
+    await show(tester, ['One']);
+    await caret(tester, 0, 3);
+    fake.gate = Completer();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    await type(tester, 0, 'Two');
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    fake.gate!.complete();
+    await tester.pumpAndSettle();
+    expect(fake.textsOf(page), ['One', 'Two']);
+  });
+
+  testWidgets('the first line keeps typing while its text is handed over', (
+    tester,
+  ) async {
+    await show(tester);
+    final made = fake.gate = Completer();
+    await tester.enterText(find.byKey(const Key('first-line')), 'a');
+    await tester.enterText(find.byKey(const Key('first-line')), 'ab');
+    final handed = Completer<void>();
+    made.complete();
+    fake.gate = handed;
+    await tester.pump();
+    await tester.enterText(find.byKey(const Key('first-line')), 'abc');
+    handed.complete();
+    await tester.pumpAndSettle();
+    expect(fake.textsOf(page), ['abc']);
+    expect(field(tester, 0).controller!.text, 'abc');
+  });
+
+  testWidgets('a shortcut typed in the first line formats it', (tester) async {
+    await show(tester);
+    fake.gate = Completer();
+    await tester.enterText(find.byKey(const Key('first-line')), '-');
+    await tester.enterText(find.byKey(const Key('first-line')), '- ');
+    fake.gate!.complete();
+    await tester.pumpAndSettle();
+    expect(styleOf(0), BridgeTextStyle.bullet);
+    expect(fake.textsOf(page), ['']);
+  });
+
+  testWidgets('⏎ in the title confirms a composition there', (tester) async {
+    await show(tester, ['One']);
+    await tester.tap(find.byKey(const Key('page-title')));
+    await tester.pump();
+    tester.testTextInput.updateEditingValue(
+      const TextEditingValue(
+        text: 'ni',
+        selection: TextSelection.collapsed(offset: 2),
+        composing: TextRange(start: 0, end: 2),
+      ),
+    );
+    await tester.pump();
+    await key(tester, LogicalKeyboardKey.enter);
+    expect(focused(tester, 0), isFalse);
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const Key('page-title')))
+          .focusNode!
+          .hasFocus,
+      isTrue,
+    );
+  });
 }
