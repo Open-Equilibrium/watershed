@@ -1,152 +1,192 @@
 <!doctype html>
-<html lang="en"><head><title>Liquid: Git pull request and worktree mockups (draft)</title>
-<link rel="stylesheet" href="../tokens.css"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Liquid: Git pull request and worktree mockups (draft)</title>
+<link rel="stylesheet" href="../tokens.css">
 <style>
 .chrome{--foreground:var(--ws-text);--muted-foreground:var(--ws-text-muted);--muted:var(--ws-subtle);--border:var(--ws-border-strong);--secondary:var(--ws-hover);--radius:8px;background:var(--ws-canvas);padding:24px}
-body{margin:0;font-family:var(--font-sans,system-ui,sans-serif);color:var(--foreground)}
-.page{display:flex;flex-direction:column;gap:28px;min-width:0}
+body{margin:0;font-family:var(--ws-font-ui);color:var(--foreground)}
+.page{display:flex;flex-direction:column;gap:28px;max-width:1400px}
 .toolbar{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;font-size:13px;color:var(--muted-foreground)}
 .toolbar>div{display:flex;gap:8px;align-items:center}
-.seg{display:inline-flex;border:1px solid var(--border);border-radius:calc(var(--radius,8px) - 2px);overflow:hidden}
+.seg{display:inline-flex;border:1px solid var(--border);border-radius:6px;overflow:hidden}
 .seg button{all:unset;cursor:pointer;padding:4px 10px;font-size:12.5px;color:var(--muted-foreground)}
 .seg button.on{background:var(--secondary);color:var(--foreground)}
-h1{margin:0 0 4px;font-size:20px;line-height:28px;font-weight:600}
+h1{margin:0 0 6px;font-size:var(--ws-fs-h1);line-height:var(--ws-lh-h1)}
 h3.sec{margin:0 0 4px;font-size:15px;font-weight:600}
-p.sub{margin:0 0 10px;font-size:13px;color:var(--muted-foreground);line-height:1.5}
-.stage{padding:16px;border-radius:var(--radius,8px);background:var(--muted);overflow:hidden}
+p.sub{margin:0 0 10px;font-size:13px;color:var(--muted-foreground);line-height:1.5;max-width:900px}
+.stage{padding:16px;border-radius:8px;background:var(--muted);overflow:hidden}
 .scaler{position:relative}
 .scaler>.win{position:absolute;top:0;left:0;transform-origin:0 0}
-.win,.ws{font-family:ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI Variable Display","Segoe UI",Helvetica,"Apple Color Emoji",Arial,sans-serif;color:var(--ws-text);font-size:14px;line-height:20px;-webkit-font-smoothing:antialiased}
-.win{width:1240px;background:var(--ws-canvas);border-radius:12px;overflow:hidden;box-shadow:var(--ws-shadow)}
-.win code,.win kbd,.mono,.ws code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.win{font-family:var(--ws-font-ui);color:var(--ws-text);font-size:var(--ws-fs-ui);line-height:var(--ws-lh-ui);-webkit-font-smoothing:antialiased;background:var(--ws-canvas);border-radius:var(--ws-radius-xl);overflow:hidden;box-shadow:var(--ws-shadow)}
+.win code,.win kbd,.mono{font-family:var(--ws-font-mono)}
+.win.bare{background:transparent;box-shadow:none;overflow:visible;border-radius:0}
 .tbar{height:38px;background:var(--ws-titlebar);display:flex;align-items:center;padding:0 14px}
 .lights{display:flex;gap:8px}.lights i{width:12px;height:12px;border-radius:50%;display:block}
-.body{display:flex;height:var(--h)}
-.side{width:264px;flex:none;background:var(--ws-subtle);padding:4px 8px 12px;display:flex;flex-direction:column;gap:1px;box-shadow:inset -1px 0 0 var(--ws-border)}
-.wsw{display:flex;align-items:center;gap:8px;height:32px;padding:0 8px;font-weight:500;border-radius:6px}
-.av{width:22px;height:22px;border-radius:4px;background:var(--ws-accent);color:var(--ws-on-accent);display:grid;place-items:center;font-size:12px;font-weight:600}
-.srch{height:30px;display:flex;align-items:center;gap:8px;padding:0 8px;border-radius:6px;color:var(--ws-text-muted)}
+.body{display:flex;height:var(--h);position:relative}
+.av{width:22px;height:22px;border-radius:4px;background:var(--ws-accent);color:var(--ws-on-accent);display:grid;place-items:center;font-size:12px;font-weight:600;flex:none}
+.srch{height:var(--ws-row-side);display:flex;align-items:center;gap:8px;padding:0 8px;border-radius:6px;color:var(--ws-text-muted)}
 .srch kbd{margin-left:auto}
-.side h6{font-size:12px;line-height:16px;color:var(--ws-text-faint);font-weight:500;margin:16px 8px 4px;display:flex;justify-content:space-between}
-.nav{display:flex;align-items:center;gap:8px;height:28px;padding:0 8px;border-radius:6px;color:var(--ws-text-muted);white-space:nowrap;overflow:hidden}
-.ico{width:18px;text-align:center;color:var(--ws-text-faint);flex:none;display:inline-flex;justify-content:center}
-.proj{display:flex;align-items:center;gap:6px;height:28px;padding:0 8px;color:var(--ws-text-muted);font-weight:500}
-.proj .f{color:var(--ws-text-faint);font-weight:400;font-size:12px}
-.sess{padding:5px 8px 6px 30px;border-radius:6px;color:var(--ws-text-muted)}
-.sess.on{background:var(--ws-hover);color:var(--ws-text)}
-.sess .l1{display:flex;align-items:center;gap:8px;white-space:nowrap;height:20px}
-.sess .l1 .end{margin-left:auto;font-size:12px}
-.sess .l2{display:flex;align-items:center;gap:5px;font-size:12px;line-height:18px;color:var(--ws-text-faint);white-space:nowrap;overflow:hidden;margin-left:15px}
-.sess .l2 svg{flex:none}
-.dot{width:7px;height:7px;border-radius:50%;flex:none;display:inline-block}
-.main{flex:1;display:flex;flex-direction:column;min-width:0}
-.head{height:44px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:0 24px}
-.head b{font-size:14px;font-weight:600}
-.tabs{display:flex;gap:2px;padding:0 20px;height:38px;flex:none;align-items:flex-end;box-shadow:inset 0 -1px 0 var(--ws-border)}
-.tab{height:36px;padding:0 10px;color:var(--ws-text-muted);border-bottom:2px solid transparent;display:flex;gap:6px;align-items:center}
-.tab.on{color:var(--ws-text);border-color:var(--ws-text);font-weight:500}
-.tab kbd{opacity:.4}
-.badge{font-size:12px;padding:0 6px;border-radius:4px;background:var(--ws-hover);color:var(--ws-text-muted);line-height:18px;font-weight:400}
+.srch span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.nav{flex:none;display:flex;align-items:center;gap:8px;height:var(--ws-row-side);padding:0 8px 0 calc(8px + var(--d,0) * 18px);border-radius:6px;color:var(--ws-text-muted);white-space:nowrap;overflow:hidden;box-sizing:border-box}
+.nav.on{background:var(--ws-selected);color:var(--ws-text)}
+.nav .tw{width:12px;flex:none;color:var(--ws-text-faint);font-size:11px;text-align:center}
+.nav .r{margin-left:auto;font-size:12px;color:var(--ws-text-faint)}
+.nav .r.warn{color:var(--ws-warning)}
+.ico{width:18px;flex:none;display:inline-flex;justify-content:center;color:var(--ws-text-faint)}
+.foot{margin-top:auto;padding-top:6px;box-shadow:inset 0 1px 0 var(--ws-border)}
+.main{flex:1;display:flex;flex-direction:column;min-width:0;position:relative}
+.head{height:var(--ws-row-header);flex:none;display:flex;align-items:center;gap:8px;padding:0 16px 0 24px;font-size:14px}
+.crumb{color:var(--ws-text-muted);display:flex;gap:6px;align-items:center;white-space:nowrap}
+.crumb b{color:var(--ws-text);font-weight:500}
+.head .end{margin-left:auto;display:flex;gap:4px;align-items:center}
+.ib{height:28px;min-width:28px;padding:0 6px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;gap:6px;color:var(--ws-text-muted);font-size:13px;box-sizing:border-box}
+.ib.on{background:var(--ws-accent-subtle);color:var(--ws-accent)}
 kbd{font-size:11px;padding:0 4px;border-radius:4px;border:1px solid currentColor;opacity:.6;line-height:16px;font-weight:400}
-.chip{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 8px;border-radius:6px;color:var(--ws-text-muted);font-size:13px;white-space:nowrap}
-.chip.box{box-shadow:inset 0 0 0 1px var(--ws-border-strong)}
-.chip.on{background:var(--ws-hover);color:var(--ws-text)}
-.chip .cv,.split .c{color:var(--ws-text-faint)}
-.sync{font-variant-numeric:tabular-nums;color:var(--ws-text-faint);font-size:12px}
-.sync.wa{color:var(--ws-warning)}
 .btn{height:28px;padding:0 10px;border-radius:6px;background:var(--ws-canvas);box-shadow:inset 0 0 0 1px var(--ws-border-strong);color:var(--ws-text);font-size:13px;display:inline-flex;align-items:center;gap:8px;font-weight:500;white-space:nowrap}
 .btn.pri{background:var(--ws-accent);color:var(--ws-on-accent);box-shadow:none}
 .btn.ghost{box-shadow:none;background:transparent;color:var(--ws-text-muted)}
-.btn.off{opacity:.45}
-.ok,.add{color:var(--ws-success)}.del{color:var(--ws-danger)}
-.gitbar{display:flex;gap:8px;align-items:center}
-.split{display:inline-flex;height:28px;border-radius:6px;box-shadow:inset 0 0 0 1px var(--ws-border-strong);font-size:13px;font-weight:500;white-space:nowrap;background:var(--ws-canvas)}
-.split .p{display:inline-flex;align-items:center;gap:6px;padding:0 10px}
-.split .c{display:inline-flex;align-items:center;padding:0 8px;box-shadow:inset 1px 0 0 var(--ws-border-strong)}
-.split.on .c{background:var(--ws-hover);border-radius:0 6px 6px 0}
-.split.off .p{color:var(--ws-text-faint)}
-.split.busy .p{color:var(--ws-text-muted);background:var(--ws-subtle);border-radius:6px 0 0 6px}
-.act{flex:none;height:132px;padding:0 0 12px;box-sizing:border-box;display:flex;justify-content:center}
-.actbox{width:var(--ws-width-reading);height:120px;box-sizing:border-box;border-radius:12px;background:var(--ws-surface);box-shadow:var(--ws-shadow);padding:12px 14px;display:flex;flex-direction:column}
-.actbox .ph{flex:1;color:var(--ws-text-faint);font-size:15px;line-height:24px}
-.actbox .bar{display:flex;align-items:center;gap:6px}
-.status{height:30px;flex:none;display:flex;align-items:center;gap:18px;padding:0 16px;font-size:12px;color:var(--ws-text-muted);font-variant-numeric:tabular-nums;white-space:nowrap;box-shadow:inset 0 1px 0 var(--ws-border)}
-.status .end{margin-left:auto;color:var(--ws-text-faint)}
-.chat{flex:1;overflow:hidden;display:flex;flex-direction:column;justify-content:flex-end;padding-bottom:8px;min-height:0;-webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 64px);mask-image:linear-gradient(to bottom,transparent 0,#000 64px)}
-.col{width:var(--ws-width-reading);margin:0 auto;display:flex;flex-direction:column;gap:12px}
-.user{align-self:flex-end;background:var(--ws-hover);padding:10px 14px;border-radius:12px;max-width:80%;font-size:16px;line-height:24px}
-.prose{font-size:16px;line-height:24px;margin:2px 0}
-.tool{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ws-text-muted);height:32px;padding:0 10px;border-radius:6px;background:var(--ws-subtle)}
-.tool code{color:var(--ws-text);font-size:13px}
-.tool .r{margin-left:auto;display:flex;gap:10px;font-variant-numeric:tabular-nums}
-.turnfoot{display:flex;align-items:center;gap:10px;font-size:13px;color:var(--ws-text-muted);padding:2px 0}
-.win.mini{width:auto;max-width:100%;display:inline-block;background:transparent;box-shadow:none;overflow:visible}
-.dlg{width:520px;max-width:100%;box-sizing:border-box;border-radius:12px;background:var(--ws-surface);box-shadow:0 0 0 1px var(--ws-border),0 3px 6px rgba(15,15,15,.1),0 9px 24px rgba(15,15,15,.2);padding:16px;display:flex;flex-direction:column;gap:12px;font-size:13px}
-.dlg h4{margin:0;font-size:16px;line-height:22px;font-weight:600}
-.dlg p{margin:0;color:var(--ws-text-muted);line-height:20px}
-.dlg .acts{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.dlg .acts .sp{flex:1}
-.flist{border-radius:8px;background:var(--ws-subtle);padding:6px;display:flex;flex-direction:column;gap:1px}
-.frow{display:flex;gap:8px;align-items:center;min-height:26px;padding:0 6px;border-radius:6px;font-size:13px}
-.frow code{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
-.frow .st{width:14px;font-weight:600;font-size:12px;flex:none}.frow .r{margin-left:auto;font-size:12px;color:var(--ws-text-faint);text-align:right;font-variant-numeric:tabular-nums}
-.frow.ex{color:var(--ws-text-faint)}
-.st.M{color:var(--ws-warning)}.st.A{color:var(--ws-success)}.st.D{color:var(--ws-danger)}.st.U{color:var(--ws-danger)}
-.cbx{width:13px;height:13px;border-radius:3px;box-shadow:inset 0 0 0 1.5px var(--ws-border-strong);display:grid;place-items:center;font-size:9px;flex:none}
-.cbx.on{background:var(--ws-accent);box-shadow:none;color:var(--ws-on-accent)}
-.cbx.mix{background:var(--ws-accent);box-shadow:none;color:var(--ws-on-accent)}
-.kvbox{border-radius:8px;background:var(--ws-subtle);padding:10px 12px;display:flex;flex-direction:column;gap:8px}
-.kvrow{display:flex;gap:10px;align-items:center}
-.kvrow .k{color:var(--ws-text-muted);width:56px;flex:none}
-.kvrow .r{margin-left:auto}
-.ta{border-radius:6px;box-shadow:inset 0 0 0 1px var(--ws-border-strong);background:var(--ws-canvas);padding:8px 10px;font-size:13px;line-height:20px;min-height:60px}
-.ta .ph{color:var(--ws-text-faint)}
-.lbl2{font-weight:500;font-size:13px}
-.notice{padding:8px 10px;border-radius:6px;background:var(--ws-warning-subtle);color:var(--ws-warning);font-size:13px;line-height:20px}
-.notice.dng{background:var(--ws-danger-subtle);color:var(--ws-danger)}
-.notice.info{background:var(--ws-subtle);color:var(--ws-text-muted)}
-.menu{position:absolute;z-index:2;min-width:260px;max-width:100%;box-sizing:border-box;border-radius:8px;background:var(--ws-surface);box-shadow:0 0 0 1px var(--ws-border),0 3px 6px rgba(15,15,15,.1),0 9px 24px rgba(15,15,15,.2);padding:6px;display:flex;flex-direction:column;gap:1px;font-size:13px}
-.menu.static{position:static}
-.menu .it{display:flex;gap:10px;align-items:center;height:28px;padding:0 8px;border-radius:6px;white-space:nowrap;color:var(--ws-text)}
-.menu .it .ck{width:14px;display:inline-flex;color:var(--ws-accent);flex:none}
-.menu .it.on{background:var(--ws-hover)}.menu .it .r{margin-left:auto;color:var(--ws-text-faint);font-size:12px;font-variant-numeric:tabular-nums}
-.menu .it.dis{color:var(--ws-text-faint)}
-.menu .it.later{color:var(--ws-text-faint);outline:1px dashed var(--ws-border-strong);outline-offset:-1px}
-.menu hr{border:0;height:1px;background:var(--ws-border);margin:4px 2px}
-.menu .lbl{font-size:12px;color:var(--ws-text-faint);padding:4px 8px 2px}
-.menu .inp{display:flex;align-items:center;gap:8px;height:30px;padding:0 8px;border-radius:6px;box-shadow:inset 0 0 0 1px var(--ws-border-strong);margin-bottom:4px;color:var(--ws-text-faint)}
-.menu .inp.on{box-shadow:inset 0 0 0 2px var(--ws-accent);color:var(--ws-text)}
-.menu .foot{font-size:12px;color:var(--ws-text-faint);padding:4px 8px 2px;line-height:18px;white-space:normal}
-.menu .notice{margin:2px 0 4px;white-space:normal}
-.opts{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,540px),1fr));gap:16px;align-items:start}
-.lab{font-size:13px;font-weight:600;margin:0 0 6px}
-.states{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:12px}
-.stc{border-radius:12px;background:var(--ws-canvas);box-shadow:var(--ws-shadow);padding:12px;display:flex;flex-direction:column;gap:8px;font-size:13px;color:var(--ws-text-muted);line-height:20px;min-width:0}
-.stc b{color:var(--ws-text);font-weight:600}
-.stc .gitbar{justify-content:flex-end;flex-wrap:wrap;padding:6px 0;box-shadow:inset 0 -1px 0 var(--ws-border)}
-.stc .hint{font-size:12px;line-height:18px}
-.rows{border-radius:8px;background:var(--ws-canvas);box-shadow:0 0 0 1px var(--ws-border-strong);overflow:hidden;font-size:13px;color:var(--ws-text)}
-.rows>div{display:grid;grid-template-columns:200px 200px 1fr;gap:12px;align-items:center;padding:8px 12px;box-shadow:inset 0 -1px 0 var(--ws-border)}
-.rows>div.h{color:var(--ws-text-faint);font-size:12px;padding:6px 12px}
-.rows .t{color:var(--ws-text-muted);font-size:12px;line-height:18px}
-.nrow{display:flex;gap:8px;align-items:flex-start;font-size:12px;line-height:18px}
-.nrow .k{width:170px;flex:none;color:var(--ws-text-faint)}
-.nrow .wa{color:var(--ws-warning)}.nrow .dg{color:var(--ws-danger)}
-.qs{font-size:13px;line-height:1.6;color:var(--foreground);margin:0;padding-left:18px}.qs li{margin:0 0 8px}
-.q{border-radius:8px;background:var(--ws-canvas);box-shadow:0 0 0 1px var(--ws-border-strong);padding:14px 16px;font-size:13px;line-height:20px;color:var(--ws-text)}
-.q+.q{margin-top:12px}
-.q h4{margin:0 0 4px;font-size:14px;line-height:20px;font-weight:600}
-.q p{margin:0 0 8px;color:var(--ws-text-muted)}
-.q ul{margin:0 0 8px;padding-left:18px}.q li{margin:0 0 4px}
-.q .t3{color:var(--ws-text-muted)}
-.q .rec{color:var(--ws-success);font-weight:500}
-.choice{display:flex;gap:10px;align-items:flex-start;padding:8px 10px;border-radius:8px;box-shadow:inset 0 0 0 1px var(--ws-border-strong)}
-.choice.on{box-shadow:inset 0 0 0 2px var(--ws-accent)}
-.choice b{display:block;font-weight:500;color:var(--ws-text)}
-.choice span{color:var(--ws-text-muted)}
-.rd{width:14px;height:14px;border-radius:50%;box-shadow:inset 0 0 0 1.5px var(--ws-border-strong);flex:none;margin-top:3px}
-.choice.on .rd{box-shadow:inset 0 0 0 4px var(--ws-accent)}
-@media (max-width:560px){.rows>div{grid-template-columns:1fr}.nrow{flex-direction:column;gap:0}.nrow .k{width:auto}}
-</style></head><body class="theme-light chrome">
+.col{width:var(--ws-width-reading);margin:0 auto;display:flex;flex-direction:column;gap:14px}
+.prose{font-size:var(--ws-fs-prose);line-height:var(--ws-lh-prose)}
+.prose p{margin:0 0 8px}
+.prose h2{font-size:var(--ws-fs-h2);line-height:var(--ws-lh-h2);margin:6px 0 6px;font-weight:600}
+.chip{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 8px;border-radius:6px;color:var(--ws-text-muted);font-size:13px;white-space:nowrap;background:var(--ws-subtle)}
+.card{border-radius:8px;box-shadow:0 0 0 1px var(--ws-border);padding:12px 14px;background:var(--ws-canvas)}
+.cap{font-size:12px;line-height:18px;color:var(--ws-text-faint)}
+.pop{position:absolute;z-index:3;border-radius:8px;background:var(--ws-surface);box-shadow:var(--ws-shadow);padding:6px;display:flex;flex-direction:column;gap:1px;font-size:14px}
+.pop .lbl{font-size:12px;color:var(--ws-text-faint);padding:6px 8px 2px}
+.pop .it{display:flex;gap:10px;align-items:center;min-height:32px;padding:0 8px;border-radius:6px;white-space:nowrap;color:var(--ws-text)}
+.pop .it.on{background:var(--ws-hover)}
+.pop .it .d{color:var(--ws-text-faint);font-size:12px}
+.pop .it .r{margin-left:auto;color:var(--ws-text-faint);font-size:12px}
+.pop .it .bi{width:28px;height:28px;border-radius:6px;box-shadow:inset 0 0 0 1px var(--ws-border);display:grid;place-items:center;color:var(--ws-text-muted);flex:none}
+.pop .it .tx{display:flex;flex-direction:column;line-height:18px;padding:4px 0}
+.pop hr{border:0;height:1px;background:var(--ws-border);margin:4px 2px}
+.scrim{position:absolute;inset:0;background:rgba(15,15,15,.24);z-index:2}
+.sg2{display:inline-flex;background:var(--ws-canvas);border-radius:6px;padding:2px;font-size:13px;box-shadow:inset 0 0 0 1px var(--ws-border)}
+.sg2 span{padding:1px 10px;color:var(--ws-text-muted);border-radius:4px;line-height:22px}.sg2 span.on{background:var(--ws-hover);color:var(--ws-text)}
+.sp{flex:1}
+.av{width:22px;height:22px;border-radius:50%;flex:none;display:inline-grid;place-items:center;font-size:11px;font-weight:600;color:#fff}
+.av.sm{width:18px;height:18px;font-size:10px}
+.av.p1{background:#d9730d}.av.p2{background:#0f7b6c}.av.me{background:var(--ws-accent)}
+.av.ag{background:var(--ws-subtle);color:var(--ws-accent);box-shadow:inset 0 0 0 1px var(--ws-border-strong)}
+.av.grp{background:var(--ws-hover);color:var(--ws-text-muted)}
+.dot{width:7px;height:7px;border-radius:50%;display:inline-block}
+.msgs{display:flex;flex-direction:column;gap:10px;padding:16px 24px;font-size:14px;line-height:21px}
+.msg{display:flex;gap:8px;align-items:flex-end;max-width:78%}
+.msg .b{border-radius:12px;padding:7px 11px;background:var(--ws-subtle);box-shadow:inset 0 0 0 1px var(--ws-border)}
+.msg .n{font-size:12px;font-weight:500;color:var(--ws-text-muted);margin-bottom:1px}
+.msg.mine{align-self:flex-end;flex-direction:row-reverse}
+.msg.mine .b{background:var(--ws-accent-subtle);box-shadow:none}
+.tm{font-size:11px;color:var(--ws-text-faint);margin-left:8px}
+.turn{display:flex;gap:8px;align-items:center;margin-top:6px;font-size:12px;color:var(--ws-text-muted)}
+.turn .chip{height:22px;font-size:12px}
+.comp2{margin:0 24px 16px;border-radius:10px;box-shadow:0 0 0 1px var(--ws-border-strong);padding:10px 12px;display:flex;align-items:center;gap:8px;color:var(--ws-text-faint);font-size:14px;background:var(--ws-canvas)}
+.chead{height:var(--ws-row-header);display:flex;align-items:center;gap:10px;padding:0 16px 0 24px;box-shadow:inset 0 -1px 0 var(--ws-border);font-size:14px}
+.chead b{font-weight:500}
+.rail{width:52px;flex:none;background:var(--ws-subtle);box-shadow:inset -1px 0 0 var(--ws-border);display:flex;flex-direction:column;align-items:center;gap:4px;padding:10px 0}
+.rail .ri{width:36px;height:36px;border-radius:8px;display:grid;place-items:center;color:var(--ws-text-muted);position:relative}
+.rail .ri.on{background:var(--ws-selected);color:var(--ws-accent)}
+.rail .ri .bd{position:absolute;top:3px;right:2px;min-width:14px;height:14px;border-radius:7px;background:var(--ws-accent);color:var(--ws-on-accent);font-size:9px;display:grid;place-items:center;padding:0 3px;box-sizing:border-box}
+.rail .ri .bd.w{background:var(--ws-warning)}
+.rail .ri .dt{position:absolute;top:6px;right:6px;width:7px;height:7px;border-radius:50%;background:var(--ws-text-faint)}
+.rail .lg{width:26px;height:26px;border-radius:7px;background:var(--ws-accent);margin-bottom:8px}
+.side2{width:var(--ws-width-side);flex:none;background:var(--ws-subtle);box-shadow:inset -1px 0 0 var(--ws-border);padding:8px;display:flex;flex-direction:column;gap:1px;font-size:var(--ws-fs-side);line-height:var(--ws-lh-side);box-sizing:border-box;overflow:hidden}
+.side2 h6{font-size:12px;line-height:16px;color:var(--ws-text-faint);font-weight:500;margin:12px 8px 4px;display:flex;justify-content:space-between;align-items:center}
+.side2 .ttl2{font-weight:600;font-size:14px;padding:4px 8px 8px;display:flex;align-items:center;gap:8px}
+.fchips{display:flex;gap:4px;padding:0 6px 4px;flex-wrap:wrap}
+.fchips span{font-size:12px;padding:2px 8px;border-radius:10px;background:var(--ws-hover);color:var(--ws-text-muted)}
+.fchips span.on{background:var(--ws-accent-subtle);color:var(--ws-accent)}
+.wa{display:flex;gap:9px;padding:6px 8px;border-radius:6px;align-items:flex-start}
+.wa.on{background:var(--ws-selected)}
+.wa .av{width:30px;height:30px;font-size:12px}
+.wa .t{flex:1;min-width:0;display:flex;flex-direction:column;line-height:17px}
+.wa .t b{font-weight:500;font-size:var(--ws-fs-side);color:var(--ws-text);display:flex;gap:6px;align-items:center}
+.wa .t span{font-size:12px;color:var(--ws-text-faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wa .t span.u{color:var(--ws-text-muted)}
+.wa .m{display:flex;flex-direction:column;align-items:flex-end;gap:3px;font-size:11px;color:var(--ws-text-faint)}
+.wa .m .n{min-width:16px;height:16px;border-radius:8px;background:var(--ws-accent);color:var(--ws-on-accent);font-size:10px;display:grid;place-items:center;padding:0 4px;box-sizing:border-box}
+.wa .m .n.w{background:var(--ws-warning)}
+.split{display:flex;height:100%}
+.split>.l{flex:1;min-width:0;display:flex;flex-direction:column}
+.split>.r{width:420px;flex:none;display:flex;flex-direction:column;box-shadow:inset 1px 0 0 var(--ws-border)}
+.tabs{height:38px;display:flex;align-items:flex-end;gap:2px;padding:0 8px;box-shadow:inset 0 -1px 0 var(--ws-border);background:var(--ws-subtle);flex:none}
+.tab{height:32px;display:flex;align-items:center;gap:7px;padding:0 10px;border-radius:7px 7px 0 0;font-size:13px;color:var(--ws-text-muted);max-width:190px;white-space:nowrap;overflow:hidden}
+.tab.on{background:var(--ws-canvas);color:var(--ws-text);box-shadow:0 0 0 1px var(--ws-border);clip-path:inset(-1px -1px 0 -1px)}
+.tab .x{margin-left:auto;color:var(--ws-text-faint);font-size:11px;padding-left:6px}
+.tab.add{color:var(--ws-text-faint)}
+.rail .ri.later{opacity:.45}
+.rail .wsav{width:30px;height:30px;border-radius:8px;background:var(--ws-accent);color:var(--ws-on-accent);display:grid;place-items:center;font-weight:600;font-size:13px;margin-bottom:6px}
+.rail .sep{width:24px;height:1px;background:var(--ws-border-strong);margin:6px 0}
+.dlg{position:absolute;z-index:3;left:50%;top:70px;transform:translateX(-50%);width:520px;border-radius:12px;background:var(--ws-surface);box-shadow:var(--ws-shadow);padding:18px 20px;display:flex;flex-direction:column;gap:12px;font-size:14px}
+.dlg h4{margin:0;font-size:16px;font-weight:600}
+.dlg .row{display:flex;align-items:center;gap:10px}
+.dlg .ck{width:16px;height:16px;border-radius:4px;background:var(--ws-accent);color:var(--ws-on-accent);display:grid;place-items:center;font-size:11px}
+.dlg .slot{border-radius:8px;box-shadow:0 0 0 1px var(--ws-border-strong);padding:8px 10px;display:flex;align-items:center;gap:10px}
+.dlg .sel2{border-radius:6px;box-shadow:inset 0 0 0 1px var(--ws-border-strong);padding:4px 8px;margin-left:auto}
+/* Git proposals extend the app/Chat components above; sizes stay token-based. */
+.page{min-width:0}.win{width:1240px}.stage{min-width:0}
+.chead{flex:none}.chead .end{margin-left:auto;display:flex;gap:var(--ws-space-1);align-items:center}
+.chead .identity{display:flex;align-items:center;gap:var(--ws-space-3);min-width:0}
+.chead .cap{white-space:nowrap}.chip code{font-size:var(--ws-fs-compact)}
+.git-controls{display:flex;align-items:center;gap:var(--ws-space-1)}
+.git-action{display:inline-flex;height:28px;border-radius:var(--ws-radius-md);box-shadow:inset 0 0 0 1px var(--ws-border-strong);font-size:var(--ws-fs-compact)}
+.git-action>span{display:inline-flex;align-items:center;gap:var(--ws-space-2);padding:0 var(--ws-space-3)}
+.git-action>span+span{box-shadow:inset 1px 0 0 var(--ws-border-strong)}
+.git-action.on>span+span{background:var(--ws-hover)}
+.btn.off,.git-action.off>span:first-child{color:var(--ws-text-faint)}
+.msgs{flex:1;min-height:0;justify-content:flex-end}.msgs .col{max-width:100%}
+.msg .b{font-size:var(--ws-fs-prose);line-height:var(--ws-lh-prose)}
+.turn{flex-wrap:wrap}.comp2{width:var(--ws-width-reading);max-width:calc(100% - 48px);box-sizing:border-box;margin:var(--ws-space-5) auto}
+.turn .chip{font-size:var(--ws-fs-compact);height:24px}
+.update{font-size:var(--ws-fs-small);color:var(--ws-text-muted);display:flex;gap:var(--ws-space-3);align-items:center;padding-top:var(--ws-space-3)}
+.pop{right:var(--ws-space-5);top:82px;width:340px;box-sizing:border-box;font-size:var(--ws-fs-compact)}
+.pop .it{min-height:28px}.pop .it.dis{color:var(--ws-text-faint)}
+.pop .note{font-size:var(--ws-fs-small);line-height:var(--ws-lh-small);color:var(--ws-text-faint);padding:var(--ws-space-2) var(--ws-space-3)}
+.pop .search{display:flex;align-items:center;gap:var(--ws-space-3);padding:var(--ws-space-2) var(--ws-space-3);box-shadow:inset 0 0 0 1px var(--ws-border-strong);border-radius:var(--ws-radius-md)}
+.dlg{box-sizing:border-box;top:var(--ws-space-8);width:560px;font-size:var(--ws-fs-ui);padding:var(--ws-space-6);gap:var(--ws-space-4)}
+.dlg h4{font-size:var(--ws-fs-prose);line-height:var(--ws-lh-prose)}
+.dlg p{margin:0;color:var(--ws-text-muted);font-size:var(--ws-fs-compact);line-height:var(--ws-lh-compact)}
+.dlg .acts{display:flex;gap:var(--ws-space-3);align-items:center;flex-wrap:wrap}.acts .sp{flex:1}
+.dlg .slot.selected{box-shadow:0 0 0 2px var(--ws-accent)}
+.slot b{font-weight:var(--ws-fw-medium)}.slot .detail{display:block;font-size:var(--ws-fs-compact);color:var(--ws-text-muted)}
+.radio{width:14px;height:14px;border-radius:50%;box-shadow:inset 0 0 0 1px var(--ws-border-strong);flex:none}
+.selected .radio{box-shadow:inset 0 0 0 4px var(--ws-accent)}
+.field{border-radius:var(--ws-radius-md);box-shadow:inset 0 0 0 1px var(--ws-border-strong);background:var(--ws-canvas);padding:var(--ws-space-3) var(--ws-space-4);font-size:var(--ws-fs-compact);line-height:var(--ws-lh-compact);min-height:60px}
+.field .ph{color:var(--ws-text-faint)}.label{font-size:var(--ws-fs-compact);font-weight:var(--ws-fw-medium)}
+.details{background:var(--ws-subtle);border-radius:var(--ws-radius-lg);padding:var(--ws-space-3) var(--ws-space-4);display:flex;flex-direction:column;gap:var(--ws-space-2);font-size:var(--ws-fs-compact)}
+.row{display:flex;gap:var(--ws-space-3);align-items:center}.row .k{width:56px;color:var(--ws-text-muted);flex:none}.row .r{margin-left:auto}
+.check{width:14px;height:14px;border-radius:var(--ws-radius-sm);box-shadow:inset 0 0 0 1px var(--ws-border-strong);display:grid;place-items:center;font-size:var(--ws-fs-caption)}
+.check.on{background:var(--ws-accent);color:var(--ws-on-accent);box-shadow:none}
+.callout{padding:var(--ws-space-3) var(--ws-space-4);border-radius:var(--ws-radius-md);background:var(--ws-warning-subtle);color:var(--ws-warning);font-size:var(--ws-fs-compact);line-height:var(--ws-lh-compact)}
+.callout.info{background:var(--ws-subtle);color:var(--ws-text-muted)}
+.file-list{display:flex;flex-direction:column;gap:1px;padding:var(--ws-space-2);background:var(--ws-subtle)}
+.file-row{display:flex;gap:var(--ws-space-3);align-items:center;min-height:var(--ws-row-side);padding:0 var(--ws-space-2);font-size:var(--ws-fs-compact)}
+.file-row .r{margin-left:auto;color:var(--ws-text-faint);font-size:var(--ws-fs-small)}
+.file-row .st{width:14px;flex:none}.st.M{color:var(--ws-warning)}.st.A,.ok,.add{color:var(--ws-success)}.del{color:var(--ws-danger)}
+.source-view{padding:var(--ws-space-7);display:flex;gap:var(--ws-space-6);flex:1;min-height:0}
+.source-view .col{width:auto;flex:1;margin:0;min-width:0}.source-view .files{width:190px;flex:none}
+.source-view .field{overflow-wrap:anywhere}.source-view .acts{display:flex;gap:var(--ws-space-3)}
+.side2 .nav code{font-size:var(--ws-fs-small);overflow:hidden;text-overflow:ellipsis}.side2 .nav .r{font-size:var(--ws-fs-caption)}
+.side2 .source-chat{padding-left:44px}.side2 .source-chat .av{width:22px;height:22px;font-size:11px}
+.notes-sheet{color:var(--ws-text);font-size:var(--ws-fs-compact)}
+.opts{display:grid;grid-template-columns:1fr;gap:var(--ws-space-5)}
+.lab{font-size:var(--ws-fs-compact);font-weight:var(--ws-fw-semibold);margin:0 0 var(--ws-space-2)}
+.states{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:var(--ws-space-4)}
+.states .card{display:flex;flex-direction:column;gap:var(--ws-space-3);min-width:0;font-size:var(--ws-fs-compact);line-height:var(--ws-lh-compact);color:var(--ws-text-muted)}
+.states b{color:var(--ws-text);font-weight:var(--ws-fw-semibold)}
+.rows{border-radius:var(--ws-radius-lg);box-shadow:0 0 0 1px var(--ws-border);overflow:hidden}
+.rows>div{display:grid;grid-template-columns:200px 200px 1fr;gap:var(--ws-space-4);padding:var(--ws-space-3) var(--ws-space-4);box-shadow:inset 0 -1px 0 var(--ws-border)}
+.rows .h,.rows .t{font-size:var(--ws-fs-small);color:var(--ws-text-muted)}
+.nrow{align-items:flex-start;font-size:var(--ws-fs-small);line-height:var(--ws-lh-small)}.nrow .k{width:170px;flex:none;color:var(--ws-text-faint)}
+.warning{color:var(--ws-warning)}.danger,.nrow .dg{color:var(--ws-danger)}
+.q{border-radius:var(--ws-radius-lg);box-shadow:0 0 0 1px var(--ws-border);padding:var(--ws-space-4) var(--ws-space-5);font-size:var(--ws-fs-compact);line-height:var(--ws-lh-compact)}
+.q+.q{margin-top:var(--ws-space-4)}.q h4{margin:0 0 var(--ws-space-1);font-size:var(--ws-fs-ui)}
+.q p{margin:0 0 var(--ws-space-3);color:var(--ws-text-muted)}.q ul{margin:0 0 var(--ws-space-3);padding-left:18px}.q li{margin-bottom:var(--ws-space-1)}.q .rec{color:var(--ws-success);font-weight:var(--ws-fw-medium)}
+.qs{font-size:var(--ws-fs-compact);line-height:var(--ws-lh-compact);margin:0;padding-left:18px}
+@media(max-width:560px){.chrome{padding:var(--ws-space-4)}.rows>div{grid-template-columns:1fr}.nrow{flex-direction:column;gap:0}.nrow .k{width:auto}}
+
+.pop.inline{position:static;width:auto;box-shadow:0 0 0 1px var(--ws-border)}
+</style></head>
+<body class="theme-light chrome">
 <div class="page">
   <div class="toolbar">
     <div>Theme <span class="seg" id="theme"><button data-v="light">Light</button><button data-v="dark">Dark</button><button data-v="system" class="on">System</button></span></div>
@@ -154,36 +194,36 @@ kbd{font-size:11px;padding:0 4px;border-radius:4px;border:1px solid currentColor
   </div>
   <section>
     <h1>Git pull requests and worktrees: mockups</h1>
-    <p class="sub"><b>Draft, not approved.</b> The next step of the <a href="../../../PLAN.md#liquid-git-integration--next-slice">Liquid Git slice</a>, following the merged branch, commit, push and pull work. These drawings extend <a href="liquid-git-branches.html">the approved branch mockup</a> §10, reusing its CSS, frame helpers, toolbar and wording. They retain that mockup's session shell to make the added Git controls comparable; the later <a href="liquid-app-concept.html">app structure</a> calls sessions Chats and projects folder Sources.</p>
-    <p class="sub">Decided bounds come from <a href="../../adr/ADR-LOG.md">ADR-0011/0190/0191/0220/0234</a> and <a href="../../../SECURITY.md#mvp-vcs-boundary">SECURITY.md</a>. Layout follows <a href="liquid-checkpoints.html">checkpoints</a>, <a href="liquid-agent-surface.html">the agent surface</a>, <a href="liquid-session-flows.html">session flows</a> and <a href="../guidelines.md">the guidelines</a>. Git keeps “branch”; a path through the conversation is a <a href="../../../GLOSSARY.md">session branch</a>. All new choices below are proposals, drawn as recommended in §13; none is a decision. Paths, titles, times and PR numbers are examples.</p>
+    <p class="sub"><b>Draft, not approved.</b> The next step of the <a href="../../../PLAN.md#liquid-git-integration--next-slice">Liquid Git slice</a>, following the merged branch, commit, push and pull work. These drawings extend <a href="liquid-git-branches.html">the approved branch flow</a> §10 inside <a href="liquid-app-concept.html">the current app structure</a> (ADR-0241): rail, Pages and Sources, Chats, and tabs. They use <a href="liquid-chats.html">the agent Chat</a> and the current Workspace components at Notion's scale.</p>
+    <p class="sub">Decided bounds come from <a href="../../adr/ADR-LOG.md">ADR-0011/0190/0191/0220/0234</a> and <a href="../../../SECURITY.md#mvp-vcs-boundary">SECURITY.md</a>. Layout follows <a href="liquid-app-concept.html">the app frame</a>, <a href="liquid-chats.html">Chats</a>, <a href="liquid-workspace-pages.html">Workspace Pages</a>, <a href="liquid-workspace-blocks.html">Blocks</a>, <a href="liquid-workspace-history.html">History</a>, <a href="liquid-workspace-text-sections.html">Sections</a> and <a href="../guidelines.md">the guidelines</a>. Git keeps “branch”; a path through the conversation is a <a href="../../../GLOSSARY.md">session branch</a>. All new choices below are proposals, drawn as recommended in §13; none is a decision. Paths, titles, times and PR numbers are examples. State cards and tables are review annotations; every screen is drawn in the current app frame.</p>
   </section>
   <section>
     <h3 class="sec">1 · Create pull request in the Git menu and after Push</h3>
-    <p class="sub">“Create pull request” joins the Git menu immediately below Push. After a successful push, the status bar offers the same action; it opens the same review dialog, never creates a PR on its own. The split button keeps the approved single next step: Commit, then Push. T3 Code also offers a combined action, including the confirmation label “Commit, push &amp; create PR”; Liquid's recommendation keeps the separate steps and makes the final write explicit (question 1).</p>
+    <p class="sub">“Create pull request” joins the Git menu immediately below Push. After a successful push, a proposed confirmation below the answer offers the same action (question 14); it opens the same review dialog, never creates a PR on its own. The Git action keeps the approved single next step: Commit, then Push. The proposed control cluster sits at the right of the current Chat header (question 13); the folder and model stay beside the agent name. T3 Code also offers a combined action, including the confirmation label “Commit, push &amp; create PR”; Liquid's recommendation keeps the separate steps and makes the final write explicit (question 1).</p>
     <div class="stage"><div class="scaler"><div class="win" id="w-menu"></div></div></div>
-    <div class="win mini" style="display:block;margin-top:16px"><div class="flist"><div class="nrow frow"><span class="k">After pushing</span><span>ⓘ Pushed 2 commits to origin/feature/retry-after · <b>Create pull request…</b></span></div><div class="nrow frow"><span class="k">An open PR already exists</span><span>ⓘ Pushed 2 commits to origin/feature/retry-after · <b>Open pull request #42 ↗</b></span></div></div></div>
+    <div class="notes-sheet" style="margin-top:16px"><div class="card file-list"><div class="nrow file-row"><span class="k">After pushing</span><span>ⓘ Pushed 2 commits to origin/feature/retry-after · <b>Create pull request…</b></span></div><div class="nrow file-row"><span class="k">An open PR already exists</span><span>ⓘ Pushed 2 commits to origin/feature/retry-after · <b>Open pull request #42 ↗</b></span></div></div></div>
   </section>
   <section>
     <h3 class="sec">2 · Review the title, description, base branch and draft</h3>
     <p class="sub">Both entry points show the repository, head branch and remote base before a write. Proposed defaults: the latest commit's subject and body, an editable description, the verified GitHub default branch, and “Create as draft” checked (questions 2–4). An empty description is allowed; an empty title disables creation. If the default branch cannot be read, the user chooses a base; Liquid does not guess “main”. Changing the base refreshes the commit comparison before enabling Create. A draft is visible on GitHub but is not ready for review.</p>
     <div class="opts">
-      <div><div class="lab">Pushed branch, ready to create a draft</div><div class="win mini"><div class="dlg">
-        <h4>Create pull request</h4><div class="kvbox"><div class="kvrow"><span class="k">GitHub</span><code>acme/acme-api</code><span class="r">MacBook</span></div><div class="kvrow"><span class="k">Head</span><code>feature/retry-after</code></div><div class="kvrow"><span class="k">Base</span><span class="chip box">main ⌄</span><span class="r">Change…</span></div></div>
+      <div><div class="lab">Pushed branch, ready to create a draft</div><div class="stage"><div class="scaler"><div class="win dialog-screen" id="w-create"><template><div class="dlg">
+        <h4>Create pull request</h4><div class="details"><div class="row"><span class="k">GitHub</span><code>acme/acme-api</code><span class="r">MacBook</span></div><div class="row"><span class="k">Head</span><code>feature/retry-after</code></div><div class="row"><span class="k">Base</span><span class="chip">main ⌄</span><span class="r">Change…</span></div></div>
         <p>2 pushed commits · 3 changed files · <span class="add">+12</span> <span class="del">−1</span> · Compare on GitHub ↗</p>
-        <div class="lbl2">Title</div><div class="ta" style="min-height:0">Return 429 with Retry-After on /login</div>
-        <div class="lbl2">Description</div><div class="ta">Return the seconds until the rate limit window frees up.<br>Document the response header in docs/api.md.</div>
+        <div class="label">Title</div><div class="field" style="min-height:0">Return 429 with Retry-After on /login</div>
+        <div class="label">Description</div><div class="field">Return the seconds until the rate limit window frees up.<br>Document the response header in docs/api.md.</div>
         <p>Filled from the latest commit. Review the description for all 2 commits.</p>
-        <div class="kvrow"><span class="cbx on">✓</span><span>Create as draft</span></div>
+        <div class="row"><span class="check on">✓</span><span>Create as draft</span></div>
         <p>Creates the pull request on GitHub through gh on MacBook.</p>
         <div class="acts"><span class="btn pri">Create draft pull request <kbd>⏎</kbd></span><span class="sp"></span><span class="btn">Cancel <kbd>esc</kbd></span></div>
-      </div></div></div>
-      <div><div class="lab">Choose a base; title still needed</div><div class="win mini"><div class="dlg">
-        <h4>Create pull request</h4><div class="kvrow"><span class="lbl2">Base branch</span><span class="chip box">Choose a branch… ⌄</span></div>
-        <div class="menu static"><div class="inp">Search branches on GitHub</div><div class="it">main<span class="r">default</span></div><div class="it">release/1.2</div></div>
+      </div></template></div></div></div></div>
+      <div><div class="lab">Choose a base; title still needed</div><div class="stage"><div class="scaler"><div class="win dialog-screen" id="w-dialog-2"><template><div class="dlg">
+        <h4>Create pull request</h4><div class="row"><span class="label">Base branch</span><span class="chip">Choose a branch… ⌄</span></div>
+        <div class="pop inline"><div class="search">Search branches on GitHub</div><div class="it">main<span class="r">default</span></div><div class="it">release/1.2</div></div>
         <p>The base is the branch you want these commits to join. Only branches in acme/acme-api are listed.</p>
-        <div class="lbl2">Title</div><div class="ta" style="min-height:0"><span class="ph">Describe the change</span></div><div class="notice">Choose a base and enter a title before creating the pull request.</div>
-        <div class="kvrow"><span class="cbx"></span><span>Create as draft</span></div><div class="acts"><span class="btn pri off" aria-disabled="true">Create pull request</span><span class="sp"></span><span class="btn">Cancel</span></div>
-      </div></div></div>
+        <div class="label">Title</div><div class="field" style="min-height:0"><span class="ph">Describe the change</span></div><div class="callout">Choose a base and enter a title before creating the pull request.</div>
+        <div class="row"><span class="check"></span><span>Create as draft</span></div><div class="acts"><span class="btn pri off" aria-disabled="true">Create pull request</span><span class="sp"></span><span class="btn">Cancel</span></div>
+      </div></template></div></div></div></div>
     </div>
     <p class="sub" style="margin-top:12px">T3 Code's inspected creation path generates title and body from the commit range, diff, optional template, writing policy and thread context; it resolves the base automatically and creates without a draft flag. Liquid's proposed form differs: no automatic model call or hidden content generation. It sends the edited title, description, chosen base and draft choice only on Create. Repository templates and a “Generate” action are not promised by this draft (question 2).</p>
   </section>
@@ -191,106 +231,106 @@ kbd{font-size:11px;padding:0 4px;border-radius:4px;border:1px solid currentColor
     <h3 class="sec">3 · Needs Push, refused creation and partial results</h3>
     <p class="sub">A pull request compares pushed commits. Uncommitted files and checkpoint commits are not included. A branch without an upstream, or with local commits ahead, shows what needs pushing; “Push…” hands off to the approved push flow and returns to review. T3 Code's “create_pr” action pushes first when needed. Liquid proposes a separate explicit Push, then Create (question 1). Recheck the repository, head commit, base and existing PR before submission; if they changed, keep the text and ask the user to review again.</p>
     <div class="opts">
-      <div><div class="lab">Local commits need pushing</div><div class="win mini"><div class="dlg"><h4>Push before creating a pull request</h4><p>feature/retry-after has 2 commits that are not on origin. GitHub cannot include them yet.</p><div class="notice info">3 uncommitted files are not part of the pull request. Commit them first if you want to include them.</div><div class="acts"><span class="btn pri">Push…</span><span class="btn">Commit changes…</span><span class="sp"></span><span class="btn">Cancel</span></div></div></div></div>
-      <div><div class="lab">An open pull request was found</div><div class="win mini"><div class="dlg"><h4>Pull request #42 already exists</h4><p>“Return 429 with Retry-After on /login” is open from feature/retry-after to main in acme/acme-api. Pushing this branch updates it.</p><div class="acts"><span class="btn pri">Open in browser ↗</span><span class="sp"></span><span class="btn">Close</span></div></div></div></div>
+      <div><div class="lab">Local commits need pushing</div><div class="stage"><div class="scaler"><div class="win dialog-screen" id="w-dialog-3"><template><div class="dlg"><h4>Push before creating a pull request</h4><p>feature/retry-after has 2 commits that are not on origin. GitHub cannot include them yet.</p><div class="callout info">3 uncommitted files are not part of the pull request. Commit them first if you want to include them.</div><div class="acts"><span class="btn pri">Push…</span><span class="btn">Commit changes…</span><span class="sp"></span><span class="btn">Cancel</span></div></div></template></div></div></div></div>
+      <div><div class="lab">An open pull request was found</div><div class="stage"><div class="scaler"><div class="win dialog-screen" id="w-dialog-4"><template><div class="dlg"><h4>Pull request #42 already exists</h4><p>“Return 429 with Retry-After on /login” is open from feature/retry-after to main in acme/acme-api. Pushing this branch updates it.</p><div class="acts"><span class="btn pri">Open in browser ↗</span><span class="sp"></span><span class="btn">Close</span></div></div></template></div></div></div></div>
     </div>
     <div class="states" style="margin-top:16px">
-      <div class="stc"><b>Detached HEAD</b><span>There is no branch to publish. Create a branch before creating a pull request.</span><span class="btn">Create branch…</span></div>
-      <div class="stc"><b>No commits to include</b><span>feature/retry-after has no commits beyond main. Choose another base or commit a change.</span><span class="btn off" aria-disabled="true">Create pull request</span></div>
-      <div class="stc"><b>Head and base are the same</b><span>A pull request cannot merge main into itself. Create a branch or choose a different base.</span><span class="btn">Create branch…</span></div>
-      <div class="stc"><b>Behind or diverged upstream</b><span>Pull first if it can fast-forward. Otherwise merge or rebase in a terminal, then push. Liquid does not force-push.</span><span class="btn">Close</span></div>
-      <div class="stc"><b>Uncommitted files only</b><span>No committed change can be published. Commit changes first; a checkpoint is not a branch commit.</span><span class="btn">Commit changes…</span></div>
-      <div class="stc"><b>Merge or rebase in progress</b><span>Finish or cancel it in Git before publishing. The form keeps your title and description.</span><span class="btn off" aria-disabled="true">Create pull request</span></div>
+      <div class="card"><b>Detached HEAD</b><span>There is no branch to publish. Create a branch before creating a pull request.</span><span class="btn">Create branch…</span></div>
+      <div class="card"><b>No commits to include</b><span>feature/retry-after has no commits beyond main. Choose another base or commit a change.</span><span class="btn off" aria-disabled="true">Create pull request</span></div>
+      <div class="card"><b>Head and base are the same</b><span>A pull request cannot merge main into itself. Create a branch or choose a different base.</span><span class="btn">Create branch…</span></div>
+      <div class="card"><b>Behind or diverged upstream</b><span>Pull first if it can fast-forward. Otherwise merge or rebase in a terminal, then push. Liquid does not force-push.</span><span class="btn">Close</span></div>
+      <div class="card"><b>Uncommitted files only</b><span>No committed change can be published. Commit changes first; a checkpoint is not a branch commit.</span><span class="btn">Commit changes…</span></div>
+      <div class="card"><b>Merge or rebase in progress</b><span>Finish or cancel it in Git before publishing. The form keeps your title and description.</span><span class="btn off" aria-disabled="true">Create pull request</span></div>
     </div>
-    <div class="win mini" style="display:block;margin-top:16px"><div class="flist"><div class="nrow frow"><span class="k">Creating</span><span>◌ Creating draft pull request… 3 s · Create is disabled while this request runs.</span></div><div class="nrow frow"><span class="k">Push succeeded, gh refused</span><span class="dg">⚠ Pushed 2 commits. Could not create the pull request: GitHub denied access. Your commits remain on origin.</span></div><div class="nrow frow"><span class="k">Result unknown</span><span class="wa">⚠ GitHub did not return a result. Check for an existing pull request before trying again. · Check again</span></div><div class="nrow frow"><span class="k">Branch changed</span><span class="wa">⚠ feature/retry-after changed since this dialog opened. Review the updated commits before creating the pull request.</span></div></div></div>
+    <div class="notes-sheet" style="margin-top:16px"><div class="card file-list"><div class="nrow file-row"><span class="k">Creating</span><span>◌ Creating draft pull request… 3 s · Create is disabled while this request runs.</span></div><div class="nrow file-row"><span class="k">Push succeeded, gh refused</span><span class="dg">⚠ Pushed 2 commits. Could not create the pull request: GitHub denied access. Your commits remain on origin.</span></div><div class="nrow file-row"><span class="k">Result unknown</span><span class="warning">⚠ GitHub did not return a result. Check for an existing pull request before trying again. · Check again</span></div><div class="nrow file-row"><span class="k">Branch changed</span><span class="warning">⚠ feature/retry-after changed since this dialog opened. Review the updated commits before creating the pull request.</span></div></div></div>
     <p class="sub" style="margin-top:12px">Existing-PR detection uses the GitHub repository and head branch, including its owner; a PR with another base still counts and is shown, rather than silently retargeted. T3 Code looks for an open PR before generation and returns “opened_existing”. A merged or closed PR is shown as history, not reused as an open PR; the user can explicitly create another for new commits. A failed lookup is “unknown”, never “no PR”.</p>
   </section>
   <section>
     <h3 class="sec">4 · A pull request beside the branch</h3>
-    <p class="sub">The PR chip joins the branch in the header shared by Chat, Trajectory and Diff. It opens a small summary with state, base, checks, review status, last successful update and “Open in browser”. T3 Code has a richer PR detail surface with checks and review information; Liquid proposes this summary and leaves review, merging and closing to GitHub. PR status never changes the branch or starts a Git write. Reading status on open, focus and “Refresh” is proposed in question 5.</p>
+    <p class="sub">The PR chip joins the branch in the Chat header, beside the Git action (question 13). Diff and Trajectory stay on the changed answer, as in the current Chat; they are no longer navigation tabs. The PR chip opens a small summary with state, base, checks, review status, last successful update and “Open in browser”. T3 Code has a richer PR detail surface with checks and review information; Liquid proposes this summary and leaves review, merging and closing to GitHub. PR status never changes the branch or starts a Git write. Reading status on open, focus and “Refresh” is proposed in question 5.</p>
     <div class="stage"><div class="scaler"><div class="win" id="w-pr"></div></div></div>
     <div class="states" style="margin-top:16px">
-      <div class="stc"><b>◌ Draft #42</b><span>Checks: 2 pending · Review: draft, not requested</span></div>
-      <div class="stc"><b>● Open #42</b><span>Checks: 3 passed · Review: required</span></div>
-      <div class="stc"><b>● Open #42</b><span class="del">Checks: 1 failed, 2 passed · Review: changes requested</span></div>
-      <div class="stc"><b>✓ Open #42</b><span class="ok">Checks: 3 passed · Review: approved</span><span>GitHub's merge rules still apply.</span></div>
-      <div class="stc"><b>✓ Merged #42</b><span>Merged into main on GitHub. The worktree and branch remain until explicitly removed.</span></div>
-      <div class="stc"><b>× Closed #42</b><span>Closed without merging. The branch stays available.</span></div>
-      <div class="stc"><b>Checks: none reported</b><span>Different from passed. Review: no reviews. Neither implies approval to merge.</span></div>
-      <div class="stc"><b>⚠ Status unavailable</b><span>Last known: Open #42 · 10:41. Could not refresh; keep the link, mark the summary stale and offer Refresh.</span></div>
+      <div class="card"><b>◌ Draft #42</b><span>Checks: 2 pending · Review: draft, not requested</span></div>
+      <div class="card"><b>● Open #42</b><span>Checks: 3 passed · Review: required</span></div>
+      <div class="card"><b>● Open #42</b><span class="del">Checks: 1 failed, 2 passed · Review: changes requested</span></div>
+      <div class="card"><b>✓ Open #42</b><span class="ok">Checks: 3 passed · Review: approved</span><span>GitHub's merge rules still apply.</span></div>
+      <div class="card"><b>✓ Merged #42</b><span>Merged into main on GitHub. The worktree and branch remain until explicitly removed.</span></div>
+      <div class="card"><b>× Closed #42</b><span>Closed without merging. The branch stays available.</span></div>
+      <div class="card"><b>Checks: none reported</b><span>Different from passed. Review: no reviews. Neither implies approval to merge.</span></div>
+      <div class="card"><b>⚠ Status unavailable</b><span>Last known: Open #42 · 10:41. Could not refresh; keep the link, mark the summary stale and offer Refresh.</span></div>
     </div>
   </section>
   <section>
     <h3 class="sec">5 · GitHub, gh and host errors</h3>
     <p class="sub">The host is the machine running Meta-Harness, which may differ from the machine displaying Liquid. Liquid uses that host's git and gh; it offers no token field, credential storage or silent installation. T3 Code's inspected GitHub provider can use credentials directly and calls GitHub's API; Liquid follows its host-specific setup guidance but keeps the decided git/gh boundary. GitHub Enterprise and fork scope remain question 6.</p>
     <div class="states">
-      <div class="stc"><b>gh missing on MacBook</b><span>Could not run gh: “command not found”. Install GitHub CLI on MacBook, then check again. Git commits and worktrees still work.</span><span class="btn">Check again</span></div>
-      <div class="stc"><b>gh not signed in</b><span>Sign in on MacBook with <code>gh auth login</code>, then check again. Liquid does not ask for the credential.</span><span class="btn">Check again</span></div>
-      <div class="stc"><b>No remote</b><span>This repository has no remote. Add a GitHub remote with Git on MacBook before creating a pull request.</span><span class="btn off" aria-disabled="true">Create pull request</span></div>
-      <div class="stc"><b>No GitHub remote</b><span>origin is on GitLab. Pull requests through gh need GitHub. Open this repository in its host's browser to create the host's merge request.</span><span class="btn">Open in browser ↗</span></div>
-      <div class="stc"><b>GitHub Enterprise</b><span>Sign in to github.acme.example with gh on MacBook. Use only an explicitly resolved GitHub host; an unknown host is not treated as GitHub.</span><span class="btn">Check again</span></div>
-      <div class="stc"><b>More than one destination</b><span>The fetch and push destinations differ or several remotes could supply this PR. Nothing was pushed or created. Resolve the remote in Git first.</span><span class="btn">Close</span></div>
-      <div class="stc"><b>No permission or repository not found</b><span>gh cannot access acme/acme-api on MacBook. Check the host's login and repository access, then check again.</span><span class="btn">Check again</span></div>
-      <div class="stc"><b>Offline, rate limited or host unavailable</b><span>Could not read GitHub status. The last successful result stays labelled with its time. Retry is explicit.</span><span class="btn">Refresh</span></div>
+      <div class="card"><b>gh missing on MacBook</b><span>Could not run gh: “command not found”. Install GitHub CLI on MacBook, then check again. Git commits and worktrees still work.</span><span class="btn">Check again</span></div>
+      <div class="card"><b>gh not signed in</b><span>Sign in on MacBook with <code>gh auth login</code>, then check again. Liquid does not ask for the credential.</span><span class="btn">Check again</span></div>
+      <div class="card"><b>No remote</b><span>This repository has no remote. Add a GitHub remote with Git on MacBook before creating a pull request.</span><span class="btn off" aria-disabled="true">Create pull request</span></div>
+      <div class="card"><b>No GitHub remote</b><span>origin is on GitLab. Pull requests through gh need GitHub. Open this repository in its host's browser to create the host's merge request.</span><span class="btn">Open in browser ↗</span></div>
+      <div class="card"><b>GitHub Enterprise</b><span>Sign in to github.acme.example with gh on MacBook. Use only an explicitly resolved GitHub host; an unknown host is not treated as GitHub.</span><span class="btn">Check again</span></div>
+      <div class="card"><b>More than one destination</b><span>The fetch and push destinations differ or several remotes could supply this PR. Nothing was pushed or created. Resolve the remote in Git first.</span><span class="btn">Close</span></div>
+      <div class="card"><b>No permission or repository not found</b><span>gh cannot access acme/acme-api on MacBook. Check the host's login and repository access, then check again.</span><span class="btn">Check again</span></div>
+      <div class="card"><b>Offline, rate limited or host unavailable</b><span>Could not read GitHub status. The last successful result stays labelled with its time. Retry is explicit.</span><span class="btn">Refresh</span></div>
     </div>
     <p class="sub" style="margin-top:12px">Errors give a plain first sentence, a safe command message and the completed steps. Credentials in remote URLs or command output must not appear. The T3 Code source says “GitHub is not authenticated. Run `gh auth login` (or set GH_TOKEN) and retry.” Liquid keeps only the gh login guidance; it does not expose a token setup flow. No Git repository or unavailable Git uses the <a href="liquid-git-branches.html">approved states</a>.</p>
   </section>
   <section>
     <h3 class="sec">6 · Open a branch in a new worktree</h3>
-    <p class="sub">A worktree is another folder for the same Git repository, with its own checked-out files, index and branch. “Open in a new worktree…” in the branch menu opens a review dialog. It creates and opens the folder, then offers a new session there; the current session stays in its folder. T3 Code can reuse a branch's existing worktree or create one. Git normally permits a branch in only one checkout: Liquid never uses force to bypass that rule.</p>
+    <p class="sub">A worktree is another folder for the same Git repository, with its own checked-out files, index and branch. “Open in a new worktree…” in the branch menu opens a review dialog. It creates and opens the folder, then offers a new Chat there; the current Chat stays in its folder. T3 Code can reuse a branch's existing worktree or create one. Git normally permits a branch in only one checkout: Liquid never uses force to bypass that rule.</p>
     <div class="stage"><div class="scaler"><div class="win" id="w-worktree"></div></div></div>
     <div class="opts" style="margin-top:16px">
-      <div><div class="lab">Selected branch is free</div><div class="win mini"><div class="dlg"><h4>Open in a new worktree</h4><div class="kvbox"><div class="kvrow"><span class="k">Branch</span><code>feature/retry-after</code></div><div class="kvrow"><span class="k">Host</span><span>MacBook</span></div></div><div class="lbl2">Location</div><div class="ta" style="min-height:0;overflow-wrap:anywhere"><code>~/code/acme-api-worktrees/feature-retry-after</code></div><p>Example of the proposed location (question 7). Change…</p><p>Opens the branch's committed files in another folder. Uncommitted files, ignored files and stashed changes stay where they are; nothing is copied automatically.</p><div class="acts"><span class="btn pri">Create worktree</span><span class="sp"></span><span class="btn">Cancel</span></div></div></div></div>
-      <div><div class="lab">Selected branch is already checked out</div><div class="win mini"><div class="dlg"><h4>main is already open</h4><p>main is checked out at <code>~/code/acme-api</code>. Git cannot check out the same branch in another worktree.</p><div class="choice on"><span class="rd"></span><div><b>Create a new branch from main</b><span>Start from main's current commit in a separate folder.</span></div></div><div class="lbl2">New branch</div><div class="ta" style="min-height:0"><code>feature/retry-after</code></div><div class="acts"><span class="btn pri">Create branch and worktree</span><span class="btn">Open existing checkout</span><span class="sp"></span><span class="btn">Cancel</span></div></div></div></div>
+      <div><div class="lab">Selected branch is free</div><div class="stage"><div class="scaler"><div class="win dialog-screen" id="w-open"><template><div class="dlg"><h4>Open in a new worktree</h4><div class="details"><div class="row"><span class="k">Branch</span><code>feature/retry-after</code></div><div class="row"><span class="k">Host</span><span>MacBook</span></div></div><div class="label">Location</div><div class="field" style="min-height:0;overflow-wrap:anywhere"><code>~/code/acme-api-worktrees/feature-retry-after</code></div><p>Example of the proposed location (question 7). Change…</p><p>Opens the branch's committed files in another folder. Uncommitted files, ignored files and stashed changes stay where they are; nothing is copied automatically.</p><div class="acts"><span class="btn pri">Create worktree</span><span class="sp"></span><span class="btn">Cancel</span></div></div></template></div></div></div></div>
+      <div><div class="lab">Selected branch is already checked out</div><div class="stage"><div class="scaler"><div class="win dialog-screen" id="w-dialog-6"><template><div class="dlg"><h4>main is already open</h4><p>main is checked out at <code>~/code/acme-api</code>. Git cannot check out the same branch in another worktree.</p><div class="slot selected"><span class="radio"></span><div><b>Create a new branch from main</b><span class="detail">Start from main's current commit in a separate folder.</span></div></div><div class="label">New branch</div><div class="field" style="min-height:0"><code>feature/retry-after</code></div><div class="acts"><span class="btn pri">Create branch and worktree</span><span class="btn">Open existing checkout</span><span class="sp"></span><span class="btn">Cancel</span></div></div></template></div></div></div></div>
     </div>
-    <div class="win mini" style="display:block;margin-top:16px"><div class="flist"><div class="nrow frow"><span class="k">Location exists</span><span class="wa">⚠ The folder already exists. Choose another empty location; nothing was overwritten.</span></div><div class="nrow frow"><span class="k">Branch name refused</span><span class="wa">⚠ Git does not allow “..” in a branch name. Choose another name.</span></div><div class="nrow frow"><span class="k">Creation failed</span><span class="dg">⚠ Could not create the worktree: the host cannot write to that folder. No session started. Check Git for any branch or folder left by the failed operation.</span></div><div class="nrow frow"><span class="k">Opening failed after creation</span><span class="wa">⚠ Created the worktree, but could not open it. The folder and branch remain. · Open folder</span></div></div></div>
+    <div class="notes-sheet" style="margin-top:16px"><div class="card file-list"><div class="nrow file-row"><span class="k">Location exists</span><span class="warning">⚠ The folder already exists. Choose another empty location; nothing was overwritten.</span></div><div class="nrow file-row"><span class="k">Branch name refused</span><span class="warning">⚠ Git does not allow “..” in a branch name. Choose another name.</span></div><div class="nrow file-row"><span class="k">Creation failed</span><span class="dg">⚠ Could not create the worktree: the host cannot write to that folder. No Chat started. Check Git for any branch or folder left by the failed operation.</span></div><div class="nrow file-row"><span class="k">Opening failed after creation</span><span class="warning">⚠ Created the worktree, but could not open it. The folder and branch remain. · Open folder</span></div></div></div>
     <p class="sub" style="margin-top:12px">T3 Code builds the path as its configured worktrees directory / repository name / branch with “/” replaced by “-”. Its default worktrees directory is in its host data folder; Settings can change it. It can begin with a temporary branch and generate its final name. Liquid proposes an editable branch name before creation, no automatic model call, and an explicit location preview (question 7). Opening an existing worktree only navigates; starting another agent there still needs the checkout guard.</p>
   </section>
   <section>
-    <h3 class="sec">7 · Start a session: Current checkout or New worktree</h3>
-    <p class="sub">The new-session start uses T3 Code's exact “Current checkout” and “New worktree” labels. Current checkout uses the selected folder's existing branch and uncommitted files. New worktree starts a new branch from the displayed base commit, with its own files. The proposed default is Current checkout when idle, but another running session requires New worktree for parallel work (question 8). Selecting a mode creates nothing; “Create worktree and start session” is the explicit Git write. Sending the first prompt is a separate action.</p>
+    <h3 class="sec">7 · Start a Chat: Current checkout or New worktree</h3>
+    <p class="sub">The new-Chat start uses T3 Code's exact “Current checkout” and “New worktree” labels. Current checkout uses the selected folder's existing branch and uncommitted files. New worktree starts a new branch from the displayed base commit, with its own files. The proposed default is Current checkout when idle, but another running Chat requires New worktree for parallel work (question 8). Selecting a mode creates nothing; “Create worktree and start Chat” is the explicit Git write. Sending the first prompt is a separate action.</p>
     <div class="opts">
-      <div><div class="lab">Current checkout, idle</div><div class="win mini"><div class="dlg"><h4>New agent session</h4><p>acme-api · pi · MacBook</p><div class="choice on"><span class="rd"></span><div><b>Current checkout</b><span>Use ~/code/acme-api · main · 3 uncommitted files</span></div></div><div class="choice"><span class="rd"></span><div><b>New worktree</b><span>A separate branch and folder for parallel work.</span></div></div><p>This session will use the current files. Starting it does not switch the branch.</p><div class="acts"><span class="btn pri">Start session</span><span class="sp"></span><span class="btn">Cancel</span></div></div></div></div>
-      <div><div class="lab">New worktree</div><div class="win mini"><div class="dlg"><h4>New agent session</h4><p>acme-api · pi · MacBook</p><div class="choice"><span class="rd"></span><div><b>Current checkout</b><span>Use ~/code/acme-api · main</span></div></div><div class="choice on"><span class="rd"></span><div><b>New worktree</b><span>Start from a commit; local changes are not copied.</span></div></div><div class="kvrow"><span class="lbl2">From</span><span class="chip box">main · 6e82c10 ⌄</span></div><div class="lbl2">New branch</div><div class="ta" style="min-height:0"><code>fix/sync-flake</code></div><p style="overflow-wrap:anywhere">Location: <code>~/code/acme-api-worktrees/fix-sync-flake</code> · Change…</p><div class="acts"><span class="btn pri">Create worktree and start session</span><span class="sp"></span><span class="btn">Cancel</span></div></div></div></div>
+      <div><div class="lab">Current checkout, idle</div><div class="stage"><div class="scaler"><div class="win dialog-screen" id="w-start-current"><template><div class="dlg"><h4>New Chat</h4><p>Coder · acme-api · pi · sonnet · MacBook</p><div class="slot selected"><span class="radio"></span><div><b>Current checkout</b><span class="detail">Use ~/code/acme-api · main · 3 uncommitted files</span></div></div><div class="slot"><span class="radio"></span><div><b>New worktree</b><span class="detail">A separate branch and folder for parallel work.</span></div></div><p>This Chat will use the current files. Starting it does not switch the branch.</p><div class="acts"><span class="btn pri">Start Chat</span><span class="sp"></span><span class="btn">Cancel</span></div></div></template></div></div></div></div>
+      <div><div class="lab">New worktree</div><div class="stage"><div class="scaler"><div class="win dialog-screen" id="w-start-new"><template><div class="dlg"><h4>New Chat</h4><p>Coder · acme-api · pi · sonnet · MacBook</p><div class="slot"><span class="radio"></span><div><b>Current checkout</b><span class="detail">Use ~/code/acme-api · main</span></div></div><div class="slot selected"><span class="radio"></span><div><b>New worktree</b><span class="detail">Start from a commit; local changes are not copied.</span></div></div><div class="row"><span class="label">From</span><span class="chip">main · 6e82c10 ⌄</span></div><div class="label">New branch</div><div class="field" style="min-height:0"><code>fix/sync-flake</code></div><p style="overflow-wrap:anywhere">Location: <code>~/code/acme-api-worktrees/fix-sync-flake</code> · Change…</p><div class="acts"><span class="btn pri">Create worktree and start Chat</span><span class="sp"></span><span class="btn">Cancel</span></div></div></template></div></div></div></div>
     </div>
-    <div class="states" style="margin-top:16px"><div class="stc"><b>Current checkout is busy</b><span>“Rate limit for /login” is running here. Stop it or wait until it finishes, or use another worktree.</span><span class="btn off" aria-disabled="true">Start in current checkout</span><span class="btn">New worktree…</span></div><div class="stc"><b>Creating worktree…</b><span>No agent starts until creation succeeds and the new checkout guard is acquired. A failed start leaves the created worktree visible for recovery.</span></div><div class="stc"><b>Creation waits for a running turn</b><span>The proposed repository-wide lifecycle guard refuses creation while any turn in the repository runs (§11, question 12). A free worktree already created can start a parallel session.</span></div></div>
+    <div class="states" style="margin-top:16px"><div class="card"><b>Current checkout is busy</b><span>“Rate limit for /login” is running here. Stop it or wait until it finishes, or use another worktree.</span><span class="btn off" aria-disabled="true">Start in current checkout</span><span class="btn">New worktree…</span></div><div class="card"><b>Creating worktree…</b><span>No agent starts until creation succeeds and the new checkout guard is acquired. A failed start leaves the created worktree visible for recovery.</span></div><div class="card"><b>Creation waits for a running turn</b><span>The proposed repository-wide lifecycle guard refuses creation while any turn in the repository runs (§11, question 12). A free worktree already created can start a parallel Chat.</span></div></div>
     <p class="sub" style="margin-top:12px">T3 Code creates the worktree during launch and supports fetching a remote base, setup scripts and generated branch names. Liquid's recommendation uses the displayed local commit without an implicit pull; the user can Fetch and deliberately select a remote branch instead. Ignored dependencies, secrets and local configuration are not copied. Outside Git, New worktree is unavailable and says “Initialize Git before creating a worktree”; Current checkout retains the existing per-folder guard.</p>
   </section>
   <section>
-    <h3 class="sec">8 · Worktrees in the sidebar and project tree</h3>
-    <p class="sub">Proposed grouping: one project, a Current checkout row and a Worktrees group, with sessions under the folder they actually use (question 9). Each folder row shows its branch; its full path and host appear on selection. The project tree and Diff use the selected session's folder, never the project's original folder by default. The header repeats that folder when a worktree is selected. T3 Code keeps thread rows under their project and adds a worktree indicator; Liquid's grouping makes checkout ownership visible before starting another session.</p>
+    <h3 class="sec">8 · Worktrees in Sources and their Chats</h3>
+    <p class="sub">Proposed placement in Pages: the acme-api folder Source in Acme API expands to Current checkout and Worktrees, with links to Chats under the folder they actually use (question 9). The Chats rail view retains its approved filters, Pinned, personal sections and Recent; these links do not replace that list. Each folder row shows its branch; its full path and host appear on selection. The Source tree and Diff use the selected Chat's folder, never the Source's original folder by default. The Source header names the selected worktree; opening its Chat repeats that work folder beside the agent. The Source tree is a Source tab, not the old Diff tab. T3 Code keeps thread rows under their project and adds a worktree indicator; Liquid's grouping makes checkout ownership visible before starting another Chat.</p>
     <div class="stage"><div class="scaler"><div class="win" id="w-tree"></div></div></div>
-    <div class="win mini" style="display:block;margin-top:16px"><div class="flist"><div class="nrow frow"><span class="k">Existing worktree</span><span>List Git's registered worktree with its actual branch and location, even when created outside Liquid. “New agent session” uses that folder after the guard check.</span></div><div class="nrow frow"><span class="k">Worktree moved or missing</span><span class="wa">⚠ This session's folder is unavailable on MacBook. Read its chat and Trajectory; sending prompts and file actions are disabled. Restore the folder with Git or start a session in another checkout.</span></div><div class="nrow frow"><span class="k">Host disconnected</span><span>Last known branch and folder · MacBook offline. Checkout availability cannot be confirmed.</span></div></div></div>
+    <div class="notes-sheet" style="margin-top:16px"><div class="card file-list"><div class="nrow file-row"><span class="k">Existing worktree</span><span>List Git's registered worktree with its actual branch and location, even when created outside Liquid. “New Chat” uses that folder after the guard check.</span></div><div class="nrow file-row"><span class="k">Worktree moved or missing</span><span class="warning">⚠ This Chat's folder is unavailable on MacBook. Read its chat and Trajectory; sending prompts and file actions are disabled. Restore the folder with Git or start a Chat in another checkout.</span></div><div class="nrow file-row"><span class="k">Host disconnected</span><span>Last known branch and folder · MacBook offline. Checkout availability cannot be confirmed.</span></div></div></div>
   </section>
   <section>
-    <h3 class="sec">9 · Changing the checkout of an existing session</h3>
-    <p class="sub">T3 Code's branch selector can point a thread at another worktree; when the path changes it requests that thread's runtime stop and updates its metadata. Its environment selector also locks an established worktree's mode. Liquid has decided that a running agent's checkout cannot switch. For idle sessions, the recommendation is to keep their original checkout and start a new session in the target, avoiding a conversation whose checkpoint file actions silently change folders (question 10).</p>
-    <div class="opts"><div><div class="lab">Idle session, another worktree selected</div><div class="win mini"><div class="dlg"><h4>Start in another worktree</h4><p>“Rate limit for /login” stays in its current checkout, with its chat, session branches and checkpoints. Start a new session in feature/retry-after to work there.</p><p>No prompt, uncommitted file, stash or checkpoint is moved.</p><div class="acts"><span class="btn pri">New session in this worktree</span><span class="sp"></span><span class="btn">Cancel</span></div></div></div></div><div><div class="lab">Running session</div><div class="win mini"><div class="dlg"><h4>Could not change checkout</h4><div class="notice">“Rate limit for /login” is running in this checkout. Stop it or wait until it finishes.</div><p>Liquid does not stop or move a running session as a side effect of choosing a folder. An existing free worktree can host a separate parallel session.</p><div class="acts"><span class="btn off" aria-disabled="true">Change checkout</span><span class="btn">Show running session</span><span class="sp"></span><span class="btn">Close</span></div></div></div></div></div>
+    <h3 class="sec">9 · Changing the checkout of an existing Chat</h3>
+    <p class="sub">T3 Code's branch selector can point a thread at another worktree; when the path changes it requests that thread's runtime stop and updates its metadata. Its environment selector also locks an established worktree's mode. Liquid has decided that a running agent's checkout cannot switch. For idle Chats, the recommendation is to keep their original checkout and start a new Chat in the target, avoiding a conversation whose checkpoint file actions silently change folders (question 10).</p>
+    <div class="opts"><div><div class="lab">Idle Chat, another worktree selected</div><div class="stage"><div class="scaler"><div class="win dialog-screen" id="w-dialog-9"><template><div class="dlg"><h4>Start in another worktree</h4><p>“Rate limit for /login” stays in its current checkout, with its chat, session branches and checkpoints. Start a new Chat in feature/retry-after to work there.</p><p>No prompt, uncommitted file, stash or checkpoint is moved.</p><div class="acts"><span class="btn pri">New Chat in this worktree</span><span class="sp"></span><span class="btn">Cancel</span></div></div></template></div></div></div></div><div><div class="lab">Running Chat</div><div class="stage"><div class="scaler"><div class="win dialog-screen" id="w-dialog-10"><template><div class="dlg"><h4>Could not change checkout</h4><div class="callout">“Rate limit for /login” is running in this checkout. Stop it or wait until it finishes.</div><p>Liquid does not stop or move a running Chat as a side effect of choosing a folder. An existing free worktree can host a separate parallel Chat.</p><div class="acts"><span class="btn off" aria-disabled="true">Change checkout</span><span class="btn">Show running Chat</span><span class="sp"></span><span class="btn">Close</span></div></div></template></div></div></div></div></div>
   </section>
   <section>
     <h3 class="sec">10 · Remove a worktree</h3>
-    <p class="sub">“Remove worktree…” belongs to the worktree folder's menu, separate from “Delete session” and “Remove all checkpoints”. Proposed removal keeps the branch, commits, repository-wide stashes, chats and checkpoint refs. It deletes the folder and its index, so the preview must cover staged, unstaged, untracked and ignored files. The recommendation refuses removal with local files to preserve and offers no force option (question 11). Unpushed commits stay on the retained branch and are called out, not mistaken for uncommitted files.</p>
+    <p class="sub">“Remove worktree…” belongs to the worktree folder's menu, separate from “Delete Chat” and “Remove all checkpoints”. Proposed removal keeps the branch, commits, repository-wide stashes, chats and checkpoint refs. It deletes the folder and its index, so the preview must cover staged, unstaged, untracked and ignored files. The recommendation refuses removal with local files to preserve and offers no force option (question 11). Unpushed commits stay on the retained branch and are called out, not mistaken for uncommitted files.</p>
     <div class="opts">
-      <div><div class="lab">Clean worktree, no local files to preserve</div><div class="win mini"><div class="dlg"><h4>Remove feature/retry-after worktree?</h4><p style="overflow-wrap:anywhere">Removes <code>~/code/acme-api-worktrees/feature-retry-after</code> on MacBook. Git reports no staged, unstaged, untracked or ignored files to preserve.</p><div class="notice info">The branch has 1 unpushed commit. The branch and its commits remain in this repository.</div><p>“Rate limit for /login” keeps its chat and checkpoints, but cannot resume file work in the removed folder. Removing the worktree does not delete its session.</p><div class="acts"><span class="btn pri" style="background:var(--ws-danger)">Remove worktree</span><span class="sp"></span><span class="btn">Cancel</span></div></div></div></div>
-      <div><div class="lab">Uncommitted changes</div><div class="win mini"><div class="dlg"><h4>Could not remove this worktree</h4><p>3 files have local changes. Commit them or leave them in a stash through the approved branch flow before removing the worktree; a stash remains shared by this repository.</p><div class="flist"><div class="frow"><span class="st M">M</span><code>src/routes/login.ts</code><span class="r">staged</span></div><div class="frow"><span class="st M">M</span><code>docs/api.md</code><span class="r">unstaged</span></div><div class="frow"><span class="st A">?</span><code>notes/todo.md</code><span class="r">untracked</span></div></div><div class="acts"><span class="btn off" aria-disabled="true">Remove worktree</span><span class="btn">Show changes</span><span class="sp"></span><span class="btn">Close</span></div></div></div></div>
+      <div><div class="lab">Clean worktree, no local files to preserve</div><div class="stage"><div class="scaler"><div class="win dialog-screen" id="w-remove"><template><div class="dlg"><h4>Remove feature/retry-after worktree?</h4><p style="overflow-wrap:anywhere">Removes <code>~/code/acme-api-worktrees/feature-retry-after</code> on MacBook. Git reports no staged, unstaged, untracked or ignored files to preserve.</p><div class="callout info">The branch has 1 unpushed commit. The branch and its commits remain in this repository.</div><p>“Rate limit for /login” keeps its chat and checkpoints, but cannot resume file work in the removed folder. Removing the worktree does not delete its Chat.</p><div class="acts"><span class="btn pri" style="background:var(--ws-danger)">Remove worktree</span><span class="sp"></span><span class="btn">Cancel</span></div></div></template></div></div></div></div>
+      <div><div class="lab">Uncommitted changes</div><div class="stage"><div class="scaler"><div class="win dialog-screen" id="w-dialog-12"><template><div class="dlg"><h4>Could not remove this worktree</h4><p>3 files have local changes. Commit them or leave them in a stash through the approved branch flow before removing the worktree; a stash remains shared by this repository.</p><div class="card file-list"><div class="file-row"><span class="st M">M</span><code>src/routes/login.ts</code><span class="r">staged</span></div><div class="file-row"><span class="st M">M</span><code>docs/api.md</code><span class="r">unstaged</span></div><div class="file-row"><span class="st A">?</span><code>notes/todo.md</code><span class="r">untracked</span></div></div><div class="acts"><span class="btn off" aria-disabled="true">Remove worktree</span><span class="btn">Show changes</span><span class="sp"></span><span class="btn">Close</span></div></div></template></div></div></div></div>
     </div>
-    <div class="states" style="margin-top:16px"><div class="stc"><b>Agent running</b><span>“Fix flaky sync test” is running in this worktree. Stop it or wait until it finishes. Remove stays disabled; it never stops the agent automatically.</span></div><div class="stc"><b>Ignored files remain</b><span>Git ignores 142 files in this folder. Checkpoints and a normal stash do not save them. Move or remove them yourself before removing the worktree.</span><span class="btn">Open folder</span></div><div class="stc"><b>Main checkout or Git-locked worktree</b><span>The main checkout cannot be removed as a linked worktree. A worktree locked by Git stays locked; Liquid does not force removal.</span></div><div class="stc"><b>Another idle session uses it</b><span>The removal dialog lists every affected session. All keep their chat; each loses its working folder. Cancel to keep it available.</span></div><div class="stc"><b>Files changed during review</b><span>Recheck under the guard before removal. If the preview changed, keep the folder and show the updated files; do not force past Git's refusal.</span></div><div class="stc"><b>Removal failed</b><span>Keep the worktree listed until Git confirms removal. If registration or folder state is uncertain, show it as unavailable and direct recovery through Git.</span></div></div>
-    <p class="sub" style="margin-top:12px">T3 Code asks “This thread is the only one linked to this worktree:” and “Delete the worktree too?” when deleting the last linked thread unless automatic cleanup is enabled. It stops that thread's runtime before deletion, then requests worktree removal with <code>force: true</code>. Its Settings also expose cleanup rules. Liquid's recommendation differs: no automatic cleanup on merge, session deletion or age, no forced deletion and no branch deletion. Deleting a session still follows its approved confirmation and removes that session's checkpoints; it does not also remove a worktree.</p>
+    <div class="states" style="margin-top:16px"><div class="card"><b>Agent running</b><span>“Fix flaky sync test” is running in this worktree. Stop it or wait until it finishes. Remove stays disabled; it never stops the agent automatically.</span></div><div class="card"><b>Ignored files remain</b><span>Git ignores 142 files in this folder. Checkpoints and a normal stash do not save them. Move or remove them yourself before removing the worktree.</span><span class="btn">Open folder</span></div><div class="card"><b>Main checkout or Git-locked worktree</b><span>The main checkout cannot be removed as a linked worktree. A worktree locked by Git stays locked; Liquid does not force removal.</span></div><div class="card"><b>Another idle Chat uses it</b><span>The removal dialog lists every affected Chat. All keep their chat; each loses its working folder. Cancel to keep it available.</span></div><div class="card"><b>Files changed during review</b><span>Recheck under the guard before removal. If the preview changed, keep the folder and show the updated files; do not force past Git's refusal.</span></div><div class="card"><b>Removal failed</b><span>Keep the worktree listed until Git confirms removal. If registration or folder state is uncertain, show it as unavailable and direct recovery through Git.</span></div></div>
+    <p class="sub" style="margin-top:12px">T3 Code asks “This thread is the only one linked to this worktree:” and “Delete the worktree too?” when deleting the last linked thread unless automatic cleanup is enabled. It stops that thread's runtime before deletion, then requests worktree removal with <code>force: true</code>. Its Settings also expose cleanup rules. Liquid's recommendation differs: no automatic cleanup on merge, Chat deletion or age, no forced deletion and no branch deletion. Deleting a Chat still follows its approved confirmation and removes that Chat's checkpoints; it does not also remove a worktree.</p>
   </section>
   <section>
     <h3 class="sec">11 · Checkpoints, stash and checkout locks</h3>
     <p class="sub">This section distinguishes the <a href="../../../SECURITY.md#mvp-vcs-boundary">decided locks</a> from the proposed worktree lifecycle rule. A checkout is a particular worktree's files and index; linked worktrees share Git objects, refs and the stash list. Different worktrees are not a protection boundary against tools that can reach their folders. Liquid coordinates its own Git operations across windows and processes, not external Git writers beyond Git's own protections.</p>
-    <div class="win mini" style="display:block"><div class="rows">
+    <div class="notes-sheet" style="margin-top:16px"><div class="rows">
       <div class="h"><span>Action</span><span>Scope</span><span>What the user sees</span></div>
       <div><span>Run a turn</span><span>This folder / checkout</span><span class="t">The decided OS guard is per canonical folder outside Git, or under this checkout's Git directory after initialization. Different existing worktrees can run in parallel.</span></div>
-      <div><span>Switch, commit, pull, stash, restore, discard or revert</span><span>This checkout</span><span class="t">Refused while any agent runs here, including another Liquid window. Name the session and offer Show; another worktree's turn does not block these actions.</span></div>
+      <div><span>Switch, commit, pull, stash, restore, discard or revert</span><span>This checkout</span><span class="t">Refused while any agent runs here, including another Liquid window. Name the Chat and offer Show; another worktree's turn does not block these actions.</span></div>
       <div><span>Push or Fetch</span><span>Remote / shared Git directory</span><span class="t">Push sends committed branch state and does not need the checkout lock. Fetch serializes through the existing common Git lock. Keep the approved destination checks and default-branch confirmation.</span></div>
       <div><span>Create PR or read its status</span><span>Resolved GitHub repository</span><span class="t">Proposed: no checkout mutation and no checkout lock. A running turn does not block a PR for already pushed commits; its unfinished changes stay out.</span></div>
-      <div><span>Remove checkpoints or delete session</span><span>Common Git directory</span><span class="t">The decided exclusive common guard waits for running turns in all worktrees. Checkpoint refs are repository-wide. These actions stay separate from worktree removal.</span></div>
+      <div><span>Remove checkpoints or delete Chat</span><span>Common Git directory</span><span class="t">The decided exclusive common guard waits for running turns in all worktrees. Checkpoint refs are repository-wide. These actions stay separate from worktree removal.</span></div>
       <div><span>Create or remove worktree</span><span>Common Git directory + affected checkout</span><span class="t">Proposal, question 12: require the exclusive common lifecycle guard and recheck the affected checkout. Refuse while any turn in this repository runs; retry is explicit. Starting turns wait for an acquired lifecycle guard to finish.</span></div>
     </div></div>
-    <div class="opts" style="margin-top:16px"><div><div class="lab">Worktree creation refused under the proposal</div><div class="win mini"><div class="dlg"><h4>Could not create a worktree</h4><div class="notice">“Rate limit for /login” is running in another checkout of acme-api. Stop it or wait until it finishes, then try again.</div><p>Worktree creation changes the shared Git repository. This proposed guard does not stop agents automatically. Sessions in worktrees already created can run in parallel.</p><div class="acts"><span class="btn">Show running session</span><span class="sp"></span><span class="btn">Close</span></div></div></div></div><div><div class="lab">Stashed changes in the selected worktree</div><div class="win mini"><div class="dlg"><h4>Stashed changes</h4><p>Left on feature/retry-after at 10:41 · 3 files. The stash belongs to the branch in the repository, not to a session or folder.</p><div class="notice">Restore is unavailable: this checkout has local changes. The stash remains.</div><div class="acts"><span class="btn off" aria-disabled="true">Restore</span><span class="btn">Show changes</span></div><p>Once clean and idle, restore still requires the branch's unchanged saved tree, as already approved. Removing a worktree does not discard this stash.</p></div></div></div></div>
-    <p class="sub" style="margin-top:12px">A new worktree begins from its selected commit, not from a checkpoint or stash. Checkpoints remain under <code style="overflow-wrap:anywhere">refs/watershed/checkpoints/&lt;session&gt;/&lt;turn&gt;/&lt;start|end&gt;</code> in the common repository, are not normal branch commits and are not included by pushing the current branch. Revert remains scoped to the session's original working folder, previews affected files, changes only the working tree and starts a new session branch. Removing a worktree preserves refs but makes its file actions unavailable until the original checkout is restored; deleting the session separately removes its refs. Liquid must not redirect an old revert into a different worktree.</p>
+    <div class="opts" style="margin-top:16px"><div><div class="lab">Worktree creation refused under the proposal</div><div class="stage"><div class="scaler"><div class="win dialog-screen" id="w-dialog-13"><template><div class="dlg"><h4>Could not create a worktree</h4><div class="callout">“Rate limit for /login” is running in another checkout of acme-api. Stop it or wait until it finishes, then try again.</div><p>Worktree creation changes the shared Git repository. This proposed guard does not stop agents automatically. Chats in worktrees already created can run in parallel.</p><div class="acts"><span class="btn">Show running Chat</span><span class="sp"></span><span class="btn">Close</span></div></div></template></div></div></div></div><div><div class="lab">Stashed changes in the selected worktree</div><div class="stage"><div class="scaler"><div class="win dialog-screen" id="w-dialog-14"><template><div class="dlg"><h4>Stashed changes</h4><p>Left on feature/retry-after at 10:41 · 3 files. The stash belongs to the branch in the repository, not to a Chat or folder.</p><div class="callout">Restore is unavailable: this checkout has local changes. The stash remains.</div><div class="acts"><span class="btn off" aria-disabled="true">Restore</span><span class="btn">Show changes</span></div><p>Once clean and idle, restore still requires the branch's unchanged saved tree, as already approved. Removing a worktree does not discard this stash.</p></div></template></div></div></div></div></div>
+    <p class="sub" style="margin-top:12px">A new worktree begins from its selected commit, not from a checkpoint or stash. Checkpoints remain under <code style="overflow-wrap:anywhere">refs/watershed/checkpoints/&lt;session&gt;/&lt;turn&gt;/&lt;start|end&gt;</code> in the common repository, are not normal branch commits and are not included by pushing the current branch. Revert remains scoped to the Chat's original working folder, previews affected files, changes only the working tree and starts a new session branch. Removing a worktree preserves refs but makes its file actions unavailable until the original checkout is restored; deleting the Chat separately removes its refs. Liquid must not redirect an old revert into a different worktree.</p>
     <p class="sub">The approved one-stash-per-branch rule remains: Restore requires no uncommitted changes and the saved tree; Discard needs confirmation; leaving another stash on the same branch warns before replacement. The stash list is shared, so removing one worktree cannot discard stashes for it or for other worktrees. T3 Code's branch picker switches without Liquid's stash flow or checkout guard; its path change stops its own runtime instead. The proposed common lifecycle guard is deliberately broader and needs approval (question 12).</p>
   </section>
   <section>
@@ -316,19 +356,21 @@ kbd{font-size:11px;padding:0 4px;border-radius:4px;border:1px solid currentColor
   </section>
   <section>
     <h3 class="sec">13 · Open questions for the maintainer</h3>
-    <p class="sub">The mockups above draw these recommendations for review. All questions remain open. No ADR or open-decision record is changed by this draft.</p>
+    <p class="sub">The original 12 questions remain open, with question 9 restated for Sources and Chats; questions 13–14 add the header and post-Push placement choices. The drawings show recommendations for review. Decisions stays empty; no ADR or decision approval is recorded by this draft.</p>
     <div class="q"><h4>1 · Separate Git steps or a combined action?</h4><p>Creating a PR may first require a commit and a push. A combined action can finish some steps before a later one fails.</p><ul><li><b>A · Commit, Push, then review and Create</b> (drawn): + every write has an explicit, bounded action and the existing controls stay familiar; − more clicks.</li><li><b>B · “Commit, push &amp; create PR”</b> with one review of all steps: + faster; − a partial result needs more recovery states and must preserve the approved commit and push confirmations.</li></ul><p class="t3">T3 Code: combined actions and standalone create; create pushes first when needed.</p><p class="rec">Recommendation: A for this slice.</p></div>
     <div class="q"><h4>2 · Defaults for the PR title and description</h4><p>A description must explain the whole branch, which may contain several commits. Generating it with a model sends repository content to a provider.</p><ul><li><b>A · Latest commit subject/body, editable</b> (drawn): + local and predictable, no extra model call; − the user must describe earlier commits.</li><li><b>B · Blank fields</b>: + no misleading summary; − repeated typing.</li><li><b>C · Model-generated draft on an explicit Generate action</b>: + can summarize the range; − another integration and a content-sharing choice. Repository templates could be a separate later addition.</li></ul><p class="t3">T3 Code: its inspected creation path automatically generates title/body using the range, diff, optional template, policy and thread context.</p><p class="rec">Recommendation: A; keep description optional and title required.</p></div>
     <div class="q"><h4>3 · Which base branch is selected?</h4><p>The base is where the change will merge. The branch a feature started from may differ from the repository's default.</p><ul><li><b>A · Verified GitHub default, editable</b> (drawn): + familiar, no hidden branch metadata; − stacked changes need a manual base choice. If unknown, require a selection.</li><li><b>B · Remember the branch it started from</b>: + useful for stacked PRs; − more persistent metadata and stale-base handling.</li></ul><p class="t3">T3 Code: recorded branch base, then a different same-repository upstream, provider default, remote default, finally “main”.</p><p class="rec">Recommendation: A; never guess a missing default.</p></div>
     <div class="q"><h4>4 · Draft by default?</h4><p>A draft can run checks and be shared, but signals that review is not requested yet.</p><ul><li><b>A · “Create as draft” checked</b> (drawn): + avoids accidentally asking for review; − users must uncheck it for finished work.</li><li><b>B · Ready for review by default</b>: + one less choice for completed changes; − can notify reviewers too early.</li></ul><p class="t3">T3 Code: draft display and conversion exist; the inspected creation call passes no draft flag and creates a regular PR.</p><p class="rec">Recommendation: A, with the button naming the draft.</p></div>
     <div class="q"><h4>5 · How often does PR status refresh?</h4><p>Checks and reviews can change on GitHub while Liquid is open. Old data must not look current.</p><ul><li><b>A · On open, window focus and explicit Refresh</b> (drawn): + bounded requests, clear retry; − background changes can remain stale until focus or refresh.</li><li><b>B · Also poll while the PR is visible</b>: + fresher status; − needs a separately approved interval, rate-limit handling and host lifecycle.</li></ul><p class="t3">T3 Code: a live PR surface shares summaries with detail checks, marks stale checks and supports refreshing from the host; this draft does not borrow an unverified polling interval.</p><p class="rec">Recommendation: A, always showing the last successful update.</p></div>
     <div class="q"><h4>6 · GitHub host and fork scope</h4><p>GitHub Enterprise uses another host name; a fork publishes a head branch in another repository. A wrong mapping can publish to the wrong place.</p><ul><li><b>A · GitHub.com and explicitly resolved Enterprise hosts through gh; same-repository PRs only</b> (drawn): + matches the decided host tools and existing push destination checks; − forks require Git/gh outside Liquid.</li><li><b>B · GitHub.com only</b>: + smaller first slice; − excludes Enterprise users.</li><li><b>C · A plus forks</b>: + common contribution workflow; − requires head-owner/base-repository selection and agreement with the existing push boundary.</li></ul><p class="t3">T3 Code: its inspected provider supports host context and cross-repository PRs, and the source-control surface supports other providers. That API credential path is outside Liquid's contract.</p><p class="rec">Recommendation: A; show an explanation for forks and other hosts, never silently choose another provider.</p></div>
-    <div class="q"><h4>7 · Worktree folder and branch naming</h4><p>Each worktree needs a real folder on the agent's host. Branch names can contain slashes, and different names can flatten to the same folder name.</p><ul><li><b>A · Sibling worktrees folder, editable path and user-written branch</b> (drawn): + easy to find beside the project, no model call; − users choose another path when names collide.</li><li><b>B · Host data folder with a configurable worktree root</b>: + T3 Code's central organization; − requires a setting and is less visible beside the project.</li><li><b>C · Ask for every path without a default</b>: + no location policy; − more setup for every session.</li></ul><p class="t3">T3 Code: configured host root / repository / slash-flattened branch; launch can generate and rename a temporary branch.</p><p class="rec">Recommendation: A, preview the full path and refuse collisions; the sibling location shown is an example pending approval.</p></div>
-    <div class="q"><h4>8 · New-session mode and starting files</h4><p>Current checkout includes local edits. A new worktree begins at a commit and has none of the source folder's uncommitted or ignored files.</p><ul><li><b>A · Current checkout when idle; separate worktree for parallel work; explicit local base commit</b> (drawn): + minimal surprise, no implicit network write; − users Fetch and choose a remote base themselves when needed.</li><li><b>B · Always default to New worktree, starting from the remote default</b>: + isolation and a fresh base; − more folders, remote access and local setup missing from each.</li></ul><p class="t3">T3 Code: both labels, selectable bases, configurable remote-start behavior and worktree creation during launch.</p><p class="rec">Recommendation: A; creation and first-prompt sending remain distinct actions.</p></div>
-    <div class="q"><h4>9 · Sidebar grouping</h4><p>Several sessions may refer to one checkout. Their branch and file actions must describe the same folder.</p><ul><li><b>A · Group sessions under their checkout within the project</b> (drawn): + folder ownership is visible; − another sidebar level.</li><li><b>B · Keep a flat session list with a worktree indicator and path on selection</b>: + closer to T3 Code and the existing sidebar; − shared checkout ownership is less obvious.</li></ul><p class="t3">T3 Code: B, project thread rows with a worktree indicator and Git status from the thread's worktree path.</p><p class="rec">Recommendation: A; show the selected folder in the header and project tree.</p></div>
-    <div class="q"><h4>10 · Can an idle session move to another worktree?</h4><p>The conversation and its checkpoint refs survive a folder change, but an old revert must not restore files into an unrelated checkout. A running session cannot switch under the decided contract.</p><ul><li><b>A · Keep existing sessions bound; start a new session in the target</b> (drawn): + preserves checkpoint meaning and folder ownership; − less convenient than moving a conversation.</li><li><b>B · Allow an explicit idle-session move</b>: + continuous conversation; − needs a separate checkpoint-origin, context-reset and file-action contract before implementation.</li></ul><p class="t3">T3 Code: path selection can rebind a thread and requests its runtime stop when the path changes; the established worktree's environment mode is locked.</p><p class="rec">Recommendation: A for this slice; never stop and move a running session implicitly.</p></div>
-    <div class="q"><h4>11 · Removal and automatic cleanup</h4><p>Removing a folder can destroy uncommitted or ignored files. A checkpoint excludes ignored files, and a stash is not a complete backup.</p><ul><li><b>A · Explicit removal only, after no staged, unstaged, untracked or ignored files remain</b> (drawn): + narrow, reviewable and no forced loss; − generated files and local configuration may need manual cleanup first. Keep branches, stashes and session history.</li><li><b>B · Also offer a separate confirmed discard-and-remove</b>: + convenient cleanup; − adds an irreversible force path and needs a complete file-loss preview.</li><li><b>C · Automatic cleanup on merge, session deletion or age</b>: + fewer leftover folders; − background destructive behavior is outside the explicit-action contract and requires a separate maintainer decision.</li></ul><p class="t3">T3 Code: optional last-thread cleanup prompt, forced removal after thread deletion, plus configurable cleanup rules.</p><p class="rec">Recommendation: A; deleting a session and removing a worktree remain separate actions.</p></div>
+    <div class="q"><h4>7 · Worktree folder and branch naming</h4><p>Each worktree needs a real folder on the agent's host. Branch names can contain slashes, and different names can flatten to the same folder name.</p><ul><li><b>A · Sibling worktrees folder, editable path and user-written branch</b> (drawn): + easy to find beside the folder Source, no model call; − users choose another path when names collide.</li><li><b>B · Host data folder with a configurable worktree root</b>: + T3 Code's central organization; − requires a setting and is less visible beside the project.</li><li><b>C · Ask for every path without a default</b>: + no location policy; − more setup for every Chat.</li></ul><p class="t3">T3 Code: configured host root / repository / slash-flattened branch; launch can generate and rename a temporary branch.</p><p class="rec">Recommendation: A, preview the full path and refuse collisions; the sibling location shown is an example pending approval.</p></div>
+    <div class="q"><h4>8 · New Chat mode and starting files</h4><p>Current checkout includes local edits. A new worktree begins at a commit and has none of the source folder's uncommitted or ignored files.</p><ul><li><b>A · Current checkout when idle; separate worktree for parallel work; explicit local base commit</b> (drawn): + minimal surprise, no implicit network write; − users Fetch and choose a remote base themselves when needed.</li><li><b>B · Always default to New worktree, starting from the remote default</b>: + isolation and a fresh base; − more folders, remote access and local setup missing from each.</li></ul><p class="t3">T3 Code: both labels, selectable bases, configurable remote-start behavior and worktree creation during launch.</p><p class="rec">Recommendation: A; creation and first-prompt sending remain distinct actions.</p></div>
+    <div class="q"><h4>9 · Worktrees and Chats in the current sidebar</h4><p>Several Chats may refer to one checkout. Their branch and file actions must describe the same folder. ADR-0241 already defines the Chats list; folder Sources belong to Pages, not to a separate project list.</p><ul><li><b>A · Expand the folder Source into Current checkout and Worktrees, with Chat links under each</b> (drawn): + keeps the proposed checkout grouping and makes folder ownership visible; − adds nested Source and Chat links beside the existing Chats list.</li><li><b>B · Keep Sources flat; show worktrees in the Source's main area and an indicator in Chats</b>: + fewer sidebar levels, closer to T3 Code; − shared checkout ownership is less obvious before opening a Source.</li></ul><p class="t3">T3 Code: project thread rows with a worktree indicator and Git status from the thread's worktree path; Liquid has Sources and Chats instead.</p><p class="rec">Recommendation: A for review, retaining the approved Chats filters, sections and Recent. Confirm whether linked worktrees are children of the existing folder Source or independent folder Sources before implementation.</p></div>
+    <div class="q"><h4>10 · Can an idle Chat move to another worktree?</h4><p>The conversation and its checkpoint refs survive a folder change, but an old revert must not restore files into an unrelated checkout. A running Chat cannot switch under the decided contract.</p><ul><li><b>A · Keep existing Chats bound; start a new Chat in the target</b> (drawn): + preserves checkpoint meaning and folder ownership; − less convenient than moving a conversation.</li><li><b>B · Allow an explicit move of an idle Chat</b>: + continuous conversation; − needs a separate checkpoint-origin, context-reset and file-action contract before implementation.</li></ul><p class="t3">T3 Code: path selection can rebind a thread and requests its runtime stop when the path changes; the established worktree's environment mode is locked.</p><p class="rec">Recommendation: A for this slice; never stop and move a running Chat implicitly.</p></div>
+    <div class="q"><h4>11 · Removal and automatic cleanup</h4><p>Removing a folder can destroy uncommitted or ignored files. A checkpoint excludes ignored files, and a stash is not a complete backup.</p><ul><li><b>A · Explicit removal only, after no staged, unstaged, untracked or ignored files remain</b> (drawn): + narrow, reviewable and no forced loss; − generated files and local configuration may need manual cleanup first. Keep branches, stashes and Chat history.</li><li><b>B · Also offer a separate confirmed discard-and-remove</b>: + convenient cleanup; − adds an irreversible force path and needs a complete file-loss preview.</li><li><b>C · Automatic cleanup on merge, Chat deletion or age</b>: + fewer leftover folders; − background destructive behavior is outside the explicit-action contract and requires a separate maintainer decision.</li></ul><p class="t3">T3 Code: optional last-thread cleanup prompt, forced removal after thread deletion, plus configurable cleanup rules.</p><p class="rec">Recommendation: A; deleting a Chat and removing a worktree remain separate actions.</p></div>
     <div class="q"><h4>12 · Worktree lifecycle versus running turns</h4><p>Worktrees have independent files, but creation and removal change shared repository metadata. Existing checkpoint operations already use a common Git guard. The new lifecycle lock scope is not decided.</p><ul><li><b>A · Exclusive common guard for create/remove, plus the affected checkout check</b> (drawn): + uses the existing repository-wide exclusion and gives a finite race boundary; − cannot create or remove any worktree while a turn in that repository runs. Existing worktrees can still run in parallel.</li><li><b>B · A separate lifecycle lock that permits other worktrees' turns</b>: + can provision parallel work immediately; − requires an approved ordering and shared-ref/checkpoint concurrency contract before implementation.</li></ul><p class="t3">T3 Code: inspected creation/removal invokes Git; changing a thread's path requests its runtime stop. It does not establish Liquid's cross-window checkout/common-guard invariant.</p><p class="rec">Recommendation: A for the first slice; approve B only with a bounded lock-order and checkpoint interaction contract.</p></div>
+    <div class="q"><h4>13 · Git controls in the current Chat header</h4><p>The current header names the agent, work folder and model. Branch, PR and Git actions need a place without restoring the old Chat / Trajectory / Diff navigation.</p><ul><li><b>A · Branch and PR chips plus the next Git action at the right of the Chat header</b> (drawn): + visible branch and PR state while reading; − a wider header, especially with long branch names.</li><li><b>B · Branch and PR chips in the header, actions inside its existing more menu</b>: + calmer and narrower; − Commit and Push require another click.</li></ul><p class="t3">T3 Code keeps branch and Git actions near the thread; Liquid's current participant header and answer-level details remain the reference.</p><p class="rec">Recommendation: A for desktop review; approve the placement and compact-width behavior before implementation. The scaled drawings do not decide a responsive product layout.</p></div>
+    <div class="q"><h4>14 · Where does the post-Push action appear?</h4><p>The current Chat has no old session status bar. A successful Push still needs its confirmation and the explicit Create pull request action from §1.</p><ul><li><b>A · Below the changed answer</b> (drawn): + keeps the result with the files it published; − it can scroll out of view.</li><li><b>B · As a widget directly above the input area</b>: + stays visible beside the next action, following the guidelines' widget position; − occupies input-area space until dismissed.</li></ul><p class="t3">T3 Code offers Create alongside its other Git actions; Liquid's current Chat needs an approved place for this extra post-Push entry point.</p><p class="rec">Recommendation: A for review; confirm its placement and lifetime before implementation.</p></div>
   </section>
   <section>
     <h3 class="sec">Decisions</h3>
@@ -337,107 +379,90 @@ kbd{font-size:11px;padding:0 4px;border-radius:4px;border:1px solid currentColor
 </div>
 <script>
 const DW=1240;
-const I={br:'<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="4.5" cy="3.5" r="1.5"/><circle cx="4.5" cy="12.5" r="1.5"/><circle cx="11.5" cy="5" r="1.5"/><path d="M4.5 5v6M11.5 6.5c0 3-7 2-7 4.5"/></svg>',
-br14:'<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="4.5" cy="3.5" r="1.5"/><circle cx="4.5" cy="12.5" r="1.5"/><circle cx="11.5" cy="5" r="1.5"/><path d="M4.5 5v6M11.5 6.5c0 3-7 2-7 4.5"/></svg>',
-lap:'<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="3" y="3.5" width="10" height="7" rx="1"/><path d="M1.5 12.5h13"/></svg>',
-hx:'<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M8 1.8l5.4 3.1v6.2L8 14.2l-5.4-3.1V4.9z"/></svg>',
-srch:'<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5l3 3"/></svg>',
-page:'<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M4 2h5l3 3v9H4z"/><path d="M9 2v3h3"/></svg>',
-commit:'<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="2.6"/><path d="M1 8h4.4M10.6 8H15"/></svg>',
-up:'<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 13V3M4 7l4-4 4 4"/></svg>',
-down:'<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 3v10M4 9l4 4 4-4"/></svg>',
-plus:'<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 3v10M3 8h10"/></svg>',
-spin:'<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 2a6 6 0 1 1-6 6"/></svg>'};
-const meta=(h,b,d)=>`<div class="l2">${I.hx}${h}<span>·</span>${I.br}${b}<span>·</span>${I.lap}${d}</div>`;
-function side(o){const b=o.branch||'main';return `<div class="side"><div class="wsw"><span class="av">B</span>Benni's Workspace<span style="margin-left:auto;color:var(--ws-text-faint)">⌄</span></div>
-<div class="srch">${I.srch}<span>Search or run a command</span><kbd>⌘K</kbd></div>
-<h6>Pages</h6><div class="nav"><span class="ico">${I.page}</span>Roadmap</div>
-<h6>Agent sessions <kbd>⌘N</kbd></h6>
-<div class="proj"><span class="ico">⌄</span>acme-api <span class="f">~/code/acme-api</span></div>
-<div class="sess on"><div class="l1"><span class="dot" style="background:var(--ws-text-faint)"></span><span>Rate limit for /login</span><span class="end" style="color:var(--ws-text-faint)">idle</span></div>${meta('pi',b,'MacBook')}</div>
-<div class="sess"><div class="l1"><span class="dot" style="background:${o.running?'var(--ws-accent)':'var(--ws-text-faint)'}"></span><span>Fix flaky sync test</span><span class="end">${o.running?'running':'done'}</span></div>${meta('pi',b,'MacBook')}</div>
-<div class="nav" style="color:var(--ws-text-faint);margin-top:2px"><span class="ico">+</span>New agent session</div></div>`}
-// The header's Git controls: branch chip and the split button.
-const chip=(name,sync,on)=>`<span class="chip box ${on?'on':''}">${I.br14}<span class="mono">${name}</span>${sync||''}<span class="cv">⌄</span></span>`;
-const split=(icon,label,badge,cls,on)=>`<span class="split ${cls||''} ${on?'on':''}"><span class="p">${icon}${label}${badge?`<span class="badge">${badge}</span>`:''}</span><span class="c">⌄</span></span>`;
-const ahead=n=>`<span class="sync">↑${n}</span>`;
-const both=(a,b)=>`<span class="sync">↑${a}</span><span class="sync wa">↓${b}</span>`;
-const commitBtn=(on)=>split(I.commit,'Commit','4','',on);
-function gitbar(o){return `<span class="gitbar">${o.chip===undefined?chip('main',ahead(1),o.chipOn):o.chip}${o.btn===undefined?commitBtn(o.btnOn):o.btn}<span style="color:var(--ws-text-faint)">···</span></span>`}
-const composer=`<div class="actbox"><div class="ph">Ask the agent…</div><div class="bar"><span class="chip box">◐ Ask ⌄</span><span class="chip">＋ Context</span><span style="flex:1"></span><span class="btn pri">Send <kbd>⏎</kbd></span></div></div>`;
-function frame(id,tab,main,h,o){o=o||{};const tabs=[['chat','Chat','','⌘1'],['traj','Trajectory','','⌘2'],['diff','Diff','3','⌘3']].map(([k,l,b,s])=>`<div class="tab ${k==tab?'on':''}">${l}${b?`<span class="badge">${b}</span>`:''}<kbd>${s}</kbd></div>`).join('');
-const st=o.status||`<span style="color:${o.running?'var(--ws-accent)':'var(--ws-text-muted)'}">● ${o.running?'Fix flaky sync test is running in this checkout':'Idle · finished 10:58'}</span><span>Context 11.2k / 200k</span>`;
-document.getElementById(id).innerHTML=`<div class="tbar"><div class="lights"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></div></div>
-<div class="body" style="--h:${h}px">${side(o)}<div class="main"><div class="head"><b>Rate limit for /login</b>${gitbar(o)}</div><div class="tabs">${tabs}</div>${main}
-<div class="act">${composer}</div>
-<div class="status">${st}</div></div></div>${o.over||''}`}
-const chat=`<div class="chat"><div class="col">
-<div class="user">When the limit is reached, answer 429 with a Retry-After header, and document it.</div>
-<div class="tool"><span class="ok">✓</span>edit <code>src/middleware/rateLimit.ts</code><span class="r"><span class="add">+5</span></span></div>
-<div class="tool"><span class="ok">✓</span>edit <code>src/routes/login.ts</code><span class="r"><span class="add">+4</span><span class="del">−1</span></span></div>
-<div class="tool"><span class="ok">✓</span>edit <code>docs/api.md</code><span class="r"><span class="add">+3</span></span></div>
-<p class="prose">Blocked attempts now get 429 with the seconds until the window frees up, and docs/api.md describes the header.</p>
-<div class="turnfoot"><span>3 changed files</span><span><span class="add">+12</span> <span class="del">−1</span></span><span class="btn ghost">Open diff</span></div>
-</div></div>`;
-const prChip=(label)=>`<span class="chip box">⑂ ${label}</span>`;
-const feature=()=>chip('feature/retry-after','');
-const gitMenu=`<div class="menu" style="right:52px;top:76px;width:320px">
-<div class="lbl">feature/retry-after → origin · fetched 10:41</div>
-<div class="it dis"><span class="ck">${I.commit}</span>Commit…<span class="r">no changes</span></div>
-<div class="it dis"><span class="ck">${I.up}</span>Push<span class="r">up to date</span></div>
-<div class="it on"><span class="ck">⑂</span>Create pull request…</div>
-<div class="it dis"><span class="ck">${I.down}</span>Pull<span class="r">up to date</span></div>
-<div class="it"><span class="ck"></span>Fetch<span class="r">origin</span></div>
-<hr><div class="it"><span class="ck">${I.br14}</span>Create branch…</div></div>`;
-frame('w-menu','chat',chat,560,{branch:'feature/retry-after',chip:feature(),btn:split(I.commit,'Commit','','off',true),over:gitMenu,
-status:'<span>ⓘ Pushed 2 commits to origin/feature/retry-after</span><span style="color:var(--ws-accent)">Create pull request…</span>'});
-const prSummary=`<div class="menu" style="right:52px;top:76px;width:360px">
-<div class="lbl">acme/acme-api · GitHub</div>
-<div class="it"><b>● Open #42</b><span class="r">Open in browser ↗</span></div>
-<div class="foot" style="color:var(--ws-text)">Return 429 with Retry-After on /login</div>
-<div class="foot"><code>feature/retry-after</code> → <code>main</code></div><hr>
-<div class="it"><span class="ck">✓</span>Checks<span class="r">3 passed</span></div>
-<div class="it"><span class="ck">◌</span>Review<span class="r">required</span></div>
-<div class="foot">Updated from GitHub at 10:58 · Refresh</div></div>`;
-frame('w-pr','chat',chat,560,{branch:'feature/retry-after',chip:feature()+prChip('Open #42'),btn:split(I.commit,'Commit','','off'),over:prSummary});
-const worktreeMenu=`<div class="menu" style="right:52px;top:76px;width:360px">
-<div class="inp">${I.srch}<span>Search or create a branch</span></div>
-<div class="lbl">Local branches</div>
-<div class="it"><span class="ck">✓</span><code>main</code><span class="r">this checkout</span></div>
-<div class="it on"><span class="ck"></span><code>feature/retry-after</code><span class="r">not checked out</span></div>
-<div class="it"><span class="ck"></span><code>fix/sync-flake</code><span class="r">another worktree</span></div>
-<hr><div class="lbl">feature/retry-after</div>
-<div class="it on"><span class="ck">${I.plus}</span>Open in a new worktree…</div>
-<div class="foot">Creates another folder; this checkout stays on main. A new session starts there only when you choose.</div></div>`;
-frame('w-worktree','chat',chat,560,{branch:'main',chip:chip('main','',true),btn:split(I.commit,'Commit','','off'),over:worktreeMenu});
-const tree=`<div style="flex:1;min-height:0;padding:16px 24px;display:flex;gap:20px">
-<div class="flist" style="width:220px;flex:none"><div class="lbl2" style="padding:4px 6px">Project tree</div>
-<div class="frow"><b>feature/retry-after</b></div><div class="frow">⌄ src</div><div class="frow" style="padding-left:20px">⌄ routes</div><div class="frow" style="padding-left:36px"><code>login.ts</code></div><div class="frow">⌄ docs</div><div class="frow" style="padding-left:20px"><code>api.md</code></div></div>
-<div style="flex:1;display:flex;flex-direction:column;gap:12px;min-width:0"><div class="lbl2">Selected worktree · MacBook</div>
-<div class="ta" style="min-height:0"><code>~/code/acme-api-worktrees/feature-retry-after</code></div>
-<div class="notice info">This session's files and Diff come from this folder.</div>
-<div class="flist"><div class="frow">Branch<span class="r">feature/retry-after</span></div><div class="frow">Pull request<span class="r">Open #42 ↗</span></div><div class="frow">Agent<span class="r">Idle</span></div></div>
-<div class="acts"><span class="btn">Open folder</span> <span class="btn">New agent session</span> <span class="btn">···</span></div></div></div>`;
-frame('w-tree','diff',tree,560,{branch:'feature/retry-after',chip:feature()+prChip('Open #42'),btn:split(I.commit,'Commit','','off')});
-document.querySelector('#w-tree .head b').textContent='Rate limit for /login · worktree';
-document.querySelector('#w-tree .side').outerHTML=`<div class="side">
-<div class="wsw"><span class="av">B</span>Benni's Workspace<span style="margin-left:auto;color:var(--ws-text-faint)">⌄</span></div>
-<div class="srch">${I.srch}<span>Search or run a command</span><kbd>⌘K</kbd></div>
-<h6>Pages</h6><div class="nav"><span class="ico">${I.page}</span>Roadmap</div>
-<h6>Agent sessions <kbd>⌘N</kbd></h6>
-<div class="proj"><span class="ico">⌄</span>acme-api <span class="f">~/code/acme-api</span></div>
-<div class="proj" style="padding-left:20px;font-weight:400"><span class="ico">⌄</span>Current checkout <span class="f">main</span></div>
-<div class="sess" style="padding-left:42px"><div class="l1"><span class="dot" style="background:var(--ws-accent)"></span><span>Fix flaky sync test</span></div>${meta('pi','main','MacBook')}<div class="l2">running</div></div>
-<div class="proj" style="padding-left:20px;font-weight:400"><span class="ico">⌄</span>Worktrees <span class="f">2</span></div>
-<div class="nav" style="padding-left:30px;color:var(--ws-text)"><span class="ico">⌄</span><code>feature/retry-after</code></div>
-<div class="sess on" style="padding-left:42px"><div class="l1"><span class="dot" style="background:var(--ws-text-faint)"></span><span>Rate limit for /login</span></div>${meta('pi','feature/retry-after','MacBook')}</div>
-<div class="nav" style="padding-left:30px"><span class="ico">›</span><code>fix/sync-flake</code></div>
-<div class="nav" style="margin-top:4px"><span class="ico">+</span>New agent session</div></div>`;
+const sv=(p,w=14)=>`<svg viewBox="0 0 16 16" width="${w}" height="${w}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
+const I={
+page:sv('<path d="M4 2h5l3 3v9H4z"/><path d="M9 2v3h3"/>'),
+file:sv('<path d="M4 2h5l3 3v9H4z"/><path d="M6 9h4M6 11.5h4"/>'),
+bubble:sv('<path d="M2.5 4c0-.8.7-1.5 1.5-1.5h8c.8 0 1.5.7 1.5 1.5v6c0 .8-.7 1.5-1.5 1.5H7l-3 2.5v-2.5c-.8 0-1.5-.7-1.5-1.5z"/>'),
+dir:sv('<path d="M1.8 4.2c0-.6.4-1 1-1h3.4l1.4 1.6h5.6c.6 0 1 .4 1 1v6.9c0 .6-.4 1-1 1H2.8c-.6 0-1-.4-1-1z"/>'),
+srch:sv('<circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5l3 3"/>'),
+zap:sv('<path d="M9 1.5L3 9h4.5L7 14.5 13 7H8.5z"/>'),
+clock:sv('<circle cx="8" cy="8" r="6"/><path d="M8 4.5V8l2.5 1.5"/>'),
+grid:sv('<rect x="2" y="2" width="5" height="5" rx="1"/><rect x="9" y="2" width="5" height="5" rx="1"/><rect x="2" y="9" width="5" height="5" rx="1"/><rect x="9" y="9" width="5" height="5" rx="1"/>'),
+more:sv('<circle cx="3.5" cy="8" r=".8"/><circle cx="8" cy="8" r=".8"/><circle cx="12.5" cy="8" r=".8"/>'),
+drag:sv('<circle cx="6" cy="4" r=".8"/><circle cx="10" cy="4" r=".8"/><circle cx="6" cy="8" r=".8"/><circle cx="10" cy="8" r=".8"/><circle cx="6" cy="12" r=".8"/><circle cx="10" cy="12" r=".8"/>'),
+plus:sv('<path d="M8 3v10M3 8h10"/>'),
+text:sv('<path d="M3 3.5h10M8 3.5V13"/>'),
+db:sv('<rect x="2" y="2.5" width="12" height="11" rx="1.5"/><path d="M2 6h12M6 6v7.5"/>'),
+chart:sv('<path d="M2.5 13.5h11"/><path d="M4.5 11V8M8 11V4M11.5 11V6.5"/>'),
+code:sv('<path d="M5.5 4.5L2 8l3.5 3.5M10.5 4.5L14 8l-3.5 3.5"/>'),
+fx:sv('<path d="M11.5 3H5.5l4 5-4 5h6"/>'),
+img:sv('<rect x="2" y="2.5" width="12" height="11" rx="1.5"/><circle cx="6" cy="6.5" r="1.2"/><path d="M2.5 12l3.5-3.5 2.5 2.5 2-2 3 3"/>'),
+pen:sv('<path d="M10.5 2.5l3 3L6 13H3v-3z"/>'),
+link:sv('<path d="M6.5 9.5l3-3"/><path d="M7 4.5l1-1a2.5 2.5 0 013.5 3.5l-1 1M9 11.5l-1 1A2.5 2.5 0 014.5 9l1-1"/>'),
+copy:sv('<rect x="5" y="5" width="8.5" height="8.5" rx="1.5"/><path d="M11 5V3.5c0-.6-.4-1-1-1H3.5c-.6 0-1 .4-1 1V10c0 .6.4 1 1 1H5"/>'),
+tpl:sv('<rect x="2" y="2" width="12" height="12" rx="1.5"/><path d="M2 6h12M6 6v8"/>'),
+cog:sv('<circle cx="8" cy="8" r="2"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4"/>'),
+reload:sv('<path d="M13 8a5 5 0 11-1.5-3.5"/><path d="M13 2.5V5h-2.5"/>'),
+back:sv('<path d="M10 3.5L5.5 8l4.5 4.5"/>'),
+};
+const avatar=(k,t)=>`<span class="av ${k}">${t}</span>`;
+const AG=avatar('ag','✦');
+const sv24=(p)=>`<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
+const ic=(p)=>sv(p,18);
+const R={
+ pages:sv24('<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M8 13h8M8 17h5"/>'),
+ chat:ic('<path d="M2.5 4c0-.8.7-1.5 1.5-1.5h8c.8 0 1.5.7 1.5 1.5v6c0 .8-.7 1.5-1.5 1.5H7l-3 2.5v-2.5c-.8 0-1.5-.7-1.5-1.5z"/>'),
+ inbox:ic('<path d="M2.5 9.5l1.7-6h7.6l1.7 6v3.5h-11z"/><path d="M2.5 9.5h3.2l.8 1.5h3l.8-1.5h3.2"/>'),
+ files:ic('<path d="M3 3h4l1.5 1.5H13v8.5H3z"/>'),
+ media:ic('<rect x="2.5" y="3" width="11" height="10" rx="1.5"/><circle cx="6" cy="6.5" r="1"/><path d="M3 12l3.5-3.5 2.5 2.5 2-2 2.5 2.5"/>'),
+ gear:sv24('<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/>'),
+ exp:sv('<path d="M9 3h4v4M13 3L8 8M7 4H3v9h9V9"/>'),
+ cal:sv('<rect x="2.5" y="3.5" width="11" height="10" rx="1.5"/><path d="M2.5 6.5h11M5.5 2v3M10.5 2v3"/>'),
+ task:sv('<rect x="2.5" y="2.5" width="11" height="11" rx="2"/><path d="M5.5 8l2 2 3.5-4"/>'),
+};
+function rail(on){const ri=(k,i,b,o='')=>`<span class="ri ${on==k?'on':''} ${o}">${i}${b||''}</span>`;
+return `<div class="rail"><span class="wsav">B</span>${ri('inbox',R.inbox,'<span class="bd w">4</span>')}${ri('pages',R.pages)}${ri('chats',R.chat,'<span class="dt"></span>')}<span class="sep"></span>${ri('files',R.files,'','later')}${ri('media',R.media,'','later')}<span style="flex:1"></span>${ri('set',R.gear)}<span class="ri">${avatar('me','BW')}</span></div>`}
+const nav=(d,ic,label,o={})=>`<div class="nav ${o.on?'on':''}" style="--d:${d}"><span class="tw">${o.tw||''}</span><span class="ico">${ic}</span><span>${label}</span>${o.r?`<span class="r ${o.warn?'warn':''}">${o.r}</span>`:''}</div>`;
+const wa=(av,name,last,time,o={})=>`<div class="wa ${o.on?'on':''}">${av}<span class="t"><b>${name}${o.run?'<span class="dot" style="background:var(--ws-accent)"></span>':''}</b><span class="${o.n?'u':''}">${last}</span></span><span class="m">${time}${o.n?`<span class="n ${o.w?'w':''}">${o.n}</span>`:''}</span></div>`;
+const tabs=(list)=>`<div class="tabs">${list.map(([ic,t,on])=>`<span class="tab ${on?'on':''}">${ic}<span>${t}</span><span class="x">✕</span></span>`).join('')}<span class="tab add">＋</span></div>`;
 
+I.branch=sv('<circle cx="4.5" cy="3.5" r="1.5"/><circle cx="4.5" cy="12.5" r="1.5"/><circle cx="11.5" cy="5" r="1.5"/><path d="M4.5 5v6M11.5 6.5c0 3-7 2-7 4.5"/>');
+I.pr=sv('<circle cx="4" cy="3" r="1.5"/><circle cx="4" cy="13" r="1.5"/><circle cx="12" cy="13" r="1.5"/><path d="M4 4.5v7M12 11.5V6a3 3 0 0 0-3-3H8m0 0 2-2M8 3l2 2"/>');
+I.commit=sv('<circle cx="8" cy="8" r="2.6"/><path d="M1 8h4.4M10.6 8H15"/>');
+const chatList=()=>`<div class="side2" style="gap:2px"><div class="ttl2">Chats<span style="margin-left:auto;color:var(--ws-text-muted)">＋</span></div>
+<div class="srch" style="margin:0 2px 6px">${I.srch}<span>Search chats</span></div><div class="fchips"><span class="on">All</span><span>Unread</span><span>Agents</span><span>Groups</span></div>
+<h6>Pinned</h6>${wa(AG,'Rate limit for /login','Coder: Retry-After is documented','10:58',{on:1})}
+<h6>Acme API<span>⌄</span></h6>${wa(AG,'Fix flaky sync test','Coder: Running the tests…','now',{run:1})}
+<h6>Recent</h6>${wa(avatar('grp','👥'),'API review','Ana: Ready to review?','10:42')}${wa(AG,'Researcher','Summary of the three APIs','Sun')}
+<h6 style="margin-top:auto">Settled · 12<span>›</span></h6></div>`;
+const sources=()=>`<div class="side2"><div class="ttl2">Benni's Workspace</div><h6>Private<span>＋</span></h6>${nav(0,I.page,'Household budget',{tw:'›'})}${nav(0,I.page,'Trip to Lisbon',{tw:'›'})}
+<h6>Acme API</h6>${nav(0,I.page,'Roadmap')}${nav(0,I.page,'API design')}${nav(0,I.db,'Tasks')}${nav(0,I.dir,'acme-api',{tw:'⌄'})}
+${nav(1,I.dir,'Current checkout',{tw:'⌄',r:'main'})}<div class="wa source-chat">${AG}<span class="t"><b>Fix flaky sync test</b><span>Coder · running · MacBook</span></span></div>
+${nav(1,I.dir,'Worktrees',{tw:'⌄',r:'2'})}${nav(2,I.branch,'feature/retry-after',{tw:'⌄',on:1})}<div class="wa source-chat on">${AG}<span class="t"><b>Rate limit for /login</b><span>Coder · idle · MacBook</span></span></div>
+${nav(2,I.branch,'fix/sync-flake',{tw:'›'})}<div class="foot">${nav(0,I.zap,'Automations')}${nav(0,I.clock,'History')}</div></div>`;
+const branch=(name='feature/retry-after')=>`<span class="chip">${I.branch}<code>${name}</code><span>⌄</span></span>`;
+const pr=()=>`<span class="chip">${I.pr}Open #42</span>`;
+const git=(on=false)=>`<span class="git-action ${on?'on':''}"><span>${I.commit}Commit</span><span>⌄</span></span>`;
+const chatHead=(o={})=>`<div class="chead"><span class="identity">${AG}<b>Coder</b><span class="chip">${I.dir}acme-api${o.worktree?' / feature-retry-after':''}</span><span class="cap">pi · sonnet · Ask</span></span><span class="end"><span class="git-controls">${branch(o.branch)}${o.pr?pr():''}${git(o.gitOn)}</span><span class="ib">${I.more}</span></span></div>`;
+const chatBody=(o={})=>`<div class="msgs"><div class="col"><div class="msg mine"><div class="b">When the limit is reached, answer 429 with a Retry-After header, and document it.<span class="tm">10:54</span></div></div>
+<div class="msg">${AG}<div class="b"><div class="n">Coder</div>Blocked attempts now get 429 with the seconds until the window frees up, and docs/api.md describes the header.<span class="tm">10:58</span><div class="turn"><span class="chip">3 files changed</span><span class="chip">Diff</span><span class="chip">Trajectory</span><span class="chip">Revert</span><span class="cap"><span class="add">+12</span> <span class="del">−1</span></span></div></div></div>
+${o.pushed?'<div class="update">ⓘ Pushed 2 commits to origin/feature/retry-after <span class="ib on">Create pull request…</span></div>':''}</div></div><div class="comp2">Steer or queue a message…<span class="sp"></span><span class="ib">${I.plus}</span><span class="ib">↑</span></div>`;
+function shell(el,o={}){el.innerHTML=`<div class="tbar"><div class="lights"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></div></div><div class="body" style="--h:${o.h||580}px">${rail(o.source?'pages':'chats')}${o.source?sources():chatList()}<div class="main">${tabs(o.source?[[I.page,'Roadmap'],[I.dir,'feature/retry-after',1],[AG,'Rate limit for /login']]:[[I.page,'Roadmap'],[AG,'Rate limit for /login',1]])}${o.main||chatHead(o)+chatBody(o)}${o.over||''}</div></div>`}
+const menu=`<div class="pop"><div class="lbl">feature/retry-after → origin · fetched 10:41</div><div class="it dis">${I.commit}Commit…<span class="r">no changes</span></div><div class="it dis">↑ Push<span class="r">up to date</span></div><div class="it on">${I.pr}Create pull request…</div><div class="it dis">↓ Pull<span class="r">up to date</span></div><div class="it">Fetch<span class="r">origin</span></div><hr><div class="it">${I.branch}Create branch…</div></div>`;
+const summary=`<div class="pop"><div class="lbl">acme/acme-api · GitHub</div><div class="it"><b>● Open #42</b><span class="r">Open in browser ↗</span></div><div class="note" style="color:var(--ws-text)">Return 429 with Retry-After on /login</div><div class="note"><code>feature/retry-after</code> → <code>main</code></div><hr><div class="it">✓ Checks<span class="r">3 passed</span></div><div class="it">◌ Review<span class="r">required</span></div><div class="note">Updated from GitHub at 10:58 · Refresh</div></div>`;
+const worktreeMenu=`<div class="pop" style="right:152px;width:360px"><div class="search">${I.srch}Search or create a branch</div><div class="lbl">Local branches</div><div class="it">✓ <code>main</code><span class="r">this checkout</span></div><div class="it on"><code>feature/retry-after</code><span class="r">not checked out</span></div><div class="it"><code>fix/sync-flake</code><span class="r">another worktree</span></div><hr><div class="lbl">feature/retry-after</div><div class="it on">${I.plus}Open in a new worktree…</div><div class="note">Creates another folder; this checkout stays on main. A new Chat starts there only when you choose.</div></div>`;
+const sourceMain=()=>`<div class="head"><span class="crumb">Acme API › acme-api › <b>feature/retry-after</b></span><span class="end"><span class="ib">${I.bubble}Chat</span><span class="ib">${I.more}</span></span></div><div class="source-view"><div class="files"><div class="cap">Source tree</div><div class="file-row">⌄ src</div><div class="file-row" style="padding-left:20px">⌄ routes</div><div class="file-row" style="padding-left:36px"><code>login.ts</code></div><div class="file-row">⌄ docs</div><div class="file-row" style="padding-left:20px"><code>api.md</code></div></div><div class="col"><span class="label">Selected worktree · MacBook</span><div class="field" style="min-height:0"><code>~/code/acme-api-worktrees/feature-retry-after</code></div><div class="callout info">This Chat's files and Diff come from this folder. Liquid reads this folder Source; Coder writes through Meta-Harness.</div><div class="card"><div class="file-row">Branch<span class="r">feature/retry-after</span></div><div class="file-row">Pull request<span class="r">Open #42 ↗</span></div><div class="file-row">Agent<span class="r">Idle</span></div></div><div class="acts"><span class="btn">Open folder</span><span class="btn">New Chat</span><span class="btn">···</span></div><div class="cap">Chats using this worktree</div>${wa(AG,'Rate limit for /login','Coder: Retry-After is documented','10:58',{on:1})}<div class="cap">Sidebar placement is a proposal · question 9</div></div></div>`;
+
+shell(document.getElementById('w-menu'),{gitOn:true,pushed:true,over:menu});
+shell(document.getElementById('w-pr'),{pr:true,over:summary});
+shell(document.getElementById('w-worktree'),{branch:'main',over:worktreeMenu});
+shell(document.getElementById('w-tree'),{source:true,main:sourceMain()});
+document.querySelectorAll('.dialog-screen').forEach(el=>{const dialog=el.querySelector('template').innerHTML;const source=el.id=='w-remove';shell(el,{source,main:source?sourceMain():undefined,over:'<div class="scrim"></div>'+dialog});const h=el.querySelector('.dlg').offsetHeight;shell(el,{source,main:source?sourceMain():undefined,h:Math.max(580,h+64),over:'<div class="scrim"></div>'+dialog})});
 let mode='system',fit=true;const mq=matchMedia('(prefers-color-scheme: dark)');
 function hostDark(){const v=getComputedStyle(document.documentElement).getPropertyValue('--background').trim();if(!v)return mq.matches;const c=document.createElement('canvas');c.width=c.height=1;const x=c.getContext('2d');x.fillStyle='#808080';x.fillStyle=v;x.fillRect(0,0,1,1);const d=x.getImageData(0,0,1,1).data;return .2126*d[0]+.7152*d[1]+.0722*d[2]<128}
-function applyTheme(){const dark=mode=='dark'||(mode=='system'&&hostDark());document.querySelectorAll('.win,.rows,.states').forEach(w=>{w.classList.toggle('theme-dark',dark);w.classList.toggle('theme-light',!dark)});document.querySelectorAll('#theme button').forEach(b=>b.classList.toggle('on',b.dataset.v==mode))}
-function layout(){document.querySelectorAll('.stage').forEach(st=>{const sc=st.querySelector('.scaler'),w=sc.firstElementChild;const s=fit?Math.min(1,(st.clientWidth-32)/DW):1;w.style.transform=`scale(${s})`;sc.style.width=DW*s+'px';sc.style.height=w.offsetHeight*s+'px';st.style.overflowX=fit?'hidden':'auto'});document.querySelectorAll('#size button').forEach(b=>b.classList.toggle('on',(b.dataset.v=='fit')==fit))}
+function applyTheme(){const dark=mode=='dark'||(mode=='system'&&hostDark());document.querySelectorAll('.win,.stage').forEach(w=>{w.classList.toggle('theme-dark',dark);w.classList.toggle('theme-light',!dark)});document.body.classList.toggle('theme-dark',dark);document.body.classList.toggle('theme-light',!dark);document.querySelectorAll('#theme button').forEach(b=>b.classList.toggle('on',b.dataset.v==mode))}
+function layout(){document.querySelectorAll('.stage').forEach(st=>{const sc=st.querySelector('.scaler'),w=sc.firstElementChild;const W=+(w.dataset.w||DW);w.style.width=W+'px';const s=fit?Math.min(1,(st.clientWidth-32)/W):1;w.style.transform=`scale(${s})`;sc.style.width=W*s+'px';sc.style.height=w.offsetHeight*s+'px';st.style.overflowX=fit?'hidden':'auto'});document.querySelectorAll('#size button').forEach(b=>b.classList.toggle('on',(b.dataset.v=='fit')==fit))}
 document.querySelectorAll('#theme button').forEach(b=>b.onclick=()=>{mode=b.dataset.v;applyTheme()});
 document.querySelectorAll('#size button').forEach(b=>b.onclick=()=>{fit=b.dataset.v=='fit';layout()});
 mq.addEventListener('change',applyTheme);addEventListener('resize',layout);setInterval(()=>{if(mode=='system')applyTheme()},1500);
