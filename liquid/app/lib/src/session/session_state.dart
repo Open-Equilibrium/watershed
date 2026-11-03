@@ -558,7 +558,7 @@ class SessionState {
     text: 'Liquid could not capture the project: $failure',
   );
 
-  /// One file's unified diff between the shown checkpoints.
+  /// One file's unified diff for the shown Diff scope.
   Future<String> patch(String path) {
     if (shownScope.value is UncommittedChanges) {
       return _backend.uncommittedPatch(
