@@ -9,8 +9,8 @@ import 'history.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `count`, `outcome`, `running_agents`, `transfer_outcome`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`, `from`, `from`
+// These functions are ignored because they are not marked as `pub`: `count`, `failed`, `of`, `of`, `outcome`, `running_agents`, `transfer_outcome`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`, `from`, `from`, `from`, `from`
 
 /// A local or remote branch.
 class BridgeBranch {
@@ -186,6 +186,44 @@ class BridgeCommitPlan {
           running == other.running;
 }
 
+/// What the head adds to the base on GitHub.
+class BridgeComparison {
+  final PlatformInt64 commits;
+  final PlatformInt64 files;
+  final PlatformInt64 added;
+  final PlatformInt64 removed;
+
+  /// GitHub's comparison page.
+  final String url;
+
+  const BridgeComparison({
+    required this.commits,
+    required this.files,
+    required this.added,
+    required this.removed,
+    required this.url,
+  });
+
+  @override
+  int get hashCode =>
+      commits.hashCode ^
+      files.hashCode ^
+      added.hashCode ^
+      removed.hashCode ^
+      url.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeComparison &&
+          runtimeType == other.runtimeType &&
+          commits == other.commits &&
+          files == other.files &&
+          added == other.added &&
+          removed == other.removed &&
+          url == other.url;
+}
+
 /// How a Git write the user asked for ended.
 class BridgeGitOutcome {
   final BridgeGitOutcomeKind kind;
@@ -330,6 +368,9 @@ class BridgeGitStatus {
   /// Conflicted files, as Liquid shows names.
   final List<String> conflicts;
 
+  /// The Git directory the repository's worktrees share, which identifies it; never shown.
+  final String repository;
+
   const BridgeGitStatus({
     this.branch,
     this.commit,
@@ -344,6 +385,7 @@ class BridgeGitStatus {
     this.defaultBranch,
     required this.merging,
     required this.conflicts,
+    required this.repository,
   });
 
   @override
@@ -360,7 +402,8 @@ class BridgeGitStatus {
       stash.hashCode ^
       defaultBranch.hashCode ^
       merging.hashCode ^
-      conflicts.hashCode;
+      conflicts.hashCode ^
+      repository.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -379,7 +422,8 @@ class BridgeGitStatus {
           stash == other.stash &&
           defaultBranch == other.defaultBranch &&
           merging == other.merging &&
-          conflicts == other.conflicts;
+          conflicts == other.conflicts &&
+          repository == other.repository;
 }
 
 /// A push or pull's display names, captured counts and opaque approval identities.
@@ -438,6 +482,386 @@ class BridgeGitTransfer {
           confirmation == other.confirmation;
 }
 
+/// A name to send back unchanged, and as Liquid shows it.
+class BridgeName {
+  final String name;
+  final String shown;
+
+  const BridgeName({required this.name, required this.shown});
+
+  @override
+  int get hashCode => name.hashCode ^ shown.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeName &&
+          runtimeType == other.runtimeType &&
+          name == other.name &&
+          shown == other.shown;
+}
+
+/// A pull request for the PR chip and its summary, as Liquid shows its text.
+class BridgePullRequest {
+  final PlatformInt64 number;
+  final String title;
+
+  /// Its page on GitHub, to open in the browser.
+  final String url;
+  final BridgePullRequestState state;
+
+  /// The target repository as `owner/name`.
+  final String repository;
+  final String base;
+
+  /// The branch, or `owner:branch` from a fork.
+  final String head;
+
+  /// Checks by outcome; all zero when GitHub reports none.
+  final PlatformInt64 checksPassed;
+  final PlatformInt64 checksFailed;
+  final PlatformInt64 checksPending;
+  final BridgeReviewDecision? review;
+
+  const BridgePullRequest({
+    required this.number,
+    required this.title,
+    required this.url,
+    required this.state,
+    required this.repository,
+    required this.base,
+    required this.head,
+    required this.checksPassed,
+    required this.checksFailed,
+    required this.checksPending,
+    this.review,
+  });
+
+  @override
+  int get hashCode =>
+      number.hashCode ^
+      title.hashCode ^
+      url.hashCode ^
+      state.hashCode ^
+      repository.hashCode ^
+      base.hashCode ^
+      head.hashCode ^
+      checksPassed.hashCode ^
+      checksFailed.hashCode ^
+      checksPending.hashCode ^
+      review.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgePullRequest &&
+          runtimeType == other.runtimeType &&
+          number == other.number &&
+          title == other.title &&
+          url == other.url &&
+          state == other.state &&
+          repository == other.repository &&
+          base == other.base &&
+          head == other.head &&
+          checksPassed == other.checksPassed &&
+          checksFailed == other.checksFailed &&
+          checksPending == other.checksPending &&
+          review == other.review;
+}
+
+/// The reviewed pull request to create.
+class BridgePullRequestDraft {
+  final BridgePullRequestHead identity;
+  final String target;
+  final String base;
+  final String title;
+  final String body;
+  final bool draft;
+
+  const BridgePullRequestDraft({
+    required this.identity,
+    required this.target,
+    required this.base,
+    required this.title,
+    required this.body,
+    required this.draft,
+  });
+
+  @override
+  int get hashCode =>
+      identity.hashCode ^
+      target.hashCode ^
+      base.hashCode ^
+      title.hashCode ^
+      body.hashCode ^
+      draft.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgePullRequestDraft &&
+          runtimeType == other.runtimeType &&
+          identity == other.identity &&
+          target == other.target &&
+          base == other.base &&
+          title == other.title &&
+          body == other.body &&
+          draft == other.draft;
+}
+
+/// The identities a plan showed; return them unchanged when creating, never display them.
+class BridgePullRequestHead {
+  final String host;
+  final String headRepository;
+  final String headBranch;
+  final String headCommit;
+
+  const BridgePullRequestHead({
+    required this.host,
+    required this.headRepository,
+    required this.headBranch,
+    required this.headCommit,
+  });
+
+  @override
+  int get hashCode =>
+      host.hashCode ^
+      headRepository.hashCode ^
+      headBranch.hashCode ^
+      headCommit.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgePullRequestHead &&
+          runtimeType == other.runtimeType &&
+          host == other.host &&
+          headRepository == other.headRepository &&
+          headBranch == other.headBranch &&
+          headCommit == other.headCommit;
+}
+
+/// How a pull request plan, creation or lookup ended, with what it names.
+class BridgePullRequestOutcome {
+  final BridgePullRequestOutcomeKind kind;
+  final BridgePullRequestPlan? plan;
+  final BridgePullRequest? pullRequest;
+  final String host;
+  final String remote;
+  final String branch;
+  final String upstream;
+  final String repository;
+  final PlatformInt64 ahead;
+  final PlatformInt64 behind;
+  final bool first;
+
+  /// gh's or Git's message, with credentials removed and hidden characters written out.
+  final String detail;
+
+  const BridgePullRequestOutcome({
+    required this.kind,
+    this.plan,
+    this.pullRequest,
+    required this.host,
+    required this.remote,
+    required this.branch,
+    required this.upstream,
+    required this.repository,
+    required this.ahead,
+    required this.behind,
+    required this.first,
+    required this.detail,
+  });
+
+  @override
+  int get hashCode =>
+      kind.hashCode ^
+      plan.hashCode ^
+      pullRequest.hashCode ^
+      host.hashCode ^
+      remote.hashCode ^
+      branch.hashCode ^
+      upstream.hashCode ^
+      repository.hashCode ^
+      ahead.hashCode ^
+      behind.hashCode ^
+      first.hashCode ^
+      detail.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgePullRequestOutcome &&
+          runtimeType == other.runtimeType &&
+          kind == other.kind &&
+          plan == other.plan &&
+          pullRequest == other.pullRequest &&
+          host == other.host &&
+          remote == other.remote &&
+          branch == other.branch &&
+          upstream == other.upstream &&
+          repository == other.repository &&
+          ahead == other.ahead &&
+          behind == other.behind &&
+          first == other.first &&
+          detail == other.detail;
+}
+
+/// How a pull request plan, creation or lookup ended.
+enum BridgePullRequestOutcomeKind {
+  /// Planned, created or read.
+  done,
+
+  /// The head, base or target changed; `plan` holds the fresh one to review.
+  changed,
+
+  /// `pull_request` is already open from this head; nothing was created.
+  exists,
+
+  /// HEAD names no branch.
+  noBranch,
+
+  /// The branch has no commit.
+  noCommit,
+
+  /// A merge is in progress.
+  merging,
+
+  /// The repository has no remote.
+  noRemote,
+
+  /// Several remotes and no upstream or origin.
+  ambiguousRemote,
+
+  /// The remote fetches from and pushes to different or several repositories.
+  destinations,
+
+  /// `remote` is not on GitHub or a GitHub Enterprise host gh has a login for; `host` names
+  /// its host, empty for a local path.
+  notGitHub,
+
+  /// `branch` has `ahead` commits not on `remote`, or was never pushed when `first`.
+  needsPush,
+
+  /// `upstream` has `behind` commits `branch` lacks.
+  behind,
+
+  /// GitHub's `branch` is at another commit than the checkout's.
+  headMoved,
+
+  /// gh could not run on the host.
+  ghMissing,
+
+  /// gh has no working login for `host`.
+  signIn,
+
+  /// gh cannot access `repository`.
+  noAccess,
+
+  /// `host` could not be reached or limited the rate.
+  unreachable,
+
+  /// gh failed; `detail` says how.
+  failed,
+
+  /// GitHub refused the pull request; none was created.
+  notCreated,
+
+  /// GitHub returned no result; a pull request may exist.
+  unknown,
+}
+
+/// The create dialog's pushed head, targets, base and comparison.
+class BridgePullRequestPlan {
+  final BridgePullRequestHead identity;
+
+  /// The GitHub host as Liquid shows it.
+  final String host;
+
+  /// The head as GitHub shows it: the branch, or `owner:branch` from a fork.
+  final String head;
+
+  /// GitHub's parent first for a fork, then the head repository, as `owner/name`.
+  final List<String> targets;
+
+  /// A fork whose parent GitHub did not name; the user chooses the target.
+  final bool parentUnknown;
+
+  /// The chosen or preselected target; none while the user must choose.
+  final String? target;
+  final BridgeName? defaultBranch;
+  final BridgeName? base;
+  final BridgeComparison? comparison;
+
+  /// GitHub has no branch `base` in the target.
+  final bool baseMissing;
+
+  /// An open pull request from this head, shown instead of creating another.
+  final BridgePullRequest? open;
+  final PlatformInt64 uncommitted;
+
+  /// The latest commit's subject and body, with hidden characters written out.
+  final String subject;
+  final String body;
+
+  const BridgePullRequestPlan({
+    required this.identity,
+    required this.host,
+    required this.head,
+    required this.targets,
+    required this.parentUnknown,
+    this.target,
+    this.defaultBranch,
+    this.base,
+    this.comparison,
+    required this.baseMissing,
+    this.open,
+    required this.uncommitted,
+    required this.subject,
+    required this.body,
+  });
+
+  @override
+  int get hashCode =>
+      identity.hashCode ^
+      host.hashCode ^
+      head.hashCode ^
+      targets.hashCode ^
+      parentUnknown.hashCode ^
+      target.hashCode ^
+      defaultBranch.hashCode ^
+      base.hashCode ^
+      comparison.hashCode ^
+      baseMissing.hashCode ^
+      open.hashCode ^
+      uncommitted.hashCode ^
+      subject.hashCode ^
+      body.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgePullRequestPlan &&
+          runtimeType == other.runtimeType &&
+          identity == other.identity &&
+          host == other.host &&
+          head == other.head &&
+          targets == other.targets &&
+          parentUnknown == other.parentUnknown &&
+          target == other.target &&
+          defaultBranch == other.defaultBranch &&
+          base == other.base &&
+          comparison == other.comparison &&
+          baseMissing == other.baseMissing &&
+          open == other.open &&
+          uncommitted == other.uncommitted &&
+          subject == other.subject &&
+          body == other.body;
+}
+
+/// A pull request's state on GitHub.
+enum BridgePullRequestState { open, draft, merged, closed }
+
 /// Exact identities returned unchanged by the default-branch confirmation dialog.
 class BridgePushConfirmation {
   final String branch;
@@ -466,6 +890,9 @@ class BridgePushConfirmation {
           reference == other.reference &&
           commit == other.commit;
 }
+
+/// A pull request's review decision.
+enum BridgeReviewDecision { required_, approved, changesRequested }
 
 /// A branch's stashed changes.
 class BridgeStash {

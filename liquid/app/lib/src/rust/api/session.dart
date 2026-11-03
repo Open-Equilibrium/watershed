@@ -58,6 +58,11 @@ abstract class AgentSession implements RustOpaqueInterface {
   /// Creates the branch `name` at the current commit and switches to it.
   Future<BridgeGitOutcome> createBranch({required String name});
 
+  /// Creates the reviewed pull request on GitHub through the host's gh.
+  Future<BridgePullRequestOutcome> createPullRequest({
+    required BridgePullRequestDraft draft,
+  });
+
   /// The selected model as `provider/id`.
   Future<String?> currentModel();
 
@@ -112,6 +117,22 @@ abstract class AgentSession implements RustOpaqueInterface {
 
   /// Pulls fast-forward only under the checkout lock, refusing any running agent.
   Future<BridgeGitOutcome> pull();
+
+  /// The branch's latest pull request on GitHub, open ones first; none without one.
+  Future<BridgePullRequestOutcome> pullRequest();
+
+  /// The branches of `target` on `host` GitHub lists, to choose a base from.
+  Future<List<BridgeName>> pullRequestBases({
+    required String host,
+    required String target,
+  });
+
+  /// The create dialog's plan for `target` and `base` as the user chose them, else as
+  /// preselected; `base` is the recorded branch this one was created from, if any.
+  Future<BridgePullRequestOutcome> pullRequestPlan({
+    String? target,
+    String? base,
+  });
 
   /// Pushes the branch through the user's Git and hooks, without a checkout lock.
   Future<BridgeGitOutcome> push({BridgePushConfirmation? confirmed});

@@ -314,6 +314,7 @@ class FakeBackend implements SessionBackend {
             defaultBranch: now.defaultBranch,
             merging: now.merging,
             conflicts: List.of(now.conflicts),
+            repository: now.repository,
           );
   }
 
@@ -810,6 +811,7 @@ BridgeGitStatus gitStatusOf({
   String? defaultBranch,
   bool merging = false,
   List<String> conflicts = const [],
+  String repository = '/work/api/.git',
 }) => BridgeGitStatus(
   branch: branch,
   commit: commit,
@@ -824,6 +826,7 @@ BridgeGitStatus gitStatusOf({
   defaultBranch: defaultBranch,
   merging: merging,
   conflicts: conflicts,
+  repository: repository,
 );
 
 BridgeGitTransfer transferOf({

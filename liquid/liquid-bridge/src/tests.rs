@@ -1849,3 +1849,63 @@ fn a_committed_bridge_outcome_survives_failed_inspection() {
     assert!(call(session.shutdown()));
     let _ = std::fs::remove_dir_all(repo);
 }
+
+#[test]
+fn pull_request_outcomes_say_what_blocks_creation_and_write_out_hidden_text() {
+    use crate::api::git::{BridgePullRequestOutcomeKind, BridgePullRequestState};
+    let repo = repository("pull-request-bridge");
+    git(&repo, &["branch", "-M", "main"]);
+    let bare = repo.with_extension("bare");
+    let _ = std::fs::remove_dir_all(&bare);
+    git(&repo, &["clone", "--bare", ".", bare.to_str().unwrap()]);
+    git(&repo, &["remote", "add", "origin", bare.to_str().unwrap()]);
+    git(&repo, &["push", "-u", "origin", "main"]);
+    let session = launch(
+        gated("IFS= read -r line || exit 0"),
+        repo.display().to_string(),
+    )
+    .unwrap();
+    let local = session.pull_request_plan(None, None).unwrap();
+    git(
+        &repo,
+        &[
+            "remote",
+            "set-url",
+            "origin",
+            "https://github.com/acme/api.git",
+        ],
+    );
+    std::fs::write(repo.join("b.txt"), "b\n").unwrap();
+    git(&repo, &["add", "b.txt"]);
+    git(&repo, &["commit", "-m", "b"]);
+    let ahead = session.pull_request_plan(None, None).unwrap();
+    let repository = session.git_status().unwrap().unwrap().repository;
+    assert!(call(session.shutdown()));
+    let _ = std::fs::remove_dir_all(&repo);
+    let _ = std::fs::remove_dir_all(&bare);
+    assert_eq!(local.kind, BridgePullRequestOutcomeKind::NotGitHub);
+    assert_eq!(local.remote, "origin");
+    assert_eq!(ahead.kind, BridgePullRequestOutcomeKind::NeedsPush);
+    assert_eq!(
+        (ahead.branch.as_str(), ahead.ahead, ahead.first),
+        ("main", 1, false)
+    );
+    assert!(repository.ends_with(".git"), "{repository}");
+
+    let shown = crate::api::git::BridgePullRequest::from(meta_harness_core::PullRequest {
+        number: 42,
+        title: "Fix \u{202e}gnp.exe".into(),
+        url: "https://github.com/acme/api/pull/42".into(),
+        state: meta_harness_core::PullRequestState::Draft,
+        repository: "acme/api".into(),
+        base: "main".into(),
+        head: "bw:feature/x".into(),
+        checks_passed: 1,
+        checks_failed: 0,
+        checks_pending: 2,
+        review: None,
+    });
+    assert_eq!(shown.state, BridgePullRequestState::Draft);
+    assert!(!shown.title.contains('\u{202e}'), "{}", shown.title);
+    assert_eq!((shown.checks_passed, shown.checks_pending), (1, 2));
+}

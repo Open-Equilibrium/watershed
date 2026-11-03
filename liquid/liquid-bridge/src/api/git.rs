@@ -1,9 +1,10 @@
-//! The checkout's branches, commits and changes for the session header and the Diff tab
-//! ([mockups](../../../../docs/design/mockups/liquid-git-branches.html)).
+//! The checkout's branches, commits, changes and pull requests for the session header and the
+//! Diff tab ([mockups](../../../../docs/design/mockups/liquid-git-branches.html),
+//! [pull requests](../../../../docs/design/mockups/liquid-git-prs-worktrees.html)).
 
 use meta_harness_core::{
-    BranchTarget, Changes, DiffError, session_id, session_title_of, visible_lines, visible_name,
-    without_credentials,
+    BranchTarget, Changes, DiffError, PullRequestError, PullRequestState, ReviewDecision,
+    session_id, session_title_of, visible_lines, visible_name, without_credentials,
 };
 
 use crate::api::events::BridgeFileChange;
@@ -37,6 +38,8 @@ pub struct BridgeGitStatus {
     pub merging: bool,
     /// Conflicted files, as Liquid shows names.
     pub conflicts: Vec<String>,
+    /// The Git directory the repository's worktrees share, which identifies it; never shown.
+    pub repository: String,
 }
 
 /// A local or remote branch.
@@ -199,6 +202,357 @@ impl From<meta_harness_core::GitTransfer> for BridgeGitTransfer {
     }
 }
 
+/// A name to send back unchanged, and as Liquid shows it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgeName {
+    pub name: String,
+    pub shown: String,
+}
+
+impl BridgeName {
+    fn of(name: String) -> Self {
+        Self {
+            shown: visible_name(&name),
+            name,
+        }
+    }
+}
+
+/// A pull request's state on GitHub.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BridgePullRequestState {
+    Open,
+    Draft,
+    Merged,
+    Closed,
+}
+
+/// A pull request's review decision.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BridgeReviewDecision {
+    Required,
+    Approved,
+    ChangesRequested,
+}
+
+/// A pull request for the PR chip and its summary, as Liquid shows its text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgePullRequest {
+    pub number: i64,
+    pub title: String,
+    /// Its page on GitHub, to open in the browser.
+    pub url: String,
+    pub state: BridgePullRequestState,
+    /// The target repository as `owner/name`.
+    pub repository: String,
+    pub base: String,
+    /// The branch, or `owner:branch` from a fork.
+    pub head: String,
+    /// Checks by outcome; all zero when GitHub reports none.
+    pub checks_passed: i64,
+    pub checks_failed: i64,
+    pub checks_pending: i64,
+    pub review: Option<BridgeReviewDecision>,
+}
+
+impl From<meta_harness_core::PullRequest> for BridgePullRequest {
+    fn from(pull: meta_harness_core::PullRequest) -> Self {
+        Self {
+            number: count(pull.number),
+            title: visible_name(&pull.title),
+            url: pull.url,
+            state: match pull.state {
+                PullRequestState::Open => BridgePullRequestState::Open,
+                PullRequestState::Draft => BridgePullRequestState::Draft,
+                PullRequestState::Merged => BridgePullRequestState::Merged,
+                PullRequestState::Closed => BridgePullRequestState::Closed,
+            },
+            repository: visible_name(&pull.repository),
+            base: visible_name(&pull.base),
+            head: visible_name(&pull.head),
+            checks_passed: count(pull.checks_passed),
+            checks_failed: count(pull.checks_failed),
+            checks_pending: count(pull.checks_pending),
+            review: pull.review.map(|review| match review {
+                ReviewDecision::Required => BridgeReviewDecision::Required,
+                ReviewDecision::Approved => BridgeReviewDecision::Approved,
+                ReviewDecision::ChangesRequested => BridgeReviewDecision::ChangesRequested,
+            }),
+        }
+    }
+}
+
+/// What the head adds to the base on GitHub.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgeComparison {
+    pub commits: i64,
+    pub files: i64,
+    pub added: i64,
+    pub removed: i64,
+    /// GitHub's comparison page.
+    pub url: String,
+}
+
+/// The identities a plan showed; return them unchanged when creating, never display them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgePullRequestHead {
+    pub host: String,
+    pub head_repository: String,
+    pub head_branch: String,
+    pub head_commit: String,
+}
+
+/// The create dialog's pushed head, targets, base and comparison.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgePullRequestPlan {
+    pub identity: BridgePullRequestHead,
+    /// The GitHub host as Liquid shows it.
+    pub host: String,
+    /// The head as GitHub shows it: the branch, or `owner:branch` from a fork.
+    pub head: String,
+    /// GitHub's parent first for a fork, then the head repository, as `owner/name`.
+    pub targets: Vec<String>,
+    /// A fork whose parent GitHub did not name; the user chooses the target.
+    pub parent_unknown: bool,
+    /// The chosen or preselected target; none while the user must choose.
+    pub target: Option<String>,
+    pub default_branch: Option<BridgeName>,
+    pub base: Option<BridgeName>,
+    pub comparison: Option<BridgeComparison>,
+    /// GitHub has no branch `base` in the target.
+    pub base_missing: bool,
+    /// An open pull request from this head, shown instead of creating another.
+    pub open: Option<BridgePullRequest>,
+    pub uncommitted: i64,
+    /// The latest commit's subject and body, with hidden characters written out.
+    pub subject: String,
+    pub body: String,
+}
+
+/// The reviewed pull request to create.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgePullRequestDraft {
+    pub identity: BridgePullRequestHead,
+    pub target: String,
+    pub base: String,
+    pub title: String,
+    pub body: String,
+    pub draft: bool,
+}
+
+/// How a pull request plan, creation or lookup ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BridgePullRequestOutcomeKind {
+    /// Planned, created or read.
+    Done,
+    /// The head, base or target changed; `plan` holds the fresh one to review.
+    Changed,
+    /// `pull_request` is already open from this head; nothing was created.
+    Exists,
+    /// HEAD names no branch.
+    NoBranch,
+    /// The branch has no commit.
+    NoCommit,
+    /// A merge is in progress.
+    Merging,
+    /// The repository has no remote.
+    NoRemote,
+    /// Several remotes and no upstream or origin.
+    AmbiguousRemote,
+    /// The remote fetches from and pushes to different or several repositories.
+    Destinations,
+    /// `remote` is not on GitHub or a GitHub Enterprise host gh has a login for; `host` names
+    /// its host, empty for a local path.
+    NotGitHub,
+    /// `branch` has `ahead` commits not on `remote`, or was never pushed when `first`.
+    NeedsPush,
+    /// `upstream` has `behind` commits `branch` lacks.
+    Behind,
+    /// GitHub's `branch` is at another commit than the checkout's.
+    HeadMoved,
+    /// gh could not run on the host.
+    GhMissing,
+    /// gh has no working login for `host`.
+    SignIn,
+    /// gh cannot access `repository`.
+    NoAccess,
+    /// `host` could not be reached or limited the rate.
+    Unreachable,
+    /// gh failed; `detail` says how.
+    Failed,
+    /// GitHub refused the pull request; none was created.
+    NotCreated,
+    /// GitHub returned no result; a pull request may exist.
+    Unknown,
+}
+
+/// How a pull request plan, creation or lookup ended, with what it names.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgePullRequestOutcome {
+    pub kind: BridgePullRequestOutcomeKind,
+    pub plan: Option<BridgePullRequestPlan>,
+    pub pull_request: Option<BridgePullRequest>,
+    pub host: String,
+    pub remote: String,
+    pub branch: String,
+    pub upstream: String,
+    pub repository: String,
+    pub ahead: i64,
+    pub behind: i64,
+    pub first: bool,
+    /// gh's or Git's message, with credentials removed and hidden characters written out.
+    pub detail: String,
+}
+
+impl BridgePullRequestOutcome {
+    fn of(kind: BridgePullRequestOutcomeKind) -> Self {
+        Self {
+            kind,
+            plan: None,
+            pull_request: None,
+            host: String::new(),
+            remote: String::new(),
+            branch: String::new(),
+            upstream: String::new(),
+            repository: String::new(),
+            ahead: 0,
+            behind: 0,
+            first: false,
+            detail: String::new(),
+        }
+    }
+
+    fn failed(error: PullRequestError) -> Self {
+        use BridgePullRequestOutcomeKind as Kind;
+        let shown = |text: &str| visible_lines(&without_credentials(text));
+        match error {
+            PullRequestError::Git(DiffError::NoBranch) => Self::of(Kind::NoBranch),
+            PullRequestError::Git(DiffError::MergeInProgress) => Self::of(Kind::Merging),
+            PullRequestError::Git(DiffError::PushDestinations) => Self::of(Kind::Destinations),
+            PullRequestError::Git(error) => Self {
+                detail: shown(&error.to_string()),
+                ..Self::of(Kind::Failed)
+            },
+            PullRequestError::NoCommit => Self::of(Kind::NoCommit),
+            PullRequestError::NoRemote => Self::of(Kind::NoRemote),
+            PullRequestError::AmbiguousRemote => Self::of(Kind::AmbiguousRemote),
+            PullRequestError::NotGitHub { remote, host } => Self {
+                remote: visible_name(&without_credentials(&remote)),
+                host: host.as_deref().map(visible_name).unwrap_or_default(),
+                ..Self::of(Kind::NotGitHub)
+            },
+            PullRequestError::NeedsPush {
+                branch,
+                remote,
+                ahead,
+                first,
+            } => Self {
+                branch: visible_name(&branch),
+                remote: visible_name(&without_credentials(&remote)),
+                ahead: count(ahead),
+                first,
+                ..Self::of(Kind::NeedsPush)
+            },
+            PullRequestError::Behind {
+                branch,
+                upstream,
+                ahead,
+                behind,
+            } => Self {
+                branch: visible_name(&branch),
+                upstream: visible_name(&without_credentials(&upstream)),
+                ahead: count(ahead),
+                behind: count(behind),
+                ..Self::of(Kind::Behind)
+            },
+            PullRequestError::HeadMoved { branch } => Self {
+                branch: visible_name(&branch),
+                ..Self::of(Kind::HeadMoved)
+            },
+            PullRequestError::GhMissing(detail) => Self {
+                detail: shown(&detail),
+                ..Self::of(Kind::GhMissing)
+            },
+            PullRequestError::SignIn { host } => Self {
+                host: visible_name(&host),
+                ..Self::of(Kind::SignIn)
+            },
+            PullRequestError::NoAccess { repository, detail } => Self {
+                repository: visible_name(&repository),
+                detail: shown(&detail),
+                ..Self::of(Kind::NoAccess)
+            },
+            PullRequestError::Unreachable { host, detail } => Self {
+                host: visible_name(&host),
+                detail: shown(&detail),
+                ..Self::of(Kind::Unreachable)
+            },
+            PullRequestError::Failed(detail) => Self {
+                detail: shown(&detail),
+                ..Self::of(Kind::Failed)
+            },
+            PullRequestError::NotCreated(detail) => Self {
+                detail: shown(&detail),
+                ..Self::of(Kind::NotCreated)
+            },
+            PullRequestError::Unknown(detail) => Self {
+                detail: shown(&detail),
+                ..Self::of(Kind::Unknown)
+            },
+            PullRequestError::Changed(plan) => Self {
+                plan: Some((*plan).into()),
+                ..Self::of(Kind::Changed)
+            },
+            PullRequestError::Exists(pull) => Self {
+                pull_request: Some((*pull).into()),
+                ..Self::of(Kind::Exists)
+            },
+        }
+    }
+}
+
+impl From<meta_harness_core::PullRequestPlan> for BridgePullRequestPlan {
+    fn from(plan: meta_harness_core::PullRequestPlan) -> Self {
+        let head = match &plan.target {
+            Some(target) if !target.eq_ignore_ascii_case(&plan.head_repository) => {
+                let owner = plan
+                    .head_repository
+                    .split_once('/')
+                    .map_or("", |(owner, _)| owner);
+                format!("{owner}:{}", plan.head_branch)
+            }
+            _ => plan.head_branch.clone(),
+        };
+        Self {
+            host: visible_name(&plan.host),
+            head: visible_name(&head),
+            targets: plan.targets,
+            parent_unknown: plan.parent_unknown,
+            target: plan.target,
+            default_branch: plan.default_branch.map(BridgeName::of),
+            base: plan.base.map(BridgeName::of),
+            comparison: plan.comparison.map(|comparison| BridgeComparison {
+                commits: count(comparison.commits),
+                files: count(comparison.files),
+                added: count(comparison.added),
+                removed: count(comparison.removed),
+                url: comparison.url,
+            }),
+            base_missing: plan.base_missing,
+            open: plan.open.map(Into::into),
+            uncommitted: count(plan.uncommitted),
+            subject: visible_name(&plan.subject),
+            body: visible_lines(&plan.body),
+            identity: BridgePullRequestHead {
+                host: plan.host,
+                head_repository: plan.head_repository,
+                head_branch: plan.head_branch,
+                head_commit: plan.head_commit,
+            },
+        }
+    }
+}
+
 /// Commit details, including the branch created when the subsequent commit failed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BridgeCommit {
@@ -281,6 +635,7 @@ impl AgentSession {
                     .iter()
                     .map(|path| visible_name(path))
                     .collect(),
+                repository: status.repository,
             }))
         })
     }
@@ -515,6 +870,85 @@ impl AgentSession {
     /// Pulls fast-forward only under the checkout lock, refusing any running agent.
     pub fn pull(&self) -> Result<BridgeGitOutcome, String> {
         RUNTIME.block_on(async { self.transfer_outcome(self.checkpoints.pull().await).await })
+    }
+
+    /// The create dialog's plan for `target` and `base` as the user chose them, else as
+    /// preselected; `base` is the recorded branch this one was created from, if any.
+    pub fn pull_request_plan(
+        &self,
+        target: Option<String>,
+        base: Option<String>,
+    ) -> Result<BridgePullRequestOutcome, String> {
+        RUNTIME.block_on(async {
+            Ok(
+                match self
+                    .checkpoints
+                    .pull_request_plan(target.as_deref(), base.as_deref())
+                    .await
+                {
+                    Ok(plan) => BridgePullRequestOutcome {
+                        plan: Some(plan.into()),
+                        ..BridgePullRequestOutcome::of(BridgePullRequestOutcomeKind::Done)
+                    },
+                    Err(error) => BridgePullRequestOutcome::failed(error),
+                },
+            )
+        })
+    }
+
+    /// Creates the reviewed pull request on GitHub through the host's gh.
+    pub fn create_pull_request(
+        &self,
+        draft: BridgePullRequestDraft,
+    ) -> Result<BridgePullRequestOutcome, String> {
+        let draft = meta_harness_core::PullRequestDraft {
+            host: draft.identity.host,
+            target: draft.target,
+            head_repository: draft.identity.head_repository,
+            head_branch: draft.identity.head_branch,
+            head_commit: draft.identity.head_commit,
+            base: draft.base,
+            title: draft.title,
+            body: draft.body,
+            draft: draft.draft,
+        };
+        RUNTIME.block_on(async {
+            Ok(match self.checkpoints.create_pull_request(&draft).await {
+                Ok(pull) => BridgePullRequestOutcome {
+                    pull_request: Some(pull.into()),
+                    ..BridgePullRequestOutcome::of(BridgePullRequestOutcomeKind::Done)
+                },
+                Err(error) => BridgePullRequestOutcome::failed(error),
+            })
+        })
+    }
+
+    /// The branch's latest pull request on GitHub, open ones first; none without one.
+    pub fn pull_request(&self) -> Result<BridgePullRequestOutcome, String> {
+        RUNTIME.block_on(async {
+            Ok(match self.checkpoints.pull_request().await {
+                Ok(pull) => BridgePullRequestOutcome {
+                    pull_request: pull.map(Into::into),
+                    ..BridgePullRequestOutcome::of(BridgePullRequestOutcomeKind::Done)
+                },
+                Err(error) => BridgePullRequestOutcome::failed(error),
+            })
+        })
+    }
+
+    /// The branches of `target` on `host` GitHub lists, to choose a base from.
+    pub fn pull_request_bases(
+        &self,
+        host: String,
+        target: String,
+    ) -> Result<Vec<BridgeName>, String> {
+        RUNTIME.block_on(async {
+            self.checkpoints
+                .pull_request_bases(&host, &target)
+                .await
+                .map(|names| names.into_iter().map(BridgeName::of).collect())
+                .map_err(|error| visible_lines(&without_credentials(&error.to_string())))
+        })
     }
 
     async fn transfer_outcome(
