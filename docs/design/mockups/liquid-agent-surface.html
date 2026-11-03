@@ -56,10 +56,10 @@ kbd{font-size:11px;padding:0 4px;border-radius:4px;border:1px solid currentColor
 .btn.dng{color:var(--ws-danger)}
 .ok,.add{color:var(--ws-success)}.del{color:var(--ws-danger)}
 .wid{flex:none;height:36px;display:flex;justify-content:center;align-items:flex-end;padding-bottom:6px;box-sizing:border-box}
-.wid>div{width:740px;display:flex;gap:16px;align-items:center;font-size:12px;color:var(--ws-text-muted);padding:0 12px}
+.wid>div{width:var(--ws-width-reading);display:flex;gap:16px;align-items:center;font-size:12px;color:var(--ws-text-muted);padding:0 12px}
 .wid b{font-weight:500;color:var(--ws-text-faint)}
 .act{flex:none;height:132px;padding:0 0 12px;box-sizing:border-box;display:flex;justify-content:center}
-.actbox{width:740px;height:120px;box-sizing:border-box;border-radius:12px;background:var(--ws-surface);box-shadow:var(--ws-shadow);padding:12px 14px;display:flex;flex-direction:column}
+.actbox{width:var(--ws-width-reading);height:120px;box-sizing:border-box;border-radius:12px;background:var(--ws-surface);box-shadow:var(--ws-shadow);padding:12px 14px;display:flex;flex-direction:column}
 .actbox .ph{flex:1;color:var(--ws-text-faint);font-size:15px;line-height:24px}
 .actbox .bar{display:flex;align-items:center;gap:6px}
 .actbox.appr{box-shadow:0 0 0 1px var(--ws-warning-border),0 3px 6px rgba(15,15,15,.08),0 9px 24px rgba(15,15,15,.12);gap:10px}
@@ -73,7 +73,7 @@ kbd{font-size:11px;padding:0 4px;border-radius:4px;border:1px solid currentColor
 .status{height:30px;flex:none;display:flex;align-items:center;gap:18px;padding:0 16px;font-size:12px;color:var(--ws-text-muted);font-variant-numeric:tabular-nums;white-space:nowrap;box-shadow:inset 0 1px 0 var(--ws-border)}
 .status .end{margin-left:auto;color:var(--ws-text-faint)}
 .chat{flex:1;overflow:hidden;display:flex;flex-direction:column;justify-content:flex-end;padding-bottom:8px;min-height:0;-webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 64px);mask-image:linear-gradient(to bottom,transparent 0,#000 64px)}
-.col{width:740px;margin:0 auto;display:flex;flex-direction:column;gap:12px}
+.col{width:var(--ws-width-reading);margin:0 auto;display:flex;flex-direction:column;gap:12px}
 .user{align-self:flex-end;background:var(--ws-hover);padding:10px 14px;border-radius:12px;max-width:80%;font-size:16px;line-height:24px}
 .prose{font-size:16px;line-height:24px;margin:2px 0}
 .tool{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ws-text-muted);height:32px;padding:0 10px;border-radius:6px;background:var(--ws-subtle)}
@@ -185,6 +185,7 @@ i.kw{font-style:normal;color:var(--ws-syn-kw)}i.st{font-style:normal;color:var(-
 @media (max-width:560px){.found{grid-template-columns:1fr}.swg{grid-template-columns:repeat(2,1fr)}}
 </style></head><body class="theme-light chrome">
 <div class="page">
+<p class="sub"><b>Superseded in part by ADR-0239 and ADR-0241:</b> sessions are Chats, projects are folder Sources, and the shell and sizes follow <a href="liquid-app-concept.html">the app's structure</a> and <code>tokens.css</code>; the Git, checkpoint, approval and Trajectory behavior shown here stays.</p>
   <div class="toolbar">
     <div>Theme <span class="seg" id="theme"><button data-v="light">Light</button><button data-v="dark">Dark</button><button data-v="system" class="on">System</button></span></div>
     <div>Size <span class="seg" id="size"><button data-v="fit" class="on">Fit</button><button data-v="full">100 %</button></span></div>
@@ -195,12 +196,12 @@ i.kw{font-style:normal;color:var(--ws-syn-kw)}i.st{font-style:normal;color:var(-
     <div class="found">
       <div class="panel ws theme-light"><h5>Color tokens · light</h5><div class="swg" data-sw></div></div>
       <div class="panel ws theme-dark"><h5>Color tokens · dark</h5><div class="swg" data-sw></div></div>
-      <div class="panel ws theme-light" style="grid-column:1/3"><h5>Type · platform UI font, AppFlowy sizes</h5>
+      <div class="panel ws theme-light" style="grid-column:1/3"><h5>Type · platform UI font, Notion's sizes (ADR-0241)</h5>
         <div class="typo">
-          <div><span class="l">display · 32/40 · 700</span><b style="font-size:32px;line-height:40px;font-weight:700">Roadmap</b></div>
-          <div><span class="l">h1 · 24/32 · 600</span><b style="font-size:24px;line-height:32px;font-weight:600">Agent sessions</b></div>
-          <div><span class="l">h2 · 20/28 · 600</span><b style="font-size:20px;line-height:28px;font-weight:600">What the model saw</b></div>
-          <div><span class="l">h3 · 16/22 · 600</span><b style="font-size:16px;line-height:22px;font-weight:600">Timing and usage</b></div>
+          <div><span class="l">display · 40/48 · 700</span><b style="font-size:var(--ws-fs-display);line-height:var(--ws-lh-display);font-weight:700">Roadmap</b></div>
+          <div><span class="l">h1 · 30/38 · 600</span><b style="font-size:var(--ws-fs-h1);line-height:var(--ws-lh-h1);font-weight:600">Chats</b></div>
+          <div><span class="l">h2 · 24/32 · 600</span><b style="font-size:var(--ws-fs-h2);line-height:var(--ws-lh-h2);font-weight:600">What the model saw</b></div>
+          <div><span class="l">h3 · 20/28 · 600</span><b style="font-size:var(--ws-fs-h3);line-height:var(--ws-lh-h3);font-weight:600">Timing and usage</b></div>
           <div><span class="l">prose · 16/24</span><span style="font-size:16px;line-height:24px">Text in Pages and agent replies reads like Notion.</span></div>
           <div><span class="l">ui · 14/20</span><span>Lists, tabs, buttons, tables</span></div>
           <div><span class="l">small · 12/18</span><span style="font-size:12px;line-height:18px;color:var(--ws-text-muted)">Metadata, status bar, column headers</span></div>

@@ -7,7 +7,7 @@ import 'theme/theme.dart';
 import 'theme/tokens.g.dart';
 
 /// Width of the reading column in the chat and the input area.
-const double readingWidth = 740;
+const double readingWidth = WsMetrics.widthReading;
 
 /// A contextual shortcut hint, shown only while the reveal key is held. It takes no space, so
 /// nothing moves when it appears.

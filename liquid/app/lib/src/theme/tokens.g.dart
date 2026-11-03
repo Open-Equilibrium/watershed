@@ -23,18 +23,18 @@ abstract final class WsMetrics {
     'Consolas',
     'monospace',
   ];
-  static const double fsDisplay = 32;
-  static const double lhDisplay = 40;
-  static const double fsH1 = 24;
-  static const double lhH1 = 32;
-  static const double fsH2 = 20;
-  static const double lhH2 = 28;
-  static const double fsH3 = 16;
-  static const double lhH3 = 22;
+  static const double fsDisplay = 40;
+  static const double lhDisplay = 48;
+  static const double fsH1 = 30;
+  static const double lhH1 = 38;
+  static const double fsH2 = 24;
+  static const double lhH2 = 32;
+  static const double fsH3 = 20;
+  static const double lhH3 = 28;
   static const double fsProse = 16;
   static const double lhProse = 24;
-  static const double fsUi = 15;
-  static const double lhUi = 22;
+  static const double fsUi = 14;
+  static const double lhUi = 20;
   static const double fsSide = 14;
   static const double lhSide = 20;
   static const double fsCompact = 13;
@@ -61,9 +61,11 @@ abstract final class WsMetrics {
   static const double radiusMd = 6;
   static const double radiusLg = 8;
   static const double radiusXl = 12;
-  static const double rowNav = 32;
+  static const double rowNav = 28;
   static const double rowSide = 28;
   static const double widthSide = 240;
+  static const double widthReading = 708;
+  static const double rowHeader = 45;
   static const double rowTable = 34;
   static const Duration motionFast = Duration(milliseconds: 120);
   static const Duration motionPanel = Duration(milliseconds: 200);

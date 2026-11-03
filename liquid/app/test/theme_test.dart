@@ -16,8 +16,8 @@ void main() {
       expect(theme.textTheme.bodyMedium!.fontSize, WsMetrics.fsUi);
       expect(
         theme.textTheme.bodyMedium!.fontSize,
-        15,
-        reason: 'the approved default UI text size',
+        14,
+        reason: 'the approved default UI text size, Notion\'s (ADR-0241)',
       );
       expect(
         theme.textTheme.bodyLarge!.height,

@@ -85,7 +85,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(
         sidebar(),
-        closeTo(WsMetrics.widthSide * 17 / 15, 1),
+        closeTo(WsMetrics.widthSide * 16 / 14, 1),
         reason: 'text and rows grow together',
       );
       expect(appearance.value.textSize, TextSize.large);

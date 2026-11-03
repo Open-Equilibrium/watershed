@@ -1,12 +1,12 @@
 # Design guidelines
 
-These rules apply to every Watershed GUI. Every GUI change starts with HTML mockups that the maintainer approves; approved mockups live in [mockups/](mockups/liquid-agent-surface.html), [session flows](mockups/liquid-session-flows.html), [look](mockups/liquid-look.html), [navigation](mockups/liquid-trajectory-navigation.html), [checkpoints](mockups/liquid-checkpoints.html) and the Workspace's [Pages](mockups/liquid-workspace-pages.html), [Blocks](mockups/liquid-workspace-blocks.html), [History](mockups/liquid-workspace-history.html) and [Sections](mockups/liquid-workspace-text-sections.html), and the [Chats](mockups/liquid-chats.html) concept. Design tokens are canonical in [tokens.css](tokens.css); components use tokens, never raw values. Flutter reads them from `liquid/app/lib/src/theme/tokens.g.dart`, which `scripts/design_tokens.py` generates; a tooling test fails when it falls out of date.
+These rules apply to every Watershed GUI. Every GUI change starts with HTML mockups that the maintainer approves; approved mockups live in [mockups/](mockups/liquid-agent-surface.html), [session flows](mockups/liquid-session-flows.html), [look](mockups/liquid-look.html), [navigation](mockups/liquid-trajectory-navigation.html), [checkpoints](mockups/liquid-checkpoints.html) and the Workspace's [Pages](mockups/liquid-workspace-pages.html), [Blocks](mockups/liquid-workspace-blocks.html), [History](mockups/liquid-workspace-history.html) and [Sections](mockups/liquid-workspace-text-sections.html), the [Chats](mockups/liquid-chats.html) concept and [the app's structure](mockups/liquid-app-concept.html). Design tokens are canonical in [tokens.css](tokens.css); components use tokens, never raw values. Flutter reads them from `liquid/app/lib/src/theme/tokens.g.dart`, which `scripts/design_tokens.py` generates; a tooling test fails when it falls out of date.
 
 References: Notion, AppFlowy, Microsoft Loop and T3 Code.
 
 ## Principles
 
-1. **Content first.** Chrome recedes: generous whitespace, few lines, controls appear when needed. Every screen still explains itself: the session header names the project and model, and a new session greets with its project; nothing is decorative.
+1. **Content first.** Chrome recedes: generous whitespace, few lines, controls appear when needed. Every screen still explains itself: a Chat's header names its participants and, for an agent, its work folder and model, and a new Chat greets with them; nothing is decorative.
 2. **Calm neutrals, one accent.** Color always carries meaning: the accent marks selection and the primary action, warning marks "waiting for you", success and danger mark results.
 3. **Dense where people develop.** Monospace for code, paths and tool calls; tabular figures for numbers; prose stays airy.
 4. **Everything through tokens.** Color, type, spacing, radii, shadows and motion are named tokens, so changing a token changes every GUI.
@@ -19,11 +19,11 @@ References: Notion, AppFlowy, Microsoft Loop and T3 Code.
 ## Tokens
 
 - **Color:** Notion's warm neutrals (`canvas`, `subtle`, `surface`, `hover`, `selected`), very light borders, three text levels, Liquid azure as the accent (the logo's blue, AA contrast), status colors (`success`, `warning`, `danger`), GitHub-style diff and syntax colors and data-series colors. Surfaces are separated by background rather than borders. Light and dark values share names; a GUI selects `.theme-light` or `.theme-dark`, and system mode follows the operating system.
-- **Type:** Notion's platform UI font stack and a monospace font for code, with AppFlowy's sizes: display 32/40 bold, h1 24/32, h2 20/28 and h3 16/22 semibold, prose 16/24, UI 15/22, sidebar 14/20, compact 13/20 for dense rows, chips and buttons, small 12/18, caption 11/14 for chart axes, badges and tags, mono 13/20.
+- **Type:** Notion's platform UI font stack and a monospace font for code, at Notion's sizes (ADR-0241): display 40/48 bold for Page titles, h1 30/38, h2 24/32 and h3 20/28 semibold, prose 16/24, UI 14/20, sidebar 14/20, compact 13/20 for dense rows, chips and buttons, small 12/18, caption 11/14 for chart axes, badges and tags, mono 13/20; the reading column is 708 px wide.
 - **Spacing:** 4, 6, 8, 12, 16, 20, 24 and 32 px.
 - **Radii:** 4 for tags, 6 for buttons, inputs and list items, 8 for cards and panels, 12 for windows, dialogs and the input area.
-- **Rows:** 32 px for navigation items outside the sidebar, 34 px for table rows.
-- **Sidebar:** as dense as Notion's, AppFlowy's and Loop's: 240 px wide, one line per Page or Chat in 28 px rows.
+- **Rows:** 28 px for navigation items, 34 px for table rows, 45 px for headers.
+- **Sidebar:** as dense as Notion's, AppFlowy's and Loop's: 240 px wide, one line per Page in 28 px rows; the chat list shows two lines per Chat, as WhatsApp does (ADR-0241).
 - **Text size:** Settings → Appearance scales text and rows together: Compact, Default (the sizes above) or Large.
 - **Motion:** 120 ms for hover and press, 200 ms for panels, ease-out; none when the user prefers reduced motion.
 - **Icons:** Lucide (ISC), 16 px in rows and buttons, in the text color of their context; status icons always come with text (principle 5).
