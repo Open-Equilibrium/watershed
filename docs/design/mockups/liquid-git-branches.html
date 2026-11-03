@@ -446,6 +446,7 @@ kbd{font-size:11px;padding:0 4px;border-radius:4px;border:1px solid currentColor
   <section>
     <h3 class="sec">Decisions</h3>
     <ol class="qs">
+      <li>Push requires the same single resolved fetch/push repository; other or multiple destinations fail before any push or hook: “This remote pushes to other or several repositories. Push it with Git.” Error notice, “Nothing was pushed.” URL comparison strips credentials; see <a href="../../../SECURITY.md#mvp-vcs-boundary">SECURITY.md</a> (decided 2026-11-03).</li>
       <li>Failures of requested Fetch, Push and Pull use error notices; background fetch failures remain warnings (decided 2026-11-03).</li>
       <li>Without an upstream, Push uses origin or the sole configured remote. With several remotes and no origin: “No upstream: set one in Git to push this branch.” “No remote…” applies only with no remotes (decided 2026-11-03).</li>
       <li>Unavailable commit attribution has no label; only line counts remain. Long attribution ends with an ellipsis, gives the filename priority, and shows its full text in a tooltip (decided 2026-11-03).</li>

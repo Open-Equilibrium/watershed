@@ -141,6 +141,7 @@ impl WorkingTree {
         if status.merging {
             return Err(DiffError::MergeInProgress);
         }
+        self.check_push_destination(&transfer).await?;
         self.fetch_transfer(&transfer).await?;
         self.transfer_counts(&mut transfer).await?;
         if transfer.behind > 0 {
@@ -184,6 +185,7 @@ impl WorkingTree {
                 "--no-force",
                 "--no-mirror",
                 "--no-follow-tags",
+                "--no-recurse-submodules",
                 "--",
                 &transfer.remote,
                 &spec,
@@ -223,10 +225,55 @@ impl WorkingTree {
                     without_credentials(&detail),
                 ))
             }
-            Err(error) => Err(DiffError::TransferFailed(without_credentials(
-                &error.to_string(),
-            ))),
+            Err(error) => {
+                let detail = without_credentials(&error.to_string());
+                if sign_in_failed(&detail) {
+                    Err(DiffError::SignInFailed(Box::new(transfer), detail))
+                } else {
+                    Err(DiffError::TransferFailed(detail))
+                }
+            }
         }
+    }
+
+    /// Keep the default-branch check and push on the same single repository. Git resolves
+    /// URL rewrites; compare only after removing any URL credentials, and never report URLs.
+    async fn check_push_destination(&self, transfer: &GitTransfer) -> Result<(), DiffError> {
+        let fetch = self.remote_urls(&transfer.remote, false).await?;
+        let push = self.remote_urls(&transfer.remote, true).await?;
+        if fetch.len() != 1 || push != fetch {
+            return Err(DiffError::PushDestinations);
+        }
+        let branch_remote = git_config(
+            &self.root,
+            &["--get", &format!("branch.{}.pushRemote", transfer.branch)],
+        )
+        .await?;
+        let default_remote = git_config(&self.root, &["--get", "remote.pushDefault"]).await?;
+        for remote in [&branch_remote, &default_remote] {
+            let remote = remote.trim_end_matches('\n');
+            if !remote.is_empty() && self.remote_urls(remote, true).await? != fetch {
+                return Err(DiffError::PushDestinations);
+            }
+        }
+        Ok(())
+    }
+
+    async fn remote_urls(&self, remote: &str, push: bool) -> Result<Vec<String>, DiffError> {
+        let mut args = vec!["remote", "get-url", "--all"];
+        if push {
+            args.push("--push");
+        }
+        args.extend(["--", remote]);
+        let output = git_ref_output(&self.root, &args).await.map_err(|_| {
+            DiffError::Git(
+                "Git could not resolve this remote's destinations. Push it with Git.".to_owned(),
+            )
+        })?;
+        Ok(without_credentials(&output)
+            .lines()
+            .map(str::to_owned)
+            .collect())
     }
 
     pub(crate) async fn fetch_transfer(&self, transfer: &GitTransfer) -> Result<(), DiffError> {
@@ -343,8 +390,16 @@ fn fetch_error(transfer: &GitTransfer, error: DiffError) -> DiffError {
         DiffError::Git(detail) => detail,
         error => error.to_string(),
     });
+    if sign_in_failed(&detail) {
+        DiffError::SignInFailed(Box::new(transfer.clone()), detail)
+    } else {
+        DiffError::FetchFailed(Box::new(transfer.clone()), detail)
+    }
+}
+
+fn sign_in_failed(detail: &str) -> bool {
     let lower = detail.to_ascii_lowercase();
-    if [
+    [
         "authentication failed",
         "could not read username",
         "could not read password",
@@ -354,9 +409,4 @@ fn fetch_error(transfer: &GitTransfer, error: DiffError) -> DiffError {
     ]
     .iter()
     .any(|marker| lower.contains(marker))
-    {
-        DiffError::SignInFailed(Box::new(transfer.clone()), detail)
-    } else {
-        DiffError::FetchFailed(Box::new(transfer.clone()), detail)
-    }
 }

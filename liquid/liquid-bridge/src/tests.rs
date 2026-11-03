@@ -1581,6 +1581,22 @@ fn git_transfer_bridge_confirms_push_tracks_and_pulls() {
     assert!(invalid.transfer.is_none());
     assert!(invalid.files.is_empty());
     git(&repo, &["config", "branch.main.merge", "refs/heads/main"]);
+    git(
+        &repo,
+        &[
+            "config",
+            "remote.origin.pushurl",
+            repo.with_extension("publication").to_str().unwrap(),
+        ],
+    );
+    let unsupported = session.push(None).unwrap();
+    assert_eq!(unsupported.kind, BridgeGitOutcomeKind::PreflightFailed);
+    assert_eq!(
+        unsupported.detail,
+        "This remote pushes to other or several repositories. Push it with Git."
+    );
+    assert!(unsupported.transfer.is_none());
+    git(&repo, &["config", "--unset", "remote.origin.pushurl"]);
     let confirmation = session.push(None).unwrap();
     assert_eq!(confirmation.kind, BridgeGitOutcomeKind::PushDefault);
     assert!(confirmation.files.is_empty());

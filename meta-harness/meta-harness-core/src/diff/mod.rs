@@ -166,6 +166,8 @@ pub enum DiffError {
     },
     /// Explicit commits do not finish merges.
     MergeInProgress,
+    /// Resolved fetch/push endpoints do not name the same single repository.
+    PushDestinations,
     /// The destination is the default branch and needs explicit confirmation.
     PushDefault(Box<GitTransfer>),
     /// Git refused a non-fast-forward push or pull, with fresh upstream counts.
@@ -233,6 +235,9 @@ impl fmt::Display for DiffError {
                 write!(f, "committing on {branch} failed: {error}")
             }
             Self::MergeInProgress => f.write_str("A merge is in progress."),
+            Self::PushDestinations => f.write_str(
+                "This remote pushes to other or several repositories. Push it with Git.",
+            ),
             Self::PushDefault(_) => f.write_str("The push destination requires approval."),
             Self::Diverged(_, detail)
             | Self::SignInFailed(_, detail)
@@ -267,8 +272,6 @@ pub struct WorkingTree {
     store: Store,
     /// Serializes use of the private index.
     busy: Mutex<()>,
-    /// Serializes all fetches, including transfer preflights.
-    fetching: Mutex<()>,
 }
 
 /// A private temporary directory, removed on drop.
@@ -332,7 +335,6 @@ impl WorkingTree {
             index: absolute(&index),
             store,
             busy: Mutex::new(()),
-            fetching: Mutex::new(()),
         })
     }
 

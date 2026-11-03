@@ -559,3 +559,240 @@ fn a_push_hook_cannot_expand_the_confirmed_commit_range() {
         assert_ne!(remote.repo.git(&["rev-parse", "HEAD"]).trim(), approved);
     });
 }
+
+#[test]
+fn push_refuses_other_or_multiple_repositories_before_hooks() {
+    use std::os::unix::fs::PermissionsExt;
+    run(async {
+        for case in [
+            "pushurl",
+            "pushurls",
+            "urls",
+            "push-rewrite",
+            "rewrite",
+            "branch-default",
+            "remote-default",
+        ] {
+            let remote = Remote::new(&format!("push-endpoints-{case}"));
+            let other = Remote::new(&format!("push-endpoints-other-{case}"));
+            other.bare.git(&["branch", "release", "main"]);
+            other
+                .bare
+                .git(&["symbolic-ref", "HEAD", "refs/heads/release"]);
+            remote.repo.git(&["switch", "-c", "release"]);
+            remote
+                .repo
+                .git(&["branch", "--set-upstream-to=origin/main"]);
+            remote
+                .repo
+                .git(&["config", "branch.release.merge", "refs/heads/release"]);
+            Remote::commit(&remote.repo, "local.txt");
+            let fetch = remote.bare.path().to_str().unwrap();
+            let push = other.bare.path().to_str().unwrap();
+            match case {
+                "pushurl" => {
+                    remote.repo.git(&["config", "remote.origin.pushurl", push]);
+                }
+                "pushurls" => {
+                    remote
+                        .repo
+                        .git(&["config", "--add", "remote.origin.pushurl", fetch]);
+                    remote
+                        .repo
+                        .git(&["config", "--add", "remote.origin.pushurl", push]);
+                }
+                "urls" => {
+                    remote
+                        .repo
+                        .git(&["config", "--add", "remote.origin.url", push]);
+                }
+                "push-rewrite" => {
+                    remote
+                        .repo
+                        .git(&["config", &format!("url.{push}.pushInsteadOf"), fetch]);
+                }
+                "rewrite" => {
+                    remote
+                        .repo
+                        .git(&["config", "remote.origin.pushurl", "publication:repo"]);
+                    remote.repo.git(&[
+                        "config",
+                        &format!("url.{push}.insteadOf"),
+                        "publication:repo",
+                    ]);
+                }
+                _ => {
+                    remote.repo.git(&["remote", "add", "publication", push]);
+                    let key = if case == "branch-default" {
+                        "branch.release.pushRemote"
+                    } else {
+                        "remote.pushDefault"
+                    };
+                    remote.repo.git(&["config", key, "publication"]);
+                }
+            }
+            let hook = remote.repo.path().join(".git/hooks/pre-push");
+            std::fs::write(&hook, "#!/bin/sh\ntouch .git/push-hook-ran\n").unwrap();
+            std::fs::set_permissions(hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+            let before_fetch = remote.bare.git(&["show-ref"]);
+            let before_push = other.bare.git(&["show-ref"]);
+            let result = Checkpoints::new(remote.repo.path()).push(None).await;
+            assert_eq!(
+                result.unwrap_err().to_string(),
+                "This remote pushes to other or several repositories. Push it with Git.",
+                "{case}"
+            );
+            assert!(
+                !remote.repo.path().join(".git/push-hook-ran").exists(),
+                "{case}"
+            );
+            assert_eq!(remote.bare.git(&["show-ref"]), before_fetch, "{case}");
+            assert_eq!(other.bare.git(&["show-ref"]), before_push, "{case}");
+        }
+    });
+}
+
+#[test]
+fn push_never_recurses_into_submodules_despite_configuration() {
+    use std::os::unix::fs::PermissionsExt;
+    run(async {
+        for mode in ["check", "on-demand", "only"] {
+            let remote = Remote::new(&format!("push-submodules-{mode}"));
+            let submodule = Remote::new(&format!("push-submodules-child-{mode}"));
+            remote.repo.git(&["switch", "-c", "feature"]);
+            remote.repo.git(&[
+                "-c",
+                "protocol.file.allow=always",
+                "submodule",
+                "add",
+                submodule.bare.path().to_str().unwrap(),
+                "child",
+            ]);
+            remote.repo.git(&["commit", "-m", "Add submodule"]);
+            let child = Repo(remote.repo.path().join("child"));
+            Remote::commit(&child, "unpublished.txt");
+            remote.repo.git(&["commit", "-am", "Advance submodule"]);
+            remote.repo.git(&["config", "push.recurseSubmodules", mode]);
+            let hooks = child.path().join("push-hooks");
+            std::fs::create_dir(&hooks).unwrap();
+            let hook = hooks.join("pre-push");
+            let marker = remote.repo.path().join(".git/submodule-push-ran");
+            std::fs::write(
+                &hook,
+                format!("#!/bin/sh\ntouch {}\n", super::shell_word(marker.display())),
+            )
+            .unwrap();
+            std::fs::set_permissions(hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+            child.git(&["config", "core.hooksPath", hooks.to_str().unwrap()]);
+            let before = submodule.bare.git(&["show-ref"]);
+            let pushed = Checkpoints::new(remote.repo.path()).push(None).await;
+            assert!(pushed.is_ok(), "{mode}: {pushed:?}");
+            assert_eq!(
+                remote.bare.git(&["rev-parse", "feature"]),
+                remote.repo.git(&["rev-parse", "HEAD"])
+            );
+            assert_eq!(submodule.bare.git(&["show-ref"]), before, "{mode}");
+            assert!(!marker.exists(), "{mode}");
+        }
+    });
+}
+
+#[test]
+fn push_time_credential_helper_failures_identify_sign_in() {
+    use std::os::unix::fs::PermissionsExt;
+    run(async {
+        let remote = Remote::new("push-time-auth");
+        remote.repo.git(&["switch", "-c", "feature"]);
+        Remote::commit(&remote.repo, "local.txt");
+        let receiver = remote.repo.path().join(".git/auth-receive-pack");
+        let marker = remote.repo.path().join(".git/credential-helper-ran");
+        std::fs::write(&receiver, format!("#!/bin/sh\nprintf 'protocol=https\\nhost=example.invalid\\n\\n' | git -c credential.helper= -c {} credential fill\nexit 1\n", super::shell_word(format!("credential.helper=!f() {{ touch {}; exit 1; }}; f", super::shell_word(marker.display()))))).unwrap();
+        std::fs::set_permissions(&receiver, std::fs::Permissions::from_mode(0o755)).unwrap();
+        remote.repo.git(&[
+            "config",
+            "remote.origin.receivepack",
+            receiver.to_str().unwrap(),
+        ]);
+        let before = remote.bare.git(&["show-ref"]);
+        let result = Checkpoints::new(remote.repo.path()).push(None).await;
+        assert!(marker.exists(), "push invokes only the synthetic helper");
+        assert!(
+            matches!(result, Err(DiffError::SignInFailed(ref transfer, ref detail)) if transfer.remote == "origin" && detail.contains("could not read Username")),
+            "{result:?}"
+        );
+        assert_eq!(remote.bare.git(&["show-ref"]), before);
+    });
+}
+
+#[test]
+fn fetches_serialize_across_instances_and_processes_after_remote_advances() {
+    const CHILD: &str = "WATERSHED_FETCH_SERIAL_TEST";
+    if let Some(path) = std::env::var_os(CHILD) {
+        run(async {
+            Checkpoints::new(&std::path::PathBuf::from(path))
+                .fetch()
+                .await
+                .unwrap();
+        });
+        return;
+    }
+    run(async {
+        for case in ["instance", "process", "worktree"] {
+            let process = case == "process";
+            let remote = Remote::new(&format!("fetch-shared-{case}"));
+            let linked = (case == "worktree").then(|| {
+                let repo = Repo(remote.repo.path().with_extension("linked"));
+                remote.repo.git(&[
+                    "worktree",
+                    "add",
+                    "-b",
+                    "linked",
+                    repo.path().to_str().unwrap(),
+                ]);
+                repo
+            });
+            remote.advance();
+            let (entered, release) = gated_fetch(&remote);
+            let first = Checkpoints::new(remote.repo.path());
+            let fetching = tokio::spawn(async move { first.fetch().await });
+            wait_for(&entered).await;
+            let mut child = if process {
+                Some(std::process::Command::new(std::env::current_exe().unwrap())
+                    .args(["--exact", "tests::sync::fetches_serialize_across_instances_and_processes_after_remote_advances"])
+                    .env(CHILD, remote.repo.path())
+                    .stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped())
+                    .spawn().unwrap())
+            } else {
+                None
+            };
+            let second = if process {
+                None
+            } else {
+                let second = Checkpoints::new(linked.as_ref().unwrap_or(&remote.repo).path());
+                Some(tokio::spawn(async move { second.fetch().await }))
+            };
+            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+            std::fs::write(release, "").unwrap();
+            let first_result = fetching.await.unwrap();
+            let second_result = if let Some(second) = second {
+                second.await.unwrap()
+            } else {
+                Ok(true)
+            };
+            let output = child.take().map(|child| child.wait_with_output().unwrap());
+            assert!(
+                !remote.repo.path().join(".git/fetch-overlap").exists(),
+                "{case}: {first_result:?} {second_result:?} {output:?}"
+            );
+            first_result.unwrap();
+            second_result.unwrap();
+            if let Some(output) = output {
+                assert!(output.status.success(), "{output:?}");
+            }
+            assert_eq!(
+                remote.repo.git(&["rev-parse", "origin/main"]),
+                remote.bare.git(&["rev-parse", "main"])
+            );
+        }
+    });
+}

@@ -389,7 +389,7 @@ impl WorkingTree {
 
     /// Fetches this named remote through the same destination checks for all callers.
     pub(super) async fn fetch_remote(&self, remote: &str) -> Result<(), DiffError> {
-        let _fetching = self.fetching.lock().await;
+        let _fetching = self.checkout().fetch_alone().await?;
         // Legacy remote files can add mappings absent from Git configuration. Refuse their
         // presence without reading URLs; both locations are shared by linked worktrees.
         if remote != ".." && !remote.contains('/') {

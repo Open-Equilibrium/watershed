@@ -214,6 +214,18 @@ void main() {
     expect(notices.map((notice) => notice.$1), everyElement(BridgeLevel.error));
   });
 
+  test('unsupported push destinations use the preflight error notice', () async {
+    backend.transferOutcome = outcomeOf(
+      BridgeGitOutcomeKind.preflightFailed,
+      detail: 'This remote pushes to other or several repositories. Push it with Git.',
+    );
+    await git.push(device: 'MacBook');
+    expect(notices.single, (
+      BridgeLevel.error,
+      'Could not push: This remote pushes to other or several repositories. Push it with Git. Nothing was pushed.',
+    ));
+  });
+
   test('a transfer failure shows Git output and states that its effects are uncertain', () async {
     backend.transferOutcome = outcomeOf(
       BridgeGitOutcomeKind.transferFailed,
