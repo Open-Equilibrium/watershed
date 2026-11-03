@@ -82,6 +82,14 @@ impl WorkingTree {
 
     pub(super) async fn destination(&self) -> Result<(GitTransfer, GitStatus), DiffError> {
         let status = self.status().await?;
+        Ok((self.destination_of(&status).await?, status))
+    }
+
+    /// Where the branch `status` reads transfers to.
+    pub(super) async fn destination_of(
+        &self,
+        status: &GitStatus,
+    ) -> Result<GitTransfer, DiffError> {
         let branch = status.branch.clone().ok_or(DiffError::NoBranch)?;
         let commit = status
             .commit
@@ -125,19 +133,16 @@ impl WorkingTree {
             reference,
             commit,
         };
-        Ok((
-            GitTransfer {
-                upstream,
-                branch,
-                remote,
-                ahead: 0,
-                behind: 0,
-                first_push,
-                gone: status.gone,
-                confirmation,
-            },
-            status,
-        ))
+        Ok(GitTransfer {
+            upstream,
+            branch,
+            remote,
+            ahead: 0,
+            behind: 0,
+            first_push,
+            gone: status.gone,
+            confirmation,
+        })
     }
 
     /// Network preflight is bounded by Checkpoints, outside any checkout write lock.

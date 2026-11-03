@@ -210,7 +210,7 @@ abstract class RustLibApi extends BaseApi {
     required AgentSession that,
   });
 
-  Future<List<BridgeName>> crateApiSessionAgentSessionPullRequestBases({
+  Future<BridgePullRequestOutcome> crateApiSessionAgentSessionPullRequestBases({
     required AgentSession that,
     required String host,
     required String target,
@@ -1444,7 +1444,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<List<BridgeName>> crateApiSessionAgentSessionPullRequestBases({
+  Future<BridgePullRequestOutcome> crateApiSessionAgentSessionPullRequestBases({
     required AgentSession that,
     required String host,
     required String target,
@@ -1467,7 +1467,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           );
         },
         codec: SseCodec(
-          decodeSuccessData: sse_decode_list_bridge_name,
+          decodeSuccessData: sse_decode_bridge_pull_request_outcome,
           decodeErrorData: sse_decode_String,
         ),
         constMeta: kCrateApiSessionAgentSessionPullRequestBasesConstMeta,
@@ -3732,21 +3732,23 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgePullRequestOutcome dco_decode_bridge_pull_request_outcome(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 12)
-      throw Exception('unexpected arr length: expect 12 but see ${arr.length}');
+    if (arr.length != 14)
+      throw Exception('unexpected arr length: expect 14 but see ${arr.length}');
     return BridgePullRequestOutcome(
       kind: dco_decode_bridge_pull_request_outcome_kind(arr[0]),
       plan: dco_decode_opt_box_autoadd_bridge_pull_request_plan(arr[1]),
       pullRequest: dco_decode_opt_box_autoadd_bridge_pull_request(arr[2]),
-      host: dco_decode_String(arr[3]),
-      remote: dco_decode_String(arr[4]),
-      branch: dco_decode_String(arr[5]),
-      upstream: dco_decode_String(arr[6]),
-      repository: dco_decode_String(arr[7]),
-      ahead: dco_decode_i_64(arr[8]),
-      behind: dco_decode_i_64(arr[9]),
-      first: dco_decode_bool(arr[10]),
-      detail: dco_decode_String(arr[11]),
+      bases: dco_decode_list_bridge_name(arr[3]),
+      moreBases: dco_decode_bool(arr[4]),
+      host: dco_decode_String(arr[5]),
+      remote: dco_decode_String(arr[6]),
+      branch: dco_decode_String(arr[7]),
+      upstream: dco_decode_String(arr[8]),
+      repository: dco_decode_String(arr[9]),
+      ahead: dco_decode_i_64(arr[10]),
+      behind: dco_decode_i_64(arr[11]),
+      first: dco_decode_bool(arr[12]),
+      detail: dco_decode_String(arr[13]),
     );
   }
 
@@ -3762,8 +3764,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgePullRequestPlan dco_decode_bridge_pull_request_plan(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 14)
-      throw Exception('unexpected arr length: expect 14 but see ${arr.length}');
+    if (arr.length != 15)
+      throw Exception('unexpected arr length: expect 15 but see ${arr.length}');
     return BridgePullRequestPlan(
       identity: dco_decode_bridge_pull_request_head(arr[0]),
       host: dco_decode_String(arr[1]),
@@ -3774,11 +3776,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       defaultBranch: dco_decode_opt_box_autoadd_bridge_name(arr[6]),
       base: dco_decode_opt_box_autoadd_bridge_name(arr[7]),
       comparison: dco_decode_opt_box_autoadd_bridge_comparison(arr[8]),
-      baseMissing: dco_decode_bool(arr[9]),
-      open: dco_decode_opt_box_autoadd_bridge_pull_request(arr[10]),
-      uncommitted: dco_decode_i_64(arr[11]),
-      subject: dco_decode_String(arr[12]),
-      body: dco_decode_String(arr[13]),
+      comparisonFailed: dco_decode_bool(arr[9]),
+      baseMissing: dco_decode_bool(arr[10]),
+      open: dco_decode_opt_box_autoadd_bridge_pull_request(arr[11]),
+      uncommitted: dco_decode_i_64(arr[12]),
+      subject: dco_decode_String(arr[13]),
+      body: dco_decode_String(arr[14]),
     );
   }
 
@@ -5819,6 +5822,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_pullRequest = sse_decode_opt_box_autoadd_bridge_pull_request(
       deserializer,
     );
+    var var_bases = sse_decode_list_bridge_name(deserializer);
+    var var_moreBases = sse_decode_bool(deserializer);
     var var_host = sse_decode_String(deserializer);
     var var_remote = sse_decode_String(deserializer);
     var var_branch = sse_decode_String(deserializer);
@@ -5832,6 +5837,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       kind: var_kind,
       plan: var_plan,
       pullRequest: var_pullRequest,
+      bases: var_bases,
+      moreBases: var_moreBases,
       host: var_host,
       remote: var_remote,
       branch: var_branch,
@@ -5871,6 +5878,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_comparison = sse_decode_opt_box_autoadd_bridge_comparison(
       deserializer,
     );
+    var var_comparisonFailed = sse_decode_bool(deserializer);
     var var_baseMissing = sse_decode_bool(deserializer);
     var var_open = sse_decode_opt_box_autoadd_bridge_pull_request(deserializer);
     var var_uncommitted = sse_decode_i_64(deserializer);
@@ -5886,6 +5894,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       defaultBranch: var_defaultBranch,
       base: var_base,
       comparison: var_comparison,
+      comparisonFailed: var_comparisonFailed,
       baseMissing: var_baseMissing,
       open: var_open,
       uncommitted: var_uncommitted,
@@ -8268,6 +8277,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       self.pullRequest,
       serializer,
     );
+    sse_encode_list_bridge_name(self.bases, serializer);
+    sse_encode_bool(self.moreBases, serializer);
     sse_encode_String(self.host, serializer);
     sse_encode_String(self.remote, serializer);
     sse_encode_String(self.branch, serializer);
@@ -8303,6 +8314,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_opt_box_autoadd_bridge_name(self.defaultBranch, serializer);
     sse_encode_opt_box_autoadd_bridge_name(self.base, serializer);
     sse_encode_opt_box_autoadd_bridge_comparison(self.comparison, serializer);
+    sse_encode_bool(self.comparisonFailed, serializer);
     sse_encode_bool(self.baseMissing, serializer);
     sse_encode_opt_box_autoadd_bridge_pull_request(self.open, serializer);
     sse_encode_i_64(self.uncommitted, serializer);
@@ -9679,7 +9691,7 @@ class AgentSessionImpl extends RustOpaque implements AgentSession {
       RustLib.instance.api.crateApiSessionAgentSessionPullRequest(that: this);
 
   /// The branches of `target` on `host` GitHub lists, to choose a base from.
-  Future<List<BridgeName>> pullRequestBases({
+  Future<BridgePullRequestOutcome> pullRequestBases({
     required String host,
     required String target,
   }) => RustLib.instance.api.crateApiSessionAgentSessionPullRequestBases(

@@ -5,15 +5,21 @@
 use super::process::{gh, git_bytes};
 use super::*;
 use serde_json::Value;
+use std::future::{Future, poll_fn};
+use std::pin::pin;
+use std::task::Poll;
 
 /// The host gh always knows; any other host must be one gh has a login for.
 const GITHUB: &str = "github.com";
 
-/// Pull requests read per head lookup, newest first.
-const MAX_LISTED: &str = "20";
+/// Pull requests read per head lookup, newest first: one page of GitHub's maximum.
+const MAX_LISTED: usize = 100;
 
-/// Branches GitHub lists to choose a base from, one page.
-const MAX_BRANCHES: &str = "100";
+/// Branches per page GitHub lists to choose a base from, GitHub's maximum.
+const BRANCHES_PER_PAGE: usize = 100;
+
+/// Pages of branches read to choose a base from.
+const MAX_BRANCH_PAGES: usize = 5;
 
 /// The pull request fields Liquid reads.
 const FIELDS: &str = "number,title,state,isDraft,url,baseRefName,headRefName,headRepository,headRepositoryOwner,statusCheckRollup,reviewDecision";
@@ -27,6 +33,8 @@ pub struct PullRequestPlan {
     pub head_repository: String,
     /// The head branch on GitHub.
     pub head_branch: String,
+    /// The head as GitHub shows it for the target: the branch, or `owner:branch` from a fork.
+    pub head: String,
     /// The full commit GitHub has for the head branch, which is the branch's own.
     pub head_commit: String,
     /// The repositories it can target: GitHub's parent first for a fork, then the head's own.
@@ -42,6 +50,8 @@ pub struct PullRequestPlan {
     /// The commits and files the base lacks; none without a base or when GitHub could not
     /// compare.
     pub comparison: Option<Comparison>,
+    /// GitHub could not compare the head with the base, though both exist.
+    pub comparison_failed: bool,
     /// GitHub has no branch `base` in the target.
     pub base_missing: bool,
     /// An open pull request from this head to the target, shown instead of creating one.
@@ -190,6 +200,8 @@ pub enum PullRequestError {
     },
     /// gh could not run on the host.
     GhMissing(String),
+    /// gh is too old for the commands Liquid runs.
+    GhOutdated(String),
     /// gh has no working login for the host.
     SignIn {
         /// The host whose login failed.
@@ -232,6 +244,7 @@ impl fmt::Display for PullRequestError {
         match self {
             Self::Git(error) => error.fmt(f),
             Self::GhMissing(detail)
+            | Self::GhOutdated(detail)
             | Self::Failed(detail)
             | Self::NotCreated(detail)
             | Self::Unknown(detail)
@@ -259,9 +272,16 @@ impl Repository {
 /// The checkout's pushed head, checked as Push checks its destination.
 struct Head {
     repository: Repository,
+    remote: String,
     branch: String,
     commit: String,
     status: GitStatus,
+}
+
+/// A pull request in a head lookup.
+struct Listed {
+    number: u64,
+    open: bool,
 }
 
 /// What GitHub says about the head repository.
@@ -284,15 +304,12 @@ impl WorkingTree {
     ) -> Result<PullRequestPlan, PullRequestError> {
         let head = self.pushed_head().await?;
         let host = head.repository.host.clone();
-        self.gh_login(program, &host)
-            .await
-            .map_err(|error| match error {
-                PullRequestError::NotGitHub { host, .. } => PullRequestError::NotGitHub {
-                    remote: head.status.remote.clone().unwrap_or_default(),
-                    host,
-                },
-                error => error,
-            })?;
+        if !self.gh_login(program, &host).await? {
+            return Err(PullRequestError::NotGitHub {
+                remote: head.remote,
+                host: Some(host),
+            });
+        }
         let repository = self.head_repository(program, &head.repository).await?;
         let on_github = self
             .gh_api(
@@ -315,7 +332,7 @@ impl WorkingTree {
             Err(PullRequestError::NoAccess { .. }) => {
                 return Err(PullRequestError::NeedsPush {
                     branch: head.status.branch.clone().unwrap_or_default(),
-                    remote: head.status.remote.clone().unwrap_or_default(),
+                    remote: head.remote,
                     ahead: head.status.ahead,
                     first: true,
                 });
@@ -347,33 +364,23 @@ impl WorkingTree {
             (None, _) => None,
         };
         let base = base.map(str::to_owned).or_else(|| default_branch.clone());
-        let (mut comparison, mut base_missing, mut open) = (None, false, None);
-        if let Some(target) = &target {
-            open = self
-                .pull_requests(program, &host, target, &repository, &head.branch)
-                .await?
-                .into_iter()
-                .find(|pull| {
-                    matches!(pull.state, PullRequestState::Open | PullRequestState::Draft)
-                });
-            if let Some(base) = &base {
-                match self
-                    .compare(
+        let (open, (comparison, base_missing, comparison_failed)) = match &target {
+            Some(target) => {
+                both(
+                    self.open_pull_request(program, &host, target, &repository, &head.branch),
+                    self.compared(
                         program,
                         &host,
                         target,
-                        base,
+                        base.as_deref(),
                         &repository.owner,
                         &head.branch,
-                    )
-                    .await
-                {
-                    Ok(compared) => comparison = Some(compared),
-                    Err(PullRequestError::NoAccess { .. }) => base_missing = true,
-                    Err(error) => return Err(error),
-                }
+                    ),
+                )
+                .await?
             }
-        }
+            None => (None, (None, false, false)),
+        };
         let message = git_bytes(
             &self.root,
             &[],
@@ -384,6 +391,11 @@ impl WorkingTree {
         let (subject, body) = message.split_once('\0').unwrap_or((&message, ""));
         Ok(PullRequestPlan {
             host,
+            head: head_label(
+                target.as_deref().unwrap_or(&repository.full),
+                &repository.full,
+                &head.branch,
+            ),
             head_repository: repository.full,
             head_branch: head.branch,
             head_commit: head.commit,
@@ -393,6 +405,7 @@ impl WorkingTree {
             default_branch,
             base,
             comparison,
+            comparison_failed,
             base_missing,
             open,
             uncommitted: head.status.changed,
@@ -401,12 +414,13 @@ impl WorkingTree {
         })
     }
 
-    /// Creates the reviewed pull request after rechecking every identity its plan showed.
-    pub(crate) async fn create_pull_request(
+    /// The plan `draft` was reviewed against, read again; a changed identity or an open pull
+    /// request refuses it.
+    pub(crate) async fn recheck_pull_request(
         &self,
         program: &OsStr,
         draft: &PullRequestDraft,
-    ) -> Result<PullRequest, PullRequestError> {
+    ) -> Result<(), PullRequestError> {
         let plan = self
             .pull_request_plan(program, Some(&draft.target), Some(&draft.base))
             .await?;
@@ -420,17 +434,22 @@ impl WorkingTree {
         {
             return Err(PullRequestError::Changed(Box::new(plan)));
         }
-        if let Some(open) = plan.open {
-            return Err(PullRequestError::Exists(Box::new(open)));
+        match plan.open {
+            Some(open) => Err(PullRequestError::Exists(Box::new(open))),
+            None => Ok(()),
         }
-        let owner = plan
-            .head_repository
-            .split_once('/')
-            .map_or("", |(owner, _)| owner);
+    }
+
+    /// Sends the rechecked draft to GitHub; only the reviewed fields go.
+    pub(crate) async fn post_pull_request(
+        &self,
+        program: &OsStr,
+        draft: &PullRequestDraft,
+    ) -> Result<PullRequest, PullRequestError> {
         let request = serde_json::json!({
             "title": draft.title,
             "body": draft.body,
-            "head": format!("{owner}:{}", draft.head_branch),
+            "head": qualified(owner_of(&draft.head_repository), &draft.head_branch),
             "base": draft.base,
             "draft": draft.draft,
         });
@@ -474,7 +493,7 @@ impl WorkingTree {
             },
             repository: draft.target.clone(),
             base: draft.base.clone(),
-            head: head_label(&draft.target, &plan.head_repository, &draft.head_branch),
+            head: head_label(&draft.target, &draft.head_repository, &draft.head_branch),
             checks_passed: 0,
             checks_failed: 0,
             checks_pending: 0,
@@ -482,70 +501,119 @@ impl WorkingTree {
         })
     }
 
-    /// The latest pull request from the branch's upstream, open ones first; none without an
-    /// upstream on GitHub.
+    /// The latest pull request from the branch's upstream, open ones first and the fork's
+    /// parent before the fork; none without an upstream. A remote gh has no GitHub login for
+    /// is refused before any request names its host.
     pub(crate) async fn pull_request(
         &self,
         program: &OsStr,
     ) -> Result<Option<PullRequest>, PullRequestError> {
-        let status = self.status().await?;
-        let Some(branch) = status.branch.as_deref() else {
+        let Some(branch) = self.branch().await? else {
             return Ok(None);
         };
-        let Some((remote, reference)) = self.configured_upstream(branch).await? else {
+        let Some((remote, reference)) = self.configured_upstream(&branch).await? else {
             return Ok(None);
         };
         let Some(branch) = reference.strip_prefix("refs/heads/") else {
             return Ok(None);
         };
-        let Ok(repository) = self.github_remote(&remote).await else {
-            return Ok(None);
+        let repository = match self.github_remote(&remote).await {
+            Ok(repository) => repository,
+            Err(error @ PullRequestError::NotGitHub { .. }) => return Err(error),
+            Err(_) => return Ok(None),
         };
-        let head = self.head_repository(program, &repository).await?;
-        let mut targets: Vec<&str> = head
-            .parent
-            .iter()
-            .map(|(parent, _)| parent.as_str())
-            .collect();
-        targets.push(&head.full);
-        let mut latest = None;
-        for target in targets {
-            let found = self
-                .pull_requests(program, &repository.host, target, &head, branch)
-                .await?;
-            if let Some(open) = found
-                .iter()
-                .find(|pull| matches!(pull.state, PullRequestState::Open | PullRequestState::Draft))
-            {
-                return Ok(Some(open.clone()));
-            }
-            latest = latest.or(found.into_iter().next());
+        if !self.gh_login(program, &repository.host).await? {
+            return Err(PullRequestError::NotGitHub {
+                remote,
+                host: Some(repository.host),
+            });
         }
-        Ok(latest)
+        let host = &repository.host;
+        let head = self.head_repository(program, &repository).await?;
+        let parent = head.parent.as_ref().map(|(parent, _)| parent.as_str());
+        let (in_parent, in_fork) = both(
+            async {
+                match parent {
+                    Some(parent) => {
+                        self.pull_requests_from(program, host, parent, &head, branch)
+                            .await
+                    }
+                    None => Ok(Vec::new()),
+                }
+            },
+            self.pull_requests_from(program, host, &head.full, &head, branch),
+        )
+        .await?;
+        let in_parent = parent.map(|parent| (parent, in_parent));
+        let in_fork = Some((head.full.as_str(), in_fork));
+        let lists = [&in_parent, &in_fork];
+        let chosen = lists
+            .iter()
+            .flat_map(|list| list.iter())
+            .find_map(|(target, listed)| {
+                listed
+                    .iter()
+                    .find(|pull| pull.open)
+                    .map(|pull| (*target, pull.number))
+            })
+            .or_else(|| {
+                lists
+                    .iter()
+                    .flat_map(|list| list.iter())
+                    .find_map(|(target, listed)| listed.first().map(|pull| (*target, pull.number)))
+            });
+        match chosen {
+            Some((target, number)) => self
+                .pull_request_details(program, host, target, &head.full, number)
+                .await
+                .map(Some),
+            None => Ok(None),
+        }
     }
 
-    /// The target's branches GitHub lists, to choose a base from.
+    /// The target's branches, up to [`MAX_BRANCH_PAGES`] pages, to choose a base from; `true`
+    /// when GitHub may list more.
     pub(crate) async fn pull_request_bases(
         &self,
         program: &OsStr,
         host: &str,
         target: &str,
-    ) -> Result<Vec<String>, PullRequestError> {
+    ) -> Result<(Vec<String>, bool), PullRequestError> {
         valid_full(target)?;
-        let listed = self
-            .gh_api(
-                program,
-                host,
-                target,
-                &[
-                    &format!("repos/{target}/branches?per_page={MAX_BRANCHES}"),
-                    "--jq",
-                    ".[].name",
-                ],
-                None,
-            )
-            .await?;
-        Ok(listed.lines().map(str::to_owned).collect())
+        if valid_host(host).as_deref() != Some(host) {
+            return Err(PullRequestError::Failed(format!(
+                "GitHub named an unexpected host: {host}"
+            )));
+        }
+        if !self.gh_login(program, host).await? {
+            return Err(PullRequestError::SignIn {
+                host: host.to_owned(),
+            });
+        }
+        let mut names = Vec::new();
+        for page in 1..=MAX_BRANCH_PAGES {
+            let listed = self
+                .gh_api(
+                    program,
+                    host,
+                    target,
+                    &[
+                        &format!(
+                            "repos/{target}/branches?per_page={BRANCHES_PER_PAGE}&page={page}"
+                        ),
+                        "--jq",
+                        ".[].name",
+                    ],
+                    None,
+                )
+                .await?;
+            let before = names.len();
+            names.extend(listed.lines().map(str::to_owned));
+            if names.len() - before < BRANCHES_PER_PAGE {
+                return Ok((names, false));
+            }
+        }
+        Ok((names, true))
     }
 
     /// The branch's pushed upstream on its own remote, refused as Push refuses it.
@@ -563,7 +631,7 @@ impl WorkingTree {
             None if status.has_remotes => return Err(PullRequestError::AmbiguousRemote),
             None => return Err(PullRequestError::NoRemote),
         };
-        let (transfer, _) = self.destination().await?;
+        let transfer = self.destination_of(&status).await?;
         self.check_push_destination(&transfer).await?;
         let repository = self.github_remote(&remote).await?;
         if transfer.first_push || status.gone {
@@ -599,6 +667,7 @@ impl WorkingTree {
             .to_owned();
         Ok(Head {
             repository,
+            remote,
             branch: remote_branch,
             commit: transfer.confirmation.commit,
             status,
@@ -618,8 +687,9 @@ impl WorkingTree {
         }
     }
 
-    /// Requires gh's working login for `host`; a host gh does not know is not GitHub.
-    async fn gh_login(&self, program: &OsStr, host: &str) -> Result<(), PullRequestError> {
+    /// Whether gh has a working login for `host`; a host other than github.com without one is
+    /// not GitHub, and github.com without one needs a sign-in.
+    async fn gh_login(&self, program: &OsStr, host: &str) -> Result<bool, PullRequestError> {
         let output = gh(
             &self.root,
             program,
@@ -627,29 +697,31 @@ impl WorkingTree {
             None,
         )
         .await
-        .map_err(|error| gh_error(host, "", error))?;
+        .map_err(|error| match gh_error(host, "", error) {
+            PullRequestError::Failed(detail) if detail.contains("unknown flag") => {
+                PullRequestError::GhOutdated(detail)
+            }
+            error => error,
+        })?;
         let hosts: Value = serde_json::from_slice(&output).map_err(|_| {
             PullRequestError::Failed("gh returned an unreadable login status.".into())
         })?;
         let accounts = hosts["hosts"][host].as_array().cloned().unwrap_or_default();
         if accounts.is_empty() {
-            return Err(if host == GITHUB {
-                PullRequestError::SignIn {
+            return if host == GITHUB {
+                Err(PullRequestError::SignIn {
                     host: host.to_owned(),
-                }
+                })
             } else {
-                PullRequestError::NotGitHub {
-                    remote: String::new(),
-                    host: Some(host.to_owned()),
-                }
-            });
+                Ok(false)
+            };
         }
         let active = accounts
             .iter()
             .find(|account| account["active"].as_bool() == Some(true))
             .unwrap_or(&accounts[0]);
         match active["state"].as_str() {
-            Some("success") => Ok(()),
+            Some("success") => Ok(true),
             Some("timeout") => Err(PullRequestError::Unreachable {
                 host: host.to_owned(),
                 detail: text(&active["error"]),
@@ -690,10 +762,7 @@ impl WorkingTree {
                 )
             });
         Ok(HeadRepository {
-            owner: full
-                .split_once('/')
-                .map_or("", |(owner, _)| owner)
-                .to_owned(),
+            owner: owner_of(&full).to_owned(),
             default_branch: json["default_branch"].as_str().map(str::to_owned),
             fork: json["fork"].as_bool() == Some(true),
             parent,
@@ -701,29 +770,97 @@ impl WorkingTree {
         })
     }
 
-    /// Pull requests in `target` whose head is `branch` of the head repository, newest first.
-    async fn pull_requests(
+    /// The open pull request from `branch` of the head repository to `target`, if any.
+    async fn open_pull_request(
         &self,
         program: &OsStr,
         host: &str,
         target: &str,
         head: &HeadRepository,
         branch: &str,
-    ) -> Result<Vec<PullRequest>, PullRequestError> {
+    ) -> Result<Option<PullRequest>, PullRequestError> {
+        let listed = self
+            .pull_requests_from(program, host, target, head, branch)
+            .await?;
+        match listed.iter().find(|pull| pull.open) {
+            Some(pull) => self
+                .pull_request_details(program, host, target, &head.full, pull.number)
+                .await
+                .map(Some),
+            None => Ok(None),
+        }
+    }
+
+    /// Pull requests in `target` whose head is `branch` of the head repository, newest first.
+    /// GitHub filters by the head's owner, so other forks' pull requests take no place; a full
+    /// page without an open one is not read as none.
+    async fn pull_requests_from(
+        &self,
+        program: &OsStr,
+        host: &str,
+        target: &str,
+        head: &HeadRepository,
+        branch: &str,
+    ) -> Result<Vec<Listed>, PullRequestError> {
+        let output = self
+            .gh_api(
+                program,
+                host,
+                target,
+                &[
+                    &format!(
+                        "repos/{target}/pulls?head={}&state=all&per_page={MAX_LISTED}",
+                        qualified(&head.owner, &path_segment(branch))
+                    ),
+                    "--jq",
+                    r#".[] | "\(.number) \(.state) \(.head.repo.full_name // "") \(.head.ref)""#,
+                ],
+                None,
+            )
+            .await?;
+        let rows = output.lines().count();
+        let listed: Vec<_> = output
+            .lines()
+            .filter_map(|line| {
+                let mut fields = line.splitn(4, ' ');
+                let number = fields.next()?.parse().ok()?;
+                let state = fields.next()?;
+                let repository = fields.next()?;
+                (repository.eq_ignore_ascii_case(&head.full) && fields.next()? == branch).then(
+                    || Listed {
+                        number,
+                        open: state == "open",
+                    },
+                )
+            })
+            .collect();
+        if rows >= MAX_LISTED && !listed.iter().any(|pull| pull.open) {
+            return Err(PullRequestError::Failed(format!(
+                "GitHub lists more pull requests from {} than Liquid reads; check on GitHub.",
+                qualified(&head.owner, branch)
+            )));
+        }
+        Ok(listed)
+    }
+
+    /// One pull request's state, checks and review.
+    async fn pull_request_details(
+        &self,
+        program: &OsStr,
+        host: &str,
+        target: &str,
+        head_repository: &str,
+        number: u64,
+    ) -> Result<PullRequest, PullRequestError> {
         let output = gh(
             &self.root,
             program,
             &[
                 "pr",
-                "list",
+                "view",
+                &number.to_string(),
                 "--repo",
                 &format!("{host}/{target}"),
-                "--head",
-                branch,
-                "--state",
-                "all",
-                "--limit",
-                MAX_LISTED,
                 "--json",
                 FIELDS,
             ],
@@ -731,24 +868,42 @@ impl WorkingTree {
         )
         .await
         .map_err(|error| gh_error(host, target, error))?;
-        let listed: Value = serde_json::from_slice(&output).map_err(|_| {
-            PullRequestError::Failed("gh returned unreadable pull requests.".into())
+        let pull: Value = serde_json::from_slice(&output).map_err(|_| {
+            PullRequestError::Failed("gh returned an unreadable pull request.".into())
         })?;
-        Ok(listed
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter(|pull| {
-                pull["headRefName"].as_str() == Some(branch)
-                    && format!(
-                        "{}/{}",
-                        text(&pull["headRepositoryOwner"]["login"]),
-                        text(&pull["headRepository"]["name"])
-                    )
-                    .eq_ignore_ascii_case(&head.full)
-            })
-            .filter_map(|pull| summary(pull, target, &head.full))
-            .collect())
+        summary(&pull, target, head_repository).ok_or_else(|| {
+            PullRequestError::Failed("gh returned an unreadable pull request.".into())
+        })
+    }
+
+    /// The comparison of the head with `base`, whether GitHub lacks `base`, and whether GitHub
+    /// could not compare them; only gh and login failures end the plan.
+    async fn compared(
+        &self,
+        program: &OsStr,
+        host: &str,
+        target: &str,
+        base: Option<&str>,
+        owner: &str,
+        branch: &str,
+    ) -> Result<(Option<Comparison>, bool, bool), PullRequestError> {
+        let Some(base) = base else {
+            return Ok((None, false, false));
+        };
+        if !valid_base(base) {
+            return Ok((None, true, false));
+        }
+        match self
+            .compare(program, host, target, base, owner, branch)
+            .await
+        {
+            Ok(compared) => Ok((Some(compared), false, false)),
+            Err(PullRequestError::NoAccess { .. }) => Ok((None, true, false)),
+            Err(PullRequestError::Failed(_) | PullRequestError::Unreachable { .. }) => {
+                Ok((None, false, true))
+            }
+            Err(error) => Err(error),
+        }
     }
 
     async fn compare(
@@ -767,9 +922,9 @@ impl WorkingTree {
                 target,
                 &[
                     &format!(
-                        "repos/{target}/compare/{}...{owner}:{}",
+                        "repos/{target}/compare/{}...{}",
                         path_segment(base),
-                        path_segment(branch)
+                        qualified(owner, &path_segment(branch))
                     ),
                     "--jq",
                     "{commits: .ahead_by, url: .html_url, files: (.files | length), added: ([.files[].additions] | add // 0), removed: ([.files[].deletions] | add // 0)}",
@@ -804,6 +959,33 @@ impl WorkingTree {
             .map(|output| String::from_utf8_lossy(&output).into_owned())
             .map_err(|error| gh_error(host, repository, error))
     }
+}
+
+/// Runs both lookups at once; the first failure ends both.
+async fn both<A, B, E>(
+    first: impl Future<Output = Result<A, E>>,
+    second: impl Future<Output = Result<B, E>>,
+) -> Result<(A, B), E> {
+    let (mut first, mut second) = (pin!(first), pin!(second));
+    let (mut a, mut b) = (None, None);
+    poll_fn(|context| {
+        if a.is_none()
+            && let Poll::Ready(result) = first.as_mut().poll(context)
+        {
+            a = Some(result?);
+        }
+        if b.is_none()
+            && let Poll::Ready(result) = second.as_mut().poll(context)
+        {
+            b = Some(result?);
+        }
+        if a.is_some() && b.is_some() {
+            Poll::Ready(Ok((a.take().unwrap(), b.take().unwrap())))
+        } else {
+            Poll::Pending
+        }
+    })
+    .await
 }
 
 /// A gh failure as Liquid explains it; gh's own message stays as the detail.
@@ -861,7 +1043,8 @@ fn github_repository(url: &str) -> Option<Repository> {
             if !["https", "http", "ssh", "git"].contains(&scheme.to_ascii_lowercase().as_str()) {
                 return None;
             }
-            let (authority, path) = rest.split_once('/')?;
+            let (authority, path) = rest.split_at(rest.find(['/', '?', '#'])?);
+            let path = path.strip_prefix('/')?;
             let host = authority
                 .rsplit_once('@')
                 .map_or(authority, |(_, host)| host);
@@ -886,7 +1069,7 @@ fn github_repository(url: &str) -> Option<Repository> {
             )
         }
     };
-    let host = host.to_ascii_lowercase();
+    let host = valid_host(host)?;
     // GitHub's SSH over port 443.
     let host = if host == "ssh.github.com" {
         GITHUB.to_owned()
@@ -901,18 +1084,44 @@ fn github_repository(url: &str) -> Option<Repository> {
         owner: owner.to_owned(),
         name: name.to_owned(),
     };
-    (!repository.host.is_empty() && valid_full(&repository.full()).is_ok()).then_some(repository)
+    valid_full(&repository.full()).is_ok().then_some(repository)
 }
 
-/// The host of a URL that names no GitHub repository, if it has one.
+/// The host of a URL that names no GitHub repository, if it has a plain one.
 fn url_host(url: &str) -> Option<String> {
+    if url.starts_with('/') || url.starts_with('.') {
+        return None;
+    }
     let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
-    let authority = rest.split(['/', ':']).next()?;
-    let host = authority
-        .rsplit_once('@')
-        .map_or(authority, |(_, host)| host);
-    (!host.is_empty() && !url.starts_with('/') && !url.starts_with('.'))
-        .then(|| host.to_ascii_lowercase())
+    let authority = rest.split(['/', ':', '?', '#']).next()?;
+    valid_host(
+        authority
+            .rsplit_once('@')
+            .map_or(authority, |(_, host)| host),
+    )
+}
+
+/// A host name gh can be asked about, in lowercase: letters, digits, dots and hyphens, not
+/// starting with a hyphen, so it cannot read as an option.
+fn valid_host(host: &str) -> Option<String> {
+    let host = host.to_ascii_lowercase();
+    (!host.is_empty()
+        && !host.starts_with('-')
+        && host.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || b".-".contains(&byte)
+        }))
+    .then_some(host)
+}
+
+/// A base branch name that can go into an API path: not empty, no leading `-`, no `.` or `..`
+/// segment and no control character.
+fn valid_base(name: &str) -> bool {
+    !name.is_empty()
+        && !name.starts_with('-')
+        && !name.chars().any(char::is_control)
+        && name
+            .split('/')
+            .all(|segment| segment != "." && segment != "..")
 }
 
 /// `owner/name` with only the characters GitHub allows, so it cannot leave its API path.
@@ -946,15 +1155,22 @@ fn path_segment(name: &str) -> String {
         .collect()
 }
 
+/// The head as GitHub shows it in `target`: the branch, or `owner:branch` from a fork.
 fn head_label(target: &str, head_repository: &str, branch: &str) -> String {
     if target.eq_ignore_ascii_case(head_repository) {
         branch.to_owned()
     } else {
-        let owner = head_repository
-            .split_once('/')
-            .map_or("", |(owner, _)| owner);
-        format!("{owner}:{branch}")
+        qualified(owner_of(head_repository), branch)
     }
+}
+
+/// A head as GitHub's API names it across forks.
+fn qualified(owner: &str, branch: &str) -> String {
+    format!("{owner}:{branch}")
+}
+
+fn owner_of(full: &str) -> &str {
+    full.split_once('/').map_or("", |(owner, _)| owner)
 }
 
 fn text(value: &Value) -> String {
@@ -1026,6 +1242,11 @@ fn reads_github_repositories_from_resolved_remote_urls() {
         ("/srv/git/api.git", None),
         ("file:///srv/git/api.git", None),
         ("https://github.com/acme/{owner}", None),
+        ("https://github.com?x=/acme/api", None),
+        ("https://github.com#/acme/api", None),
+        ("https://-oProxyCommand=x/acme/api", None),
+        ("https://git hub.com/acme/api", None),
+        ("git@github.com:acme/api?x", None),
     ] {
         assert_eq!(full(url).as_deref(), expected, "{url}");
     }
@@ -1034,6 +1255,11 @@ fn reads_github_repositories_from_resolved_remote_urls() {
         Some("gitlab.com")
     );
     assert_eq!(url_host("/srv/git/api.git"), None);
+    assert_eq!(url_host("https://-oProxyCommand=x/acme/api"), None);
+    assert_eq!(
+        url_host("https://gitlab.com?x/api").as_deref(),
+        Some("gitlab.com")
+    );
     assert_eq!(
         path_segment("feature/a b#?{x}"),
         "feature/a%20b%23%3F%7Bx%7D"

@@ -4298,6 +4298,8 @@ impl SseDecode for crate::api::git::BridgePullRequestOutcome {
             <Option<crate::api::git::BridgePullRequestPlan>>::sse_decode(deserializer);
         let mut var_pullRequest =
             <Option<crate::api::git::BridgePullRequest>>::sse_decode(deserializer);
+        let mut var_bases = <Vec<crate::api::git::BridgeName>>::sse_decode(deserializer);
+        let mut var_moreBases = <bool>::sse_decode(deserializer);
         let mut var_host = <String>::sse_decode(deserializer);
         let mut var_remote = <String>::sse_decode(deserializer);
         let mut var_branch = <String>::sse_decode(deserializer);
@@ -4311,6 +4313,8 @@ impl SseDecode for crate::api::git::BridgePullRequestOutcome {
             kind: var_kind,
             plan: var_plan,
             pull_request: var_pullRequest,
+            bases: var_bases,
+            more_bases: var_moreBases,
             host: var_host,
             remote: var_remote,
             branch: var_branch,
@@ -4343,12 +4347,13 @@ impl SseDecode for crate::api::git::BridgePullRequestOutcomeKind {
             11 => crate::api::git::BridgePullRequestOutcomeKind::Behind,
             12 => crate::api::git::BridgePullRequestOutcomeKind::HeadMoved,
             13 => crate::api::git::BridgePullRequestOutcomeKind::GhMissing,
-            14 => crate::api::git::BridgePullRequestOutcomeKind::SignIn,
-            15 => crate::api::git::BridgePullRequestOutcomeKind::NoAccess,
-            16 => crate::api::git::BridgePullRequestOutcomeKind::Unreachable,
-            17 => crate::api::git::BridgePullRequestOutcomeKind::Failed,
-            18 => crate::api::git::BridgePullRequestOutcomeKind::NotCreated,
-            19 => crate::api::git::BridgePullRequestOutcomeKind::Unknown,
+            14 => crate::api::git::BridgePullRequestOutcomeKind::GhOutdated,
+            15 => crate::api::git::BridgePullRequestOutcomeKind::SignIn,
+            16 => crate::api::git::BridgePullRequestOutcomeKind::NoAccess,
+            17 => crate::api::git::BridgePullRequestOutcomeKind::Unreachable,
+            18 => crate::api::git::BridgePullRequestOutcomeKind::Failed,
+            19 => crate::api::git::BridgePullRequestOutcomeKind::NotCreated,
+            20 => crate::api::git::BridgePullRequestOutcomeKind::Unknown,
             _ => unreachable!(
                 "Invalid variant for BridgePullRequestOutcomeKind: {}",
                 inner
@@ -4370,6 +4375,7 @@ impl SseDecode for crate::api::git::BridgePullRequestPlan {
         let mut var_base = <Option<crate::api::git::BridgeName>>::sse_decode(deserializer);
         let mut var_comparison =
             <Option<crate::api::git::BridgeComparison>>::sse_decode(deserializer);
+        let mut var_comparisonFailed = <bool>::sse_decode(deserializer);
         let mut var_baseMissing = <bool>::sse_decode(deserializer);
         let mut var_open = <Option<crate::api::git::BridgePullRequest>>::sse_decode(deserializer);
         let mut var_uncommitted = <i64>::sse_decode(deserializer);
@@ -4385,6 +4391,7 @@ impl SseDecode for crate::api::git::BridgePullRequestPlan {
             default_branch: var_defaultBranch,
             base: var_base,
             comparison: var_comparison,
+            comparison_failed: var_comparisonFailed,
             base_missing: var_baseMissing,
             open: var_open,
             uncommitted: var_uncommitted,
@@ -7438,6 +7445,8 @@ impl flutter_rust_bridge::IntoDart for crate::api::git::BridgePullRequestOutcome
             self.kind.into_into_dart().into_dart(),
             self.plan.into_into_dart().into_dart(),
             self.pull_request.into_into_dart().into_dart(),
+            self.bases.into_into_dart().into_dart(),
+            self.more_bases.into_into_dart().into_dart(),
             self.host.into_into_dart().into_dart(),
             self.remote.into_into_dart().into_dart(),
             self.branch.into_into_dart().into_dart(),
@@ -7480,12 +7489,13 @@ impl flutter_rust_bridge::IntoDart for crate::api::git::BridgePullRequestOutcome
             Self::Behind => 11.into_dart(),
             Self::HeadMoved => 12.into_dart(),
             Self::GhMissing => 13.into_dart(),
-            Self::SignIn => 14.into_dart(),
-            Self::NoAccess => 15.into_dart(),
-            Self::Unreachable => 16.into_dart(),
-            Self::Failed => 17.into_dart(),
-            Self::NotCreated => 18.into_dart(),
-            Self::Unknown => 19.into_dart(),
+            Self::GhOutdated => 14.into_dart(),
+            Self::SignIn => 15.into_dart(),
+            Self::NoAccess => 16.into_dart(),
+            Self::Unreachable => 17.into_dart(),
+            Self::Failed => 18.into_dart(),
+            Self::NotCreated => 19.into_dart(),
+            Self::Unknown => 20.into_dart(),
             _ => unreachable!(),
         }
     }
@@ -7514,6 +7524,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::git::BridgePullRequestPlan {
             self.default_branch.into_into_dart().into_dart(),
             self.base.into_into_dart().into_dart(),
             self.comparison.into_into_dart().into_dart(),
+            self.comparison_failed.into_into_dart().into_dart(),
             self.base_missing.into_into_dart().into_dart(),
             self.open.into_into_dart().into_dart(),
             self.uncommitted.into_into_dart().into_dart(),
@@ -9128,6 +9139,8 @@ impl SseEncode for crate::api::git::BridgePullRequestOutcome {
         <crate::api::git::BridgePullRequestOutcomeKind>::sse_encode(self.kind, serializer);
         <Option<crate::api::git::BridgePullRequestPlan>>::sse_encode(self.plan, serializer);
         <Option<crate::api::git::BridgePullRequest>>::sse_encode(self.pull_request, serializer);
+        <Vec<crate::api::git::BridgeName>>::sse_encode(self.bases, serializer);
+        <bool>::sse_encode(self.more_bases, serializer);
         <String>::sse_encode(self.host, serializer);
         <String>::sse_encode(self.remote, serializer);
         <String>::sse_encode(self.branch, serializer);
@@ -9159,12 +9172,13 @@ impl SseEncode for crate::api::git::BridgePullRequestOutcomeKind {
                 crate::api::git::BridgePullRequestOutcomeKind::Behind => 11,
                 crate::api::git::BridgePullRequestOutcomeKind::HeadMoved => 12,
                 crate::api::git::BridgePullRequestOutcomeKind::GhMissing => 13,
-                crate::api::git::BridgePullRequestOutcomeKind::SignIn => 14,
-                crate::api::git::BridgePullRequestOutcomeKind::NoAccess => 15,
-                crate::api::git::BridgePullRequestOutcomeKind::Unreachable => 16,
-                crate::api::git::BridgePullRequestOutcomeKind::Failed => 17,
-                crate::api::git::BridgePullRequestOutcomeKind::NotCreated => 18,
-                crate::api::git::BridgePullRequestOutcomeKind::Unknown => 19,
+                crate::api::git::BridgePullRequestOutcomeKind::GhOutdated => 14,
+                crate::api::git::BridgePullRequestOutcomeKind::SignIn => 15,
+                crate::api::git::BridgePullRequestOutcomeKind::NoAccess => 16,
+                crate::api::git::BridgePullRequestOutcomeKind::Unreachable => 17,
+                crate::api::git::BridgePullRequestOutcomeKind::Failed => 18,
+                crate::api::git::BridgePullRequestOutcomeKind::NotCreated => 19,
+                crate::api::git::BridgePullRequestOutcomeKind::Unknown => 20,
                 _ => {
                     unimplemented!("");
                 }
@@ -9186,6 +9200,7 @@ impl SseEncode for crate::api::git::BridgePullRequestPlan {
         <Option<crate::api::git::BridgeName>>::sse_encode(self.default_branch, serializer);
         <Option<crate::api::git::BridgeName>>::sse_encode(self.base, serializer);
         <Option<crate::api::git::BridgeComparison>>::sse_encode(self.comparison, serializer);
+        <bool>::sse_encode(self.comparison_failed, serializer);
         <bool>::sse_encode(self.base_missing, serializer);
         <Option<crate::api::git::BridgePullRequest>>::sse_encode(self.open, serializer);
         <i64>::sse_encode(self.uncommitted, serializer);

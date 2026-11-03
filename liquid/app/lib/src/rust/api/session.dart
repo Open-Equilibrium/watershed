@@ -122,7 +122,7 @@ abstract class AgentSession implements RustOpaqueInterface {
   Future<BridgePullRequestOutcome> pullRequest();
 
   /// The branches of `target` on `host` GitHub lists, to choose a base from.
-  Future<List<BridgeName>> pullRequestBases({
+  Future<BridgePullRequestOutcome> pullRequestBases({
     required String host,
     required String target,
   });

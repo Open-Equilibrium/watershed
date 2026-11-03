@@ -70,38 +70,42 @@ impl Checkpoints {
             .await?
     }
 
-    /// Creates the reviewed pull request once its plan still holds; at the time limit its
-    /// result is unknown.
+    /// Creates the reviewed pull request once its plan still holds. A recheck that times out
+    /// created nothing; a request stopped at the time limit or by closing has an unknown result.
     pub async fn create_pull_request(
         &self,
         draft: &PullRequestDraft,
     ) -> Result<PullRequest, PullRequestError> {
         let tree = self.tree().await?;
+        self.bounded(async { Ok(tree.recheck_pull_request(&self.gh, draft).await) })
+            .await??;
         match self
-            .bounded(async { Ok(tree.create_pull_request(&self.gh, draft).await) })
+            .bounded(async { Ok(tree.post_pull_request(&self.gh, draft).await) })
             .await
         {
             Ok(result) => result,
-            Err(error @ DiffError::TimedOut(_)) => {
+            Err(error @ (DiffError::TimedOut(_) | DiffError::Closed)) => {
                 Err(PullRequestError::Unknown(error.to_string()))
             }
             Err(error) => Err(error.into()),
         }
     }
 
-    /// The latest pull request from the branch's upstream; none without one on GitHub.
+    /// The latest pull request from the branch's upstream; none without an upstream or pull
+    /// request, and a remote gh has no GitHub login for is refused before gh calls its host.
     pub async fn pull_request(&self) -> Result<Option<PullRequest>, PullRequestError> {
         let tree = self.tree().await?;
         self.bounded(async { Ok(tree.pull_request(&self.gh).await) })
             .await?
     }
 
-    /// The branches of `target` on `host`, to choose a base from.
+    /// The branches of `target` on `host`, to choose a base from; `true` when GitHub may list
+    /// more.
     pub async fn pull_request_bases(
         &self,
         host: &str,
         target: &str,
-    ) -> Result<Vec<String>, PullRequestError> {
+    ) -> Result<(Vec<String>, bool), PullRequestError> {
         let tree = self.tree().await?;
         self.bounded(async { Ok(tree.pull_request_bases(&self.gh, host, target).await) })
             .await?

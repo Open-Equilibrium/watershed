@@ -5,11 +5,14 @@ use crate::{
 };
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
+use std::time::Duration;
 
 const BRANCH: &str = "feature/retry-after";
 const LOGGED_IN: &str =
     r#"{"hosts":{"github.com":[{"state":"success","active":true,"host":"github.com"}]}}"#;
 const FORK: &str = r#"{"full_name":"bw/api","fork":true,"default_branch":"main","parent":{"full_name":"acme/api","default_branch":"main"}}"#;
+/// The fork's pull request #42 as `gh pr view` reads it.
+const OPEN: &str = r#"{"number":42,"title":"Return 429","state":"OPEN","isDraft":false,"url":"https://github.com/acme/api/pull/42","baseRefName":"develop","headRefName":"feature/retry-after","headRepository":{"name":"api"},"headRepositoryOwner":{"login":"bw"},"statusCheckRollup":[],"reviewDecision":""}"#;
 
 /// A branch pushed to a bare repository, whose remote then names GitHub; no Git network runs
 /// for a pull request, and the fake gh answers for GitHub.
@@ -39,7 +42,8 @@ impl Pushed {
         pushed.answer("auth", LOGGED_IN);
         pushed.answer("repo", FORK);
         pushed.answer("head", &pushed.head());
-        pushed.answer("prs", "[]");
+        pushed.answer("prs", "");
+        pushed.answer("fork-prs", "");
         pushed
     }
 
@@ -68,8 +72,9 @@ impl Pushed {
                  'auth status --json hosts --hostname '*) cat \"$d/auth\" ;;\n\
                  'api --hostname github.com repos/bw/api') cat \"$d/repo\" ;;\n\
                  'api --hostname github.com repos/bw/api/branches/feature/retry-after --jq .commit.sha') cat \"$d/head\" ;;\n\
-                 'pr list --repo github.com/acme/api --head feature/retry-after '*) cat \"$d/prs\" ;;\n\
-                 'pr list --repo github.com/bw/api --head feature/retry-after '*) echo '[]' ;;\n\
+                 'api --hostname github.com repos/acme/api/pulls?head=bw:feature/retry-after&state=all&per_page=100 --jq '*) cat \"$d/prs\" ;;\n\
+                 'api --hostname github.com repos/bw/api/pulls?head=bw:feature/retry-after&state=all&per_page=100 --jq '*) cat \"$d/fork-prs\" ;;\n\
+                 'pr view '*' --repo github.com/'*) cat \"$d/view-$3\" ;;\n\
                  'api --hostname github.com repos/acme/api/compare/develop...bw:feature/retry-after --jq '*) echo '{{\"commits\":2,\"url\":\"https://github.com/acme/api/compare\",\"files\":3,\"added\":12,\"removed\":1}}' ;;\n\
                  'api --hostname github.com repos/acme/api/compare/'*) echo 'gh: Not Found (HTTP 404)' >&2; exit 1 ;;\n\
                  *) echo \"unexpected: $*\" >&2; exit 9 ;;\nesac\n"
@@ -151,10 +156,8 @@ fn a_fork_targets_its_parent_and_creates_only_the_reviewed_pull_request() {
         );
 
         // An open pull request is shown instead of creating another.
-        pushed.answer(
-            "prs",
-            r#"[{"number":42,"title":"Return 429","state":"OPEN","isDraft":false,"url":"https://github.com/acme/api/pull/42","baseRefName":"develop","headRefName":"feature/retry-after","headRepository":{"name":"api"},"headRepositoryOwner":{"login":"bw"},"statusCheckRollup":[],"reviewDecision":""}]"#,
-        );
+        pushed.answer("prs", "42 open bw/api feature/retry-after");
+        pushed.answer("view-42", OPEN);
         let calls = pushed.read("log").lines().count();
         let shown = checkpoints
             .pull_request_plan(None, Some("develop"))
@@ -253,6 +256,13 @@ fn refuses_what_cannot_become_a_pull_request_and_says_why() {
 
         // gh's answers: missing, signed out, an unknown or Enterprise host, no access, offline.
         let pushed = Pushed::new("gh", "https://github.com/bw/api.git");
+        assert!(matches!(
+            pushed
+                .checkpoints("'auth status '*) echo 'unknown flag: --json' >&2; exit 1 ;;")
+                .pull_request_plan(None, None)
+                .await,
+            Err(PullRequestError::GhOutdated(_))
+        ));
         let mut missing = pushed.checkpoints("");
         missing.set_gh(&pushed.gh.join("missing"));
         assert!(matches!(
@@ -293,7 +303,7 @@ fn refuses_what_cannot_become_a_pull_request_and_says_why() {
             .checkpoints(
                 "'api --hostname github.acme.example repos/bw/api') echo '{\"full_name\":\"bw/api\",\"fork\":false,\"default_branch\":\"trunk\"}' ;;\n\
                  'api --hostname github.acme.example repos/bw/api/branches/'*) cat \"$d/head\" ;;\n\
-                 'pr list --repo github.acme.example/bw/api '*) echo '[]' ;;\n\
+                 'api --hostname github.acme.example repos/bw/api/pulls?'*) ;;\n\
                  'api --hostname github.acme.example repos/bw/api/compare/trunk...bw:feature/retry-after --jq '*) echo '{\"commits\":1,\"files\":1,\"added\":1,\"removed\":0,\"url\":\"\"}' ;;",
             )
             .pull_request_plan(None, None)
@@ -356,15 +366,16 @@ fn a_refused_creation_is_not_created_and_a_silent_one_is_unknown() {
 fn the_summary_reads_the_open_pull_request_with_checks_and_review() {
     run(async {
         let pushed = Pushed::new("summary", "https://github.com/bw/api.git");
+        // GitHub filters by the head's owner; another owner's head is still not taken.
         pushed.answer(
             "prs",
-            r#"[
-              {"number":43,"title":"Other fork","state":"OPEN","isDraft":false,"url":"u","baseRefName":"main","headRefName":"feature/retry-after","headRepository":{"name":"api"},"headRepositoryOwner":{"login":"someone"},"statusCheckRollup":[],"reviewDecision":""},
-              {"number":42,"title":"Return 429","state":"OPEN","isDraft":true,"url":"https://github.com/acme/api/pull/42","baseRefName":"main","headRefName":"feature/retry-after","headRepository":{"name":"api"},"headRepositoryOwner":{"login":"bw"},
+            "43 open someone/api feature/retry-after\n42 open bw/api feature/retry-after\n40 closed bw/api feature/retry-after",
+        );
+        pushed.answer(
+            "view-42",
+            r#"{"number":42,"title":"Return 429","state":"OPEN","isDraft":true,"url":"https://github.com/acme/api/pull/42","baseRefName":"main","headRefName":"feature/retry-after","headRepository":{"name":"api"},"headRepositoryOwner":{"login":"bw"},
                "statusCheckRollup":[{"__typename":"CheckRun","status":"COMPLETED","conclusion":"SUCCESS"},{"__typename":"CheckRun","status":"IN_PROGRESS","conclusion":""},{"__typename":"StatusContext","state":"FAILURE"}],
-               "reviewDecision":"CHANGES_REQUESTED"},
-              {"number":40,"title":"Earlier","state":"MERGED","isDraft":false,"url":"u","baseRefName":"main","headRefName":"feature/retry-after","headRepository":{"name":"api"},"headRepositoryOwner":{"login":"bw"},"statusCheckRollup":[],"reviewDecision":"APPROVED"}
-            ]"#,
+               "reviewDecision":"CHANGES_REQUESTED"}"#,
         );
         let pull = pushed
             .checkpoints("")
@@ -381,8 +392,30 @@ fn the_summary_reads_the_open_pull_request_with_checks_and_review() {
             (1, 1, 1)
         );
         assert_eq!(pull.review, Some(ReviewDecision::ChangesRequested));
-        // A merged pull request stays history once none is open.
-        pushed.answer("prs", &pushed.read("prs").replace("\"OPEN\"", "\"CLOSED\""));
+        // A merged or closed pull request stays history once none is open, in the parent first.
+        pushed.answer(
+            "prs",
+            "42 closed bw/api feature/retry-after\n40 closed bw/api feature/retry-after",
+        );
+        pushed.answer("fork-prs", "7 open bw/api feature/retry-after");
+        pushed.answer(
+            "view-7",
+            &OPEN
+                .replace("\"number\":42", "\"number\":7")
+                .replace("acme/api/pull/42", "bw/api/pull/7"),
+        );
+        let open = pushed
+            .checkpoints("")
+            .pull_request()
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!((open.number, open.repository.as_str()), (7, "bw/api"));
+        pushed.answer("fork-prs", "");
+        pushed.answer(
+            "view-42",
+            &pushed.read("view-42").replace("\"OPEN\"", "\"CLOSED\""),
+        );
         let latest = pushed
             .checkpoints("")
             .pull_request()
@@ -391,6 +424,18 @@ fn the_summary_reads_the_open_pull_request_with_checks_and_review() {
             .unwrap();
         assert_eq!(latest.number, 42);
         assert_eq!(latest.state, PullRequestState::Closed);
+        // A full page without an open pull request is not read as none.
+        pushed.answer(
+            "prs",
+            &vec!["40 closed bw/api feature/retry-after"; 100].join("\n"),
+        );
+        assert!(matches!(
+            pushed
+                .checkpoints("")
+                .pull_request_plan(None, Some("develop"))
+                .await,
+            Err(PullRequestError::Failed(_))
+        ));
         // Without an upstream there is nothing to look up.
         pushed.repo.git(&["switch", "-c", "unpublished"]);
         assert!(
@@ -401,5 +446,144 @@ fn the_summary_reads_the_open_pull_request_with_checks_and_review() {
                 .unwrap()
                 .is_none()
         );
+    });
+}
+
+#[test]
+fn a_busy_parent_does_not_hide_the_forks_pull_request() {
+    run(async {
+        let pushed = Pushed::new("busy", "https://github.com/bw/api.git");
+        let others = vec![
+            r#"{"number":1,"title":"Other","state":"OPEN","isDraft":false,"url":"u","baseRefName":"main","headRefName":"feature/retry-after","headRepository":{"name":"api"},"headRepositoryOwner":{"login":"someone"},"statusCheckRollup":[],"reviewDecision":""}"#;
+            20
+        ];
+        pushed.answer("list", &format!("[{}]", others.join(",")));
+        pushed.answer("prs", "42 open bw/api feature/retry-after");
+        pushed.answer("view-42", OPEN);
+        let checkpoints = pushed.checkpoints(
+            "'pr list --repo github.com/acme/api '*) cat \"$d/list\" ;;\n\
+             'pr list --repo github.com/bw/api '*) echo '[]' ;;",
+        );
+        let plan = checkpoints
+            .pull_request_plan(None, Some("develop"))
+            .await
+            .unwrap();
+        assert_eq!(plan.open.map(|pull| pull.number), Some(42));
+        let pull = checkpoints.pull_request().await.unwrap().unwrap();
+        assert_eq!(pull.number, 42);
+    });
+}
+
+#[test]
+fn a_remote_gh_has_no_github_login_for_is_never_asked_about() {
+    run(async {
+        let pushed = Pushed::new("gitlab", "https://gitlab.com/bw/api.git");
+        pushed.answer("auth", r#"{"hosts":{}}"#);
+        let checkpoints = pushed.checkpoints("");
+        assert!(matches!(
+            checkpoints.pull_request().await,
+            Err(PullRequestError::NotGitHub { host: Some(host), remote }) if host == "gitlab.com" && remote == "origin"
+        ));
+        assert!(matches!(
+            checkpoints.pull_request_bases("gitlab.com", "bw/api").await,
+            Err(PullRequestError::SignIn { host }) if host == "gitlab.com"
+        ));
+        assert!(
+            pushed
+                .read("log")
+                .lines()
+                .all(|call| call.starts_with("auth status ")),
+            "{}",
+            pushed.read("log")
+        );
+    });
+}
+
+#[test]
+fn bases_are_read_page_by_page_up_to_a_bound() {
+    run(async {
+        let pushed = Pushed::new("bases", "https://github.com/bw/api.git");
+        let checkpoints = pushed.checkpoints(
+            "'api --hostname github.com repos/acme/api/branches?per_page=100&page=1 --jq .[].name') seq -f 'b%g' 1 100 ;;\n\
+             'api --hostname github.com repos/acme/api/branches?per_page=100&page=2 --jq .[].name') printf 'main\\nrelease/1.2\\n' ;;\n\
+             'api --hostname github.com repos/bw/api/branches?per_page=100&page='*) seq -f 'f%g' 1 100 ;;",
+        );
+        let (names, more) = checkpoints
+            .pull_request_bases("github.com", "acme/api")
+            .await
+            .unwrap();
+        assert_eq!((names.len(), more), (102, false));
+        assert_eq!(names.last().map(String::as_str), Some("release/1.2"));
+        let (names, more) = checkpoints
+            .pull_request_bases("github.com", "bw/api")
+            .await
+            .unwrap();
+        assert_eq!((names.len(), more), (500, true));
+    });
+}
+
+#[test]
+fn a_base_github_cannot_compare_keeps_the_plan_and_an_unsafe_base_is_missing() {
+    run(async {
+        let pushed = Pushed::new("compare", "https://github.com/bw/api.git");
+        let checkpoints = pushed.checkpoints(
+            "'api --hostname github.com repos/acme/api/compare/unrelated...'*) echo 'gh: No common ancestor (HTTP 422)' >&2; exit 1 ;;\n\
+             'api --hostname github.com repos/acme/api/compare/busy...'*) echo 'gh: Server Error (HTTP 502)' >&2; exit 1 ;;",
+        );
+        for base in ["unrelated", "busy"] {
+            let plan = checkpoints
+                .pull_request_plan(None, Some(base))
+                .await
+                .unwrap();
+            assert!(
+                plan.comparison.is_none() && plan.comparison_failed,
+                "{base}"
+            );
+            assert!(!plan.base_missing, "{base}");
+        }
+        let calls = pushed.read("log").lines().count();
+        for base in ["", "-x", "../main", "a/./b", "a\u{7}b"] {
+            let plan = checkpoints
+                .pull_request_plan(None, Some(base))
+                .await
+                .unwrap();
+            assert!(plan.base_missing && !plan.comparison_failed, "{base:?}");
+        }
+        assert!(
+            !pushed
+                .read("log")
+                .lines()
+                .skip(calls)
+                .any(|call| call.contains("/compare/")),
+        );
+    });
+}
+
+#[test]
+fn a_recheck_that_times_out_created_nothing_and_a_stopped_request_is_unknown() {
+    run(async {
+        let pushed = Pushed::new("slow", "https://github.com/bw/api.git");
+        let plan = pushed
+            .checkpoints("")
+            .pull_request_plan(None, Some("develop"))
+            .await
+            .unwrap();
+        let mut rechecking = pushed
+            .checkpoints("'api --hostname github.com repos/bw/api') sleep 5; cat \"$d/repo\" ;;");
+        rechecking.set_timeout(Duration::from_millis(1500));
+        assert!(matches!(
+            rechecking
+                .create_pull_request(&draft(&plan, "develop"))
+                .await,
+            Err(PullRequestError::Git(DiffError::TimedOut(_)))
+        ));
+        assert!(!pushed.read("log").contains("POST"));
+        let mut posting =
+            pushed.checkpoints("'api --hostname github.com --method POST '*) sleep 5 ;;");
+        posting.set_timeout(Duration::from_millis(1500));
+        assert!(matches!(
+            posting.create_pull_request(&draft(&plan, "develop")).await,
+            Err(PullRequestError::Unknown(_))
+        ));
     });
 }

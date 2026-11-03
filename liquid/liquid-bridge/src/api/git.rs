@@ -293,7 +293,9 @@ pub struct BridgeComparison {
     pub url: String,
 }
 
-/// The identities a plan showed; return them unchanged when creating, never display them.
+/// The identities a plan showed; return them unchanged when creating. `head_repository` is an
+/// `owner/name` GitHub validated, of letters, digits, `-`, `_` and `.`, so it shows as it is;
+/// never display `head_branch`, whose shown form is the plan's `head`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BridgePullRequestHead {
     pub host: String,
@@ -310,21 +312,25 @@ pub struct BridgePullRequestPlan {
     pub host: String,
     /// The head as GitHub shows it: the branch, or `owner:branch` from a fork.
     pub head: String,
-    /// GitHub's parent first for a fork, then the head repository, as `owner/name`.
+    /// GitHub's parent first for a fork, then the head repository, as validated `owner/name`
+    /// that shows as it is.
     pub targets: Vec<String>,
     /// A fork whose parent GitHub did not name; the user chooses the target.
     pub parent_unknown: bool,
-    /// The chosen or preselected target; none while the user must choose.
+    /// The chosen or preselected target, one of `targets`; none while the user must choose.
     pub target: Option<String>,
     pub default_branch: Option<BridgeName>,
     pub base: Option<BridgeName>,
     pub comparison: Option<BridgeComparison>,
+    /// GitHub could not compare the head with the base, though both exist.
+    pub comparison_failed: bool,
     /// GitHub has no branch `base` in the target.
     pub base_missing: bool,
     /// An open pull request from this head, shown instead of creating another.
     pub open: Option<BridgePullRequest>,
     pub uncommitted: i64,
-    /// The latest commit's subject and body, with hidden characters written out.
+    /// The latest commit's subject and body as Git has them, to fill the editable title and
+    /// description; they are sent only as the user reviewed them.
     pub subject: String,
     pub body: String,
 }
@@ -372,6 +378,8 @@ pub enum BridgePullRequestOutcomeKind {
     HeadMoved,
     /// gh could not run on the host.
     GhMissing,
+    /// gh is too old for the commands Liquid runs.
+    GhOutdated,
     /// gh has no working login for `host`.
     SignIn,
     /// gh cannot access `repository`.
@@ -392,6 +400,9 @@ pub struct BridgePullRequestOutcome {
     pub kind: BridgePullRequestOutcomeKind,
     pub plan: Option<BridgePullRequestPlan>,
     pub pull_request: Option<BridgePullRequest>,
+    /// The target's branches to choose a base from, and whether GitHub may list more.
+    pub bases: Vec<BridgeName>,
+    pub more_bases: bool,
     pub host: String,
     pub remote: String,
     pub branch: String,
@@ -410,6 +421,8 @@ impl BridgePullRequestOutcome {
             kind,
             plan: None,
             pull_request: None,
+            bases: Vec::new(),
+            more_bases: false,
             host: String::new(),
             remote: String::new(),
             branch: String::new(),
@@ -422,7 +435,7 @@ impl BridgePullRequestOutcome {
         }
     }
 
-    fn failed(error: PullRequestError) -> Self {
+    pub(crate) fn failed(error: PullRequestError) -> Self {
         use BridgePullRequestOutcomeKind as Kind;
         let shown = |text: &str| visible_lines(&without_credentials(text));
         match error {
@@ -473,6 +486,10 @@ impl BridgePullRequestOutcome {
                 detail: shown(&detail),
                 ..Self::of(Kind::GhMissing)
             },
+            PullRequestError::GhOutdated(detail) => Self {
+                detail: shown(&detail),
+                ..Self::of(Kind::GhOutdated)
+            },
             PullRequestError::SignIn { host } => Self {
                 host: visible_name(&host),
                 ..Self::of(Kind::SignIn)
@@ -513,19 +530,9 @@ impl BridgePullRequestOutcome {
 
 impl From<meta_harness_core::PullRequestPlan> for BridgePullRequestPlan {
     fn from(plan: meta_harness_core::PullRequestPlan) -> Self {
-        let head = match &plan.target {
-            Some(target) if !target.eq_ignore_ascii_case(&plan.head_repository) => {
-                let owner = plan
-                    .head_repository
-                    .split_once('/')
-                    .map_or("", |(owner, _)| owner);
-                format!("{owner}:{}", plan.head_branch)
-            }
-            _ => plan.head_branch.clone(),
-        };
         Self {
             host: visible_name(&plan.host),
-            head: visible_name(&head),
+            head: visible_name(&plan.head),
             targets: plan.targets,
             parent_unknown: plan.parent_unknown,
             target: plan.target,
@@ -538,11 +545,12 @@ impl From<meta_harness_core::PullRequestPlan> for BridgePullRequestPlan {
                 removed: count(comparison.removed),
                 url: comparison.url,
             }),
+            comparison_failed: plan.comparison_failed,
             base_missing: plan.base_missing,
             open: plan.open.map(Into::into),
             uncommitted: count(plan.uncommitted),
-            subject: visible_name(&plan.subject),
-            body: visible_lines(&plan.body),
+            subject: plan.subject,
+            body: plan.body,
             identity: BridgePullRequestHead {
                 host: plan.host,
                 head_repository: plan.head_repository,
@@ -941,13 +949,18 @@ impl AgentSession {
         &self,
         host: String,
         target: String,
-    ) -> Result<Vec<BridgeName>, String> {
+    ) -> Result<BridgePullRequestOutcome, String> {
         RUNTIME.block_on(async {
-            self.checkpoints
-                .pull_request_bases(&host, &target)
-                .await
-                .map(|names| names.into_iter().map(BridgeName::of).collect())
-                .map_err(|error| visible_lines(&without_credentials(&error.to_string())))
+            Ok(
+                match self.checkpoints.pull_request_bases(&host, &target).await {
+                    Ok((names, more)) => BridgePullRequestOutcome {
+                        bases: names.into_iter().map(BridgeName::of).collect(),
+                        more_bases: more,
+                        ..BridgePullRequestOutcome::of(BridgePullRequestOutcomeKind::Done)
+                    },
+                    Err(error) => BridgePullRequestOutcome::failed(error),
+                },
+            )
         })
     }
 

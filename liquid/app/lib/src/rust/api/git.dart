@@ -609,7 +609,9 @@ class BridgePullRequestDraft {
           draft == other.draft;
 }
 
-/// The identities a plan showed; return them unchanged when creating, never display them.
+/// The identities a plan showed; return them unchanged when creating. `head_repository` is an
+/// `owner/name` GitHub validated, of letters, digits, `-`, `_` and `.`, so it shows as it is;
+/// never display `head_branch`, whose shown form is the plan's `head`.
 class BridgePullRequestHead {
   final String host;
   final String headRepository;
@@ -646,6 +648,10 @@ class BridgePullRequestOutcome {
   final BridgePullRequestOutcomeKind kind;
   final BridgePullRequestPlan? plan;
   final BridgePullRequest? pullRequest;
+
+  /// The target's branches to choose a base from, and whether GitHub may list more.
+  final List<BridgeName> bases;
+  final bool moreBases;
   final String host;
   final String remote;
   final String branch;
@@ -662,6 +668,8 @@ class BridgePullRequestOutcome {
     required this.kind,
     this.plan,
     this.pullRequest,
+    required this.bases,
+    required this.moreBases,
     required this.host,
     required this.remote,
     required this.branch,
@@ -678,6 +686,8 @@ class BridgePullRequestOutcome {
       kind.hashCode ^
       plan.hashCode ^
       pullRequest.hashCode ^
+      bases.hashCode ^
+      moreBases.hashCode ^
       host.hashCode ^
       remote.hashCode ^
       branch.hashCode ^
@@ -696,6 +706,8 @@ class BridgePullRequestOutcome {
           kind == other.kind &&
           plan == other.plan &&
           pullRequest == other.pullRequest &&
+          bases == other.bases &&
+          moreBases == other.moreBases &&
           host == other.host &&
           remote == other.remote &&
           branch == other.branch &&
@@ -752,6 +764,9 @@ enum BridgePullRequestOutcomeKind {
   /// gh could not run on the host.
   ghMissing,
 
+  /// gh is too old for the commands Liquid runs.
+  ghOutdated,
+
   /// gh has no working login for `host`.
   signIn,
 
@@ -781,17 +796,21 @@ class BridgePullRequestPlan {
   /// The head as GitHub shows it: the branch, or `owner:branch` from a fork.
   final String head;
 
-  /// GitHub's parent first for a fork, then the head repository, as `owner/name`.
+  /// GitHub's parent first for a fork, then the head repository, as validated `owner/name`
+  /// that shows as it is.
   final List<String> targets;
 
   /// A fork whose parent GitHub did not name; the user chooses the target.
   final bool parentUnknown;
 
-  /// The chosen or preselected target; none while the user must choose.
+  /// The chosen or preselected target, one of `targets`; none while the user must choose.
   final String? target;
   final BridgeName? defaultBranch;
   final BridgeName? base;
   final BridgeComparison? comparison;
+
+  /// GitHub could not compare the head with the base, though both exist.
+  final bool comparisonFailed;
 
   /// GitHub has no branch `base` in the target.
   final bool baseMissing;
@@ -800,7 +819,8 @@ class BridgePullRequestPlan {
   final BridgePullRequest? open;
   final PlatformInt64 uncommitted;
 
-  /// The latest commit's subject and body, with hidden characters written out.
+  /// The latest commit's subject and body as Git has them, to fill the editable title and
+  /// description; they are sent only as the user reviewed them.
   final String subject;
   final String body;
 
@@ -814,6 +834,7 @@ class BridgePullRequestPlan {
     this.defaultBranch,
     this.base,
     this.comparison,
+    required this.comparisonFailed,
     required this.baseMissing,
     this.open,
     required this.uncommitted,
@@ -832,6 +853,7 @@ class BridgePullRequestPlan {
       defaultBranch.hashCode ^
       base.hashCode ^
       comparison.hashCode ^
+      comparisonFailed.hashCode ^
       baseMissing.hashCode ^
       open.hashCode ^
       uncommitted.hashCode ^
@@ -852,6 +874,7 @@ class BridgePullRequestPlan {
           defaultBranch == other.defaultBranch &&
           base == other.base &&
           comparison == other.comparison &&
+          comparisonFailed == other.comparisonFailed &&
           baseMissing == other.baseMissing &&
           open == other.open &&
           uncommitted == other.uncommitted &&
