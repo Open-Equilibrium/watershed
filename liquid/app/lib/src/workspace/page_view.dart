@@ -39,8 +39,11 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
   final _first = TextEditingController();
   late final _firstFocus = FocusNode(
     debugLabel: 'First line',
+    // A composition takes its own ⏎.
     onKeyEvent: (_, event) =>
-        event is KeyUpEvent || !_views.editor.isSource(this)
+        event is KeyUpEvent ||
+            !_first.value.composing.isCollapsed ||
+            !_views.editor.isSource(this)
         ? KeyEventResult.ignored
         : _views.editor.queue(this, event),
   );
@@ -141,6 +144,14 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
 
   @override
   TextEditingValue get typed => _first.value;
+
+  @override
+  void collapse() {
+    final selection = _first.selection;
+    if (selection.isValid && !selection.isCollapsed) {
+      _first.selection = TextSelection.collapsed(offset: selection.end);
+    }
+  }
 
   @override
   void settle(String? text) {

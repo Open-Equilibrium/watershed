@@ -21,6 +21,10 @@ const markdownShortcuts = {
   '" ': BridgeTextStyle.quote,
 };
 
+/// What `---` typed alone in a Text Block becomes: a Section boundary (approved Section
+/// mockups).
+const sectionBreak = '---';
+
 /// The style of the Text Block ⏎ starts, as in Notion: lists and to-dos go on, the rest
 /// becomes a paragraph.
 BridgeTextStyle nextStyle(BridgeTextStyle style) => switch (style) {
@@ -79,6 +83,9 @@ abstract interface class EditorSource {
   /// Shows `text`, what its Text Block holds once the change is done, or for the first line
   /// gives way to the new Text Block.
   void settle(String? text);
+
+  /// Collapses a selection to its end, as a queued key that replaces it is replayed.
+  void collapse();
 }
 
 /// The Text Block that typing goes to, as the editor knows it.
@@ -121,6 +128,9 @@ class PageEditor {
 
   EditorSource? _source;
   bool _gone = false;
+
+  /// Set when Liquid quits: a composition still open is taken as it stands.
+  bool _finishing = false;
   TextEditingValue _latest = TextEditingValue.empty;
   final _queue = Queue<_Queued>();
   Completer<void>? _wake;
@@ -166,8 +176,15 @@ class PageEditor {
   void _begin(EditorSource source) {
     _source = source;
     _gone = false;
+    _finishing = false;
     _latest = source.typed;
+    _state.finishing.add(_finish);
     _write();
+  }
+
+  void _finish() {
+    _finishing = true;
+    _wakeUp();
   }
 
   /// Marks that input waits to be written, so quitting waits for it.
@@ -214,6 +231,7 @@ class PageEditor {
         key == LogicalKeyboardKey.delete) {
       if (isSource(source)) {
         _queue.add((source.typed, key));
+        source.collapse();
         _write();
         _wakeUp();
       }
@@ -234,7 +252,6 @@ class PageEditor {
   Future<void> _drive(EditorTarget? target, TextEditingValue? first) async {
     final source = _source!;
     var prev = first ?? _latest;
-    var formatted = first == null;
     try {
       if (first != null) {
         final created = await _apply(
@@ -254,52 +271,82 @@ class PageEditor {
           style: BridgeTextStyle.paragraph,
         );
         _known[target.block] = target.text;
+        await _markdown(target, '');
       }
       // Where the field's caret was when the target took over, and the target's caret then.
       var boundary = _caret(prev);
       var base = target!.caret;
+      int place(int field) =>
+          (base + field - boundary).clamp(0, target!.text.length);
       while (true) {
         final _Queued? next = _queue.isEmpty ? null : _queue.removeFirst();
         final TextEditingValue snapshot;
         if (next != null) {
           snapshot = next.$1;
         } else {
-          // A composition ends before its text moves, unless its field is gone.
-          while (!_gone && !_latest.composing.isCollapsed) {
+          // A composition ends before its text moves, unless its field is gone or Liquid
+          // quits.
+          while (!_gone && !_finishing && !_latest.composing.isCollapsed) {
             await _sleep();
           }
           if (_queue.isNotEmpty) continue;
           snapshot = _latest;
         }
-        await _route(target!, prev, snapshot, boundary, base);
+        final before = target!.text;
+        await _route(target, prev, snapshot, boundary, base);
         prev = snapshot;
+        if (await _markdown(target, before)) {
+          boundary = _caret(prev);
+          base = target.caret;
+        }
         if (next != null) {
-          target = await _perform(next.$2, target);
-          boundary = _caret(snapshot);
+          // The key acts where the field's caret or selection was when it was pressed.
+          final selection = snapshot.selection;
+          final key = next.$2;
+          if (selection.isValid) {
+            final (start, end) = (place(selection.start), place(selection.end));
+            if (end > start) {
+              await _replace(target, start, end, '');
+            } else {
+              target.caret = start;
+            }
+          }
+          final replaced = selection.isValid && !selection.isCollapsed;
+          if (!(replaced &&
+              (key == LogicalKeyboardKey.backspace ||
+                  key == LogicalKeyboardKey.delete))) {
+            target = await _perform(key, target);
+          }
+          boundary = selection.isValid ? selection.end : _caret(snapshot);
           base = target.caret;
           continue;
         }
         if (_queue.isNotEmpty || _latest.text != prev.text) continue;
-        if (!formatted) {
-          formatted = true;
-          await _shortcut(target);
+        _written();
+        // The field it started from shows its own Text Block's text before the caret moves,
+        // so a long one leaves the target in view.
+        final block = source.block;
+        if (!_gone && block != null && block != target.block) {
+          source.settle(_known[block]);
+          prev = _latest = source.typed;
           boundary = _caret(prev);
           base = target.caret;
-          continue;
         }
-        _written();
         if (await _handOver(target, prev)) break;
       }
-      // The field shows what its own Text Block holds now; the target keeps the caret.
       final block = source.block;
       source.settle(block == null ? null : _known[block]);
       if (block == target.block) views.moveCaret(_caretOf(target));
+      // Both Text Blocks read their text and style again, now that the queue let go.
+      if (block != null) views.reread(block);
+      views.reread(target.block);
     } on Object {
       // The problem shows on the Page; the stored text stays as the core has it.
       source.settle(null);
     } finally {
       _source = null;
       _queue.clear();
+      _state.finishing.remove(_finish);
       _written();
       if (!views.closed) lingering.value = null;
     }
@@ -317,10 +364,20 @@ class PageEditor {
     final offered = _caretOf(target);
     views.moveCaret(offered);
     if (views.closed) return true;
+    // A target never built, as when the Page scrolled far away, leaves the caret where it is.
+    var expired = false;
+    final timer = Timer(const Duration(seconds: 1), () {
+      expired = true;
+      _wakeUp();
+    });
     views.caret.addListener(_wakeUp);
     try {
       while (true) {
         if (views.closed || !identical(views.caret.value, offered)) return true;
+        if (expired) {
+          views.caret.value = null;
+          return true;
+        }
         if (_queue.isNotEmpty || _latest.text != prev.text) {
           views.caret.value = null;
           _write();
@@ -329,6 +386,7 @@ class PageEditor {
         await _sleep();
       }
     } finally {
+      timer.cancel();
       if (!views.closed) views.caret.removeListener(_wakeUp);
     }
   }
@@ -522,16 +580,39 @@ class PageEditor {
     }
   }
 
-  /// A Markdown shortcut typed at the start of a Page's first line formats its Text Block.
-  Future<void> _shortcut(EditorTarget target) async {
+  /// A Markdown shortcut just typed at a paragraph's start formats it, and `---` typed
+  /// alone starts a Section, as typing in a Text Block does; true if one applied.
+  Future<bool> _markdown(EditorTarget target, String before) async {
+    if (target.style != BridgeTextStyle.paragraph) return false;
     for (final MapEntry(key: typed, value: style)
         in markdownShortcuts.entries) {
-      if (!target.text.startsWith(typed)) continue;
-      final caret = target.caret;
+      if (!target.text.startsWith(typed) ||
+          before.startsWith(typed) ||
+          target.caret != typed.length) {
+        continue;
+      }
       await _replace(target, 0, typed.length, '');
-      target.caret = (caret - typed.length).clamp(0, target.text.length);
       await _restyle(target, style);
-      return;
+      return true;
     }
+    // A boundary already exists at the Page's start (approved Section mockups).
+    if (target.text == sectionBreak &&
+        before != sectionBreak &&
+        target.index > 0 &&
+        !target.boundary) {
+      await _replace(target, 0, target.text.length, '');
+      await _apply(
+        mutation(
+          BridgeMutationKind.setSectionBoundary,
+          page: _page,
+          view: target.view,
+          boundary: true,
+        ),
+        const [],
+      );
+      target.boundary = true;
+      return true;
+    }
+    return false;
   }
 }

@@ -136,7 +136,10 @@ void main() {
           expect(fake.textsOf(page), typed.lines);
           return;
       }
-      await tester.pump(const Duration(seconds: 5));
+      // Time passes frame by frame, as on screen.
+      for (var frame = 0; frame < 300; frame++) {
+        await tester.pump(const Duration(milliseconds: 16));
+      }
       await tester.pumpAndSettle();
       expect(fake.textsOf(page), typed.lines);
       if (end == _End.stay) {

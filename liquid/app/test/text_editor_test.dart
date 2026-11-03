@@ -449,4 +449,140 @@ void main() {
       isTrue,
     );
   });
+
+  testWidgets('a selection deleted before the first Block is made goes', (
+    tester,
+  ) async {
+    await show(tester);
+    fake.gate = Completer();
+    await tester.enterText(find.byKey(const Key('first-line')), 'abc');
+    tester.testTextInput.updateEditingValue(
+      const TextEditingValue(
+        text: 'abc',
+        selection: TextSelection(baseOffset: 0, extentOffset: 3),
+      ),
+    );
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.backspace);
+    fake.gate!.complete();
+    await tester.pumpAndSettle();
+    expect(fake.textsOf(page), ['']);
+  });
+
+  testWidgets('a shortcut typed while ⏎ waits formats the new Text Block', (
+    tester,
+  ) async {
+    await show(tester, ['One']);
+    await caret(tester, 0, 3);
+    fake.gate = Completer();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    await type(tester, 0, '-');
+    await type(tester, 0, ' ');
+    fake.gate!.complete();
+    await tester.pumpAndSettle();
+    expect(fake.textsOf(page), ['One', '']);
+    expect(styleOf(1), BridgeTextStyle.bullet);
+  });
+
+  testWidgets('⏎ that ends a composition in the first line splits nothing', (
+    tester,
+  ) async {
+    await show(tester);
+    fake.gate = Completer();
+    await tester.enterText(find.byKey(const Key('first-line')), 'a');
+    tester.testTextInput.updateEditingValue(
+      const TextEditingValue(
+        text: 'ani',
+        selection: TextSelection.collapsed(offset: 3),
+        composing: TextRange(start: 1, end: 3),
+      ),
+    );
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    tester.testTextInput.updateEditingValue(
+      const TextEditingValue(
+        text: 'a你',
+        selection: TextSelection.collapsed(offset: 2),
+      ),
+    );
+    fake.gate!.complete();
+    await tester.pumpAndSettle();
+    expect(fake.textsOf(page), ['a你']);
+  });
+
+  testWidgets('quitting takes a composition still open as it stands', (
+    tester,
+  ) async {
+    await show(tester, ['One']);
+    await caret(tester, 0, 3);
+    fake.gate = Completer();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    final at = field(tester, 0).controller!.selection.baseOffset;
+    tester.testTextInput.updateEditingValue(
+      TextEditingValue(
+        text: 'Oneni',
+        selection: TextSelection.collapsed(offset: at + 2),
+        composing: TextRange(start: at, end: at + 2),
+      ),
+    );
+    await tester.pump();
+    var drained = false;
+    unawaited(workspace.drain().then((_) => drained = true));
+    fake.gate!.complete();
+    await tester.pump();
+    await tester.pump();
+    expect(drained, isTrue);
+    expect(fake.textsOf(page), ['One', 'ni']);
+  });
+
+  testWidgets('⏎ near the start of a long paragraph moves the caret down', (
+    tester,
+  ) async {
+    await show(tester, ['Lisbon ${'and more ' * 600}']);
+    // Taller than the window, so a tap could miss it.
+    field(tester, 0).focusNode!.requestFocus();
+    await tester.pump();
+    field(tester, 0).controller!.selection = const TextSelection.collapsed(
+      offset: 6,
+    );
+    await tester.pump();
+    fake.gate = Completer();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    fake.gate!.complete();
+    for (var frame = 0; frame < 30; frame++) {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    expect(fake.textsOf(page).first, 'Lisbon');
+    expect(focused(tester, 1), isTrue);
+  });
+
+  testWidgets('a heading made a paragraph by ⌫ joins at the next ⌫', (
+    tester,
+  ) async {
+    await show(tester, ['Plan', 'Before we go']);
+    await workspace.apply(
+      mutation(
+        BridgeMutationKind.setTextStyle,
+        page: page,
+        block: fake.views[page]![1].block,
+        style: BridgeTextStyle.heading2,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await caret(tester, 1, 0);
+    fake.delay = () => const Duration(milliseconds: 30);
+    await tester.sendKeyEvent(LogicalKeyboardKey.backspace);
+    for (var frame = 0; frame < 30; frame++) {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    expect(styleOf(1), BridgeTextStyle.paragraph);
+    await tester.sendKeyEvent(LogicalKeyboardKey.backspace);
+    for (var frame = 0; frame < 30; frame++) {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    expect(fake.textsOf(page), ['PlanBefore we go']);
+  });
 }

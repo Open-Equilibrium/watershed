@@ -13,10 +13,6 @@ import 'page_editor.dart';
 import 'page_views.dart';
 import 'workspace_state.dart';
 
-/// What `---` typed alone in a Text Block becomes: a Section boundary (approved Section
-/// mockups).
-const sectionBreak = '---';
-
 /// A caret offset that means a Text Block's end.
 const _end = 1 << 30;
 
@@ -167,6 +163,15 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
       text: text,
       selection: TextSelection.collapsed(offset: offset),
     );
+    _quiet = false;
+  }
+
+  @override
+  void collapse() {
+    final selection = _text.selection;
+    if (!selection.isValid || selection.isCollapsed) return;
+    _quiet = true;
+    _text.selection = TextSelection.collapsed(offset: selection.end);
     _quiet = false;
   }
 

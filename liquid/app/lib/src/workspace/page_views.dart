@@ -97,6 +97,11 @@ class PageViews extends ChangeNotifier {
   /// The Blocks whose writes have all arrived, each time that happens.
   Stream<String> get settled => _settled.stream;
 
+  /// Has `block`'s Text Block read its text and style again.
+  void reread(String block) {
+    if (!_disposed) _settled.add(block);
+  }
+
   /// Applies `change` after earlier writes, counting it for `blocks`.
   Future<BridgeApplied> write(
     BridgeMutation change,
