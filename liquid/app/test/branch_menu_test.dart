@@ -356,6 +356,31 @@ void main() {
     await tester.pump(const Duration(seconds: 7));
   });
 
+  testWidgets(
+    'a refused switch offers Commit changes without retrying the switch',
+    (tester) async {
+      await show(tester);
+      backend.outcome = outcomeOf(
+        BridgeGitOutcomeKind.wouldOverwrite,
+        files: ['a.txt'],
+      );
+      await openMenu(tester);
+      await tester.tap(find.text('feature/token-bucket'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Bring my changes to feature/token-bucket'));
+      await tester.pumpAndSettle();
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Commit changes…'));
+      await tester.pumpAndSettle();
+      expect(find.text('Commit changes'), findsOneWidget);
+      expect(
+        backend.calls.where((call) => call.startsWith('switch ')),
+        hasLength(1),
+      );
+    },
+  );
+
   testWidgets('a refused Leave retry keeps its current refusal visible', (
     tester,
   ) async {

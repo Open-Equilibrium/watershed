@@ -786,7 +786,9 @@ enum Open {
 }
 
 /// The turns of the current branch.
-async fn branch_turns(session: &mut Option<Session>) -> Result<Vec<TurnCheckpoints>, String> {
+pub(crate) async fn branch_turns(
+    session: &mut Option<Session>,
+) -> Result<Vec<TurnCheckpoints>, String> {
     Ok(open(session)?
         .history()
         .await

@@ -97,6 +97,28 @@ abstract interface class SessionBackend {
   /// Creates the branch `name` at the current commit and switches to it.
   Future<BridgeGitOutcome> createBranch(String name);
 
+  /// Captures the current whole files and their checkpoint attribution.
+  Future<BridgeCommitPlan> commitPlan();
+
+  /// Commits selected files only if they still match the captured tree.
+  Future<BridgeGitOutcome> commitFiles(
+    String snapshot,
+    List<String> paths,
+    String message,
+    String? branch,
+  );
+
+  /// Initializes Git only while no turn runs in this project folder.
+  Future<BridgeGitOutcome> initializeGit();
+
+  /// Reads compared tree identities and whole-file changes against HEAD.
+  Future<(String, List<BridgeFileChange>)> uncommittedChanges({
+    required bool hideWhitespace,
+  });
+
+  /// Reads one uncommitted file against HEAD.
+  Future<String> uncommittedPatch(String path, {required bool hideWhitespace});
+
   /// The stashed changes of the branch checked out, if any.
   Future<BridgeStash?> gitStash();
 
@@ -236,6 +258,31 @@ class RustSessionBackend implements SessionBackend {
   @override
   Future<BridgeGitOutcome> createBranch(String name) =>
       _session.createBranch(name: name);
+  @override
+  Future<BridgeCommitPlan> commitPlan() => _session.commitPlan();
+  @override
+  Future<BridgeGitOutcome> commitFiles(
+    String snapshot,
+    List<String> paths,
+    String message,
+    String? branch,
+  ) => _session.commitFiles(
+    snapshot: snapshot,
+    paths: paths,
+    message: message,
+    branch: branch,
+  );
+  @override
+  Future<BridgeGitOutcome> initializeGit() => _session.initializeGit();
+  @override
+  Future<(String, List<BridgeFileChange>)> uncommittedChanges({
+    required bool hideWhitespace,
+  }) => _session.uncommittedChanges(hideWhitespace: hideWhitespace);
+  @override
+  Future<String> uncommittedPatch(
+    String path, {
+    required bool hideWhitespace,
+  }) => _session.uncommittedPatch(path: path, hideWhitespace: hideWhitespace);
   @override
   Future<BridgeStash?> gitStash() => _session.gitStash();
   @override

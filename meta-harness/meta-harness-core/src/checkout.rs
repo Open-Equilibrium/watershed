@@ -6,7 +6,8 @@
 //! The system drops the locks of a process that ends, so a crash leaves no agent running.
 
 use std::fs::{File, OpenOptions, TryLockError};
-use std::os::unix::fs::OpenOptionsExt;
+use std::hash::{Hash, Hasher};
+use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -55,6 +56,20 @@ pub(crate) struct Alone {
 }
 
 impl Checkout {
+    /// A shared namespace outside the project, also before it has a Git directory.
+    pub(crate) fn folder(project: &Path) -> Result<Self, DiffError> {
+        let canonical = std::fs::canonicalize(project).map_err(DiffError::Io)?;
+        let mut key = std::hash::DefaultHasher::new();
+        canonical.hash(&mut key);
+        let namespace = std::env::temp_dir().join(format!(
+            "watershed-project-locks-{}",
+            rustix::process::geteuid().as_raw()
+        ));
+        private_namespace(&namespace)?;
+        let dir = namespace.join(format!("{:016x}", key.finish()));
+        Ok(Self::new(dir.clone(), dir))
+    }
+
     /// The locks in `dir`, the checkout's `watershed` folder in its Git directory, and in
     /// `repository`, the one in the Git directory all worktrees share.
     pub(crate) fn new(dir: PathBuf, repository: PathBuf) -> Self {
@@ -183,6 +198,32 @@ async fn hold_alone(lock: File, running: impl Fn() -> Vec<String>) -> Result<Alo
     Err(DiffError::AgentRunning(running()))
 }
 
+/// A namespace owned by this user, with no ancestor another user may replace from within it.
+fn private_namespace(path: &Path) -> Result<(), DiffError> {
+    match std::fs::DirBuilder::new().mode(0o700).create(path) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(error) => return Err(DiffError::Io(error)),
+    }
+    let metadata = std::fs::symlink_metadata(path).map_err(DiffError::Io)?;
+    if !metadata.is_dir()
+        || metadata.uid() != rustix::process::geteuid().as_raw()
+        || metadata.mode() & 0o022 != 0
+    {
+        return Err(DiffError::Io(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "The project lock namespace must be a private directory owned by this user.",
+        )));
+    }
+    // Earlier versions created owner-writable, publicly readable directories. Only their
+    // owner could change their contents, so tightening those permissions preserves live locks.
+    if metadata.mode() & 0o077 != 0 {
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
+            .map_err(DiffError::Io)?;
+    }
+    Ok(())
+}
+
 /// Opens or creates the lock file `name` in the folder `dir`.
 fn lock_file(dir: &Path, name: &str) -> Result<File, DiffError> {
     std::fs::create_dir_all(dir).map_err(DiffError::Io)?;
@@ -208,4 +249,42 @@ fn open(path: &Path, create: bool) -> Result<File, DiffError> {
         ))));
     }
     Ok(file)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn folder_locks_use_a_private_owner_namespace() {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async {
+                let checkout = Checkout::folder(&std::env::temp_dir()).unwrap();
+                let _lock = checkout.alone().await.unwrap();
+                let namespace = checkout.dir.parent().unwrap();
+                let metadata = std::fs::symlink_metadata(namespace).unwrap();
+                assert!(metadata.is_dir());
+                assert_eq!(metadata.uid(), rustix::process::geteuid().as_raw());
+                assert_eq!(metadata.mode() & 0o077, 0);
+            });
+    }
+
+    #[test]
+    fn a_shared_or_linked_namespace_is_refused() {
+        let root =
+            std::env::temp_dir().join(format!("watershed-namespace-test-{}", std::process::id()));
+        std::fs::create_dir(&root).unwrap();
+        let target = root.join("target");
+        private_namespace(&target).unwrap();
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o777)).unwrap();
+        assert!(private_namespace(&target).is_err());
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let link = root.join("link");
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        assert!(private_namespace(&link).is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }

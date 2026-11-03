@@ -112,3 +112,31 @@ Long approval line, pieces:
 {"sample":3,"opened_ms":111.3}
 {"sample":4,"opened_ms":117.474}
 ```
+
+## Token streaming after stderr cleanup
+
+Observed on 2026-11-03 at `228ede81`, in the environment above, using the same release command and 20-sample workload. The stream path is now passed as a shell argument, and session exit cancels and joins a stderr reader whose drain deadline expires. Every sample preserved all 20,000 deltas as one 320,000-byte text event, six events in all. Maximum resident set size was 14,368,768 bytes; peak memory footprint was 9,372,152 bytes. This workload does not exercise a descendant holding stderr open; the session regression test covers that cleanup path.
+
+```json
+{"sample":0,"elapsed_ms":24.977,"events":6,"delta_events":1,"largest_delta_bytes":320000}
+{"sample":1,"elapsed_ms":16.965,"events":6,"delta_events":1,"largest_delta_bytes":320000}
+{"sample":2,"elapsed_ms":13.435,"events":6,"delta_events":1,"largest_delta_bytes":320000}
+{"sample":3,"elapsed_ms":11.442,"events":6,"delta_events":1,"largest_delta_bytes":320000}
+{"sample":4,"elapsed_ms":11.440,"events":6,"delta_events":1,"largest_delta_bytes":320000}
+{"sample":5,"elapsed_ms":11.296,"events":6,"delta_events":1,"largest_delta_bytes":320000}
+{"sample":6,"elapsed_ms":11.256,"events":6,"delta_events":1,"largest_delta_bytes":320000}
+{"sample":7,"elapsed_ms":11.836,"events":6,"delta_events":1,"largest_delta_bytes":320000}
+{"sample":8,"elapsed_ms":11.477,"events":6,"delta_events":1,"largest_delta_bytes":320000}
+{"sample":9,"elapsed_ms":11.650,"events":6,"delta_events":1,"largest_delta_bytes":320000}
+{"sample":10,"elapsed_ms":11.420,"events":6,"delta_events":1,"largest_delta_bytes":320000}
+{"sample":11,"elapsed_ms":11.574,"events":6,"delta_events":1,"largest_delta_bytes":320000}
+{"sample":12,"elapsed_ms":11.633,"events":6,"delta_events":1,"largest_delta_bytes":320000}
+{"sample":13,"elapsed_ms":11.629,"events":6,"delta_events":1,"largest_delta_bytes":320000}
+{"sample":14,"elapsed_ms":11.533,"events":6,"delta_events":1,"largest_delta_bytes":320000}
+{"sample":15,"elapsed_ms":11.664,"events":6,"delta_events":1,"largest_delta_bytes":320000}
+{"sample":16,"elapsed_ms":11.928,"events":6,"delta_events":1,"largest_delta_bytes":320000}
+{"sample":17,"elapsed_ms":11.498,"events":6,"delta_events":1,"largest_delta_bytes":320000}
+{"sample":18,"elapsed_ms":11.381,"events":6,"delta_events":1,"largest_delta_bytes":320000}
+{"sample":19,"elapsed_ms":11.647,"events":6,"delta_events":1,"largest_delta_bytes":320000}
+{"summary":"stream","deltas_in":20000,"delta_bytes":16,"samples":20,"p50_ms":11.574,"p95_ms":16.965,"max_ms":24.977}
+```

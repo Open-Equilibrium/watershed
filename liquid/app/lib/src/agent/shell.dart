@@ -22,6 +22,7 @@ import '../trajectory/trajectory_view.dart';
 import 'action_area.dart';
 import 'branch_menu.dart';
 import 'chat_view.dart';
+import 'git_actions.dart';
 import 'input_lane.dart';
 import 'sidebar.dart';
 import 'status_bar.dart';
@@ -424,6 +425,8 @@ class _Header extends StatelessWidget {
             ),
           ),
           Flexible(child: BranchChip(state: state)),
+          const SizedBox(width: WsMetrics.space2),
+          GitActions(state: state),
         ],
       ),
     );

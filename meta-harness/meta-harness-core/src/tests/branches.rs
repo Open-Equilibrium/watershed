@@ -235,6 +235,9 @@ fn the_status_counts_commits_against_the_upstream_and_uncommitted_files() {
                 ahead: 1,
                 behind: 2,
                 changed: 3,
+                default_branch: Some("main".to_owned()),
+                merging: false,
+                conflicts: Vec::new(),
             }
         );
         assert_eq!(

@@ -1,4 +1,8 @@
 import 'dart:async';
+
+import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart'
+    show Int64List;
+
 import 'dart:math' as math;
 
 import 'package:liquid/src/rust/api/events.dart';
@@ -268,6 +272,10 @@ class FakeBackend implements SessionBackend {
   /// The checkout's Git state; null outside Git.
   BridgeGitStatus? git = gitStatusOf();
   Object? gitError;
+  Completer<BridgeGitStatus?>? statusGate;
+  Completer<BridgeCommitPlan>? planGate;
+  Completer<void>? commitGate;
+  Completer<BridgeGitOutcome>? initializeGate;
   BridgeBranches branches = const BridgeBranches(branches: [], running: []);
   BridgeStash? stashed;
   ({String? branch, String? stash})? switchConfirmation;
@@ -284,6 +292,7 @@ class FakeBackend implements SessionBackend {
   @override
   Future<BridgeGitStatus?> gitStatus() async {
     statusReads++;
+    if (statusGate case final gate?) return gate.future;
     if (gitError case final error?) throw error;
     final now = git;
     return now == null
@@ -296,6 +305,9 @@ class FakeBackend implements SessionBackend {
             behind: now.behind,
             changed: now.changed,
             stash: stashed,
+            defaultBranch: now.defaultBranch,
+            merging: now.merging,
+            conflicts: List.of(now.conflicts),
           );
   }
 
@@ -318,6 +330,88 @@ class FakeBackend implements SessionBackend {
   Future<BridgeGitOutcome> createBranch(String name) async {
     calls.add('create $name');
     return outcome;
+  }
+
+  BridgeCommitPlan commitPlanned = const BridgeCommitPlan(
+    snapshot: 'snapshot',
+    files: [],
+    running: [],
+  );
+  String? committedSnapshot;
+  List<String>? committedPaths;
+  String? committedMessage;
+  String? committedBranch;
+
+  @override
+  Future<BridgeCommitPlan> commitPlan() async {
+    calls.add('commit plan');
+    return planGate?.future ?? commitPlanned;
+  }
+
+  @override
+  Future<BridgeGitOutcome> commitFiles(
+    String snapshot,
+    List<String> paths,
+    String message,
+    String? branch,
+  ) async {
+    committedSnapshot = snapshot;
+    committedPaths = paths;
+    committedMessage = message;
+    committedBranch = branch;
+    await commitGate?.future;
+    return outcome.kind == BridgeGitOutcomeKind.done && outcome.commit == null
+        ? BridgeGitOutcome(
+            kind: BridgeGitOutcomeKind.done,
+            files: [],
+            running: [],
+            detail: '',
+            commit: BridgeCommit(
+              branch: branch ?? git?.branch ?? 'main',
+              subject: message.split('\n').first,
+              count: paths.length,
+            ),
+          )
+        : outcome;
+  }
+
+  @override
+  Future<BridgeGitOutcome> initializeGit() async {
+    calls.add('initialize git');
+    if (initializeGate case final gate?) return gate.future;
+    git = gitStatusOf();
+    inRepository = true;
+    return outcome;
+  }
+
+  String uncommittedRevision = 'uncommitted';
+
+  @override
+  Future<(String, List<BridgeFileChange>)> uncommittedChanges({
+    required bool hideWhitespace,
+  }) async {
+    calls.add(
+      'uncommitted changes${hideWhitespace ? ' without whitespace' : ''}',
+    );
+    return (
+      uncommittedRevision,
+      List<BridgeFileChange>.of(
+        hideWhitespace
+            ? changedWithoutWhitespace ?? changed ?? []
+            : changed ?? [],
+      ),
+    );
+  }
+
+  @override
+  Future<String> uncommittedPatch(
+    String path, {
+    required bool hideWhitespace,
+  }) async {
+    calls.add('uncommitted patch $path');
+    final patch = patches[path] ?? '';
+    await patchGate?.future;
+    return patch;
   }
 
   @override
@@ -656,6 +750,9 @@ BridgeGitStatus gitStatusOf({
   int ahead = 0,
   int behind = 0,
   int changed = 0,
+  String? defaultBranch,
+  bool merging = false,
+  List<String> conflicts = const [],
 }) => BridgeGitStatus(
   branch: branch,
   commit: '1a2b3c4',
@@ -664,6 +761,9 @@ BridgeGitStatus gitStatusOf({
   behind: behind,
   changed: changed,
   stash: null,
+  defaultBranch: defaultBranch,
+  merging: merging,
+  conflicts: conflicts,
 );
 
 BridgeBranch branchOf(
@@ -690,4 +790,27 @@ BridgeGitOutcome outcomeOf(
   files: files,
   running: running,
   detail: detail,
+);
+
+BridgeCommitFile commitFileOf(
+  String path, {
+  bool attributionAvailable = true,
+  List<int> turns = const [],
+  bool edited = false,
+  bool stagedPartly = false,
+  BridgeChangeStatus status = BridgeChangeStatus.modified,
+  int added = 0,
+  int removed = 0,
+}) => BridgeCommitFile(
+  change: BridgeFileChange(
+    path: path,
+    shown: path,
+    status: status,
+    added: added,
+    removed: removed,
+  ),
+  turns: Int64List.fromList(turns),
+  attributionAvailable: attributionAvailable,
+  edited: edited,
+  stagedPartly: stagedPartly,
 );

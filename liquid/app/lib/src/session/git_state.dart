@@ -30,6 +30,17 @@ class GitState {
   /// The branch and its counts; null outside Git or before the first read.
   final status = ValueNotifier<BridgeGitStatus?>(null);
 
+  /// Whether a status read has completed, distinguishing startup from outside Git.
+  final loaded = ValueNotifier(false);
+
+  /// Successful reads, including equal summaries whose contents or agent locks changed.
+  final refreshed = ValueNotifier(0);
+
+  /// Whether a Git write is queued or running in this window.
+  final writing = ValueNotifier(false);
+  int _writes = 0;
+  bool _initializing = false;
+
   /// Why Git could not be read, such as Git missing on the host.
   final problem = ValueNotifier<String?>(null);
 
@@ -43,6 +54,7 @@ class GitState {
   bool _watching = false;
   int _failures = 0;
   DateTime? _fetched;
+  DateTime? get fetched => _fetched;
   bool _fetching = false;
 
   /// Reads of the state left until the next fetch; the state is read every [fetchEvery]
@@ -130,12 +142,14 @@ class GitState {
       // A later read, such as one after a write, wins.
       if (read != _reads) return;
       problem.value = null;
-      status.value = now;
+      if (!_sameStatus(status.value, now)) status.value = now;
+      loaded.value = true;
       // The same stash on the same tree keeps its value, so the Diff tab keeps its place.
       if (stashed?.id != stash.value?.id ||
           stashed?.current != stash.value?.current) {
         stash.value = stashed;
       }
+      refreshed.value++;
       final after = now?.branch;
       if (before == null || after == null || after == before) return;
       if (!_writing) {
@@ -191,7 +205,7 @@ class GitState {
         fromBranch: fromBranch,
         replacingStash: replacingStash,
       ),
-      done: (now) {
+      done: (now, _) {
         final name = now?.branch ?? branch.shown;
         final changes = left?.changed ?? 0;
         final count = changes == 1 ? '1 change is' : '$changes changes are';
@@ -206,8 +220,77 @@ class GitState {
   Future<BridgeGitOutcome?> create(String name) => _write(
     'create the branch',
     () => _backend.createBranch(name),
-    done: (_) => 'Created and switched to $name.',
+    done: (_, _) => 'Created and switched to $name.',
   );
+
+  Future<BridgeCommitPlan>? _planRead;
+  bool _openingCommit = false;
+
+  /// Shares only an in-flight capture; each later read captures the checkout again.
+  Future<BridgeCommitPlan> commitPlan() => _planRead ??= _readPlan();
+
+  Future<BridgeCommitPlan> _readPlan() async {
+    try {
+      return await _backend.commitPlan();
+    } finally {
+      _planRead = null;
+    }
+  }
+
+  /// Opens at most one commit dialog, including its initial status and plan reads.
+  Future<void> openCommitPlan(
+    Future<void> Function(BridgeCommitPlan) show,
+  ) async {
+    if (_openingCommit) return;
+    _openingCommit = true;
+    try {
+      await refresh();
+      final plan = await commitPlan();
+      await show(plan);
+    } on Object catch (error) {
+      notify(BridgeLevel.error, 'Could not read uncommitted changes: $error');
+    } finally {
+      _openingCommit = false;
+    }
+  }
+
+  /// Commits the selected files only while they match the dialog's snapshot.
+  Future<BridgeGitOutcome?> commit(
+    List<String> paths,
+    String message, {
+    required String snapshot,
+    String? branch,
+  }) => _write(
+    'commit',
+    () => _backend.commitFiles(snapshot, paths, message, branch),
+    done: (now, outcome) {
+      final commit = outcome.commit!;
+      final text =
+          'Committed ${commit.count} ${commit.count == 1 ? 'file' : 'files'} on ${commit.branch}';
+      return commit.subject == null ? '$text.' : '$text: “${commit.subject}”';
+    },
+  );
+
+  /// Creates Git explicitly, once at a time, after status confirmed this folder is outside it.
+  Future<void> initialize() async {
+    if (_initializing ||
+        !loaded.value ||
+        status.value != null ||
+        writing.value) {
+      return;
+    }
+    _initializing = true;
+    try {
+      await _write(
+        'initialize Git',
+        _backend.initializeGit,
+        done: (_, _) =>
+            'Initialized Git. Checkpoints start with the next turn.',
+      );
+    } finally {
+      _initializing = false;
+    }
+  }
 
   /// Moves the stashed changes `stashed` back into the checkout.
   Future<void> restoreStash(BridgeStash stashed) async {
@@ -216,7 +299,7 @@ class GitState {
     await _write(
       'restore',
       () => _backend.restoreStash(stashed.id),
-      done: (_) =>
+      done: (_, _) =>
           'Restored $files stashed ${files == 1 ? 'file' : 'files'} on $branch',
     );
   }
@@ -225,7 +308,7 @@ class GitState {
   Future<void> discardStash(BridgeStash stashed) => _write(
     'discard',
     () => _backend.discardStash(stashed.id),
-    done: (_) => 'Discarded the stashed changes.',
+    done: (_, _) => 'Discarded the stashed changes.',
   );
 
   /// Runs the Git write `run`, reports how it ended, `action` naming it, and reads the state
@@ -233,8 +316,11 @@ class GitState {
   Future<BridgeGitOutcome?> _write(
     String action,
     Future<BridgeGitOutcome> Function() run, {
-    required String Function(BridgeGitStatus? now) done,
+    required String Function(BridgeGitStatus? now, BridgeGitOutcome outcome)
+    done,
   }) async {
+    _writes++;
+    writing.value = true;
     final previous = _pendingWrite;
     final finished = Completer<void>();
     _pendingWrite = finished.future;
@@ -251,14 +337,36 @@ class GitState {
         return null;
       }
       await _refreshAfterWrite();
+      final now = problem.value == null ? status.value : null;
       final files = outcome.files.join(', ');
       switch (outcome.kind) {
         case BridgeGitOutcomeKind.done:
-          notify(BridgeLevel.info, done(status.value));
+          final text = done(now, outcome);
+          notify(
+            outcome.detail.isEmpty ? BridgeLevel.info : BridgeLevel.warning,
+            outcome.detail.isEmpty ? text : '$text ${outcome.detail}',
+          );
         case BridgeGitOutcomeKind.hookFailed:
           notify(
             BridgeLevel.warning,
-            '${done(status.value)} A hook failed after: ${outcome.detail}',
+            '${done(now, outcome)} A hook failed after: ${outcome.detail}',
+          );
+        case BridgeGitOutcomeKind.mergeInProgress:
+          notify(BridgeLevel.warning, mergeHint(status.value));
+        case BridgeGitOutcomeKind.commitBranchFailed:
+          notify(
+            BridgeLevel.error,
+            'Created and switched to ${outcome.commit!.branch}; nothing was committed. ${outcome.detail}',
+          );
+        case BridgeGitOutcomeKind.commitFailed:
+          notify(
+            BridgeLevel.error,
+            'Could not commit: nothing was committed. ${outcome.detail}',
+          );
+        case BridgeGitOutcomeKind.hookChanged:
+          notify(
+            BridgeLevel.warning,
+            '${done(now, outcome)} A hook also changed $files, which ${outcome.files.length == 1 ? 'stays' : 'stay'} uncommitted.',
           );
         case BridgeGitOutcomeKind.agentRunning:
           notify(
@@ -306,6 +414,7 @@ class GitState {
       return outcome;
     } finally {
       _writing = false;
+      writing.value = --_writes > 0;
       _arrived = null;
       finished.complete();
     }
@@ -360,3 +469,33 @@ String? branchNameProblem(String name) {
   }
   return null;
 }
+
+/// Why the current merge prevents an explicit commit.
+String mergeHint(BridgeGitStatus? status) {
+  final conflicts = status?.conflicts ?? const <String>[];
+  if (conflicts.isEmpty) {
+    return 'A merge is in progress. Finish it in a terminal; Liquid commits no merges.';
+  }
+  return '${conflicts.length} ${conflicts.length == 1 ? 'file has' : 'files have'} conflicts: ${conflicts.join(', ')}. Resolve them in an editor or a terminal; Liquid resolves no conflicts.';
+}
+
+/// How to commit while HEAD names a commit rather than a branch.
+const detachedCommitHint =
+    'Detached HEAD: create a branch before committing or pushing.';
+
+/// Generated bridge lists compare by identity; compare only status values before publishing.
+bool _sameStatus(BridgeGitStatus? a, BridgeGitStatus? b) =>
+    identical(a, b) ||
+    (a != null &&
+        b != null &&
+        a.branch == b.branch &&
+        a.commit == b.commit &&
+        a.upstream == b.upstream &&
+        a.ahead == b.ahead &&
+        a.behind == b.behind &&
+        a.changed == b.changed &&
+        a.defaultBranch == b.defaultBranch &&
+        a.merging == b.merging &&
+        listEquals(a.conflicts, b.conflicts) &&
+        a.stash?.id == b.stash?.id &&
+        a.stash?.current == b.stash?.current);

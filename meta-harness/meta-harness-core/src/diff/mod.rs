@@ -20,11 +20,14 @@ use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 
 mod branches;
+mod commit;
 mod process;
 mod revert;
 mod stash;
 
 pub use branches::{Branch, BranchTarget, Changes, GitStatus};
+pub use commit::Commit;
+
 pub use stash::Stash;
 #[cfg(test)]
 pub(crate) use stash::{before_drop, before_stash_identity};
@@ -32,6 +35,11 @@ pub(crate) use stash::{before_drop, before_stash_identity};
 use process::{Git, git, git_command, git_path, git_path_output, git_ref_output, unreadable};
 #[cfg(test)]
 pub(crate) use revert::holds_repository;
+
+/// Creates the repository only for the explicit Initialize Git action.
+pub(crate) async fn initialize(dir: &Path) -> Result<(), DiffError> {
+    process::user_git(dir, &["init"]).await.map(drop)
+}
 
 /// Largest Git output read for one file list or patch; longer output is cut off.
 const MAX_OUTPUT_BYTES: u64 = 4 * 1024 * 1024;
@@ -46,7 +54,7 @@ const CHECKPOINT_EMAIL: &str = "checkpoints@watershed.invalid";
 
 /// A project state captured as a Git tree in the project's object database.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Snapshot(String);
+pub struct Snapshot(pub(crate) String);
 
 /// How a file changed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -145,6 +153,17 @@ pub enum DiffError {
     /// The remote's fetch refspec writes outside its remote-tracking branches, so Liquid does
     /// not fetch it in the background.
     FetchOutsideRemotes(String),
+    /// Git refused the commit; nothing was committed.
+    CommitFailed(String),
+    /// A branch was created and switched to, but its commit failed.
+    CommitOnBranchFailed {
+        /// The branch now checked out.
+        branch: String,
+        /// The failure after creating it.
+        error: Box<DiffError>,
+    },
+    /// Explicit commits do not finish merges.
+    MergeInProgress,
 }
 
 impl fmt::Display for DiffError {
@@ -198,6 +217,11 @@ impl fmt::Display for DiffError {
                 if *count == 1 { "" } else { "s" }
             ),
             Self::HookFailed(output) => write!(f, "Git switched, but a hook failed: {output}"),
+            Self::CommitOnBranchFailed { branch, error } => {
+                write!(f, "committing on {branch} failed: {error}")
+            }
+            Self::MergeInProgress => f.write_str("A merge is in progress."),
+            Self::CommitFailed(output) => f.write_str(output),
             Self::FetchOutsideRemotes(spec) => write!(
                 f,
                 "the remote's fetch refspec {spec} writes outside its remote-tracking branches, \
