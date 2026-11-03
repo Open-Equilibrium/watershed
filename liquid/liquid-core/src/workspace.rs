@@ -7,6 +7,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use automerge::transaction::{CommitOptions, Transactable};
 use automerge::{ActorId, AutoCommit, ObjType, ROOT, ReadDoc};
 
+use crate::database;
 use crate::history::Header;
 use crate::id::random_bytes;
 use crate::model::{
@@ -41,6 +42,8 @@ pub(crate) struct Loaded {
     chunks: usize,
     /// A Page document's View order, read once it is first needed.
     order: Option<Order>,
+    /// Its Database Blocks' rows, each read once it is first needed.
+    databases: HashMap<BlockId, database::Index>,
 }
 
 /// What a mutation wrote before its changes are committed.
@@ -180,7 +183,7 @@ impl<S: Store> Workspace<S> {
     /// How a live Text Block reads, from the document of its home `page`.
     pub fn style(&mut self, page: &PageId, block: &BlockId) -> Result<Option<TextStyle>, Error> {
         let doc = self.doc(&Document::Page(page.clone()))?;
-        Ok(model::live(doc, BLOCKS, block.as_str())
+        Ok(text_block(doc, block)
             .map(|entry| model::style(model::string(doc, &entry, STYLE).as_deref())))
     }
 
@@ -192,12 +195,33 @@ impl<S: Store> Workspace<S> {
         ))
     }
 
+    /// A live Database Block's name and fields, from the document of its home `page`; none
+    /// if `block` is no live Database Block.
+    pub fn database(
+        &mut self,
+        page: &PageId,
+        block: &BlockId,
+    ) -> Result<Option<database::Database>, Error> {
+        database::read(self.doc(&Document::Page(page.clone()))?, block)
+    }
+
+    /// A window of a Database Block's rows, filtered and sorted as `query` asks.
+    pub fn rows(
+        &mut self,
+        page: &PageId,
+        block: &BlockId,
+        query: &database::RowQuery,
+    ) -> Result<database::Rows, Error> {
+        let (doc, index) = self.database_index(page, block)?;
+        database::rows(doc, index, block, query)
+    }
+
     /// Whether a Page's document is in memory.
     pub fn is_loaded(&self, page: &PageId) -> bool {
         self.docs.contains_key(&Document::Page(page.clone()))
     }
 
-    /// Releases a Page's document and View order from memory; the next read loads them
+    /// Releases a Page's document, View order and Database row indexes from memory; the next read loads them
     /// again from the store. A Page holds no uncommitted writes between requests.
     pub fn close_page(&mut self, page: &PageId) {
         self.docs.remove(&Document::Page(page.clone()));
@@ -221,6 +245,23 @@ impl<S: Store> Workspace<S> {
         Ok((&mut loaded.doc, order))
     }
 
+    /// A Page document with the row index of one of its Database Blocks.
+    fn database_index(
+        &mut self,
+        page: &PageId,
+        block: &BlockId,
+    ) -> Result<(&mut AutoCommit, &mut database::Index), Error> {
+        let document = Document::Page(page.clone());
+        self.doc(&document)?;
+        let loaded = self.docs.get_mut(&document).expect("loaded above");
+        if !loaded.databases.contains_key(block) {
+            let index = database::Index::read(&loaded.doc, block)?;
+            loaded.databases.insert(block.clone(), index);
+        }
+        let index = loaded.databases.get_mut(block).expect("read above");
+        Ok((&mut loaded.doc, index))
+    }
+
     /// A document, loaded from the store on first use.
     fn doc(&mut self, document: &Document) -> Result<&mut AutoCommit, Error> {
         if !self.docs.contains_key(document) {
@@ -233,6 +274,7 @@ impl<S: Store> Workspace<S> {
                 doc,
                 chunks: chunks.len(),
                 order: None,
+                databases: HashMap::new(),
             };
             self.docs.insert(document.clone(), loaded);
         }
@@ -397,7 +439,7 @@ impl<S: Store> Workspace<S> {
             Mutation::SetTextStyle { page, block, style } => {
                 let name = model::style_name(*style)?;
                 let (doc, _) = self.page(page)?;
-                let entry = model::live(doc, BLOCKS, block.as_str()).ok_or(Error::NotFound)?;
+                let entry = text_block(doc, block).ok_or(Error::NotFound)?;
                 doc.put(&entry, STYLE, name)?;
                 Ok(Written::new(
                     Document::Page(page.clone()),
@@ -441,6 +483,81 @@ impl<S: Store> Workspace<S> {
                     Changed::Block(page.clone(), block.clone()),
                 ))
             }
+            Mutation::AddDatabaseBlock { page, after, name } => {
+                let (doc, order) = self.page(page)?;
+                let block = BlockId::new()?;
+                database::create(doc, &block, name)?;
+                let view = add_view(doc, order, after.as_ref(), &block)?;
+                let mut written =
+                    Written::new(Document::Page(page.clone()), Changed::Views(page.clone()));
+                written.created = Some(Created::Block { block, view });
+                Ok(written)
+            }
+            Mutation::RenameDatabase { page, block, name } => {
+                database::rename(self.doc(&Document::Page(page.clone()))?, block, name)?;
+                Ok(database_changed(page, block, None))
+            }
+            Mutation::AddField {
+                page,
+                block,
+                after,
+                name,
+                kind,
+            } => {
+                let doc = self.doc(&Document::Page(page.clone()))?;
+                let field = database::add_field(doc, block, after.as_ref(), name, *kind)?;
+                Ok(database_changed(page, block, Some(Created::Field(field))))
+            }
+            Mutation::RenameField {
+                page,
+                block,
+                field,
+                name,
+            } => {
+                database::rename_field(
+                    self.doc(&Document::Page(page.clone()))?,
+                    block,
+                    field,
+                    name,
+                )?;
+                Ok(database_changed(page, block, None))
+            }
+            Mutation::RemoveField { page, block, field } => {
+                database::remove_field(self.doc(&Document::Page(page.clone()))?, block, field)?;
+                Ok(database_changed(page, block, None))
+            }
+            Mutation::AddOption {
+                page,
+                block,
+                field,
+                name,
+                color,
+            } => {
+                let doc = self.doc(&Document::Page(page.clone()))?;
+                let option = database::add_option(doc, block, field, name, *color)?;
+                Ok(database_changed(page, block, Some(Created::Option(option))))
+            }
+            Mutation::AddRow { page, block, after } => {
+                let (doc, index) = self.database_index(page, block)?;
+                let row = database::add_row(doc, index, block, after.as_ref())?;
+                Ok(database_changed(page, block, Some(Created::Row(row))))
+            }
+            Mutation::RemoveRow { page, block, row } => {
+                let (doc, index) = self.database_index(page, block)?;
+                database::remove_row(doc, index, block, row)?;
+                Ok(database_changed(page, block, None))
+            }
+            Mutation::SetCell {
+                page,
+                block,
+                row,
+                field,
+                value,
+            } => {
+                let (doc, index) = self.database_index(page, block)?;
+                database::set_cell(doc, index, block, row, field, value)?;
+                Ok(database_changed(page, block, None))
+            }
             Mutation::RemoveView { page, view } => {
                 let (doc, order) = self.page(page)?;
                 let entry = model::live(doc, VIEWS, view.as_str()).ok_or(Error::NotFound)?;
@@ -482,6 +599,7 @@ impl<S: Store> Workspace<S> {
                 doc,
                 chunks: 0,
                 order: None,
+                databases: HashMap::new(),
             };
             self.docs.insert(document, loaded);
         }
@@ -535,8 +653,7 @@ fn add_text_block(
     style: TextStyle,
 ) -> Result<(BlockId, ViewId), Error> {
     let style = model::style_name(style)?;
-    let sort = order.key_after(after)?;
-    let (block, view) = (BlockId::new()?, ViewId::new()?);
+    let block = BlockId::new()?;
     let entry = model::insert(
         doc,
         BLOCKS,
@@ -545,6 +662,29 @@ fn add_text_block(
     )?;
     let content = doc.put_object(&entry, TEXT, ObjType::Text)?;
     doc.splice_text(&content, 0, 0, text)?;
+    let view = add_view(doc, order, after, &block)?;
+    Ok((block, view))
+}
+
+/// What a write to a Database Block changed: only that Block.
+fn database_changed(page: &PageId, block: &BlockId, created: Option<Created>) -> Written {
+    let mut written = Written::new(
+        Document::Page(page.clone()),
+        Changed::Block(page.clone(), block.clone()),
+    );
+    written.created = created;
+    written
+}
+
+/// Adds a View of `block` after `after` or first.
+fn add_view(
+    doc: &mut AutoCommit,
+    order: &mut Order,
+    after: Option<&ViewId>,
+    block: &BlockId,
+) -> Result<ViewId, Error> {
+    let sort = order.key_after(after)?;
+    let view = ViewId::new()?;
     model::insert(
         doc,
         VIEWS,
@@ -564,7 +704,13 @@ fn add_text_block(
         boundary: false,
     };
     order.insert(sort, placed);
-    Ok((block, view))
+    Ok(view)
+}
+
+/// A live Text Block's entry; none for a Block of another type.
+fn text_block(doc: &AutoCommit, block: &BlockId) -> Option<automerge::ObjId> {
+    let entry = model::live(doc, BLOCKS, block.as_str())?;
+    (model::string(doc, &entry, KIND).as_deref() == Some("text")).then_some(entry)
 }
 
 /// A live Text Block's text object.

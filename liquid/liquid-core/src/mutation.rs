@@ -3,7 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{ActionId, AreaId, BlockId, PageId, PersonId, ViewId};
+use crate::{ActionId, AreaId, BlockId, FieldId, OptionId, PageId, PersonId, RowId, ViewId};
 
 /// Who makes a request.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -40,6 +40,55 @@ pub enum TextStyle {
     /// A quote.
     Quote,
 }
+
+/// The kind of a Database field, which decides the values its cells take.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FieldKind {
+    /// Plain text.
+    Text,
+    /// A finite number.
+    Number,
+    /// One of the field's options.
+    Select,
+    /// A day, `YYYY-MM-DD`; times follow once their zones are decided.
+    Date,
+    /// Ticked or not.
+    Checkbox,
+}
+
+/// One cell's value. A cell of a field takes only values of the field's kind.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum Cell {
+    /// Nothing.
+    Empty,
+    /// Text.
+    Text(String),
+    /// A finite number.
+    Number(f64),
+    /// An option of the field.
+    Select(OptionId),
+    /// A day, `YYYY-MM-DD`.
+    Date(String),
+    /// Ticked or not.
+    Checkbox(bool),
+}
+
+// Numbers compare by their bits, so every Cell equals itself, also one holding NaN, which
+// the pipeline refuses.
+impl PartialEq for Cell {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Empty, Self::Empty) => true,
+            (Self::Text(a), Self::Text(b)) | (Self::Date(a), Self::Date(b)) => a == b,
+            (Self::Number(a), Self::Number(b)) => a.to_bits() == b.to_bits(),
+            (Self::Select(a), Self::Select(b)) => a == b,
+            (Self::Checkbox(a), Self::Checkbox(b)) => a == b,
+            _ => false,
+        }
+    }
+}
+
+impl Eq for Cell {}
 
 /// One write to the Workspace. Text positions count UTF-16 code units, as Dart and
 /// JavaScript do. A Page-scoped mutation names the Page whose document holds its target:
@@ -140,6 +189,102 @@ pub enum Mutation {
         /// Whether a Section starts here.
         boundary: bool,
     },
+    /// Adds a Database Block with one text field, "Name", and a View on `page`, at its
+    /// start or after the View `after`.
+    AddDatabaseBlock {
+        /// The Page.
+        page: PageId,
+        /// The View it follows.
+        after: Option<ViewId>,
+        /// Its name.
+        name: String,
+    },
+    /// Renames a Database Block.
+    RenameDatabase {
+        /// The Block's home Page.
+        page: PageId,
+        /// The Database Block.
+        block: BlockId,
+        /// The new name.
+        name: String,
+    },
+    /// Adds a field first or after the field `after`.
+    AddField {
+        /// The Block's home Page.
+        page: PageId,
+        /// The Database Block.
+        block: BlockId,
+        /// The field it follows.
+        after: Option<FieldId>,
+        /// Its name.
+        name: String,
+        /// Its kind.
+        kind: FieldKind,
+    },
+    /// Renames a field.
+    RenameField {
+        /// The Block's home Page.
+        page: PageId,
+        /// The Database Block.
+        block: BlockId,
+        /// The field.
+        field: FieldId,
+        /// The new name.
+        name: String,
+    },
+    /// Removes a field; its cells stay in the document but read as nothing.
+    RemoveField {
+        /// The Block's home Page.
+        page: PageId,
+        /// The Database Block.
+        block: BlockId,
+        /// The field.
+        field: FieldId,
+    },
+    /// Adds an option to a select field, after its others.
+    AddOption {
+        /// The Block's home Page.
+        page: PageId,
+        /// The Database Block.
+        block: BlockId,
+        /// The select field.
+        field: FieldId,
+        /// Its name.
+        name: String,
+        /// Its color, an index into the tag colors that the Table View's mockups define.
+        color: u8,
+    },
+    /// Adds an empty row first or after the row `after`.
+    AddRow {
+        /// The Block's home Page.
+        page: PageId,
+        /// The Database Block.
+        block: BlockId,
+        /// The row it follows.
+        after: Option<RowId>,
+    },
+    /// Removes a row.
+    RemoveRow {
+        /// The Block's home Page.
+        page: PageId,
+        /// The Database Block.
+        block: BlockId,
+        /// The row.
+        row: RowId,
+    },
+    /// Sets one cell; [`Cell::Empty`] clears it.
+    SetCell {
+        /// The Block's home Page.
+        page: PageId,
+        /// The Database Block.
+        block: BlockId,
+        /// The row.
+        row: RowId,
+        /// The field.
+        field: FieldId,
+        /// The value, of the field's kind.
+        value: Cell,
+    },
 }
 
 /// A write request: the mutation and who asks for it through which surface.
@@ -167,6 +312,12 @@ pub enum Created {
         /// Its View.
         view: ViewId,
     },
+    /// A new Database field.
+    Field(FieldId),
+    /// A new Database row.
+    Row(RowId),
+    /// A new option of a select field.
+    Option(OptionId),
 }
 
 /// A resource whose readers must refresh, so each subscribes only to what it shows.
@@ -207,6 +358,8 @@ pub enum Error {
     /// A Text Block that starts a Section joins no Text Block above it; ⌫ there removes
     /// the boundary instead.
     SectionBoundary,
+    /// A cell's value is not of its field's kind, or is no valid value of it.
+    WrongKind,
     /// The system's random source failed, so no new identity could be made.
     Random,
     /// The CRDT library failed; the message is its own.

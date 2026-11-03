@@ -3,8 +3,9 @@
 //! ```text
 //! Workspace document  { owner, areas: { <area>: { name, sort, deleted } } }
 //! area document       { pages: { <page>: { title, parent?, sort, deleted } } }
-//! Page document       { blocks: { <block>: { kind, text, deleted } },
-//!                       views: { <view>: { block, sort, deleted } } }
+//! Page document       { blocks: { <block>: { kind, text, style, deleted } },
+//!                       (a Database Block's entry is in `database.rs`)
+//!                       views: { <view>: { block, sort, boundary, deleted } } }
 //! ```
 
 use std::collections::HashMap;
@@ -91,7 +92,18 @@ pub(crate) fn insert(
     id: &str,
     fields: &[(&str, &str)],
 ) -> Result<ObjId, Error> {
-    let entry = doc.put_object(top(doc, map)?, id, ObjType::Map)?;
+    let map = top(doc, map)?;
+    insert_in(doc, &map, id, fields)
+}
+
+/// Adds `id` to the map `map` as a live object.
+pub(crate) fn insert_in(
+    doc: &mut AutoCommit,
+    map: &ObjId,
+    id: &str,
+    fields: &[(&str, &str)],
+) -> Result<ObjId, Error> {
+    let entry = doc.put_object(map, id, ObjType::Map)?;
     for (key, value) in fields {
         doc.put(&entry, *key, *value)?;
     }
@@ -120,7 +132,7 @@ pub(crate) fn string(doc: &AutoCommit, obj: &ObjId, key: &str) -> Option<String>
     }
 }
 
-fn deleted(doc: &AutoCommit, obj: &ObjId) -> bool {
+pub(crate) fn deleted(doc: &AutoCommit, obj: &ObjId) -> bool {
     !matches!(
         doc.get(obj, DELETED),
         Ok(Some((Value::Scalar(value), _))) if value.as_ref() == &ScalarValue::Boolean(false)
@@ -129,7 +141,12 @@ fn deleted(doc: &AutoCommit, obj: &ObjId) -> bool {
 
 /// The live object `id` in the top-level map `map`.
 pub(crate) fn live(doc: &AutoCommit, map: &str, id: &str) -> Option<ObjId> {
-    let obj = child(doc, &child(doc, &ROOT, map)?, id)?;
+    live_in(doc, &child(doc, &ROOT, map)?, id)
+}
+
+/// The live object `id` in the map `map`.
+pub(crate) fn live_in(doc: &AutoCommit, map: &ObjId, id: &str) -> Option<ObjId> {
+    let obj = child(doc, map, id)?;
     (!deleted(doc, &obj)).then_some(obj)
 }
 
@@ -151,11 +168,16 @@ impl Entry {
 
 /// The live objects in the top-level map `map`, ordered by sort key, then identity.
 pub(crate) fn sorted(doc: &AutoCommit, map: &str) -> Vec<Entry> {
-    let Some(top) = child(doc, &ROOT, map) else {
-        return Vec::new();
-    };
+    match child(doc, &ROOT, map) {
+        Some(top) => sorted_in(doc, &top),
+        None => Vec::new(),
+    }
+}
+
+/// The live objects in the map `map`, ordered by sort key, then identity.
+pub(crate) fn sorted_in(doc: &AutoCommit, map: &ObjId) -> Vec<Entry> {
     let mut entries: Vec<Entry> = doc
-        .map_range(&top, ..)
+        .map_range(map, ..)
         .filter(|item| matches!(item.value, ValueRef::Object(ObjType::Map)))
         .filter_map(|item| {
             let obj = item.id();

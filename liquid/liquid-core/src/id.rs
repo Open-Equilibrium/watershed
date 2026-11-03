@@ -64,6 +64,12 @@ ids! {
     ViewId,
     /// One recorded Action.
     ActionId,
+    /// A field of a Database Block.
+    FieldId,
+    /// A row of a Database Block.
+    RowId,
+    /// One option of a select field.
+    OptionId,
 }
 
 /// A person, as the account that signs in names them.

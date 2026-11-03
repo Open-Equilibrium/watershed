@@ -198,3 +198,54 @@ fn one_session_at_a_time_holds_the_replica() {
     drop(first);
     assert!(Sqlite::open(&scratch.db(), &KEY).is_ok());
 }
+
+#[test]
+fn history_keeps_a_number_cell_exactly() {
+    let scratch = Scratch::new("number");
+    let (page, _) = lisbon(&scratch.db());
+    let mut workspace = Workspace::open(Sqlite::open(&scratch.db(), &KEY).unwrap()).unwrap();
+    let add = Mutation::AddDatabaseBlock {
+        page: page.clone(),
+        after: None,
+        name: "Expenses".into(),
+    };
+    let Some(Created::Block { block, .. }) = apply(&mut workspace, add) else {
+        panic!("a Database")
+    };
+    let field = workspace.database(&page, &block).unwrap().unwrap().fields[0]
+        .id
+        .clone();
+    let amount = Mutation::AddField {
+        page: page.clone(),
+        block: block.clone(),
+        after: Some(field),
+        name: "Amount".into(),
+        kind: liquid_core::FieldKind::Number,
+    };
+    let Some(Created::Field(amount)) = apply(&mut workspace, amount) else {
+        panic!("a field")
+    };
+    let row = Mutation::AddRow {
+        page: page.clone(),
+        block: block.clone(),
+        after: None,
+    };
+    let Some(Created::Row(row)) = apply(&mut workspace, row) else {
+        panic!("a row")
+    };
+    // A value serde_json reads back one bit off without its exact float parsing.
+    let value = 51.248178375505404;
+    let set = Mutation::SetCell {
+        page,
+        block,
+        row,
+        field: amount,
+        value: liquid_core::Cell::Number(value),
+    };
+    apply(&mut workspace, set.clone());
+    drop(workspace);
+
+    let mut store = Sqlite::open(&scratch.db(), &KEY).unwrap();
+    let newest = store.history(None, 1).unwrap().remove(0);
+    assert_eq!(newest.operation, Operation::Mutation(set));
+}
