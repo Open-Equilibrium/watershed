@@ -351,6 +351,7 @@ fn message(error: Error) -> String {
         Error::NoChange => "the write changes nothing".into(),
         Error::SectionBoundary => "the Text Block starts a Section".into(),
         Error::WrongKind => "the value is not of its field's kind".into(),
+        Error::TooMany => "the Database holds the most fields or options it may".into(),
         Error::Random => "the random source failed".into(),
         Error::Document(message) | Error::Storage(message) => message,
     }

@@ -25,6 +25,12 @@ const CELLS: &str = "cells";
 const OPTIONS: &str = "options";
 const COLOR: &str = "color";
 
+/// The most live fields a Database holds, so its fields cross the bridge in one bounded
+/// answer (client architecture rule 3, ADR-0243).
+pub const MAX_FIELDS: usize = 500;
+/// The most live options a select field holds, for the same reason.
+pub const MAX_OPTIONS: usize = 500;
+
 /// A Database Block's name and fields.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Database {
@@ -273,6 +279,9 @@ fn add_field_to(
     kind: FieldKind,
 ) -> Result<(), Error> {
     let siblings = model::sorted_in(doc, fields);
+    if siblings.len() >= MAX_FIELDS {
+        return Err(Error::TooMany);
+    }
     let sort = model::sort_after(&siblings, after.map(FieldId::as_str))?;
     let entry = model::insert_in(
         doc,
@@ -342,6 +351,9 @@ pub(crate) fn add_option(
     }
     let options = map(doc, &entry, OPTIONS)?;
     let siblings = model::sorted_in(doc, &options);
+    if siblings.len() >= MAX_OPTIONS {
+        return Err(Error::TooMany);
+    }
     let last = siblings.last().map(|option| option.id.clone());
     let sort = model::sort_after(&siblings, last.as_deref())?;
     let option = OptionId::new()?;

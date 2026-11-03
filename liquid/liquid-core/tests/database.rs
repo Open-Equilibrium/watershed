@@ -3,8 +3,8 @@
 //! rule 13).
 
 use liquid_core::{
-    Actor, Applied, BlockId, Cell, Created, Error, FieldId, FieldKind, Match, MemoryStore,
-    Mutation, Origin, PageId, PersonId, Request, RowId, RowQuery, Sort,
+    Actor, Applied, BlockId, Cell, Created, Error, FieldId, FieldKind, MAX_FIELDS, MAX_OPTIONS,
+    Match, MemoryStore, Mutation, Origin, PageId, PersonId, Request, RowId, RowQuery, Sort,
 };
 
 type Workspace = liquid_core::Workspace<MemoryStore>;
@@ -690,4 +690,54 @@ fn every_cell_equals_itself() {
     let nan = Cell::Number(f64::NAN);
     assert_eq!(nan, nan.clone());
     assert_ne!(Cell::Number(1.0), Cell::Text("1".into()));
+}
+
+#[test]
+fn a_database_holds_a_bounded_number_of_fields_and_options() {
+    let (mut workspace, page, block) = expenses();
+    // "Name" is the first.
+    for number in 1..MAX_FIELDS {
+        let add = Mutation::AddField {
+            page: page.clone(),
+            block: block.clone(),
+            after: None,
+            name: format!("Field {number}"),
+            kind: FieldKind::Select,
+        };
+        apply(&mut workspace, add).unwrap();
+    }
+    let one_more = Mutation::AddField {
+        page: page.clone(),
+        block: block.clone(),
+        after: None,
+        name: "One more".into(),
+        kind: FieldKind::Text,
+    };
+    assert_eq!(apply(&mut workspace, one_more.clone()), Err(Error::TooMany));
+    let fields = workspace.database(&page, &block).unwrap().unwrap().fields;
+    assert_eq!(fields.len(), MAX_FIELDS);
+    // A removed field frees its place.
+    let remove = Mutation::RemoveField {
+        page: page.clone(),
+        block: block.clone(),
+        field: fields[0].id.clone(),
+    };
+    apply(&mut workspace, remove).unwrap();
+    apply(&mut workspace, one_more).unwrap();
+
+    let select = fields[1].id.clone();
+    let option = |number: usize| Mutation::AddOption {
+        page: page.clone(),
+        block: block.clone(),
+        field: select.clone(),
+        name: format!("Option {number}"),
+        color: 0,
+    };
+    for number in 0..MAX_OPTIONS {
+        apply(&mut workspace, option(number)).unwrap();
+    }
+    assert_eq!(
+        apply(&mut workspace, option(MAX_OPTIONS)),
+        Err(Error::TooMany)
+    );
 }
