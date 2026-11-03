@@ -151,7 +151,7 @@ fn a_fork_targets_its_parent_and_creates_only_the_reviewed_pull_request() {
                 "title": "Return 429 with Retry-After",
                 "body": "Edited.",
                 "head": "bw:feature/retry-after",
-                "head_repo": "api",
+                "head_repo": "bw/api",
                 "base": "develop",
                 "draft": true,
             })

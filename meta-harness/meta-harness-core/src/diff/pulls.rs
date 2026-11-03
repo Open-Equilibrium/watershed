@@ -456,9 +456,9 @@ impl WorkingTree {
             "base": draft.base,
             "draft": draft.draft,
         });
-        // GitHub needs the head's repository when one organization owns both.
+        // GitHub needs the head's `owner/name` when one organization owns both.
         if !draft.target.eq_ignore_ascii_case(&draft.head_repository) {
-            request["head_repo"] = name_of(&draft.head_repository).into();
+            request["head_repo"] = draft.head_repository.as_str().into();
         }
         let created = self
             .gh_api(
@@ -1200,10 +1200,6 @@ fn qualified(owner: &str, branch: &str) -> String {
 
 fn owner_of(full: &str) -> &str {
     full.split_once('/').map_or("", |(owner, _)| owner)
-}
-
-fn name_of(full: &str) -> &str {
-    full.split_once('/').map_or(full, |(_, name)| name)
 }
 
 fn text(value: &Value) -> String {
