@@ -172,6 +172,24 @@ fn pull_fast_forwards_and_refuses_divergence_and_overwriting_changes() {
 }
 
 #[test]
+fn pull_advances_head_despite_configured_squash_mode() {
+    run(async {
+        let remote = Remote::new("pull-configured-squash");
+        remote
+            .repo
+            .git(&["config", "branch.main.mergeOptions", "--squash"]);
+        remote.advance();
+        let pulled = Checkpoints::new(remote.repo.path()).pull().await.unwrap();
+        assert_eq!(pulled.behind, 1);
+        assert_eq!(
+            remote.repo.git(&["rev-parse", "HEAD"]),
+            remote.bare.git(&["rev-parse", "main"])
+        );
+        assert!(remote.repo.git(&["status", "--porcelain"]).is_empty());
+    });
+}
+
+#[test]
 fn pull_refuses_a_running_agent_before_fetching() {
     run(async {
         let remote = Remote::new("pull-agent");

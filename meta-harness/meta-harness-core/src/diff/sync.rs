@@ -356,7 +356,12 @@ impl WorkingTree {
         if transfer.ahead > 0 && transfer.behind > 0 {
             return Err(DiffError::Diverged(Box::new(transfer), String::new()));
         }
-        match user_git(&self.root, &["merge", "--ff-only", "--", "@{upstream}"]).await {
+        match user_git(
+            &self.root,
+            &["merge", "--ff-only", "--no-squash", "--", "@{upstream}"],
+        )
+        .await
+        {
             Ok(_) => Ok(transfer),
             Err(DiffError::Git(detail)) if detail.contains("would be overwritten by merge") => {
                 Err(DiffError::WouldOverwrite(listed_files(&detail)))
