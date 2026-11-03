@@ -42,6 +42,8 @@ pub(crate) struct Loaded {
     chunks: usize,
     /// A Page document's View order, read once it is first needed.
     order: Option<Order>,
+    /// Its Database Blocks' rows, each read once it is first needed.
+    databases: HashMap<BlockId, database::Index>,
 }
 
 /// What a mutation wrote before its changes are committed.
@@ -210,7 +212,8 @@ impl<S: Store> Workspace<S> {
         block: &BlockId,
         query: &database::RowQuery,
     ) -> Result<database::Rows, Error> {
-        database::rows(self.doc(&Document::Page(page.clone()))?, block, query)
+        let (doc, index) = self.database_index(page, block)?;
+        database::rows(doc, index, block, query)
     }
 
     /// Whether a Page's document is in memory.
@@ -242,6 +245,23 @@ impl<S: Store> Workspace<S> {
         Ok((&mut loaded.doc, order))
     }
 
+    /// A Page document with the row index of one of its Database Blocks.
+    fn database_index(
+        &mut self,
+        page: &PageId,
+        block: &BlockId,
+    ) -> Result<(&mut AutoCommit, &mut database::Index), Error> {
+        let document = Document::Page(page.clone());
+        self.doc(&document)?;
+        let loaded = self.docs.get_mut(&document).expect("loaded above");
+        if !loaded.databases.contains_key(block) {
+            let index = database::Index::read(&loaded.doc, block)?;
+            loaded.databases.insert(block.clone(), index);
+        }
+        let index = loaded.databases.get_mut(block).expect("read above");
+        Ok((&mut loaded.doc, index))
+    }
+
     /// A document, loaded from the store on first use.
     fn doc(&mut self, document: &Document) -> Result<&mut AutoCommit, Error> {
         if !self.docs.contains_key(document) {
@@ -254,6 +274,7 @@ impl<S: Store> Workspace<S> {
                 doc,
                 chunks: chunks.len(),
                 order: None,
+                databases: HashMap::new(),
             };
             self.docs.insert(document.clone(), loaded);
         }
@@ -517,12 +538,13 @@ impl<S: Store> Workspace<S> {
                 Ok(database_changed(page, block, Some(Created::Option(option))))
             }
             Mutation::AddRow { page, block, after } => {
-                let doc = self.doc(&Document::Page(page.clone()))?;
-                let row = database::add_row(doc, block, after.as_ref())?;
+                let (doc, index) = self.database_index(page, block)?;
+                let row = database::add_row(doc, index, block, after.as_ref())?;
                 Ok(database_changed(page, block, Some(Created::Row(row))))
             }
             Mutation::RemoveRow { page, block, row } => {
-                database::remove_row(self.doc(&Document::Page(page.clone()))?, block, row)?;
+                let (doc, index) = self.database_index(page, block)?;
+                database::remove_row(doc, index, block, row)?;
                 Ok(database_changed(page, block, None))
             }
             Mutation::SetCell {
@@ -532,13 +554,8 @@ impl<S: Store> Workspace<S> {
                 field,
                 value,
             } => {
-                database::set_cell(
-                    self.doc(&Document::Page(page.clone()))?,
-                    block,
-                    row,
-                    field,
-                    value,
-                )?;
+                let (doc, index) = self.database_index(page, block)?;
+                database::set_cell(doc, index, block, row, field, value)?;
                 Ok(database_changed(page, block, None))
             }
             Mutation::RemoveView { page, view } => {
@@ -582,6 +599,7 @@ impl<S: Store> Workspace<S> {
                 doc,
                 chunks: 0,
                 order: None,
+                databases: HashMap::new(),
             };
             self.docs.insert(document, loaded);
         }

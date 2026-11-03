@@ -130,6 +130,84 @@ pub struct Rows {
     pub rows: Vec<Row>,
 }
 
+/// A Database Block's rows in their order with their cells, kept beside its loaded Page
+/// document, so that placing a row or reading a window never reads every row from the
+/// document (client architecture rules 3 and 13).
+pub(crate) struct Index {
+    rows: Vec<Indexed>,
+}
+
+struct Indexed {
+    sort: String,
+    id: RowId,
+    /// Values by field, typed by their field's kind.
+    cells: HashMap<String, Cell>,
+}
+
+impl Index {
+    /// The rows as the Database's document holds them.
+    pub(crate) fn read(doc: &AutoCommit, block: &BlockId) -> Result<Self, Error> {
+        let entry = entry(doc, block)?;
+        let fields = map(doc, &entry, FIELDS)?;
+        let kinds: HashMap<String, FieldKind> = model::sorted_in(doc, &fields)
+            .into_iter()
+            .filter_map(|field| Some((field.id.clone(), kind(field.get(KIND))?)))
+            .collect();
+        let rows_map = map(doc, &entry, ROWS)?;
+        let rows = model::sorted_in(doc, &rows_map)
+            .into_iter()
+            .map(|row| Indexed {
+                sort: row.get(SORT).unwrap_or_default().to_string(),
+                cells: cells(doc, &rows_map, &row.id, &kinds),
+                id: RowId::stored(&row.id),
+            })
+            .collect();
+        Ok(Self { rows })
+    }
+
+    fn position(&self, row: &RowId) -> Option<usize> {
+        self.rows.iter().position(|indexed| &indexed.id == row)
+    }
+
+    /// The sort key for a row placed after `after`, or first.
+    fn key_after(&self, after: Option<&RowId>) -> Result<String, Error> {
+        let index = match after {
+            None => 0,
+            Some(after) => self.position(after).ok_or(Error::NotFound)? + 1,
+        };
+        let key = |i: usize| self.rows.get(i).map(|row| row.sort.as_str());
+        Ok(crate::sort_key::between(
+            index.checked_sub(1).and_then(key),
+            key(index),
+        ))
+    }
+
+    fn insert(&mut self, sort: String, id: RowId) {
+        let index = self
+            .rows
+            .partition_point(|row| (&row.sort, &row.id) < (&sort, &id));
+        let cells = HashMap::new();
+        self.rows.insert(index, Indexed { sort, id, cells });
+    }
+
+    fn remove(&mut self, row: &RowId) {
+        if let Some(index) = self.position(row) {
+            self.rows.remove(index);
+        }
+    }
+
+    fn set(&mut self, row: &RowId, field: &FieldId, cell: &Cell) {
+        let Some(index) = self.position(row) else {
+            return;
+        };
+        let cells = &mut self.rows[index].cells;
+        match cell {
+            Cell::Empty => cells.remove(field.as_str()),
+            value => cells.insert(field.as_str().to_string(), value.clone()),
+        };
+    }
+}
+
 fn kind_name(kind: FieldKind) -> &'static str {
     match kind {
         FieldKind::Text => "text",
@@ -278,15 +356,16 @@ pub(crate) fn add_option(
 
 pub(crate) fn add_row(
     doc: &mut AutoCommit,
+    index: &mut Index,
     block: &BlockId,
     after: Option<&RowId>,
 ) -> Result<RowId, Error> {
     let rows = map(doc, &entry(doc, block)?, ROWS)?;
-    let siblings = model::sorted_in(doc, &rows);
-    let sort = model::sort_after(&siblings, after.map(RowId::as_str))?;
+    let sort = index.key_after(after)?;
     let row = RowId::new()?;
     let entry = model::insert_in(doc, &rows, row.as_str(), &[(SORT, &sort)])?;
     doc.put_object(&entry, CELLS, ObjType::Map)?;
+    index.insert(sort, row.clone());
     Ok(row)
 }
 
@@ -297,15 +376,19 @@ fn row(doc: &AutoCommit, block: &BlockId, row: &RowId) -> Result<ObjId, Error> {
 
 pub(crate) fn remove_row(
     doc: &mut AutoCommit,
+    index: &mut Index,
     block: &BlockId,
     row_id: &RowId,
 ) -> Result<(), Error> {
     let entry = row(doc, block, row_id)?;
-    model::mark_deleted(doc, &entry)
+    model::mark_deleted(doc, &entry)?;
+    index.remove(row_id);
+    Ok(())
 }
 
 pub(crate) fn set_cell(
     doc: &mut AutoCommit,
+    index: &mut Index,
     block: &BlockId,
     row_id: &RowId,
     field_id: &FieldId,
@@ -318,6 +401,7 @@ pub(crate) fn set_cell(
             if doc.get(&cells, field_id.as_str())?.is_some() {
                 doc.delete(&cells, field_id.as_str())?;
             }
+            index.set(row_id, field_id, value);
             return Ok(());
         }
         (FieldKind::Text, Cell::Text(text)) => ScalarValue::Str(text.as_str().into()),
@@ -335,7 +419,9 @@ pub(crate) fn set_cell(
         }
         _ => return Err(Error::WrongKind),
     };
-    Ok(doc.put(&cells, field_id.as_str(), scalar)?)
+    doc.put(&cells, field_id.as_str(), scalar)?;
+    index.set(row_id, field_id, value);
+    Ok(())
 }
 
 /// Whether `date` is a real day, `YYYY-MM-DD`, with a time `THH:MM` if wanted.
@@ -426,25 +512,24 @@ fn fields_entry(doc: &AutoCommit, entry: &ObjId, field: &str) -> Option<ObjId> {
     model::child(doc, &model::child(doc, entry, FIELDS)?, field)
 }
 
-/// The window `query` asks for, sorted and filtered here.
-pub(crate) fn rows(doc: &AutoCommit, block: &BlockId, query: &RowQuery) -> Result<Rows, Error> {
+/// The window `query` asks for, filtered and sorted here from the index.
+pub(crate) fn rows(
+    doc: &AutoCommit,
+    index: &Index,
+    block: &BlockId,
+    query: &RowQuery,
+) -> Result<Rows, Error> {
     let database = read(doc, block)?.ok_or(Error::NotFound)?;
-    let kinds: HashMap<String, FieldKind> = database
-        .fields
-        .iter()
-        .map(|field| (field.id.as_str().to_string(), field.kind))
-        .collect();
-    let rows_map = map(doc, &entry(doc, block)?, ROWS)?;
-    let mut rows: Vec<Row> = model::sorted_in(doc, &rows_map)
-        .into_iter()
-        .map(|entry| Row {
-            id: RowId::stored(&entry.id),
-            cells: cells(doc, &rows_map, &entry.id, &kinds),
-        })
-        .collect();
-    if let Some(filter) = &query.filter {
-        rows.retain(|row| matches(row.cell(&filter.field), &filter.matches));
-    }
+    let live: Vec<&FieldId> = database.fields.iter().map(|field| &field.id).collect();
+    let cell = |row, field| cell(&live, row, field);
+    let mut rows: Vec<&Indexed> = match &query.filter {
+        Some(filter) => index
+            .rows
+            .iter()
+            .filter(|row| matches(cell(row, &filter.field), &filter.matches))
+            .collect(),
+        None => index.rows.iter().collect(),
+    };
     if let Some(sort) = &query.sort {
         let positions: HashMap<&str, usize> = database
             .fields
@@ -454,7 +539,7 @@ pub(crate) fn rows(doc: &AutoCommit, block: &BlockId, query: &RowQuery) -> Resul
             .map(|(position, option)| (option.id.as_str(), position))
             .collect();
         // A stable sort keeps the rows' own order among equal cells.
-        rows.sort_by(|a, b| match (a.cell(&sort.field), b.cell(&sort.field)) {
+        rows.sort_by(|a, b| match (cell(a, &sort.field), cell(b, &sort.field)) {
             (None, None) => Ordering::Equal,
             (None, Some(_)) => Ordering::Greater,
             (Some(_), None) => Ordering::Less,
@@ -473,22 +558,40 @@ pub(crate) fn rows(doc: &AutoCommit, block: &BlockId, query: &RowQuery) -> Resul
         .into_iter()
         .skip(query.start)
         .take(query.limit)
+        .map(|row| {
+            let mut cells: Vec<(FieldId, Cell)> = live
+                .iter()
+                .filter_map(|field| Some(((*field).clone(), cell(row, field)?.clone())))
+                .collect();
+            cells.sort_by(|(a, _), (b, _)| a.cmp(b));
+            Row {
+                id: row.id.clone(),
+                cells,
+            }
+        })
         .collect();
     Ok(Rows { count, rows })
 }
 
-/// A row's cells that hold a value of their live field's kind.
+/// A row's value of `field`, if the field is live and the cell holds one.
+fn cell<'a>(live: &[&FieldId], row: &'a Indexed, field: &FieldId) -> Option<&'a Cell> {
+    live.contains(&field)
+        .then(|| row.cells.get(field.as_str()))
+        .flatten()
+}
+
+/// A row's cells that hold a value of their field's kind.
 fn cells(
     doc: &AutoCommit,
     rows: &ObjId,
     row: &str,
     kinds: &HashMap<String, FieldKind>,
-) -> Vec<(FieldId, Cell)> {
+) -> HashMap<String, Cell> {
     let Some(cells) = model::child(doc, rows, row).and_then(|row| model::child(doc, &row, CELLS))
     else {
-        return Vec::new();
+        return HashMap::new();
     };
-    let mut read = Vec::new();
+    let mut read = HashMap::new();
     for (field, kind) in kinds {
         let Ok(Some((Value::Scalar(value), _))) = doc.get(&cells, field.as_str()) else {
             continue;
@@ -501,9 +604,8 @@ fn cells(
             (FieldKind::Select, ScalarValue::Str(option)) => Cell::Select(OptionId::stored(option)),
             _ => continue,
         };
-        read.push((FieldId::stored(field), cell));
+        read.insert(field.clone(), cell);
     }
-    read.sort_by(|(a, _), (b, _)| a.cmp(b));
     read
 }
 

@@ -552,3 +552,44 @@ fn database_writes_change_only_their_block_and_its_text_reads_none() {
         Err(Error::NotFound)
     );
 }
+
+#[test]
+fn rows_read_the_same_after_their_page_is_loaded_again() {
+    let (mut workspace, page, block) = expenses();
+    let name = workspace.database(&page, &block).unwrap().unwrap().fields[0]
+        .id
+        .clone();
+    let first = row(&mut workspace, &page, &block, None);
+    let second = row(&mut workspace, &page, &block, Some(&first));
+    set(
+        &mut workspace,
+        &page,
+        &block,
+        &first,
+        &name,
+        Cell::Text("Rent".into()),
+    )
+    .unwrap();
+    set(
+        &mut workspace,
+        &page,
+        &block,
+        &second,
+        &name,
+        Cell::Text("Food".into()),
+    )
+    .unwrap();
+    let before = workspace.rows(&page, &block, &all()).unwrap();
+    workspace.close_page(&page);
+    assert_eq!(workspace.rows(&page, &block, &all()).unwrap(), before);
+    // The index read back from the document places new rows as before.
+    let third = row(&mut workspace, &page, &block, Some(&first));
+    let order: Vec<_> = workspace
+        .rows(&page, &block, &all())
+        .unwrap()
+        .rows
+        .into_iter()
+        .map(|row| row.id)
+        .collect();
+    assert_eq!(order, [first, third, second]);
+}
