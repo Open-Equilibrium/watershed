@@ -695,6 +695,54 @@ fn push_refuses_other_or_multiple_repositories_before_hooks() {
 }
 
 #[test]
+fn push_destination_comparison_preserves_repository_paths() {
+    use std::os::unix::fs::PermissionsExt;
+    run(async {
+        for file_url in [true, false] {
+            let remote = Remote::new(&format!("push-destination-path-{file_url}"));
+            let endpoints = Repo(remote.repo.path().with_extension("endpoints"));
+            std::fs::create_dir_all(endpoints.path().join("https:")).unwrap();
+            let fetch = format!("{}/https://alice@repo.git", endpoints.path().display());
+            let push = format!("{}/https://bob@repo.git", endpoints.path().display());
+            for endpoint in [&fetch, &push] {
+                remote.repo.git(&[
+                    "clone",
+                    "--bare",
+                    remote.bare.path().to_str().unwrap(),
+                    endpoint,
+                ]);
+            }
+            let fetched = Repo(fetch.clone().into());
+            let pushed = Repo(push.clone().into());
+            let prefix = if file_url { "file://" } else { "" };
+            remote
+                .repo
+                .git(&["config", "remote.origin.url", &format!("{prefix}{fetch}")]);
+            remote.repo.git(&[
+                "config",
+                "remote.origin.pushurl",
+                &format!("{prefix}{push}"),
+            ]);
+            remote.repo.git(&["switch", "-c", "feature/path"]);
+            Remote::commit(&remote.repo, "local.txt");
+            let hook = remote.repo.path().join(".git/hooks/pre-push");
+            std::fs::write(&hook, "#!/bin/sh\ntouch .git/push-hook-ran\n").unwrap();
+            std::fs::set_permissions(hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+            let before_fetch = fetched.git(&["show-ref"]);
+            let before_push = pushed.git(&["show-ref"]);
+            let result = Checkpoints::new(remote.repo.path()).push(None).await;
+            assert!(
+                matches!(result, Err(DiffError::PushDestinations)),
+                "{file_url}: {result:?}"
+            );
+            assert!(!remote.repo.path().join(".git/push-hook-ran").exists());
+            assert_eq!(fetched.git(&["show-ref"]), before_fetch);
+            assert_eq!(pushed.git(&["show-ref"]), before_push);
+        }
+    });
+}
+
+#[test]
 fn push_never_recurses_into_submodules_despite_configuration() {
     use std::os::unix::fs::PermissionsExt;
     run(async {

@@ -273,9 +273,9 @@ impl WorkingTree {
                 "Git could not resolve this remote's destinations. Push it with Git.".to_owned(),
             )
         })?;
-        Ok(without_credentials(&output)
+        Ok(output
             .lines()
-            .map(str::to_owned)
+            .map(destination_without_credentials)
             .collect())
     }
 
@@ -397,6 +397,26 @@ impl WorkingTree {
                 &error.to_string(),
             ))),
         }
+    }
+}
+
+/// A resolved URL is one value: only its leading authority can contain credentials.
+fn destination_without_credentials(url: &str) -> String {
+    let Some((scheme, rest)) = url.split_once("://") else {
+        return url.to_owned();
+    };
+    if scheme.is_empty()
+        || !scheme.bytes().enumerate().all(|(index, byte)| {
+            byte.is_ascii_alphabetic()
+                || (index > 0 && (byte.is_ascii_digit() || b"+-.".contains(&byte)))
+        })
+    {
+        return url.to_owned();
+    }
+    let authority_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    match rest[..authority_end].rfind('@') {
+        Some(at) => format!("{scheme}://{}", &rest[at + 1..]),
+        None => url.to_owned(),
     }
 }
 
