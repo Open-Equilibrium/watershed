@@ -1818,6 +1818,49 @@ printf '%s\n' "$!" > {}/holder"#,
 }
 
 #[test]
+fn an_exited_agents_unread_stdin_cannot_block_collected_output_or_completion() {
+    run(async {
+        let dir = marker("stdin-after-exit");
+        std::fs::create_dir_all(&dir).expect("temporary directory");
+        // Large automatic answers fill both the inherited input pipe and its bounded queue.
+        let descendant = format!(
+            "i=0\nwhile [ $i -lt 512 ]; do {}i=$((i+1)); done\nprintf '%s\\n' '{{\"type\":\"extension_ui_request\",\"method\":\"notify\",\"message\":\"collected\",\"notifyType\":\"info\"}}'\nexec sleep 30",
+            approval_request(&"x".repeat(4096), "read", true)
+        );
+        let (mut session, mut events) = fake_agent(&format!(
+            "IFS= read -r line\nexec 3<&0\n/bin/sh -c {} <&3 2>/dev/null &\nprintf '%s\\n' \"$!\" > {}/holder",
+            super::shell_word(descendant),
+            super::shell_word(dir.display())
+        ));
+        let pending = session.abort().await.expect("command sent");
+        let result = timeout(Duration::from_secs(5), async {
+            for (level, message) in [
+                (NotificationLevel::Info, "collected"),
+                (
+                    NotificationLevel::Warning,
+                    "Some agent output may be missing.",
+                ),
+            ] {
+                assert_eq!(
+                    next(&mut events).await,
+                    SessionEvent::Agent(AgentEvent::Notification {
+                        level,
+                        message: message.to_owned(),
+                    })
+                );
+            }
+            assert_eq!(pending.accepted().await, Err(CommandError::Closed));
+            assert_eq!(next(&mut events).await, exited(true));
+        })
+        .await;
+        let pid = std::fs::read_to_string(dir.join("holder")).expect("holder pid");
+        let _ = std::process::Command::new("kill").arg(pid.trim()).status();
+        std::fs::remove_dir_all(&dir).expect("remove temporary directory");
+        result.expect("unread inherited stdin cannot hold completion open");
+    });
+}
+
+#[test]
 fn an_exited_agents_buffered_stdout_reaches_eof_without_a_notice() {
     run(async {
         let written = marker("stdout-buffered");

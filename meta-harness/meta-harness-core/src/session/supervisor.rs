@@ -52,6 +52,7 @@ pub(super) struct Supervisor {
     /// The end of the agent's error output so far, and the task that reads it.
     pub(super) error_output: Arc<Mutex<Vec<u8>>>,
     pub(super) error_reader: tokio::task::JoinHandle<()>,
+    pub(super) input_writer: tokio::task::JoinHandle<()>,
     /// Checkpoint requests, taken one after another in the order the agent asked.
     pub(super) captures: mpsc::Sender<CheckpointRequest>,
     /// Closed once the agent is gone, so no capture outlives it.
@@ -75,12 +76,14 @@ impl Supervisor {
         let reader = tokio::spawn(read_output(stdout, output, drain));
         let mut cut_off = false;
         let checkpoints = self.checkpoints.clone();
+        let input_writer = self.input_writer.abort_handle();
         let failure = 'read: loop {
             let read = watching(
                 self.unless_killed(reads.recv()),
                 &mut child,
                 &mut exited,
                 &checkpoints,
+                &input_writer,
             )
             .await;
             let Some(Some(read)) = read else {
@@ -97,8 +100,13 @@ impl Supervisor {
                 let record = match frame {
                     Frame::Record(record) => record,
                     Frame::Oversized { start, .. } => {
-                        let skipped =
-                            watching(self.skip(&start), &mut child, &mut exited, &checkpoints);
+                        let skipped = watching(
+                            self.skip(&start),
+                            &mut child,
+                            &mut exited,
+                            &checkpoints,
+                            &input_writer,
+                        );
                         if !skipped.await {
                             break 'read None;
                         }
@@ -108,7 +116,15 @@ impl Supervisor {
                 let Ok(Value::Object(record)) = serde_json::from_slice::<Value>(&record) else {
                     break 'read Some("agent wrote a record that is not a JSON object".to_owned());
                 };
-                if !watching(self.handle(record), &mut child, &mut exited, &checkpoints).await {
+                if !watching(
+                    self.handle(record),
+                    &mut child,
+                    &mut exited,
+                    &checkpoints,
+                    &input_writer,
+                )
+                .await
+                {
                     break 'read None;
                 }
             }
@@ -131,6 +147,8 @@ impl Supervisor {
             }
         };
         let success = status.is_ok_and(|status| status.success());
+        self.input_writer.abort();
+        let _ = (&mut self.input_writer).await;
         {
             // Nothing is asked of a gone agent: open dialogs end with it, and their expiry
             // reports nothing after the exit.
@@ -433,13 +451,14 @@ impl Supervisor {
 }
 
 /// Runs `work` while watching for the agent's exit. Once the agent exited, the checkpoints close
-/// at once, so no capture outlives it, and output collection gets its deadline. Already read
-/// records still finish delivery, even when the event buffer is full.
+/// at once, so no capture outlives it, input delivery ends and output collection gets its deadline.
+/// Already read records still finish delivery, even when the event buffer is full.
 async fn watching<F: Future>(
     work: F,
     child: &mut Child,
     exited: &mut Option<oneshot::Sender<Instant>>,
     checkpoints: &Checkpoints,
+    input_writer: &tokio::task::AbortHandle,
 ) -> F::Output {
     let mut work = pin!(work);
     if exited.is_some() {
@@ -459,6 +478,9 @@ async fn watching<F: Future>(
         if let Some(exited) = exited.take() {
             let _ = exited.send(Instant::now() + OUTPUT_DRAIN_WAIT);
         }
+        // A descendant may retain stdin without reading it. Dropping the writer's receiver
+        // releases queued automatic answers while already collected output finishes delivery.
+        input_writer.abort();
         checkpoints.close().await;
     }
     work.await
