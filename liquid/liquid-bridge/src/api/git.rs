@@ -368,7 +368,7 @@ pub enum BridgePullRequestOutcomeKind {
     /// The remote fetches from and pushes to different or several repositories.
     Destinations,
     /// `remote` is not on GitHub or a GitHub Enterprise host gh has a login for; `host` names
-    /// its host, empty for a local path.
+    /// its host, empty for a local path, and `page` the repository's HTTPS page, if known.
     NotGitHub,
     /// `branch` has `ahead` commits not on `remote`, or was never pushed when `first`.
     NeedsPush,
@@ -411,6 +411,9 @@ pub struct BridgePullRequestOutcome {
     pub ahead: i64,
     pub behind: i64,
     pub first: bool,
+    /// A page of letters, digits, `-`, `_`, `.` and `/` on a validated host, to open in the
+    /// browser.
+    pub page: String,
     /// gh's or Git's message, with credentials removed and hidden characters written out.
     pub detail: String,
 }
@@ -431,6 +434,7 @@ impl BridgePullRequestOutcome {
             ahead: 0,
             behind: 0,
             first: false,
+            page: String::new(),
             detail: String::new(),
         }
     }
@@ -449,9 +453,10 @@ impl BridgePullRequestOutcome {
             PullRequestError::NoCommit => Self::of(Kind::NoCommit),
             PullRequestError::NoRemote => Self::of(Kind::NoRemote),
             PullRequestError::AmbiguousRemote => Self::of(Kind::AmbiguousRemote),
-            PullRequestError::NotGitHub { remote, host } => Self {
+            PullRequestError::NotGitHub { remote, host, page } => Self {
                 remote: visible_name(&without_credentials(&remote)),
                 host: host.as_deref().map(visible_name).unwrap_or_default(),
+                page: page.unwrap_or_default(),
                 ..Self::of(Kind::NotGitHub)
             },
             PullRequestError::NeedsPush {

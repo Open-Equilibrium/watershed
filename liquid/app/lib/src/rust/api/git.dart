@@ -661,6 +661,10 @@ class BridgePullRequestOutcome {
   final PlatformInt64 behind;
   final bool first;
 
+  /// A page of letters, digits, `-`, `_`, `.` and `/` on a validated host, to open in the
+  /// browser.
+  final String page;
+
   /// gh's or Git's message, with credentials removed and hidden characters written out.
   final String detail;
 
@@ -678,6 +682,7 @@ class BridgePullRequestOutcome {
     required this.ahead,
     required this.behind,
     required this.first,
+    required this.page,
     required this.detail,
   });
 
@@ -696,6 +701,7 @@ class BridgePullRequestOutcome {
       ahead.hashCode ^
       behind.hashCode ^
       first.hashCode ^
+      page.hashCode ^
       detail.hashCode;
 
   @override
@@ -716,6 +722,7 @@ class BridgePullRequestOutcome {
           ahead == other.ahead &&
           behind == other.behind &&
           first == other.first &&
+          page == other.page &&
           detail == other.detail;
 }
 
@@ -749,7 +756,7 @@ enum BridgePullRequestOutcomeKind {
   destinations,
 
   /// `remote` is not on GitHub or a GitHub Enterprise host gh has a login for; `host` names
-  /// its host, empty for a local path.
+  /// its host, empty for a local path, and `page` the repository's HTTPS page, if known.
   notGitHub,
 
   /// `branch` has `ahead` commits not on `remote`, or was never pushed when `first`.

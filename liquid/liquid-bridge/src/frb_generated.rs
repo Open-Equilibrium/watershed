@@ -4308,6 +4308,7 @@ impl SseDecode for crate::api::git::BridgePullRequestOutcome {
         let mut var_ahead = <i64>::sse_decode(deserializer);
         let mut var_behind = <i64>::sse_decode(deserializer);
         let mut var_first = <bool>::sse_decode(deserializer);
+        let mut var_page = <String>::sse_decode(deserializer);
         let mut var_detail = <String>::sse_decode(deserializer);
         return crate::api::git::BridgePullRequestOutcome {
             kind: var_kind,
@@ -4323,6 +4324,7 @@ impl SseDecode for crate::api::git::BridgePullRequestOutcome {
             ahead: var_ahead,
             behind: var_behind,
             first: var_first,
+            page: var_page,
             detail: var_detail,
         };
     }
@@ -7455,6 +7457,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::git::BridgePullRequestOutcome
             self.ahead.into_into_dart().into_dart(),
             self.behind.into_into_dart().into_dart(),
             self.first.into_into_dart().into_dart(),
+            self.page.into_into_dart().into_dart(),
             self.detail.into_into_dart().into_dart(),
         ]
         .into_dart()
@@ -9149,6 +9152,7 @@ impl SseEncode for crate::api::git::BridgePullRequestOutcome {
         <i64>::sse_encode(self.ahead, serializer);
         <i64>::sse_encode(self.behind, serializer);
         <bool>::sse_encode(self.first, serializer);
+        <String>::sse_encode(self.page, serializer);
         <String>::sse_encode(self.detail, serializer);
     }
 }

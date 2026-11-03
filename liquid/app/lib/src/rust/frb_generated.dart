@@ -3732,8 +3732,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgePullRequestOutcome dco_decode_bridge_pull_request_outcome(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 14)
-      throw Exception('unexpected arr length: expect 14 but see ${arr.length}');
+    if (arr.length != 15)
+      throw Exception('unexpected arr length: expect 15 but see ${arr.length}');
     return BridgePullRequestOutcome(
       kind: dco_decode_bridge_pull_request_outcome_kind(arr[0]),
       plan: dco_decode_opt_box_autoadd_bridge_pull_request_plan(arr[1]),
@@ -3748,7 +3748,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       ahead: dco_decode_i_64(arr[10]),
       behind: dco_decode_i_64(arr[11]),
       first: dco_decode_bool(arr[12]),
-      detail: dco_decode_String(arr[13]),
+      page: dco_decode_String(arr[13]),
+      detail: dco_decode_String(arr[14]),
     );
   }
 
@@ -5832,6 +5833,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_ahead = sse_decode_i_64(deserializer);
     var var_behind = sse_decode_i_64(deserializer);
     var var_first = sse_decode_bool(deserializer);
+    var var_page = sse_decode_String(deserializer);
     var var_detail = sse_decode_String(deserializer);
     return BridgePullRequestOutcome(
       kind: var_kind,
@@ -5847,6 +5849,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       ahead: var_ahead,
       behind: var_behind,
       first: var_first,
+      page: var_page,
       detail: var_detail,
     );
   }
@@ -8287,6 +8290,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_i_64(self.ahead, serializer);
     sse_encode_i_64(self.behind, serializer);
     sse_encode_bool(self.first, serializer);
+    sse_encode_String(self.page, serializer);
     sse_encode_String(self.detail, serializer);
   }
 

@@ -1860,6 +1860,7 @@ fn pull_request_outcomes_say_what_blocks_creation_and_write_out_hidden_text() {
     let local = BridgePullRequestOutcome::failed(PullRequestError::NotGitHub {
         remote: "origin".into(),
         host: None,
+        page: None,
     });
     assert_eq!(local.kind, BridgePullRequestOutcomeKind::NotGitHub);
     assert_eq!((local.remote.as_str(), local.host.as_str()), ("origin", ""));

@@ -170,6 +170,8 @@ pub enum PullRequestError {
         remote: String,
         /// Its host, none for a local path.
         host: Option<String>,
+        /// The repository's page on its host, to create the host's merge request there.
+        page: Option<String>,
     },
     /// The branch was never pushed, or has commits its upstream lacks.
     NeedsPush {
@@ -307,6 +309,7 @@ impl WorkingTree {
         if !self.gh_login(program, &host).await? {
             return Err(PullRequestError::NotGitHub {
                 remote: head.remote,
+                page: Some(format!("https://{host}/{}", head.repository.full())),
                 host: Some(host),
             });
         }
@@ -525,6 +528,7 @@ impl WorkingTree {
         if !self.gh_login(program, &repository.host).await? {
             return Err(PullRequestError::NotGitHub {
                 remote,
+                page: Some(format!("https://{}/{}", repository.host, repository.full())),
                 host: Some(repository.host),
             });
         }
@@ -677,12 +681,12 @@ impl WorkingTree {
     /// The GitHub repository `remote` fetches from; Git resolves URL rewrites.
     async fn github_remote(&self, remote: &str) -> Result<Repository, PullRequestError> {
         let urls = self.remote_urls(remote, false).await?;
-        let not_github = |host| PullRequestError::NotGitHub {
-            remote: remote.to_owned(),
-            host,
-        };
         match urls.as_slice() {
-            [url] => github_repository(url).ok_or_else(|| not_github(url_host(url))),
+            [url] => github_repository(url).ok_or_else(|| PullRequestError::NotGitHub {
+                remote: remote.to_owned(),
+                host: url_host(url),
+                page: web_page(url),
+            }),
             _ => Err(DiffError::PushDestinations.into()),
         }
     }
@@ -1092,13 +1096,34 @@ fn url_host(url: &str) -> Option<String> {
     if url.starts_with('/') || url.starts_with('.') {
         return None;
     }
-    let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
-    let authority = rest.split(['/', ':', '?', '#']).next()?;
-    valid_host(
-        authority
-            .rsplit_once('@')
-            .map_or(authority, |(_, host)| host),
-    )
+    let authority = match url.split_once("://") {
+        Some((_, rest)) => rest.split(['/', '?', '#']).next()?,
+        None => url.split(['/', ':']).next()?,
+    };
+    let host = authority
+        .rsplit_once('@')
+        .map_or(authority, |(_, host)| host);
+    valid_host(host.split(':').next()?)
+}
+
+/// The HTTPS page of the repository a remote URL names on a host that is not GitHub.
+fn web_page(url: &str) -> Option<String> {
+    let host = url_host(url)?;
+    let path = match url.split_once("://") {
+        Some((_, rest)) => rest.split_once('/')?.1,
+        None => url.split_once(':')?.1,
+    };
+    let path = path.trim_matches('/');
+    let path = path.strip_suffix(".git").unwrap_or(path);
+    let safe = path.split('/').all(|segment| {
+        !segment.is_empty()
+            && segment != "."
+            && segment != ".."
+            && segment
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || b"-_.".contains(&byte))
+    });
+    safe.then(|| format!("https://{host}/{path}"))
 }
 
 /// A host name gh can be asked about, in lowercase: letters, digits, dots and hyphens, not
@@ -1255,6 +1280,20 @@ fn reads_github_repositories_from_resolved_remote_urls() {
         Some("gitlab.com")
     );
     assert_eq!(url_host("/srv/git/api.git"), None);
+    for (url, page) in [
+        (
+            "https://user:token@gitlab.com/group/sub/api.git",
+            Some("https://gitlab.com/group/sub/api"),
+        ),
+        (
+            "git@gitlab.com:group/api.git",
+            Some("https://gitlab.com/group/api"),
+        ),
+        ("https://gitlab.com/group/../api", None),
+        ("/srv/git/api.git", None),
+    ] {
+        assert_eq!(web_page(url).as_deref(), page, "{url}");
+    }
     assert_eq!(url_host("https://-oProxyCommand=x/acme/api"), None);
     assert_eq!(
         url_host("https://gitlab.com?x/api").as_deref(),

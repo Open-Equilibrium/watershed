@@ -279,7 +279,7 @@ fn refuses_what_cannot_become_a_pull_request_and_says_why() {
             .git(&["remote", "set-url", "origin", "git@gitlab.com:bw/api.git"]);
         assert!(matches!(
             pushed.checkpoints("").pull_request_plan(None, None).await,
-            Err(PullRequestError::NotGitHub { host: Some(host), remote }) if host == "gitlab.com" && remote == "origin"
+            Err(PullRequestError::NotGitHub { host: Some(host), remote, page: Some(page) }) if host == "gitlab.com" && remote == "origin" && page == "https://gitlab.com/bw/api"
         ));
         pushed.repo.git(&[
             "remote",
@@ -482,7 +482,7 @@ fn a_remote_gh_has_no_github_login_for_is_never_asked_about() {
         let checkpoints = pushed.checkpoints("");
         assert!(matches!(
             checkpoints.pull_request().await,
-            Err(PullRequestError::NotGitHub { host: Some(host), remote }) if host == "gitlab.com" && remote == "origin"
+            Err(PullRequestError::NotGitHub { host: Some(host), remote, page: Some(page) }) if host == "gitlab.com" && remote == "origin" && page == "https://gitlab.com/bw/api"
         ));
         assert!(matches!(
             checkpoints.pull_request_bases("gitlab.com", "bw/api").await,
