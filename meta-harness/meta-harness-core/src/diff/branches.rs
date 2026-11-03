@@ -535,7 +535,7 @@ fn branch_name(name: &str) -> Result<&str, DiffError> {
 
 /// `text` with the user name and password of each URL taken out, as a remote's URL may hold
 /// them.
-pub(super) fn without_credentials(text: &str) -> String {
+pub fn without_credentials(text: &str) -> String {
     let mut kept = String::with_capacity(text.len());
     let mut rest = text;
     while let Some(at) = rest.find("://") {

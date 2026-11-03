@@ -3,6 +3,7 @@
 
 use meta_harness_core::{
     BranchTarget, Changes, DiffError, session_id, session_title_of, visible_lines, visible_name,
+    without_credentials,
 };
 
 use crate::api::events::BridgeFileChange;
@@ -175,8 +176,8 @@ impl From<meta_harness_core::GitTransfer> for BridgeGitTransfer {
     fn from(transfer: meta_harness_core::GitTransfer) -> Self {
         Self {
             branch: visible_name(&transfer.branch),
-            remote: visible_name(&transfer.remote),
-            upstream: visible_name(&transfer.upstream),
+            remote: visible_name(&without_credentials(&transfer.remote)),
+            upstream: visible_name(&without_credentials(&transfer.upstream)),
             ahead: count(transfer.ahead),
             behind: count(transfer.behind),
             first_push: transfer.first_push,
@@ -259,8 +260,14 @@ impl AgentSession {
             Ok(Some(BridgeGitStatus {
                 branch: status.branch.as_deref().map(visible_name),
                 commit: status.commit.map(|commit| commit.chars().take(7).collect()),
-                upstream: status.upstream.as_deref().map(visible_name),
-                remote: status.remote.as_deref().map(visible_name),
+                upstream: status
+                    .upstream
+                    .as_deref()
+                    .map(|name| visible_name(&without_credentials(name))),
+                remote: status
+                    .remote
+                    .as_deref()
+                    .map(|name| visible_name(&without_credentials(name))),
                 has_remotes: status.has_remotes,
                 gone: status.gone,
                 ahead: count(status.ahead),

@@ -26,7 +26,7 @@ mod revert;
 mod stash;
 mod sync;
 
-pub use branches::{Branch, BranchTarget, Changes, GitStatus};
+pub use branches::{Branch, BranchTarget, Changes, GitStatus, without_credentials};
 pub use commit::Commit;
 
 pub use stash::Stash;
