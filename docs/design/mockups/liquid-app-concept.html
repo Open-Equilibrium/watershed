@@ -54,7 +54,7 @@ p.sub{margin:0 0 10px;font-size:13px;color:var(--muted-foreground);line-height:1
 .egrid span.on{background:var(--ws-hover)}
 .foot{margin-top:auto;padding-top:6px;box-shadow:inset 0 1px 0 var(--ws-border)}
 .main{flex:1;display:flex;flex-direction:column;min-width:0;position:relative}
-.head{height:44px;flex:none;display:flex;align-items:center;gap:8px;padding:0 16px 0 24px;font-size:14px}
+.head{height:var(--ws-row-header);flex:none;display:flex;align-items:center;gap:8px;padding:0 16px 0 24px;font-size:14px}
 .crumb{color:var(--ws-text-muted);display:flex;gap:6px;align-items:center;white-space:nowrap}
 .crumb b{color:var(--ws-text);font-weight:500}
 .head .end{margin-left:auto;display:flex;gap:4px;align-items:center}
@@ -127,7 +127,7 @@ kbd{font-size:11px;padding:0 4px;border-radius:4px;border:1px solid currentColor
 .tile .rs{position:absolute;right:-5px;top:50%;width:8px;height:28px;margin-top:-14px;border-radius:4px;background:var(--ws-surface);box-shadow:0 0 0 1px var(--ws-border-strong)}
 .tile.sel .rs{background:var(--ws-accent);box-shadow:none}
 .tile .span{position:absolute;right:10px;bottom:-11px;font-size:11px;line-height:18px;padding:0 6px;border-radius:4px;background:var(--ws-accent);color:var(--ws-on-accent)}
-.armode{height:44px;flex:none;display:flex;align-items:center;gap:12px;padding:0 16px 0 24px;background:var(--ws-accent-subtle);font-size:13px;color:var(--ws-accent)}
+.armode{height:var(--ws-row-header);flex:none;display:flex;align-items:center;gap:12px;padding:0 16px 0 24px;background:var(--ws-accent-subtle);font-size:13px;color:var(--ws-accent)}
 .armode b{font-weight:600}
 .armode .end{margin-left:auto;display:flex;gap:8px;align-items:center}
 .sg2{display:inline-flex;background:var(--ws-canvas);border-radius:6px;padding:2px;font-size:13px;box-shadow:inset 0 0 0 1px var(--ws-border)}
@@ -193,7 +193,7 @@ h4.qh{margin:14px 0 6px;font-size:13px}
 .turn{display:flex;gap:8px;align-items:center;margin-top:6px;font-size:12px;color:var(--ws-text-muted)}
 .turn .chip{height:22px;font-size:12px}
 .comp2{margin:0 24px 16px;border-radius:10px;box-shadow:0 0 0 1px var(--ws-border-strong);padding:10px 12px;display:flex;align-items:center;gap:8px;color:var(--ws-text-faint);font-size:14px;background:var(--ws-canvas)}
-.chead{height:44px;display:flex;align-items:center;gap:10px;padding:0 16px 0 24px;box-shadow:inset 0 -1px 0 var(--ws-border);font-size:14px}
+.chead{height:var(--ws-row-header);display:flex;align-items:center;gap:10px;padding:0 16px 0 24px;box-shadow:inset 0 -1px 0 var(--ws-border);font-size:14px}
 .chead b{font-weight:500}
 .panel2{width:380px;flex:none;box-shadow:inset 1px 0 0 var(--ws-border);display:flex;flex-direction:column;background:var(--ws-canvas)}
 .appr{border-radius:10px;box-shadow:0 0 0 2px var(--ws-warning),0 3px 6px rgba(15,15,15,.08);padding:10px 12px;display:flex;flex-direction:column;gap:8px;font-size:13px;max-width:78%}
@@ -218,7 +218,7 @@ h4.qh{margin:14px 0 6px;font-size:13px}
 .wa.on{background:var(--ws-selected)}
 .wa .av{width:30px;height:30px;font-size:12px}
 .wa .t{flex:1;min-width:0;display:flex;flex-direction:column;line-height:17px}
-.wa .t b{font-weight:500;font-size:13.5px;color:var(--ws-text);display:flex;gap:6px;align-items:center}
+.wa .t b{font-weight:500;font-size:var(--ws-fs-side);color:var(--ws-text);display:flex;gap:6px;align-items:center}
 .wa .t span{font-size:12px;color:var(--ws-text-faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .wa .t span.u{color:var(--ws-text-muted)}
 .wa .m{display:flex;flex-direction:column;align-items:flex-end;gap:3px;font-size:11px;color:var(--ws-text-faint)}
@@ -243,7 +243,7 @@ h4.qh{margin:14px 0 6px;font-size:13px}
 .tabs3 span.on{color:var(--ws-accent)}
 .ann{position:absolute;z-index:4;background:#ffe9a8;color:#3d3000;font-size:12px;line-height:16px;padding:5px 8px;border-radius:6px;box-shadow:0 2px 6px rgba(0,0,0,.15);max-width:240px}
 
-.head{height:var(--ws-row-header)!important}
+
 .tabs{height:38px;display:flex;align-items:flex-end;gap:2px;padding:0 8px;box-shadow:inset 0 -1px 0 var(--ws-border);background:var(--ws-subtle);flex:none}
 .tab{height:32px;display:flex;align-items:center;gap:7px;padding:0 10px;border-radius:7px 7px 0 0;font-size:13px;color:var(--ws-text-muted);max-width:190px;white-space:nowrap;overflow:hidden}
 .tab.on{background:var(--ws-canvas);color:var(--ws-text);box-shadow:0 0 0 1px var(--ws-border);clip-path:inset(-1px -1px 0 -1px)}
@@ -380,25 +380,7 @@ const E={budget:'💰',review:'📊',trip:'🧳',road:'🗺️',api:'🧩',plan:
 const em=e=>`<span class="em">${e}</span>`;
 const modal=(title,body,o={})=>`<div class="scrim"></div><div class="modal" style="width:${o.w||1000}px"><div class="mh">${title}<span class="end">${o.right||''}<span class="ib">✕</span></span></div><div class="mb">${body}</div></div>`;
 const nav=(d,ic,label,o={})=>`<div class="nav ${o.on?'on':''}" style="--d:${d}"><span class="tw">${o.tw||''}</span><span class="ico">${ic}</span><span>${label}</span>${o.r?`<span class="r ${o.warn?'warn':''}">${o.r}</span>`:''}</div>`;
-function side(o={}){const s=o.sel||'budget';const e=(k)=>s==k;
-return `<div class="side"><div class="wsw"><span class="av">B</span>Benni's Workspace<span style="margin-left:auto;color:var(--ws-text-faint)">⌄</span></div>
-<div class="srch">${I.srch}<span>Search or run a command</span><kbd>⌘K</kbd></div>
-<h6>Private<span class="a">${o.plus?'<span style="color:var(--ws-text-muted)">···  ＋</span>':''}</span></h6>
-${nav(0,em(E.budget),'Household budget',{tw:'⌄',on:e('budget')})}
-${nav(1,em(E.review),'Monthly review',{on:e('review')})}
-${o.newp?nav(0,o.newp=='Untitled'?I.page:em(E.plan),o.newp,{on:e('new')}):''}
-${nav(0,em(E.trip),'Trip to Lisbon',{tw:'›',on:e('trip')})}
-${nav(0,I.file,'bank-export.csv',{on:e('csv')})}
-<h6>Acme API</h6>
-${nav(0,em(E.road),'Roadmap',{on:e('road')})}
-${nav(0,em(E.api),'API design',{on:e('api')})}
-${nav(0,I.dir,'acme-api',{tw:'›',on:e('docs')})}
-${chats(o.chat)}
-<div class="foot">${nav(0,I.zap,'Automations',Object.assign({on:e('auto')},o.att?{r:'⚠ 1',warn:true}:{}))}${nav(0,I.clock,'History',{on:e('hist')})}${nav(0,I.cog,'Settings',{on:e('set')})}</div>
-${o.menu||''}</div>`}
 function head(crumb,o={}){return `<div class="head"><span class="crumb">${crumb}</span><span class="end">${o.right!==undefined?o.right:`<span class="ib ${o.arr?'on':''}">${I.grid}Arrange</span><span class="ib" title="Page history">${I.clock}</span><span class="ib">${I.more}</span>`}</span></div>`}
-function frame(id,o){document.getElementById(id).innerHTML=`<div class="tbar"><div class="lights"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></div></div>
-<div class="body" style="--h:${o.h}px">${side(o.side||{})}<div class="main">${o.head||''}${o.main}</div>${o.over||''}</div>`}
 
 
 
@@ -451,7 +433,7 @@ shell('w-ws',{h:640,rail:'pages',side:tree('trip'),main:tabs(T)+pageHead()+pageB
 shell('w-chats',{h:620,rail:'chats',side:chatList,main:tabs([[em(E.trip),'Trip to Lisbon'],[avatar('grp','👥').replace('class="av','class="av sm'),'Lisbon trip',1]])+groupChat,over:chatMenu});
 const besideChat=`<div class="chead" style="padding-left:14px">${avatar('ag','🧳')}<b>Trip to Lisbon</b><span class="cap">this Page's Chat · You, Planner</span></div>
 <div class="msgs" style="flex:1;justify-content:flex-end;padding:14px 16px">${msg('',avatar('me','B'),'Add a day trip if the weather holds.',{mine:1,t:'09:12'})}${msg('Planner',AG,'Added “Day trip to Sintra” under Ideas, 9:11 from Rossio.',{t:'09:15',extra:`<div class="turn"><span class="chip">1 change · Undo</span></div>`})}</div><div class="comp2" style="margin:0 14px 14px">Message…</div>`;
-shell('w-split',{h:560,rail:'pages',side:tree('trip'),main:`<div class="split"><div class="group">${tabs([[em(E.trip),'Trip to Lisbon',1],[em(E.budget),'Household budget']])}${pageHead()}<div class="pg"><div class="col" style="width:460px!important"><div class="ttl" style="font-size:32px;line-height:40px"><span class="tic">🧳</span>Trip to Lisbon</div><div class="prose"><h2>Ideas</h2><p style="background:var(--ws-accent-subtle);border-radius:4px;padding:0 4px">Day trip to Sintra, 9:11 from Rossio.</p></div></div></div></div><span class="grip"></span><div class="group" style="flex:none;width:420px">${tabs([[avatar('ag','🧳').replace('class="av','class="av sm'),'Trip to Lisbon · Chat',1],[AG.replace('class="av','class="av sm'),'Coder']])}${besideChat}</div></div>`});
+shell('w-split',{h:560,rail:'pages',side:tree('trip'),main:`<div class="split"><div class="group">${tabs([[em(E.trip),'Trip to Lisbon',1],[em(E.budget),'Household budget']])}${pageHead()}<div class="pg"><div class="col" style="width:460px!important"><div class="ttl" style="font-size:var(--ws-fs-h1);line-height:var(--ws-lh-h1)"><span class="tic">🧳</span>Trip to Lisbon</div><div class="prose"><h2>Ideas</h2><p style="background:var(--ws-accent-subtle);border-radius:4px;padding:0 4px">Day trip to Sintra, 9:11 from Rossio.</p></div></div></div></div><span class="grip"></span><div class="group" style="flex:none;width:420px">${tabs([[avatar('ag','🧳').replace('class="av','class="av sm'),'Trip to Lisbon · Chat',1],[AG.replace('class="av','class="av sm'),'Coder']])}${besideChat}</div></div>`});
 const tl=(span,body,o={})=>`<div class="tile ${o.sel?'sel':''}" style="grid-column:span ${span};${o.style||''}">${o.h?'<span class="mv">• • •</span><span class="rs"></span>':''}${o.sp?`<span class="span">${o.sp}</span>`:''}${body}</div>`;
 const saveDlg=`<div class="scrim"></div><div class="tpl"><div class="th">${I.tpl}<b style="font-weight:600">New Template</b><span class="sel2" style="margin-left:6px">Trip plan</span><span class="cap">from 🧳 Trip to Lisbon · edit it here; the Page stays as it is</span><span class="end" style="margin-left:auto;display:flex;gap:8px"><span class="btn">Cancel</span><span class="btn pri">Save Template</span></span></div>
 <div class="tb2"><div class="pv"><div class="paper"><div class="ttl" style="font-size:30px;line-height:38px">🧳 <span style="color:var(--ws-text-faint)">Trip to …</span><span class="caret" style="height:28px;margin-left:2px"></span></div>

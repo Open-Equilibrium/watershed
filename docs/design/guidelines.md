@@ -6,7 +6,7 @@ References: Notion, AppFlowy, Microsoft Loop and T3 Code.
 
 ## Principles
 
-1. **Content first.** Chrome recedes: generous whitespace, few lines, controls appear when needed. Every screen still explains itself: the session header names the project and model, and a new session greets with its project; nothing is decorative.
+1. **Content first.** Chrome recedes: generous whitespace, few lines, controls appear when needed. Every screen still explains itself: a Chat's header names its participants and, for an agent, its work folder and model, and a new Chat greets with them; nothing is decorative.
 2. **Calm neutrals, one accent.** Color always carries meaning: the accent marks selection and the primary action, warning marks "waiting for you", success and danger mark results.
 3. **Dense where people develop.** Monospace for code, paths and tool calls; tabular figures for numbers; prose stays airy.
 4. **Everything through tokens.** Color, type, spacing, radii, shadows and motion are named tokens, so changing a token changes every GUI.

@@ -185,6 +185,7 @@ i.kw{font-style:normal;color:var(--ws-syn-kw)}i.st{font-style:normal;color:var(-
 @media (max-width:560px){.found{grid-template-columns:1fr}.swg{grid-template-columns:repeat(2,1fr)}}
 </style></head><body class="theme-light chrome">
 <div class="page">
+<p class="sub"><b>Superseded in part by ADR-0239 and ADR-0241:</b> sessions are Chats, projects are folder Sources, and the shell and sizes follow <a href="liquid-app-concept.html">the app's structure</a> and <code>tokens.css</code>; the Git, checkpoint, approval and Trajectory behavior shown here stays.</p>
   <div class="toolbar">
     <div>Theme <span class="seg" id="theme"><button data-v="light">Light</button><button data-v="dark">Dark</button><button data-v="system" class="on">System</button></span></div>
     <div>Size <span class="seg" id="size"><button data-v="fit" class="on">Fit</button><button data-v="full">100 %</button></span></div>
@@ -195,12 +196,12 @@ i.kw{font-style:normal;color:var(--ws-syn-kw)}i.st{font-style:normal;color:var(-
     <div class="found">
       <div class="panel ws theme-light"><h5>Color tokens · light</h5><div class="swg" data-sw></div></div>
       <div class="panel ws theme-dark"><h5>Color tokens · dark</h5><div class="swg" data-sw></div></div>
-      <div class="panel ws theme-light" style="grid-column:1/3"><h5>Type · platform UI font, AppFlowy sizes</h5>
+      <div class="panel ws theme-light" style="grid-column:1/3"><h5>Type · platform UI font, Notion's sizes (ADR-0241)</h5>
         <div class="typo">
-          <div><span class="l">display · 32/40 · 700</span><b style="font-size:32px;line-height:40px;font-weight:700">Roadmap</b></div>
-          <div><span class="l">h1 · 24/32 · 600</span><b style="font-size:24px;line-height:32px;font-weight:600">Agent sessions</b></div>
-          <div><span class="l">h2 · 20/28 · 600</span><b style="font-size:20px;line-height:28px;font-weight:600">What the model saw</b></div>
-          <div><span class="l">h3 · 16/22 · 600</span><b style="font-size:16px;line-height:22px;font-weight:600">Timing and usage</b></div>
+          <div><span class="l">display · 40/48 · 700</span><b style="font-size:var(--ws-fs-display);line-height:var(--ws-lh-display);font-weight:700">Roadmap</b></div>
+          <div><span class="l">h1 · 30/38 · 600</span><b style="font-size:var(--ws-fs-h1);line-height:var(--ws-lh-h1);font-weight:600">Chats</b></div>
+          <div><span class="l">h2 · 24/32 · 600</span><b style="font-size:var(--ws-fs-h2);line-height:var(--ws-lh-h2);font-weight:600">What the model saw</b></div>
+          <div><span class="l">h3 · 20/28 · 600</span><b style="font-size:var(--ws-fs-h3);line-height:var(--ws-lh-h3);font-weight:600">Timing and usage</b></div>
           <div><span class="l">prose · 16/24</span><span style="font-size:16px;line-height:24px">Text in Pages and agent replies reads like Notion.</span></div>
           <div><span class="l">ui · 14/20</span><span>Lists, tabs, buttons, tables</span></div>
           <div><span class="l">small · 12/18</span><span style="font-size:12px;line-height:18px;color:var(--ws-text-muted)">Metadata, status bar, column headers</span></div>
