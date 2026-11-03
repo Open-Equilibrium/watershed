@@ -127,7 +127,7 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 
 - **Workspace** — Top-level owner of Pages, Blocks, Sources, Connections, Automations, Roles, History and settings.
 - **Page** — Liquid's authored surface: an ordered composition of Block Views with responsive layout metadata. A Page starts as an empty flow and may later be arranged on a grid.
-- **Block** — A canonical, typed and addressable unit of content or functionality, such as text, database, code, formula, media, whiteboard, App or agent session. A text toggle is formatting inside a Text Block, not a Block Type.
+- **Block** — A canonical, typed and addressable unit of content or functionality, such as text, database, code, formula, media, whiteboard, App or Chat. A text toggle is formatting inside a Text Block, not a Block Type.
 - **Block Type** — The versioned behavior, state contract, supported Views, ports/actions, permissions and responsive capabilities shared by Blocks of one kind.
 - **View** — One placement or representation of a Block. Several Views may expose the same Block on different Pages and stay synchronized because they share canonical Block state. Duplicating creates a new Block; adding a View does not.
 - **Connection** — An explicit typed and permissioned data/action relation among Blocks and Sources. It addresses stable objects and ports independently of active View or layout; visual proximity never grants access.
@@ -142,7 +142,7 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **Role** — A reusable allow-only composition of permissions assigned to users, groups, agent profiles, sessions or Automations. Anything not allowed is denied by default; explicit deny/blacklist rules are post-MVP. Editable templates: Can view, Can edit and Can manage.
 - **Protected** — A Page, Block or Source that stops inheriting rights from its area or Page, so only Roles allowed on it may change it; the allow-only way to restrict one part of an editable Page (ADR-0235).
 - **History** — Liquid's attributed and reversible record of Workspace Actions; also called **workspace action history / workspace VCS** when distinguishing it from project-code VCS. A revert records a new reversing Action; Restore version returns a Page to an earlier save point (ADR-0235).
-- **Agent surface** — Liquid's view of one agent session: the sidebar, the Chat, Trajectory and Diff tabs, the widget strip, the input area and the status bar.
+- **Agent surface** — Liquid's view of one agent session: the sidebar, the Chat, Trajectory and Diff tabs, the widget strip, the input area and the status bar; ADR-0239 plans to fold it into Chats.
 - **Start page** — What the agent surface shows before a session's first message: the project's recent sessions to continue and chips to set the new one up.
 - **Input area** — The fixed-height area at the bottom of the agent surface: the composer, or in its place an approval or an agent question.
 - **Approval mode** — How much an agent may do without asking: Ask (every call that is not read-only), Allow edits (file changes too) or Full access (every call) (ADR-0188).
@@ -164,6 +164,7 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **Compliance replica** — A replica a company runs with its own key for search, legal hold and data-loss checks (ADR-0228).
 - **Recovery key** — The second way to regain a Workspace's keys when no signed-in device can approve a new one. Area keys are also wrapped for it, and the person or their company holds it (ADR-0228).
 - **Headless Liquid replica** — Optional Liquid replica without a user interface. A Workspace must opt in before this replica can sync it; same-host agents then use Liquid's normal permission and action surfaces while user devices are offline.
+- **Text Block** — One paragraph, heading, list item, to-do or quote; ⏎ ends it and starts the next.
 - **Section** — Consecutive Text Blocks up to `---`, a Block of another type or the Page's edge; Arrange mode places it as one tile, inside which its Text Blocks can be arranged in columns. It is layout only and owns no content, rights or Views (ADR-0235).
 - **Chat** — Liquid's one kind of conversation, as in WhatsApp: one-to-one or a group, whose participants are people or agents alike; a Chat may belong to a Page. A planned replacement for separate agent sessions and projects (ADR-0239).
 - **Arrange mode** — The explicit Page state that reveals the responsive grid and resize/reorder handles. Outside Arrange mode, a Page remains a content-first flow.

@@ -22,7 +22,7 @@ References: Notion, AppFlowy, Microsoft Loop and T3 Code.
 - **Type:** Notion's platform UI font stack and a monospace font for code, with AppFlowy's sizes: display 32/40 bold, h1 24/32, h2 20/28 and h3 16/22 semibold, prose 16/24, UI 15/22, sidebar 14/20, compact 13/20 for dense rows, chips and buttons, small 12/18, caption 11/14 for chart axes, badges and tags, mono 13/20.
 - **Spacing:** 4, 6, 8, 12, 16, 20, 24 and 32 px.
 - **Radii:** 4 for tags, 6 for buttons, inputs and list items, 8 for cards and panels, 12 for windows, dialogs and the input area.
-- **Rows:** 32 px for navigation items, 34 px for table rows.
+- **Rows:** 32 px for navigation items outside the sidebar, 34 px for table rows.
 - **Sidebar:** as dense as Notion's, AppFlowy's and Loop's: 240 px wide, one line per Page or Chat in 28 px rows.
 - **Text size:** Settings → Appearance scales text and rows together: Compact, Default (the sizes above) or Large.
 - **Motion:** 120 ms for hover and press, 200 ms for panels, ease-out; none when the user prefers reduced motion.

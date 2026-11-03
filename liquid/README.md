@@ -1,6 +1,6 @@
 # Liquid
 
-Planned for M3; see the [Liquid V-Spec](../docs/concept/V-Spec_Liquid.html). The agent-surface slice in [PLAN.md](../PLAN.md) comes first.
+The Liquid app: the agent surface and the Workspace's Explorer and Pages, growing slice by slice through [PLAN.md](../PLAN.md); see the [Liquid V-Spec](../docs/concept/V-Spec_Liquid.html).
 
 Native targets and current availability follow [PLATFORMS.md](../PLATFORMS.md).
 
@@ -15,7 +15,7 @@ After changing `liquid-bridge/src/api`, run `flutter_rust_bridge_codegen generat
 
 ## Run
 
-The app opens the Workspace, whose replica lives in `~/Library/Application Support/Liquid/Workspace/` with its key in the keychain. With the project named in the environment it also starts pi and opens the start page, where recent sessions continue and the first message starts a new one; without one, it opens the Workspace's first Page and says why on stderr. It needs pi 1.3.0 with a configured model. `flutter run -d macos` in `app/` needs Xcode and rustup ([build hosts](../TESTING.md#development-toolchain)). The project signs development builds ad hoc; release builds are to be signed with Developer ID, hardened and notarized, and to run without the App Sandbox (ADR-0200).
+The app opens the Workspace, whose replica lives in `~/Library/Application Support/Liquid/Workspace/` with its key in the keychain. With the project named in the environment it also starts pi and opens the start page, where recent sessions continue and the first message starts a new one; without a session, it opens the Workspace's first Page and says why on stderr. An agent session needs pi 1.3.0 with a configured model. `flutter run -d macos` in `app/` needs Xcode and rustup ([build hosts](../TESTING.md#development-toolchain)). The project signs development builds ad hoc; release builds are to be signed with Developer ID, hardened and notarized, and to run without the App Sandbox (ADR-0200).
 
 - `LIQUID_PROJECT` — the agent's project directory (required for an agent session).
 - `LIQUID_PI_EXTENSION` — the absolute path of `meta-harness/pi-extension/watershed.ts` (required: pi would run tools without approvals, so Liquid does not start a session unless this extension is loaded).

@@ -68,9 +68,9 @@ Liquid        = local-first workspace and App platform</code></pre>
         <li>Text shortcuts format the current Text Block. For example, <code>&gt;</code> plus space applies toggle formatting; a toggle is not a Block.</li>
         <li>Blocks begin in one ordered vertical flow. Arrange mode reveals a responsive grid with move/resize handles, like placing mobile widgets without a separate container.</li>
         <li>A Text Block is one paragraph, heading, list item, to-do or quote; ⏎ ends it. As in Notion, ⏎ continues a list or to-do and ends one left empty, and at a Text Block's start adds an empty one above; ⌫ at a start removes a divider above, then the formatting, and then joins the Text Block above. Consecutive Text Blocks form a <strong>Section</strong>, which <code>---</code> or a Block of another type ends; Arrange mode places each Section and each other Block as one tile, and a Section's Text Blocks can be arranged in columns inside it. A Section is layout only and owns no content (ADR-0235).</li>
-        <li>Page templates create useful starting compositions, such as an AI Project with Agent Session, Database and App Blocks. A template is not a Page Type.</li>
+        <li>Page templates create useful starting compositions, such as an AI project with a Chat, Database and App Blocks. A template is not a Page Type.</li>
         <li>The Explorer shows Pages and Sources as peer entries. Opening either follows one navigation model; the internal object types remain distinct.</li>
-        <li>The Explorer shows each area under its own heading, as Notion shows teamspaces; each holds a tree of nested Pages with Sources among them (ADR-0235). A new Workspace starts, as Notion does, with the area Private holding one blank Page, and the Workspace works without an agent session.</li>
+        <li>The Explorer shows each area under its own heading, as Notion shows teamspaces; each holds a tree of nested Pages with Sources among them (ADR-0235). A new Workspace starts, as Notion does, with the area Private holding one blank Page, and the Workspace works without an agent.</li>
         <li>In M3a a Source is a local file or folder, read-only, because History cannot revert writes outside Workspace data (ADR-0235). Web links follow after M3a as read-only Sources that load only when opened and show in a built-in browser (ADR-0236).</li>
         <li>Media come from local attachments; a web link is a bookmark that fetches nothing, and an embed loads remote content only after a click (ADR-0235).</li>
         <li>The PowerBar finds Workspace objects, creates Blocks and invokes permitted Workspace or agent actions. Without a prefix it searches and jumps; <code>/</code> adds a Block and <code>&gt;</code> lists actions; <code>@</code> is kept for people (ADR-0236, <a href="../design/mockups/liquid-workspace-pages.html">Pages mockups</a>).</li>
@@ -217,6 +217,7 @@ Headless replica ┘</code></pre>
     </div></section>
 
     <section id="agents" class="section"><h2>8. Agent experience</h2><div class="body">
+      <p class="muted">Planned (ADR-0239): every conversation becomes a Chat, one-to-one or a group of people and agents, which may belong to a Page; an agent's work folder is a folder Source, and the steps below then start a Chat rather than a session (<a href="../design/mockups/liquid-chats.html">concept mockup</a>).</p>
       <ol>
         <li>A user or developer configures a harness in Liquid and gives its execution location a friendly name such as “My laptop” or “Liquid Cloud Server.”</li>
         <li>The user selects harness, that adapter's configuration and a location, then names the session by intent, such as “Refactor project X.” Flow Agent requires an explicit Flow from its global authority; other harnesses retain their documented selection model. Global-config management is a separate surface; infrastructure IDs and any device-local Runtime binding remain internal.</li>

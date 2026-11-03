@@ -33,7 +33,7 @@ flowchart TD
 
 ### Rendering
 
-5. Pages build only Views that intersect the viewport plus a bounded cache extent; Arrange mode virtualizes grid rows the same way. Measured View heights persist in a device-local cache outside synced layout and History, so scroll position stays stable when off-screen Views rebuild.
+5. Pages build only Views that intersect the viewport plus a bounded cache extent; Arrange mode virtualizes grid rows the same way. Measured View heights persist in a device-local cache outside synced layout and History, so scroll position stays stable when off-screen Views rebuild; that cache is not yet built.
 6. Each Block View subscribes only to its own Block's stream and is its own repaint boundary. Editing Block A never rebuilds the Page or the Explorer and never repaints another Block; the Page subscribes only to View order and layout.
 7. Text input, selection and IME composition live in the focused Block's controller and render in the next frame without awaiting the bridge; the resulting mutation crosses the pipeline asynchronously. Edit controls are enabled only where the effective permission already allows the write, and a later pipeline rejection reverts the local edit visibly.
 8. Whiteboard, wide Database and complex App Views use their own tile or viewport slicing.
