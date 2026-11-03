@@ -3061,6 +3061,9 @@ impl SseDecode for crate::api::workspace::BridgeAnswer {
         let mut var_text = <Option<String>>::sse_decode(deserializer);
         let mut var_style =
             <Option<crate::api::workspace::BridgeTextStyle>>::sse_decode(deserializer);
+        let mut var_database =
+            <Option<crate::api::database::BridgeDatabase>>::sse_decode(deserializer);
+        let mut var_rows = <Vec<crate::api::database::BridgeRow>>::sse_decode(deserializer);
         return crate::api::workspace::BridgeAnswer {
             areas: var_areas,
             pages: var_pages,
@@ -3068,6 +3071,8 @@ impl SseDecode for crate::api::workspace::BridgeAnswer {
             count: var_count,
             text: var_text,
             style: var_style,
+            database: var_database,
+            rows: var_rows,
         };
     }
 }
@@ -3080,12 +3085,18 @@ impl SseDecode for crate::api::workspace::BridgeApplied {
         let mut var_page = <Option<String>>::sse_decode(deserializer);
         let mut var_block = <Option<String>>::sse_decode(deserializer);
         let mut var_view = <Option<String>>::sse_decode(deserializer);
+        let mut var_field = <Option<String>>::sse_decode(deserializer);
+        let mut var_row = <Option<String>>::sse_decode(deserializer);
+        let mut var_option = <Option<String>>::sse_decode(deserializer);
         return crate::api::workspace::BridgeApplied {
             action: var_action,
             area: var_area,
             page: var_page,
             block: var_block,
             view: var_view,
+            field: var_field,
+            row: var_row,
+            option: var_option,
         };
     }
 }
@@ -3162,6 +3173,38 @@ impl SseDecode for crate::api::git::BridgeBranches {
         return crate::api::git::BridgeBranches {
             branches: var_branches,
             running: var_running,
+        };
+    }
+}
+
+impl SseDecode for crate::api::database::BridgeCell {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_kind = <crate::api::database::BridgeCellKind>::sse_decode(deserializer);
+        let mut var_text = <Option<String>>::sse_decode(deserializer);
+        let mut var_number = <f64>::sse_decode(deserializer);
+        let mut var_checked = <bool>::sse_decode(deserializer);
+        return crate::api::database::BridgeCell {
+            kind: var_kind,
+            text: var_text,
+            number: var_number,
+            checked: var_checked,
+        };
+    }
+}
+
+impl SseDecode for crate::api::database::BridgeCellKind {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut inner = <i32>::sse_decode(deserializer);
+        return match inner {
+            0 => crate::api::database::BridgeCellKind::Empty,
+            1 => crate::api::database::BridgeCellKind::Text,
+            2 => crate::api::database::BridgeCellKind::Number,
+            3 => crate::api::database::BridgeCellKind::Select,
+            4 => crate::api::database::BridgeCellKind::Date,
+            5 => crate::api::database::BridgeCellKind::Checkbox,
+            _ => unreachable!("Invalid variant for BridgeCellKind: {}", inner),
         };
     }
 }
@@ -3309,6 +3352,18 @@ impl SseDecode for crate::api::history::BridgeContextPart {
     }
 }
 
+impl SseDecode for crate::api::database::BridgeDatabase {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_name = <String>::sse_decode(deserializer);
+        let mut var_fields = <Vec<crate::api::database::BridgeField>>::sse_decode(deserializer);
+        return crate::api::database::BridgeDatabase {
+            name: var_name,
+            fields: var_fields,
+        };
+    }
+}
+
 impl SseDecode for crate::api::events::BridgeDecision {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -3434,6 +3489,49 @@ impl SseDecode for crate::api::events::BridgeEventKind {
     }
 }
 
+impl SseDecode for crate::api::database::BridgeField {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_id = <String>::sse_decode(deserializer);
+        let mut var_name = <String>::sse_decode(deserializer);
+        let mut var_kind = <crate::api::database::BridgeFieldKind>::sse_decode(deserializer);
+        let mut var_options = <Vec<crate::api::database::BridgeOption>>::sse_decode(deserializer);
+        return crate::api::database::BridgeField {
+            id: var_id,
+            name: var_name,
+            kind: var_kind,
+            options: var_options,
+        };
+    }
+}
+
+impl SseDecode for crate::api::database::BridgeFieldCell {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_field = <String>::sse_decode(deserializer);
+        let mut var_value = <crate::api::database::BridgeCell>::sse_decode(deserializer);
+        return crate::api::database::BridgeFieldCell {
+            field: var_field,
+            value: var_value,
+        };
+    }
+}
+
+impl SseDecode for crate::api::database::BridgeFieldKind {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut inner = <i32>::sse_decode(deserializer);
+        return match inner {
+            0 => crate::api::database::BridgeFieldKind::Text,
+            1 => crate::api::database::BridgeFieldKind::Number,
+            2 => crate::api::database::BridgeFieldKind::Select,
+            3 => crate::api::database::BridgeFieldKind::Date,
+            4 => crate::api::database::BridgeFieldKind::Checkbox,
+            _ => unreachable!("Invalid variant for BridgeFieldKind: {}", inner),
+        };
+    }
+}
+
 impl SseDecode for crate::api::events::BridgeFileChange {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -3448,6 +3546,20 @@ impl SseDecode for crate::api::events::BridgeFileChange {
             status: var_status,
             added: var_added,
             removed: var_removed,
+        };
+    }
+}
+
+impl SseDecode for crate::api::database::BridgeFilter {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_field = <String>::sse_decode(deserializer);
+        let mut var_matches = <crate::api::database::BridgeMatch>::sse_decode(deserializer);
+        let mut var_value = <Option<crate::api::database::BridgeCell>>::sse_decode(deserializer);
+        return crate::api::database::BridgeFilter {
+            field: var_field,
+            matches: var_matches,
+            value: var_value,
         };
     }
 }
@@ -3591,6 +3703,20 @@ impl SseDecode for crate::api::events::BridgeLevel {
     }
 }
 
+impl SseDecode for crate::api::database::BridgeMatch {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut inner = <i32>::sse_decode(deserializer);
+        return match inner {
+            0 => crate::api::database::BridgeMatch::Empty,
+            1 => crate::api::database::BridgeMatch::NotEmpty,
+            2 => crate::api::database::BridgeMatch::Is,
+            3 => crate::api::database::BridgeMatch::Contains,
+            _ => unreachable!("Invalid variant for BridgeMatch: {}", inner),
+        };
+    }
+}
+
 impl SseDecode for crate::api::session::BridgeModel {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -3622,6 +3748,12 @@ impl SseDecode for crate::api::workspace::BridgeMutation {
         let mut var_delete = <i64>::sse_decode(deserializer);
         let mut var_style = <crate::api::workspace::BridgeTextStyle>::sse_decode(deserializer);
         let mut var_boundary = <bool>::sse_decode(deserializer);
+        let mut var_field = <Option<String>>::sse_decode(deserializer);
+        let mut var_row = <Option<String>>::sse_decode(deserializer);
+        let mut var_fieldKind =
+            <Option<crate::api::database::BridgeFieldKind>>::sse_decode(deserializer);
+        let mut var_color = <i64>::sse_decode(deserializer);
+        let mut var_cell = <Option<crate::api::database::BridgeCell>>::sse_decode(deserializer);
         return crate::api::workspace::BridgeMutation {
             kind: var_kind,
             area: var_area,
@@ -3635,6 +3767,11 @@ impl SseDecode for crate::api::workspace::BridgeMutation {
             delete: var_delete,
             style: var_style,
             boundary: var_boundary,
+            field: var_field,
+            row: var_row,
+            field_kind: var_fieldKind,
+            color: var_color,
+            cell: var_cell,
         };
     }
 }
@@ -3654,7 +3791,30 @@ impl SseDecode for crate::api::workspace::BridgeMutationKind {
             7 => crate::api::workspace::BridgeMutationKind::JoinTextBlock,
             8 => crate::api::workspace::BridgeMutationKind::SetTextStyle,
             9 => crate::api::workspace::BridgeMutationKind::SetSectionBoundary,
+            10 => crate::api::workspace::BridgeMutationKind::AddDatabaseBlock,
+            11 => crate::api::workspace::BridgeMutationKind::RenameDatabase,
+            12 => crate::api::workspace::BridgeMutationKind::AddField,
+            13 => crate::api::workspace::BridgeMutationKind::RenameField,
+            14 => crate::api::workspace::BridgeMutationKind::RemoveField,
+            15 => crate::api::workspace::BridgeMutationKind::AddOption,
+            16 => crate::api::workspace::BridgeMutationKind::AddRow,
+            17 => crate::api::workspace::BridgeMutationKind::RemoveRow,
+            18 => crate::api::workspace::BridgeMutationKind::SetCell,
             _ => unreachable!("Invalid variant for BridgeMutationKind: {}", inner),
+        };
+    }
+}
+
+impl SseDecode for crate::api::database::BridgeOption {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_id = <String>::sse_decode(deserializer);
+        let mut var_name = <String>::sse_decode(deserializer);
+        let mut var_color = <i64>::sse_decode(deserializer);
+        return crate::api::database::BridgeOption {
+            id: var_id,
+            name: var_name,
+            color: var_color,
         };
     }
 }
@@ -3682,6 +3842,8 @@ impl SseDecode for crate::api::workspace::BridgeQuery {
         let mut var_block = <Option<String>>::sse_decode(deserializer);
         let mut var_start = <i64>::sse_decode(deserializer);
         let mut var_limit = <i64>::sse_decode(deserializer);
+        let mut var_sort = <Option<crate::api::database::BridgeSort>>::sse_decode(deserializer);
+        let mut var_filter = <Option<crate::api::database::BridgeFilter>>::sse_decode(deserializer);
         return crate::api::workspace::BridgeQuery {
             kind: var_kind,
             area: var_area,
@@ -3689,6 +3851,8 @@ impl SseDecode for crate::api::workspace::BridgeQuery {
             block: var_block,
             start: var_start,
             limit: var_limit,
+            sort: var_sort,
+            filter: var_filter,
         };
     }
 }
@@ -3702,6 +3866,8 @@ impl SseDecode for crate::api::workspace::BridgeQueryKind {
             1 => crate::api::workspace::BridgeQueryKind::Pages,
             2 => crate::api::workspace::BridgeQueryKind::Views,
             3 => crate::api::workspace::BridgeQueryKind::Text,
+            4 => crate::api::workspace::BridgeQueryKind::Database,
+            5 => crate::api::workspace::BridgeQueryKind::Rows,
             _ => unreachable!("Invalid variant for BridgeQueryKind: {}", inner),
         };
     }
@@ -3907,6 +4073,18 @@ impl SseDecode for crate::api::history::BridgeRevertPlan {
     }
 }
 
+impl SseDecode for crate::api::database::BridgeRow {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_id = <String>::sse_decode(deserializer);
+        let mut var_cells = <Vec<crate::api::database::BridgeFieldCell>>::sse_decode(deserializer);
+        return crate::api::database::BridgeRow {
+            id: var_id,
+            cells: var_cells,
+        };
+    }
+}
+
 impl SseDecode for crate::api::history::BridgeRunningAgent {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -3915,6 +4093,18 @@ impl SseDecode for crate::api::history::BridgeRunningAgent {
         return crate::api::history::BridgeRunningAgent {
             own: var_own,
             title: var_title,
+        };
+    }
+}
+
+impl SseDecode for crate::api::database::BridgeSort {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_field = <String>::sse_decode(deserializer);
+        let mut var_descending = <bool>::sse_decode(deserializer);
+        return crate::api::database::BridgeSort {
+            field: var_field,
+            descending: var_descending,
         };
     }
 }
@@ -4177,6 +4367,13 @@ impl SseDecode for crate::api::workspace::BridgeView {
     }
 }
 
+impl SseDecode for f64 {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        deserializer.cursor.read_f64::<NativeEndian>().unwrap()
+    }
+}
+
 impl SseDecode for i32 {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -4299,6 +4496,34 @@ impl SseDecode for Vec<crate::api::events::BridgeEditChange> {
     }
 }
 
+impl SseDecode for Vec<crate::api::database::BridgeField> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = Vec::with_capacity(len_ as usize);
+        for idx_ in 0..len_ {
+            ans_.push(<crate::api::database::BridgeField>::sse_decode(
+                deserializer,
+            ));
+        }
+        return ans_;
+    }
+}
+
+impl SseDecode for Vec<crate::api::database::BridgeFieldCell> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = Vec::with_capacity(len_ as usize);
+        for idx_ in 0..len_ {
+            ans_.push(<crate::api::database::BridgeFieldCell>::sse_decode(
+                deserializer,
+            ));
+        }
+        return ans_;
+    }
+}
+
 impl SseDecode for Vec<crate::api::events::BridgeFileChange> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -4320,6 +4545,20 @@ impl SseDecode for Vec<crate::api::session::BridgeModel> {
         let mut ans_ = Vec::with_capacity(len_ as usize);
         for idx_ in 0..len_ {
             ans_.push(<crate::api::session::BridgeModel>::sse_decode(deserializer));
+        }
+        return ans_;
+    }
+}
+
+impl SseDecode for Vec<crate::api::database::BridgeOption> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = Vec::with_capacity(len_ as usize);
+        for idx_ in 0..len_ {
+            ans_.push(<crate::api::database::BridgeOption>::sse_decode(
+                deserializer,
+            ));
         }
         return ans_;
     }
@@ -4362,6 +4601,18 @@ impl SseDecode for Vec<crate::api::history::BridgeRevertFile> {
             ans_.push(<crate::api::history::BridgeRevertFile>::sse_decode(
                 deserializer,
             ));
+        }
+        return ans_;
+    }
+}
+
+impl SseDecode for Vec<crate::api::database::BridgeRow> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = Vec::with_capacity(len_ as usize);
+        for idx_ in 0..len_ {
+            ans_.push(<crate::api::database::BridgeRow>::sse_decode(deserializer));
         }
         return ans_;
     }
@@ -4522,6 +4773,17 @@ impl SseDecode for Option<crate::api::events::BridgeApproval> {
     }
 }
 
+impl SseDecode for Option<crate::api::database::BridgeCell> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<crate::api::database::BridgeCell>::sse_decode(deserializer));
+        } else {
+            return None;
+        }
+    }
+}
+
 impl SseDecode for Option<crate::api::git::BridgeCommit> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -4538,6 +4800,19 @@ impl SseDecode for Option<crate::api::history::BridgeContextDetail> {
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         if (<bool>::sse_decode(deserializer)) {
             return Some(<crate::api::history::BridgeContextDetail>::sse_decode(
+                deserializer,
+            ));
+        } else {
+            return None;
+        }
+    }
+}
+
+impl SseDecode for Option<crate::api::database::BridgeDatabase> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<crate::api::database::BridgeDatabase>::sse_decode(
                 deserializer,
             ));
         } else {
@@ -4577,6 +4852,32 @@ impl SseDecode for Option<crate::api::events::BridgeEdit> {
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         if (<bool>::sse_decode(deserializer)) {
             return Some(<crate::api::events::BridgeEdit>::sse_decode(deserializer));
+        } else {
+            return None;
+        }
+    }
+}
+
+impl SseDecode for Option<crate::api::database::BridgeFieldKind> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<crate::api::database::BridgeFieldKind>::sse_decode(
+                deserializer,
+            ));
+        } else {
+            return None;
+        }
+    }
+}
+
+impl SseDecode for Option<crate::api::database::BridgeFilter> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<crate::api::database::BridgeFilter>::sse_decode(
+                deserializer,
+            ));
         } else {
             return None;
         }
@@ -4660,6 +4961,17 @@ impl SseDecode for Option<crate::api::events::BridgeRequest> {
             return Some(<crate::api::events::BridgeRequest>::sse_decode(
                 deserializer,
             ));
+        } else {
+            return None;
+        }
+    }
+}
+
+impl SseDecode for Option<crate::api::database::BridgeSort> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<crate::api::database::BridgeSort>::sse_decode(deserializer));
         } else {
             return None;
         }
@@ -5150,6 +5462,8 @@ impl flutter_rust_bridge::IntoDart for crate::api::workspace::BridgeAnswer {
             self.count.into_into_dart().into_dart(),
             self.text.into_into_dart().into_dart(),
             self.style.into_into_dart().into_dart(),
+            self.database.into_into_dart().into_dart(),
+            self.rows.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -5174,6 +5488,9 @@ impl flutter_rust_bridge::IntoDart for crate::api::workspace::BridgeApplied {
             self.page.into_into_dart().into_dart(),
             self.block.into_into_dart().into_dart(),
             self.view.into_into_dart().into_dart(),
+            self.field.into_into_dart().into_dart(),
+            self.row.into_into_dart().into_dart(),
+            self.option.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -5296,6 +5613,54 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::git::BridgeBranches>
     for crate::api::git::BridgeBranches
 {
     fn into_into_dart(self) -> crate::api::git::BridgeBranches {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::database::BridgeCell {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.kind.into_into_dart().into_dart(),
+            self.text.into_into_dart().into_dart(),
+            self.number.into_into_dart().into_dart(),
+            self.checked.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::database::BridgeCell
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::database::BridgeCell>
+    for crate::api::database::BridgeCell
+{
+    fn into_into_dart(self) -> crate::api::database::BridgeCell {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::database::BridgeCellKind {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        match self {
+            Self::Empty => 0.into_dart(),
+            Self::Text => 1.into_dart(),
+            Self::Number => 2.into_dart(),
+            Self::Select => 3.into_dart(),
+            Self::Date => 4.into_dart(),
+            Self::Checkbox => 5.into_dart(),
+            _ => unreachable!(),
+        }
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::database::BridgeCellKind
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::database::BridgeCellKind>
+    for crate::api::database::BridgeCellKind
+{
+    fn into_into_dart(self) -> crate::api::database::BridgeCellKind {
         self
     }
 }
@@ -5518,6 +5883,27 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::history::BridgeContextPart>
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::database::BridgeDatabase {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.name.into_into_dart().into_dart(),
+            self.fields.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::database::BridgeDatabase
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::database::BridgeDatabase>
+    for crate::api::database::BridgeDatabase
+{
+    fn into_into_dart(self) -> crate::api::database::BridgeDatabase {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::api::events::BridgeDecision {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         match self {
@@ -5697,6 +6083,74 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::events::BridgeEventKind>
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::database::BridgeField {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.id.into_into_dart().into_dart(),
+            self.name.into_into_dart().into_dart(),
+            self.kind.into_into_dart().into_dart(),
+            self.options.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::database::BridgeField
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::database::BridgeField>
+    for crate::api::database::BridgeField
+{
+    fn into_into_dart(self) -> crate::api::database::BridgeField {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::database::BridgeFieldCell {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.field.into_into_dart().into_dart(),
+            self.value.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::database::BridgeFieldCell
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::database::BridgeFieldCell>
+    for crate::api::database::BridgeFieldCell
+{
+    fn into_into_dart(self) -> crate::api::database::BridgeFieldCell {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::database::BridgeFieldKind {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        match self {
+            Self::Text => 0.into_dart(),
+            Self::Number => 1.into_dart(),
+            Self::Select => 2.into_dart(),
+            Self::Date => 3.into_dart(),
+            Self::Checkbox => 4.into_dart(),
+            _ => unreachable!(),
+        }
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::database::BridgeFieldKind
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::database::BridgeFieldKind>
+    for crate::api::database::BridgeFieldKind
+{
+    fn into_into_dart(self) -> crate::api::database::BridgeFieldKind {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::api::events::BridgeFileChange {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
@@ -5717,6 +6171,28 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::events::BridgeFileChange>
     for crate::api::events::BridgeFileChange
 {
     fn into_into_dart(self) -> crate::api::events::BridgeFileChange {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::database::BridgeFilter {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.field.into_into_dart().into_dart(),
+            self.matches.into_into_dart().into_dart(),
+            self.value.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::database::BridgeFilter
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::database::BridgeFilter>
+    for crate::api::database::BridgeFilter
+{
+    fn into_into_dart(self) -> crate::api::database::BridgeFilter {
         self
     }
 }
@@ -5902,6 +6378,29 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::events::BridgeLevel>
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::database::BridgeMatch {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        match self {
+            Self::Empty => 0.into_dart(),
+            Self::NotEmpty => 1.into_dart(),
+            Self::Is => 2.into_dart(),
+            Self::Contains => 3.into_dart(),
+            _ => unreachable!(),
+        }
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::database::BridgeMatch
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::database::BridgeMatch>
+    for crate::api::database::BridgeMatch
+{
+    fn into_into_dart(self) -> crate::api::database::BridgeMatch {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::api::session::BridgeModel {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
@@ -5940,6 +6439,11 @@ impl flutter_rust_bridge::IntoDart for crate::api::workspace::BridgeMutation {
             self.delete.into_into_dart().into_dart(),
             self.style.into_into_dart().into_dart(),
             self.boundary.into_into_dart().into_dart(),
+            self.field.into_into_dart().into_dart(),
+            self.row.into_into_dart().into_dart(),
+            self.field_kind.into_into_dart().into_dart(),
+            self.color.into_into_dart().into_dart(),
+            self.cell.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -5969,6 +6473,15 @@ impl flutter_rust_bridge::IntoDart for crate::api::workspace::BridgeMutationKind
             Self::JoinTextBlock => 7.into_dart(),
             Self::SetTextStyle => 8.into_dart(),
             Self::SetSectionBoundary => 9.into_dart(),
+            Self::AddDatabaseBlock => 10.into_dart(),
+            Self::RenameDatabase => 11.into_dart(),
+            Self::AddField => 12.into_dart(),
+            Self::RenameField => 13.into_dart(),
+            Self::RemoveField => 14.into_dart(),
+            Self::AddOption => 15.into_dart(),
+            Self::AddRow => 16.into_dart(),
+            Self::RemoveRow => 17.into_dart(),
+            Self::SetCell => 18.into_dart(),
             _ => unreachable!(),
         }
     }
@@ -5981,6 +6494,28 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::workspace::BridgeMutationKind
     for crate::api::workspace::BridgeMutationKind
 {
     fn into_into_dart(self) -> crate::api::workspace::BridgeMutationKind {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::database::BridgeOption {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.id.into_into_dart().into_dart(),
+            self.name.into_into_dart().into_dart(),
+            self.color.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::database::BridgeOption
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::database::BridgeOption>
+    for crate::api::database::BridgeOption
+{
+    fn into_into_dart(self) -> crate::api::database::BridgeOption {
         self
     }
 }
@@ -6016,6 +6551,8 @@ impl flutter_rust_bridge::IntoDart for crate::api::workspace::BridgeQuery {
             self.block.into_into_dart().into_dart(),
             self.start.into_into_dart().into_dart(),
             self.limit.into_into_dart().into_dart(),
+            self.sort.into_into_dart().into_dart(),
+            self.filter.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -6039,6 +6576,8 @@ impl flutter_rust_bridge::IntoDart for crate::api::workspace::BridgeQueryKind {
             Self::Pages => 1.into_dart(),
             Self::Views => 2.into_dart(),
             Self::Text => 3.into_dart(),
+            Self::Database => 4.into_dart(),
+            Self::Rows => 5.into_dart(),
             _ => unreachable!(),
         }
     }
@@ -6321,6 +6860,27 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::history::BridgeRevertPlan>
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::database::BridgeRow {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.id.into_into_dart().into_dart(),
+            self.cells.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::database::BridgeRow
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::database::BridgeRow>
+    for crate::api::database::BridgeRow
+{
+    fn into_into_dart(self) -> crate::api::database::BridgeRow {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::api::history::BridgeRunningAgent {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
@@ -6338,6 +6898,27 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::history::BridgeRunningAgent>
     for crate::api::history::BridgeRunningAgent
 {
     fn into_into_dart(self) -> crate::api::history::BridgeRunningAgent {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::database::BridgeSort {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.field.into_into_dart().into_dart(),
+            self.descending.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::database::BridgeSort
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::database::BridgeSort>
+    for crate::api::database::BridgeSort
+{
+    fn into_into_dart(self) -> crate::api::database::BridgeSort {
         self
     }
 }
@@ -6791,6 +7372,8 @@ impl SseEncode for crate::api::workspace::BridgeAnswer {
         <i64>::sse_encode(self.count, serializer);
         <Option<String>>::sse_encode(self.text, serializer);
         <Option<crate::api::workspace::BridgeTextStyle>>::sse_encode(self.style, serializer);
+        <Option<crate::api::database::BridgeDatabase>>::sse_encode(self.database, serializer);
+        <Vec<crate::api::database::BridgeRow>>::sse_encode(self.rows, serializer);
     }
 }
 
@@ -6802,6 +7385,9 @@ impl SseEncode for crate::api::workspace::BridgeApplied {
         <Option<String>>::sse_encode(self.page, serializer);
         <Option<String>>::sse_encode(self.block, serializer);
         <Option<String>>::sse_encode(self.view, serializer);
+        <Option<String>>::sse_encode(self.field, serializer);
+        <Option<String>>::sse_encode(self.row, serializer);
+        <Option<String>>::sse_encode(self.option, serializer);
     }
 }
 
@@ -6858,6 +7444,36 @@ impl SseEncode for crate::api::git::BridgeBranches {
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <Vec<crate::api::git::BridgeBranch>>::sse_encode(self.branches, serializer);
         <Vec<crate::api::history::BridgeRunningAgent>>::sse_encode(self.running, serializer);
+    }
+}
+
+impl SseEncode for crate::api::database::BridgeCell {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <crate::api::database::BridgeCellKind>::sse_encode(self.kind, serializer);
+        <Option<String>>::sse_encode(self.text, serializer);
+        <f64>::sse_encode(self.number, serializer);
+        <bool>::sse_encode(self.checked, serializer);
+    }
+}
+
+impl SseEncode for crate::api::database::BridgeCellKind {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(
+            match self {
+                crate::api::database::BridgeCellKind::Empty => 0,
+                crate::api::database::BridgeCellKind::Text => 1,
+                crate::api::database::BridgeCellKind::Number => 2,
+                crate::api::database::BridgeCellKind::Select => 3,
+                crate::api::database::BridgeCellKind::Date => 4,
+                crate::api::database::BridgeCellKind::Checkbox => 5,
+                _ => {
+                    unimplemented!("");
+                }
+            },
+            serializer,
+        );
     }
 }
 
@@ -6965,6 +7581,14 @@ impl SseEncode for crate::api::history::BridgeContextPart {
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <String>::sse_encode(self.name, serializer);
         <i64>::sse_encode(self.chars, serializer);
+    }
+}
+
+impl SseEncode for crate::api::database::BridgeDatabase {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.name, serializer);
+        <Vec<crate::api::database::BridgeField>>::sse_encode(self.fields, serializer);
     }
 }
 
@@ -7080,6 +7704,43 @@ impl SseEncode for crate::api::events::BridgeEventKind {
     }
 }
 
+impl SseEncode for crate::api::database::BridgeField {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.id, serializer);
+        <String>::sse_encode(self.name, serializer);
+        <crate::api::database::BridgeFieldKind>::sse_encode(self.kind, serializer);
+        <Vec<crate::api::database::BridgeOption>>::sse_encode(self.options, serializer);
+    }
+}
+
+impl SseEncode for crate::api::database::BridgeFieldCell {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.field, serializer);
+        <crate::api::database::BridgeCell>::sse_encode(self.value, serializer);
+    }
+}
+
+impl SseEncode for crate::api::database::BridgeFieldKind {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(
+            match self {
+                crate::api::database::BridgeFieldKind::Text => 0,
+                crate::api::database::BridgeFieldKind::Number => 1,
+                crate::api::database::BridgeFieldKind::Select => 2,
+                crate::api::database::BridgeFieldKind::Date => 3,
+                crate::api::database::BridgeFieldKind::Checkbox => 4,
+                _ => {
+                    unimplemented!("");
+                }
+            },
+            serializer,
+        );
+    }
+}
+
 impl SseEncode for crate::api::events::BridgeFileChange {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -7088,6 +7749,15 @@ impl SseEncode for crate::api::events::BridgeFileChange {
         <crate::api::events::BridgeChangeStatus>::sse_encode(self.status, serializer);
         <i64>::sse_encode(self.added, serializer);
         <i64>::sse_encode(self.removed, serializer);
+    }
+}
+
+impl SseEncode for crate::api::database::BridgeFilter {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.field, serializer);
+        <crate::api::database::BridgeMatch>::sse_encode(self.matches, serializer);
+        <Option<crate::api::database::BridgeCell>>::sse_encode(self.value, serializer);
     }
 }
 
@@ -7205,6 +7875,24 @@ impl SseEncode for crate::api::events::BridgeLevel {
     }
 }
 
+impl SseEncode for crate::api::database::BridgeMatch {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(
+            match self {
+                crate::api::database::BridgeMatch::Empty => 0,
+                crate::api::database::BridgeMatch::NotEmpty => 1,
+                crate::api::database::BridgeMatch::Is => 2,
+                crate::api::database::BridgeMatch::Contains => 3,
+                _ => {
+                    unimplemented!("");
+                }
+            },
+            serializer,
+        );
+    }
+}
+
 impl SseEncode for crate::api::session::BridgeModel {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -7230,6 +7918,11 @@ impl SseEncode for crate::api::workspace::BridgeMutation {
         <i64>::sse_encode(self.delete, serializer);
         <crate::api::workspace::BridgeTextStyle>::sse_encode(self.style, serializer);
         <bool>::sse_encode(self.boundary, serializer);
+        <Option<String>>::sse_encode(self.field, serializer);
+        <Option<String>>::sse_encode(self.row, serializer);
+        <Option<crate::api::database::BridgeFieldKind>>::sse_encode(self.field_kind, serializer);
+        <i64>::sse_encode(self.color, serializer);
+        <Option<crate::api::database::BridgeCell>>::sse_encode(self.cell, serializer);
     }
 }
 
@@ -7248,12 +7941,30 @@ impl SseEncode for crate::api::workspace::BridgeMutationKind {
                 crate::api::workspace::BridgeMutationKind::JoinTextBlock => 7,
                 crate::api::workspace::BridgeMutationKind::SetTextStyle => 8,
                 crate::api::workspace::BridgeMutationKind::SetSectionBoundary => 9,
+                crate::api::workspace::BridgeMutationKind::AddDatabaseBlock => 10,
+                crate::api::workspace::BridgeMutationKind::RenameDatabase => 11,
+                crate::api::workspace::BridgeMutationKind::AddField => 12,
+                crate::api::workspace::BridgeMutationKind::RenameField => 13,
+                crate::api::workspace::BridgeMutationKind::RemoveField => 14,
+                crate::api::workspace::BridgeMutationKind::AddOption => 15,
+                crate::api::workspace::BridgeMutationKind::AddRow => 16,
+                crate::api::workspace::BridgeMutationKind::RemoveRow => 17,
+                crate::api::workspace::BridgeMutationKind::SetCell => 18,
                 _ => {
                     unimplemented!("");
                 }
             },
             serializer,
         );
+    }
+}
+
+impl SseEncode for crate::api::database::BridgeOption {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.id, serializer);
+        <String>::sse_encode(self.name, serializer);
+        <i64>::sse_encode(self.color, serializer);
     }
 }
 
@@ -7275,6 +7986,8 @@ impl SseEncode for crate::api::workspace::BridgeQuery {
         <Option<String>>::sse_encode(self.block, serializer);
         <i64>::sse_encode(self.start, serializer);
         <i64>::sse_encode(self.limit, serializer);
+        <Option<crate::api::database::BridgeSort>>::sse_encode(self.sort, serializer);
+        <Option<crate::api::database::BridgeFilter>>::sse_encode(self.filter, serializer);
     }
 }
 
@@ -7287,6 +8000,8 @@ impl SseEncode for crate::api::workspace::BridgeQueryKind {
                 crate::api::workspace::BridgeQueryKind::Pages => 1,
                 crate::api::workspace::BridgeQueryKind::Views => 2,
                 crate::api::workspace::BridgeQueryKind::Text => 3,
+                crate::api::workspace::BridgeQueryKind::Database => 4,
+                crate::api::workspace::BridgeQueryKind::Rows => 5,
                 _ => {
                     unimplemented!("");
                 }
@@ -7451,11 +8166,27 @@ impl SseEncode for crate::api::history::BridgeRevertPlan {
     }
 }
 
+impl SseEncode for crate::api::database::BridgeRow {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.id, serializer);
+        <Vec<crate::api::database::BridgeFieldCell>>::sse_encode(self.cells, serializer);
+    }
+}
+
 impl SseEncode for crate::api::history::BridgeRunningAgent {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <bool>::sse_encode(self.own, serializer);
         <Option<String>>::sse_encode(self.title, serializer);
+    }
+}
+
+impl SseEncode for crate::api::database::BridgeSort {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.field, serializer);
+        <bool>::sse_encode(self.descending, serializer);
     }
 }
 
@@ -7627,6 +8358,13 @@ impl SseEncode for crate::api::workspace::BridgeView {
     }
 }
 
+impl SseEncode for f64 {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        serializer.cursor.write_f64::<NativeEndian>(self).unwrap();
+    }
+}
+
 impl SseEncode for i32 {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -7721,6 +8459,26 @@ impl SseEncode for Vec<crate::api::events::BridgeEditChange> {
     }
 }
 
+impl SseEncode for Vec<crate::api::database::BridgeField> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::api::database::BridgeField>::sse_encode(item, serializer);
+        }
+    }
+}
+
+impl SseEncode for Vec<crate::api::database::BridgeFieldCell> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::api::database::BridgeFieldCell>::sse_encode(item, serializer);
+        }
+    }
+}
+
 impl SseEncode for Vec<crate::api::events::BridgeFileChange> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -7737,6 +8495,16 @@ impl SseEncode for Vec<crate::api::session::BridgeModel> {
         <i32>::sse_encode(self.len() as _, serializer);
         for item in self {
             <crate::api::session::BridgeModel>::sse_encode(item, serializer);
+        }
+    }
+}
+
+impl SseEncode for Vec<crate::api::database::BridgeOption> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::api::database::BridgeOption>::sse_encode(item, serializer);
         }
     }
 }
@@ -7767,6 +8535,16 @@ impl SseEncode for Vec<crate::api::history::BridgeRevertFile> {
         <i32>::sse_encode(self.len() as _, serializer);
         for item in self {
             <crate::api::history::BridgeRevertFile>::sse_encode(item, serializer);
+        }
+    }
+}
+
+impl SseEncode for Vec<crate::api::database::BridgeRow> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::api::database::BridgeRow>::sse_encode(item, serializer);
         }
     }
 }
@@ -7891,6 +8669,16 @@ impl SseEncode for Option<crate::api::events::BridgeApproval> {
     }
 }
 
+impl SseEncode for Option<crate::api::database::BridgeCell> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <crate::api::database::BridgeCell>::sse_encode(value, serializer);
+        }
+    }
+}
+
 impl SseEncode for Option<crate::api::git::BridgeCommit> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -7907,6 +8695,16 @@ impl SseEncode for Option<crate::api::history::BridgeContextDetail> {
         <bool>::sse_encode(self.is_some(), serializer);
         if let Some(value) = self {
             <crate::api::history::BridgeContextDetail>::sse_encode(value, serializer);
+        }
+    }
+}
+
+impl SseEncode for Option<crate::api::database::BridgeDatabase> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <crate::api::database::BridgeDatabase>::sse_encode(value, serializer);
         }
     }
 }
@@ -7937,6 +8735,26 @@ impl SseEncode for Option<crate::api::events::BridgeEdit> {
         <bool>::sse_encode(self.is_some(), serializer);
         if let Some(value) = self {
             <crate::api::events::BridgeEdit>::sse_encode(value, serializer);
+        }
+    }
+}
+
+impl SseEncode for Option<crate::api::database::BridgeFieldKind> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <crate::api::database::BridgeFieldKind>::sse_encode(value, serializer);
+        }
+    }
+}
+
+impl SseEncode for Option<crate::api::database::BridgeFilter> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <crate::api::database::BridgeFilter>::sse_encode(value, serializer);
         }
     }
 }
@@ -8007,6 +8825,16 @@ impl SseEncode for Option<crate::api::events::BridgeRequest> {
         <bool>::sse_encode(self.is_some(), serializer);
         if let Some(value) = self {
             <crate::api::events::BridgeRequest>::sse_encode(value, serializer);
+        }
+    }
+}
+
+impl SseEncode for Option<crate::api::database::BridgeSort> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <crate::api::database::BridgeSort>::sse_encode(value, serializer);
         }
     }
 }
