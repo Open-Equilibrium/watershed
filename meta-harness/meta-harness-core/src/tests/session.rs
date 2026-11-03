@@ -1664,6 +1664,47 @@ fn exited(success: bool) -> SessionEvent {
 }
 
 #[test]
+fn an_exited_agents_stderr_reader_closes_while_a_descendant_holds_the_pipe() {
+    run(async {
+        let dir = marker("stderr-reader");
+        std::fs::create_dir_all(&dir).expect("temporary directory");
+        let script = format!(
+            r#"printf 'retained tail\n' >&2
+/bin/sh -c 'trap "" PIPE
+count=0
+until [ -e "$1/release" ]; do
+    [ "$count" -lt 500 ] || exit 1
+    count=$((count + 1))
+    sleep 0.02
+done
+if printf probe >&3 2>/dev/null; then result=open; else result=closed; fi
+: > "$1/$result"
+' holder {} 3>&2 >/dev/null 2>/dev/null &"#,
+            super::shell_word(dir.display())
+        );
+        let (_session, mut events) = fake_agent(&script);
+        assert_eq!(
+            next(&mut events).await,
+            SessionEvent::Exited {
+                success: true,
+                error_output: "retained tail".to_owned(),
+            }
+        );
+        std::fs::write(dir.join("release"), "").expect("release the descendant");
+        timeout(WAIT, async {
+            while !dir.join("open").exists() && !dir.join("closed").exists() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("the descendant probed stderr");
+        let closed = dir.join("closed").exists();
+        std::fs::remove_dir_all(&dir).expect("remove temporary directory");
+        assert!(closed, "the stderr reader outlived the reported agent exit");
+    });
+}
+
+#[test]
 fn reports_the_end_of_what_a_failed_agent_wrote_to_its_error_output() {
     run(async {
         // More than a pipe holds and than is kept, with the reason at the end.

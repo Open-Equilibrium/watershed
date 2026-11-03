@@ -135,7 +135,13 @@ impl Supervisor {
         let success = status.is_ok_and(|status| status.success());
         // Shutdown learns of the exit first; the event waits for buffer space.
         let _ = exit.send(success);
-        let _ = tokio::time::timeout(ERROR_OUTPUT_WAIT, &mut self.error_reader).await;
+        if tokio::time::timeout(ERROR_OUTPUT_WAIT, &mut self.error_reader)
+            .await
+            .is_err()
+        {
+            self.error_reader.abort();
+            let _ = self.error_reader.await;
+        }
         let error_output = {
             let kept = self
                 .error_output
