@@ -57,8 +57,11 @@ class GitState {
   bool _watching = false;
   int _failures = 0;
   DateTime? _fetched;
-  DateTime? get fetched => _fetched;
+  String? _fetchedRemote;
+  DateTime? get fetched =>
+      _fetchedRemote == status.value?.remote ? _fetched : null;
   Future<void>? _fetching;
+  String? _fetchRemote;
   bool _fetchRequested = false;
 
   /// Reads of the state left until the next fetch; the state is read every [fetchEvery]
@@ -106,10 +109,27 @@ class GitState {
     if (watch == _watches) _next = Timer(fetchEvery, () => _tick(watch));
   }
 
-  /// Shares an in-flight fetch, preserving any explicit request's failure notice.
-  Future<void> _fetch(int watch, String remote, {bool requested = false}) {
-    _fetchRequested |= requested;
-    return _fetching ??= _runFetch(watch, remote);
+  /// Shares a fetch for the same remote; a changed destination waits its turn.
+  Future<void> _fetch(
+    int watch,
+    String remote, {
+    bool requested = false,
+  }) async {
+    final pending = _fetching;
+    if (pending != null) {
+      if (_fetchRemote == remote) {
+        _fetchRequested |= requested;
+        return pending;
+      }
+      await pending;
+      if (watch != _watches) return;
+      final current = status.value?.remote;
+      if (current != null) await _fetch(watch, current, requested: requested);
+      return;
+    }
+    _fetchRemote = remote;
+    _fetchRequested = requested;
+    await (_fetching = _runFetch(watch, remote));
   }
 
   Future<void> _runFetch(int watch, String remote) async {
@@ -117,13 +137,16 @@ class GitState {
       final fetched = await _backend.fetch();
       if (watch != _watches) return;
       _failures = 0;
-      if (fetched) _fetched = DateTime.now();
+      if (fetched) {
+        _fetched = DateTime.now();
+        _fetchedRemote = remote;
+      }
       await refresh();
     } on Object catch (error) {
       if (watch != _watches) return;
       // A streak of failures tells once.
       if (_failures++ == 0 || _fetchRequested) {
-        final since = switch (_fetched) {
+        final since = switch (_fetchedRemote == remote ? _fetched : null) {
           final at? =>
             ' The ahead and behind counts are from ${formatClockMs(at.millisecondsSinceEpoch)}.',
           null => '',
@@ -135,6 +158,7 @@ class GitState {
       }
     } finally {
       _fetching = null;
+      _fetchRemote = null;
       _fetchRequested = false;
       if (watch == _watches) {
         _untilFetch = fetchWait(_failures).inSeconds ~/ fetchEvery.inSeconds;
@@ -408,6 +432,7 @@ class GitState {
                 BridgeGitOutcomeKind.transferFailed,
               }.contains(outcome.kind)) {
         _fetched = DateTime.now();
+        _fetchedRemote = transfer.remote;
       }
       await _refreshAfterWrite();
       final now = problem.value == null ? status.value : null;

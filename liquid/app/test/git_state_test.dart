@@ -214,17 +214,20 @@ void main() {
     expect(notices.map((notice) => notice.$1), everyElement(BridgeLevel.error));
   });
 
-  test('unsupported push destinations use the preflight error notice', () async {
-    backend.transferOutcome = outcomeOf(
-      BridgeGitOutcomeKind.preflightFailed,
-      detail: 'This remote pushes to other or several repositories. Push it with Git.',
-    );
-    await git.push(device: 'MacBook');
-    expect(notices.single, (
-      BridgeLevel.error,
-      'Could not push: This remote pushes to other or several repositories. Push it with Git. Nothing was pushed.',
-    ));
-  });
+  test(
+    'unsupported push destinations use the preflight error notice',
+    () async {
+      backend.transferOutcome = outcomeOf(
+        BridgeGitOutcomeKind.preflightFailed,
+        detail: 'This remote pushes to other or several repositories. Push it with Git.',
+      );
+      await git.push(device: 'MacBook');
+      expect(notices.single, (
+        BridgeLevel.error,
+        'Could not push: This remote pushes to other or several repositories. Push it with Git. Nothing was pushed.',
+      ));
+    },
+  );
 
   test('a transfer failure shows Git output and states that its effects are uncertain', () async {
     backend.transferOutcome = outcomeOf(
@@ -267,6 +270,52 @@ void main() {
       state.stop();
     },
   );
+
+  testWidgets('a requested Fetch queues behind a fetch for another remote', (
+    tester,
+  ) async {
+    for (final stopped in [false, true]) {
+      final pending = _QueuedFetchBackend();
+      final state = GitState(
+        pending,
+        notify: (level, text) => notices.add((level, text)),
+      );
+      addTearDown(state.stop);
+      state.watch();
+      await tester.pump();
+      await tester.pump(fetchEvery);
+      expect(pending.remotes, ['origin']);
+      pending.git = gitStatusOf(remote: 'other', upstream: 'other/main');
+      await state.refresh();
+      var finished = false;
+      final requested = state.fetchNow().then((_) => finished = true);
+      final shared = state.fetchNow();
+      await tester.pump();
+      expect(finished, isFalse);
+      expect(pending.remotes, ['origin']);
+      if (stopped) state.stop();
+      pending.fetches.first.complete(true);
+      await tester.pump();
+      if (!stopped) {
+        expect(pending.remotes, ['origin', 'other']);
+        expect(finished, isFalse);
+        expect(state.fetched, isNull);
+        pending.fetches.last.completeError('offline');
+        await tester.pump();
+        expect(notices.single.$1, BridgeLevel.error);
+        expect(
+          notices.single.$2,
+          contains('Could not fetch from other: “offline”'),
+        );
+      } else {
+        expect(pending.remotes, ['origin']);
+      }
+      await requested;
+      await shared;
+      state.stop();
+      notices.clear();
+    }
+  });
 
   testWidgets('background fetch waits while a push or pull runs', (
     tester,
@@ -811,6 +860,19 @@ class _PendingFetchBackend extends FakeBackend {
   @override
   Future<bool> fetch() {
     calls.add('fetch');
+    return fetched.future;
+  }
+}
+
+class _QueuedFetchBackend extends FakeBackend {
+  final remotes = <String?>[];
+  final fetches = <Completer<bool>>[];
+
+  @override
+  Future<bool> fetch() {
+    remotes.add(git?.remote);
+    final fetched = Completer<bool>();
+    fetches.add(fetched);
     return fetched.future;
   }
 }
