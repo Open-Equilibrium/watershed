@@ -93,6 +93,19 @@ summary{cursor:pointer}summary h3{display:inline;margin:0}summary:focus-visible{
         <p><strong>Recommendation:</strong> A behind a backend-neutral Meta-Harness agent-executor contract, subject to a bounded integration spike; keep direct semantic adapters where they provide richer events.</p>
         <p><strong>Acceptance criterion:</strong> The spike starts, steers, observes and restores Codex plus one other CLI agent without an attached HerdR UI; preserves stable Meta-Harness session identity across detach and service restarts; routes every mutation through the Meta-Harness policy/audit gate; normalizes HerdR events without treating terminal inference as semantic truth; rejects cross-host process claims; and documents fail-closed behavior for unsupported capabilities on the native targets in <a href="../../PLATFORMS.md">PLATFORMS.md</a>.</p>
       </details>
+      <details id="d-078" class="decision">
+        <summary><h3>D-078 - Agent Output After Its Process Exits</h3></summary>
+        <p><strong>Status:</strong> Blocks Liquid Git commit closeout. Clawpatch confirmed that a child program retaining the agent's standard output can delay exit reporting and command replies forever after the agent process has exited.</p>
+        <p><strong>Boundary:</strong> In <a href="../../meta-harness/meta-harness-core/src/session/supervisor.rs">the session supervisor</a>, observing process exit closes checkpoints but then resumes the pending output read without a limit. The completed fixes cancel the stderr reader after its existing drain deadline and keep the checkout guard until a protocol-failed process is reaped; neither defines when to stop accepting stdout from descendants.</p>
+        <p><strong>Question:</strong> How much output should a session accept after its agent process exits, and how should it report output cut off by that rule?</p>
+        <ul>
+          <li><strong>A: Bounded collection, then explicit incomplete output.</strong> Set time and byte limits for remaining stdout, preserve accepted records and report when collection is cut off. Pro: bounded waiting with ordinary buffered output retained. Con: late records can be lost; limits, command-reply closure and interaction with a slow event consumer need an explicit contract.</li>
+          <li><strong>B: Stop collecting as soon as process exit is observed.</strong> Pro: simplest lifetime rule and no wait for descendants. Con: unread final records, including command replies, may be lost during normal exits.</li>
+          <li><strong>C: Keep waiting until every writer closes stdout.</strong> Pro: preserves the current opportunity to collect descendant output. Con: one long-lived child can prevent the session from finishing indefinitely.</li>
+        </ul>
+        <p><strong>Recommendation:</strong> A. Consider the existing 500 ms stderr drain interval as a starting point, not an approved stdout limit. Keep pipe collection distinct from waiting to deliver already accepted events. This adds no promise to terminate descendant processes.</p>
+        <p><strong>Acceptance criterion:</strong> Approve the cutoff limits, treatment of unread/partial records, pending command replies and incomplete-output notice. Tests must retain normal buffered final records, finish when a descendant holds or continuously writes stdout, preserve accepted-event order with a slow consumer, and keep <code>Exited</code> last. Record the decision before implementing it; then revalidate the open finding.</p>
+      </details>
       <details id="d-074" class="decision">
         <summary><h3>D-074 - Who Starts The Local Meta-Harness Service</h3></summary>
         <p><strong>Status:</strong> Open; decide with the service-mode slice. ADR-0215 settled that Liquid reaches its own host's Meta-Harness as a separate service.</p>
