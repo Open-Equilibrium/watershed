@@ -7,7 +7,8 @@
 //!
 //! - the Workspace document: its owner and its areas;
 //! - one document per area: its Page tree, so the Explorer opens without any Page;
-//! - one document per Page: its Blocks and their Views.
+//! - one document per Page: its Blocks and their Views, a Database Block with its fields and
+//!   rows.
 //!
 //! Removing an object marks it deleted instead of deleting it from the document, so a
 //! concurrent edit or move cannot bring it back and a revert can restore it unchanged.
@@ -17,6 +18,7 @@
 
 #![deny(missing_docs)]
 
+mod database;
 mod history;
 mod id;
 mod model;
@@ -26,10 +28,16 @@ mod sort_key;
 mod store;
 mod workspace;
 
+pub use database::{
+    Database, Field, Filter, MAX_FIELDS, MAX_OPTIONS, Match, Row, RowQuery, Rows, SelectOption,
+    Sort,
+};
 pub use history::{Action, Document, Operation, Permission};
-pub use id::{ActionId, AreaId, BlockId, PageId, PersonId, ViewId};
+pub use id::{ActionId, AreaId, BlockId, FieldId, OptionId, PageId, PersonId, RowId, ViewId};
 pub use model::{Area, PageEntry, View};
-pub use mutation::{Actor, Applied, Changed, Created, Error, Mutation, Origin, Request, TextStyle};
+pub use mutation::{
+    Actor, Applied, Cell, Changed, Created, Error, FieldKind, Mutation, Origin, Request, TextStyle,
+};
 pub use store::{Commit, MemoryStore, Store, Write};
 pub use workspace::Workspace;
 

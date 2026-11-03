@@ -248,18 +248,21 @@ class FakeWorkspace implements LiquidWorkspace {
         pages: const [],
         views: const [],
         count: areas.length,
+        rows: const [],
       ),
       BridgeQueryKind.pages => BridgeAnswer(
         areas: const [],
         pages: window(pages[query.area]!),
         views: const [],
         count: pages[query.area]!.length,
+        rows: const [],
       ),
       BridgeQueryKind.views => BridgeAnswer(
         areas: const [],
         pages: const [],
         views: window(views[query.page] ?? const []),
         count: views[query.page]?.length ?? 0,
+        rows: const [],
       ),
       BridgeQueryKind.text => BridgeAnswer(
         areas: const [],
@@ -268,7 +271,10 @@ class FakeWorkspace implements LiquidWorkspace {
         count: 0,
         text: texts[query.block],
         style: styles[query.block],
+        rows: const [],
       ),
+      BridgeQueryKind.database || BridgeQueryKind.rows =>
+        throw UnsupportedError('the fake Workspace keeps no Databases'),
     };
   }
 

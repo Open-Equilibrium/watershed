@@ -1,6 +1,6 @@
 //! Observation workload for the Workspace core's mutation pipeline (PERFORMANCE.md, Liquid):
-//! typing and Page building through the pipeline, one recorded Action per request, with an
-//! in-memory store. It prints a summary and never compares with a threshold. Run from the
+//! typing, Page building and a Database Block's rows through the pipeline, one recorded Action
+//! per request, with an in-memory store. It prints a summary and never compares with a threshold. Run from the
 //! repository root:
 //!
 //! ```sh
@@ -11,11 +11,13 @@
 use std::time::{Duration, Instant};
 
 use liquid_core::{
-    Actor, Created, MemoryStore, Mutation, Origin, PageId, PersonId, Request, Workspace,
+    Actor, Cell, Created, FieldKind, Filter, Match, MemoryStore, Mutation, Origin, PageId,
+    PersonId, Request, RowQuery, Sort, Workspace,
 };
 
 const KEYSTROKES: usize = 10_000;
 const BLOCKS: usize = 1_000;
+const ROWS: usize = 5_000;
 
 fn request(mutation: Mutation) -> Request {
     Request {
@@ -116,6 +118,100 @@ fn main() {
     println!(
         "reading that Page's {} Views in order: {:.2} ms",
         views.len(),
+        start.elapsed().as_secs_f64() * 1e3
+    );
+
+    // A Database of 5,000 rows with four fields, as the CRDT spike measured, then one sorted
+    // and filtered window as a Table View reads it.
+    let mut workspace =
+        Workspace::create(PersonId::new("observer"), MemoryStore::default()).unwrap();
+    let budget = page(&mut workspace);
+    let add = Mutation::AddDatabaseBlock {
+        page: budget.clone(),
+        after: None,
+        name: "Expenses".into(),
+    };
+    let Some(Created::Block { block, .. }) = workspace.apply(request(add)).unwrap().created else {
+        panic!("a Database")
+    };
+    let mut fields = vec![
+        workspace.database(&budget, &block).unwrap().unwrap().fields[0]
+            .id
+            .clone(),
+    ];
+    for (name, kind) in [
+        ("Amount", FieldKind::Number),
+        ("Date", FieldKind::Date),
+        ("Paid", FieldKind::Checkbox),
+    ] {
+        let add = Mutation::AddField {
+            page: budget.clone(),
+            block: block.clone(),
+            after: fields.last().cloned(),
+            name: name.into(),
+            kind,
+        };
+        let Some(Created::Field(field)) = workspace.apply(request(add)).unwrap().created else {
+            panic!("a field")
+        };
+        fields.push(field);
+    }
+    let mut after = None;
+    let (mut added, mut filled) = (Vec::with_capacity(ROWS), Vec::with_capacity(ROWS * 4));
+    for i in 0..ROWS {
+        let add = Mutation::AddRow {
+            page: budget.clone(),
+            block: block.clone(),
+            after: after.clone(),
+        };
+        let start = Instant::now();
+        let Some(Created::Row(row)) = workspace.apply(request(add)).unwrap().created else {
+            panic!("a row")
+        };
+        added.push(start.elapsed());
+        let values = [
+            Cell::Text(format!("Item {i}")),
+            Cell::Number((i * 37 % 1_000) as f64 + 0.5),
+            Cell::Date(format!("2026-{:02}-{:02}", i % 12 + 1, i % 28 + 1)),
+            Cell::Checkbox(i % 3 == 0),
+        ];
+        for (field, value) in fields.iter().zip(values) {
+            let set = Mutation::SetCell {
+                page: budget.clone(),
+                block: block.clone(),
+                row: row.clone(),
+                field: field.clone(),
+                value,
+            };
+            let start = Instant::now();
+            workspace.apply(request(set)).unwrap();
+            filled.push(start.elapsed());
+        }
+        after = Some(row);
+    }
+    summary(
+        &format!("Database of {ROWS} rows, per row added at the end"),
+        added,
+    );
+    summary("the same, per cell set", filled);
+    let query = RowQuery {
+        sort: Some(Sort {
+            field: fields[1].clone(),
+            descending: true,
+        }),
+        filter: Some(Filter {
+            field: fields[3].clone(),
+            matches: Match::Is(Cell::Checkbox(true)),
+        }),
+        start: 0,
+        limit: 100,
+    };
+    let start = Instant::now();
+    let window = workspace.rows(&budget, &block, &query).unwrap();
+    println!(
+        "a window of {} of its {} paid rows, sorted by amount: {:.2} ms",
+        window.rows.len(),
+        window.count,
         start.elapsed().as_secs_f64() * 1e3
     );
 }

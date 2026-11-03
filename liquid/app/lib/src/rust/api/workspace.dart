@@ -4,12 +4,13 @@
 // ignore_for_file: invalid_use_of_internal_member, unused_import, unnecessary_import
 
 import '../frb_generated.dart';
+import 'database.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `id`, `message`, `normalized`, `notify`, `of`, `of`, `open_lock`, `open_with`, `optional_id`, `page`, `random_hex`, `read`, `release_page`, `release`, `to_core`, `to_core`, `units`, `watch`, `window`
+// These functions are ignored because they are not marked as `pub`: `id`, `message`, `normalized`, `notify`, `of`, `of`, `open_lock`, `open_with`, `optional_id`, `page`, `random_hex`, `read`, `release_page`, `release`, `take_lock`, `to_core`, `to_core`, `units`, `watch`, `window`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `Inner`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `drop`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `hash`, `hash`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `drop`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `hash`, `hash`
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<LiquidWorkspace>>
 abstract class LiquidWorkspace implements RustOpaqueInterface {
@@ -26,7 +27,7 @@ abstract class LiquidWorkspace implements RustOpaqueInterface {
   static Future<LiquidWorkspace> open({required String dir}) =>
       RustLib.instance.api.crateApiWorkspaceLiquidWorkspaceOpen(dir: dir);
 
-  /// Reads one bounded window or one Block's text.
+  /// Reads one bounded window, one Block's text or one Database's fields.
   Future<BridgeAnswer> query({required BridgeQuery query});
 
   /// Streams `resource`'s changes to Dart under the identity `subscription`, which Dart
@@ -59,6 +60,12 @@ class BridgeAnswer {
   /// A Text Block's style, with its text.
   final BridgeTextStyle? style;
 
+  /// A Database's name and fields.
+  final BridgeDatabase? database;
+
+  /// A Database's rows.
+  final List<BridgeRow> rows;
+
   const BridgeAnswer({
     required this.areas,
     required this.pages,
@@ -66,6 +73,8 @@ class BridgeAnswer {
     required this.count,
     this.text,
     this.style,
+    this.database,
+    required this.rows,
   });
 
   @override
@@ -75,7 +84,9 @@ class BridgeAnswer {
       views.hashCode ^
       count.hashCode ^
       text.hashCode ^
-      style.hashCode;
+      style.hashCode ^
+      database.hashCode ^
+      rows.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -87,7 +98,9 @@ class BridgeAnswer {
           views == other.views &&
           count == other.count &&
           text == other.text &&
-          style == other.style;
+          style == other.style &&
+          database == other.database &&
+          rows == other.rows;
 }
 
 /// What an applied write recorded and created.
@@ -107,12 +120,24 @@ class BridgeApplied {
   /// The new Block's View.
   final String? view;
 
+  /// A new Database field.
+  final String? field;
+
+  /// A new Database row.
+  final String? row;
+
+  /// A new option of a select field.
+  final String? option;
+
   const BridgeApplied({
     required this.action,
     this.area,
     this.page,
     this.block,
     this.view,
+    this.field,
+    this.row,
+    this.option,
   });
 
   @override
@@ -121,7 +146,10 @@ class BridgeApplied {
       area.hashCode ^
       page.hashCode ^
       block.hashCode ^
-      view.hashCode;
+      view.hashCode ^
+      field.hashCode ^
+      row.hashCode ^
+      option.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -132,7 +160,10 @@ class BridgeApplied {
           area == other.area &&
           page == other.page &&
           block == other.block &&
-          view == other.view;
+          view == other.view &&
+          field == other.field &&
+          row == other.row &&
+          option == other.option;
 }
 
 /// An area in the Explorer.
@@ -200,7 +231,7 @@ class BridgeMutation {
   /// A View.
   final String? view;
 
-  /// The View a new Block follows.
+  /// The View, field or row a new one follows.
   final String? after;
 
   /// A name, title or text.
@@ -218,6 +249,21 @@ class BridgeMutation {
   /// Whether a Section starts at `view`.
   final bool boundary;
 
+  /// A Database field.
+  final String? field;
+
+  /// A Database row.
+  final String? row;
+
+  /// A new field's kind.
+  final BridgeFieldKind? fieldKind;
+
+  /// A new option's color, an index into the tag colors.
+  final PlatformInt64 color;
+
+  /// A cell's new value.
+  final BridgeCell? cell;
+
   const BridgeMutation({
     required this.kind,
     this.area,
@@ -231,6 +277,11 @@ class BridgeMutation {
     required this.delete,
     required this.style,
     required this.boundary,
+    this.field,
+    this.row,
+    this.fieldKind,
+    required this.color,
+    this.cell,
   });
 
   @override
@@ -246,7 +297,12 @@ class BridgeMutation {
       at.hashCode ^
       delete.hashCode ^
       style.hashCode ^
-      boundary.hashCode;
+      boundary.hashCode ^
+      field.hashCode ^
+      row.hashCode ^
+      fieldKind.hashCode ^
+      color.hashCode ^
+      cell.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -264,7 +320,12 @@ class BridgeMutation {
           at == other.at &&
           delete == other.delete &&
           style == other.style &&
-          boundary == other.boundary;
+          boundary == other.boundary &&
+          field == other.field &&
+          row == other.row &&
+          fieldKind == other.fieldKind &&
+          color == other.color &&
+          cell == other.cell;
 }
 
 /// What a [`BridgeMutation`] does; each kind names the parts it fills.
@@ -300,6 +361,37 @@ enum BridgeMutationKind {
 
   /// Starts a Section at `view` on `page`, or stops one, as `boundary` says.
   setSectionBoundary,
+
+  /// Adds a Database Block named `text`, with a text field "Name", to `page`, after the
+  /// View `after` or first.
+  addDatabaseBlock,
+
+  /// Renames the Database `block` on its home `page` to `text`.
+  renameDatabase,
+
+  /// Adds a field named `text` of `field_kind` to the Database `block` on its home `page`,
+  /// after the field `after` or first.
+  addField,
+
+  /// Renames `field` of the Database `block` on its home `page` to `text`.
+  renameField,
+
+  /// Removes `field` from the Database `block` on its home `page`.
+  removeField,
+
+  /// Adds an option named `text` of `color` to the select `field` of the Database `block`
+  /// on its home `page`.
+  addOption,
+
+  /// Adds an empty row to the Database `block` on its home `page`, after the row `after`
+  /// or first.
+  addRow,
+
+  /// Removes `row` from the Database `block` on its home `page`.
+  removeRow,
+
+  /// Sets `row`'s cell of `field` in the Database `block` on its home `page` to `cell`.
+  setCell,
 }
 
 /// A Page in an area's tree, which lists each Page before its descendants.
@@ -348,6 +440,12 @@ class BridgeQuery {
   /// How many items a window takes, at most [`MAX_WINDOW`].
   final PlatformInt64 limit;
 
+  /// How a row window is ordered; the rows' own order without one.
+  final BridgeSort? sort;
+
+  /// Which rows a row window keeps; all without one.
+  final BridgeFilter? filter;
+
   const BridgeQuery({
     required this.kind,
     this.area,
@@ -355,6 +453,8 @@ class BridgeQuery {
     this.block,
     required this.start,
     required this.limit,
+    this.sort,
+    this.filter,
   });
 
   @override
@@ -364,7 +464,9 @@ class BridgeQuery {
       page.hashCode ^
       block.hashCode ^
       start.hashCode ^
-      limit.hashCode;
+      limit.hashCode ^
+      sort.hashCode ^
+      filter.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -376,7 +478,9 @@ class BridgeQuery {
           page == other.page &&
           block == other.block &&
           start == other.start &&
-          limit == other.limit;
+          limit == other.limit &&
+          sort == other.sort &&
+          filter == other.filter;
 }
 
 /// What a [`BridgeQuery`] reads; each kind names the parts it uses and fills.
@@ -393,6 +497,14 @@ enum BridgeQueryKind {
   /// `block`'s text and style on its home `page` into `text` and `style`; none once the
   /// Block is removed.
   text,
+
+  /// The Database `block`'s name and fields on its home `page` into `database`; none
+  /// once the Block is removed or if it is no Database.
+  database,
+
+  /// A window of the Database `block`'s rows on its home `page` into `rows`, kept by
+  /// `filter` and ordered by `sort`, and the number of rows `filter` keeps into `count`.
+  rows,
 }
 
 /// A resource whose readers refresh when it changes.
