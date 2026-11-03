@@ -527,6 +527,14 @@ pub(crate) fn rows(
     let database = read(doc, block)?.ok_or(Error::NotFound)?;
     let live: Vec<&FieldId> = database.fields.iter().map(|field| &field.id).collect();
     let cell = |row, field| cell(&live, row, field);
+    // Without a filter or a sort, the window is a slice of the index.
+    if query.filter.is_none() && query.sort.is_none() {
+        let window = index.rows.iter().skip(query.start).take(query.limit);
+        return Ok(Rows {
+            count: index.rows.len(),
+            rows: window.map(|row| shown(&live, row)).collect(),
+        });
+    }
     let mut rows: Vec<&Indexed> = match &query.filter {
         Some(filter) => index
             .rows
@@ -563,19 +571,22 @@ pub(crate) fn rows(
         .into_iter()
         .skip(query.start)
         .take(query.limit)
-        .map(|row| {
-            let mut cells: Vec<(FieldId, Cell)> = live
-                .iter()
-                .filter_map(|field| Some(((*field).clone(), cell(row, field)?.clone())))
-                .collect();
-            cells.sort_by(|(a, _), (b, _)| a.cmp(b));
-            Row {
-                id: row.id.clone(),
-                cells,
-            }
-        })
+        .map(|row| shown(&live, row))
         .collect();
     Ok(Rows { count, rows })
+}
+
+/// A row as a window shows it: its cells of live fields that hold a value.
+fn shown(live: &[&FieldId], row: &Indexed) -> Row {
+    let mut cells: Vec<(FieldId, Cell)> = live
+        .iter()
+        .filter_map(|field| Some(((*field).clone(), cell(live, row, field)?.clone())))
+        .collect();
+    cells.sort_by(|(a, _), (b, _)| a.cmp(b));
+    Row {
+        id: row.id.clone(),
+        cells,
+    }
 }
 
 /// A row's value of `field`, if the field is live and the cell holds one.

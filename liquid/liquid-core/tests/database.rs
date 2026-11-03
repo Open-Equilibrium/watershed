@@ -672,3 +672,12 @@ fn a_database_takes_no_text_style() {
         Err(Error::NotFound)
     );
 }
+
+#[test]
+fn every_cell_equals_itself() {
+    // Mutations compare as equal values, so a cell must equal itself even holding NaN,
+    // which the pipeline refuses to store.
+    let nan = Cell::Number(f64::NAN);
+    assert_eq!(nan, nan.clone());
+    assert_ne!(Cell::Number(1.0), Cell::Text("1".into()));
+}

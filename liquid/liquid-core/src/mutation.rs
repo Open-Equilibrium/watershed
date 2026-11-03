@@ -59,7 +59,7 @@ pub enum FieldKind {
 }
 
 /// One cell's value. A cell of a field takes only values of the field's kind.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Cell {
     /// Nothing.
     Empty,
@@ -75,7 +75,21 @@ pub enum Cell {
     Checkbox(bool),
 }
 
-// The pipeline refuses numbers that are not finite, so every stored Cell equals itself.
+// Numbers compare by their bits, so every Cell equals itself, also one holding NaN, which
+// the pipeline refuses.
+impl PartialEq for Cell {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Empty, Self::Empty) => true,
+            (Self::Text(a), Self::Text(b)) | (Self::Date(a), Self::Date(b)) => a == b,
+            (Self::Number(a), Self::Number(b)) => a.to_bits() == b.to_bits(),
+            (Self::Select(a), Self::Select(b)) => a == b,
+            (Self::Checkbox(a), Self::Checkbox(b)) => a == b,
+            _ => false,
+        }
+    }
+}
+
 impl Eq for Cell {}
 
 /// One write to the Workspace. Text positions count UTF-16 code units, as Dart and
