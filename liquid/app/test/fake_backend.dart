@@ -509,6 +509,47 @@ class FakeBackend implements SessionBackend {
     );
   }
 
+  /// What planning, creating and reading pull requests return, until set otherwise.
+  BridgePullRequestOutcome planned = pullRequestOutcomeOf(plan: planOf());
+  BridgePullRequestOutcome created = pullRequestOutcomeOf(
+    pullRequest: pullRequestOf(),
+  );
+  BridgePullRequestOutcome current = pullRequestOutcomeOf();
+  Completer<BridgePullRequestOutcome>? createGate;
+  List<BridgeName> baseBranches = const [];
+  BridgePullRequestDraft? lastDraft;
+
+  @override
+  Future<BridgePullRequestOutcome> pullRequestPlan({
+    String? target,
+    String? base,
+  }) async {
+    calls.add('plan ${target ?? '-'} ${base ?? '-'}');
+    return planned;
+  }
+
+  @override
+  Future<BridgePullRequestOutcome> createPullRequest(
+    BridgePullRequestDraft draft,
+  ) async {
+    calls.add('create pull request');
+    lastDraft = draft;
+    if (createGate case final gate?) return gate.future;
+    return created;
+  }
+
+  @override
+  Future<BridgePullRequestOutcome> pullRequest() async {
+    calls.add('pull request');
+    return current;
+  }
+
+  @override
+  Future<List<BridgeName>> pullRequestBases(String host, String target) async {
+    calls.add('bases $target');
+    return baseBranches;
+  }
+
   /// What reverting to before a turn would change.
   BridgeRevertPlan revertPlanned = revertPlanOf();
 
@@ -901,4 +942,100 @@ BridgeCommitFile commitFileOf(
   attributionAvailable: attributionAvailable,
   edited: edited,
   stagedPartly: stagedPartly,
+);
+
+BridgePullRequestOutcome pullRequestOutcomeOf({
+  BridgePullRequestOutcomeKind kind = BridgePullRequestOutcomeKind.done,
+  BridgePullRequestPlan? plan,
+  BridgePullRequest? pullRequest,
+  String host = '',
+  String remote = '',
+  String branch = '',
+  String upstream = '',
+  String repository = '',
+  int ahead = 0,
+  int behind = 0,
+  bool first = false,
+  String detail = '',
+}) => BridgePullRequestOutcome(
+  kind: kind,
+  plan: plan,
+  pullRequest: pullRequest,
+  host: host,
+  remote: remote,
+  branch: branch,
+  upstream: upstream,
+  repository: repository,
+  ahead: ahead,
+  behind: behind,
+  first: first,
+  detail: detail,
+);
+
+BridgePullRequest pullRequestOf({
+  int number = 42,
+  String title = 'Return 429 with Retry-After on /login',
+  BridgePullRequestState state = BridgePullRequestState.open,
+  String head = 'feature/retry-after',
+  String base = 'main',
+  int passed = 0,
+  int failed = 0,
+  int pending = 0,
+  BridgeReviewDecision? review,
+}) => BridgePullRequest(
+  number: number,
+  title: title,
+  url: 'https://github.com/acme/api/pull/$number',
+  state: state,
+  repository: 'acme/api',
+  base: base,
+  head: head,
+  checksPassed: passed,
+  checksFailed: failed,
+  checksPending: pending,
+  review: review,
+);
+
+BridgeName nameOf(String name) => BridgeName(name: name, shown: name);
+
+BridgePullRequestPlan planOf({
+  List<String> targets = const ['acme/api'],
+  String? target = 'acme/api',
+  String head = 'feature/retry-after',
+  String? defaultBranch = 'main',
+  String? base = 'main',
+  BridgeComparison? comparison = const BridgeComparison(
+    commits: 2,
+    files: 3,
+    added: 12,
+    removed: 1,
+    url: 'https://github.com/acme/api/compare/main...feature/retry-after',
+  ),
+  bool baseMissing = false,
+  bool parentUnknown = false,
+  BridgePullRequest? open,
+  int uncommitted = 0,
+  String subject = 'Return 429 with Retry-After on /login',
+  String body = 'Blocked login attempts now get 429.',
+  String commit = 'c0ffee',
+}) => BridgePullRequestPlan(
+  identity: BridgePullRequestHead(
+    host: 'github.com',
+    headRepository: targets.last,
+    headBranch: 'feature/retry-after',
+    headCommit: commit,
+  ),
+  host: 'github.com',
+  head: head,
+  targets: targets,
+  parentUnknown: parentUnknown,
+  target: target,
+  defaultBranch: defaultBranch == null ? null : nameOf(defaultBranch),
+  base: base == null ? null : nameOf(base),
+  comparison: comparison,
+  baseMissing: baseMissing,
+  open: open,
+  uncommitted: uncommitted,
+  subject: subject,
+  body: body,
 );

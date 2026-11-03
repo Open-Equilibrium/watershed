@@ -143,6 +143,24 @@ abstract interface class SessionBackend {
   Future<BridgeGitOutcome> push(BridgePushConfirmation? confirmed);
   Future<BridgeGitOutcome> pull();
 
+  /// The pushed branch's pull request plan on GitHub, through the host's gh; `base` is the
+  /// recorded branch it was created from, if any.
+  Future<BridgePullRequestOutcome> pullRequestPlan({
+    String? target,
+    String? base,
+  });
+
+  /// Creates the reviewed pull request after rechecking its plan.
+  Future<BridgePullRequestOutcome> createPullRequest(
+    BridgePullRequestDraft draft,
+  );
+
+  /// The branch's latest pull request on GitHub, open ones first.
+  Future<BridgePullRequestOutcome> pullRequest();
+
+  /// The branches of `target` on GitHub, to choose a base from.
+  Future<List<BridgeName>> pullRequestBases(String host, String target);
+
   Future<List<BridgeModel>> models();
 
   /// The selected model as `provider/id`.
@@ -312,6 +330,20 @@ class RustSessionBackend implements SessionBackend {
       _session.push(confirmed: confirmed);
   @override
   Future<BridgeGitOutcome> pull() => _session.pull();
+  @override
+  Future<BridgePullRequestOutcome> pullRequestPlan({
+    String? target,
+    String? base,
+  }) => _session.pullRequestPlan(target: target, base: base);
+  @override
+  Future<BridgePullRequestOutcome> createPullRequest(
+    BridgePullRequestDraft draft,
+  ) => _session.createPullRequest(draft: draft);
+  @override
+  Future<BridgePullRequestOutcome> pullRequest() => _session.pullRequest();
+  @override
+  Future<List<BridgeName>> pullRequestBases(String host, String target) =>
+      _session.pullRequestBases(host: host, target: target);
   @override
   Future<List<BridgeModel>> models() => _session.models();
   @override
