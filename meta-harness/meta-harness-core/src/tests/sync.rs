@@ -796,3 +796,56 @@ fn fetches_serialize_across_instances_and_processes_after_remote_advances() {
         }
     });
 }
+
+#[test]
+fn push_preserves_the_configured_remote_without_a_tracking_ref_mapping() {
+    run(async {
+        let origin = Remote::new("push-unmapped-origin");
+        let upstream = Remote::new("push-unmapped-upstream");
+        origin.repo.git(&["switch", "-c", "topic"]);
+        Remote::commit(&origin.repo, "local.txt");
+        origin.repo.git(&[
+            "remote",
+            "add",
+            "upstream",
+            upstream.bare.path().to_str().unwrap(),
+        ]);
+        origin.repo.git(&[
+            "config",
+            "remote.upstream.fetch",
+            "+refs/heads/main:refs/remotes/upstream/main",
+        ]);
+        origin
+            .repo
+            .git(&["config", "branch.topic.remote", "upstream"]);
+        origin
+            .repo
+            .git(&["config", "branch.topic.merge", "refs/heads/topic"]);
+        assert!(
+            origin
+                .repo
+                .git(&[
+                    "for-each-ref",
+                    "--format=%(upstream:remotename)",
+                    "refs/heads/topic"
+                ])
+                .trim()
+                .is_empty()
+        );
+        let before = origin.bare.git(&["show-ref"]);
+        let pushed = Checkpoints::new(origin.repo.path())
+            .push(None)
+            .await
+            .unwrap();
+        assert_eq!(pushed.remote, "upstream");
+        assert_eq!(origin.bare.git(&["show-ref"]), before);
+        assert_eq!(
+            upstream.bare.git(&["rev-parse", "topic"]),
+            origin.repo.git(&["rev-parse", "HEAD"])
+        );
+        assert_eq!(
+            origin.repo.git(&["config", "branch.topic.remote"]),
+            "upstream\n"
+        );
+    });
+}

@@ -48,17 +48,12 @@ impl WorkingTree {
         let remotes = git_ref_output(&self.root, &["remote"]).await?;
         let names: Vec<_> = remotes.lines().collect();
         if let Some(branch) = branch {
-            let remote = git_ref_output(
-                &self.root,
-                &[
-                    "for-each-ref",
-                    "--format=%(upstream:remotename)",
-                    &format!("refs/heads/{branch}"),
-                ],
-            )
-            .await?;
+            let merge =
+                git_config(&self.root, &["--get", &format!("branch.{branch}.merge")]).await?;
+            let remote =
+                git_config(&self.root, &["--get", &format!("branch.{branch}.remote")]).await?;
             let remote = remote.trim_end_matches('\n');
-            if !remote.is_empty() {
+            if !merge.is_empty() && !remote.is_empty() {
                 return Ok((Some(remote.to_owned()), !names.is_empty()));
             }
         }
