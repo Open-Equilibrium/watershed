@@ -372,6 +372,21 @@ fn one_session_at_a_time_opens_a_replica_folder() {
 }
 
 #[test]
+fn a_lock_held_only_for_a_moment_is_waited_for() {
+    // A child process started between fork and exec holds the lock it inherited until exec.
+    let folder = Folder::new("moment");
+    std::fs::create_dir_all(&folder.0).unwrap();
+    let held = std::fs::File::create(folder.0.join("replica.lock")).unwrap();
+    held.lock().unwrap();
+    let release = std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        drop(held);
+    });
+    assert!(LiquidWorkspace::open_with(&folder.0, &Memory::default()).is_ok());
+    release.join().unwrap();
+}
+
+#[test]
 fn a_subscription_starts_with_its_resource_s_current_count() {
     let folder = Folder::new("ack");
     let workspace = LiquidWorkspace::open_with(&folder.0, &Memory::default()).unwrap();

@@ -472,6 +472,27 @@ fn open_lock(path: &Path) -> Result<File, String> {
     Ok(lock)
 }
 
+/// How long a held replica lock is tried again: a process this one starts holds the lock
+/// it inherited only until it runs its program, while another session holds it for good.
+const LOCK_PATIENCE: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// Takes the replica's lock, trying again for a moment while it is held.
+fn take_lock(lock: &File) -> Result<(), String> {
+    let since = std::time::Instant::now();
+    loop {
+        match lock.try_lock() {
+            Ok(()) => return Ok(()),
+            Err(TryLockError::WouldBlock) if since.elapsed() < LOCK_PATIENCE => {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            Err(TryLockError::WouldBlock) => {
+                return Err("another Liquid session holds this replica".into());
+            }
+            Err(TryLockError::Error(error)) => return Err(error.to_string()),
+        }
+    }
+}
+
 /// The window `start..start + limit`, with `limit` capped at [`MAX_WINDOW`].
 fn window(start: i64, limit: i64) -> Result<(usize, usize), String> {
     Ok((
@@ -497,13 +518,7 @@ impl LiquidWorkspace {
         // Taken before the key is read or made, so two sessions opening a new folder at once
         // cannot each store a key of their own.
         let lock = open_lock(&dir.join("replica.lock"))?;
-        match lock.try_lock() {
-            Ok(()) => {}
-            Err(TryLockError::WouldBlock) => {
-                return Err("another Liquid session holds this replica".into());
-            }
-            Err(TryLockError::Error(error)) => return Err(error.to_string()),
-        }
+        take_lock(&lock)?;
         let path = dir.join("replica.db");
         let key = match keys.read()? {
             Some(key) => key,
