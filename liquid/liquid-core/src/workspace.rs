@@ -7,6 +7,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use automerge::transaction::{CommitOptions, Transactable};
 use automerge::{ActorId, AutoCommit, ObjType, ROOT, ReadDoc};
 
+use crate::database;
 use crate::history::Header;
 use crate::id::random_bytes;
 use crate::model::{
@@ -190,6 +191,26 @@ impl<S: Store> Workspace<S> {
             self.doc(&Document::Page(page.clone()))?,
             block.as_str(),
         ))
+    }
+
+    /// A live Database Block's name and fields, from the document of its home `page`; none
+    /// if `block` is no live Database Block.
+    pub fn database(
+        &mut self,
+        page: &PageId,
+        block: &BlockId,
+    ) -> Result<Option<database::Database>, Error> {
+        database::read(self.doc(&Document::Page(page.clone()))?, block)
+    }
+
+    /// A window of a Database Block's rows, filtered and sorted as `query` asks.
+    pub fn rows(
+        &mut self,
+        page: &PageId,
+        block: &BlockId,
+        query: &database::RowQuery,
+    ) -> Result<database::Rows, Error> {
+        database::rows(self.doc(&Document::Page(page.clone()))?, block, query)
     }
 
     /// Whether a Page's document is in memory.
@@ -441,6 +462,85 @@ impl<S: Store> Workspace<S> {
                     Changed::Block(page.clone(), block.clone()),
                 ))
             }
+            Mutation::AddDatabaseBlock { page, after, name } => {
+                let (doc, order) = self.page(page)?;
+                let block = BlockId::new()?;
+                database::create(doc, &block, name)?;
+                let view = add_view(doc, order, after.as_ref(), &block)?;
+                let mut written =
+                    Written::new(Document::Page(page.clone()), Changed::Views(page.clone()));
+                written.created = Some(Created::Block { block, view });
+                Ok(written)
+            }
+            Mutation::RenameDatabase { page, block, name } => {
+                database::rename(self.doc(&Document::Page(page.clone()))?, block, name)?;
+                Ok(database_changed(page, block, None))
+            }
+            Mutation::AddField {
+                page,
+                block,
+                after,
+                name,
+                kind,
+            } => {
+                let doc = self.doc(&Document::Page(page.clone()))?;
+                let field = database::add_field(doc, block, after.as_ref(), name, *kind)?;
+                Ok(database_changed(page, block, Some(Created::Field(field))))
+            }
+            Mutation::RenameField {
+                page,
+                block,
+                field,
+                name,
+            } => {
+                database::rename_field(
+                    self.doc(&Document::Page(page.clone()))?,
+                    block,
+                    field,
+                    name,
+                )?;
+                Ok(database_changed(page, block, None))
+            }
+            Mutation::RemoveField { page, block, field } => {
+                database::remove_field(self.doc(&Document::Page(page.clone()))?, block, field)?;
+                Ok(database_changed(page, block, None))
+            }
+            Mutation::AddOption {
+                page,
+                block,
+                field,
+                name,
+                color,
+            } => {
+                let doc = self.doc(&Document::Page(page.clone()))?;
+                let option = database::add_option(doc, block, field, name, *color)?;
+                Ok(database_changed(page, block, Some(Created::Option(option))))
+            }
+            Mutation::AddRow { page, block, after } => {
+                let doc = self.doc(&Document::Page(page.clone()))?;
+                let row = database::add_row(doc, block, after.as_ref())?;
+                Ok(database_changed(page, block, Some(Created::Row(row))))
+            }
+            Mutation::RemoveRow { page, block, row } => {
+                database::remove_row(self.doc(&Document::Page(page.clone()))?, block, row)?;
+                Ok(database_changed(page, block, None))
+            }
+            Mutation::SetCell {
+                page,
+                block,
+                row,
+                field,
+                value,
+            } => {
+                database::set_cell(
+                    self.doc(&Document::Page(page.clone()))?,
+                    block,
+                    row,
+                    field,
+                    value,
+                )?;
+                Ok(database_changed(page, block, None))
+            }
             Mutation::RemoveView { page, view } => {
                 let (doc, order) = self.page(page)?;
                 let entry = model::live(doc, VIEWS, view.as_str()).ok_or(Error::NotFound)?;
@@ -535,8 +635,7 @@ fn add_text_block(
     style: TextStyle,
 ) -> Result<(BlockId, ViewId), Error> {
     let style = model::style_name(style)?;
-    let sort = order.key_after(after)?;
-    let (block, view) = (BlockId::new()?, ViewId::new()?);
+    let block = BlockId::new()?;
     let entry = model::insert(
         doc,
         BLOCKS,
@@ -545,6 +644,29 @@ fn add_text_block(
     )?;
     let content = doc.put_object(&entry, TEXT, ObjType::Text)?;
     doc.splice_text(&content, 0, 0, text)?;
+    let view = add_view(doc, order, after, &block)?;
+    Ok((block, view))
+}
+
+/// What a write to a Database Block changed: only that Block.
+fn database_changed(page: &PageId, block: &BlockId, created: Option<Created>) -> Written {
+    let mut written = Written::new(
+        Document::Page(page.clone()),
+        Changed::Block(page.clone(), block.clone()),
+    );
+    written.created = created;
+    written
+}
+
+/// Adds a View of `block` after `after` or first.
+fn add_view(
+    doc: &mut AutoCommit,
+    order: &mut Order,
+    after: Option<&ViewId>,
+    block: &BlockId,
+) -> Result<ViewId, Error> {
+    let sort = order.key_after(after)?;
+    let view = ViewId::new()?;
     model::insert(
         doc,
         VIEWS,
@@ -564,7 +686,7 @@ fn add_text_block(
         boundary: false,
     };
     order.insert(sort, placed);
-    Ok((block, view))
+    Ok(view)
 }
 
 /// A live Text Block's text object.

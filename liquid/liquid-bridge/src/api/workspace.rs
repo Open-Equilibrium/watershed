@@ -294,6 +294,7 @@ fn message(error: Error) -> String {
         Error::OutOfRange => "text position out of range".into(),
         Error::NoChange => "the write changes nothing".into(),
         Error::SectionBoundary => "the Text Block starts a Section".into(),
+        Error::WrongKind => "the value is not of its field's kind".into(),
         Error::Random => "the random source failed".into(),
         Error::Document(message) | Error::Storage(message) => message,
     }
@@ -591,7 +592,8 @@ impl LiquidWorkspace {
                 answer.block = Some(block.to_string());
                 answer.view = Some(view.to_string());
             }
-            None => {}
+            // The bridge writes no Database Blocks yet.
+            Some(Created::Field(_) | Created::Row(_) | Created::Option(_)) | None => {}
         }
         Ok(answer)
     }

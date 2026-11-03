@@ -1,0 +1,554 @@
+//! Database Blocks: typed fields and rows in their home Page's document, written through the
+//! one pipeline and read in sorted, filtered windows that Rust computes (client architecture
+//! rule 13).
+
+use liquid_core::{
+    Actor, Applied, BlockId, Cell, Created, Error, FieldId, FieldKind, Match, MemoryStore,
+    Mutation, Origin, PageId, PersonId, Request, RowId, RowQuery, Sort,
+};
+
+type Workspace = liquid_core::Workspace<MemoryStore>;
+
+fn apply(workspace: &mut Workspace, mutation: Mutation) -> Result<Applied, Error> {
+    workspace.apply(Request {
+        actor: Actor::Person(PersonId::new("benni")),
+        origin: Origin::Ui,
+        mutation,
+    })
+}
+
+/// A Workspace with one Page holding a Database Block named "Expenses".
+fn expenses() -> (Workspace, PageId, BlockId) {
+    let mut workspace = Workspace::create(PersonId::new("benni"), MemoryStore::default()).unwrap();
+    let Some(Created::Area(area)) = apply(
+        &mut workspace,
+        Mutation::CreateArea {
+            name: "Private".into(),
+        },
+    )
+    .unwrap()
+    .created
+    else {
+        panic!("an area")
+    };
+    let create = Mutation::CreatePage {
+        area,
+        parent: None,
+        title: "Household budget".into(),
+    };
+    let Some(Created::Page(page)) = apply(&mut workspace, create).unwrap().created else {
+        panic!("a Page")
+    };
+    let add = Mutation::AddDatabaseBlock {
+        page: page.clone(),
+        after: None,
+        name: "Expenses".into(),
+    };
+    let Some(Created::Block { block, .. }) = apply(&mut workspace, add).unwrap().created else {
+        panic!("a Database Block")
+    };
+    (workspace, page, block)
+}
+
+fn field(
+    workspace: &mut Workspace,
+    page: &PageId,
+    block: &BlockId,
+    name: &str,
+    kind: FieldKind,
+) -> FieldId {
+    // After the last field, as the header's + adds one.
+    let last = workspace
+        .database(page, block)
+        .unwrap()
+        .unwrap()
+        .fields
+        .last()
+        .map(|field| field.id.clone());
+    let add = Mutation::AddField {
+        page: page.clone(),
+        block: block.clone(),
+        after: last,
+        name: name.into(),
+        kind,
+    };
+    match apply(workspace, add).unwrap().created {
+        Some(Created::Field(field)) => field,
+        other => panic!("expected a field, got {other:?}"),
+    }
+}
+
+fn row(workspace: &mut Workspace, page: &PageId, block: &BlockId, after: Option<&RowId>) -> RowId {
+    let add = Mutation::AddRow {
+        page: page.clone(),
+        block: block.clone(),
+        after: after.cloned(),
+    };
+    match apply(workspace, add).unwrap().created {
+        Some(Created::Row(row)) => row,
+        other => panic!("expected a row, got {other:?}"),
+    }
+}
+
+fn set(
+    workspace: &mut Workspace,
+    page: &PageId,
+    block: &BlockId,
+    row: &RowId,
+    field: &FieldId,
+    value: Cell,
+) -> Result<Applied, Error> {
+    apply(
+        workspace,
+        Mutation::SetCell {
+            page: page.clone(),
+            block: block.clone(),
+            row: row.clone(),
+            field: field.clone(),
+            value,
+        },
+    )
+}
+
+fn all() -> RowQuery {
+    RowQuery {
+        sort: None,
+        filter: None,
+        start: 0,
+        limit: usize::MAX,
+    }
+}
+
+/// The text of `field` in each row of `query`'s window.
+fn column(
+    workspace: &mut Workspace,
+    page: &PageId,
+    block: &BlockId,
+    query: &RowQuery,
+    field: &FieldId,
+) -> Vec<Cell> {
+    workspace
+        .rows(page, block, query)
+        .unwrap()
+        .rows
+        .into_iter()
+        .map(|row| row.cell(field).cloned().unwrap_or(Cell::Empty))
+        .collect()
+}
+
+#[test]
+fn a_new_database_has_a_name_field_and_no_rows() {
+    let (mut workspace, page, block) = expenses();
+    let database = workspace.database(&page, &block).unwrap().unwrap();
+    assert_eq!(database.name, "Expenses");
+    assert_eq!(
+        database
+            .fields
+            .iter()
+            .map(|field| (field.name.as_str(), field.kind))
+            .collect::<Vec<_>>(),
+        [("Name", FieldKind::Text)]
+    );
+    let rows = workspace.rows(&page, &block, &all()).unwrap();
+    assert_eq!(rows.count, 0);
+    assert!(rows.rows.is_empty());
+    // A Database shows on its Page like any Block.
+    assert_eq!(workspace.view_count(&page).unwrap(), 1);
+}
+
+#[test]
+fn fields_and_rows_keep_their_order_and_cells_their_values() {
+    let (mut workspace, page, block) = expenses();
+    let name = workspace.database(&page, &block).unwrap().unwrap().fields[0]
+        .id
+        .clone();
+    let amount = field(&mut workspace, &page, &block, "Amount", FieldKind::Number);
+    let paid = field(&mut workspace, &page, &block, "Paid", FieldKind::Checkbox);
+    let date = field(&mut workspace, &page, &block, "Date", FieldKind::Date);
+    let rent = row(&mut workspace, &page, &block, None);
+    let food = row(&mut workspace, &page, &block, Some(&rent));
+    let train = row(&mut workspace, &page, &block, Some(&rent));
+    for (row, item, euros) in [
+        (&rent, "Rent", 950.0),
+        (&food, "Groceries", 84.2),
+        (&train, "Train", 42.5),
+    ] {
+        set(
+            &mut workspace,
+            &page,
+            &block,
+            row,
+            &name,
+            Cell::Text(item.into()),
+        )
+        .unwrap();
+        set(
+            &mut workspace,
+            &page,
+            &block,
+            row,
+            &amount,
+            Cell::Number(euros),
+        )
+        .unwrap();
+    }
+    set(
+        &mut workspace,
+        &page,
+        &block,
+        &rent,
+        &paid,
+        Cell::Checkbox(true),
+    )
+    .unwrap();
+    set(
+        &mut workspace,
+        &page,
+        &block,
+        &train,
+        &date,
+        Cell::Date("2026-10-28".into()),
+    )
+    .unwrap();
+
+    let fields: Vec<_> = workspace.database(&page, &block).unwrap().unwrap().fields;
+    assert_eq!(
+        fields
+            .iter()
+            .map(|field| field.name.as_str())
+            .collect::<Vec<_>>(),
+        ["Name", "Amount", "Paid", "Date"]
+    );
+    assert_eq!(
+        column(&mut workspace, &page, &block, &all(), &name),
+        [
+            Cell::Text("Rent".into()),
+            Cell::Text("Train".into()),
+            Cell::Text("Groceries".into())
+        ]
+    );
+    let rows = workspace.rows(&page, &block, &all()).unwrap().rows;
+    assert_eq!(rows[0].cell(&paid), Some(&Cell::Checkbox(true)));
+    assert_eq!(rows[1].cell(&date), Some(&Cell::Date("2026-10-28".into())));
+    assert_eq!(rows[2].cell(&paid), None);
+
+    // Clearing a cell leaves it empty, and an unchanged value records nothing.
+    set(&mut workspace, &page, &block, &rent, &paid, Cell::Empty).unwrap();
+    assert_eq!(
+        set(&mut workspace, &page, &block, &rent, &paid, Cell::Empty),
+        Err(Error::NoChange)
+    );
+    assert_eq!(
+        workspace.rows(&page, &block, &all()).unwrap().rows[0].cell(&paid),
+        None
+    );
+}
+
+#[test]
+fn a_cell_takes_only_values_of_its_field_s_kind() {
+    let (mut workspace, page, block) = expenses();
+    let amount = field(&mut workspace, &page, &block, "Amount", FieldKind::Number);
+    let date = field(&mut workspace, &page, &block, "Date", FieldKind::Date);
+    let category = field(&mut workspace, &page, &block, "Category", FieldKind::Select);
+    let rent = row(&mut workspace, &page, &block, None);
+    let refused = [
+        (&amount, Cell::Text("950".into())),
+        (&amount, Cell::Number(f64::NAN)),
+        (&amount, Cell::Number(f64::INFINITY)),
+        (&date, Cell::Date("28.10.2026".into())),
+        (&date, Cell::Date("2026-02-30".into())),
+        (&date, Cell::Date("2026-10-28T25:00".into())),
+    ];
+    for (field, value) in refused {
+        assert_eq!(
+            set(&mut workspace, &page, &block, &rent, field, value.clone()),
+            Err(Error::WrongKind),
+            "{value:?}"
+        );
+    }
+    // A select cell names one of its field's options.
+    let elsewhere = Mutation::AddOption {
+        page: page.clone(),
+        block: block.clone(),
+        field: category.clone(),
+        name: "Home".into(),
+        color: 2,
+    };
+    let Some(Created::Option(home)) = apply(&mut workspace, elsewhere).unwrap().created else {
+        panic!("an option")
+    };
+    let unknown = liquid_core::OptionId::parse(&"0".repeat(32)).unwrap();
+    assert_eq!(
+        set(
+            &mut workspace,
+            &page,
+            &block,
+            &rent,
+            &category,
+            Cell::Select(unknown)
+        ),
+        Err(Error::NotFound)
+    );
+    set(
+        &mut workspace,
+        &page,
+        &block,
+        &rent,
+        &category,
+        Cell::Select(home.clone()),
+    )
+    .unwrap();
+    set(
+        &mut workspace,
+        &page,
+        &block,
+        &rent,
+        &date,
+        Cell::Date("2026-10-28T09:30".into()),
+    )
+    .unwrap();
+    let database = workspace.database(&page, &block).unwrap().unwrap();
+    let options = &database
+        .fields
+        .iter()
+        .find(|field| field.id == category)
+        .unwrap()
+        .options;
+    assert_eq!(options.len(), 1);
+    assert_eq!(
+        (
+            options[0].id.clone(),
+            options[0].name.as_str(),
+            options[0].color
+        ),
+        (home, "Home", 2)
+    );
+}
+
+#[test]
+fn rows_sort_and_filter_in_windows() {
+    let (mut workspace, page, block) = expenses();
+    let name = workspace.database(&page, &block).unwrap().unwrap().fields[0]
+        .id
+        .clone();
+    let amount = field(&mut workspace, &page, &block, "Amount", FieldKind::Number);
+    let mut last = None;
+    for (item, euros) in [
+        ("rent", Some(950.0)),
+        ("Groceries", Some(84.2)),
+        ("Cinema", Some(111.8)),
+        ("Gift", None),
+        ("Train", Some(42.5)),
+    ] {
+        let added = row(&mut workspace, &page, &block, last.as_ref());
+        set(
+            &mut workspace,
+            &page,
+            &block,
+            &added,
+            &name,
+            Cell::Text(item.into()),
+        )
+        .unwrap();
+        if let Some(euros) = euros {
+            set(
+                &mut workspace,
+                &page,
+                &block,
+                &added,
+                &amount,
+                Cell::Number(euros),
+            )
+            .unwrap();
+        }
+        last = Some(added);
+    }
+    let by = |field: &FieldId, descending| RowQuery {
+        sort: Some(Sort {
+            field: field.clone(),
+            descending,
+        }),
+        ..all()
+    };
+    let names = |cells: Vec<Cell>| -> Vec<String> {
+        cells
+            .into_iter()
+            .map(|cell| match cell {
+                Cell::Text(text) => text,
+                other => panic!("{other:?}"),
+            })
+            .collect()
+    };
+    // Numbers sort by value, empty cells last either way.
+    let ascending = column(&mut workspace, &page, &block, &by(&amount, false), &name);
+    assert_eq!(
+        names(ascending),
+        ["Train", "Groceries", "Cinema", "rent", "Gift"]
+    );
+    let descending = column(&mut workspace, &page, &block, &by(&amount, true), &name);
+    assert_eq!(
+        names(descending),
+        ["rent", "Cinema", "Groceries", "Train", "Gift"]
+    );
+    // Text sorts ignoring case.
+    let alphabetical = column(&mut workspace, &page, &block, &by(&name, false), &name);
+    assert_eq!(
+        names(alphabetical),
+        ["Cinema", "Gift", "Groceries", "rent", "Train"]
+    );
+
+    // A window of the sorted rows, with the count of all that match.
+    let window = RowQuery {
+        start: 1,
+        limit: 2,
+        ..by(&name, false)
+    };
+    let rows = workspace.rows(&page, &block, &window).unwrap();
+    assert_eq!(rows.count, 5);
+    assert_eq!(
+        names(column(&mut workspace, &page, &block, &window, &name)),
+        ["Gift", "Groceries"]
+    );
+
+    // Filters.
+    let filtered = |matches| RowQuery {
+        filter: Some(liquid_core::Filter {
+            field: amount.clone(),
+            matches,
+        }),
+        ..by(&name, false)
+    };
+    let empty = filtered(Match::Empty);
+    assert_eq!(
+        names(column(&mut workspace, &page, &block, &empty, &name)),
+        ["Gift"]
+    );
+    assert_eq!(
+        workspace
+            .rows(&page, &block, &filtered(Match::NotEmpty))
+            .unwrap()
+            .count,
+        4
+    );
+    let exact = filtered(Match::Is(Cell::Number(42.5)));
+    assert_eq!(
+        names(column(&mut workspace, &page, &block, &exact, &name)),
+        ["Train"]
+    );
+    let contains = RowQuery {
+        filter: Some(liquid_core::Filter {
+            field: name.clone(),
+            matches: Match::Contains("R".into()),
+        }),
+        ..by(&name, false)
+    };
+    assert_eq!(
+        names(column(&mut workspace, &page, &block, &contains, &name)),
+        ["Groceries", "rent", "Train"]
+    );
+}
+
+#[test]
+fn removed_rows_and_fields_disappear_and_renames_show() {
+    let (mut workspace, page, block) = expenses();
+    let amount = field(&mut workspace, &page, &block, "Amount", FieldKind::Number);
+    let first = row(&mut workspace, &page, &block, None);
+    let second = row(&mut workspace, &page, &block, Some(&first));
+    set(
+        &mut workspace,
+        &page,
+        &block,
+        &second,
+        &amount,
+        Cell::Number(3.0),
+    )
+    .unwrap();
+    for mutation in [
+        Mutation::RemoveRow {
+            page: page.clone(),
+            block: block.clone(),
+            row: first.clone(),
+        },
+        Mutation::RemoveField {
+            page: page.clone(),
+            block: block.clone(),
+            field: amount.clone(),
+        },
+        Mutation::RenameDatabase {
+            page: page.clone(),
+            block: block.clone(),
+            name: "Spending".into(),
+        },
+    ] {
+        apply(&mut workspace, mutation).unwrap();
+    }
+    let rows = workspace.rows(&page, &block, &all()).unwrap();
+    assert_eq!(
+        rows.rows
+            .iter()
+            .map(|row| row.id.clone())
+            .collect::<Vec<_>>(),
+        std::slice::from_ref(&second)
+    );
+    assert_eq!(rows.rows[0].cell(&amount), None);
+    let database = workspace.database(&page, &block).unwrap().unwrap();
+    assert_eq!(database.name, "Spending");
+    assert_eq!(database.fields.len(), 1);
+    // A removed field takes no values, and a removed row none either.
+    assert_eq!(
+        set(
+            &mut workspace,
+            &page,
+            &block,
+            &second,
+            &amount,
+            Cell::Number(1.0)
+        ),
+        Err(Error::NotFound)
+    );
+    let name = database.fields[0].id.clone();
+    assert_eq!(
+        set(
+            &mut workspace,
+            &page,
+            &block,
+            &first,
+            &name,
+            Cell::Text("x".into())
+        ),
+        Err(Error::NotFound)
+    );
+}
+
+#[test]
+fn database_writes_change_only_their_block_and_its_text_reads_none() {
+    let (mut workspace, page, block) = expenses();
+    let applied = apply(
+        &mut workspace,
+        Mutation::AddRow {
+            page: page.clone(),
+            block: block.clone(),
+            after: None,
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        applied.changed,
+        [liquid_core::Changed::Block(page.clone(), block.clone())]
+    );
+    // A Database is no Text Block.
+    assert_eq!(workspace.text(&page, &block).unwrap(), None);
+    assert_eq!(
+        apply(
+            &mut workspace,
+            Mutation::EditText {
+                page: page.clone(),
+                block: block.clone(),
+                at: 0,
+                delete: 0,
+                insert: "x".into(),
+            },
+        ),
+        Err(Error::NotFound)
+    );
+}
