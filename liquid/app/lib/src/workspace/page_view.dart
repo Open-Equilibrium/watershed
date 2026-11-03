@@ -10,6 +10,7 @@ import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'explorer.dart';
 import 'page_views.dart';
+import 'page_editor.dart';
 import 'text_block.dart';
 import 'workspace_state.dart';
 
@@ -26,7 +27,7 @@ class WorkspacePage extends StatefulWidget {
   State<WorkspacePage> createState() => _WorkspacePageState();
 }
 
-class _WorkspacePageState extends State<WorkspacePage> {
+class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
   final _title = TextEditingController();
   late final _titleFocus = FocusNode(
     debugLabel: 'Page title',
@@ -36,12 +37,19 @@ class _WorkspacePageState extends State<WorkspacePage> {
 
   /// The line a Page without Blocks offers; typing there creates the first Text Block.
   final _first = TextEditingController();
-  final _firstFocus = FocusNode(debugLabel: 'First line');
-  bool _syncing = false;
+  late final _firstFocus = FocusNode(
+    debugLabel: 'First line',
+    onKeyEvent: (_, event) =>
+        event is KeyUpEvent || !_views.editor.isSource(this)
+        ? KeyEventResult.ignored
+        : _views.editor.queue(this, event),
+  );
 
-  /// The first Text Block once made, and the text it holds.
-  (String block, String view)? _made;
-  String _sent = '';
+  /// Keeps the first line, its focus and composition included, while it moves out of sight.
+  final _firstLineKey = GlobalKey(debugLabel: 'first-line');
+
+  /// While the first Text Block is made from the line, which stays until it took over.
+  bool _handing = false;
 
   ValueListenable<List<BridgePage>> get _tree =>
       widget.state.pages(widget.open.area);
@@ -54,7 +62,7 @@ class _WorkspacePageState extends State<WorkspacePage> {
     super.initState();
     _title.text = _page?.title ?? '';
     _tree.addListener(_titleChanged);
-    _first.addListener(() => unawaited(_typedFirst()));
+    _first.addListener(_typedFirst);
     // After the frame, so it wins over the window's own first focus.
     if (widget.open.fresh) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -65,6 +73,7 @@ class _WorkspacePageState extends State<WorkspacePage> {
 
   @override
   void dispose() {
+    _views.editor.left(this);
     _tree.removeListener(_titleChanged);
     _title.dispose();
     _titleFocus.dispose();
@@ -113,65 +122,31 @@ class _WorkspacePageState extends State<WorkspacePage> {
   }
 
   /// What is typed on an empty Page, once any composition ends, makes its first Text Block
-  /// and keeps it in step until the line is left with nothing new: then that Text Block takes
-  /// the caret, formatted by a Markdown shortcut typed at its start.
-  Future<void> _typedFirst() async {
-    if (_syncing) return;
-    _syncing = true;
-    final page = widget.open.page;
-    try {
-      while (mounted) {
-        final typed = _first.value;
-        if (!typed.composing.isCollapsed) return;
-        final made = _made;
-        if (made == null) {
-          if (typed.text.isEmpty) return;
-          final created = await widget.state.apply(
-            mutation(
-              BridgeMutationKind.addTextBlock,
-              page: page,
-              text: typed.text,
-            ),
-          );
-          if (!mounted) return;
-          setState(() => _made = (created.block!, created.view!));
-          _sent = typed.text;
-        } else if (typed.text != _sent) {
-          await widget.state.apply(textEdit(page, made.$1, _sent, typed.text));
-          _sent = typed.text;
-        } else {
-          var offset = typed.selection.isValid
-              ? typed.selection.baseOffset
-              : typed.text.length;
-          for (final MapEntry(key: prefix, value: style)
-              in markdownShortcuts.entries) {
-            if (!_sent.startsWith(prefix)) continue;
-            final rest = _sent.substring(prefix.length);
-            await widget.state.apply(textEdit(page, made.$1, _sent, rest));
-            await widget.state.apply(
-              mutation(
-                BridgeMutationKind.setTextStyle,
-                page: page,
-                block: made.$1,
-                style: style,
-              ),
-            );
-            offset = (offset - prefix.length).clamp(0, rest.length);
-            break;
-          }
-          if (!mounted) return;
-          _views.moveCaret(Caret(made.$2, offset));
-          setState(() => _made = null);
-          _sent = '';
-          _first.clear();
-          return;
-        }
-      }
-    } on Object {
-      // The problem shows above the Page; what was typed stays in the line.
-    } finally {
-      _syncing = false;
+  /// through the Page's input queue (ADR-0240), which also hands over what is typed
+  /// meanwhile and applies a Markdown shortcut typed there.
+  void _typedFirst() {
+    final editor = _views.editor;
+    if (editor.isSource(this)) {
+      editor.typed(this);
+      return;
     }
+    if (_first.text.isEmpty || !_first.value.composing.isCollapsed) return;
+    if (editor.busy) return;
+    setState(() => _handing = true);
+    editor.first(this);
+  }
+
+  @override
+  String? get block => null;
+
+  @override
+  TextEditingValue get typed => _first.value;
+
+  @override
+  void settle(String? text) {
+    if (!mounted) return;
+    setState(() => _handing = false);
+    _first.clear();
   }
 
   /// The reading column's width, centred.
@@ -185,6 +160,23 @@ class _WorkspacePageState extends State<WorkspacePage> {
   @override
   Widget build(BuildContext context) {
     final ws = context.ws;
+    final firstLine = KeyedSubtree(
+      key: _firstLineKey,
+      child: TextField(
+        key: const Key('first-line'),
+        controller: _first,
+        focusNode: _firstFocus,
+        style: TextStyle(
+          fontSize: WsMetrics.fsProse,
+          height: WsMetrics.lhProse / WsMetrics.fsProse,
+          color: ws.text,
+        ),
+        decoration: InputDecoration.collapsed(
+          hintText: 'Type to write.',
+          hintStyle: TextStyle(color: ws.textFaint),
+        ),
+      ),
+    );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -202,7 +194,7 @@ class _WorkspacePageState extends State<WorkspacePage> {
         ),
         Expanded(
           child: ListenableBuilder(
-            listenable: _views,
+            listenable: Listenable.merge([_views, _views.editor.lingering]),
             builder: (context, _) => CustomScrollView(
               slivers: [
                 SliverPadding(
@@ -250,48 +242,63 @@ class _WorkspacePageState extends State<WorkspacePage> {
                     WsMetrics.space8,
                   ),
                   // The line stays until its Text Block took over what was typed.
-                  sliver: _views.count == 0 || _made != null
-                      ? SliverToBoxAdapter(
-                          child: _column(
-                            TextField(
-                              key: const Key('first-line'),
-                              controller: _first,
-                              focusNode: _firstFocus,
-                              style: TextStyle(
-                                fontSize: WsMetrics.fsProse,
-                                height: WsMetrics.lhProse / WsMetrics.fsProse,
-                                color: ws.text,
-                              ),
-                              decoration: InputDecoration.collapsed(
-                                hintText: 'Type to write.',
-                                hintStyle: TextStyle(color: ws.textFaint),
+                  // The first line stays, out of sight, until its Text Block took the
+                  // caret, so typing meanwhile still reaches it.
+                  sliver: SliverMainAxisGroup(
+                    slivers: [
+                      if (_views.count == 0 || _handing)
+                        SliverToBoxAdapter(
+                          key: const ValueKey('first line'),
+                          child: Offstage(
+                            offstage: _views.count != 0,
+                            child: _column(firstLine),
+                          ),
+                        ),
+                      // The Text Block a change started from stays, out of sight, after
+                      // its View is gone, until the change is done.
+                      if (_views.editor.lingering.value
+                          case (final view, final index)
+                          when _views.indexOf(view.id) == null)
+                        SliverToBoxAdapter(
+                          key: const ValueKey('lingering'),
+                          child: Offstage(
+                            child: _column(
+                              TextBlock(
+                                key: _views.keyFor(view.id),
+                                views: _views,
+                                view: view,
+                                index: index,
                               ),
                             ),
                           ),
-                        )
-                      : SliverList.builder(
-                          itemCount: _views.count ?? 0,
-                          // A Text Block keeps its state, focus included, when Views above it
-                          // come or go.
-                          findChildIndexCallback: (key) =>
-                              _views.indexOf((key as ValueKey<String>).value),
-                          itemBuilder: (context, index) {
-                            final view = _views.at(index);
-                            if (view == null) {
-                              return const SizedBox(height: WsMetrics.lhProse);
-                            }
-                            return KeyedSubtree(
-                              key: ValueKey(view.id),
-                              child: _column(
-                                TextBlock(
-                                  views: _views,
-                                  view: view,
-                                  index: index,
-                                ),
-                              ),
-                            );
-                          },
                         ),
+                      SliverList.builder(
+                        key: const ValueKey('Text Blocks'),
+                        itemCount: _views.count ?? 0,
+                        // A Text Block keeps its state, focus included, when Views
+                        // above it come or go.
+                        findChildIndexCallback: (key) =>
+                            _views.indexOf((key as ValueKey<String>).value),
+                        itemBuilder: (context, index) {
+                          final view = _views.at(index);
+                          if (view == null) {
+                            return const SizedBox(height: WsMetrics.lhProse);
+                          }
+                          return KeyedSubtree(
+                            key: ValueKey(view.id),
+                            child: _column(
+                              TextBlock(
+                                key: _views.keyFor(view.id),
+                                views: _views,
+                                view: view,
+                                index: index,
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ),

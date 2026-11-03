@@ -233,14 +233,24 @@ class WorkspaceState {
     if (!_disposed) _trees[area]!.value = read;
   }
 
+  /// Work that will ask for writes, such as a Page's input queue (ADR-0240).
+  final _tracked = <Future<void>>{};
+
+  /// Counts `work` until it is done, so that draining waits for its writes too.
+  void track(Future<void> work) {
+    _tracked.add(work);
+    unawaited(work.whenComplete(() => _tracked.remove(work)));
+  }
+
   /// Waits for every write asked for so far, and for those asked meanwhile, so that closing
   /// the window loses none.
   Future<void> drain() async {
     Future<void> last;
     do {
+      await Future.wait([..._tracked]);
       last = _applied;
       await last;
-    } while (!identical(last, _applied));
+    } while (!identical(last, _applied) || _tracked.isNotEmpty);
   }
 
   Future<void> dispose() async {

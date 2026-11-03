@@ -9,72 +9,21 @@ import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'follow.dart';
+import 'page_editor.dart';
 import 'page_views.dart';
 import 'workspace_state.dart';
-
-/// Text typed at a paragraph's start that formats it, as Notion's Markdown shortcuts do
-/// (approved Pages mockups).
-const markdownShortcuts = {
-  '# ': BridgeTextStyle.heading1,
-  '## ': BridgeTextStyle.heading2,
-  '### ': BridgeTextStyle.heading3,
-  '- ': BridgeTextStyle.bullet,
-  '* ': BridgeTextStyle.bullet,
-  '1. ': BridgeTextStyle.numbered,
-  '[] ': BridgeTextStyle.todo,
-  '" ': BridgeTextStyle.quote,
-};
 
 /// What `---` typed alone in a Text Block becomes: a Section boundary (approved Section
 /// mockups).
 const sectionBreak = '---';
 
-/// The style of the Text Block ⏎ starts, as in Notion: lists and to-dos go on, the rest
-/// becomes a paragraph.
-BridgeTextStyle nextStyle(BridgeTextStyle style) => switch (style) {
-  BridgeTextStyle.bullet => BridgeTextStyle.bullet,
-  BridgeTextStyle.numbered => BridgeTextStyle.numbered,
-  BridgeTextStyle.todo || BridgeTextStyle.done => BridgeTextStyle.todo,
-  _ => BridgeTextStyle.paragraph,
-};
-
 /// A caret offset that means a Text Block's end.
 const _end = 1 << 30;
 
-bool _listed(BridgeTextStyle style) =>
-    nextStyle(style) != BridgeTextStyle.paragraph;
-
-/// The one edit that turns `from` into `to` in `block`: the changed middle, never between the
-/// halves of a surrogate pair, which the core refuses.
-BridgeMutation textEdit(String page, String block, String from, String to) {
-  final shorter = to.length < from.length ? to.length : from.length;
-  var start = 0;
-  while (start < shorter && to.codeUnitAt(start) == from.codeUnitAt(start)) {
-    start++;
-  }
-  var end = 0;
-  while (end < shorter - start &&
-      to.codeUnitAt(to.length - 1 - end) ==
-          from.codeUnitAt(from.length - 1 - end)) {
-    end++;
-  }
-  bool trail(int at) =>
-      at < from.length && (from.codeUnitAt(at) & 0xFC00) == 0xDC00;
-  if (start > 0 && trail(start)) start--;
-  if (end > 0 && trail(from.length - end)) end--;
-  return mutation(
-    BridgeMutationKind.editText,
-    page: page,
-    block: block,
-    at: start,
-    delete: from.length - start - end,
-    text: to.substring(start, to.length - end),
-  );
-}
-
 /// One Text Block on its Page, with the divider above it when it starts a Section. It
 /// follows only its own Block (client architecture rule 6); typing shows at once and
-/// reaches the core afterwards (rule 7).
+/// reaches the core afterwards (rule 7). ⏎ and ⌫ at its start go through the Page's input
+/// queue (ADR-0240).
 class TextBlock extends StatefulWidget {
   const TextBlock({
     super.key,
@@ -93,7 +42,7 @@ class TextBlock extends StatefulWidget {
   State<TextBlock> createState() => _TextBlockState();
 }
 
-class _TextBlockState extends State<TextBlock> {
+class _TextBlockState extends State<TextBlock> implements EditorSource {
   final _text = TextEditingController();
 
   /// Keeps the field, its text input included, when a new style wraps it differently.
@@ -107,29 +56,29 @@ class _TextBlockState extends State<TextBlock> {
   String? _stored;
   BridgeTextStyle _style = BridgeTextStyle.paragraph;
 
-  /// Edits sent but not yet applied, and all sent so far, so a read that crossed one is
-  /// not shown.
-  int _pending = 0;
-  int _sent = 0;
-
   /// While the text changes from the core or a key, not from typing.
   bool _quiet = false;
-
-  /// While a split or join is on its way: typing then stays here, in [_latest], and goes to
-  /// the Text Block that holds the caret afterwards, even once this one is gone.
-  bool _handing = false;
-  TextEditingValue _latest = TextEditingValue.empty;
 
   /// Reads asked for, so only the latest shows.
   int _reads = 0;
 
+  /// Whether the field was last built editable, which it is once its text is known.
+  bool _editable = false;
+
   /// A caret place past the text shown, which a write on its way makes room for.
   int? _wanted;
   StreamSubscription<BridgeChange>? _followed;
+  StreamSubscription<String>? _settled;
 
   WorkspaceState get _state => widget.views.state;
+  PageEditor get _editor => widget.views.editor;
   String get _page => widget.views.page;
-  String get _block => widget.view.block;
+
+  @override
+  String get block => widget.view.block;
+
+  @override
+  TextEditingValue get typed => _text.value;
 
   @override
   void initState() {
@@ -138,17 +87,23 @@ class _TextBlockState extends State<TextBlock> {
     widget.views.caret.addListener(_takeCaret);
     _followed = follow(
       _state.workspace,
-      BridgeResource(
-        kind: BridgeResourceKind.block,
-        page: _page,
-        block: _block,
-      ),
+      BridgeResource(kind: BridgeResourceKind.block, page: _page, block: block),
     ).listen((_) => unawaited(_read()), onError: _report);
+    // Built after the caret was handed to it.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _takeCaret();
+    });
+    // Once every write to this Block arrived, its text is read again.
+    _settled = widget.views.settled
+        .where((settled) => settled == block)
+        .listen((_) => unawaited(_read()));
   }
 
   @override
   void dispose() {
+    _editor.left(this);
     unawaited(_followed?.cancel());
+    unawaited(_settled?.cancel());
     widget.views.caret.removeListener(_takeCaret);
     _text.dispose();
     _focus.dispose();
@@ -159,28 +114,35 @@ class _TextBlockState extends State<TextBlock> {
     if (mounted) _state.problem.value = '$error';
   }
 
-  /// Shows the stored text and style, unless an edit of this Block is on its way.
+  /// Shows the stored text and style, unless a write to this Block or a change of the
+  /// Page's structure from it is on its way.
   Future<void> _read() async {
     final read = ++_reads;
-    // A read asked while an edit is on its way may miss it, whenever it answers.
-    final clean = _pending == 0;
-    final sent = _sent;
+    final views = widget.views;
+    // A read asked while a write is on its way may miss it, whenever it answers.
+    final clean = views.pending(block) == 0;
+    final sent = views.sent(block);
     final BridgeAnswer answer;
     try {
       answer = await _state.workspace.query(
-        query: query(BridgeQueryKind.text, page: _page, block: _block),
+        query: query(BridgeQueryKind.text, page: _page, block: block),
       );
     } on Object catch (error) {
       _report(error);
       return;
     }
-    if (!mounted || read != _reads) return;
+    if (!mounted || read != _reads || _editor.isSource(this)) return;
     final text = answer.text;
-    if (text == null || !clean || _pending > 0 || sent != _sent) return;
+    if (text == null ||
+        !clean ||
+        views.pending(block) > 0 ||
+        sent != views.sent(block)) {
+      return;
+    }
     final style = answer.style ?? BridgeTextStyle.paragraph;
-    widget.views.setStyle(_block, style);
+    views.setStyle(block, style);
     if (style == BridgeTextStyle.numbered) {
-      unawaited(widget.views.readRun(widget.index).catchError(_report));
+      unawaited(views.readRun(widget.index).catchError(_report));
     }
     if (style != _style) setState(() => _style = style);
     // Editable once the text is known, so nothing typed before is lost.
@@ -208,9 +170,30 @@ class _TextBlockState extends State<TextBlock> {
     _quiet = false;
   }
 
+  @override
+  void settle(String? text) {
+    if (!mounted || text == null) return;
+    _stored = text;
+    if (_text.text != text) {
+      _set(text, _text.selection.baseOffset.clamp(0, text.length));
+    }
+  }
+
   void _takeCaret() {
     final caret = widget.views.caret.value;
-    if (caret == null || caret.view != widget.view.id || _stored == null) {
+    if (caret == null || caret.view != widget.view.id) return;
+    // What the input queue wrote last is what the core holds, so it needs no read first.
+    if (caret.text case final text?) {
+      _stored = text;
+      if (_text.text != text) _set(text, text.length);
+    }
+    if (_stored == null) return;
+    // Takes the caret once the field is built editable, so it opens its text input.
+    if (!_editable) {
+      setState(() {});
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _takeCaret();
+      });
       return;
     }
     widget.views.caret.value = null;
@@ -222,14 +205,16 @@ class _TextBlockState extends State<TextBlock> {
     );
   }
 
-  /// Sends what typing changed, or applies a shortcut typed at the start.
+  /// Sends what typing changed, or applies a shortcut typed at the start. While the Page's
+  /// structure changes from here, the input queue takes it instead.
   void _typed() {
     final stored = _stored;
-    if (_quiet || stored == null || _composing) return;
-    if (_handing) {
-      _latest = _text.value;
+    if (_quiet || stored == null) return;
+    if (_editor.isSource(this)) {
+      _editor.typed(this);
       return;
     }
+    if (_composing) return;
     final text = _text.text;
     if (text == stored) return;
     if (_style == BridgeTextStyle.paragraph) {
@@ -250,7 +235,7 @@ class _TextBlockState extends State<TextBlock> {
     if (text == sectionBreak && widget.index > 0 && !widget.view.boundary) {
       _set('', 0);
       _send('');
-      _apply(
+      _write(
         mutation(
           BridgeMutationKind.setSectionBoundary,
           page: _page,
@@ -268,31 +253,24 @@ class _TextBlockState extends State<TextBlock> {
     final stored = _stored!;
     if (text == stored) return;
     _stored = text;
-    _apply(textEdit(_page, _block, stored, text));
+    _write(textEdit(_page, block, stored, text));
   }
 
-  /// Applies `change` after earlier ones; a refusal shows the stored text again (rule 7).
-  Future<BridgeApplied?> _apply(BridgeMutation change) async {
-    _pending++;
-    _sent++;
-    try {
-      return await _state.apply(change);
-    } on Object {
-      return null;
-    } finally {
-      _pending--;
-      if (mounted && _pending == 0) unawaited(_read());
-    }
-  }
+  /// Writes `change` after earlier ones; a refusal shows the stored text again (rule 7).
+  void _write(BridgeMutation change) => unawaited(
+    widget.views
+        .write(change, [block])
+        .then<void>((_) {}, onError: (Object _) {}),
+  );
 
   void _restyle(BridgeTextStyle style) {
     setState(() => _style = style);
-    widget.views.setStyle(_block, style);
-    _apply(
+    widget.views.setStyle(block, style);
+    _write(
       mutation(
         BridgeMutationKind.setTextStyle,
         page: _page,
-        block: _block,
+        block: block,
         style: style,
       ),
     );
@@ -302,29 +280,33 @@ class _TextBlockState extends State<TextBlock> {
     if (event is KeyUpEvent || _composing || _stored == null) {
       return KeyEventResult.ignored;
     }
-    // ⏎ or ⌫ before a split or join arrived is dropped rather than typed or deleted here.
-    if (_handing) {
-      return event.logicalKey == LogicalKeyboardKey.enter ||
-              event.logicalKey == LogicalKeyboardKey.backspace
-          ? KeyEventResult.handled
-          : KeyEventResult.ignored;
-    }
     final keys = HardwareKeyboard.instance;
     final plain =
         !keys.isShiftPressed &&
         !keys.isMetaPressed &&
         !keys.isControlPressed &&
         !keys.isAltPressed;
+    if (!plain) return KeyEventResult.ignored;
+    if (_editor.busy) return _editor.queue(this, event);
     final selection = _text.selection;
-    if (!plain || !selection.isValid) return KeyEventResult.ignored;
+    if (!selection.isValid) return KeyEventResult.ignored;
     final at = selection.baseOffset;
     final collapsed = selection.isCollapsed;
     switch (event.logicalKey) {
       case LogicalKeyboardKey.enter || LogicalKeyboardKey.numpadEnter:
-        _enter();
+        if (!collapsed) {
+          final text = _text.text.replaceRange(
+            selection.start,
+            selection.end,
+            '',
+          );
+          _set(text, selection.start);
+          _send(text);
+        }
+        _structure(LogicalKeyboardKey.enter);
         return KeyEventResult.handled;
       case LogicalKeyboardKey.backspace when collapsed && at == 0:
-        unawaited(_backspace());
+        _structure(LogicalKeyboardKey.backspace);
         return KeyEventResult.handled;
       case LogicalKeyboardKey.arrowUp when collapsed && _onLine(first: true):
       case LogicalKeyboardKey.arrowLeft when collapsed && at == 0:
@@ -337,6 +319,21 @@ class _TextBlockState extends State<TextBlock> {
         return KeyEventResult.ignored;
     }
   }
+
+  /// Hands ⏎ or ⌫ at the start to the Page's input queue, which changes the structure.
+  void _structure(LogicalKeyboardKey key) => _editor.start(
+    this,
+    EditorTarget(
+      view: widget.view.id,
+      block: block,
+      index: widget.index,
+      text: _stored!,
+      caret: _text.selection.start,
+      style: _style,
+      boundary: widget.view.boundary,
+    ),
+    key,
+  );
 
   /// Whether the caret is on the text's first or last visual line.
   bool _onLine({required bool first}) {
@@ -375,160 +372,6 @@ class _TextBlockState extends State<TextBlock> {
     return true;
   }
 
-  /// ⏎ ends this Text Block and starts the next at the caret, as in Notion. An empty list
-  /// item or to-do becomes a paragraph instead.
-  void _enter() {
-    final selection = _text.selection;
-    var text = _text.text;
-    if (!selection.isCollapsed) {
-      text = text.replaceRange(selection.start, selection.end, '');
-      _set(text, selection.start);
-      _send(text);
-    }
-    final at = selection.start;
-    if (text.isEmpty && _listed(_style)) {
-      _restyle(BridgeTextStyle.paragraph);
-      return;
-    }
-    final split = _apply(
-      mutation(
-        BridgeMutationKind.splitTextBlock,
-        page: _page,
-        block: _block,
-        view: widget.view.id,
-        at: at,
-        style: nextStyle(_style),
-      ),
-    );
-    // At the start the text stays here, below a new empty Text Block, and typing goes on
-    // here.
-    if (at == 0) return;
-    final head = text.substring(0, at);
-    final tail = text.substring(at);
-    _stored = head;
-    _set(head, at);
-    _handOver(split, (applied, typed) {
-      final created = applied?.block;
-      final view = applied?.view;
-      if (created == null || view == null) return null;
-      // Typed after the split: it begins the new Text Block, before the text that moved.
-      if (!typed.text.startsWith(head)) return null;
-      final extra = typed.text.substring(head.length);
-      if (mounted) _set(head, head.length);
-      return (
-        extra.isEmpty ? null : textEdit(_page, created, tail, extra + tail),
-        Caret(view, extra.length),
-      );
-    });
-  }
-
-  /// Keeps typing here while `change` is on its way, then lets `moved` say which edit carries
-  /// it to the Text Block that holds the caret, and where the caret goes; without one, it is
-  /// an edit of this Text Block. It works on when this Text Block is gone meanwhile.
-  void _handOver(
-    Future<BridgeApplied?> change,
-    (BridgeMutation?, Caret)? Function(
-      BridgeApplied? applied,
-      TextEditingValue typed,
-    )
-    moved,
-  ) {
-    _handing = true;
-    _latest = _text.value;
-    final (state, views, page, block) = (_state, widget.views, _page, _block);
-    final stored = _stored;
-    unawaited(
-      change.then((applied) {
-        _handing = false;
-        final typed = _latest;
-        final carried = moved(applied, typed);
-        if (carried == null) {
-          if (stored != null && typed.text != stored) {
-            if (mounted) {
-              _send(typed.text);
-            } else {
-              _stored = typed.text;
-              unawaited(
-                state
-                    .apply(textEdit(page, block, stored, typed.text))
-                    .then<void>((_) {}, onError: (Object _) {}),
-              );
-            }
-          }
-          return;
-        }
-        final (edit, caret) = carried;
-        if (edit != null) {
-          unawaited(
-            state.apply(edit).then<void>((_) {}, onError: (Object _) {}),
-          );
-        }
-        views.moveCaret(caret);
-      }),
-    );
-  }
-
-  /// ⌫ at the start removes a divider above, then the formatting, then joins this Text
-  /// Block to the one above, as the approved Section mockups and Notion do.
-  Future<void> _backspace() async {
-    if (widget.view.boundary && widget.index > 0) {
-      await _apply(
-        mutation(
-          BridgeMutationKind.setSectionBoundary,
-          page: _page,
-          view: widget.view.id,
-          boundary: false,
-        ),
-      );
-      return;
-    }
-    if (_style != BridgeTextStyle.paragraph) {
-      _restyle(BridgeTextStyle.paragraph);
-      return;
-    }
-    final above = widget.index > 0 ? widget.views.at(widget.index - 1) : null;
-    if (above == null) return;
-    final joined = _stored!;
-    final (page, view) = (_page, widget.view.id);
-    // The text above, read once every earlier write arrived, says where the caret goes.
-    final join = _state.settled.then((_) async {
-      final answer = await _state.workspace.query(
-        query: query(BridgeQueryKind.text, page: page, block: above.block),
-      );
-      final applied = await _state.apply(
-        mutation(BridgeMutationKind.joinTextBlock, page: page, view: view),
-      );
-      return (applied, answer.text ?? '');
-    });
-    String aboveText = '';
-    _handOver(
-      join
-          .then((result) {
-            aboveText = result.$2;
-            return result.$1;
-          })
-          .then<BridgeApplied?>(
-            (applied) => applied,
-            onError: (Object _) => null,
-          ),
-      (applied, typed) {
-        if (applied == null) return null;
-        final offset = typed.selection.isValid ? typed.selection.baseOffset : 0;
-        return (
-          typed.text == joined
-              ? null
-              : textEdit(
-                  page,
-                  above.block,
-                  aboveText + joined,
-                  aboveText + typed.text,
-                ),
-          Caret(above.id, aboveText.length + offset),
-        );
-      },
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final ws = context.ws;
@@ -557,7 +400,7 @@ class _TextBlockState extends State<TextBlock> {
     Widget text = TextField(
       key: _field,
       controller: _text,
-      readOnly: _stored == null,
+      readOnly: !(_editable = _stored != null),
       focusNode: _focus,
       maxLines: null,
       keyboardType: TextInputType.multiline,

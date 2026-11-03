@@ -405,7 +405,11 @@ void main() {
     made.complete();
     fake.gate = handed;
     await tester.pump();
-    await tester.enterText(find.byKey(const Key('first-line')), 'abc');
+    // Its Text Block exists, so the line is out of sight but still takes the keys.
+    await tester.enterText(
+      find.byKey(const Key('first-line'), skipOffstage: false),
+      'abc',
+    );
     handed.complete();
     await tester.pumpAndSettle();
     expect(fake.textsOf(page), ['abc']);

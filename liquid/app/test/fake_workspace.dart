@@ -20,6 +20,9 @@ class FakeWorkspace implements LiquidWorkspace {
   /// Holds applies until it completes.
   Completer<void>? gate;
 
+  /// How long each apply takes, as a slow disk would.
+  Duration Function()? delay;
+
   /// Fails every query with this text.
   String? refuseQueries;
 
@@ -42,6 +45,7 @@ class FakeWorkspace implements LiquidWorkspace {
   @override
   Future<BridgeApplied> apply({required BridgeMutation mutation}) async {
     await gate?.future;
+    if (delay case final delay?) await Future<void>.delayed(delay());
     if (refuse case final refused?) throw refused;
     applied.add(mutation);
     switch (mutation.kind) {

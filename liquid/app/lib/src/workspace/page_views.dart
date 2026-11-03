@@ -1,9 +1,10 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 
 import '../rust/api/workspace.dart';
 import 'follow.dart';
+import 'page_editor.dart';
 import 'workspace_state.dart';
 
 /// Views read at once: a screenful and more, far below the bridge's window.
@@ -12,12 +13,16 @@ const _chunk = 100;
 /// Where the caret goes once a Text Block's View is built.
 @immutable
 class Caret {
-  const Caret(this.view, this.offset);
+  const Caret(this.view, this.offset, {this.text});
 
   final String view;
 
   /// In UTF-16 units, as Dart and the core count text; past the end means the end.
   final int offset;
+
+  /// What the Text Block holds, when the Page's input queue wrote it last, so it can take
+  /// the caret before reading its text.
+  final String? text;
 }
 
 /// An open Page's Views in order, read in windows as the Page scrolls to them, never the
@@ -76,6 +81,49 @@ class PageViews extends ChangeNotifier {
     }
     return null;
   }
+
+  /// The Page's ordered input queue (ADR-0240).
+  late final editor = PageEditor(this);
+
+  final _pending = <String, int>{};
+  final _sent = <String, int>{};
+  final _settled = StreamController<String>.broadcast();
+
+  /// Writes on their way to each Block, and all sent so far, so a read that crossed one is
+  /// not shown.
+  int pending(String block) => _pending[block] ?? 0;
+  int sent(String block) => _sent[block] ?? 0;
+
+  /// The Blocks whose writes have all arrived, each time that happens.
+  Stream<String> get settled => _settled.stream;
+
+  /// Applies `change` after earlier writes, counting it for `blocks`.
+  Future<BridgeApplied> write(
+    BridgeMutation change,
+    List<String> blocks,
+  ) async {
+    for (final block in blocks) {
+      _pending[block] = pending(block) + 1;
+      _sent[block] = sent(block) + 1;
+    }
+    try {
+      return await state.apply(change);
+    } finally {
+      for (final block in blocks) {
+        final left = _pending[block] = pending(block) - 1;
+        if (left == 0 && !_disposed) _settled.add(block);
+      }
+    }
+  }
+
+  final _keys = <String, GlobalKey>{};
+
+  /// The key of a View's Text Block, which keeps its state when the Page shows it elsewhere.
+  GlobalKey keyFor(String view) =>
+      _keys.putIfAbsent(view, () => GlobalKey(debugLabel: view));
+
+  /// Whether the Page has closed.
+  bool get closed => _disposed;
 
   /// Puts the caret's next place, unless the Page has closed.
   void moveCaret(Caret caret) {
@@ -192,6 +240,8 @@ class PageViews extends ChangeNotifier {
     unawaited(_followed?.cancel());
     caret.dispose();
     styles.dispose();
+    editor.lingering.dispose();
+    unawaited(_settled.close());
     super.dispose();
   }
 }
