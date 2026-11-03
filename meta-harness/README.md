@@ -19,3 +19,7 @@ Internal to the slice; it changes together with both sides.
 - **Branching:** the command `/watershed-branch <entry-id> [label]` continues the session from that entry, so the next prompt starts a new branch in the same session file. The core also takes this extension command, as pi's `get_commands` lists it with the extension file the core started pi with, as the sign that the extension is loaded. At a prompt, pi continues before it and the extension hands the prompt back as the input text; a cancelled or failed navigation becomes an error notification.
 
 Test the extension with `node --test meta-harness/pi-extension/watershed.test.ts`. The manual check with real pi and a scripted model is `meta-harness-core/examples/pi_check.rs`; its header shows how to run it.
+
+## Session exit
+
+After pi exits, stdout drains to EOF for at most two seconds, independently of event delivery. Every complete record read is processed in order; a trailing partial record is dropped. If the pipe remains open at the deadline, the core closes it and emits one warning through the existing notification path: "Some agent output may be missing." Pending commands without a response resolve as "agent exited" and `Exited` follows all accepted events. Ordinary buffered output reaches EOF without a warning. This does not terminate descendants.
