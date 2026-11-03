@@ -75,6 +75,7 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
     _title.text = _page?.title ?? '';
     _tree.addListener(_titleChanged);
     _first.addListener(_typedFirst);
+    _views.ready.addListener(_readied);
     widget.state.finishing.add(_typedFirst);
     // After the frame, so it wins over the window's own first focus.
     if (widget.open.fresh) {
@@ -110,22 +111,32 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
   }
 
   /// Each change of the title is one rename; a refused one puts the stored title back.
-  void _rename(String title) => unawaited(
-    widget.state
-        .rename(widget.open.page, title)
-        .then<void>(
-          (_) {},
-          onError: (Object _) {
-            if (!mounted) return;
-            _title.text = _page?.title ?? '';
-          },
-        ),
-  );
+  void _rename(String title) {
+    final rename = ++_renames;
+    unawaited(
+      widget.state
+          .rename(widget.open.page, title)
+          .then<void>(
+            (_) {},
+            onError: (Object _) {
+              // Only the latest rename's refusal puts the stored title back.
+              if (!mounted || rename != _renames) return;
+              _title.text = _page?.title ?? '';
+            },
+          ),
+    );
+  }
+
+  int _renames = 0;
+
+  void _readied() {
+    if (mounted) setState(() {});
+  }
 
   /// ⏎ or ↓ in the title goes to the first Text Block, as in Notion.
   KeyEventResult _titleKey(KeyEvent event) {
-    // A composition takes its own ⏎ and arrows.
-    if (event is KeyUpEvent || !_title.value.composing.isCollapsed) {
+    // A composition takes its own ⏎ and arrows, and the field the keys with modifiers.
+    if (event is KeyUpEvent || !_title.value.composing.isCollapsed || !_plain) {
       return KeyEventResult.ignored;
     }
     if (event.logicalKey != LogicalKeyboardKey.enter &&
@@ -166,6 +177,9 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
   TextEditingValue get typed => _first.value;
 
   @override
+  bool get focused => _firstFocus.hasFocus;
+
+  @override
   void collapse() {
     final selection = _first.selection;
     if (selection.isValid && !selection.isCollapsed) {
@@ -197,6 +211,8 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
         key: const Key('first-line'),
         controller: _first,
         focusNode: _firstFocus,
+        // Until the Page's earlier queue is done, nothing can be typed.
+        readOnly: !_views.ready.value,
         style: TextStyle(
           fontSize: WsMetrics.fsProse,
           height: WsMetrics.lhProse / WsMetrics.fsProse,
@@ -225,7 +241,11 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
         ),
         Expanded(
           child: ListenableBuilder(
-            listenable: Listenable.merge([_views, _views.editor.lingering]),
+            listenable: Listenable.merge([
+              _views,
+              _views.editor.lingering,
+              _views.ready,
+            ]),
             builder: (context, _) => CustomScrollView(
               slivers: [
                 SliverPadding(

@@ -86,6 +86,9 @@ abstract interface class EditorSource {
 
   /// Collapses a selection to its end, as a queued key that replaces it is replayed.
   void collapse();
+
+  /// Whether it has the keyboard focus, which a person may move elsewhere meanwhile.
+  bool get focused;
 }
 
 /// The Text Block that typing goes to, as the editor knows it.
@@ -181,7 +184,7 @@ class PageEditor {
     _linger(target);
     _known[target.block] = target.text;
     _queue.add(_Queued(_latest, key));
-    unawaited(_drive(target, null));
+    _state.trackPage(_page, _drive(target, null));
   }
 
   void _linger(EditorTarget target) {
@@ -198,7 +201,7 @@ class PageEditor {
   /// Makes the first Text Block of an empty Page from what `source` holds.
   void first(EditorSource source) {
     _begin(source);
-    unawaited(_drive(null, _latest));
+    _state.trackPage(_page, _drive(null, _latest));
   }
 
   void _begin(EditorSource source) {
@@ -306,8 +309,9 @@ class PageEditor {
         final _Queued? next = _queue.isEmpty ? null : _queue.removeFirst();
         if (next?.left case final left?) {
           // What the field before still held goes in before the other field's key.
-          await _route(target!, prev, left, boundary, base);
-          await _markdown(target, target.text);
+          final before = target!.text;
+          await _route(target, prev, left, boundary, base);
+          await _markdown(target, before);
           source = next!.source!;
           sources.add(source);
           target = next.target!;
@@ -372,7 +376,9 @@ class PageEditor {
       for (final settled in sources) {
         final block = settled.block;
         settled.settle(block == null ? null : _known[block]);
-        if (block == target.block) views.moveCaret(_caretOf(target));
+        if (block == target.block && settled.focused) {
+          views.moveCaret(_caretOf(target));
+        }
         // Each Text Block reads its text and style again, now that the queue let go.
         if (block != null) views.reread(block);
       }
@@ -400,6 +406,8 @@ class PageEditor {
   /// Offers the caret to the target's Text Block. True once it took it or the Page closed;
   /// false when more input came first, which then takes its turn.
   Future<bool> _handOver(EditorTarget target, TextEditingValue prev) async {
+    // A person who moved to another field meanwhile keeps the caret there.
+    if (!_gone && !(_source?.focused ?? true)) return true;
     final offered = _caretOf(target);
     views.moveCaret(offered);
     if (views.closed) return true;

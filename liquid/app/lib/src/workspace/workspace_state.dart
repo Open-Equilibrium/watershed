@@ -244,6 +244,23 @@ class WorkspaceState {
   /// Work that will ask for writes, such as a Page's input queue (ADR-0240).
   final _tracked = <Future<void>>{};
 
+  final _pages = <String, Future<void>>{};
+
+  /// A Page's input queue still writing, also after the Page closed, or none.
+  Future<void>? pageWork(String page) => _pages[page];
+
+  /// Counts `work` on `page` until it is done, so that the Page reopened meanwhile waits
+  /// for it before taking keys.
+  void trackPage(String page, Future<void> work) {
+    _pages[page] = work;
+    track(work);
+    unawaited(
+      work.whenComplete(() {
+        if (identical(_pages[page], work)) _pages.remove(page);
+      }),
+    );
+  }
+
   /// Counts `work` until it is done, so that draining waits for its writes too.
   void track(Future<void> work) {
     _tracked.add(work);

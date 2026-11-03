@@ -790,4 +790,75 @@ void main() {
     expect(fake.textsOf(page), ['Item', '']);
     expect(fake.views[page]![1].boundary, isTrue);
   });
+
+  testWidgets('a Page reopened while its queue writes waits for it', (
+    tester,
+  ) async {
+    await show(tester, ['ABC']);
+    await caret(tester, 0, 1);
+    fake.gate = Completer();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    workspace.open.value = OpenPage(workspace.open.value?.area ?? '', page);
+    await tester.pumpAndSettle();
+    expect(field(tester, 0).readOnly, isTrue);
+    fake.gate!.complete();
+    await tester.pumpAndSettle();
+    expect(fake.textsOf(page), ['A', 'BC']);
+    expect(field(tester, 0).readOnly, isFalse);
+    expect(field(tester, 0).controller!.text, 'A');
+  });
+
+  testWidgets('a person who moved to another Text Block keeps the caret', (
+    tester,
+  ) async {
+    await show(tester, ['A', 'B']);
+    await caret(tester, 0, 1);
+    fake.gate = Completer();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    await caret(tester, 1, 1);
+    await type(tester, 1, 'x');
+    fake.gate!.complete();
+    for (var frame = 0; frame < 60; frame++) {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    expect(fake.textsOf(page), ['A', '', 'Bx']);
+    expect(focused(tester, 2), isTrue);
+  });
+
+  testWidgets('a shortcut typed before moving to another Text Block applies', (
+    tester,
+  ) async {
+    await show(tester, ['A', 'C']);
+    await caret(tester, 0, 1);
+    fake.gate = Completer();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    await type(tester, 0, '- ');
+    await caret(tester, 1, 1);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    fake.gate!.complete();
+    for (var frame = 0; frame < 60; frame++) {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    expect(fake.textsOf(page), ['A', '', 'C', '']);
+    expect(styleOf(1), BridgeTextStyle.bullet);
+  });
+
+  testWidgets('shift and ↓ in the title select rather than leave it', (
+    tester,
+  ) async {
+    await show(tester, ['One']);
+    await tester.tap(find.byKey(const Key('page-title')));
+    await tester.pump();
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.pump();
+    expect(focused(tester, 0), isFalse);
+  });
 }

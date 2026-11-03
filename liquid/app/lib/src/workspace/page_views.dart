@@ -59,7 +59,21 @@ class PageViews extends ChangeNotifier {
   bool _reading = false;
   bool _again = false;
 
+  /// False while the queue of this Page's earlier opening still writes, which its fields
+  /// wait for before taking keys.
+  final ready = ValueNotifier(true);
+
   void start() {
+    if (state.pageWork(page) case final work?) {
+      ready.value = false;
+      unawaited(
+        work.whenComplete(() {
+          if (_disposed) return;
+          ready.value = true;
+          unawaited(_reread());
+        }),
+      );
+    }
     _followed = follow(
       state.workspace,
       BridgeResource(kind: BridgeResourceKind.views, page: page),
@@ -266,6 +280,7 @@ class PageViews extends ChangeNotifier {
     caret.dispose();
     styles.dispose();
     editor.lingering.dispose();
+    ready.dispose();
     unawaited(_settled.close());
     super.dispose();
   }

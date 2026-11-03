@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -269,5 +271,19 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
     expect(inSidebar('Untitled'), findsOneWidget);
+  });
+
+  testWidgets('an older refused rename never undoes a newer one', (
+    tester,
+  ) async {
+    await show(tester);
+    fake.gate = Completer();
+    await tester.enterText(title(), 'P');
+    await tester.enterText(title(), 'Pl');
+    fake.refuseNext = 1;
+    fake.gate!.complete();
+    await tester.pumpAndSettle();
+    expect(fake.pages.values.single.single.title, 'Pl');
+    expect(tester.widget<TextField>(title()).controller!.text, 'Pl');
   });
 }

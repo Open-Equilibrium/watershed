@@ -82,6 +82,7 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     _text.addListener(_typed);
     _state.finishing.add(_typed);
     widget.views.caret.addListener(_takeCaret);
+    widget.views.ready.addListener(_readied);
     _followed = follow(
       _state.workspace,
       BridgeResource(kind: BridgeResourceKind.block, page: _page, block: block),
@@ -107,10 +108,21 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     unawaited(_followed?.cancel());
     unawaited(_settled?.cancel());
     widget.views.caret.removeListener(_takeCaret);
+    widget.views.ready.removeListener(_readied);
     _text.dispose();
     _focus.dispose();
     super.dispose();
   }
+
+  /// The Page's earlier queue finished: what it wrote shows, and the field takes keys.
+  void _readied() {
+    if (!mounted) return;
+    setState(() {});
+    unawaited(_read());
+  }
+
+  @override
+  bool get focused => _focus.hasFocus;
 
   void _report(Object error) {
     if (mounted) _state.problem.value = '$error';
@@ -295,6 +307,8 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     if (event is KeyUpEvent || _composing || _stored == null) {
       return KeyEventResult.ignored;
     }
+    // Until the Page's earlier queue is done, the field takes no keys at all.
+    if (!widget.views.ready.value) return KeyEventResult.handled;
     final keys = HardwareKeyboard.instance;
     final plain =
         !keys.isShiftPressed &&
@@ -419,7 +433,7 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     Widget text = TextField(
       key: _field,
       controller: _text,
-      readOnly: !(_editable = _stored != null),
+      readOnly: !(_editable = _stored != null && widget.views.ready.value),
       focusNode: _focus,
       maxLines: null,
       keyboardType: TextInputType.multiline,
