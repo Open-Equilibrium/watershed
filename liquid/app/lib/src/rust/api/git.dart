@@ -304,7 +304,7 @@ class BridgeGitStatus {
   /// The upstream the branch tracks, such as `origin/main`.
   final String? upstream;
 
-  /// The upstream's remote, or origin when configured without an upstream.
+  /// The upstream's remote, or else origin or the only configured remote.
   final String? remote;
   final bool hasRemotes;
   final bool gone;

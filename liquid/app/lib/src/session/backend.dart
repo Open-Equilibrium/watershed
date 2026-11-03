@@ -137,7 +137,7 @@ abstract interface class SessionBackend {
   Future<BridgeGitOutcome> restoreStash(String id);
   Future<BridgeGitOutcome> discardStash(String id);
 
-  /// Fetches the upstream's remote; whether there was one.
+  /// Fetches the upstream's remote, or else origin or the only remote; whether there was one.
   Future<bool> fetch();
 
   Future<BridgeGitOutcome> push(BridgePushConfirmation? confirmed);

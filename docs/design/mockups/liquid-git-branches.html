@@ -460,7 +460,7 @@ kbd{font-size:11px;padding:0 4px;border-radius:4px;border:1px solid currentColor
       <li>Switching with uncommitted changes asks, as GitHub Desktop does: leave them stashed on the branch, or bring them along; a branch's stashed changes show in the Diff tab with Restore and Discard, and stash, restore and discard are refused while an agent runs in the checkout (question 6).</li>
       <li>Liquid fetches in the background every 15 seconds while the session is open, as T3 Code does, so ahead and behind stay current; "Fetch" in the menu fetches at once. This is the one Git write without a user action besides checkpoints, recorded in the ADR log (question 7).</li>
       <li>The split button's main part runs the next single step: commit, push or pull (question 8).</li>
-      <li>A push asks first only for the default branch (question 9).</li>
+      <li>A push asks first only for the default branch (question 9); the answer is bound to the local branch, remote, destination ref and commit, and any change asks again.</li>
       <li>Pull is fast-forward only; when the branches diverged, Liquid points to the terminal (question 10).</li>
       <li>A folder without Git offers "Initialize Git" (question 11).</li>
       <li>With a detached HEAD, commit and push need a branch; the button offers "Create branch …" (question 12).</li>

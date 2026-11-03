@@ -441,8 +441,8 @@ impl Checkpoints {
             .await
     }
 
-    /// Fetches the remote of the branch's upstream, as Liquid does in the background; returns
-    /// whether there was one.
+    /// Fetches the remote of the branch's upstream, or else origin or the only configured remote,
+    /// as Liquid does in the background; returns whether there was one.
     pub async fn fetch(&self) -> Result<bool, DiffError> {
         let tree = self.tree().await?;
         self.bounded(tree.fetch()).await

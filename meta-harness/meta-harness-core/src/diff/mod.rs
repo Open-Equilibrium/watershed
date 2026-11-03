@@ -168,7 +168,8 @@ pub enum DiffError {
     MergeInProgress,
     /// Resolved fetch/push endpoints do not name the same single repository.
     PushDestinations,
-    /// The destination is the default branch and needs explicit confirmation.
+    /// The destination is the default branch, or a confirmed push changed since, and needs
+    /// explicit confirmation.
     PushDefault(Box<GitTransfer>),
     /// Git refused a non-fast-forward push or pull, with fresh upstream counts.
     Diverged(Box<GitTransfer>, String),

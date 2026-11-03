@@ -19,7 +19,7 @@ pub struct BridgeGitStatus {
     pub commit: Option<String>,
     /// The upstream the branch tracks, such as `origin/main`.
     pub upstream: Option<String>,
-    /// The upstream's remote, or origin when configured without an upstream.
+    /// The upstream's remote, or else origin or the only configured remote.
     pub remote: Option<String>,
     pub has_remotes: bool,
     pub gone: bool,
