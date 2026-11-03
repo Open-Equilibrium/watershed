@@ -325,3 +325,64 @@ fn a_closed_page_leaves_memory_and_loads_again_unchanged() {
     assert_eq!(workspace.view_count(&page).unwrap(), 1);
     assert_eq!(workspace.text(&page, &block).unwrap().unwrap(), "Five days");
 }
+
+#[test]
+fn a_block_of_an_unknown_kind_is_neither_read_nor_edited_as_text() {
+    use automerge::transaction::Transactable;
+
+    let owner = Actor::Person(PersonId::new("benni"));
+    let mut workspace = Workspace::create(PersonId::new("benni"), MemoryStore::default()).unwrap();
+    let apply = |workspace: &mut Workspace<MemoryStore>, mutation| {
+        workspace.apply(Request {
+            actor: owner.clone(),
+            origin: Origin::Ui,
+            mutation,
+        })
+    };
+    let Ok(Some(Created::Area(area))) = apply(
+        &mut workspace,
+        Mutation::CreateArea {
+            name: "Trips".into(),
+        },
+    )
+    .map(|applied| applied.created) else {
+        panic!("an area")
+    };
+    let create = Mutation::CreatePage {
+        area,
+        parent: None,
+        title: "Lisbon".into(),
+    };
+    let Ok(Some(Created::Page(page))) = apply(&mut workspace, create).map(|a| a.created) else {
+        panic!("a Page")
+    };
+    let add = Mutation::AddTextBlock {
+        page: page.clone(),
+        after: None,
+        text: "Five days".into(),
+    };
+    let Ok(Some(Created::Block { block, .. })) = apply(&mut workspace, add).map(|a| a.created)
+    else {
+        panic!("a Text Block")
+    };
+    // A later version made it a Chart that keeps a text, as one of its own might.
+    let loaded = workspace
+        .docs
+        .get_mut(&Document::Page(page.clone()))
+        .unwrap();
+    let entry = crate::model::live(&loaded.doc, crate::model::BLOCKS, block.as_str()).unwrap();
+    loaded.doc.put(&entry, crate::model::KIND, "chart").unwrap();
+
+    assert_eq!(workspace.text(&page, &block), Ok(None));
+    let edit = Mutation::EditText {
+        page,
+        block,
+        at: 0,
+        delete: 0,
+        insert: "x".into(),
+    };
+    assert_eq!(
+        apply(&mut workspace, edit).map(|_| ()),
+        Err(Error::NotFound)
+    );
+}

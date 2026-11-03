@@ -287,8 +287,13 @@ pub(crate) fn pages(doc: &AutoCommit) -> Vec<PageEntry> {
     tree
 }
 
+/// A live Text Block's text; none for a Block of another kind.
 pub(crate) fn text(doc: &AutoCommit, block: &str) -> Option<String> {
-    let text = child(doc, &live(doc, BLOCKS, block)?, TEXT)?;
+    let entry = live(doc, BLOCKS, block)?;
+    if string(doc, &entry, KIND).as_deref() != Some("text") {
+        return None;
+    }
+    let text = child(doc, &entry, TEXT)?;
     doc.text(&text).ok()
 }
 

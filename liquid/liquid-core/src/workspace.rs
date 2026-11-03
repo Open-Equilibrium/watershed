@@ -468,8 +468,7 @@ impl<S: Store> Workspace<S> {
                 insert,
             } => {
                 let doc = self.doc(&Document::Page(page.clone()))?;
-                let entry = model::live(doc, BLOCKS, block.as_str()).ok_or(Error::NotFound)?;
-                let content = model::child(doc, &entry, TEXT).ok_or(Error::NotFound)?;
+                let content = text_of(doc, block)?;
                 let end = at.checked_add(*delete).ok_or(Error::OutOfRange)?;
                 if !model::on_boundary(doc, &content, *at)
                     || !model::on_boundary(doc, &content, end)
@@ -715,9 +714,9 @@ fn text_block(doc: &AutoCommit, block: &BlockId) -> Option<automerge::ObjId> {
     (model::string(doc, &entry, KIND).as_deref() == Some("text")).then_some(entry)
 }
 
-/// A live Text Block's text object.
+/// A live Text Block's text object; none for a Block of another kind.
 fn text_of(doc: &AutoCommit, block: &BlockId) -> Result<automerge::ObjId, Error> {
-    let entry = model::live(doc, BLOCKS, block.as_str()).ok_or(Error::NotFound)?;
+    let entry = text_block(doc, block).ok_or(Error::NotFound)?;
     model::child(doc, &entry, TEXT).ok_or(Error::NotFound)
 }
 
