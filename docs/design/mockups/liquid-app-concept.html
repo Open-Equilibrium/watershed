@@ -343,6 +343,8 @@ h4.qh{margin:14px 0 6px;font-size:13px}
       <li>Save as Template opens the Template as an editable copy in a large window, with each data-holding Block's options on the right (a Chat: ask each time, a new Chat, or always the same).</li>
       <li>The Inbox ordered by when things are due, agents waiting first, items without a date last; sidebar views Waiting, Due, Mentions, Snoozed and Settled, with the next due items below.</li>
     </ol>
+    <h4 class="qh">Decided with the mockup review (2026-11-03)</h4>
+    <ol class="qs"><li>⌘N starts a new Chat; ⇧⌘N stays New Page.</li><li>Automations and History stay at the foot of the Pages sidebar and open as dialogs; Settings is on the rail.</li><li>Branching from an agent's answer makes a branch within the same Chat, as the Trajectory shows it.</li><li>Liquid's own starting Templates and the person's saved ones share one list, all editable.</li></ol>
     <h4 class="qh">Later</h4>
     <ol class="qs"><li>Calls and meetings as Blocks with a rail icon, as Chats are, once the core works.</li></ol>
   </section>
@@ -403,7 +405,7 @@ function rail(on){const ri=(k,i,b,o='')=>`<span class="ri ${on==k?'on':''} ${o}"
 return `<div class="rail"><span class="wsav">B</span>${ri('inbox',R.inbox,'<span class="bd w">4</span>')}${ri('pages',R.pages)}${ri('chats',R.chat,'<span class="dt"></span>')}<span class="sep"></span>${ri('files',R.files,'','later')}${ri('media',R.media,'','later')}<span style="flex:1"></span>${ri('set',R.gear)}<span class="ri">${avatar('me','BW')}</span></div>`}
 const tree=(sel)=>`<div class="side2"><div class="ttl2">Benni's Workspace</div>
 <h6>Private<span style="color:var(--ws-text-muted)">＋</span></h6>${nav(0,em(E.budget),'Household budget',{tw:'⌄'})}${nav(1,em(E.review),'Monthly review')}${nav(0,em(E.trip),'Trip to Lisbon',{tw:'›',on:sel=='trip'})}${nav(0,I.file,'bank-export.csv')}
-<h6>Acme API</h6>${nav(0,em(E.road),'Roadmap')}${nav(0,em(E.api),'API design')}${nav(0,I.db,'Tasks')}${nav(0,I.dir,'acme-api',{tw:'›'})}</div>`;
+<h6>Acme API</h6>${nav(0,em(E.road),'Roadmap')}${nav(0,em(E.api),'API design')}${nav(0,I.db,'Tasks')}${nav(0,I.dir,'acme-api',{tw:'›'})}<div class="foot">${nav(0,I.zap,'Automations')}${nav(0,I.clock,'History')}</div></div>`;
 const wa=(av,name,last,time,o={})=>`<div class="wa ${o.on?'on':''}">${av}<span class="t"><b>${name}${o.run?'<span class="dot" style="background:var(--ws-accent)"></span>':''}</b><span class="${o.n?'u':''}">${last}</span></span><span class="m">${time}${o.n?`<span class="n ${o.w?'w':''}">${o.n}</span>`:''}</span></div>`;
 const chatMenu=`<div class="menu" style="left:300px;top:200px"><div>Pin</div><div class="on">Snooze<span class="r">›</span></div><div>Settle</div><div>Move to section<span class="r">›</span></div><hr><div>Open to the side<span class="r">⌥-click</span></div></div><div class="menu" style="left:516px;top:222px;width:180px"><div>Until a new message</div><div class="on">Later today<span class="r">18:00</span></div><div>Tomorrow<span class="r">09:00</span></div><div>Next week</div><div>Choose a time…</div></div>`;
 const chatList=`<div class="side2" style="gap:2px"><div class="ttl2">Chats<span style="margin-left:auto;color:var(--ws-text-muted)">＋</span></div>
