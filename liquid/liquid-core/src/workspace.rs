@@ -183,7 +183,7 @@ impl<S: Store> Workspace<S> {
     /// How a live Text Block reads, from the document of its home `page`.
     pub fn style(&mut self, page: &PageId, block: &BlockId) -> Result<Option<TextStyle>, Error> {
         let doc = self.doc(&Document::Page(page.clone()))?;
-        Ok(model::live(doc, BLOCKS, block.as_str())
+        Ok(text_block(doc, block)
             .map(|entry| model::style(model::string(doc, &entry, STYLE).as_deref())))
     }
 
@@ -439,7 +439,7 @@ impl<S: Store> Workspace<S> {
             Mutation::SetTextStyle { page, block, style } => {
                 let name = model::style_name(*style)?;
                 let (doc, _) = self.page(page)?;
-                let entry = model::live(doc, BLOCKS, block.as_str()).ok_or(Error::NotFound)?;
+                let entry = text_block(doc, block).ok_or(Error::NotFound)?;
                 doc.put(&entry, STYLE, name)?;
                 Ok(Written::new(
                     Document::Page(page.clone()),
@@ -705,6 +705,12 @@ fn add_view(
     };
     order.insert(sort, placed);
     Ok(view)
+}
+
+/// A live Text Block's entry; none for a Block of another type.
+fn text_block(doc: &AutoCommit, block: &BlockId) -> Option<automerge::ObjId> {
+    let entry = model::live(doc, BLOCKS, block.as_str())?;
+    (model::string(doc, &entry, KIND).as_deref() == Some("text")).then_some(entry)
 }
 
 /// A live Text Block's text object.

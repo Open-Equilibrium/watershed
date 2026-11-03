@@ -593,3 +593,82 @@ fn rows_read_the_same_after_their_page_is_loaded_again() {
         .collect();
     assert_eq!(order, [first, third, second]);
 }
+
+#[test]
+fn zero_is_one_value_whatever_its_sign() {
+    let (mut workspace, page, block) = expenses();
+    let amount = field(&mut workspace, &page, &block, "Amount", FieldKind::Number);
+    let first = row(&mut workspace, &page, &block, None);
+    let second = row(&mut workspace, &page, &block, Some(&first));
+    set(
+        &mut workspace,
+        &page,
+        &block,
+        &first,
+        &amount,
+        Cell::Number(0.0),
+    )
+    .unwrap();
+    set(
+        &mut workspace,
+        &page,
+        &block,
+        &second,
+        &amount,
+        Cell::Number(-0.0),
+    )
+    .unwrap();
+    // The sign of zero changes nothing, so the second write is no change either.
+    assert_eq!(
+        set(
+            &mut workspace,
+            &page,
+            &block,
+            &first,
+            &amount,
+            Cell::Number(-0.0)
+        ),
+        Err(Error::NoChange)
+    );
+    let sorted = RowQuery {
+        sort: Some(Sort {
+            field: amount.clone(),
+            descending: false,
+        }),
+        ..all()
+    };
+    let order: Vec<_> = workspace
+        .rows(&page, &block, &sorted)
+        .unwrap()
+        .rows
+        .into_iter()
+        .map(|row| row.id)
+        .collect();
+    assert_eq!(order, [first.clone(), second.clone()]);
+    workspace.close_page(&page);
+    let reloaded: Vec<_> = workspace
+        .rows(&page, &block, &sorted)
+        .unwrap()
+        .rows
+        .into_iter()
+        .map(|row| row.id)
+        .collect();
+    assert_eq!(reloaded, order);
+}
+
+#[test]
+fn a_database_takes_no_text_style() {
+    let (mut workspace, page, block) = expenses();
+    assert_eq!(workspace.style(&page, &block).unwrap(), None);
+    assert_eq!(
+        apply(
+            &mut workspace,
+            Mutation::SetTextStyle {
+                page: page.clone(),
+                block: block.clone(),
+                style: liquid_core::TextStyle::Quote,
+            },
+        ),
+        Err(Error::NotFound)
+    );
+}

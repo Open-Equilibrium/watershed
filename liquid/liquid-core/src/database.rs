@@ -405,8 +405,9 @@ pub(crate) fn set_cell(
             return Ok(());
         }
         (FieldKind::Text, Cell::Text(text)) => ScalarValue::Str(text.as_str().into()),
+        // Zero is one value: Automerge stores -0 as 0, and so does the index.
         (FieldKind::Number, Cell::Number(number)) if number.is_finite() => {
-            ScalarValue::F64(*number)
+            ScalarValue::F64(*number + 0.0)
         }
         (FieldKind::Date, Cell::Date(date)) if valid_date(date) => {
             ScalarValue::Str(date.as_str().into())
@@ -419,8 +420,12 @@ pub(crate) fn set_cell(
         }
         _ => return Err(Error::WrongKind),
     };
+    let stored = match (&scalar, value) {
+        (ScalarValue::F64(number), Cell::Number(_)) => Cell::Number(*number),
+        _ => value.clone(),
+    };
     doc.put(&cells, field_id.as_str(), scalar)?;
-    index.set(row_id, field_id, value);
+    index.set(row_id, field_id, &stored);
     Ok(())
 }
 
