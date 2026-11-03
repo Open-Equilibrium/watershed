@@ -217,4 +217,19 @@ void main() {
     await tester.tap(find.text('Allow once'));
     expect(backend.calls.last, 'decide a1 allowOnce');
   });
+
+  testWidgets(
+    'a Workspace problem shows in the sidebar while no Page is open',
+    (tester) async {
+      await show(tester, session: SessionState(FakeBackend()));
+      fake.refuse = 'the replica is read-only';
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyN);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+      await tester.pumpAndSettle();
+      expect(inSidebar('the replica is read-only'), findsOneWidget);
+    },
+  );
 }

@@ -289,6 +289,25 @@ class Sidebar extends StatelessWidget {
                     padding: const EdgeInsets.only(top: WsMetrics.space3),
                     child: WarningNotice(problem),
                   ),
+                // A Page shows the Workspace's latest problem itself; without one, it shows
+                // here.
+                if (workspace case final workspace?)
+                  ListenableBuilder(
+                    listenable: Listenable.merge([
+                      workspace.problem,
+                      workspace.open,
+                    ]),
+                    builder: (context, _) => switch ((
+                      workspace.problem.value,
+                      workspace.open.value,
+                    )) {
+                      (final problem?, null) => Padding(
+                        padding: const EdgeInsets.only(top: WsMetrics.space3),
+                        child: WarningNotice(problem),
+                      ),
+                      _ => const SizedBox.shrink(),
+                    },
+                  ),
                 const SidebarHeading('Agent sessions'),
                 if ((state, info) case (final state?, final info?))
                   ..._session(context, state, info, small),
