@@ -50,7 +50,7 @@ class GitActions extends StatelessWidget {
               shortcut: '⏎',
               onPressed: push,
             ),
-            GhostButton(
+            SecondaryButton(
               label: 'Create branch…',
               onPressed: () => Navigator.of(context).pop(false),
             ),
@@ -103,76 +103,61 @@ class GitActions extends StatelessWidget {
       final diverged = status.ahead > 0 && status.behind > 0;
       final divergedHint =
           '${status.branch} and ${status.upstream} have diverged. Merge or rebase in a terminal, then push.';
-      final commitHint = status.merging
-          ? mergeHint(status)
-          : detached
-          ? detachedCommitHint
-          : remote == null
-          ? _noRemote
-          : status.changed == 0
-          ? 'Branch is up to date. Nothing to commit.'
-          : 'Commit ${status.changed} changed ${status.changed == 1 ? 'file' : 'files'} on ${status.branch}.';
-      final pushHint = detached
-          ? detachedCommitHint
-          : remote == null
-          ? _noRemote
-          : status.merging
-          ? mergeHint(status)
-          : diverged
-          ? divergedHint
-          : status.behind > 0
-          ? '${status.upstream} has ${status.behind} ${status.behind == 1 ? 'commit' : 'commits'} that ${status.branch} lacks. Pull them, then push.'
-          : status.upstream == null
-          ? 'Push ${status.branch} to $remote and track it.'
-          : status.ahead > 0
-          ? 'Push ${status.ahead} ${status.ahead == 1 ? 'commit' : 'commits'} to ${status.upstream}.'
-          : 'Branch is up to date. Nothing to push.';
-      final pullHint = remote == null
-          ? _noRemote
-          : detached
-          ? detachedCommitHint
-          : status.merging
-          ? mergeHint(status)
-          : diverged
-          ? divergedHint
-          : status.upstream == null
-          ? 'This branch has no upstream. Push it first.'
-          : status.behind > 0
-          ? 'Pull ${status.behind} ${status.behind == 1 ? 'commit' : 'commits'} from ${status.upstream}.'
-          : 'Branch is up to date. Nothing to pull.';
-      final canCommit = !detached && !status.merging && status.changed > 0;
-      final canPush =
-          !detached &&
-          status.commit != null &&
-          remote != null &&
-          !status.merging &&
-          status.behind == 0 &&
-          (status.upstream == null || status.ahead > 0);
-      final canPull =
-          !detached &&
-          remote != null &&
-          status.upstream != null &&
-          !status.merging &&
-          status.behind > 0 &&
-          status.ahead == 0;
+      String? blocker(_GitAction action) {
+        if (status.merging) return mergeHint(status);
+        if (action == _GitAction.create) return null;
+        if (detached && action != _GitAction.fetch) return detachedCommitHint;
+        switch (action) {
+          case _GitAction.commit:
+            return status.changed == 0
+                ? 'Branch is up to date. Nothing to commit.'
+                : null;
+          case _GitAction.push:
+            if (status.commit == null)
+              return 'Commit before pushing this branch.';
+            if (remote == null) return _noRemote;
+            if (diverged) return divergedHint;
+            if (status.behind > 0) {
+              return '${status.upstream} has ${status.behind} ${status.behind == 1 ? 'commit' : 'commits'} that ${status.branch} lacks. Pull them, then push.';
+            }
+            return status.upstream != null && status.ahead == 0
+                ? 'Branch is up to date. Nothing to push.'
+                : null;
+          case _GitAction.pull:
+            if (remote == null) return _noRemote;
+            if (diverged) return divergedHint;
+            if (status.upstream == null)
+              return 'This branch has no upstream. Push it first.';
+            return status.behind == 0
+                ? 'Branch is up to date. Nothing to pull.'
+                : null;
+          case _GitAction.fetch:
+            return remote == null || remote == '.' ? _noRemote : null;
+          case _GitAction.create:
+            return null;
+        }
+      }
+
+      final blockers = {
+        for (final action in _GitAction.values) action: blocker(action),
+      };
+      final enabled = {
+        for (final action in _GitAction.values)
+          action: blockers[action] == null,
+      };
       final next = status.merging
           ? _GitAction.commit
           : detached
           ? _GitAction.create
-          : status.changed > 0 || remote == null
+          : enabled[_GitAction.commit]! ||
+                remote == null ||
+                status.commit == null
           ? _GitAction.commit
-          : status.upstream == null || status.ahead > 0
+          : enabled[_GitAction.push]! || status.ahead > 0
           ? _GitAction.push
-          : status.behind > 0
+          : enabled[_GitAction.pull]!
           ? _GitAction.pull
           : _GitAction.commit;
-      final enabled = {
-        _GitAction.commit: canCommit,
-        _GitAction.push: canPush,
-        _GitAction.pull: canPull,
-        _GitAction.fetch: remote != null && remote != '.',
-        _GitAction.create: !status.merging,
-      };
       final labels = {
         _GitAction.commit: 'Commit',
         _GitAction.push: 'Push',
@@ -186,18 +171,30 @@ class GitActions extends StatelessWidget {
         _GitAction.create: LucideIcons.gitBranch,
       };
       final hints = {
-        _GitAction.commit: commitHint,
-        _GitAction.push: pushHint,
-        _GitAction.pull: pullHint,
-        _GitAction.fetch: remote == null ? _noRemote : 'Fetch from $remote.',
-        _GitAction.create: status.merging
-            ? mergeHint(status)
-            : detached
-            ? detachedCommitHint
-            : 'Create a branch from ${status.branch}.',
+        _GitAction.commit:
+            blockers[_GitAction.commit] ??
+            (remote == null
+                ? _noRemote
+                : 'Commit ${status.changed} changed ${status.changed == 1 ? 'file' : 'files'} on ${status.branch}.'),
+        _GitAction.push:
+            blockers[_GitAction.push] ??
+            (status.upstream == null
+                ? 'Push ${status.branch} to $remote and track it.'
+                : 'Push ${status.ahead} ${status.ahead == 1 ? 'commit' : 'commits'} to ${status.upstream}.'),
+        _GitAction.pull:
+            blockers[_GitAction.pull] ??
+            'Pull ${status.behind} ${status.behind == 1 ? 'commit' : 'commits'} from ${status.upstream}.',
+        _GitAction.fetch: blockers[_GitAction.fetch] ?? 'Fetch from $remote.',
+        _GitAction.create:
+            blockers[_GitAction.create] ??
+            (detached
+                ? detachedCommitHint
+                : 'Create a branch from ${status.branch}.'),
       };
       final counts = {
-        _GitAction.commit: status.changed > 0 ? '${status.changed}' : '',
+        _GitAction.commit: enabled[_GitAction.commit]!
+            ? '${status.changed}'
+            : '',
         _GitAction.push: !diverged && status.ahead > 0
             ? '↑${status.ahead}'
             : '',
@@ -318,7 +315,7 @@ class GitActions extends StatelessWidget {
                 item(
                   _GitAction.commit,
                   'Commit…',
-                  status.changed > 0
+                  enabled[_GitAction.commit]!
                       ? '${status.changed} ${status.changed == 1 ? 'file' : 'files'}'
                       : '',
                 ),
@@ -326,7 +323,12 @@ class GitActions extends StatelessWidget {
                 item(
                   _GitAction.pull,
                   'Pull',
-                  status.behind == 0 ? 'up to date' : counts[_GitAction.pull]!,
+                  remote != null &&
+                          status.upstream != null &&
+                          !detached &&
+                          status.behind == 0
+                      ? 'up to date'
+                      : counts[_GitAction.pull]!,
                 ),
                 item(_GitAction.fetch, 'Fetch', remote ?? ''),
                 const PopupMenuDivider(),

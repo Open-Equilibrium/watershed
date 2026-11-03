@@ -75,6 +75,13 @@ void main() {
         'main and origin/main have diverged. Merge or rebase in a terminal, then push.',
       ),
       (
+        gitStatusOf(commit: null, upstream: null),
+        'Commit',
+        '',
+        false,
+        'Branch is up to date. Nothing to commit.',
+      ),
+      (
         gitStatusOf(),
         'Commit',
         '',
@@ -160,6 +167,7 @@ void main() {
         );
         expect(tester.widget<PopupMenuItem<Object>>(item).enabled, isFalse);
       }
+      expect(find.text('up to date'), findsNothing);
       await state.dispose();
     },
   );
@@ -196,6 +204,16 @@ void main() {
       expect(backend.calls.where((call) => call == 'push true'), hasLength(1));
     },
   );
+
+  testWidgets('a merge hides the Commit badge and explains the blocker', (
+    tester,
+  ) async {
+    await show(tester, gitStatusOf(merging: true, changed: 2));
+    final next = find.byKey(const Key('git-next'));
+    expect(tester.widget<TextButton>(next).onPressed, isNull);
+    expect(find.descendant(of: next, matching: find.text('2')), findsNothing);
+    await state.dispose();
+  });
 
   testWidgets('push shows its remote and elapsed seconds until Git completes', (
     tester,

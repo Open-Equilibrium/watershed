@@ -801,6 +801,7 @@ BridgeTurn turnOf(
 );
 
 BridgeGitStatus gitStatusOf({
+  String? commit = '1a2b3c4',
   String? branch = 'main',
   String? upstream = 'origin/main',
   String? remote = 'origin',
@@ -812,7 +813,7 @@ BridgeGitStatus gitStatusOf({
   List<String> conflicts = const [],
 }) => BridgeGitStatus(
   branch: branch,
-  commit: '1a2b3c4',
+  commit: commit,
   upstream: upstream,
   remote: remote,
   ahead: ahead,
