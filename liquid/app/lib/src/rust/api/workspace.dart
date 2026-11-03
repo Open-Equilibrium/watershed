@@ -10,7 +10,7 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 // These functions are ignored because they are not marked as `pub`: `id`, `message`, `normalized`, `notify`, `of`, `of`, `open_lock`, `open_with`, `optional_id`, `page`, `random_hex`, `read`, `release_page`, `release`, `take_lock`, `to_core`, `to_core`, `units`, `watch`, `window`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `Inner`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `drop`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `hash`, `hash`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `drop`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `hash`, `hash`
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<LiquidWorkspace>>
 abstract class LiquidWorkspace implements RustOpaqueInterface {
@@ -186,6 +186,15 @@ class BridgeArea {
           runtimeType == other.runtimeType &&
           id == other.id &&
           name == other.name;
+}
+
+/// The kind of Block a View shows.
+enum BridgeBlockKind {
+  /// A Text Block.
+  text,
+
+  /// A Database Block, which the app calls a Table (ADR-0244).
+  database,
 }
 
 /// A resource changed; `seq` counts its changes since this Workspace opened, so a reader
@@ -594,14 +603,19 @@ class BridgeView {
   /// Whether a Section starts here.
   final bool boundary;
 
+  /// The kind of Block it shows.
+  final BridgeBlockKind kind;
+
   const BridgeView({
     required this.id,
     required this.block,
     required this.boundary,
+    required this.kind,
   });
 
   @override
-  int get hashCode => id.hashCode ^ block.hashCode ^ boundary.hashCode;
+  int get hashCode =>
+      id.hashCode ^ block.hashCode ^ boundary.hashCode ^ kind.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -610,5 +624,6 @@ class BridgeView {
           runtimeType == other.runtimeType &&
           id == other.id &&
           block == other.block &&
-          boundary == other.boundary;
+          boundary == other.boundary &&
+          kind == other.kind;
 }

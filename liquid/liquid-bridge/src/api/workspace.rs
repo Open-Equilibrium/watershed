@@ -14,8 +14,8 @@ use std::path::Path;
 use std::sync::{Mutex, PoisonError};
 
 use liquid_core::{
-    Actor, AreaId, BlockId, Changed, Created, Error, FieldId, Mutation, Origin, PageId, PersonId,
-    Request, RowId, TextStyle, ViewId, Workspace,
+    Actor, AreaId, BlockId, BlockKind, Changed, Created, Error, FieldId, Mutation, Origin, PageId,
+    PersonId, Request, RowId, TextStyle, ViewId, Workspace,
 };
 use liquid_storage::Sqlite;
 
@@ -252,6 +252,15 @@ pub struct BridgePage {
     pub title: String,
 }
 
+/// The kind of Block a View shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BridgeBlockKind {
+    /// A Text Block.
+    Text,
+    /// A Database Block, which the app calls a Table (ADR-0244).
+    Database,
+}
+
 /// A View on a Page.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BridgeView {
@@ -261,6 +270,8 @@ pub struct BridgeView {
     pub block: String,
     /// Whether a Section starts here.
     pub boundary: bool,
+    /// The kind of Block it shows.
+    pub kind: BridgeBlockKind,
 }
 
 /// The answer to a query; the query's kind names the parts it fills.
@@ -824,6 +835,10 @@ impl LiquidWorkspace {
                         id: view.id.to_string(),
                         block: view.block.to_string(),
                         boundary: view.boundary,
+                        kind: match view.kind {
+                            BlockKind::Text => BridgeBlockKind::Text,
+                            BlockKind::Database => BridgeBlockKind::Database,
+                        },
                     })
                     .collect();
             }

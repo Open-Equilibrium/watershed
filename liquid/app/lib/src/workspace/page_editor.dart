@@ -200,6 +200,8 @@ class PageEditor {
         id: target.view,
         block: target.block,
         boundary: target.boundary,
+        // The queue changes only Text Blocks.
+        kind: BridgeBlockKind.text,
       ),
       target.index,
     );

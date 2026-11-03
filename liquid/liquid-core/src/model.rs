@@ -63,6 +63,28 @@ pub struct View {
     pub block: BlockId,
     /// Whether a Section starts here.
     pub boundary: bool,
+    /// The kind of Block it shows.
+    pub kind: BlockKind,
+}
+
+/// The kind of a Block.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BlockKind {
+    /// A Text Block.
+    Text,
+    /// A Database Block, which the app calls a Table (ADR-0244).
+    Database,
+}
+
+impl BlockKind {
+    /// The kind a Block's entry names; none for a kind this version does not know.
+    pub(crate) fn of(name: &str) -> Option<Self> {
+        match name {
+            "text" => Some(Self::Text),
+            "database" => Some(Self::Database),
+            _ => None,
+        }
+    }
 }
 
 /// A new document for this device. Text positions count UTF-16 code units, also when
