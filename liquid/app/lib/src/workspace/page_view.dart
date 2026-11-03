@@ -372,7 +372,7 @@ class _Breadcrumb extends StatelessWidget {
     final ws = context.ws;
     return Container(
       key: const Key('page-header'),
-      height: 44,
+      height: WsMetrics.rowHeader,
       padding: const EdgeInsets.only(left: WsMetrics.space7),
       alignment: Alignment.centerLeft,
       child: ListenableBuilder(

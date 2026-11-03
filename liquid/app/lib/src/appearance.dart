@@ -21,9 +21,9 @@ enum ThemeChoice {
 /// How large Liquid draws its text and rows (approved look mockup): Default is the base size,
 /// Compact and Large scale text and rows together.
 enum TextSize {
-  compact(13 / 15),
+  compact(13 / 14),
   standard(1),
-  large(17 / 15);
+  large(16 / 14);
 
   const TextSize(this.scale);
 

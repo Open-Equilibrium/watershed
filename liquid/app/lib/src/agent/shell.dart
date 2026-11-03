@@ -487,7 +487,7 @@ class _Header extends StatelessWidget {
     );
     return Container(
       key: const Key('session-header'),
-      height: 44,
+      height: WsMetrics.rowHeader,
       padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space7),
       child: Row(
         children: [
