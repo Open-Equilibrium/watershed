@@ -233,6 +233,16 @@ class WorkspaceState {
     if (!_disposed) _trees[area]!.value = read;
   }
 
+  /// Waits for every write asked for so far, and for those asked meanwhile, so that closing
+  /// the window loses none.
+  Future<void> drain() async {
+    Future<void> last;
+    do {
+      last = _applied;
+      await last;
+    } while (!identical(last, _applied));
+  }
+
   Future<void> dispose() async {
     _disposed = true;
     final followed = [..._followed];

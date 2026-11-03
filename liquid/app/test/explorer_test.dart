@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/agent/chat_view.dart';
 import 'package:liquid/src/agent/shell.dart';
 import 'package:liquid/src/agent/sidebar.dart';
+import 'package:liquid/src/rust/api/events.dart';
 import 'package:liquid/src/session/session_state.dart';
 import 'package:liquid/src/theme/theme.dart';
 import 'package:liquid/src/workspace/page_view.dart';
@@ -182,5 +183,38 @@ void main() {
     await tester.tap(inSidebar('Untitled'));
     await tester.pumpAndSettle();
     expect(find.byType(WorkspacePage), findsOneWidget);
+  });
+
+  testWidgets('an approval that came behind a Page waits once shown', (
+    tester,
+  ) async {
+    final backend = FakeBackend();
+    await show(tester, session: SessionState(backend));
+    await tester.tap(inSidebar('Untitled'));
+    await tester.pumpAndSettle();
+    backend.controller.add(
+      event(
+        BridgeEventKind.requestOpened,
+        request: const BridgeRequest(
+          id: 'a1',
+          approval: BridgeApproval(
+            kind: BridgeRequestKind.commandExecution,
+            tool: 'bash',
+            text: 'npm test',
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 2));
+
+    await tester.tap(find.byKey(const Key('session-card')));
+    await tester.pump();
+    await tester.tap(find.text('Allow once'));
+    await tester.pump();
+    expect(backend.calls.where((call) => call.startsWith('decide')), isEmpty);
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.tap(find.text('Allow once'));
+    expect(backend.calls.last, 'decide a1 allowOnce');
   });
 }

@@ -93,6 +93,31 @@ void main() {
     await state.dispose();
   });
 
+  test(
+    'draining waits for every write asked for, also those asked meanwhile',
+    () async {
+      final fake = FakeWorkspace();
+      final state = WorkspaceState(fake);
+      await state.start();
+      final page = state.open.value!.page;
+      fake.gate = Completer();
+      for (final title in ['L', 'Li', 'Lis']) {
+        unawaited(state.rename(page, title));
+      }
+      var drained = false;
+      unawaited(state.drain().then((_) => drained = true));
+      await pumpEventQueue();
+      expect(drained, isFalse);
+      // Asked while draining, as a handover after a split asks.
+      unawaited(state.rename(page, 'Lisbon'));
+      fake.gate!.complete();
+      await pumpEventQueue();
+      expect(drained, isTrue);
+      expect(fake.pages.values.single.single.title, 'Lisbon');
+      await state.dispose();
+    },
+  );
+
   test('disposing closes every subscription', () async {
     final fake = FakeWorkspace();
     final state = WorkspaceState(fake);

@@ -83,6 +83,8 @@ class _AgentShellState extends State<AgentShell> {
   late final _lifecycle = AppLifecycleListener(
     onExitRequested: () async {
       await widget.state?.dispose();
+      // Every edit asked for reaches the replica before Liquid exits.
+      await widget.workspace?.drain();
       await widget.workspace?.dispose();
       return AppExitResponse.exit;
     },
