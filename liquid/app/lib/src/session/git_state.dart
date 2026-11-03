@@ -485,7 +485,7 @@ class GitState {
           );
         case BridgeGitOutcomeKind.agentRunning:
           notify(
-            BridgeLevel.warning,
+            progressLabel == null ? BridgeLevel.warning : BridgeLevel.error,
             'Could not $action: ${whoRuns(outcome.running)}. ${stopFirst(outcome.running)}.${nothingTransferred(action)}',
           );
         case BridgeGitOutcomeKind.conflicts:
@@ -525,7 +525,7 @@ class GitState {
           );
         case BridgeGitOutcomeKind.wouldOverwrite when action == 'pull':
           notify(
-            BridgeLevel.warning,
+            BridgeLevel.error,
             'Could not pull: Git would overwrite your uncommitted changes in $files. Commit them first. Nothing was pulled.',
           );
         case BridgeGitOutcomeKind.wouldOverwrite:

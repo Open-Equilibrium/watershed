@@ -211,6 +211,7 @@ void main() {
       notices[4].$2,
       'Could not pull: “Fix flaky sync test” is running in this checkout. Stop it or wait until it finishes. Nothing was pulled.',
     );
+    expect(notices.map((notice) => notice.$1), everyElement(BridgeLevel.error));
   });
 
   test('a transfer failure shows Git output and states that its effects are uncertain', () async {
