@@ -87,6 +87,17 @@
   --ws-data-2: #8a5fad;
   --ws-data-3: #3d7a58;
   --ws-on-data: #ffffff;
+  --ws-tag-text: #32302c;
+  --ws-tag-0: rgba(227, 226, 224, 0.5);
+  --ws-tag-1: #e3e2e0;
+  --ws-tag-2: #eee0da;
+  --ws-tag-3: #fadec9;
+  --ws-tag-4: #fdecc8;
+  --ws-tag-5: #dbeddb;
+  --ws-tag-6: #d3e5ef;
+  --ws-tag-7: #e8deee;
+  --ws-tag-8: #f5e0e9;
+  --ws-tag-9: #ffe2dd;
   --ws-shadow: 0 0 0 1px rgba(15, 15, 15, 0.05), 0 3px 6px rgba(15, 15, 15, 0.1), 0 9px 24px rgba(15, 15, 15, 0.2);
 }
 
@@ -125,5 +136,16 @@
   --ws-data-2: #b48ce6;
   --ws-data-3: #4dab9a;
   --ws-on-data: #191919;
+  --ws-tag-text: rgba(255, 255, 255, 0.81);
+  --ws-tag-0: #373737;
+  --ws-tag-1: #5a5a5a;
+  --ws-tag-2: #603b2c;
+  --ws-tag-3: #854c1d;
+  --ws-tag-4: #89632a;
+  --ws-tag-5: #2b593f;
+  --ws-tag-6: #28456c;
+  --ws-tag-7: #492f64;
+  --ws-tag-8: #69314c;
+  --ws-tag-9: #6e3630;
   --ws-shadow: 0 0 0 1px rgba(255, 255, 255, 0.07), 0 3px 6px rgba(0, 0, 0, 0.3), 0 9px 24px rgba(0, 0, 0, 0.4);
 }
