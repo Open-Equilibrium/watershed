@@ -140,6 +140,11 @@ abstract interface class SessionBackend {
   /// Fetches the upstream's remote; whether there was one.
   Future<bool> fetch();
 
+  /// Explicit Fetch through the same destination checks, using origin before first push.
+  Future<bool> fetchNow();
+  Future<BridgeGitOutcome> push(bool confirmedDefault);
+  Future<BridgeGitOutcome> pull();
+
   Future<List<BridgeModel>> models();
 
   /// The selected model as `provider/id`.
@@ -304,6 +309,13 @@ class RustSessionBackend implements SessionBackend {
       _session.discardStash(id: id);
   @override
   Future<bool> fetch() => _session.fetch();
+  @override
+  Future<bool> fetchNow() => _session.fetchNow();
+  @override
+  Future<BridgeGitOutcome> push(bool confirmedDefault) =>
+      _session.push(confirmedDefault: confirmedDefault);
+  @override
+  Future<BridgeGitOutcome> pull() => _session.pull();
   @override
   Future<List<BridgeModel>> models() => _session.models();
   @override

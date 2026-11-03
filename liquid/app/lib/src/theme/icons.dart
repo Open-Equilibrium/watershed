@@ -10,6 +10,8 @@ abstract final class LucideIcons {
   static const clock = IconData(0xe087, fontFamily: _family);
   static const loader = IconData(0xe109, fontFamily: _family);
   static const gitCommit = IconData(0xe0e3, fontFamily: _family);
+  static const arrowUp = IconData(0xe04a, fontFamily: _family);
+  static const arrowDown = IconData(0xe042, fontFamily: _family);
   static const plus = IconData(0xe13d, fontFamily: _family);
   static const gitBranch = IconData(0xe0e2, fontFamily: _family);
   static const chevronDown = IconData(0xe06d, fontFamily: _family);

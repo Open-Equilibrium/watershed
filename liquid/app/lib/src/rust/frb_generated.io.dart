@@ -113,6 +113,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeGitStatus dco_decode_box_autoadd_bridge_git_status(dynamic raw);
 
   @protected
+  BridgeGitTransfer dco_decode_box_autoadd_bridge_git_transfer(dynamic raw);
+
+  @protected
   BridgeItem dco_decode_box_autoadd_bridge_item(dynamic raw);
 
   @protected
@@ -246,6 +249,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeGitStatus dco_decode_bridge_git_status(dynamic raw);
+
+  @protected
+  BridgeGitTransfer dco_decode_bridge_git_transfer(dynamic raw);
 
   @protected
   BridgeHistory dco_decode_bridge_history(dynamic raw);
@@ -463,6 +469,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeGitStatus? dco_decode_opt_box_autoadd_bridge_git_status(dynamic raw);
 
   @protected
+  BridgeGitTransfer? dco_decode_opt_box_autoadd_bridge_git_transfer(
+    dynamic raw,
+  );
+
+  @protected
   BridgeItem? dco_decode_opt_box_autoadd_bridge_item(dynamic raw);
 
   @protected
@@ -613,6 +624,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeGitStatus sse_decode_box_autoadd_bridge_git_status(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeGitTransfer sse_decode_box_autoadd_bridge_git_transfer(
     SseDeserializer deserializer,
   );
 
@@ -782,6 +798,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeGitStatus sse_decode_bridge_git_status(SseDeserializer deserializer);
+
+  @protected
+  BridgeGitTransfer sse_decode_bridge_git_transfer(
+    SseDeserializer deserializer,
+  );
 
   @protected
   BridgeHistory sse_decode_bridge_history(SseDeserializer deserializer);
@@ -1053,6 +1074,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeGitTransfer? sse_decode_opt_box_autoadd_bridge_git_transfer(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   BridgeItem? sse_decode_opt_box_autoadd_bridge_item(
     SseDeserializer deserializer,
   );
@@ -1245,6 +1271,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_box_autoadd_bridge_git_status(
     BridgeGitStatus self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_bridge_git_transfer(
+    BridgeGitTransfer self,
     SseSerializer serializer,
   );
 
@@ -1485,6 +1517,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_bridge_git_status(
     BridgeGitStatus self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_git_transfer(
+    BridgeGitTransfer self,
     SseSerializer serializer,
   );
 
@@ -1842,6 +1880,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_opt_box_autoadd_bridge_git_status(
     BridgeGitStatus? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_bridge_git_transfer(
+    BridgeGitTransfer? self,
     SseSerializer serializer,
   );
 

@@ -86,6 +86,9 @@ abstract class AgentSession implements RustOpaqueInterface {
   /// there was one.
   Future<bool> fetch();
 
+  /// Explicit Fetch with the background fetch's checks; origin before the first push.
+  Future<bool> fetchNow();
+
   /// The checkout's branches.
   Future<BridgeBranches> gitBranches();
 
@@ -110,6 +113,12 @@ abstract class AgentSession implements RustOpaqueInterface {
 
   /// Starts a new session in the same agent; `false` when an extension cancelled it.
   Future<bool> newSession();
+
+  /// Pulls fast-forward only under the checkout lock, refusing any running agent.
+  Future<BridgeGitOutcome> pull();
+
+  /// Pushes the branch through the user's Git and hooks, without a checkout lock.
+  Future<BridgeGitOutcome> push({required bool confirmedDefault});
 
   /// Up to `limit` stored sessions of this project, newest first, without the current one.
   Future<List<BridgeStoredSession>> recentSessions({required int limit});

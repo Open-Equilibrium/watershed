@@ -108,6 +108,123 @@ void main() {
 
   int fetches() => backend.calls.where((call) => call == 'fetch').length;
 
+  test(
+    'push and pull notices report the actual destination and captured counts',
+    () async {
+      await git.refresh();
+      backend.transferOutcome = BridgeGitOutcome(
+        kind: BridgeGitOutcomeKind.done,
+        files: const [],
+        running: const [],
+        detail: '',
+        transfer: transferOf(ahead: 1),
+      );
+      await git.push(device: 'MacBook');
+      expect(git.fetched, isNotNull);
+      backend.transferOutcome = BridgeGitOutcome(
+        kind: BridgeGitOutcomeKind.done,
+        files: const [],
+        running: const [],
+        detail: '',
+        transfer: transferOf(
+          branch: 'feature/retry-after',
+          upstream: 'origin/feature/retry-after',
+          firstPush: true,
+        ),
+      );
+      await git.push(device: 'MacBook');
+      backend.transferOutcome = BridgeGitOutcome(
+        kind: BridgeGitOutcomeKind.done,
+        files: const [],
+        running: const [],
+        detail: '',
+        transfer: transferOf(behind: 3),
+      );
+      await git.pull(device: 'MacBook');
+      expect(notices.map((notice) => notice.$2), [
+        'Pushed 1 commit to origin/main',
+        'Pushed feature/retry-after to origin; it now tracks origin/feature/retry-after',
+        'Pulled 3 commits from origin/main',
+      ]);
+    },
+  );
+
+  test('push rejection, sign-in and pull refusals use the approved recovery wording', () async {
+    await git.refresh();
+    for (final ahead in [0, 1]) {
+      backend.transferOutcome = BridgeGitOutcome(
+        kind: BridgeGitOutcomeKind.pushRejected,
+        files: const [],
+        running: const [],
+        detail: '',
+        transfer: transferOf(ahead: ahead, behind: 3),
+      );
+      await git.push(device: 'MacBook');
+    }
+    backend.transferOutcome = outcomeOf(
+      BridgeGitOutcomeKind.signInFailed,
+      files: ['origin'],
+      detail: 'Authentication failed',
+    );
+    await git.push(device: 'MacBook');
+    backend.transferOutcome = outcomeOf(
+      BridgeGitOutcomeKind.wouldOverwrite,
+      files: ['src/routes/login.ts'],
+    );
+    await git.pull(device: 'MacBook');
+    backend.transferOutcome = outcomeOf(
+      BridgeGitOutcomeKind.agentRunning,
+      running: [
+        const BridgeRunningAgent(own: false, title: 'Fix flaky sync test'),
+      ],
+    );
+    await git.pull(device: 'MacBook');
+    expect(
+      notices[0].$2,
+      startsWith(
+        'Could not push: origin/main has 3 commits that main lacks. Pull them, then push.',
+      ),
+    );
+    expect(
+      notices[1].$2,
+      startsWith(
+        'Could not push: main and origin/main have diverged, 1 commit here and 3 there. Merge or rebase in a terminal, then push.',
+      ),
+    );
+    expect(
+      notices[2].$2,
+      startsWith(
+        'Could not push: Git could not sign in to origin. Liquid uses the Git login of MacBook; sign in there with git or gh, then push again.',
+      ),
+    );
+    expect(notices[2].$2, contains('Nothing was pushed.'));
+    expect(notices[2].$2, contains('“Authentication failed”'));
+    expect(
+      notices[3].$2,
+      startsWith(
+        'Could not pull: Git would overwrite your uncommitted changes in src/routes/login.ts. Commit them first.',
+      ),
+    );
+    expect(
+      notices[4].$2,
+      'Could not pull: “Fix flaky sync test” is running in this checkout. Stop it or wait until it finishes.',
+    );
+  });
+
+  test('a transfer failure shows Git output and states that its effects are uncertain', () async {
+    backend.transferOutcome = outcomeOf(
+      BridgeGitOutcomeKind.transferFailed,
+      detail: 'Could not resolve host: github.com',
+    );
+    await git.push(device: 'MacBook');
+    expect(notices.single.$2, startsWith('Could not push: Git failed.'));
+    expect(notices.single.$2, contains('“Could not resolve host: github.com”'));
+    expect(
+      notices.single.$2,
+      contains('Git or its hooks may have made changes.'),
+    );
+  });
+
   testWidgets('a pending fetch leaves checkout polling active', (tester) async {
     final pending = _PendingFetchBackend();
     final state = GitState(

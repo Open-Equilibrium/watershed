@@ -9,8 +9,8 @@ import 'history.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `count`, `outcome`, `running_agents`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`
+// These functions are ignored because they are not marked as `pub`: `count`, `outcome`, `running_agents`, `transfer_outcome`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`, `from`
 
 /// A local or remote branch.
 class BridgeBranch {
@@ -202,12 +202,16 @@ class BridgeGitOutcome {
   /// A completed commit, or a created branch when its commit failed.
   final BridgeCommit? commit;
 
+  /// The destination and counts captured for this push or pull.
+  final BridgeGitTransfer? transfer;
+
   const BridgeGitOutcome({
     required this.kind,
     required this.files,
     required this.running,
     required this.detail,
     this.commit,
+    this.transfer,
   });
 
   @override
@@ -216,7 +220,8 @@ class BridgeGitOutcome {
       files.hashCode ^
       running.hashCode ^
       detail.hashCode ^
-      commit.hashCode;
+      commit.hashCode ^
+      transfer.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -227,7 +232,8 @@ class BridgeGitOutcome {
           files == other.files &&
           running == other.running &&
           detail == other.detail &&
-          commit == other.commit;
+          commit == other.commit &&
+          transfer == other.transfer;
 }
 
 /// How a Git write the user asked for ended, when not with an error to show as it is.
@@ -267,6 +273,18 @@ enum BridgeGitOutcomeKind {
 
   /// Liquid cannot commit while a merge is in progress.
   mergeInProgress,
+
+  /// The destination is the repository's default branch; nothing was pushed.
+  pushDefault,
+
+  /// The upstream has commits the branch lacks; nothing was pushed or pulled.
+  pushRejected,
+
+  /// The host's Git login failed, before the transfer.
+  signInFailed,
+
+  /// Git failed; its own output describes any effects it completed.
+  transferFailed,
 }
 
 /// The checkout's branch and how it stands against its upstream.
@@ -279,6 +297,9 @@ class BridgeGitStatus {
 
   /// The upstream the branch tracks, such as `origin/main`.
   final String? upstream;
+
+  /// The upstream's remote, or origin when configured without an upstream.
+  final String? remote;
 
   /// Commits the branch has that its upstream lacks.
   final PlatformInt64 ahead;
@@ -305,6 +326,7 @@ class BridgeGitStatus {
     this.branch,
     this.commit,
     this.upstream,
+    this.remote,
     required this.ahead,
     required this.behind,
     required this.changed,
@@ -319,6 +341,7 @@ class BridgeGitStatus {
       branch.hashCode ^
       commit.hashCode ^
       upstream.hashCode ^
+      remote.hashCode ^
       ahead.hashCode ^
       behind.hashCode ^
       changed.hashCode ^
@@ -335,6 +358,7 @@ class BridgeGitStatus {
           branch == other.branch &&
           commit == other.commit &&
           upstream == other.upstream &&
+          remote == other.remote &&
           ahead == other.ahead &&
           behind == other.behind &&
           changed == other.changed &&
@@ -342,6 +366,46 @@ class BridgeGitStatus {
           defaultBranch == other.defaultBranch &&
           merging == other.merging &&
           conflicts == other.conflicts;
+}
+
+/// A push or pull's destination and captured upstream counts, all names safe to show.
+class BridgeGitTransfer {
+  final String branch;
+  final String remote;
+  final String upstream;
+  final PlatformInt64 ahead;
+  final PlatformInt64 behind;
+  final bool firstPush;
+
+  const BridgeGitTransfer({
+    required this.branch,
+    required this.remote,
+    required this.upstream,
+    required this.ahead,
+    required this.behind,
+    required this.firstPush,
+  });
+
+  @override
+  int get hashCode =>
+      branch.hashCode ^
+      remote.hashCode ^
+      upstream.hashCode ^
+      ahead.hashCode ^
+      behind.hashCode ^
+      firstPush.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeGitTransfer &&
+          runtimeType == other.runtimeType &&
+          branch == other.branch &&
+          remote == other.remote &&
+          upstream == other.upstream &&
+          ahead == other.ahead &&
+          behind == other.behind &&
+          firstPush == other.firstPush;
 }
 
 /// A branch's stashed changes.
