@@ -385,6 +385,22 @@ void main() {
     });
   }
 
+  testWidgets('a person who writes Serbian in Latin reads days in Latin', (
+    tester,
+  ) async {
+    tester.platformDispatcher.localesTestValue = [
+      Locale.fromSubtags(
+        languageCode: 'sr',
+        scriptCode: 'Latn',
+        countryCode: 'RS',
+      ),
+    ];
+    addTearDown(tester.platformDispatcher.clearLocalesTestValue);
+    await show(tester, [_Table(_expenses)], app: true);
+    expect(inTable(find.textContaining('nov')), findsOneWidget);
+    expect(inTable(find.textContaining('нов')), findsNothing);
+  });
+
   testWidgets('a language Cupertino does not know reads in English', (
     tester,
   ) async {

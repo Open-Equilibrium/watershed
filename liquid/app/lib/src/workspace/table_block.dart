@@ -63,6 +63,20 @@ String _number(NumberFormat format, double number) {
       : text;
 }
 
+/// The most specific form of `locale` intl has formats for, keeping its script as in
+/// Serbian written in Latin, or US English where intl has none for a language Material
+/// knows.
+String _formats(Locale locale, bool Function(String) exists) {
+  final Locale(:languageCode, :scriptCode, :countryCode) = locale;
+  return [
+        locale.toString(),
+        if (scriptCode != null) '${languageCode}_$scriptCode',
+        if (countryCode != null) '${languageCode}_$countryCode',
+        languageCode,
+      ].where(exists).firstOrNull ??
+      'en_US';
+}
+
 IconData _icon(BridgeFieldKind kind) => switch (kind) {
   BridgeFieldKind.text => LucideIcons.text,
   BridgeFieldKind.number => LucideIcons.hash,
@@ -163,18 +177,9 @@ class _TableBlockState extends State<TableBlock> {
   Widget build(BuildContext context) {
     final ws = context.ws;
     final database = _database;
-    final locale = Localizations.localeOf(context).toString();
-    // US English where intl has no formats for a language Material knows.
-    final numbers = Intl.verifiedLocale(
-      locale,
-      NumberFormat.localeExists,
-      onFailure: (_) => 'en_US',
-    )!;
-    final days = Intl.verifiedLocale(
-      locale,
-      DateFormat.localeExists,
-      onFailure: (_) => 'en_US',
-    )!;
+    final locale = Localizations.localeOf(context);
+    final numbers = _formats(locale, NumberFormat.localeExists);
+    final days = _formats(locale, DateFormat.localeExists);
     final count = _rows.count ?? 0;
     final name = database?.name ?? '';
     return Padding(
