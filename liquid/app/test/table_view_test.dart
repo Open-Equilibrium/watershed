@@ -140,9 +140,11 @@ void main() {
     WidgetTester tester,
     List<_Part> parts, {
     bool app = false,
+    void Function()? before,
   }) async {
     await tester.binding.setSurfaceSize(const Size(1400, 900));
     fake = FakeWorkspace();
+    before?.call();
     workspace = WorkspaceState(fake);
     await workspace.start();
     page = workspace.open.value!.page;
@@ -781,5 +783,52 @@ void main() {
     expect(inTable(find.text('22 rows')), findsOneWidget);
     final rows = tester.widget<ListView>(find.byKey(const Key('table rows')));
     expect(rows.controller!.offset, (22 - 10) * 34.0);
+  });
+
+  testWidgets('+ New before the rows are counted adds after the last', (
+    tester,
+  ) async {
+    late List<Completer<void>> reads;
+    await show(
+      tester,
+      [_Table(_expenses)],
+      before: () {
+        reads = fake.deferred = [];
+        fake.deferredKinds = {BridgeQueryKind.rows};
+      },
+    );
+    expect(inTable(find.text('New')), findsOneWidget);
+    await tester.tap(inTable(find.text('New')));
+    await tester.pump();
+    fake.deferred = null;
+    while (reads.isNotEmpty) {
+      reads.removeAt(0).complete();
+      await tester.pump();
+    }
+    await tester.pumpAndSettle();
+    expect(applied(BridgeMutationKind.addRow).single.after, 'r2');
+  });
+
+  testWidgets('a quick second field goes after the field just added', (
+    tester,
+  ) async {
+    await show(tester, [_Table(_expenses)]);
+    final reads = fake.deferred = [];
+    fake.deferredKinds = {BridgeQueryKind.database};
+    for (var time = 0; time < 2; time++) {
+      await tester.tap(inTable(find.byKey(const Key('add field'))));
+      await tester.pumpAndSettle();
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pump();
+    }
+    fake.deferred = null;
+    for (final read in reads) {
+      read.complete();
+    }
+    await tester.pumpAndSettle();
+    final adds = applied(BridgeMutationKind.addField).toList();
+    expect(adds, hasLength(2));
+    final fields = fake.databases[fake.views[page]!.single.block]!.fields;
+    expect(adds.last.after, fields[5].id, reason: 'after the field just added');
   });
 }

@@ -122,7 +122,9 @@ class _TableBlockState extends State<TableBlock> {
 
   /// What was just added, to scroll to once it shows: rows beyond this count, a field.
   int? _toNewRow;
-  String? _toNewField;
+
+  /// The field the last add made, the last until a read holds it, then shown.
+  String? _fieldAdded;
 
   /// + New's adds, one after another. The row one added is the last until a read counts
   /// it, so the next goes after it.
@@ -224,7 +226,10 @@ class _TableBlockState extends State<TableBlock> {
 
   Future<void> _addOneRow() async {
     try {
-      final count = _rows.count ?? 0;
+      // Rows not yet counted are read first, so the row goes after the last.
+      if (_rows.count == null) await _rows.load(0);
+      final count = _rows.count;
+      if (count == null) throw 'The Table\'s rows are not read yet; try again.';
       var after = _rowAdded;
       if (after == null && count > 0) {
         after = (await _rows.load(count - 1))?.id;
@@ -261,15 +266,15 @@ class _TableBlockState extends State<TableBlock> {
         block: _block,
         text: name,
         fieldKind: kind,
-        after: _database?.fields.lastOrNull?.id,
+        after: _fieldAdded ?? _database?.fields.lastOrNull?.id,
       ),
       const [],
     );
     if (!mounted) return;
     _panel.hide();
-    _toNewField = added.field;
+    _fieldAdded = added.field;
     if (_database?.fields.any((field) => field.id == added.field) ?? false) {
-      _toNewField = null;
+      _fieldAdded = null;
       setState(() => _toLastField = true);
     }
   }
@@ -357,10 +362,10 @@ class _TableBlockState extends State<TableBlock> {
         query: query(BridgeQueryKind.database, page: _page, block: _block),
       );
       if (!mounted || read != _reads) return;
-      if (_toNewField case final field?
+      if (_fieldAdded case final field?
           when answer.database?.fields.any((shown) => shown.id == field) ??
               false) {
-        _toNewField = null;
+        _fieldAdded = null;
         _toLastField = true;
       }
       if (clean && views.pending(_block) == 0 && sent == views.sent(_block)) {
