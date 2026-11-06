@@ -5,14 +5,14 @@ import 'package:flutter/foundation.dart';
 /// Items read at once: a screenful and more, far below the bridge's window.
 const _chunk = 100;
 
-/// Windows kept, the last used, so a change rereads a bounded number of them.
-const _kept = 5;
-
 /// A long list read in windows as it is shown, never whole (client architecture rules 3
-/// and 5). It keeps the windows last used, which each reread asks for again with the
-/// count; others are read again once shown.
+/// and 5). Each reread asks again for the count and the windows kept: all read so far, or
+/// the `kept` last used, whose others are read again once shown.
 class Windows<T> extends ChangeNotifier {
-  Windows(this._query, this._report);
+  Windows(this._query, this._report, {this.kept});
+
+  /// How many windows it keeps at most, for a list no walk reads far through.
+  final int? kept;
 
   /// Reads the window `start..start + limit` and the count.
   final Future<(int, List<T>)> Function(int start, int limit) _query;
@@ -136,7 +136,7 @@ class Windows<T> extends ChangeNotifier {
 
   /// Drops the windows used longest ago beyond the kept ones.
   void _trim() {
-    while (_chunks.length > _kept) {
+    while (_chunks.length > (kept ?? _chunks.length)) {
       _chunks.remove(_chunks.keys.first);
     }
   }

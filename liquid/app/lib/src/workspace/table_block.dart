@@ -87,18 +87,22 @@ class TableBlock extends StatefulWidget {
 
 class _TableBlockState extends State<TableBlock> {
   BridgeDatabase? _database;
-  late final _rows = Windows<BridgeRow>((start, limit) async {
-    final answer = await _state.workspace.query(
-      query: query(
-        BridgeQueryKind.rows,
-        page: _page,
-        block: _block,
-        start: start,
-        limit: limit,
-      ),
-    );
-    return (answer.count, answer.rows);
-  }, _report);
+  late final _rows = Windows<BridgeRow>(
+    (start, limit) async {
+      final answer = await _state.workspace.query(
+        query: query(
+          BridgeQueryKind.rows,
+          page: _page,
+          block: _block,
+          start: start,
+          limit: limit,
+        ),
+      );
+      return (answer.count, answer.rows);
+    },
+    _report,
+    kept: 5,
+  );
   final _sideways = ScrollController();
   StreamSubscription<BridgeChange>? _followed;
 

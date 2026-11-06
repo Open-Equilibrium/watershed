@@ -4,10 +4,14 @@ import 'package:liquid/src/workspace/windows.dart';
 void main() {
   test('a reread asks again only for the windows last used', () async {
     final asked = <int>[];
-    final windows = Windows<int>((start, limit) async {
-      asked.add(start);
-      return (100000, [for (var at = start; at < start + limit; at++) at]);
-    }, (error) => fail('$error'));
+    final windows = Windows<int>(
+      (start, limit) async {
+        asked.add(start);
+        return (100000, [for (var at = start; at < start + limit; at++) at]);
+      },
+      (error) => fail('$error'),
+      kept: 5,
+    );
     addTearDown(windows.dispose);
     for (var index = 0; index < 2000; index += 100) {
       await windows.load(index);
