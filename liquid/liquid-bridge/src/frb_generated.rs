@@ -41,7 +41,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.13.0";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -2146789643;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 1222327024;
 
 // Section: executor
 
@@ -1852,6 +1852,60 @@ fn wire__crate__api__session__AgentSession_remove_all_checkpoints_impl(
         },
     )
 }
+fn wire__crate__api__session__AgentSession_remove_worktree_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "AgentSession_remove_worktree",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_that = <RustOpaqueMoi<
+                flutter_rust_bridge::for_generated::RustAutoOpaqueInner<AgentSession>,
+            >>::sse_decode(&mut deserializer);
+            let api_reviewed =
+                <crate::api::worktrees::BridgeWorktreeRemoval>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let mut api_that_guard = None;
+                    let decode_indices_ =
+                        flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![
+                            flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                &api_that, 0, false,
+                            ),
+                        ]);
+                    for i in decode_indices_ {
+                        match i {
+                            0 => api_that_guard = Some(api_that.lockable_decode_sync_ref()),
+                            _ => unreachable!(),
+                        }
+                    }
+                    let api_that_guard = api_that_guard.unwrap();
+                    let output_ok = crate::api::session::AgentSession::remove_worktree(
+                        &*api_that_guard,
+                        api_reviewed,
+                    )?;
+                    std::result::Result::Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
 fn wire__crate__api__session__AgentSession_restore_stash_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -3018,6 +3072,108 @@ fn wire__crate__api__session__AgentSession_uncommitted_patch_impl(
                         api_path,
                         api_hide_whitespace,
                     )?;
+                    std::result::Result::Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__api__session__AgentSession_worktree_removal_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "AgentSession_worktree_removal",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_that = <RustOpaqueMoi<
+                flutter_rust_bridge::for_generated::RustAutoOpaqueInner<AgentSession>,
+            >>::sse_decode(&mut deserializer);
+            let api_path = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let mut api_that_guard = None;
+                    let decode_indices_ =
+                        flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![
+                            flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                &api_that, 0, false,
+                            ),
+                        ]);
+                    for i in decode_indices_ {
+                        match i {
+                            0 => api_that_guard = Some(api_that.lockable_decode_sync_ref()),
+                            _ => unreachable!(),
+                        }
+                    }
+                    let api_that_guard = api_that_guard.unwrap();
+                    let output_ok = crate::api::session::AgentSession::worktree_removal(
+                        &*api_that_guard,
+                        api_path,
+                    )?;
+                    std::result::Result::Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__api__session__AgentSession_worktrees_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "AgentSession_worktrees",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_that = <RustOpaqueMoi<
+                flutter_rust_bridge::for_generated::RustAutoOpaqueInner<AgentSession>,
+            >>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let mut api_that_guard = None;
+                    let decode_indices_ =
+                        flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![
+                            flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                &api_that, 0, false,
+                            ),
+                        ]);
+                    for i in decode_indices_ {
+                        match i {
+                            0 => api_that_guard = Some(api_that.lockable_decode_sync_ref()),
+                            _ => unreachable!(),
+                        }
+                    }
+                    let api_that_guard = api_that_guard.unwrap();
+                    let output_ok = crate::api::session::AgentSession::worktrees(&*api_that_guard)?;
                     std::result::Result::Ok(output_ok)
                 })())
             }
@@ -5236,6 +5392,119 @@ impl SseDecode for crate::api::workspace::BridgeView {
     }
 }
 
+impl SseDecode for crate::api::worktrees::BridgeWorktree {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_path = <String>::sse_decode(deserializer);
+        let mut var_shown = <String>::sse_decode(deserializer);
+        let mut var_branch = <Option<crate::api::git::BridgeName>>::sse_decode(deserializer);
+        let mut var_main = <bool>::sse_decode(deserializer);
+        let mut var_current = <bool>::sse_decode(deserializer);
+        let mut var_locked = <bool>::sse_decode(deserializer);
+        let mut var_missing = <bool>::sse_decode(deserializer);
+        let mut var_running =
+            <Vec<crate::api::history::BridgeRunningAgent>>::sse_decode(deserializer);
+        let mut var_sessions = <Vec<String>>::sse_decode(deserializer);
+        return crate::api::worktrees::BridgeWorktree {
+            path: var_path,
+            shown: var_shown,
+            branch: var_branch,
+            main: var_main,
+            current: var_current,
+            locked: var_locked,
+            missing: var_missing,
+            running: var_running,
+            sessions: var_sessions,
+        };
+    }
+}
+
+impl SseDecode for crate::api::worktrees::BridgeWorktreeFile {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_path = <String>::sse_decode(deserializer);
+        let mut var_shown = <String>::sse_decode(deserializer);
+        let mut var_state =
+            <crate::api::worktrees::BridgeWorktreeFileState>::sse_decode(deserializer);
+        return crate::api::worktrees::BridgeWorktreeFile {
+            path: var_path,
+            shown: var_shown,
+            state: var_state,
+        };
+    }
+}
+
+impl SseDecode for crate::api::worktrees::BridgeWorktreeFileState {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut inner = <i32>::sse_decode(deserializer);
+        return match inner {
+            0 => crate::api::worktrees::BridgeWorktreeFileState::Staged,
+            1 => crate::api::worktrees::BridgeWorktreeFileState::Unstaged,
+            2 => crate::api::worktrees::BridgeWorktreeFileState::Untracked,
+            _ => unreachable!("Invalid variant for BridgeWorktreeFileState: {}", inner),
+        };
+    }
+}
+
+impl SseDecode for crate::api::worktrees::BridgeWorktreeOutcome {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_kind =
+            <crate::api::worktrees::BridgeWorktreeOutcomeKind>::sse_decode(deserializer);
+        let mut var_removal =
+            <Option<crate::api::worktrees::BridgeWorktreeRemoval>>::sse_decode(deserializer);
+        let mut var_running =
+            <Vec<crate::api::history::BridgeRunningAgent>>::sse_decode(deserializer);
+        let mut var_detail = <String>::sse_decode(deserializer);
+        return crate::api::worktrees::BridgeWorktreeOutcome {
+            kind: var_kind,
+            removal: var_removal,
+            running: var_running,
+            detail: var_detail,
+        };
+    }
+}
+
+impl SseDecode for crate::api::worktrees::BridgeWorktreeOutcomeKind {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut inner = <i32>::sse_decode(deserializer);
+        return match inner {
+            0 => crate::api::worktrees::BridgeWorktreeOutcomeKind::Done,
+            1 => crate::api::worktrees::BridgeWorktreeOutcomeKind::Changed,
+            2 => crate::api::worktrees::BridgeWorktreeOutcomeKind::AgentRunning,
+            3 => crate::api::worktrees::BridgeWorktreeOutcomeKind::Failed,
+            _ => unreachable!("Invalid variant for BridgeWorktreeOutcomeKind: {}", inner),
+        };
+    }
+}
+
+impl SseDecode for crate::api::worktrees::BridgeWorktreeRemoval {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_worktree = <crate::api::worktrees::BridgeWorktree>::sse_decode(deserializer);
+        let mut var_head = <Option<String>>::sse_decode(deserializer);
+        let mut var_files =
+            <Vec<crate::api::worktrees::BridgeWorktreeFile>>::sse_decode(deserializer);
+        let mut var_moreFiles = <bool>::sse_decode(deserializer);
+        let mut var_ignored = <i64>::sse_decode(deserializer);
+        let mut var_moreIgnored = <bool>::sse_decode(deserializer);
+        let mut var_unpushed = <i64>::sse_decode(deserializer);
+        let mut var_removable = <bool>::sse_decode(deserializer);
+        return crate::api::worktrees::BridgeWorktreeRemoval {
+            worktree: var_worktree,
+            head: var_head,
+            files: var_files,
+            more_files: var_moreFiles,
+            ignored: var_ignored,
+            more_ignored: var_moreIgnored,
+            unpushed: var_unpushed,
+            removable: var_removable,
+        };
+    }
+}
+
 impl SseDecode for f64 {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -5588,6 +5857,34 @@ impl SseDecode for Vec<crate::api::workspace::BridgeView> {
         let mut ans_ = Vec::with_capacity(len_ as usize);
         for idx_ in 0..len_ {
             ans_.push(<crate::api::workspace::BridgeView>::sse_decode(
+                deserializer,
+            ));
+        }
+        return ans_;
+    }
+}
+
+impl SseDecode for Vec<crate::api::worktrees::BridgeWorktree> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = Vec::with_capacity(len_ as usize);
+        for idx_ in 0..len_ {
+            ans_.push(<crate::api::worktrees::BridgeWorktree>::sse_decode(
+                deserializer,
+            ));
+        }
+        return ans_;
+    }
+}
+
+impl SseDecode for Vec<crate::api::worktrees::BridgeWorktreeFile> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = Vec::with_capacity(len_ as usize);
+        for idx_ in 0..len_ {
+            ans_.push(<crate::api::worktrees::BridgeWorktreeFile>::sse_decode(
                 deserializer,
             ));
         }
@@ -6020,6 +6317,19 @@ impl SseDecode for Option<crate::api::events::BridgeUsage> {
     }
 }
 
+impl SseDecode for Option<crate::api::worktrees::BridgeWorktreeRemoval> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<crate::api::worktrees::BridgeWorktreeRemoval>::sse_decode(
+                deserializer,
+            ));
+        } else {
+            return None;
+        }
+    }
+}
+
 impl SseDecode for Option<i32> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -6274,167 +6584,185 @@ fn pde_ffi_dispatcher_primary_impl(
             rust_vec_len,
             data_len,
         ),
-        35 => wire__crate__api__session__AgentSession_restore_stash_impl(
+        35 => wire__crate__api__session__AgentSession_remove_worktree_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        36 => wire__crate__api__session__AgentSession_revert_plan_impl(
+        36 => wire__crate__api__session__AgentSession_restore_stash_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        37 => wire__crate__api__session__AgentSession_revert_to_turn_impl(
+        37 => wire__crate__api__session__AgentSession_revert_plan_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        38 => wire__crate__api__session__AgentSession_send_impl(port, ptr, rust_vec_len, data_len),
-        39 => wire__crate__api__session__AgentSession_session_file_impl(
+        38 => wire__crate__api__session__AgentSession_revert_to_turn_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        40 => wire__crate__api__session__AgentSession_set_approval_mode_impl(
+        39 => wire__crate__api__session__AgentSession_send_impl(port, ptr, rust_vec_len, data_len),
+        40 => wire__crate__api__session__AgentSession_session_file_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        41 => wire__crate__api__session__AgentSession_set_model_impl(
+        41 => wire__crate__api__session__AgentSession_set_approval_mode_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        42 => {
+        42 => wire__crate__api__session__AgentSession_set_model_impl(
+            port,
+            ptr,
+            rust_vec_len,
+            data_len,
+        ),
+        43 => {
             wire__crate__api__session__AgentSession_shutdown_impl(port, ptr, rust_vec_len, data_len)
         }
-        43 => wire__crate__api__session__AgentSession_start_impl(port, ptr, rust_vec_len, data_len),
-        44 => wire__crate__api__session__AgentSession_stash_changes_impl(
+        44 => wire__crate__api__session__AgentSession_start_impl(port, ptr, rust_vec_len, data_len),
+        45 => wire__crate__api__session__AgentSession_stash_changes_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        45 => wire__crate__api__session__AgentSession_stash_patch_impl(
+        46 => wire__crate__api__session__AgentSession_stash_patch_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        46 => wire__crate__api__session__AgentSession_stop_pull_request_text_impl(
+        47 => wire__crate__api__session__AgentSession_stop_pull_request_text_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        47 => wire__crate__api__session__AgentSession_stored_turns_impl(
+        48 => wire__crate__api__session__AgentSession_stored_turns_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        48 => wire__crate__api__session__AgentSession_switch_branch_impl(
+        49 => wire__crate__api__session__AgentSession_switch_branch_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        49 => wire__crate__api__session__AgentSession_switch_session_impl(
+        50 => wire__crate__api__session__AgentSession_switch_session_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        50 => wire__crate__api__session__AgentSession_title_impl(port, ptr, rust_vec_len, data_len),
-        51 => wire__crate__api__session__AgentSession_transcript_impl(
+        51 => wire__crate__api__session__AgentSession_title_impl(port, ptr, rust_vec_len, data_len),
+        52 => wire__crate__api__session__AgentSession_transcript_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        52 => wire__crate__api__session__AgentSession_turn_changes_impl(
+        53 => wire__crate__api__session__AgentSession_turn_changes_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        53 => wire__crate__api__session__AgentSession_turn_patch_impl(
+        54 => wire__crate__api__session__AgentSession_turn_patch_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        54 => wire__crate__api__session__AgentSession_turns_impl(port, ptr, rust_vec_len, data_len),
-        55 => wire__crate__api__session__AgentSession_uncommitted_changes_impl(
+        55 => wire__crate__api__session__AgentSession_turns_impl(port, ptr, rust_vec_len, data_len),
+        56 => wire__crate__api__session__AgentSession_uncommitted_changes_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        56 => wire__crate__api__session__AgentSession_uncommitted_patch_impl(
+        57 => wire__crate__api__session__AgentSession_uncommitted_patch_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        57 => wire__crate__api__session__AgentSession_write_pull_request_draft_text_impl(
+        58 => wire__crate__api__session__AgentSession_worktree_removal_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        58 => wire__crate__api__session__AgentSession_write_pull_request_text_impl(
+        59 => wire__crate__api__session__AgentSession_worktrees_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        59 => wire__crate__api__workspace__LiquidWorkspace_apply_impl(
+        60 => wire__crate__api__session__AgentSession_write_pull_request_draft_text_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        60 => wire__crate__api__workspace__LiquidWorkspace_close_impl(
+        61 => wire__crate__api__session__AgentSession_write_pull_request_text_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        61 => wire__crate__api__workspace__LiquidWorkspace_open_impl(
+        62 => wire__crate__api__workspace__LiquidWorkspace_apply_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        62 => wire__crate__api__workspace__LiquidWorkspace_query_impl(
+        63 => wire__crate__api__workspace__LiquidWorkspace_close_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        63 => wire__crate__api__workspace__LiquidWorkspace_subscribe_impl(
+        64 => wire__crate__api__workspace__LiquidWorkspace_open_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        64 => {
+        65 => wire__crate__api__workspace__LiquidWorkspace_query_impl(
+            port,
+            ptr,
+            rust_vec_len,
+            data_len,
+        ),
+        66 => wire__crate__api__workspace__LiquidWorkspace_subscribe_impl(
+            port,
+            ptr,
+            rust_vec_len,
+            data_len,
+        ),
+        67 => {
             wire__crate__api__events__bridge_queue_default_impl(port, ptr, rust_vec_len, data_len)
         }
-        65 => wire__crate__api__history__bridge_tool_outcome_default_impl(
+        68 => wire__crate__api__history__bridge_tool_outcome_default_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        66 => {
+        69 => {
             wire__crate__api__events__bridge_usage_default_impl(port, ptr, rust_vec_len, data_len)
         }
         _ => unreachable!(),
@@ -8677,6 +9005,151 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::workspace::BridgeView>
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::worktrees::BridgeWorktree {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.path.into_into_dart().into_dart(),
+            self.shown.into_into_dart().into_dart(),
+            self.branch.into_into_dart().into_dart(),
+            self.main.into_into_dart().into_dart(),
+            self.current.into_into_dart().into_dart(),
+            self.locked.into_into_dart().into_dart(),
+            self.missing.into_into_dart().into_dart(),
+            self.running.into_into_dart().into_dart(),
+            self.sessions.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::worktrees::BridgeWorktree
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::worktrees::BridgeWorktree>
+    for crate::api::worktrees::BridgeWorktree
+{
+    fn into_into_dart(self) -> crate::api::worktrees::BridgeWorktree {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::worktrees::BridgeWorktreeFile {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.path.into_into_dart().into_dart(),
+            self.shown.into_into_dart().into_dart(),
+            self.state.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::worktrees::BridgeWorktreeFile
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::worktrees::BridgeWorktreeFile>
+    for crate::api::worktrees::BridgeWorktreeFile
+{
+    fn into_into_dart(self) -> crate::api::worktrees::BridgeWorktreeFile {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::worktrees::BridgeWorktreeFileState {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        match self {
+            Self::Staged => 0.into_dart(),
+            Self::Unstaged => 1.into_dart(),
+            Self::Untracked => 2.into_dart(),
+            _ => unreachable!(),
+        }
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::worktrees::BridgeWorktreeFileState
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::worktrees::BridgeWorktreeFileState>
+    for crate::api::worktrees::BridgeWorktreeFileState
+{
+    fn into_into_dart(self) -> crate::api::worktrees::BridgeWorktreeFileState {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::worktrees::BridgeWorktreeOutcome {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.kind.into_into_dart().into_dart(),
+            self.removal.into_into_dart().into_dart(),
+            self.running.into_into_dart().into_dart(),
+            self.detail.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::worktrees::BridgeWorktreeOutcome
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::worktrees::BridgeWorktreeOutcome>
+    for crate::api::worktrees::BridgeWorktreeOutcome
+{
+    fn into_into_dart(self) -> crate::api::worktrees::BridgeWorktreeOutcome {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::worktrees::BridgeWorktreeOutcomeKind {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        match self {
+            Self::Done => 0.into_dart(),
+            Self::Changed => 1.into_dart(),
+            Self::AgentRunning => 2.into_dart(),
+            Self::Failed => 3.into_dart(),
+            _ => unreachable!(),
+        }
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::worktrees::BridgeWorktreeOutcomeKind
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::worktrees::BridgeWorktreeOutcomeKind>
+    for crate::api::worktrees::BridgeWorktreeOutcomeKind
+{
+    fn into_into_dart(self) -> crate::api::worktrees::BridgeWorktreeOutcomeKind {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::worktrees::BridgeWorktreeRemoval {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.worktree.into_into_dart().into_dart(),
+            self.head.into_into_dart().into_dart(),
+            self.files.into_into_dart().into_dart(),
+            self.more_files.into_into_dart().into_dart(),
+            self.ignored.into_into_dart().into_dart(),
+            self.more_ignored.into_into_dart().into_dart(),
+            self.unpushed.into_into_dart().into_dart(),
+            self.removable.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::worktrees::BridgeWorktreeRemoval
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::worktrees::BridgeWorktreeRemoval>
+    for crate::api::worktrees::BridgeWorktreeRemoval
+{
+    fn into_into_dart(self) -> crate::api::worktrees::BridgeWorktreeRemoval {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::api::session::SessionConfig {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
@@ -10008,6 +10481,92 @@ impl SseEncode for crate::api::workspace::BridgeView {
     }
 }
 
+impl SseEncode for crate::api::worktrees::BridgeWorktree {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.path, serializer);
+        <String>::sse_encode(self.shown, serializer);
+        <Option<crate::api::git::BridgeName>>::sse_encode(self.branch, serializer);
+        <bool>::sse_encode(self.main, serializer);
+        <bool>::sse_encode(self.current, serializer);
+        <bool>::sse_encode(self.locked, serializer);
+        <bool>::sse_encode(self.missing, serializer);
+        <Vec<crate::api::history::BridgeRunningAgent>>::sse_encode(self.running, serializer);
+        <Vec<String>>::sse_encode(self.sessions, serializer);
+    }
+}
+
+impl SseEncode for crate::api::worktrees::BridgeWorktreeFile {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.path, serializer);
+        <String>::sse_encode(self.shown, serializer);
+        <crate::api::worktrees::BridgeWorktreeFileState>::sse_encode(self.state, serializer);
+    }
+}
+
+impl SseEncode for crate::api::worktrees::BridgeWorktreeFileState {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(
+            match self {
+                crate::api::worktrees::BridgeWorktreeFileState::Staged => 0,
+                crate::api::worktrees::BridgeWorktreeFileState::Unstaged => 1,
+                crate::api::worktrees::BridgeWorktreeFileState::Untracked => 2,
+                _ => {
+                    unimplemented!("");
+                }
+            },
+            serializer,
+        );
+    }
+}
+
+impl SseEncode for crate::api::worktrees::BridgeWorktreeOutcome {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <crate::api::worktrees::BridgeWorktreeOutcomeKind>::sse_encode(self.kind, serializer);
+        <Option<crate::api::worktrees::BridgeWorktreeRemoval>>::sse_encode(
+            self.removal,
+            serializer,
+        );
+        <Vec<crate::api::history::BridgeRunningAgent>>::sse_encode(self.running, serializer);
+        <String>::sse_encode(self.detail, serializer);
+    }
+}
+
+impl SseEncode for crate::api::worktrees::BridgeWorktreeOutcomeKind {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(
+            match self {
+                crate::api::worktrees::BridgeWorktreeOutcomeKind::Done => 0,
+                crate::api::worktrees::BridgeWorktreeOutcomeKind::Changed => 1,
+                crate::api::worktrees::BridgeWorktreeOutcomeKind::AgentRunning => 2,
+                crate::api::worktrees::BridgeWorktreeOutcomeKind::Failed => 3,
+                _ => {
+                    unimplemented!("");
+                }
+            },
+            serializer,
+        );
+    }
+}
+
+impl SseEncode for crate::api::worktrees::BridgeWorktreeRemoval {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <crate::api::worktrees::BridgeWorktree>::sse_encode(self.worktree, serializer);
+        <Option<String>>::sse_encode(self.head, serializer);
+        <Vec<crate::api::worktrees::BridgeWorktreeFile>>::sse_encode(self.files, serializer);
+        <bool>::sse_encode(self.more_files, serializer);
+        <i64>::sse_encode(self.ignored, serializer);
+        <bool>::sse_encode(self.more_ignored, serializer);
+        <i64>::sse_encode(self.unpushed, serializer);
+        <bool>::sse_encode(self.removable, serializer);
+    }
+}
+
 impl SseEncode for f64 {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -10275,6 +10834,26 @@ impl SseEncode for Vec<crate::api::workspace::BridgeView> {
         <i32>::sse_encode(self.len() as _, serializer);
         for item in self {
             <crate::api::workspace::BridgeView>::sse_encode(item, serializer);
+        }
+    }
+}
+
+impl SseEncode for Vec<crate::api::worktrees::BridgeWorktree> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::api::worktrees::BridgeWorktree>::sse_encode(item, serializer);
+        }
+    }
+}
+
+impl SseEncode for Vec<crate::api::worktrees::BridgeWorktreeFile> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::api::worktrees::BridgeWorktreeFile>::sse_encode(item, serializer);
         }
     }
 }
@@ -10625,6 +11204,16 @@ impl SseEncode for Option<crate::api::events::BridgeUsage> {
         <bool>::sse_encode(self.is_some(), serializer);
         if let Some(value) = self {
             <crate::api::events::BridgeUsage>::sse_encode(value, serializer);
+        }
+    }
+}
+
+impl SseEncode for Option<crate::api::worktrees::BridgeWorktreeRemoval> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <crate::api::worktrees::BridgeWorktreeRemoval>::sse_encode(value, serializer);
         }
     }
 }

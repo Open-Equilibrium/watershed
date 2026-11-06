@@ -9,6 +9,7 @@ import 'api/git.dart';
 import 'api/history.dart';
 import 'api/session.dart';
 import 'api/workspace.dart';
+import 'api/worktrees.dart';
 
 import 'dart:async';
 import 'dart:convert';
@@ -206,6 +207,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeUsage dco_decode_box_autoadd_bridge_usage(dynamic raw);
+
+  @protected
+  BridgeWorktreeRemoval dco_decode_box_autoadd_bridge_worktree_removal(
+    dynamic raw,
+  );
 
   @protected
   int dco_decode_box_autoadd_i_32(dynamic raw);
@@ -486,6 +492,26 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeView dco_decode_bridge_view(dynamic raw);
 
   @protected
+  BridgeWorktree dco_decode_bridge_worktree(dynamic raw);
+
+  @protected
+  BridgeWorktreeFile dco_decode_bridge_worktree_file(dynamic raw);
+
+  @protected
+  BridgeWorktreeFileState dco_decode_bridge_worktree_file_state(dynamic raw);
+
+  @protected
+  BridgeWorktreeOutcome dco_decode_bridge_worktree_outcome(dynamic raw);
+
+  @protected
+  BridgeWorktreeOutcomeKind dco_decode_bridge_worktree_outcome_kind(
+    dynamic raw,
+  );
+
+  @protected
+  BridgeWorktreeRemoval dco_decode_bridge_worktree_removal(dynamic raw);
+
+  @protected
   double dco_decode_f_64(dynamic raw);
 
   @protected
@@ -574,6 +600,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<BridgeView> dco_decode_list_bridge_view(dynamic raw);
+
+  @protected
+  List<BridgeWorktree> dco_decode_list_bridge_worktree(dynamic raw);
+
+  @protected
+  List<BridgeWorktreeFile> dco_decode_list_bridge_worktree_file(dynamic raw);
 
   @protected
   Int64List dco_decode_list_prim_i_64_strict(dynamic raw);
@@ -695,6 +727,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeUsage? dco_decode_opt_box_autoadd_bridge_usage(dynamic raw);
+
+  @protected
+  BridgeWorktreeRemoval? dco_decode_opt_box_autoadd_bridge_worktree_removal(
+    dynamic raw,
+  );
 
   @protected
   int? dco_decode_opt_box_autoadd_i_32(dynamic raw);
@@ -934,6 +971,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeUsage sse_decode_box_autoadd_bridge_usage(SseDeserializer deserializer);
+
+  @protected
+  BridgeWorktreeRemoval sse_decode_box_autoadd_bridge_worktree_removal(
+    SseDeserializer deserializer,
+  );
 
   @protected
   int sse_decode_box_autoadd_i_32(SseDeserializer deserializer);
@@ -1272,6 +1314,34 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeView sse_decode_bridge_view(SseDeserializer deserializer);
 
   @protected
+  BridgeWorktree sse_decode_bridge_worktree(SseDeserializer deserializer);
+
+  @protected
+  BridgeWorktreeFile sse_decode_bridge_worktree_file(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeWorktreeFileState sse_decode_bridge_worktree_file_state(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeWorktreeOutcome sse_decode_bridge_worktree_outcome(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeWorktreeOutcomeKind sse_decode_bridge_worktree_outcome_kind(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeWorktreeRemoval sse_decode_bridge_worktree_removal(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   double sse_decode_f_64(SseDeserializer deserializer);
 
   @protected
@@ -1386,6 +1456,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<BridgeView> sse_decode_list_bridge_view(SseDeserializer deserializer);
+
+  @protected
+  List<BridgeWorktree> sse_decode_list_bridge_worktree(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<BridgeWorktreeFile> sse_decode_list_bridge_worktree_file(
+    SseDeserializer deserializer,
+  );
 
   @protected
   Int64List sse_decode_list_prim_i_64_strict(SseDeserializer deserializer);
@@ -1551,6 +1631,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeUsage? sse_decode_opt_box_autoadd_bridge_usage(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeWorktreeRemoval? sse_decode_opt_box_autoadd_bridge_worktree_removal(
     SseDeserializer deserializer,
   );
 
@@ -1860,6 +1945,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_box_autoadd_bridge_usage(
     BridgeUsage self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_bridge_worktree_removal(
+    BridgeWorktreeRemoval self,
     SseSerializer serializer,
   );
 
@@ -2320,6 +2411,42 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_bridge_view(BridgeView self, SseSerializer serializer);
 
   @protected
+  void sse_encode_bridge_worktree(
+    BridgeWorktree self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_worktree_file(
+    BridgeWorktreeFile self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_worktree_file_state(
+    BridgeWorktreeFileState self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_worktree_outcome(
+    BridgeWorktreeOutcome self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_worktree_outcome_kind(
+    BridgeWorktreeOutcomeKind self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_worktree_removal(
+    BridgeWorktreeRemoval self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_f_64(double self, SseSerializer serializer);
 
   @protected
@@ -2472,6 +2599,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_list_bridge_view(
     List<BridgeView> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_bridge_worktree(
+    List<BridgeWorktree> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_bridge_worktree_file(
+    List<BridgeWorktreeFile> self,
     SseSerializer serializer,
   );
 
@@ -2676,6 +2815,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_opt_box_autoadd_bridge_usage(
     BridgeUsage? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_bridge_worktree_removal(
+    BridgeWorktreeRemoval? self,
     SseSerializer serializer,
   );
 

@@ -214,7 +214,7 @@ pub struct BridgeName {
 }
 
 impl BridgeName {
-    fn of(name: String) -> Self {
+    pub(crate) fn of(name: String) -> Self {
         Self {
             shown: visible_name(&name),
             name,
@@ -1198,7 +1198,7 @@ impl AgentSession {
     }
 
     /// The agents of `sessions`, named by their sessions' titles.
-    async fn running_agents(&self, sessions: &[String]) -> Vec<BridgeRunningAgent> {
+    pub(crate) async fn running_agents(&self, sessions: &[String]) -> Vec<BridgeRunningAgent> {
         if sessions.is_empty() {
             return Vec::new();
         }
@@ -1229,6 +1229,6 @@ impl From<meta_harness_core::Stash> for BridgeStash {
     }
 }
 
-fn count(value: u64) -> i64 {
+pub(crate) fn count(value: u64) -> i64 {
     i64::try_from(value).unwrap_or(i64::MAX)
 }

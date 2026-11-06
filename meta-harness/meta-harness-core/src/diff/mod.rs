@@ -27,6 +27,7 @@ mod pulls;
 mod revert;
 mod stash;
 mod sync;
+mod worktrees;
 
 pub use branches::{Branch, BranchTarget, Changes, GitStatus, without_credentials};
 pub use commit::Commit;
@@ -41,6 +42,7 @@ pub use stash::Stash;
 #[cfg(test)]
 pub(crate) use stash::{before_drop, before_stash_identity};
 pub use sync::{GitTransfer, PushConfirmation};
+pub use worktrees::{Worktree, WorktreeFile, WorktreeFileState, WorktreeRemoval, WorktreeRemoved};
 
 use process::{Git, git, git_command, git_path, git_path_output, git_ref_output, unreadable};
 #[cfg(test)]

@@ -15,6 +15,7 @@ mod trajectory;
 mod transcript;
 mod turns;
 mod visible;
+mod worktrees;
 
 /// `text` as one word of a POSIX shell command, so spaces and quotes in a temporary directory
 /// stay part of its paths.
