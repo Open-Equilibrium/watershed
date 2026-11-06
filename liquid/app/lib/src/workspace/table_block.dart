@@ -196,8 +196,10 @@ class _TableBlockState extends State<TableBlock> {
     if (caret == null || caret.view != widget.view.id) return;
     widget.views.caret.value = null;
     // What was typed in the line it took the place of is its name.
-    final text = widget.views.naming.remove(widget.view.id)?.call() ?? '';
+    final (text, written) =
+        widget.views.naming.remove(widget.view.id)?.call() ?? ('', false);
     if (text.isNotEmpty) {
+      if (written) _named = text;
       _name.value = TextEditingValue(
         text: text,
         selection: TextSelection.collapsed(offset: text.length),

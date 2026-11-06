@@ -611,4 +611,45 @@ void main() {
       },
     );
   }
+
+  testWidgets('a name handed from a line that went is written once', (
+    tester,
+  ) async {
+    await show(tester, ['Intro', '', 'After']);
+    await type(tester, 1, '/');
+    await type(tester, 1, 'table');
+    final gate = fake.gate = Completer<void>();
+    fake.gatedKinds = {BridgeMutationKind.addDatabaseBlock};
+    final reads = fake.deferred = [];
+    fake.deferredKinds = {BridgeQueryKind.views};
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    await type(tester, 1, 'Ex');
+    fake.gate = null;
+    gate.complete();
+    await tester.pump();
+    fake.deferred = null;
+    for (final read in reads) {
+      read.complete();
+    }
+    await tester.pumpAndSettle();
+    expect(
+      fake.applied.where(
+        (applied) => applied.kind == BridgeMutationKind.renameDatabase,
+      ),
+      hasLength(1),
+    );
+    expect(fake.databases[fake.views[page]![1].block]!.name, 'Ex');
+  });
+
+  testWidgets('/ on a blank Page opens the Block menu', (tester) async {
+    await show(tester, []);
+    await tester.enterText(find.byKey(const Key('first-line')), '/');
+    await tester.pumpAndSettle();
+    expect(menu, findsOneWidget);
+    await type(tester, 0, 'h');
+    await key(tester, LogicalKeyboardKey.enter);
+    expect(styleOf(0), BridgeTextStyle.heading1);
+    expect(fake.textsOf(page), ['']);
+  });
 }

@@ -124,7 +124,7 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
       final typed = _gone = _text.text;
       if (_added case final added?) {
         _name(widget.views, added, typed);
-        widget.views.naming[added.view!] = () => typed;
+        widget.views.naming[added.view!] = () => (typed, true);
       }
     }
     // A composition still open, or anything else not yet sent, is written as it stands.
@@ -276,10 +276,10 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
   }
 
   /// What the line holds, for the Table that took its place and now the caret.
-  String _handOver() {
+  (String, bool) _handOver() {
     final typed = _text.text;
     _release();
-    return typed;
+    return (typed, false);
   }
 
   /// Gives what the line holds to its Table without the caret.
@@ -437,6 +437,8 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     }
     widget.views.caret.value = null;
     _focus.requestFocus();
+    // `/` typed on a blank Page opens the Block menu in the Text Block it made.
+    if (caret.text == '/' && widget.views.count == 1) _offer('/', '');
     final length = _text.text.length;
     if (caret.offset > length && caret.offset < _end) _wanted = caret.offset;
     _text.selection = TextSelection.collapsed(

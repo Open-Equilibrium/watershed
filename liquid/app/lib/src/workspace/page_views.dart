@@ -56,8 +56,8 @@ class PageViews extends ChangeNotifier {
   final caret = ValueNotifier<Caret?>(null);
 
   /// What a line that a Table took the place of holds, by the Table's View: its name,
-  /// read when the Table takes the caret.
-  final naming = <String, String Function()>{};
+  /// read when the Table takes the caret, and whether it was written already.
+  final naming = <String, (String, bool) Function()>{};
 
   /// The styles Text Blocks read, by Block.
   final styles = ValueNotifier<Map<String, BridgeTextStyle>>(const {});
