@@ -287,6 +287,18 @@ struct Head {
     status: GitStatus,
 }
 
+impl Head {
+    /// The refusal when the upstream has commits the branch lacks.
+    fn behind(&self) -> Option<PullRequestError> {
+        (self.status.behind > 0).then(|| PullRequestError::Behind {
+            branch: self.local.clone(),
+            upstream: self.status.upstream.clone().unwrap_or_default(),
+            ahead: self.status.ahead,
+            behind: self.status.behind,
+        })
+    }
+}
+
 /// The targets a head repository offers, and the target and base chosen or preselected.
 struct Chosen {
     targets: Vec<String>,
@@ -356,6 +368,35 @@ impl WorkingTree {
         base: Option<&str>,
     ) -> Result<PullRequestPlan, PullRequestError> {
         let head = self.pushed_head().await?;
+        self.planned(program, head, target, base, true).await
+    }
+
+    /// The branch's target, base and any open pull request before it is pushed, for "Commit,
+    /// push & create PR", which checks them before any write; GitHub has no comparison yet, but
+    /// says whether it has the base.
+    pub(crate) async fn pull_request_prepared(
+        &self,
+        program: &OsStr,
+        target: Option<&str>,
+        base: Option<&str>,
+    ) -> Result<PullRequestPlan, PullRequestError> {
+        let head = self.github_head().await?;
+        if let Some(behind) = head.behind() {
+            return Err(behind);
+        }
+        self.planned(program, head, target, base, false).await
+    }
+
+    /// The plan for `head`; a `pushed` head must be on GitHub at its commit and is compared
+    /// with the base, else GitHub is only asked whether it has the base.
+    async fn planned(
+        &self,
+        program: &OsStr,
+        head: Head,
+        target: Option<&str>,
+        base: Option<&str>,
+        pushed: bool,
+    ) -> Result<PullRequestPlan, PullRequestError> {
         let host = head.repository.host.clone();
         if !self.gh_login(program, &host).await? {
             return Err(PullRequestError::NotGitHub {
@@ -365,49 +406,50 @@ impl WorkingTree {
             });
         }
         let repository = self.head_repository(program, &head.repository).await?;
-        let on_github = self
-            .gh_api(
-                program,
-                &host,
-                &head.repository.full(),
-                &[
-                    &format!(
-                        "repos/{}/branches/{}",
-                        repository.full,
-                        path_segment(&head.branch)
-                    ),
-                    "--jq",
-                    ".commit.sha",
-                ],
-                None,
-            )
-            .await;
-        let on_github = match on_github {
-            Err(PullRequestError::NoAccess { .. }) => {
-                return Err(PullRequestError::NeedsPush {
-                    branch: head.status.branch.clone().unwrap_or_default(),
-                    remote: head.remote,
-                    ahead: head.status.ahead,
-                    first: true,
+        if pushed {
+            let on_github = self
+                .gh_api(
+                    program,
+                    &host,
+                    &head.repository.full(),
+                    &[
+                        &format!(
+                            "repos/{}/branches/{}",
+                            repository.full,
+                            path_segment(&head.branch)
+                        ),
+                        "--jq",
+                        ".commit.sha",
+                    ],
+                    None,
+                )
+                .await;
+            let on_github = match on_github {
+                Err(PullRequestError::NoAccess { .. }) => {
+                    return Err(PullRequestError::NeedsPush {
+                        branch: head.local,
+                        remote: head.remote,
+                        ahead: head.status.ahead,
+                        first: true,
+                    });
+                }
+                result => result?,
+            };
+            if on_github.trim() != head.commit {
+                return Err(PullRequestError::HeadMoved {
+                    branch: head.branch,
                 });
             }
-            result => result?,
-        };
-        if on_github.trim() != head.commit {
-            return Err(PullRequestError::HeadMoved {
-                branch: head.branch,
-            });
         }
-        let chosen = Chosen::of(&repository, target, base);
         let Chosen {
             targets,
             parent_unknown,
             target,
             default_branch,
             base,
-        } = chosen;
+        } = Chosen::of(&repository, target, base);
         let (open, (comparison, base_missing, comparison_failed)) = match &target {
-            Some(target) => {
+            Some(target) if pushed => {
                 both(
                     self.open_pull_request(program, &host, target, &repository, &head.branch),
                     self.compared(
@@ -420,6 +462,14 @@ impl WorkingTree {
                     ),
                 )
                 .await?
+            }
+            Some(target) => {
+                let (open, missing) = both(
+                    self.open_pull_request(program, &host, target, &repository, &head.branch),
+                    self.base_missing(program, &host, target, base.as_deref()),
+                )
+                .await?;
+                (open, (None, missing, false))
             }
             None => (None, (None, false, false)),
         };
@@ -449,70 +499,38 @@ impl WorkingTree {
         })
     }
 
-    /// The branch's target, base and any open pull request before it is pushed, for "Commit,
-    /// push & create PR", which checks them before any write; GitHub has no comparison yet.
-    pub(crate) async fn pull_request_prepared(
+    /// Whether GitHub lacks the branch `base` in `target`; none to check without a base.
+    async fn base_missing(
         &self,
         program: &OsStr,
-        target: Option<&str>,
+        host: &str,
+        target: &str,
         base: Option<&str>,
-    ) -> Result<PullRequestPlan, PullRequestError> {
-        let head = self.github_head().await?;
-        if head.status.behind > 0 {
-            return Err(PullRequestError::Behind {
-                branch: head.status.branch.clone().unwrap_or_default(),
-                upstream: head.status.upstream.clone().unwrap_or_default(),
-                ahead: head.status.ahead,
-                behind: head.status.behind,
-            });
-        }
-        let host = head.repository.host.clone();
-        if !self.gh_login(program, &host).await? {
-            return Err(PullRequestError::NotGitHub {
-                remote: head.remote,
-                page: Some(format!("https://{host}/{}", head.repository.full())),
-                host: Some(host),
-            });
-        }
-        let repository = self.head_repository(program, &head.repository).await?;
-        let Chosen {
-            targets,
-            parent_unknown,
-            target,
-            default_branch,
-            base,
-        } = Chosen::of(&repository, target, base);
-        let open = match &target {
-            Some(target) => {
-                self.open_pull_request(program, &host, target, &repository, &head.branch)
-                    .await?
-            }
-            None => None,
+    ) -> Result<bool, PullRequestError> {
+        let Some(base) = base else {
+            return Ok(false);
         };
-        let (subject, body) = self.message_of(&head.commit).await?;
-        Ok(PullRequestPlan {
-            host,
-            head: head_label(
-                target.as_deref().unwrap_or(&repository.full),
-                &repository.full,
-                &head.branch,
-            ),
-            head_repository: repository.full,
-            head_branch: head.branch,
-            head_commit: head.commit,
-            targets,
-            parent_unknown,
-            target,
-            default_branch,
-            base,
-            comparison: None,
-            comparison_failed: false,
-            base_missing: false,
-            open,
-            uncommitted: head.status.changed,
-            subject,
-            body,
-        })
+        if !valid_base(base) {
+            return Ok(true);
+        }
+        match self
+            .gh_api(
+                program,
+                host,
+                target,
+                &[
+                    &format!("repos/{target}/branches/{}", path_segment(base)),
+                    "--jq",
+                    ".name",
+                ],
+                None,
+            )
+            .await
+        {
+            Ok(_) => Ok(false),
+            Err(PullRequestError::NoAccess { .. }) => Ok(true),
+            Err(error) => Err(error),
+        }
     }
 
     /// The subject and body of `commit` as Git has them.
@@ -747,14 +765,8 @@ impl WorkingTree {
                 first: true,
             });
         }
-        let upstream = status.upstream.clone().unwrap_or_default();
-        if status.behind > 0 {
-            return Err(PullRequestError::Behind {
-                branch,
-                upstream,
-                ahead: status.ahead,
-                behind: status.behind,
-            });
+        if let Some(behind) = head.behind() {
+            return Err(behind);
         }
         if status.ahead > 0 {
             return Err(PullRequestError::NeedsPush {

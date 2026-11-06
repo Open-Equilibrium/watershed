@@ -114,85 +114,126 @@ impl WorkingTree {
 
     /// The question before a commit and push, for "Commit, push & create PR": the commits the
     /// base branch `base` on the push remote lacks, when Git has it, else those its upstream
-    /// lacks, and the uncommitted whole files at `paths`.
+    /// lacks, and the whole files at `paths` as the commit plan's `snapshot` holds them; none
+    /// when there are neither.
     pub(crate) async fn pull_request_draft_question(
         &self,
         program: &Path,
         args: &[OsString],
         model: &str,
         base: Option<&str>,
+        snapshot: &str,
         paths: &[String],
-    ) -> Result<PiQuestion, PullRequestError> {
+    ) -> Result<Option<PiQuestion>, PullRequestError> {
         let model = model_parts(model)?;
-        let status = self.status().await?;
-        let head = status.commit.clone();
-        let mut start = None;
-        if let (Some(remote), Some(base)) = (&status.remote, base) {
-            start = self
-                .resolve(&format!("refs/remotes/{remote}/{base}^{{commit}}"))
-                .await?;
+        let range = self.draft_range(base).await?;
+        if range.is_none() && paths.is_empty() {
+            return Ok(None);
         }
-        if start.is_none() && status.upstream.is_some() && !status.gone {
-            start = self.resolve("@{upstream}^{commit}").await?;
-        }
-        let range = match (start, head) {
-            (Some(start), Some(head)) => {
-                let shared = git(&self.root, &[], &["merge-base", &start, &head]).await?;
-                Some((shared.trim().to_owned(), head))
+        let mut list = Vec::new();
+        let (mut patch, mut patch_cut) = (Vec::new(), false);
+        if !paths.is_empty() {
+            if !commit_id(snapshot) {
+                return Err(DiffError::Git("the files' snapshot is not a full id".into()).into());
             }
-            _ => None,
-        };
-        let from = self.committed("HEAD").await?;
-        let to = self.snapshot().await?;
-        let selected: BTreeSet<&str> = paths.iter().map(String::as_str).collect();
-        let files: String = self
-            .changes(&from, &to, Whitespace::Shown)
-            .await?
-            .into_iter()
-            .filter(|file| selected.contains(file.path.as_str()))
-            .map(|file| format!("{}\t{}\t{}\n", file.added, file.removed, file.path))
-            .collect();
-        let mut patch = (Vec::new(), false);
-        for chunk in paths.chunks(PATHS_PER_DIFF) {
-            let room = MAX_PATCH_BYTES - patch.0.len() as u64;
-            let literal: Vec<String> = chunk
+            let from = self.committed("HEAD").await?;
+            let to = Snapshot(snapshot.to_owned());
+            let changes = self.changes(&from, &to, Whitespace::Shown).await?;
+            let selected: BTreeSet<&str> = paths.iter().map(String::as_str).collect();
+            for file in changes
                 .iter()
-                .map(|path| format!(":(literal){path}"))
+                .filter(|file| selected.contains(file.path.as_str()))
+            {
+                list.extend(format!("{}\t{}\t{}\n", file.added, file.removed, file.path).bytes());
+            }
+            // A literal pathspec also names what lies below it, such as a folder that replaced
+            // a selected file; changes there that are not selected stay out.
+            let left_out: Vec<String> = changes
+                .iter()
+                .map(|file| file.path.as_str())
+                .filter(|path| {
+                    !selected.contains(path)
+                        && path
+                            .match_indices('/')
+                            .any(|(end, _)| selected.contains(&path[..end]))
+                })
+                .map(|path| format!(":(exclude,literal){path}"))
                 .collect();
-            let mut args = [&DIFF[..], &[from.0.as_str(), to.0.as_str(), "--"][..]].concat();
-            args.extend(literal.iter().map(String::as_str));
-            let (part, more) = git_start(&self.root, &args, room).await?;
-            patch.0.extend(part);
-            if more {
-                patch.1 = true;
-                break;
+            for chunk in paths.chunks(PATHS_PER_DIFF) {
+                let room = MAX_PATCH_BYTES - patch.len() as u64;
+                let named: Vec<String> = chunk
+                    .iter()
+                    .map(|path| format!(":(literal){path}"))
+                    .collect();
+                let mut args = [&DIFF[..], &[from.0.as_str(), to.0.as_str(), "--"][..]].concat();
+                args.extend(named.iter().chain(&left_out).map(String::as_str));
+                let (part, more) = git_start(&self.root, &args, room).await?;
+                patch.extend(part);
+                if more {
+                    patch_cut = true;
+                    break;
+                }
             }
         }
-        let (mut commits, mut committed, mut count) = ((Vec::new(), false), (Vec::new(), false), 0);
+        let (mut commits, mut list_cut, mut count) = ((Vec::new(), false), false, 0);
         if let Some((start, head)) = &range {
             commits = self.commit_messages(start, head).await?;
-            committed = self.files(start, head).await?;
+            let (committed, more) = self.files(start, head).await?;
+            list.extend(committed);
+            list_cut = more;
             count = self.count(start, head).await?;
-            if !patch.1 {
-                let room = MAX_PATCH_BYTES - patch.0.len() as u64;
+            if !patch_cut {
+                let room = MAX_PATCH_BYTES - patch.len() as u64;
                 let (part, more) = git_start(
                     &self.root,
                     &[&DIFF[..], &[start.as_str(), head.as_str()][..]].concat(),
                     room,
                 )
                 .await?;
-                patch.0.extend(part);
-                patch.1 = more;
+                patch.extend(part);
+                patch_cut = more;
             }
         }
+        if list.len() as u64 > MAX_LIST_BYTES {
+            list.truncate(MAX_LIST_BYTES as usize);
+            list_cut = true;
+        }
         let material = format!(
-            "Commits:\n{}\nChanged files (added lines, removed lines, path):\n{}{}\nPatch of the uncommitted files, then of the commits:\n{}",
+            "Commits:\n{}\nChanged files (added lines, removed lines, path):\n{}\nPatch of the uncommitted files, then of the commits:\n{}",
             cut(commits, "The commit messages are"),
-            files,
-            cut(committed, "The file list is"),
-            cut(patch, "The patch is"),
+            cut((list, list_cut), "The file list is"),
+            cut((patch, patch_cut), "The patch is"),
         );
-        Ok(question(program, args, model, material, count))
+        Ok(Some(question(program, args, model, material, count)))
+    }
+
+    /// The commits HEAD has beyond the base branch `base` on the push remote, when Git has it,
+    /// else beyond its upstream, as the shared commit and HEAD; none without either, or when
+    /// they share no history.
+    async fn draft_range(&self, base: Option<&str>) -> Result<Option<(String, String)>, DiffError> {
+        let status = self.status().await?;
+        let Some(head) = status.commit else {
+            return Ok(None);
+        };
+        let mut starts = Vec::new();
+        if let (Some(remote), Some(base)) = (&status.remote, base) {
+            starts.push(format!("refs/remotes/{remote}/{base}^{{commit}}"));
+        }
+        if status.upstream.is_some() && !status.gone {
+            starts.push("@{upstream}^{commit}".to_owned());
+        }
+        for name in starts {
+            let Some(start) = self.resolve(&name).await? else {
+                continue;
+            };
+            match git(&self.root, &[], &["merge-base", &start, &head]).await {
+                Ok(shared) => return Ok(Some((shared.trim().to_owned(), head))),
+                // Git says nothing when the histories share no commit.
+                Err(DiffError::Git(reason)) if reason.is_empty() => {}
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(None)
     }
 
     /// How many commits `head` has beyond `base`.

@@ -160,6 +160,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgePullRequestText dco_decode_box_autoadd_bridge_pull_request_text(
+    dynamic raw,
+  );
+
+  @protected
   BridgePushConfirmation dco_decode_box_autoadd_bridge_push_confirmation(
     dynamic raw,
   );
@@ -648,6 +653,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgePullRequestText? dco_decode_opt_box_autoadd_bridge_pull_request_text(
+    dynamic raw,
+  );
+
+  @protected
   BridgePushConfirmation? dco_decode_opt_box_autoadd_bridge_push_confirmation(
     dynamic raw,
   );
@@ -864,6 +874,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgePullRequestPlan sse_decode_box_autoadd_bridge_pull_request_plan(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgePullRequestText sse_decode_box_autoadd_bridge_pull_request_text(
     SseDeserializer deserializer,
   );
 
@@ -1480,6 +1495,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgePullRequestText? sse_decode_opt_box_autoadd_bridge_pull_request_text(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   BridgePushConfirmation? sse_decode_opt_box_autoadd_bridge_push_confirmation(
     SseDeserializer deserializer,
   );
@@ -1756,6 +1776,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_box_autoadd_bridge_pull_request_plan(
     BridgePullRequestPlan self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_bridge_pull_request_text(
+    BridgePullRequestText self,
     SseSerializer serializer,
   );
 
@@ -2578,6 +2604,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_opt_box_autoadd_bridge_pull_request_plan(
     BridgePullRequestPlan? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_bridge_pull_request_text(
+    BridgePullRequestText? self,
     SseSerializer serializer,
   );
 

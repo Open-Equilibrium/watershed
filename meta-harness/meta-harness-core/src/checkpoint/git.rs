@@ -112,31 +112,40 @@ impl Checkpoints {
         head: &str,
     ) -> Result<PullRequestText, PullRequestError> {
         let tree = self.tree().await?;
-        self.answer(tree.pull_request_question(program, args, model, base, head))
-            .await
+        let question = async {
+            tree.pull_request_question(program, args, model, base, head)
+                .await
+                .map(Some)
+        };
+        self.answer(question)
+            .await?
+            .ok_or_else(|| PullRequestError::Failed("pi was not asked.".into()))
     }
 
     /// As [`Checkpoints::write_pull_request_text`], before a commit and push: about the commits
     /// the base branch `base` lacks, as far as Git has it on the push remote, else those the
-    /// upstream lacks, and the uncommitted whole files at `paths`.
+    /// upstream lacks, and the whole files at `paths` as the commit plan's `snapshot` holds
+    /// them; none, without asking pi, when there are neither.
     pub async fn write_pull_request_draft_text(
         &self,
         program: &Path,
         args: &[std::ffi::OsString],
         model: &str,
         base: Option<&str>,
+        snapshot: &str,
         paths: &[String],
-    ) -> Result<PullRequestText, PullRequestError> {
+    ) -> Result<Option<PullRequestText>, PullRequestError> {
         let tree = self.tree().await?;
-        self.answer(tree.pull_request_draft_question(program, args, model, base, paths))
+        self.answer(tree.pull_request_draft_question(program, args, model, base, snapshot, paths))
             .await
     }
 
-    /// pi's answer to the question `question` builds, both within one time limit.
+    /// pi's answer to the question `question` builds, both within one time limit; none when
+    /// there is no question.
     async fn answer(
         &self,
-        question: impl Future<Output = Result<PiQuestion, PullRequestError>>,
-    ) -> Result<PullRequestText, PullRequestError> {
+        question: impl Future<Output = Result<Option<PiQuestion>, PullRequestError>>,
+    ) -> Result<Option<PullRequestText>, PullRequestError> {
         let limit = self.text_timeout;
         let deadline = tokio::time::Instant::now() + limit;
         let question = self
@@ -146,6 +155,9 @@ impl Checkpoints {
                     .map_err(|_| DiffError::TimedOut(limit))
             })
             .await??;
+        let Some(question) = question else {
+            return Ok(None);
+        };
         // A caller that stops waiting leaves pi to end by itself or at the time limit, so it is
         // never killed while it refreshes and stores its login.
         let answer = tokio::spawn(async move {
@@ -159,6 +171,7 @@ impl Checkpoints {
                 .map_err(|error| DiffError::Io(std::io::Error::other(error)))
         })
         .await?
+        .map(Some)
     }
 
     /// The branch's target, base and any open pull request before it is pushed, for "Commit,

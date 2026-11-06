@@ -3051,6 +3051,7 @@ fn wire__crate__api__session__AgentSession_write_pull_request_draft_text_impl(
             >>::sse_decode(&mut deserializer);
             let api_model = <String>::sse_decode(&mut deserializer);
             let api_base = <Option<String>>::sse_decode(&mut deserializer);
+            let api_snapshot = <String>::sse_decode(&mut deserializer);
             let api_paths = <Vec<String>>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| {
@@ -3074,6 +3075,7 @@ fn wire__crate__api__session__AgentSession_write_pull_request_draft_text_impl(
                             &*api_that_guard,
                             api_model,
                             api_base,
+                            api_snapshot,
                             api_paths,
                         )?;
                     std::result::Result::Ok(output_ok)
@@ -5864,6 +5866,19 @@ impl SseDecode for Option<crate::api::git::BridgePullRequestPlan> {
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         if (<bool>::sse_decode(deserializer)) {
             return Some(<crate::api::git::BridgePullRequestPlan>::sse_decode(
+                deserializer,
+            ));
+        } else {
+            return None;
+        }
+    }
+}
+
+impl SseDecode for Option<crate::api::git::BridgePullRequestText> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<crate::api::git::BridgePullRequestText>::sse_decode(
                 deserializer,
             ));
         } else {
@@ -10490,6 +10505,16 @@ impl SseEncode for Option<crate::api::git::BridgePullRequestPlan> {
         <bool>::sse_encode(self.is_some(), serializer);
         if let Some(value) = self {
             <crate::api::git::BridgePullRequestPlan>::sse_encode(value, serializer);
+        }
+    }
+}
+
+impl SseEncode for Option<crate::api::git::BridgePullRequestText> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <crate::api::git::BridgePullRequestText>::sse_encode(value, serializer);
         }
     }
 }

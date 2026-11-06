@@ -320,18 +320,16 @@ fn before_a_commit_the_model_reads_the_commits_the_base_lacks_and_the_selected_f
         branch.repo.write("c.txt", "selected new file\n");
         branch.repo.write("d.txt", "left out\n");
         let checkpoints = Checkpoints::new(branch.repo.path());
+        let snapshot = checkpoints.commit_plan(&[]).await.unwrap().snapshot;
+        // The model reads the files as the commit takes them, not as they are later.
+        branch
+            .repo
+            .write("c.txt", "changed after the dialog opened\n");
         let selected = ["a.txt".to_owned(), "c.txt".to_owned()];
-        let draft = |base: &'static str| {
-            let (pi, checkpoints, selected) = (branch.pi.join("pi"), &checkpoints, &selected);
-            async move {
-                checkpoints
-                    .write_pull_request_draft_text(&pi, &[], MODEL, Some(base), selected)
-                    .await
-                    .unwrap()
-            }
-        };
 
-        let text = draft("main").await;
+        let text = draft(&branch, &checkpoints, Some("main"), &snapshot, &selected)
+            .await
+            .unwrap();
 
         assert_eq!(text.title, "Return 429 with Retry-After");
         assert_eq!(text.commits, 1);
@@ -339,13 +337,104 @@ fn before_a_commit_the_model_reads_the_commits_the_base_lacks_and_the_selected_f
         for part in ["Retry after", "+retry", "+changed", "+selected new file"] {
             assert!(input.contains(part), "{part} missing from {input}");
         }
-        assert!(!input.contains("left out"), "{input}");
+        for part in ["left out", "after the dialog opened"] {
+            assert!(!input.contains(part), "{part} in {input}");
+        }
 
         // Without the base on the remote and without an upstream, only the files are read.
-        let text = draft("develop").await;
+        let text = draft(&branch, &checkpoints, Some("develop"), &snapshot, &selected)
+            .await
+            .unwrap();
         assert_eq!(text.commits, 0);
         let input = branch.read("input");
         assert!(!input.contains("Retry after"), "{input}");
         assert!(input.contains("+selected new file"), "{input}");
+
+        // With neither commits nor files there is nothing to describe, and pi is not asked.
+        std::fs::remove_file(branch.pi.join("args")).unwrap();
+        assert!(
+            draft(&branch, &checkpoints, Some("develop"), &snapshot, &[])
+                .await
+                .is_none()
+        );
+        assert_eq!(branch.read("args"), "");
+    });
+}
+
+/// The draft text for `selected` files of `snapshot` with `base`; none when pi was not asked.
+async fn draft(
+    branch: &Branch,
+    checkpoints: &Checkpoints,
+    base: Option<&str>,
+    snapshot: &str,
+    selected: &[String],
+) -> Option<PullRequestText> {
+    checkpoints
+        .write_pull_request_draft_text(&branch.pi.join("pi"), &[], MODEL, base, snapshot, selected)
+        .await
+        .unwrap()
+}
+
+#[test]
+fn without_the_base_the_model_reads_the_commits_the_upstream_lacks() {
+    run(async {
+        let branch = Branch::new("upstream", "b.txt", "retry\n");
+        branch
+            .repo
+            .git(&["remote", "add", "origin", "/nonexistent/origin.git"]);
+        branch
+            .repo
+            .git(&["update-ref", "refs/remotes/origin/feature", &branch.base]);
+        branch
+            .repo
+            .git(&["branch", "--set-upstream-to=origin/feature"]);
+        let checkpoints = Checkpoints::new(branch.repo.path());
+
+        let text = draft(&branch, &checkpoints, None, "", &[]).await.unwrap();
+
+        assert_eq!(text.commits, 1);
+        assert!(branch.read("input").contains("Retry after"));
+    });
+}
+
+#[test]
+fn a_folder_that_replaced_a_selected_file_stays_with_the_files_left_out() {
+    run(async {
+        let branch = Branch::new("folder", "foo", "old file\n");
+        std::fs::remove_file(branch.repo.path().join("foo")).unwrap();
+        std::fs::create_dir(branch.repo.path().join("foo")).unwrap();
+        branch.repo.write("foo/bar", "not selected\n");
+        let checkpoints = Checkpoints::new(branch.repo.path());
+        let snapshot = checkpoints.commit_plan(&[]).await.unwrap().snapshot;
+
+        draft(&branch, &checkpoints, None, &snapshot, &["foo".to_owned()])
+            .await
+            .unwrap();
+
+        let input = branch.read("input");
+        assert!(input.contains("-old file"), "{input}");
+        assert!(!input.contains("not selected"), "{input}");
+    });
+}
+
+#[test]
+fn a_selection_longer_than_one_diff_reaches_the_model() {
+    run(async {
+        let branch = Branch::new("many", "b.txt", "retry\n");
+        let selected: Vec<String> = (0..150).map(|n| format!("f{n:03}.txt")).collect();
+        for (n, path) in selected.iter().enumerate() {
+            branch.repo.write(path, &format!("file {n}\n"));
+        }
+        let checkpoints = Checkpoints::new(branch.repo.path());
+        let snapshot = checkpoints.commit_plan(&[]).await.unwrap().snapshot;
+
+        draft(&branch, &checkpoints, None, &snapshot, &selected)
+            .await
+            .unwrap();
+
+        let input = branch.read("input");
+        for part in ["+file 0", "+file 149", "f149.txt"] {
+            assert!(input.contains(part), "{part} missing");
+        }
     });
 }

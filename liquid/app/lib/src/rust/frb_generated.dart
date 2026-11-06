@@ -364,11 +364,12 @@ abstract class RustLibApi extends BaseApi {
     required bool hideWhitespace,
   });
 
-  Future<BridgePullRequestText>
+  Future<BridgePullRequestText?>
   crateApiSessionAgentSessionWritePullRequestDraftText({
     required AgentSession that,
     required String model,
     String? base,
+    required String snapshot,
     required List<String> paths,
   });
 
@@ -2570,11 +2571,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<BridgePullRequestText>
+  Future<BridgePullRequestText?>
   crateApiSessionAgentSessionWritePullRequestDraftText({
     required AgentSession that,
     required String model,
     String? base,
+    required String snapshot,
     required List<String> paths,
   }) {
     return handler.executeNormal(
@@ -2587,6 +2589,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           );
           sse_encode_String(model, serializer);
           sse_encode_opt_String(base, serializer);
+          sse_encode_String(snapshot, serializer);
           sse_encode_list_String(paths, serializer);
           pdeCallFfi(
             generalizedFrbRustBinding,
@@ -2596,12 +2599,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           );
         },
         codec: SseCodec(
-          decodeSuccessData: sse_decode_bridge_pull_request_text,
+          decodeSuccessData:
+              sse_decode_opt_box_autoadd_bridge_pull_request_text,
           decodeErrorData: sse_decode_String,
         ),
         constMeta:
             kCrateApiSessionAgentSessionWritePullRequestDraftTextConstMeta,
-        argValues: [that, model, base, paths],
+        argValues: [that, model, base, snapshot, paths],
         apiImpl: this,
       ),
     );
@@ -2611,7 +2615,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   get kCrateApiSessionAgentSessionWritePullRequestDraftTextConstMeta =>
       const TaskConstMeta(
         debugName: "AgentSession_write_pull_request_draft_text",
-        argNames: ["that", "model", "base", "paths"],
+        argNames: ["that", "model", "base", "snapshot", "paths"],
       );
 
   @override
@@ -3171,6 +3175,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return dco_decode_bridge_pull_request_plan(raw);
+  }
+
+  @protected
+  BridgePullRequestText dco_decode_box_autoadd_bridge_pull_request_text(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_bridge_pull_request_text(raw);
   }
 
   @protected
@@ -4758,6 +4770,16 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgePullRequestText? dco_decode_opt_box_autoadd_bridge_pull_request_text(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null
+        ? null
+        : dco_decode_box_autoadd_bridge_pull_request_text(raw);
+  }
+
+  @protected
   BridgePushConfirmation? dco_decode_opt_box_autoadd_bridge_push_confirmation(
     dynamic raw,
   ) {
@@ -5175,6 +5197,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return (sse_decode_bridge_pull_request_plan(deserializer));
+  }
+
+  @protected
+  BridgePullRequestText sse_decode_box_autoadd_bridge_pull_request_text(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_bridge_pull_request_text(deserializer));
   }
 
   @protected
@@ -7271,6 +7301,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgePullRequestText? sse_decode_opt_box_autoadd_bridge_pull_request_text(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_bridge_pull_request_text(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
   BridgePushConfirmation? sse_decode_opt_box_autoadd_bridge_push_confirmation(
     SseDeserializer deserializer,
   ) {
@@ -7821,6 +7864,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_bridge_pull_request_plan(self, serializer);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_bridge_pull_request_text(
+    BridgePullRequestText self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_bridge_pull_request_text(self, serializer);
   }
 
   @protected
@@ -9564,6 +9616,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_opt_box_autoadd_bridge_pull_request_text(
+    BridgePullRequestText? self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_bridge_pull_request_text(self, serializer);
+    }
+  }
+
+  @protected
   void sse_encode_opt_box_autoadd_bridge_push_confirmation(
     BridgePushConfirmation? self,
     SseSerializer serializer,
@@ -10189,16 +10254,19 @@ class AgentSessionImpl extends RustOpaque implements AgentSession {
   );
 
   /// As [`AgentSession::write_pull_request_text`], before a commit and push: about the commits
-  /// the base branch `base` lacks, as far as Git has it, and the uncommitted files at `paths`.
-  Future<BridgePullRequestText> writePullRequestDraftText({
+  /// the base branch `base` lacks, as far as Git has it, and the files at `paths` as the
+  /// commit plan's `snapshot` holds them; none when there are neither.
+  Future<BridgePullRequestText?> writePullRequestDraftText({
     required String model,
     String? base,
+    required String snapshot,
     required List<String> paths,
   }) =>
       RustLib.instance.api.crateApiSessionAgentSessionWritePullRequestDraftText(
         that: this,
         model: model,
         base: base,
+        snapshot: snapshot,
         paths: paths,
       );
 

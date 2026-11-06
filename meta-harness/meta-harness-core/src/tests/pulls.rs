@@ -601,7 +601,10 @@ fn before_a_push_the_target_base_and_open_pull_request_are_known() {
         pushed.repo.git(&["add", "c.txt"]);
         pushed.repo.git(&["commit", "-m", "More"]);
         pushed.repo.write("d.txt", "uncommitted\n");
-        let checkpoints = pushed.checkpoints("");
+        let checkpoints = pushed.checkpoints(
+            "'api --hostname github.com repos/acme/api/branches/develop --jq .name') echo develop ;;\n\
+             'api --hostname github.com repos/acme/api/branches/'*) echo 'gh: Not Found (HTTP 404)' >&2; exit 1 ;;",
+        );
 
         let plan = checkpoints
             .pull_request_prepared(None, Some("develop"))
@@ -615,12 +618,19 @@ fn before_a_push_the_target_base_and_open_pull_request_are_known() {
         assert_eq!(plan.head_commit, pushed.head());
         assert_eq!((plan.subject.as_str(), plan.uncommitted), ("More", 1));
         assert!(plan.comparison.is_none() && plan.open.is_none());
-        // The branch on GitHub is not read: it may not exist yet.
+        assert!(!plan.base_missing);
+        // The head branch on GitHub is not read: it may not exist yet.
         assert!(
-            !pushed.read("log").contains("branches/"),
+            !pushed.read("log").contains("branches/feature"),
             "{}",
             pushed.read("log")
         );
+        // A base GitHub lacks is known before anything is committed or pushed.
+        let missing = checkpoints
+            .pull_request_prepared(None, Some("release"))
+            .await
+            .unwrap();
+        assert!(missing.base_missing);
 
         pushed.repo.git(&[
             "remote",

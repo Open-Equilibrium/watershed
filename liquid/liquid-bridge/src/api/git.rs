@@ -1000,28 +1000,37 @@ impl AgentSession {
         merge_base: String,
         head_commit: String,
     ) -> Result<BridgePullRequestText, String> {
-        self.text(Box::pin(self.checkpoints.write_pull_request_text(
-            &self.pi_program,
-            &self.pi_args,
-            &model,
-            &merge_base,
-            &head_commit,
-        )))
+        self.text(Box::pin(async {
+            self.checkpoints
+                .write_pull_request_text(
+                    &self.pi_program,
+                    &self.pi_args,
+                    &model,
+                    &merge_base,
+                    &head_commit,
+                )
+                .await
+                .map(Some)
+        }))?
+        .ok_or_else(|| "pi was not asked".to_owned())
     }
 
     /// As [`AgentSession::write_pull_request_text`], before a commit and push: about the commits
-    /// the base branch `base` lacks, as far as Git has it, and the uncommitted files at `paths`.
+    /// the base branch `base` lacks, as far as Git has it, and the files at `paths` as the
+    /// commit plan's `snapshot` holds them; none when there are neither.
     pub fn write_pull_request_draft_text(
         &self,
         model: String,
         base: Option<String>,
+        snapshot: String,
         paths: Vec<String>,
-    ) -> Result<BridgePullRequestText, String> {
+    ) -> Result<Option<BridgePullRequestText>, String> {
         self.text(Box::pin(self.checkpoints.write_pull_request_draft_text(
             &self.pi_program,
             &self.pi_args,
             &model,
             base.as_deref(),
+            &snapshot,
             &paths,
         )))
     }
@@ -1034,12 +1043,16 @@ impl AgentSession {
         &self,
         mut text: std::pin::Pin<
             Box<
-                dyn Future<Output = Result<meta_harness_core::PullRequestText, PullRequestError>>
-                    + Send
+                dyn Future<
+                        Output = Result<
+                            Option<meta_harness_core::PullRequestText>,
+                            PullRequestError,
+                        >,
+                    > + Send
                     + '_,
             >,
         >,
-    ) -> Result<BridgePullRequestText, String> {
+    ) -> Result<Option<BridgePullRequestText>, String> {
         let (stop, stopped) = tokio::sync::oneshot::channel();
         *self.writing.lock().unwrap_or_else(PoisonError::into_inner) = Some(stop);
         RUNTIME.block_on(async {
@@ -1053,10 +1066,12 @@ impl AgentSession {
                     .map(|_| Err("stopped".to_owned()))
             })
             .await
-            .map(|text| BridgePullRequestText {
-                title: text.title,
-                body: text.body,
-                commits: count(text.commits),
+            .map(|text| {
+                text.map(|text| BridgePullRequestText {
+                    title: text.title,
+                    body: text.body,
+                    commits: count(text.commits),
+                })
             })
         })
     }
