@@ -5,8 +5,12 @@ import 'package:flutter/foundation.dart';
 /// Items read at once: a screenful and more, far below the bridge's window.
 const _chunk = 100;
 
+/// Windows kept, the last used, so a change rereads a bounded number of them.
+const _kept = 5;
+
 /// A long list read in windows as it is shown, never whole (client architecture rules 3
-/// and 5). Each reread asks again for the count and every window read so far.
+/// and 5). It keeps the windows last used, which each reread asks for again with the
+/// count; others are read again once shown.
 class Windows<T> extends ChangeNotifier {
   Windows(this._query, this._report);
 
@@ -32,11 +36,13 @@ class Windows<T> extends ChangeNotifier {
   T? at(int index) {
     if (index < 0 || index >= (_count ?? index + 1)) return null;
     final chunk = index ~/ _chunk;
-    final items = _chunks[chunk];
+    // Read again as it is shown, then kept as the last used.
+    final items = _chunks.remove(chunk);
     if (items == null) {
       unawaited(_load(chunk));
       return null;
     }
+    _chunks[chunk] = items;
     final at = index % _chunk;
     return at < items.length ? items[at] : null;
   }
@@ -60,8 +66,9 @@ class Windows<T> extends ChangeNotifier {
 
   /// Reads one window; one the list changed under is read again.
   Future<void> _load(int chunk) =>
-      _loading[chunk] ??= _read(chunk)
-          .whenComplete(() => _loading.remove(chunk));
+      _loading[chunk] ??= _read(chunk).whenComplete(() {
+        _loading.remove(chunk);
+      });
 
   Future<void> _read(int chunk) async {
     final generation = _generation;
@@ -81,6 +88,7 @@ class Windows<T> extends ChangeNotifier {
       }
       _count = count;
       _chunks[chunk] = items;
+      _trim();
       notifyListeners();
     } on Object catch (error) {
       if (!_disposed) _report(error);
@@ -108,17 +116,28 @@ class Windows<T> extends ChangeNotifier {
         if (_disposed || generation != _generation) return;
         // Windows read across a change may disagree; read them all again first.
         if (_again) continue;
-        _wanted.clear();
         _count = count;
-        _chunks
-          ..clear()
-          ..addAll(read);
+        // In the order last used, the first window, read for the count, oldest.
+        final used = [..._chunks.keys, ..._wanted];
+        _chunks.clear();
+        for (final chunk in {0, ...used}) {
+          _chunks[chunk] = read[chunk]!;
+        }
+        _wanted.clear();
+        _trim();
         notifyListeners();
       } while (_again);
     } on Object catch (error) {
       if (!_disposed) _report(error);
     } finally {
       _reading = false;
+    }
+  }
+
+  /// Drops the windows used longest ago beyond the kept ones.
+  void _trim() {
+    while (_chunks.length > _kept) {
+      _chunks.remove(_chunks.keys.first);
     }
   }
 

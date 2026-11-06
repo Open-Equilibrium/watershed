@@ -1,3 +1,4 @@
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -333,6 +334,18 @@ void main() {
       expect(inTable(find.text(day)), findsOneWidget);
     });
   }
+
+  testWidgets('a language Cupertino does not know reads in English', (
+    tester,
+  ) async {
+    // Material knows Pashto, but Cupertino, whose texts macOS's text menu shows, does not.
+    tester.platformDispatcher.localesTestValue = const [Locale('ps', 'AF')];
+    addTearDown(tester.platformDispatcher.clearLocalesTestValue);
+    await show(tester, [_Table(_expenses)], app: true);
+    final context = tester.element(find.byType(TableBlock));
+    expect(CupertinoLocalizations.of(context), isNotNull);
+    expect(inTable(find.text('Nov 1, 2026')), findsOneWidget);
+  });
 
   testWidgets('a number shows every digit it holds', (tester) async {
     BridgeRow amount(String id, double number) => BridgeRow(
