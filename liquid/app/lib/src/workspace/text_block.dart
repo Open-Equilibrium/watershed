@@ -184,7 +184,8 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
         mutation(
           BridgeMutationKind.addDatabaseBlock,
           page: _page,
-          after: last ? views.at(widget.index - 1)?.id : view.id,
+          // The View above is read first if its window was not.
+          after: last ? (await views.viewAt(widget.index - 1))?.id : view.id,
           text: '',
         ),
         const [],
