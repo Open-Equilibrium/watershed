@@ -881,24 +881,21 @@ void main() {
     expect(fake.textsOf(page), ['A', 'x', 'B', '']);
   });
 
-  testWidgets(
-    'a numbered list longer than the windows kept counts to its end',
-    (tester) async {
-      await show(tester, [
-        for (var number = 1; number <= 600; number++) 'Item $number',
-      ], BridgeTextStyle.numbered);
-      await tester.scrollUntilVisible(
-        find.text('Item 600'),
-        2000,
-        scrollable: find
-            .descendant(
-              of: find.byType(CustomScrollView),
-              matching: find.byType(Scrollable),
-            )
-            .first,
-      );
-      await tester.pumpAndSettle();
-      expect(find.text('600.'), findsOneWidget);
-    },
-  );
+  testWidgets('a numbered list of 600 items counts to its end', (tester) async {
+    await show(tester, [
+      for (var number = 1; number <= 600; number++) 'Item $number',
+    ], BridgeTextStyle.numbered);
+    await tester.scrollUntilVisible(
+      find.text('Item 600'),
+      2000,
+      scrollable: find
+          .descendant(
+            of: find.byType(CustomScrollView),
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('600.'), findsOneWidget);
+  });
 }

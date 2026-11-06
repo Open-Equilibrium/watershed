@@ -5,7 +5,7 @@ import 'package:flutter/widgets.dart';
 import '../rust/api/workspace.dart';
 import 'follow.dart';
 import 'page_editor.dart';
-import 'windows.dart';
+import 'windowed_list.dart';
 import 'workspace_state.dart';
 
 /// Where the caret goes once a Text Block's View is built.
@@ -37,7 +37,7 @@ class PageViews extends ChangeNotifier {
   final WorkspaceState state;
   final String page;
 
-  late final _views = Windows<BridgeView>((start, limit) async {
+  late final _views = WindowedList<BridgeView>((start, limit) async {
     final answer = await state.workspace.query(
       query: query(
         BridgeQueryKind.views,

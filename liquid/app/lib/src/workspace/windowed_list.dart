@@ -8,8 +8,8 @@ const _chunk = 100;
 /// A long list read in windows as it is shown, never whole (client architecture rules 3
 /// and 5). Each reread asks again for the count and the windows kept: all read so far, or
 /// the `kept` last used, whose others are read again once shown.
-class Windows<T> extends ChangeNotifier {
-  Windows(this._query, this._report, {this.kept});
+class WindowedList<T> extends ChangeNotifier {
+  WindowedList(this._query, this._report, {this.kept});
 
   /// How many windows it keeps at most, for a list no walk reads far through.
   final int? kept;
@@ -95,7 +95,7 @@ class Windows<T> extends ChangeNotifier {
     }
   }
 
-  /// Rereads the count and every window read so far, one reread at a time.
+  /// Rereads the count and every window kept, one reread at a time.
   Future<void> reread() async {
     if (_reading) {
       _again = true;

@@ -1,10 +1,10 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:liquid/src/workspace/windows.dart';
+import 'package:liquid/src/workspace/windowed_list.dart';
 
 void main() {
   test('a reread asks again only for the windows last used', () async {
     final asked = <int>[];
-    final windows = Windows<int>(
+    final windows = WindowedList<int>(
       (start, limit) async {
         asked.add(start);
         return (100000, [for (var at = start; at < start + limit; at++) at]);
