@@ -277,9 +277,58 @@ impl Repository {
 struct Head {
     repository: Repository,
     remote: String,
+    /// The local branch.
+    local: String,
+    /// The branch on the remote.
     branch: String,
     commit: String,
+    /// The branch was never pushed there.
+    first_push: bool,
     status: GitStatus,
+}
+
+/// The targets a head repository offers, and the target and base chosen or preselected.
+struct Chosen {
+    targets: Vec<String>,
+    parent_unknown: bool,
+    target: Option<String>,
+    default_branch: Option<String>,
+    base: Option<String>,
+}
+
+impl Chosen {
+    /// GitHub's parent first for a fork, then the head's own; without a choice the parent, or
+    /// none when GitHub did not name a fork's parent; the base as chosen, else the target's
+    /// default.
+    fn of(repository: &HeadRepository, target: Option<&str>, base: Option<&str>) -> Self {
+        let mut targets = Vec::new();
+        if let Some((parent, _)) = &repository.parent {
+            targets.push(parent.clone());
+        }
+        targets.push(repository.full.clone());
+        let parent_unknown = repository.fork && repository.parent.is_none();
+        let target = match target {
+            Some(target) => targets
+                .iter()
+                .find(|known| known.as_str() == target)
+                .cloned(),
+            None if parent_unknown => None,
+            None => targets.first().cloned(),
+        };
+        let default_branch = match (&target, &repository.parent) {
+            (Some(target), Some((parent, default))) if target == parent => default.clone(),
+            (Some(_), _) => repository.default_branch.clone(),
+            (None, _) => None,
+        };
+        let base = base.map(str::to_owned).or_else(|| default_branch.clone());
+        Self {
+            targets,
+            parent_unknown,
+            target,
+            default_branch,
+            base,
+        }
+    }
 }
 
 /// A pull request in a head lookup.
@@ -349,26 +398,14 @@ impl WorkingTree {
                 branch: head.branch,
             });
         }
-        let mut targets = Vec::new();
-        if let Some((parent, _)) = &repository.parent {
-            targets.push(parent.clone());
-        }
-        targets.push(repository.full.clone());
-        let parent_unknown = repository.fork && repository.parent.is_none();
-        let target = match target {
-            Some(target) => targets
-                .iter()
-                .find(|known| known.as_str() == target)
-                .cloned(),
-            None if parent_unknown => None,
-            None => targets.first().cloned(),
-        };
-        let default_branch = match (&target, &repository.parent) {
-            (Some(target), Some((parent, default))) if target == parent => default.clone(),
-            (Some(_), _) => repository.default_branch.clone(),
-            (None, _) => None,
-        };
-        let base = base.map(str::to_owned).or_else(|| default_branch.clone());
+        let chosen = Chosen::of(&repository, target, base);
+        let Chosen {
+            targets,
+            parent_unknown,
+            target,
+            default_branch,
+            base,
+        } = chosen;
         let (open, (comparison, base_missing, comparison_failed)) = match &target {
             Some(target) => {
                 both(
@@ -386,14 +423,7 @@ impl WorkingTree {
             }
             None => (None, (None, false, false)),
         };
-        let message = git_bytes(
-            &self.root,
-            &[],
-            &["log", "-1", "--format=%s%x00%b", &head.commit, "--"],
-        )
-        .await?;
-        let message = String::from_utf8_lossy(&message);
-        let (subject, body) = message.split_once('\0').unwrap_or((&message, ""));
+        let (subject, body) = self.message_of(&head.commit).await?;
         Ok(PullRequestPlan {
             host,
             head: head_label(
@@ -414,9 +444,88 @@ impl WorkingTree {
             base_missing,
             open,
             uncommitted: head.status.changed,
-            subject: subject.trim().to_owned(),
-            body: body.trim().to_owned(),
+            subject,
+            body,
         })
+    }
+
+    /// The branch's target, base and any open pull request before it is pushed, for "Commit,
+    /// push & create PR", which checks them before any write; GitHub has no comparison yet.
+    pub(crate) async fn pull_request_prepared(
+        &self,
+        program: &OsStr,
+        target: Option<&str>,
+        base: Option<&str>,
+    ) -> Result<PullRequestPlan, PullRequestError> {
+        let head = self.github_head().await?;
+        if head.status.behind > 0 {
+            return Err(PullRequestError::Behind {
+                branch: head.status.branch.clone().unwrap_or_default(),
+                upstream: head.status.upstream.clone().unwrap_or_default(),
+                ahead: head.status.ahead,
+                behind: head.status.behind,
+            });
+        }
+        let host = head.repository.host.clone();
+        if !self.gh_login(program, &host).await? {
+            return Err(PullRequestError::NotGitHub {
+                remote: head.remote,
+                page: Some(format!("https://{host}/{}", head.repository.full())),
+                host: Some(host),
+            });
+        }
+        let repository = self.head_repository(program, &head.repository).await?;
+        let Chosen {
+            targets,
+            parent_unknown,
+            target,
+            default_branch,
+            base,
+        } = Chosen::of(&repository, target, base);
+        let open = match &target {
+            Some(target) => {
+                self.open_pull_request(program, &host, target, &repository, &head.branch)
+                    .await?
+            }
+            None => None,
+        };
+        let (subject, body) = self.message_of(&head.commit).await?;
+        Ok(PullRequestPlan {
+            host,
+            head: head_label(
+                target.as_deref().unwrap_or(&repository.full),
+                &repository.full,
+                &head.branch,
+            ),
+            head_repository: repository.full,
+            head_branch: head.branch,
+            head_commit: head.commit,
+            targets,
+            parent_unknown,
+            target,
+            default_branch,
+            base,
+            comparison: None,
+            comparison_failed: false,
+            base_missing: false,
+            open,
+            uncommitted: head.status.changed,
+            subject,
+            body,
+        })
+    }
+
+    /// The subject and body of `commit` as Git has them.
+    async fn message_of(&self, commit: &str) -> Result<(String, String), PullRequestError> {
+        let message = git_bytes(
+            &self.root,
+            &[],
+            &["log", "-1", "--format=%s%x00%b", commit, "--"],
+        )
+        .await?;
+        let message = String::from_utf8_lossy(&message);
+        let (subject, body) = message.split_once('\0').unwrap_or((&message, ""));
+        Ok((subject.trim().to_owned(), body.trim().to_owned()))
     }
 
     /// The plan `draft` was reviewed against, read again; a changed identity or an open pull
@@ -628,23 +737,9 @@ impl WorkingTree {
 
     /// The branch's pushed upstream on its own remote, refused as Push refuses it.
     async fn pushed_head(&self) -> Result<Head, PullRequestError> {
-        let status = self.status().await?;
-        if status.merging {
-            return Err(DiffError::MergeInProgress.into());
-        }
-        let branch = status.branch.clone().ok_or(DiffError::NoBranch)?;
-        if status.commit.is_none() {
-            return Err(PullRequestError::NoCommit);
-        }
-        let remote = match &status.remote {
-            Some(remote) => remote.clone(),
-            None if status.has_remotes => return Err(PullRequestError::AmbiguousRemote),
-            None => return Err(PullRequestError::NoRemote),
-        };
-        let transfer = self.destination_of(&status).await?;
-        self.check_push_destination(&transfer).await?;
-        let repository = self.github_remote(&remote).await?;
-        if transfer.first_push || status.gone {
+        let head = self.github_head().await?;
+        let (status, branch, remote) = (&head.status, head.local.clone(), head.remote.clone());
+        if head.first_push || status.gone {
             return Err(PullRequestError::NeedsPush {
                 branch,
                 remote,
@@ -669,6 +764,28 @@ impl WorkingTree {
                 first: false,
             });
         }
+        Ok(head)
+    }
+
+    /// The branch, its commit and the GitHub repository and branch Push sends it to, under
+    /// Push's destination checks, pushed or not.
+    async fn github_head(&self) -> Result<Head, PullRequestError> {
+        let status = self.status().await?;
+        if status.merging {
+            return Err(DiffError::MergeInProgress.into());
+        }
+        let branch = status.branch.clone().ok_or(DiffError::NoBranch)?;
+        if status.commit.is_none() {
+            return Err(PullRequestError::NoCommit);
+        }
+        let remote = match &status.remote {
+            Some(remote) => remote.clone(),
+            None if status.has_remotes => return Err(PullRequestError::AmbiguousRemote),
+            None => return Err(PullRequestError::NoRemote),
+        };
+        let transfer = self.destination_of(&status).await?;
+        self.check_push_destination(&transfer).await?;
+        let repository = self.github_remote(&remote).await?;
         let remote_branch = transfer
             .confirmation
             .reference
@@ -678,8 +795,10 @@ impl WorkingTree {
         Ok(Head {
             repository,
             remote,
+            local: branch,
             branch: remote_branch,
             commit: transfer.confirmation.commit,
+            first_push: transfer.first_push,
             status,
         })
     }

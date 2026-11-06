@@ -305,6 +305,8 @@ pub struct BridgeComparison {
 pub struct BridgePullRequestText {
     pub title: String,
     pub body: String,
+    /// The commits the model read about, besides any uncommitted files.
+    pub commits: i64,
 }
 
 /// The identities a plan showed; return them unchanged when creating. `head_repository` is an
@@ -925,6 +927,30 @@ impl AgentSession {
         })
     }
 
+    /// The branch's target, base and any open pull request before it is pushed, for "Commit,
+    /// push & create PR", which checks them before any write.
+    pub fn pull_request_prepared(
+        &self,
+        target: Option<String>,
+        base: Option<String>,
+    ) -> Result<BridgePullRequestOutcome, String> {
+        RUNTIME.block_on(async {
+            Ok(
+                match self
+                    .checkpoints
+                    .pull_request_prepared(target.as_deref(), base.as_deref())
+                    .await
+                {
+                    Ok(plan) => BridgePullRequestOutcome {
+                        plan: Some(plan.into()),
+                        ..BridgePullRequestOutcome::of(BridgePullRequestOutcomeKind::Done)
+                    },
+                    Err(error) => BridgePullRequestOutcome::failed(error),
+                },
+            )
+        })
+    }
+
     /// Creates the reviewed pull request on GitHub through the host's gh.
     pub fn create_pull_request(
         &self,
@@ -974,19 +1000,50 @@ impl AgentSession {
         merge_base: String,
         head_commit: String,
     ) -> Result<BridgePullRequestText, String> {
+        self.text(Box::pin(self.checkpoints.write_pull_request_text(
+            &self.pi_program,
+            &self.pi_args,
+            &model,
+            &merge_base,
+            &head_commit,
+        )))
+    }
+
+    /// As [`AgentSession::write_pull_request_text`], before a commit and push: about the commits
+    /// the base branch `base` lacks, as far as Git has it, and the uncommitted files at `paths`.
+    pub fn write_pull_request_draft_text(
+        &self,
+        model: String,
+        base: Option<String>,
+        paths: Vec<String>,
+    ) -> Result<BridgePullRequestText, String> {
+        self.text(Box::pin(self.checkpoints.write_pull_request_draft_text(
+            &self.pi_program,
+            &self.pi_args,
+            &model,
+            base.as_deref(),
+            &paths,
+        )))
+    }
+
+    /// Waits for `text` until a later request or a stop; stopping only stops the wait, and pi
+    /// ends by itself or at its time limit.
+    // Boxed by the callers, as flutter_rust_bridge cannot parse what `pin!` expands to.
+    #[flutter_rust_bridge::frb(ignore)]
+    fn text(
+        &self,
+        mut text: std::pin::Pin<
+            Box<
+                dyn Future<Output = Result<meta_harness_core::PullRequestText, PullRequestError>>
+                    + Send
+                    + '_,
+            >,
+        >,
+    ) -> Result<BridgePullRequestText, String> {
         let (stop, stopped) = tokio::sync::oneshot::channel();
         *self.writing.lock().unwrap_or_else(PoisonError::into_inner) = Some(stop);
         RUNTIME.block_on(async {
-            // Boxed, as flutter_rust_bridge cannot parse what `pin!` expands to.
-            let mut text = Box::pin(self.checkpoints.write_pull_request_text(
-                &self.pi_program,
-                &self.pi_args,
-                &model,
-                &merge_base,
-                &head_commit,
-            ));
             let mut stopped = stopped;
-            // Stopping only stops the wait; pi ends by itself or at its time limit.
             std::future::poll_fn(|context| {
                 if let std::task::Poll::Ready(text) = text.as_mut().poll(context) {
                     return std::task::Poll::Ready(text.map_err(|error| error.to_string()));
@@ -999,6 +1056,7 @@ impl AgentSession {
             .map(|text| BridgePullRequestText {
                 title: text.title,
                 body: text.body,
+                commits: count(text.commits),
             })
         })
     }

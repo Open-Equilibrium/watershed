@@ -9,7 +9,7 @@ import 'history.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `count`, `failed`, `of`, `of`, `outcome`, `running_agents`, `transfer_outcome`
+// These functions are ignored because they are not marked as `pub`: `count`, `failed`, `of`, `of`, `outcome`, `running_agents`, `text`, `transfer_outcome`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`, `from`, `from`, `from`, `from`
 
 /// A local or remote branch.
@@ -910,10 +910,17 @@ class BridgePullRequestText {
   final String title;
   final String body;
 
-  const BridgePullRequestText({required this.title, required this.body});
+  /// The commits the model read about, besides any uncommitted files.
+  final PlatformInt64 commits;
+
+  const BridgePullRequestText({
+    required this.title,
+    required this.body,
+    required this.commits,
+  });
 
   @override
-  int get hashCode => title.hashCode ^ body.hashCode;
+  int get hashCode => title.hashCode ^ body.hashCode ^ commits.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -921,7 +928,8 @@ class BridgePullRequestText {
       other is BridgePullRequestText &&
           runtimeType == other.runtimeType &&
           title == other.title &&
-          body == other.body;
+          body == other.body &&
+          commits == other.commits;
 }
 
 /// Exact identities returned unchanged by the default-branch confirmation dialog.

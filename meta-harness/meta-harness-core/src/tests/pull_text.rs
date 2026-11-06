@@ -305,3 +305,47 @@ fn reading_signed_commits_runs_no_signature_program() {
         assert!(!ran.exists(), "Git ran the project's signature program");
     });
 }
+
+#[test]
+fn before_a_commit_the_model_reads_the_commits_the_base_lacks_and_the_selected_files() {
+    run(async {
+        let branch = Branch::new("draft", "b.txt", "retry\n");
+        branch
+            .repo
+            .git(&["remote", "add", "origin", "/nonexistent/origin.git"]);
+        branch
+            .repo
+            .git(&["update-ref", "refs/remotes/origin/main", &branch.base]);
+        branch.repo.write("a.txt", "changed\n");
+        branch.repo.write("c.txt", "selected new file\n");
+        branch.repo.write("d.txt", "left out\n");
+        let checkpoints = Checkpoints::new(branch.repo.path());
+        let selected = ["a.txt".to_owned(), "c.txt".to_owned()];
+        let draft = |base: &'static str| {
+            let (pi, checkpoints, selected) = (branch.pi.join("pi"), &checkpoints, &selected);
+            async move {
+                checkpoints
+                    .write_pull_request_draft_text(&pi, &[], MODEL, Some(base), selected)
+                    .await
+                    .unwrap()
+            }
+        };
+
+        let text = draft("main").await;
+
+        assert_eq!(text.title, "Return 429 with Retry-After");
+        assert_eq!(text.commits, 1);
+        let input = branch.read("input");
+        for part in ["Retry after", "+retry", "+changed", "+selected new file"] {
+            assert!(input.contains(part), "{part} missing from {input}");
+        }
+        assert!(!input.contains("left out"), "{input}");
+
+        // Without the base on the remote and without an upstream, only the files are read.
+        let text = draft("develop").await;
+        assert_eq!(text.commits, 0);
+        let input = branch.read("input");
+        assert!(!input.contains("Retry after"), "{input}");
+        assert!(input.contains("+selected new file"), "{input}");
+    });
+}
