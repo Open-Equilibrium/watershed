@@ -77,6 +77,8 @@ pub struct Comparison {
     pub removed: u64,
     /// GitHub's comparison page.
     pub url: String,
+    /// The commit the head and base share, as GitHub names it; empty when it named none.
+    pub merge_base: String,
 }
 
 /// A pull request's state on GitHub.
@@ -935,7 +937,7 @@ impl WorkingTree {
                         qualified(owner, &path_segment(branch))
                     ),
                     "--jq",
-                    "{commits: .ahead_by, url: .html_url, files: (.files | length), added: ([.files[].additions] | add // 0), removed: ([.files[].deletions] | add // 0)}",
+                    "{commits: .ahead_by, url: .html_url, merge_base: .merge_base_commit.sha, files: (.files | length), added: ([.files[].additions] | add // 0), removed: ([.files[].deletions] | add // 0)}",
                 ],
                 None,
             )
@@ -949,6 +951,7 @@ impl WorkingTree {
             added: json["added"].as_u64().unwrap_or(0),
             removed: json["removed"].as_u64().unwrap_or(0),
             url: text(&json["url"]),
+            merge_base: text(&json["merge_base"]),
         })
     }
 

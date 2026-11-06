@@ -22,6 +22,7 @@ use tokio::sync::Mutex;
 mod branches;
 mod commit;
 mod process;
+mod pull_text;
 mod pulls;
 mod revert;
 mod stash;
@@ -29,6 +30,7 @@ mod sync;
 
 pub use branches::{Branch, BranchTarget, Changes, GitStatus, without_credentials};
 pub use commit::Commit;
+pub use pull_text::PullRequestText;
 pub use pulls::{
     Comparison, PullRequest, PullRequestDraft, PullRequestError, PullRequestPlan, PullRequestState,
     ReviewDecision,

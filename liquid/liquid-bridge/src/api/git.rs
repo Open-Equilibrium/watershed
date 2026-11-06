@@ -10,6 +10,8 @@ use meta_harness_core::{
 use crate::api::events::BridgeFileChange;
 use crate::api::history::BridgeRunningAgent;
 use crate::api::session::{AgentSession, RUNTIME, branch_turns, open, shown, whitespace};
+use std::future::Future;
+use std::sync::PoisonError;
 
 /// The checkout's branch and how it stands against its upstream.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -293,6 +295,16 @@ pub struct BridgeComparison {
     pub removed: i64,
     /// GitHub's comparison page.
     pub url: String,
+    /// The commit head and base share, from which the Chat's model reads the commits.
+    pub merge_base: String,
+}
+
+/// A pull request's title and description as the Chat's model wrote them, to fill the editable
+/// fields.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgePullRequestText {
+    pub title: String,
+    pub body: String,
 }
 
 /// The identities a plan showed; return them unchanged when creating. `head_repository` is an
@@ -551,6 +563,7 @@ impl From<meta_harness_core::PullRequestPlan> for BridgePullRequestPlan {
                 added: count(comparison.added),
                 removed: count(comparison.removed),
                 url: comparison.url,
+                merge_base: comparison.merge_base,
             }),
             comparison_failed: plan.comparison_failed,
             base_missing: plan.base_missing,
@@ -950,6 +963,53 @@ impl AgentSession {
                 Err(error) => BridgePullRequestOutcome::failed(error),
             })
         })
+    }
+
+    /// The title and description the Chat's `model` (`provider/id`) writes about the commits
+    /// from `merge_base` to `head_commit`, through pi as the session started it; a later request
+    /// or [`AgentSession::stop_pull_request_text`] stops this one.
+    pub fn write_pull_request_text(
+        &self,
+        model: String,
+        merge_base: String,
+        head_commit: String,
+    ) -> Result<BridgePullRequestText, String> {
+        let (stop, stopped) = tokio::sync::oneshot::channel();
+        *self.writing.lock().unwrap_or_else(PoisonError::into_inner) = Some(stop);
+        let (program, args) = &self.pi;
+        RUNTIME.block_on(async {
+            // Boxed, as flutter_rust_bridge cannot parse what `pin!` expands to.
+            let mut text = Box::pin(self.checkpoints.write_pull_request_text(
+                program,
+                args,
+                &model,
+                &merge_base,
+                &head_commit,
+            ));
+            let mut stopped = stopped;
+            // Stopping drops the write, whose pi ends with it.
+            std::future::poll_fn(|context| {
+                if let std::task::Poll::Ready(text) = text.as_mut().poll(context) {
+                    return std::task::Poll::Ready(text.map_err(|error| error.to_string()));
+                }
+                std::pin::Pin::new(&mut stopped)
+                    .poll(context)
+                    .map(|_| Err("stopped".to_owned()))
+            })
+            .await
+            .map(|text| BridgePullRequestText {
+                title: text.title,
+                body: text.body,
+            })
+        })
+    }
+
+    /// Stops the pull request text being written; pi ends with it.
+    pub fn stop_pull_request_text(&self) {
+        self.writing
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
     }
 
     /// The branches of `target` on `host` GitHub lists, to choose a base from.

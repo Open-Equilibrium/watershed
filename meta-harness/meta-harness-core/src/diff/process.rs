@@ -42,6 +42,16 @@ pub(super) async fn git_bytes(
     output(git_command(dir, env, args), false, None).await
 }
 
+/// At most `limit` bytes from the start of Git's output in `dir`, and whether it went on; Git
+/// stops at the cut.
+pub(super) async fn git_start(
+    dir: &Path,
+    args: &[&str],
+    limit: u64,
+) -> Result<(Vec<u8>, bool), DiffError> {
+    cut_output(git_command(dir, &[], args), false, None, limit).await
+}
+
 /// Decodes ref identities without aliasing byte-distinct branches.
 pub(super) fn ref_text(bytes: &[u8]) -> Result<&str, DiffError> {
     std::str::from_utf8(bytes).map_err(|_| {
@@ -185,6 +195,19 @@ pub(super) async fn gh(
     output(command, false, input).await
 }
 
+/// Runs the host's pi (`program` with `args`) once in `dir` with `input` and returns what it
+/// printed; its login stays its own.
+pub(super) async fn pi_once(
+    dir: &Path,
+    program: &Path,
+    args: &[OsString],
+    input: &[u8],
+) -> Result<Vec<u8>, DiffError> {
+    let mut command = Command::new(program);
+    command.args(args).current_dir(dir);
+    output(piped(command, &[] as &[(&str, &str)]), false, Some(input)).await
+}
+
 /// Keeps Git and its credential helpers from asking on a terminal or in a window, as T3 Code
 /// does.
 pub(super) const NO_PROMPTS: [(&str, &str); 5] = [
@@ -206,10 +229,24 @@ pub(super) fn no_prompts() -> Vec<(&'static str, OsString)> {
 
 /// Runs `command` and returns at most [`MAX_OUTPUT_BYTES`] of its output.
 async fn output(
-    mut command: Command,
+    command: Command,
     missing_config: bool,
     input: Option<&[u8]>,
 ) -> Result<Vec<u8>, DiffError> {
+    match cut_output(command, missing_config, input, MAX_OUTPUT_BYTES).await? {
+        (_, true) => Err(DiffError::TooLarge),
+        (output, false) => Ok(output),
+    }
+}
+
+/// Runs `command` and returns at most `limit` bytes of its output, and whether it went on; the
+/// command stops at the cut.
+async fn cut_output(
+    mut command: Command,
+    missing_config: bool,
+    input: Option<&[u8]>,
+    limit: u64,
+) -> Result<(Vec<u8>, bool), DiffError> {
     if input.is_some() {
         command.stdin(Stdio::piped());
     }
@@ -229,12 +266,13 @@ async fn output(
         writes.spawn(async move { stdin.write_all(&input).await.map_err(unreadable) });
     }
     stdout
-        .take(MAX_OUTPUT_BYTES + 1)
+        .take(limit + 1)
         .read_to_end(&mut output)
         .await
         .map_err(unreadable)?;
-    if output.len() as u64 > MAX_OUTPUT_BYTES {
-        return Err(DiffError::TooLarge);
+    if output.len() as u64 > limit {
+        output.truncate(limit as usize);
+        return Ok((output, true));
     }
     if let Some(written) = writes.join_next().await {
         written.map_err(|error| DiffError::Io(std::io::Error::other(error)))??;
@@ -252,13 +290,13 @@ async fn output(
         .map_err(|error| DiffError::Git(error.to_string()))?;
     if !status.success() {
         if missing_config && status.code() == Some(1) && errors.is_empty() {
-            return Ok(Vec::new());
+            return Ok((Vec::new(), false));
         }
         return Err(DiffError::Git(
             String::from_utf8_lossy(&errors).trim().to_owned(),
         ));
     }
-    Ok(output)
+    Ok((output, false))
 }
 
 /// The host's `git` in `dir` with its output piped. Project settings that would run something

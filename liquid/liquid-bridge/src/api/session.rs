@@ -103,6 +103,10 @@ pub struct AgentSession {
     pub(crate) cwd: PathBuf,
     /// Stops the agent even while a request holds the session.
     stopper: std::sync::Mutex<Option<meta_harness_core::Stopper>>,
+    /// How pi started, which writes a pull request's text the same way.
+    pub(crate) pi: (PathBuf, Vec<std::ffi::OsString>),
+    /// Stops the pull request text being written, if any.
+    pub(crate) writing: std::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
 }
 
 impl AgentSession {
@@ -159,6 +163,8 @@ impl AgentSession {
             early: std::sync::Mutex::new(early),
             checkpoints,
             cwd: command.cwd,
+            pi: (command.program, command.args),
+            writing: std::sync::Mutex::new(None),
         })
     }
 

@@ -1,0 +1,211 @@
+use super::checkpoint::{Repo, run};
+use super::shell_word;
+use crate::{Checkpoints, PullRequestText};
+use std::os::unix::fs::PermissionsExt;
+use std::path::PathBuf;
+use std::time::Duration;
+
+const MODEL: &str = "anthropic/claude-test";
+
+/// A branch with one commit beyond `main` and a fake pi that logs how it ran and answers
+/// `answer`.
+struct Branch {
+    repo: Repo,
+    pi: PathBuf,
+    base: String,
+    head: String,
+}
+
+impl Branch {
+    fn new(name: &str, file: &str, text: &str) -> Self {
+        let repo = Repo::new(&format!("pr-text-{name}"));
+        repo.git(&["branch", "-M", "main"]);
+        let base = repo.git(&["rev-parse", "HEAD"]).trim().to_owned();
+        repo.git(&["switch", "-q", "-c", "feature"]);
+        repo.write(file, text);
+        repo.git(&["add", file]);
+        repo.git(&["commit", "-q", "-m", "Retry after\n\nBlocked logins wait."]);
+        let head = repo.git(&["rev-parse", "HEAD"]).trim().to_owned();
+        let pi = repo.path().with_extension("pi");
+        let _ = std::fs::remove_dir_all(&pi);
+        std::fs::create_dir_all(&pi).unwrap();
+        let branch = Self {
+            repo,
+            pi,
+            base,
+            head,
+        };
+        branch.answer(
+            "# Return 429 with Retry-After\n\nBlocked logins get 429.\n",
+            0,
+        );
+        branch
+    }
+
+    /// Makes pi print `text` and exit with `status`.
+    fn answer(&self, text: &str, status: i32) {
+        let dir = shell_word(self.pi.display());
+        std::fs::write(self.pi.join("answer"), text).unwrap();
+        let script = self.pi.join("pi");
+        std::fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\nd={dir}\npwd > \"$d/cwd\"\nls -A > \"$d/listing\"\n\
+                 for a in \"$@\"; do printf '%s\\n' \"$a\"; done > \"$d/args\"\n\
+                 cat > \"$d/input\"\ncat \"$d/answer\"\nexit {status}\n"
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    fn read(&self, name: &str) -> String {
+        std::fs::read_to_string(self.pi.join(name)).unwrap_or_default()
+    }
+
+    async fn write(&self, checkpoints: &Checkpoints) -> Result<PullRequestText, String> {
+        checkpoints
+            .write_pull_request_text(
+                &self.pi.join("pi"),
+                &["--from-settings".into()],
+                MODEL,
+                &self.base,
+                &self.head,
+            )
+            .await
+            .map_err(|error| error.to_string())
+    }
+}
+
+#[test]
+fn the_chats_model_writes_the_text_from_the_commits_and_diff_without_tools_or_project() {
+    run(async {
+        let branch = Branch::new("writes", "b.txt", "retry\n");
+        let checkpoints = Checkpoints::new(branch.repo.path());
+
+        let text = branch.write(&checkpoints).await.unwrap();
+
+        assert_eq!(text.title, "Return 429 with Retry-After");
+        assert_eq!(text.body, "Blocked logins get 429.");
+        let input = branch.read("input");
+        assert!(
+            input.contains("Retry after\n\nBlocked logins wait."),
+            "{input}"
+        );
+        assert!(input.contains("b.txt"), "{input}");
+        assert!(input.contains("+retry"), "{input}");
+        let args = branch.read("args");
+        let args: Vec<&str> = args.lines().collect();
+        assert_eq!(args[0], "--from-settings");
+        for flag in [
+            "--print",
+            "--no-session",
+            "--no-tools",
+            "--no-extensions",
+            "--no-mcp",
+            "--no-skills",
+            "--no-prompt-templates",
+            "--no-themes",
+            "--no-context-files",
+            "--no-approve",
+            "--offline",
+        ] {
+            assert!(args.contains(&flag), "{flag} missing from {args:?}");
+        }
+        let after = |flag: &str| args[args.iter().position(|arg| *arg == flag).unwrap() + 1];
+        assert_eq!(after("--provider"), "anthropic");
+        assert_eq!(after("--model"), "claude-test");
+        assert_eq!(after("--thinking"), "low");
+        // pi runs in an empty folder of its own, never in the project, which it then removes.
+        let cwd = PathBuf::from(branch.read("cwd").trim_end());
+        assert_ne!(
+            cwd.canonicalize().ok(),
+            branch.repo.path().canonicalize().ok()
+        );
+        assert_eq!(branch.read("listing"), "");
+        assert!(!cwd.exists());
+    });
+}
+
+#[test]
+fn a_long_patch_reaches_the_model_cut_at_64_kib_with_a_note() {
+    run(async {
+        let long = "x".repeat(99) + "\n";
+        let branch = Branch::new("long", "big.txt", &long.repeat(2000));
+        let checkpoints = Checkpoints::new(branch.repo.path());
+
+        branch.write(&checkpoints).await.unwrap();
+
+        let input = branch.read("input");
+        assert!(input.contains("big.txt"), "{input}");
+        assert!(input.contains("cut at 64 KiB"), "the cut is not marked");
+        let patch = input.matches(&format!("+{}", "x".repeat(99))).count();
+        assert!((600..=660).contains(&patch), "{patch} patch lines");
+    });
+}
+
+#[test]
+fn a_failing_or_empty_answer_writes_no_text() {
+    run(async {
+        let branch = Branch::new("fails", "b.txt", "retry\n");
+        let checkpoints = Checkpoints::new(branch.repo.path());
+
+        branch.answer("No API key for anthropic.", 1);
+        assert!(branch.write(&checkpoints).await.is_err());
+
+        branch.answer("\n  \n", 0);
+        assert!(branch.write(&checkpoints).await.is_err());
+    });
+}
+
+#[test]
+fn commits_that_are_not_full_ids_never_reach_git_or_pi() {
+    run(async {
+        let branch = Branch::new("ids", "b.txt", "retry\n");
+        let checkpoints = Checkpoints::new(branch.repo.path());
+
+        for (base, head) in [
+            ("main", branch.head.as_str()),
+            (branch.base.as_str(), "--output=/tmp/x"),
+        ] {
+            let result = checkpoints
+                .write_pull_request_text(&branch.pi.join("pi"), &[], MODEL, base, head)
+                .await;
+            assert!(result.is_err());
+        }
+        let result = checkpoints
+            .write_pull_request_text(
+                &branch.pi.join("pi"),
+                &[],
+                "-x/claude",
+                &branch.base,
+                &branch.head,
+            )
+            .await;
+        assert!(result.is_err());
+        assert_eq!(branch.read("args"), "");
+    });
+}
+
+#[test]
+fn a_model_that_does_not_answer_in_time_is_stopped() {
+    run(async {
+        let branch = Branch::new("slow", "b.txt", "retry\n");
+        let mut checkpoints = Checkpoints::new(branch.repo.path());
+        checkpoints.set_text_timeout(Duration::from_millis(300));
+        let dir = shell_word(branch.pi.display());
+        std::fs::write(
+            branch.pi.join("pi"),
+            format!("#!/bin/sh\npwd > {dir}/cwd\nsleep 5\necho late\n"),
+        )
+        .unwrap();
+
+        let started = std::time::Instant::now();
+        let result = branch.write(&checkpoints).await;
+
+        assert!(result.is_err());
+        assert!(started.elapsed() < Duration::from_secs(3));
+        let cwd = PathBuf::from(branch.read("cwd").trim_end());
+        assert!(!cwd.exists(), "the stopped pi's folder stays");
+    });
+}

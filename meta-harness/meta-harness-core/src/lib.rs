@@ -22,7 +22,8 @@ pub use checkpoint::{
 pub use diff::{
     Branch, BranchTarget, ChangeStatus, Changes, Commit, Comparison, DiffError, FileChange,
     GitStatus, GitTransfer, PullRequest, PullRequestDraft, PullRequestError, PullRequestPlan,
-    PullRequestState, PushConfirmation, ReviewDecision, Stash, Whitespace, without_credentials,
+    PullRequestState, PullRequestText, PushConfirmation, ReviewDecision, Stash, Whitespace,
+    without_credentials,
 };
 pub use event::{
     AgentEvent, Answer, ChangedLines, Decision, Delivery, EditChange, EditPreview, EntryKind,

@@ -8,6 +8,8 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 const BRANCH: &str = "feature/retry-after";
+/// The commit GitHub names as shared by head and base.
+const BASE: &str = "0123456789abcdef0123456789abcdef01234567";
 const LOGGED_IN: &str =
     r#"{"hosts":{"github.com":[{"state":"success","active":true,"host":"github.com"}]}}"#;
 const FORK: &str = r#"{"full_name":"bw/api","fork":true,"default_branch":"main","parent":{"full_name":"acme/api","default_branch":"main"}}"#;
@@ -75,7 +77,7 @@ impl Pushed {
                  'api --hostname github.com repos/acme/api/pulls?head=bw:feature/retry-after&state=all&per_page=100 --jq '*) cat \"$d/prs\" ;;\n\
                  'api --hostname github.com repos/bw/api/pulls?head=bw:feature/retry-after&state=all&per_page=100 --jq '*) cat \"$d/fork-prs\" ;;\n\
                  'pr view '*' --repo github.com/'*) cat \"$d/view-$3\" ;;\n\
-                 'api --hostname github.com repos/acme/api/compare/develop...bw:feature/retry-after --jq '*) echo '{{\"commits\":2,\"url\":\"https://github.com/acme/api/compare\",\"files\":3,\"added\":12,\"removed\":1}}' ;;\n\
+                 'api --hostname github.com repos/acme/api/compare/develop...bw:feature/retry-after --jq '*) echo '{{\"commits\":2,\"url\":\"https://github.com/acme/api/compare\",\"merge_base\":\"{BASE}\",\"files\":3,\"added\":12,\"removed\":1}}' ;;\n\
                  'api --hostname github.com repos/acme/api/compare/'*) echo 'gh: Not Found (HTTP 404)' >&2; exit 1 ;;\n\
                  *) echo \"unexpected: $*\" >&2; exit 9 ;;\nesac\n"
             ),
@@ -126,6 +128,7 @@ fn a_fork_targets_its_parent_and_creates_only_the_reviewed_pull_request() {
         let comparison = plan.comparison.clone().unwrap();
         assert_eq!((comparison.commits, comparison.files), (2, 3));
         assert_eq!((comparison.added, comparison.removed), (12, 1));
+        assert_eq!(comparison.merge_base, BASE);
         assert_eq!(
             (plan.subject.as_str(), plan.body.as_str()),
             ("Retry after", "Details.")

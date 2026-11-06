@@ -3,7 +3,8 @@
 use super::*;
 use crate::TurnCheckpoints;
 use crate::diff::{
-    Commit, PullRequest, PullRequestDraft, PullRequestError, PullRequestPlan, Snapshot,
+    Commit, PullRequest, PullRequestDraft, PullRequestError, PullRequestPlan, PullRequestText,
+    Snapshot,
 };
 use std::collections::BTreeMap;
 
@@ -97,6 +98,29 @@ impl Checkpoints {
         let tree = self.tree().await?;
         self.bounded(async { Ok(tree.pull_request(&self.gh).await) })
             .await?
+    }
+
+    /// The title and description `model` (`provider/id`) writes, through pi as `program` with
+    /// `args`, about the commits from `base` to `head`; it stops at its time limit or when the
+    /// checkpoints close.
+    pub async fn write_pull_request_text(
+        &self,
+        program: &Path,
+        args: &[std::ffi::OsString],
+        model: &str,
+        base: &str,
+        head: &str,
+    ) -> Result<PullRequestText, PullRequestError> {
+        let tree = self.tree().await?;
+        self.until_closed(async {
+            tokio::time::timeout(
+                self.text_timeout,
+                tree.write_pull_request_text(program, args, model, base, head),
+            )
+            .await
+            .map_err(|_| DiffError::TimedOut(self.text_timeout))
+        })
+        .await?
     }
 
     /// The branches of `target` on `host`, to choose a base from; `true` when GitHub may list
