@@ -46,7 +46,7 @@ Future<void> showPullRequestDialog(
 enum _Next { push, branch, commit }
 
 /// Where the title and description came from.
-enum _Text { commit, writing, written, failed, noModel }
+enum _Text { commit, written, failed }
 
 class _PullRequestDialog extends StatefulWidget {
   const _PullRequestDialog({required this.state, required this.device});
@@ -91,10 +91,16 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
   /// The Chat's model as `provider/id`, read when the dialog opened.
   late final String? _model = widget.state.model.value;
   _Text _text = _Text.commit;
+  bool _writing = false;
 
-  /// The commits the model last wrote for, as `mergeBase..head`.
+  /// The commits the model last wrote for, as `mergeBase..head`, and how many they were.
   String? _range;
+  int _written = 0;
   int _writes = 0;
+
+  /// Runs while Create waits after the model changed the fields, so a click meant for the
+  /// earlier text does not send unread text.
+  Timer? _settling;
 
   /// What the dialog last put in the fields; a field that differs is the user's.
   String _filledTitle = '';
@@ -113,6 +119,7 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
   @override
   void dispose() {
     _stopWriting();
+    _settling?.cancel();
     _elapsed?.cancel();
     _title.dispose();
     _body.dispose();
@@ -160,7 +167,6 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
     if (_plan == null) {
       _title.text = _filledTitle = plan.subject;
       _body.text = _filledBody = plan.body;
-      if (_model == null) _text = _Text.noModel;
       // The form replaces the reading state, whose dialog took the focus first.
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _titleFocus.requestFocus();
@@ -184,13 +190,15 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
         comparison == null ||
         comparison.commits == 0 ||
         comparison.mergeBase.isEmpty) {
+      // Text for other commits would not fit this plan.
+      _stopWriting();
       return;
     }
     final range = '${comparison.mergeBase}..${plan.identity.headCommit}';
     if (range == _range) return;
     _range = range;
     final write = ++_writes;
-    _text = _Text.writing;
+    _writing = true;
     unawaited(() async {
       BridgePullRequestText? text;
       try {
@@ -200,26 +208,41 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
       }
       if (!mounted || write != _writes) return;
       setState(() {
-        if (text == null) {
-          _text = _Text.failed;
-          return;
-        }
-        _text = _Text.written;
-        if (_title.text == _filledTitle) {
-          _title.text = _filledTitle = text.title;
-        }
-        if (_body.text == _filledBody) {
-          _body.text = _filledBody = text.body;
-        }
+        _writing = false;
+        _written = comparison.commits.toInt();
+        _text = text == null ? _Text.failed : _Text.written;
+        // Without an answer, fields that still show earlier model text show the commit again.
+        _fill(text?.title ?? plan.subject, text?.body ?? plan.body);
       });
     }());
   }
 
-  /// Stops the model writing; what it would have written is dropped.
+  /// Puts `title` and `body` in the fields the user has not edited.
+  void _fill(String title, String body) {
+    var changed = false;
+    if (_title.text == _filledTitle && title != _filledTitle) {
+      _title.text = _filledTitle = title;
+      changed = true;
+    }
+    if (_body.text == _filledBody && body != _filledBody) {
+      _body.text = _filledBody = body;
+      changed = true;
+    }
+    if (!changed) return;
+    _settling?.cancel();
+    _settling = Timer(
+      const Duration(milliseconds: 500),
+      () => setState(() => _settling = null),
+    );
+  }
+
+  /// Stops waiting for the model; what it would have written is dropped, and the same commits
+  /// may be written for again.
   void _stopWriting() {
-    if (_text != _Text.writing) return;
+    if (!_writing) return;
     _writes++;
-    _text = _Text.commit;
+    _writing = false;
+    _range = null;
     unawaited(_pulls.stopWriting().catchError((Object _) {}));
   }
 
@@ -235,6 +258,7 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
         !_reading &&
         !_stale &&
         !_creating &&
+        _settling == null &&
         plan.target != null &&
         plan.base != null &&
         !plan.baseMissing &&
@@ -380,28 +404,21 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
   }
 
   /// Where the title and description came from (mockup §2's generating and failure states).
-  Widget? _textNote(
-    BuildContext context,
-    BridgePullRequestPlan plan,
-    TextStyle faint,
-  ) {
-    final commits = plan.comparison?.commits.toInt() ?? 0;
-    return switch (_text) {
-      _Text.commit => null,
-      _Text.writing => Text(
+  Widget? _textNote(TextStyle faint) {
+    if (_writing) {
+      return Text(
         '◌ $_writer is writing the title and description… The fields stay editable.',
         style: faint,
-      ),
+      );
+    }
+    return switch (_text) {
+      _Text.commit => null,
       _Text.written => Text(
-        'Written by $_writer from ${commits == 1 ? 'the commit and its diff' : 'the $commits commits and their diff'}. Edit before creating.',
+        'Written by $_writer from ${_written == 1 ? 'the commit and its diff' : 'the $_written commits and their diff'}. Edit before creating.',
         style: faint,
       ),
       _Text.failed => WarningNotice(
         "Could not write the text with $_writer. Filled from the latest commit's subject and body instead; edit before creating.",
-      ),
-      _Text.noModel => Text(
-        "Filled from the latest commit's subject and body; the Chat has no model selected.",
-        style: faint,
       ),
     };
   }
@@ -646,7 +663,7 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
             alignLabelWithHint: true,
           ),
         ),
-        ?_textNote(context, plan, faint),
+        ?_textNote(faint),
         if (plan.uncommitted > 0)
           Text(
             '${plural(plan.uncommitted.toInt(), 'uncommitted file')} ${plan.uncommitted == 1 ? 'is' : 'are'} not part of the pull request. Commit them first if you want to include them.',

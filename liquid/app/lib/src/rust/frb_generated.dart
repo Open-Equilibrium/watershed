@@ -9970,7 +9970,7 @@ class AgentSessionImpl extends RustOpaque implements AgentSession {
     hideWhitespace: hideWhitespace,
   );
 
-  /// Stops the pull request text being written; pi ends with it.
+  /// Stops waiting for the pull request text being written.
   Future<void> stopPullRequestText() => RustLib.instance.api
       .crateApiSessionAgentSessionStopPullRequestText(that: this);
 
@@ -10071,7 +10071,7 @@ class AgentSessionImpl extends RustOpaque implements AgentSession {
 
   /// The title and description the Chat's `model` (`provider/id`) writes about the commits
   /// from `merge_base` to `head_commit`, through pi as the session started it; a later request
-  /// or [`AgentSession::stop_pull_request_text`] stops this one.
+  /// or [`AgentSession::stop_pull_request_text`] stops waiting for this one.
   Future<BridgePullRequestText> writePullRequestText({
     required String model,
     required String mergeBase,
