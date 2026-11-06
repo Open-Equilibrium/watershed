@@ -127,6 +127,9 @@ class _TableBlockState extends State<TableBlock> {
   /// Renames asked for, so only the latest refusal puts the stored name back.
   int _renames = 0;
 
+  /// The name as last read or written, which typing changes once a composition ends.
+  String _named = '';
+
   /// Reads asked for, so only the latest shows.
   int _reads = 0;
 
@@ -138,6 +141,7 @@ class _TableBlockState extends State<TableBlock> {
   void initState() {
     super.initState();
     _rows.addListener(_changed);
+    _name.addListener(_typed);
     widget.views.caret.addListener(_takeCaret);
     // Built after the caret was handed to it, as a new Table is.
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -179,8 +183,12 @@ class _TableBlockState extends State<TableBlock> {
     _nameFocus.requestFocus();
   }
 
-  /// Each change of the name is one rename; a refused one puts the stored name back.
-  void _rename(String name) {
+  /// Each change of the name, once any composition ends, is one rename; a refused one puts
+  /// the stored name back.
+  void _typed() {
+    final name = _name.text;
+    if (!_name.value.composing.isCollapsed || name == _named) return;
+    _named = name;
     final rename = ++_renames;
     unawaited(
       widget.views
@@ -197,10 +205,15 @@ class _TableBlockState extends State<TableBlock> {
             (_) {},
             onError: (Object _) {
               if (!mounted || rename != _renames) return;
-              _name.text = _database?.name ?? '';
+              _show(_database?.name ?? '');
             },
           ),
     );
+  }
+
+  void _show(String name) {
+    _named = name;
+    if (_name.text != name) _name.text = name;
   }
 
   /// Reads the name and fields, then the rows read so far.
@@ -211,8 +224,7 @@ class _TableBlockState extends State<TableBlock> {
         query: query(BridgeQueryKind.database, page: _page, block: _block),
       );
       if (!mounted || read != _reads) return;
-      final name = answer.database?.name ?? '';
-      if (!_nameFocus.hasFocus && _name.text != name) _name.text = name;
+      if (!_nameFocus.hasFocus) _show(answer.database?.name ?? '');
       setState(() => _database = answer.database);
     } on Object catch (error) {
       _report(error);
@@ -244,7 +256,6 @@ class _TableBlockState extends State<TableBlock> {
                   child: TextField(
                     controller: _name,
                     focusNode: _nameFocus,
-                    onChanged: _rename,
                     style: TextStyle(
                       fontSize: WsMetrics.fsProse,
                       fontWeight: WsMetrics.fwSemibold,

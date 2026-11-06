@@ -157,7 +157,8 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
   }
 
   /// Applies `choice` in place of what was typed for it: a style, or a Table in this line's
-  /// place. A line that ends the Page stays, empty, below the Table, so the Page goes on.
+  /// place, starting the Section the line started. A line that ends the Page stays, empty,
+  /// below the Table, so the Page goes on.
   Future<void> _choose(BlockChoice choice) async {
     _closeMenu();
     _set('', 0);
@@ -178,6 +179,19 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
         ),
         const [],
       );
+      Future<void> boundary(String view, bool starts) => views.write(
+        mutation(
+          BridgeMutationKind.setSectionBoundary,
+          page: _page,
+          view: view,
+          boundary: starts,
+        ),
+        const [],
+      );
+      if (widget.view.boundary) {
+        await boundary(added.view!, true);
+        if (last) await boundary(widget.view.id, false);
+      }
       if (!last) {
         await views.write(
           mutation(

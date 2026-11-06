@@ -249,4 +249,55 @@ void main() {
       findsOneWidget,
     );
   });
+
+  for (final last in [false, true]) {
+    testWidgets(
+      'a Table chosen in a line that starts a Section starts it instead'
+      '${last ? ', also in the last line' : ''}',
+      (tester) async {
+        await show(tester, ['Intro', '', if (!last) 'After']);
+        await type(tester, 1, '---');
+        expect(fake.views[page]![1].boundary, isTrue);
+        await type(tester, 1, '/');
+        await type(tester, 1, 'table');
+        await key(tester, LogicalKeyboardKey.enter);
+        final views = fake.views[page]!;
+        expect(views[1].kind, BridgeBlockKind.database);
+        expect(views[1].boundary, isTrue);
+        expect(views.where((view) => view.boundary), hasLength(1));
+      },
+    );
+  }
+
+  testWidgets('a Table\'s name is written once a composition ends', (
+    tester,
+  ) async {
+    await show(tester, ['']);
+    await type(tester, 0, '/');
+    await type(tester, 0, 'table');
+    await key(tester, LogicalKeyboardKey.enter);
+    int renames() => fake.applied
+        .where((applied) => applied.kind == BridgeMutationKind.renameDatabase)
+        .length;
+    for (final typed in ['n', 'ni', 'nih']) {
+      tester.testTextInput.updateEditingValue(
+        TextEditingValue(
+          text: typed,
+          selection: TextSelection.collapsed(offset: typed.length),
+          composing: TextRange(start: 0, end: typed.length),
+        ),
+      );
+      await tester.pumpAndSettle();
+    }
+    expect(renames(), 0);
+    tester.testTextInput.updateEditingValue(
+      const TextEditingValue(
+        text: '你好',
+        selection: TextSelection.collapsed(offset: 2),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(renames(), 1);
+    expect(fake.databases[fake.views[page]![0].block]!.name, '你好');
+  });
 }
