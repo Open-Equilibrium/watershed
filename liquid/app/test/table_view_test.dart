@@ -556,7 +556,8 @@ void main() {
     ]);
     await tester.tap(inTable(find.text('New')));
     await tester.pumpAndSettle();
-    expect(applied(BridgeMutationKind.addRow).single.after, 'r20');
+    final add = applied(BridgeMutationKind.addRow).single;
+    expect((add.last, add.after), (true, null), reason: 'the core places it');
     final table = fake.views[page]!.single.block;
     expect(fake.rows[table], hasLength(21));
     expect(inTable(find.text('21 rows')), findsOneWidget);
@@ -570,7 +571,7 @@ void main() {
     expect(inTable(find.textContaining('rows')), findsNothing);
     await tester.tap(inTable(find.text('New')));
     await tester.pumpAndSettle();
-    expect(applied(BridgeMutationKind.addRow).single.after, isNull);
+    expect(applied(BridgeMutationKind.addRow).single.last, isTrue);
     expect(inTable(find.text('1 row')), findsOneWidget);
   });
 
@@ -598,7 +599,7 @@ void main() {
       await tester.sendKeyEvent(LogicalKeyboardKey.enter);
       await tester.pumpAndSettle();
       final added = applied(BridgeMutationKind.addField).single;
-      expect(added.after, 'paid');
+      expect(added.last, isTrue);
       expect(added.text, 'Tip');
       expect(added.fieldKind, BridgeFieldKind.number);
       expect(panel, findsNothing);
@@ -678,12 +679,11 @@ void main() {
     await tester.pumpAndSettle();
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
-    final added = applied(BridgeMutationKind.addField).single;
-    expect(added.after, isNull);
+    expect(applied(BridgeMutationKind.addField).single.last, isTrue);
     expect(inTable(find.text('Text')), findsOneWidget);
   });
 
-  testWidgets('two quick + New add their rows in order', (tester) async {
+  testWidgets('two quick + New add both rows last', (tester) async {
     await show(tester, [_Table(_expenses)]);
     final gate = fake.gate = Completer<void>();
     fake.gatedKinds = {BridgeMutationKind.addRow};
@@ -696,9 +696,11 @@ void main() {
     await tester.pumpAndSettle();
     final table = fake.rows[fake.views[page]!.single.block]!;
     expect(table, hasLength(4));
-    final adds = applied(BridgeMutationKind.addRow).toList();
-    expect(adds.first.after, 'r2');
-    expect(adds.last.after, table[2].id, reason: 'after the row just added');
+    expect(applied(BridgeMutationKind.addRow).map((add) => add.last), [
+      true,
+      true,
+    ]);
+    expect(table.take(2).map((row) => row.id), ['r1', 'r2']);
   });
 
   testWidgets('scrolling a Table sideways closes its field panel', (
@@ -734,30 +736,6 @@ void main() {
     expect(panel, findsNothing);
   });
 
-  testWidgets('+ New right after a row was added goes after that row', (
-    tester,
-  ) async {
-    await show(tester, [_Table(_expenses)]);
-    // The Table reads its rows again only after the second click.
-    final reads = fake.deferred = [];
-    fake.deferredKinds = {BridgeQueryKind.database, BridgeQueryKind.rows};
-    await tester.tap(inTable(find.text('New')));
-    await tester.pump();
-    await tester.pump();
-    expect(applied(BridgeMutationKind.addRow), hasLength(1));
-    await tester.tap(inTable(find.text('New')));
-    await tester.pump();
-    fake.deferred = null;
-    for (final read in reads) {
-      read.complete();
-    }
-    await tester.pumpAndSettle();
-    final table = fake.rows[fake.views[page]!.single.block]!;
-    final adds = applied(BridgeMutationKind.addRow).toList();
-    expect(adds, hasLength(2));
-    expect(adds.last.after, table[2].id, reason: 'after the row just added');
-  });
-
   testWidgets('a quick second + New shows its own row', (tester) async {
     await show(tester, [
       _Table([for (var number = 1; number <= 20; number++) _named(number)]),
@@ -783,53 +761,6 @@ void main() {
     expect(inTable(find.text('22 rows')), findsOneWidget);
     final rows = tester.widget<ListView>(find.byKey(const Key('table rows')));
     expect(rows.controller!.offset, (22 - 10) * 34.0);
-  });
-
-  testWidgets('+ New before the rows are counted adds after the last', (
-    tester,
-  ) async {
-    late List<Completer<void>> reads;
-    await show(
-      tester,
-      [_Table(_expenses)],
-      before: () {
-        reads = fake.deferred = [];
-        fake.deferredKinds = {BridgeQueryKind.rows};
-      },
-    );
-    expect(inTable(find.text('New')), findsOneWidget);
-    await tester.tap(inTable(find.text('New')));
-    await tester.pump();
-    fake.deferred = null;
-    while (reads.isNotEmpty) {
-      reads.removeAt(0).complete();
-      await tester.pump();
-    }
-    await tester.pumpAndSettle();
-    expect(applied(BridgeMutationKind.addRow).single.after, 'r2');
-  });
-
-  testWidgets('a quick second field goes after the field just added', (
-    tester,
-  ) async {
-    await show(tester, [_Table(_expenses)]);
-    final reads = fake.deferred = [];
-    fake.deferredKinds = {BridgeQueryKind.database};
-    for (var time = 0; time < 2; time++) {
-      await tester.tap(inTable(find.byKey(const Key('add field'))));
-      await tester.pumpAndSettle();
-      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-      await tester.pump();
-    }
-    fake.deferred = null;
-    for (final read in reads) {
-      read.complete();
-    }
-    await tester.pumpAndSettle();
-    final adds = applied(BridgeMutationKind.addField).toList();
-    expect(adds, hasLength(2));
-    final fields = fake.databases[fake.views[page]!.single.block]!.fields;
-    expect(adds.last.after, fields[5].id, reason: 'after the field just added');
   });
 
   testWidgets('a field removed before it was read leaves + working', (
@@ -861,7 +792,6 @@ void main() {
     await tester.pumpAndSettle();
     await add();
     expect(workspace.problem.value, isNull);
-    expect(applied(BridgeMutationKind.addField).last.after, 'paid');
     expect(fake.databases[table]!.fields, hasLength(6));
   });
 
@@ -894,33 +824,8 @@ void main() {
     },
   );
 
-  testWidgets('a failed read keeps + New after the row just added', (
-    tester,
-  ) async {
-    await show(tester, [_Table(_expenses)]);
-    final table = fake.views[page]!.single.block;
-    final reads = fake.deferred = [];
-    fake.deferredKinds = {BridgeQueryKind.database};
-    await tester.tap(inTable(find.text('New')));
-    await tester.pump();
-    final added = fake.rows[table]!.last.id;
-    // The reads after the add fail, as when the bridge is briefly gone.
-    fake.refuseQueries = 'gone';
-    fake.deferred = null;
-    for (final read in reads) {
-      read.complete();
-    }
-    await tester.pumpAndSettle();
-    fake.putRows(page, table, [...fake.rows[table]!]);
-    await tester.pumpAndSettle();
-    fake.refuseQueries = null;
-    await tester.tap(inTable(find.text('New')));
-    await tester.pumpAndSettle();
-    expect(applied(BridgeMutationKind.addRow).last.after, added);
-  });
-
   testWidgets(
-    'a field added from a reopened panel goes after the one on its way',
+    'a field added from a reopened panel is added, and that panel stays',
     (tester) async {
       await show(tester, [_Table(_expenses)]);
       Future<void> open() async {
@@ -943,13 +848,11 @@ void main() {
       await tester.sendKeyEvent(LogicalKeyboardKey.enter);
       await tester.pumpAndSettle();
       final fields = fake.databases[fake.views[page]!.single.block]!.fields;
-      final adds = applied(BridgeMutationKind.addField).toList();
-      expect(adds, hasLength(2));
-      expect(adds.last.after, fields[5].id);
+      expect(fields, hasLength(7));
     },
   );
 
-  testWidgets('a field added while another is on its way goes after it', (
+  testWidgets('a field added while another is on its way is added too', (
     tester,
   ) async {
     await show(tester, [_Table(_expenses)]);
@@ -972,9 +875,7 @@ void main() {
     gate.complete();
     await tester.pumpAndSettle();
     final fields = fake.databases[fake.views[page]!.single.block]!.fields;
-    final adds = applied(BridgeMutationKind.addField).toList();
-    expect(adds, hasLength(2));
-    expect(adds.last.after, fields[5].id);
+    expect(fields, hasLength(7));
     expect(panel, findsNothing);
   });
 

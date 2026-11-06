@@ -120,32 +120,20 @@ class _TableBlockState extends State<TableBlock> {
   final _panel = OverlayPortalController();
   final _plus = LayerLink();
 
-  /// What was just added, to scroll to once it shows: rows beyond this count, a field.
-  int? _toNewRow;
+  /// Rows this Table added that no read counted yet, and the count last read, so the
+  /// rows scroll to their end as each one shows.
+  int _rowsAwaited = 0;
+  int? _rowsSeen;
 
-  /// The field the last add made, the last until a read holds it, then shown.
+  /// The field the last add made, shown once a read holds it.
   String? _fieldAdded;
 
-  /// The reads started when the last field add returned; any later one holds that field.
+  /// The reads started when the last field add returned; a later one without it means
+  /// the field went elsewhere.
   int _readsAtFieldAdd = 0;
-
-  /// Field adds, one after another, so each goes after the one before it.
-  Future<void> _fieldAdds = Future.value();
 
   /// Times the field panel opened, so an add closes only the panel it came from.
   int _panelOpened = 0;
-
-  /// + New's adds, one after another. The row one added is the last until a read counts
-  /// it, so the next goes after it.
-  Future<void> _rowAdds = Future.value();
-  String? _rowAdded;
-  int _rowAddedAt = 0;
-
-  /// The reads started when the last row add returned; any later one holds that row.
-  int _readsAtRowAdd = 0;
-
-  /// Row adds asked for and not yet returned.
-  int _rowsAdding = 0;
 
   /// Whether to scroll to the last row or field once the next build laid it out.
   var _toLastRow = false;
@@ -227,54 +215,34 @@ class _TableBlockState extends State<TableBlock> {
   void _changed() {
     if (!mounted) return;
     setState(() {});
-    if (_rowAdded != null && (_rows.count ?? 0) >= _rowAddedAt) {
-      _rowAdded = null;
-    }
-    if (_toNewRow case final before? when (_rows.count ?? 0) > before) {
-      _toNewRow = null;
+    final count = _rows.count;
+    if (count == null) return;
+    final seen = _rowsSeen ?? count;
+    _rowsSeen = count;
+    if (_rowsAwaited > 0 && count > seen) {
+      _rowsAwaited = math.max(0, _rowsAwaited - (count - seen));
       _toLastRow = true;
     }
   }
 
-  /// + New adds a row after the last one and shows it; the last row is read first if its
-  /// window was not.
-  void _addRow() {
-    _rowsAdding++;
-    _rowAdds = _rowAdds.then((_) => _addOneRow());
-  }
-
-  Future<void> _addOneRow() async {
+  /// + New adds a row last, which the core places as it applies the write (ADR-0247),
+  /// and shows it.
+  Future<void> _addRow() async {
+    // Counted before the write, as its change may arrive first.
+    _rowsAwaited++;
     try {
-      // Rows not yet counted are read first, so the row goes after the last.
-      if (_rows.count == null) await _rows.load(0);
-      final count = _rows.count;
-      if (count == null) throw 'The Table\'s rows are not read yet; try again.';
-      var after = _rowAdded;
-      if (after == null && count > 0) {
-        after = (await _rows.load(count - 1))?.id;
-        if (after == null) throw 'The Table changed; try again.';
-      }
-      // The rows a read must count to hold this one too, and to show it.
-      final at = (_rowAdded == null ? count : _rowAddedAt) + 1;
-      _toNewRow = at - 1;
-      final added = await widget.views.write(
+      await widget.views.write(
         mutation(
           BridgeMutationKind.addRow,
           page: _page,
           block: _block,
-          after: after,
+          last: true,
         ),
         const [],
       );
-      _rowAdded = added.row;
-      _rowAddedAt = at;
-      _readsAtRowAdd = _reads;
     } on Object catch (error) {
-      _toNewRow = null;
-      _rowAdded = null;
+      _rowsAwaited = math.max(0, _rowsAwaited - 1);
       _report(error);
-    } finally {
-      _rowsAdding--;
     }
   }
 
@@ -284,45 +252,28 @@ class _TableBlockState extends State<TableBlock> {
     _panel.show();
   }
 
-  /// Adds a field after the last one, once the adds before it returned, and shows it
-  /// once a read holds it; a refused one keeps the panel open.
-  Future<void> _addField(String name, BridgeFieldKind kind) {
+  /// Adds a field last (ADR-0247) and shows it once a read holds it; a refused one keeps
+  /// the panel open.
+  Future<void> _addField(String name, BridgeFieldKind kind) async {
     final opened = _panelOpened;
-    final add = _fieldAdds.then((_) => _addOneField(name, kind, opened));
-    _fieldAdds = add.then<void>((_) {}, onError: (Object _) {});
-    return add;
-  }
-
-  Future<void> _addOneField(
-    String name,
-    BridgeFieldKind kind,
-    int opened,
-  ) async {
-    final BridgeApplied added;
-    try {
-      added = await widget.views.write(
-        mutation(
-          BridgeMutationKind.addField,
-          page: _page,
-          block: _block,
-          text: name,
-          fieldKind: kind,
-          after: _fieldAdded ?? _database?.fields.lastOrNull?.id,
-        ),
-        const [],
-      );
-    } on Object {
-      // The field it went after may be gone; the next goes after the last one read.
-      _fieldAdded = null;
-      rethrow;
-    }
+    final added = await widget.views.write(
+      mutation(
+        BridgeMutationKind.addField,
+        page: _page,
+        block: _block,
+        text: name,
+        fieldKind: kind,
+        last: true,
+      ),
+      const [],
+    );
     if (!mounted) return;
     if (opened == _panelOpened) _panel.hide();
-    _fieldAdded = added.field;
-    _readsAtFieldAdd = _reads;
     if (_database?.fields.any((field) => field.id == added.field) ?? false) {
-      _fieldAdded = null;
       setState(() => _toLastField = true);
+    } else {
+      _fieldAdded = added.field;
+      _readsAtFieldAdd = _reads;
     }
   }
 
@@ -411,7 +362,7 @@ class _TableBlockState extends State<TableBlock> {
       if (!mounted || read != _reads) return;
       if (_fieldAdded case final field?) {
         // A read that holds it shows it; one begun after the add without it means the
-        // field went elsewhere, so the next add goes after the last one read.
+        // field went elsewhere, so there is nothing to show.
         if (answer.database?.fields.any((shown) => shown.id == field) ??
             false) {
           _fieldAdded = null;
@@ -429,17 +380,7 @@ class _TableBlockState extends State<TableBlock> {
       _report(error);
       return;
     }
-    final answered = await _rows.reread();
-    // Counts may not tell when rows also go elsewhere; a read begun after the last add
-    // holds its row, if it answered.
-    if (answered && mounted && _rowAdded != null && read > _readsAtRowAdd) {
-      _rowAdded = null;
-      // The scroll waits for an add still on its way.
-      if (_toNewRow != null && _rowsAdding == 0) {
-        _toNewRow = null;
-        setState(() => _toLastRow = true);
-      }
-    }
+    await _rows.reread();
   }
 
   @override
@@ -551,7 +492,7 @@ class _TableBlockState extends State<TableBlock> {
                             DateFormat.yMMMd(days),
                           ),
                         ),
-                      _NewRow(onTap: _addRow),
+                      _NewRow(onTap: () => unawaited(_addRow())),
                       if (count > 0)
                         Container(
                           height: _footerHeight,

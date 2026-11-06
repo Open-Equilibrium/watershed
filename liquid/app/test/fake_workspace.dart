@@ -220,7 +220,9 @@ class FakeWorkspace implements LiquidWorkspace {
         }
         final row = BridgeRow(id: _id(), cells: const []);
         table.insert(
-          mutation.after == null
+          mutation.last
+              ? table.length
+              : mutation.after == null
               ? 0
               : table.indexWhere((row) => row.id == mutation.after) + 1,
           row,
@@ -241,7 +243,9 @@ class FakeWorkspace implements LiquidWorkspace {
           options: const [],
         );
         fields.insert(
-          mutation.after == null
+          mutation.last
+              ? fields.length
+              : mutation.after == null
               ? 0
               : fields.indexWhere((field) => field.id == mutation.after) + 1,
           field,
