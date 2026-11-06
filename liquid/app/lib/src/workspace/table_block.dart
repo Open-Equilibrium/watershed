@@ -126,6 +126,9 @@ class _TableBlockState extends State<TableBlock> {
   /// The field the last add made, the last until a read holds it, then shown.
   String? _fieldAdded;
 
+  /// The reads started when the last field add returned; any later one holds that field.
+  int _readsAtFieldAdd = 0;
+
   /// Field adds, one after another, so each goes after the one before it.
   Future<void> _fieldAdds = Future.value();
 
@@ -316,6 +319,7 @@ class _TableBlockState extends State<TableBlock> {
     if (!mounted) return;
     if (opened == _panelOpened) _panel.hide();
     _fieldAdded = added.field;
+    _readsAtFieldAdd = _reads;
     if (_database?.fields.any((field) => field.id == added.field) ?? false) {
       _fieldAdded = null;
       setState(() => _toLastField = true);
@@ -405,11 +409,16 @@ class _TableBlockState extends State<TableBlock> {
         query: query(BridgeQueryKind.database, page: _page, block: _block),
       );
       if (!mounted || read != _reads) return;
-      if (_fieldAdded case final field?
-          when answer.database?.fields.any((shown) => shown.id == field) ??
-              false) {
-        _fieldAdded = null;
-        _toLastField = true;
+      if (_fieldAdded case final field?) {
+        // A read that holds it shows it; one begun after the add without it means the
+        // field went elsewhere, so the next add goes after the last one read.
+        if (answer.database?.fields.any((shown) => shown.id == field) ??
+            false) {
+          _fieldAdded = null;
+          _toLastField = true;
+        } else if (read > _readsAtFieldAdd) {
+          _fieldAdded = null;
+        }
       }
       if (clean && views.pending(_block) == 0 && sent == views.sent(_block)) {
         _readSent = sent;

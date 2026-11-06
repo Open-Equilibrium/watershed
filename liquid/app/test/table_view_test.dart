@@ -843,7 +843,7 @@ void main() {
       await tester.tap(inTable(find.byKey(const Key('add field'))));
       await tester.pumpAndSettle();
       await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-      await tester.pump();
+      await tester.pumpAndSettle();
     }
 
     await add();
@@ -852,16 +852,16 @@ void main() {
       name: 'Expenses',
       fields: _fields,
     );
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    await tester.pump();
-    await add();
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    fake.putRows(page, table, [...fake.rows[table]!]);
     await tester.pump();
     fake.deferred = null;
     for (final read in reads) {
       read.complete();
     }
     await tester.pumpAndSettle();
+    await add();
+    expect(workspace.problem.value, isNull);
+    expect(applied(BridgeMutationKind.addField).last.after, 'paid');
     expect(fake.databases[table]!.fields, hasLength(6));
   });
 
