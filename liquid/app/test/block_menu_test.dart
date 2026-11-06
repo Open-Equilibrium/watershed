@@ -300,4 +300,35 @@ void main() {
     expect(renames(), 1);
     expect(fake.databases[fake.views[page]![0].block]!.name, '你好');
   });
+
+  testWidgets('the Block menu opens in a list item too', (tester) async {
+    await show(tester, ['']);
+    await type(tester, 0, '- ');
+    expect(styleOf(0), BridgeTextStyle.bullet);
+    await type(tester, 0, '/');
+    expect(menu, findsOneWidget);
+    await type(tester, 0, 'quo');
+    await key(tester, LogicalKeyboardKey.enter);
+    expect(styleOf(0), BridgeTextStyle.quote);
+  });
+
+  testWidgets('a Table\'s name being composed is written when Liquid quits', (
+    tester,
+  ) async {
+    await show(tester, ['']);
+    await type(tester, 0, '/');
+    await type(tester, 0, 'table');
+    await key(tester, LogicalKeyboardKey.enter);
+    tester.testTextInput.updateEditingValue(
+      const TextEditingValue(
+        text: 'ni',
+        selection: TextSelection.collapsed(offset: 2),
+        composing: TextRange(start: 0, end: 2),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await workspace.drain();
+    await tester.pumpAndSettle();
+    expect(fake.databases[fake.views[page]![0].block]!.name, 'ni');
+  });
 }

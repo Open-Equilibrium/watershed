@@ -549,31 +549,6 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
       ),
       decoration: const InputDecoration.collapsed(hintText: null),
     );
-    // The Block menu opens under the line `/` was typed in; clicking it keeps the field's
-    // focus.
-    text = CompositedTransformTarget(
-      link: _menuAnchor,
-      child: OverlayPortal(
-        controller: _menu,
-        overlayChildBuilder: (context) => Align(
-          alignment: Alignment.topLeft,
-          child: CompositedTransformFollower(
-            link: _menuAnchor,
-            targetAnchor: Alignment.bottomLeft,
-            offset: const Offset(0, WsMetrics.space1),
-            child: TextFieldTapRegion(
-              child: BlockMenu(
-                choices: _choices,
-                chosen: _chosen,
-                onChoose: (choice) => unawaited(_choose(choice)),
-                onHover: (index) => setState(() => _chosen = index),
-              ),
-            ),
-          ),
-        ),
-        child: text,
-      ),
-    );
     Widget marker(Widget child) => SizedBox(
       width: 24,
       height: line,
@@ -639,14 +614,38 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
       ),
       _ => text,
     };
-    return Padding(
-      padding: EdgeInsets.only(top: top, bottom: WsMetrics.space1),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          if (widget.view.boundary && widget.index > 0) const SectionDivider(),
-          text,
-        ],
+    // The Block menu opens under the line `/` was typed in, and clicking it keeps the
+    // field's focus. It sits above the style's frame, which a restyle rebuilds.
+    return CompositedTransformTarget(
+      link: _menuAnchor,
+      child: OverlayPortal(
+        controller: _menu,
+        overlayChildBuilder: (context) => Align(
+          alignment: Alignment.topLeft,
+          child: CompositedTransformFollower(
+            link: _menuAnchor,
+            targetAnchor: Alignment.bottomLeft,
+            child: TextFieldTapRegion(
+              child: BlockMenu(
+                choices: _choices,
+                chosen: _chosen,
+                onChoose: (choice) => unawaited(_choose(choice)),
+                onHover: (index) => setState(() => _chosen = index),
+              ),
+            ),
+          ),
+        ),
+        child: Padding(
+          padding: EdgeInsets.only(top: top, bottom: WsMetrics.space1),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (widget.view.boundary && widget.index > 0)
+                const SectionDivider(),
+              text,
+            ],
+          ),
+        ),
       ),
     );
   }

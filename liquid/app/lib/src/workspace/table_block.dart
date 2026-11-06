@@ -142,6 +142,7 @@ class _TableBlockState extends State<TableBlock> {
     super.initState();
     _rows.addListener(_changed);
     _name.addListener(_typed);
+    _state.finishing.add(_typed);
     widget.views.caret.addListener(_takeCaret);
     // Built after the caret was handed to it, as a new Table is.
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -159,6 +160,9 @@ class _TableBlockState extends State<TableBlock> {
 
   @override
   void dispose() {
+    // A composition still open is written as it stands.
+    _write();
+    _state.finishing.remove(_typed);
     unawaited(_followed?.cancel());
     widget.views.caret.removeListener(_takeCaret);
     _rows.dispose();
@@ -186,8 +190,14 @@ class _TableBlockState extends State<TableBlock> {
   /// Each change of the name, once any composition ends, is one rename; a refused one puts
   /// the stored name back.
   void _typed() {
+    // On quitting, a composition still open is written as it stands.
+    if (!_name.value.composing.isCollapsed && !_state.quitting) return;
+    _write();
+  }
+
+  void _write() {
     final name = _name.text;
-    if (!_name.value.composing.isCollapsed || name == _named) return;
+    if (name == _named) return;
     _named = name;
     final rename = ++_renames;
     unawaited(
