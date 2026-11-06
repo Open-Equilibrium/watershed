@@ -993,4 +993,37 @@ void main() {
       expect(panel, findsOneWidget);
     },
   );
+
+  testWidgets('a refused field crossed by one added elsewhere closes the panel '
+      'whose + left', (tester) async {
+    await show(tester, [_Table(_expenses)]);
+    final table = fake.views[page]!.single.block;
+    await tester.tap(inTable(find.byKey(const Key('add field'))));
+    await tester.pumpAndSettle();
+    final gate = fake.gate = Completer<void>();
+    fake.gatedKinds = {BridgeMutationKind.addField};
+    fake.refuseKinds = {BridgeMutationKind.addField};
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    // Another device adds a field, which pushes + out of view.
+    fake.databases[table] = const BridgeDatabase(
+      name: 'Expenses',
+      fields: [
+        ..._fields,
+        BridgeField(
+          id: 'shop',
+          name: 'Shop',
+          kind: BridgeFieldKind.text,
+          options: [],
+        ),
+      ],
+    );
+    fake.putRows(page, table, [...fake.rows[table]!]);
+    await tester.pumpAndSettle();
+    fake.gate = null;
+    gate.complete();
+    await tester.pumpAndSettle();
+    expect(workspace.problem.value, isNotNull);
+    expect(panel, findsNothing);
+  });
 }

@@ -283,6 +283,8 @@ class _TableBlockState extends State<TableBlock> {
       );
     } finally {
       _fieldsWriting--;
+      // + may have left the view meanwhile; the header checks again.
+      if (mounted && _panel.isShowing) setState(() {});
     }
     if (!mounted) return;
     if (opened == _panelOpened) _panel.hide();
