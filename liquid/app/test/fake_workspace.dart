@@ -25,6 +25,9 @@ class FakeWorkspace implements LiquidWorkspace {
   /// Fails this many of the next applies.
   int refuseNext = 0;
 
+  /// Fails every apply of these kinds.
+  Set<BridgeMutationKind> refuseKinds = {};
+
   /// Holds applies until it completes.
   Completer<void>? gate;
 
@@ -58,6 +61,7 @@ class FakeWorkspace implements LiquidWorkspace {
     await gate?.future;
     if (delay case final delay?) await Future<void>.delayed(delay());
     if (refuse case final refused?) throw refused;
+    if (refuseKinds.contains(mutation.kind)) throw 'refused';
     if (refuseNext > 0) {
       refuseNext--;
       throw 'refused';

@@ -178,8 +178,9 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     final last = widget.index == (views.count ?? 0) - 1;
     // What is typed meanwhile stays in the field and becomes the Table's name.
     _adding = true;
+    final BridgeApplied added;
     try {
-      final added = await views.write(
+      added = await views.write(
         mutation(
           BridgeMutationKind.addDatabaseBlock,
           page: _page,
@@ -188,6 +189,18 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
         ),
         const [],
       );
+    } on Object {
+      // The problem shows on the Page; what was typed stays in the line.
+      if (mounted) {
+        _adding = false;
+        _typed();
+      }
+      return;
+    }
+    // Once the Table exists it takes the caret and the name, also if a later write is
+    // refused, whose problem shows on the Page.
+    var typed = '';
+    try {
       Future<void> boundary(String view, bool starts) => views.write(
         mutation(
           BridgeMutationKind.setSectionBoundary,
@@ -201,27 +214,23 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
         await boundary(added.view!, true);
         if (last) await boundary(view.id, false);
       }
-      var typed = _text.text;
       if (!last) {
+        // As the line may be gone once its View is.
+        typed = _text.text;
         await views.write(
           mutation(BridgeMutationKind.removeView, page: _page, view: view.id),
           [block],
         );
       }
+    } on Object {
+      // Shown on the Page.
+    } finally {
       if (mounted) {
         typed = _text.text;
-        if (last) {
-          _set('', 0);
-          _adding = false;
-        }
+        _set('', 0);
+        _adding = false;
       }
       views.moveCaret(Caret(added.view!, typed.length, text: typed));
-    } on Object {
-      // The problem shows on the Page; what was typed stays in the line.
-      if (mounted) {
-        _adding = false;
-        _typed();
-      }
     }
   }
 

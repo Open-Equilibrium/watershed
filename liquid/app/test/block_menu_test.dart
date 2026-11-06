@@ -455,4 +455,24 @@ void main() {
     await tester.pumpAndSettle();
     expect(name.controller!.text, 'AB');
   });
+
+  testWidgets('a Table added in a line that stays takes the caret anyway', (
+    tester,
+  ) async {
+    await show(tester, ['Intro', '', 'After']);
+    await type(tester, 1, '/');
+    await type(tester, 1, 'table');
+    fake.refuseKinds = {BridgeMutationKind.removeView};
+    await key(tester, LogicalKeyboardKey.enter);
+    expect(fake.views[page]![2].kind, BridgeBlockKind.database);
+    expect(fake.textsOf(page), ['Intro', '', 'After']);
+    final name = tester.widget<TextField>(
+      find.descendant(
+        of: find.byType(TableBlock),
+        matching: find.byType(TextField),
+      ),
+    );
+    expect(name.focusNode!.hasFocus, isTrue);
+    expect(workspace.problem.value, isNotNull);
+  });
 }
