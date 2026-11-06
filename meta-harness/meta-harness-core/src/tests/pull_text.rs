@@ -350,13 +350,20 @@ fn before_a_commit_the_model_reads_the_commits_the_base_lacks_and_the_selected_f
         assert!(!input.contains("Retry after"), "{input}");
         assert!(input.contains("+selected new file"), "{input}");
 
-        // With neither commits nor files there is nothing to describe, and pi is not asked.
+        // With neither commits nor files there is nothing to describe, and pi is not asked:
+        // without a base, or with one the branch has no commits beyond.
         std::fs::remove_file(branch.pi.join("args")).unwrap();
-        assert!(
-            draft(&branch, &checkpoints, Some("develop"), &snapshot, &[])
-                .await
-                .is_none()
-        );
+        branch
+            .repo
+            .git(&["update-ref", "refs/remotes/origin/caught-up", &branch.head]);
+        for base in ["develop", "caught-up"] {
+            assert!(
+                draft(&branch, &checkpoints, Some(base), &snapshot, &[])
+                    .await
+                    .is_none(),
+                "{base}"
+            );
+        }
         assert_eq!(branch.read("args"), "");
     });
 }

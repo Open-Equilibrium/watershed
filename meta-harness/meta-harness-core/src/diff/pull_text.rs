@@ -208,8 +208,8 @@ impl WorkingTree {
     }
 
     /// The commits HEAD has beyond the base branch `base` on the push remote, when Git has it,
-    /// else beyond its upstream, as the shared commit and HEAD; none without either, or when
-    /// they share no history.
+    /// else beyond its upstream, as the shared commit and HEAD; none without either, when they
+    /// share no history, or when HEAD has no commits beyond it.
     async fn draft_range(&self, base: Option<&str>) -> Result<Option<(String, String)>, DiffError> {
         let status = self.status().await?;
         let Some(head) = status.commit else {
@@ -227,6 +227,8 @@ impl WorkingTree {
                 continue;
             };
             match git(&self.root, &[], &["merge-base", &start, &head]).await {
+                // A branch with no commits beyond its base has none to describe.
+                Ok(shared) if self.count(shared.trim(), &head).await? == 0 => return Ok(None),
                 Ok(shared) => return Ok(Some((shared.trim().to_owned(), head))),
                 // Git says nothing when the histories share no commit.
                 Err(DiffError::Git(reason)) if reason.is_empty() => {}
