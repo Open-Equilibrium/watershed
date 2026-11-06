@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:liquid/src/rust/api/database.dart';
 import 'package:liquid/src/rust/api/workspace.dart';
 
 /// An in-memory Workspace behind the bridge's calls: areas and Page trees, with a change for
@@ -14,6 +15,10 @@ class FakeWorkspace implements LiquidWorkspace {
   final texts = <String, String>{};
   final styles = <String, BridgeTextStyle>{};
 
+  /// Each Database Block's name and fields, and its rows in order.
+  final databases = <String, BridgeDatabase>{};
+  final rows = <String, List<BridgeRow>>{};
+
   /// Fails every apply with this text.
   String? refuse;
 
@@ -25,6 +30,9 @@ class FakeWorkspace implements LiquidWorkspace {
 
   /// How long each apply takes, as a slow disk would.
   Duration Function()? delay;
+
+  /// Every query asked, in order.
+  final asked = <BridgeQuery>[];
 
   /// Fails every query with this text.
   String? refuseQueries;
@@ -155,7 +163,10 @@ class FakeWorkspace implements LiquidWorkspace {
       case BridgeMutationKind.joinTextBlock:
         final page = views[mutation.page]!;
         final at = page.indexWhere((view) => view.id == mutation.view);
-        if (at <= 0) throw 'not found';
+        // The core joins only Text Blocks.
+        if (at <= 0 || page[at - 1].kind != BridgeBlockKind.text) {
+          throw 'not found';
+        }
         if (page[at].boundary) throw 'a Section starts here';
         final above = page[at - 1].block;
         texts[above] = texts[above]! + texts.remove(page[at].block)!;
@@ -189,6 +200,36 @@ class FakeWorkspace implements LiquidWorkspace {
           BridgeResource(kind: BridgeResourceKind.views, page: mutation.page),
         );
         return BridgeApplied(action: _id());
+      case BridgeMutationKind.addDatabaseBlock:
+        final page = views.putIfAbsent(mutation.page!, () => []);
+        final view = BridgeView(
+          id: _id(),
+          block: _id(),
+          boundary: false,
+          kind: BridgeBlockKind.database,
+        );
+        databases[view.block] = BridgeDatabase(
+          name: mutation.text!,
+          fields: [
+            BridgeField(
+              id: _id(),
+              name: 'Name',
+              kind: BridgeFieldKind.text,
+              options: const [],
+            ),
+          ],
+        );
+        rows[view.block] = [];
+        page.insert(
+          mutation.after == null
+              ? 0
+              : page.indexWhere((view) => view.id == mutation.after) + 1,
+          view,
+        );
+        _changed(
+          BridgeResource(kind: BridgeResourceKind.views, page: mutation.page),
+        );
+        return BridgeApplied(action: _id(), block: view.block, view: view.id);
       default:
         throw UnimplementedError('${mutation.kind}');
     }
@@ -223,8 +264,17 @@ class FakeWorkspace implements LiquidWorkspace {
 
   /// The Page's Text Blocks' texts in order.
   List<String> textsOf(String page) => [
-    for (final view in views[page] ?? const <BridgeView>[]) texts[view.block]!,
+    for (final view in views[page] ?? const <BridgeView>[])
+      if (view.kind == BridgeBlockKind.text) texts[view.block]!,
   ];
+
+  /// Puts `rows` into the Database `block`, as writes elsewhere would.
+  void putRows(String page, String block, List<BridgeRow> rows) {
+    this.rows[block] = rows;
+    _changed(
+      BridgeResource(kind: BridgeResourceKind.block, page: page, block: block),
+    );
+  }
 
   bool _below(List<BridgePage> tree, BridgePage page, String parent) {
     for (var at = page.parent; at != null;) {
@@ -236,6 +286,7 @@ class FakeWorkspace implements LiquidWorkspace {
 
   @override
   Future<BridgeAnswer> query({required BridgeQuery query}) async {
+    asked.add(query);
     if (refuseQueries case final refused?) throw refused;
     final answer = _answer(query);
     if (deferred case final held? when deferredKinds.contains(query.kind)) {
@@ -280,8 +331,21 @@ class FakeWorkspace implements LiquidWorkspace {
         style: styles[query.block],
         rows: const [],
       ),
-      BridgeQueryKind.database || BridgeQueryKind.rows =>
-        throw UnsupportedError('the fake Workspace keeps no Databases'),
+      BridgeQueryKind.database => BridgeAnswer(
+        areas: const [],
+        pages: const [],
+        views: const [],
+        count: 0,
+        database: databases[query.block],
+        rows: const [],
+      ),
+      BridgeQueryKind.rows => BridgeAnswer(
+        areas: const [],
+        pages: const [],
+        views: const [],
+        count: rows[query.block]?.length ?? 0,
+        rows: window(rows[query.block] ?? const []),
+      ),
     };
   }
 

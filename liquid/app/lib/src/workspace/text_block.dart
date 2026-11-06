@@ -395,11 +395,12 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     return (caret - edge).abs() < 1;
   }
 
-  /// Puts the caret into the neighbouring Text Block: at the end above, at the start below.
+  /// Puts the caret into the neighbouring Text Block, past Blocks of other kinds: at the end
+  /// above, at the start below.
   bool _move(int by) {
     // The caret is the input queue's to place while the structure changes.
     if (_editor.busy) return false;
-    final neighbour = widget.views.at(widget.index + by);
+    final neighbour = widget.views.textFrom(widget.index + by, by);
     if (neighbour == null) return false;
     widget.views.caret.value = Caret(neighbour.id, by < 0 ? _end : 0);
     return true;
@@ -516,14 +517,7 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // The divider `---` leaves; tile edges show it in Arrange mode instead.
-          if (widget.view.boundary && widget.index > 0)
-            Container(
-              key: const Key('section-divider'),
-              height: 1,
-              margin: const EdgeInsets.symmetric(vertical: WsMetrics.space4),
-              color: ws.border,
-            ),
+          if (widget.view.boundary && widget.index > 0) const SectionDivider(),
           text,
         ],
       ),
@@ -545,4 +539,17 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     }
     return number;
   }
+}
+
+/// The divider `---` leaves above a View that starts a Section; tile edges show it in
+/// Arrange mode instead.
+class SectionDivider extends StatelessWidget {
+  const SectionDivider({super.key = const Key('section-divider')});
+
+  @override
+  Widget build(BuildContext context) => Container(
+    height: 1,
+    margin: const EdgeInsets.symmetric(vertical: WsMetrics.space4),
+    color: context.ws.border,
+  );
 }

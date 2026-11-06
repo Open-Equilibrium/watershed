@@ -5,10 +5,8 @@ import 'package:flutter/widgets.dart';
 import '../rust/api/workspace.dart';
 import 'follow.dart';
 import 'page_editor.dart';
+import 'windows.dart';
 import 'workspace_state.dart';
-
-/// Views read at once: a screenful and more, far below the bridge's window.
-const _chunk = 100;
 
 /// Where the caret goes once a Text Block's View is built.
 @immutable
@@ -28,19 +26,31 @@ class Caret {
   final BridgeTextStyle? style;
 }
 
-/// An open Page's Views in order, read in windows as the Page scrolls to them, never the
-/// whole order at once (client architecture rules 3 and 5). Each change rereads the count
-/// and the windows read so far. It also keeps what the Page's Text Blocks share: their
-/// styles, for numbering, and where the caret goes next.
+/// An open Page's Views in order, read in windows as the Page scrolls to them, and reread
+/// after each change. It also keeps what the Page's Text Blocks share: their styles, for
+/// numbering, and where the caret goes next.
 class PageViews extends ChangeNotifier {
-  PageViews(this.state, this.page);
+  PageViews(this.state, this.page) {
+    _views.addListener(notifyListeners);
+  }
 
   final WorkspaceState state;
   final String page;
 
+  late final _views = Windows<BridgeView>((start, limit) async {
+    final answer = await state.workspace.query(
+      query: query(
+        BridgeQueryKind.views,
+        page: page,
+        start: start,
+        limit: limit,
+      ),
+    );
+    return (answer.count, answer.views);
+  }, _report);
+
   /// How many Views the Page shows; null until first read.
-  int? get count => _count;
-  int? _count;
+  int? get count => _views.count;
 
   /// The caret's next place, taken by the Text Block it names once built.
   final caret = ValueNotifier<Caret?>(null);
@@ -48,16 +58,8 @@ class PageViews extends ChangeNotifier {
   /// The styles Text Blocks read, by Block.
   final styles = ValueNotifier<Map<String, BridgeTextStyle>>(const {});
 
-  final _chunks = <int, List<BridgeView>>{};
-  final _loading = <int, Future<void>>{};
-
-  /// Windows asked for while a reread ran, which it reads too.
-  final _wanted = <int>{};
   StreamSubscription<BridgeChange>? _followed;
-  int _generation = 0;
   bool _disposed = false;
-  bool _reading = false;
-  bool _again = false;
 
   /// False while the queue of this Page's earlier opening still writes, which its fields
   /// wait for before taking keys.
@@ -70,36 +72,29 @@ class PageViews extends ChangeNotifier {
         work.whenComplete(() {
           if (_disposed) return;
           ready.value = true;
-          unawaited(_reread());
+          unawaited(_views.reread());
         }),
       );
     }
     _followed = follow(
       state.workspace,
       BridgeResource(kind: BridgeResourceKind.views, page: page),
-    ).listen((_) => unawaited(_reread()), onError: _report);
+    ).listen((_) => unawaited(_views.reread()), onError: _report);
   }
 
   /// The View at `index`, or null outside the Page or while its window is read.
-  BridgeView? at(int index) {
-    if (index < 0 || index >= (_count ?? index + 1)) return null;
-    final chunk = index ~/ _chunk;
-    final views = _chunks[chunk];
-    if (views == null) {
-      unawaited(_load(chunk));
-      return null;
-    }
-    final at = index % _chunk;
-    return at < views.length ? views[at] : null;
-  }
+  BridgeView? at(int index) => _views.at(index);
 
   /// The position of a read View, or null.
-  int? indexOf(String view) {
-    for (final MapEntry(key: chunk, value: views) in _chunks.entries) {
-      final at = views.indexWhere((shown) => shown.id == view);
-      if (at >= 0) return chunk * _chunk + at;
+  int? indexOf(String view) => _views.indexWhere((shown) => shown.id == view);
+
+  /// The nearest Text Block's View from `index` on, going by `by`, past other kinds; null
+  /// if none is read there.
+  BridgeView? textFrom(int index, int by) {
+    for (var at = index; ; at += by) {
+      final view = _views.at(at);
+      if (view == null || view.kind == BridgeBlockKind.text) return view;
     }
-    return null;
   }
 
   /// The Page's ordered input queue (ADR-0240).
@@ -161,19 +156,15 @@ class PageViews extends ChangeNotifier {
   }
 
   /// The View at `index`, read first if its window was not.
-  Future<BridgeView?> viewAt(int index) async {
-    if (index < 0) return null;
-    final chunk = index ~/ _chunk;
-    if (!_chunks.containsKey(chunk)) await _load(chunk);
-    return at(index);
-  }
+  Future<BridgeView?> viewAt(int index) => _views.load(index);
 
   /// Reads the styles of the Text Blocks above `index` that no shown Text Block reported, as
   /// far back as a numbered run reaches, so its numbers count items out of view.
   Future<void> readRun(int index) async {
     for (var at = index - 1; at >= 0 && !_disposed; at--) {
       final view = await viewAt(at);
-      if (view == null) return;
+      // A numbered run ends at a Block of another kind.
+      if (view == null || view.kind != BridgeBlockKind.text) return;
       var style = styles.value[view.block];
       if (style == null) {
         final answer = await state.workspace.query(
@@ -191,84 +182,6 @@ class PageViews extends ChangeNotifier {
     }
   }
 
-  /// Reads one window; one the Page changed under is read again.
-  Future<void> _load(int chunk) =>
-      _loading[chunk] ??= _read(chunk)
-          .whenComplete(() => _loading.remove(chunk));
-
-  Future<void> _read(int chunk) async {
-    final generation = _generation;
-    try {
-      final answer = await state.workspace.query(
-        query: query(
-          BridgeQueryKind.views,
-          page: page,
-          start: chunk * _chunk,
-          limit: _chunk,
-        ),
-      );
-      if (_disposed) return;
-      // A reread running now reads this window too, so no order mixes with another.
-      if (_reading) {
-        _wanted.add(chunk);
-        _again = true;
-        return;
-      }
-      if (generation != _generation) {
-        // Read again once this read has left the list of running ones.
-        scheduleMicrotask(() => unawaited(_load(chunk)));
-        return;
-      }
-      _count = answer.count;
-      _chunks[chunk] = answer.views;
-      notifyListeners();
-    } on Object catch (error) {
-      _report(error);
-    }
-  }
-
-  /// Rereads the count and every window read so far, one reread at a time.
-  Future<void> _reread() async {
-    if (_reading) {
-      _again = true;
-      return;
-    }
-    _reading = true;
-    try {
-      do {
-        _again = false;
-        final generation = ++_generation;
-        final read = <int, List<BridgeView>>{};
-        var count = 0;
-        for (final chunk in {0, ..._chunks.keys, ..._wanted}) {
-          final answer = await state.workspace.query(
-            query: query(
-              BridgeQueryKind.views,
-              page: page,
-              start: chunk * _chunk,
-              limit: _chunk,
-            ),
-          );
-          count = answer.count;
-          read[chunk] = answer.views;
-        }
-        if (_disposed || generation != _generation) return;
-        // Windows read across a change may disagree; read them all again first.
-        if (_again) continue;
-        _wanted.clear();
-        _count = count;
-        _chunks
-          ..clear()
-          ..addAll(read);
-        notifyListeners();
-      } while (_again);
-    } on Object catch (error) {
-      _report(error);
-    } finally {
-      _reading = false;
-    }
-  }
-
   void _report(Object error) {
     if (!_disposed) state.problem.value = '$error';
   }
@@ -277,6 +190,7 @@ class PageViews extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     unawaited(_followed?.cancel());
+    _views.dispose();
     caret.dispose();
     styles.dispose();
     editor.lingering.dispose();

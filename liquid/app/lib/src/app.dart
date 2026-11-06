@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'agent/shell.dart';
 import 'appearance.dart';
@@ -44,6 +45,14 @@ class LiquidApp extends StatelessWidget {
         theme: liquidTheme(Brightness.light),
         darkTheme: liquidTheme(Brightness.dark),
         themeMode: chosen.theme.mode,
+        // Numbers and days read in the person's language (ADR-0246); English comes first,
+        // for a language Material does not know.
+        localizationsDelegates: GlobalMaterialLocalizations.delegates,
+        supportedLocales: [
+          const Locale('en'),
+          for (final language in kMaterialSupportedLanguages)
+            if (language != 'en') Locale(language),
+        ],
         builder: (context, child) =>
             UiScale(scale: chosen.textSize.scale, child: child!),
         home: state != null || workspace != null
