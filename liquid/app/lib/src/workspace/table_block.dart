@@ -34,6 +34,8 @@ double _width(BridgeFieldKind kind) => switch (kind) {
 /// separators and grouping; rounding comes with field formats (ADR-0242). intl itself
 /// keeps at most 18 decimals and 18 grouped digits exactly.
 String _number(NumberFormat format, double number) {
+  // The core refuses these, but a document it did not write may hold them.
+  if (!number.isFinite) return format.format(number);
   final [mantissa, ...exponent] = number.abs().toString().split('e');
   final [whole, ...fraction] = mantissa.split('.');
   var digits = whole + fraction.join();

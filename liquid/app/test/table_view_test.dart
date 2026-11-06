@@ -354,6 +354,9 @@ void main() {
         amount('r6', 1e-20),
         amount('r7', 1e20),
         amount('r8', 84),
+        // Another replica's or a damaged document may hold what the core refuses.
+        amount('r9', double.negativeInfinity),
+        amount('r10', double.nan),
       ]),
     ]);
     for (final text in [
@@ -365,6 +368,8 @@ void main() {
       '0.00000000000000000001',
       '100000000000000000000',
       '84',
+      '-∞',
+      'NaN',
     ]) {
       expect(inTable(find.text(text)), findsOneWidget, reason: text);
     }
