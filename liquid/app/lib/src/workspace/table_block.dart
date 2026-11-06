@@ -230,9 +230,9 @@ class _TableBlockState extends State<TableBlock> {
         after = (await _rows.load(count - 1))?.id;
         if (after == null) throw 'The Table changed; try again.';
       }
-      _toNewRow = count;
-      // The rows a read must count to hold this one too.
+      // The rows a read must count to hold this one too, and to show it.
       final at = (_rowAdded == null ? count : _rowAddedAt) + 1;
+      _toNewRow = at - 1;
       final added = await widget.views.write(
         mutation(
           BridgeMutationKind.addRow,

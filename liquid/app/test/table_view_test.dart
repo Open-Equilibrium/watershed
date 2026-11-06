@@ -755,4 +755,31 @@ void main() {
     expect(adds, hasLength(2));
     expect(adds.last.after, table[2].id, reason: 'after the row just added');
   });
+
+  testWidgets('a quick second + New shows its own row', (tester) async {
+    await show(tester, [
+      _Table([for (var number = 1; number <= 20; number++) _named(number)]),
+    ]);
+    // The first add's read waits until the second add is on its way.
+    final reads = fake.deferred = [];
+    fake.deferredKinds = {BridgeQueryKind.database};
+    await tester.tap(inTable(find.text('New')));
+    await tester.pump();
+    fake.deferred = null;
+    final gate = fake.gate = Completer<void>();
+    fake.gatedKinds = {BridgeMutationKind.addRow};
+    await tester.tap(inTable(find.text('New')));
+    await tester.pump();
+    for (final read in reads) {
+      read.complete();
+    }
+    await tester.pumpAndSettle();
+    expect(inTable(find.text('21 rows')), findsOneWidget);
+    fake.gate = null;
+    gate.complete();
+    await tester.pumpAndSettle();
+    expect(inTable(find.text('22 rows')), findsOneWidget);
+    final rows = tester.widget<ListView>(find.byKey(const Key('table rows')));
+    expect(rows.controller!.offset, (22 - 10) * 34.0);
+  });
 }
