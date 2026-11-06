@@ -193,6 +193,9 @@ abstract class AgentSession implements RustOpaqueInterface {
     required bool hideWhitespace,
   });
 
+  /// Stops the pull request text being written; pi ends with it.
+  Future<void> stopPullRequestText();
+
   /// The turns with checkpoints of the session stored in `path`, the open one too; none
   /// outside Git or before pi stored the session.
   Future<PlatformInt64> storedTurns({required String path});
@@ -250,6 +253,15 @@ abstract class AgentSession implements RustOpaqueInterface {
   Future<String> uncommittedPatch({
     required String path,
     required bool hideWhitespace,
+  });
+
+  /// The title and description the Chat's `model` (`provider/id`) writes about the commits
+  /// from `merge_base` to `head_commit`, through pi as the session started it; a later request
+  /// or [`AgentSession::stop_pull_request_text`] stops this one.
+  Future<BridgePullRequestText> writePullRequestText({
+    required String model,
+    required String mergeBase,
+    required String headCommit,
   });
 }
 

@@ -161,6 +161,17 @@ abstract interface class SessionBackend {
   /// The branches of `target` on GitHub, to choose a base from.
   Future<BridgePullRequestOutcome> pullRequestBases(String host, String target);
 
+  /// The title and description the Chat's `model` (`provider/id`) writes about the commits
+  /// from `mergeBase` to `headCommit`; a later request or [stopPullRequestText] stops it.
+  Future<BridgePullRequestText> writePullRequestText({
+    required String model,
+    required String mergeBase,
+    required String headCommit,
+  });
+
+  /// Stops the pull request text being written.
+  Future<void> stopPullRequestText();
+
   Future<List<BridgeModel>> models();
 
   /// The selected model as `provider/id`.
@@ -346,6 +357,20 @@ class RustSessionBackend implements SessionBackend {
     String host,
     String target,
   ) => _session.pullRequestBases(host: host, target: target);
+
+  @override
+  Future<BridgePullRequestText> writePullRequestText({
+    required String model,
+    required String mergeBase,
+    required String headCommit,
+  }) => _session.writePullRequestText(
+    model: model,
+    mergeBase: mergeBase,
+    headCommit: headCommit,
+  );
+
+  @override
+  Future<void> stopPullRequestText() => _session.stopPullRequestText();
   @override
   Future<List<BridgeModel>> models() => _session.models();
   @override

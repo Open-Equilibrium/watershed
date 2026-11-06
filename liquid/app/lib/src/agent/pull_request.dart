@@ -19,8 +19,8 @@ import 'git_actions.dart';
 import 'session_menus.dart';
 
 /// The approved "Create pull request" dialog for a pushed branch (pull request mockups §2–3).
-/// Its title and description start from the latest commit; a model writing them is a later
-/// step.
+/// Its title and description start from the latest commit, and the Chat's model rewrites the
+/// fields the user has not edited.
 Future<void> showPullRequestDialog(
   BuildContext context,
   SessionState state, {
@@ -44,6 +44,9 @@ Future<void> showPullRequestDialog(
 
 /// What the dialog hands off to when the branch needs another step first.
 enum _Next { push, branch, commit }
+
+/// Where the title and description came from.
+enum _Text { commit, writing, written, failed, noModel }
 
 class _PullRequestDialog extends StatefulWidget {
   const _PullRequestDialog({required this.state, required this.device});
@@ -85,6 +88,18 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
   bool _changed = false;
   int _reads = 0;
 
+  /// The Chat's model as `provider/id`, read when the dialog opened.
+  late final String? _model = widget.state.model.value;
+  _Text _text = _Text.commit;
+
+  /// The commits the model last wrote for, as `mergeBase..head`.
+  String? _range;
+  int _writes = 0;
+
+  /// What the dialog last put in the fields; a field that differs is the user's.
+  String _filledTitle = '';
+  String _filledBody = '';
+
   PullRequests get _pulls => widget.state.pulls;
 
   @override
@@ -97,6 +112,7 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
 
   @override
   void dispose() {
+    _stopWriting();
     _elapsed?.cancel();
     _title.dispose();
     _body.dispose();
@@ -142,8 +158,9 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
 
   void _accept(BridgePullRequestPlan plan) {
     if (_plan == null) {
-      _title.text = plan.subject;
-      _body.text = plan.body;
+      _title.text = _filledTitle = plan.subject;
+      _body.text = _filledBody = plan.body;
+      if (_model == null) _text = _Text.noModel;
       // The form replaces the reading state, whose dialog took the focus first.
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _titleFocus.requestFocus();
@@ -152,6 +169,58 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
     _plan = plan;
     _refused = null;
     _existing = plan.open;
+    _write(plan);
+  }
+
+  String get _writer => _model!.substring(_model.indexOf('/') + 1);
+
+  /// Has the Chat's model write the fields the user has not edited, once for each range of
+  /// commits.
+  void _write(BridgePullRequestPlan plan) {
+    final model = _model;
+    final comparison = plan.comparison;
+    if (model == null ||
+        plan.open != null ||
+        comparison == null ||
+        comparison.commits == 0 ||
+        comparison.mergeBase.isEmpty) {
+      return;
+    }
+    final range = '${comparison.mergeBase}..${plan.identity.headCommit}';
+    if (range == _range) return;
+    _range = range;
+    final write = ++_writes;
+    _text = _Text.writing;
+    unawaited(() async {
+      BridgePullRequestText? text;
+      try {
+        text = await _pulls.write(model, plan);
+      } on Object {
+        text = null;
+      }
+      if (!mounted || write != _writes) return;
+      setState(() {
+        if (text == null) {
+          _text = _Text.failed;
+          return;
+        }
+        _text = _Text.written;
+        if (_title.text == _filledTitle) {
+          _title.text = _filledTitle = text.title;
+        }
+        if (_body.text == _filledBody) {
+          _body.text = _filledBody = text.body;
+        }
+      });
+    }());
+  }
+
+  /// Stops the model writing; what it would have written is dropped.
+  void _stopWriting() {
+    if (_text != _Text.writing) return;
+    _writes++;
+    _text = _Text.commit;
+    unawaited(_pulls.stopWriting().catchError((Object _) {}));
   }
 
   bool get _sameBranch {
@@ -179,6 +248,7 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
     if (!_ready) return;
     final plan = _plan!;
     setState(() {
+      _stopWriting();
       _creating = true;
       _seconds = 0;
       _error = null;
@@ -307,6 +377,33 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
         ),
       ],
     );
+  }
+
+  /// Where the title and description came from (mockup §2's generating and failure states).
+  Widget? _textNote(
+    BuildContext context,
+    BridgePullRequestPlan plan,
+    TextStyle faint,
+  ) {
+    final commits = plan.comparison?.commits.toInt() ?? 0;
+    return switch (_text) {
+      _Text.commit => null,
+      _Text.writing => Text(
+        '◌ $_writer is writing the title and description… The fields stay editable.',
+        style: faint,
+      ),
+      _Text.written => Text(
+        'Written by $_writer from ${commits == 1 ? 'the commit and its diff' : 'the $commits commits and their diff'}. Edit before creating.',
+        style: faint,
+      ),
+      _Text.failed => WarningNotice(
+        "Could not write the text with $_writer. Filled from the latest commit's subject and body instead; edit before creating.",
+      ),
+      _Text.noModel => Text(
+        "Filled from the latest commit's subject and body; the Chat has no model selected.",
+        style: faint,
+      ),
+    };
   }
 
   Widget _refusal(BuildContext context, BridgePullRequestOutcome outcome) {
@@ -549,6 +646,7 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
             alignLabelWithHint: true,
           ),
         ),
+        ?_textNote(context, plan, faint),
         if (plan.uncommitted > 0)
           Text(
             '${plural(plan.uncommitted.toInt(), 'uncommitted file')} ${plan.uncommitted == 1 ? 'is' : 'are'} not part of the pull request. Commit them first if you want to include them.',

@@ -10,7 +10,7 @@ import 'history.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 // These functions are ignored because they are not marked as `pub`: `count`, `failed`, `of`, `of`, `outcome`, `running_agents`, `transfer_outcome`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`, `from`, `from`, `from`, `from`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`, `from`, `from`, `from`, `from`
 
 /// A local or remote branch.
 class BridgeBranch {
@@ -196,12 +196,16 @@ class BridgeComparison {
   /// GitHub's comparison page.
   final String url;
 
+  /// The commit head and base share, from which the Chat's model reads the commits.
+  final String mergeBase;
+
   const BridgeComparison({
     required this.commits,
     required this.files,
     required this.added,
     required this.removed,
     required this.url,
+    required this.mergeBase,
   });
 
   @override
@@ -210,7 +214,8 @@ class BridgeComparison {
       files.hashCode ^
       added.hashCode ^
       removed.hashCode ^
-      url.hashCode;
+      url.hashCode ^
+      mergeBase.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -221,7 +226,8 @@ class BridgeComparison {
           files == other.files &&
           added == other.added &&
           removed == other.removed &&
-          url == other.url;
+          url == other.url &&
+          mergeBase == other.mergeBase;
 }
 
 /// How a Git write the user asked for ended.
@@ -897,6 +903,26 @@ class BridgePullRequestPlan {
 
 /// A pull request's state on GitHub.
 enum BridgePullRequestState { open, draft, merged, closed }
+
+/// A pull request's title and description as the Chat's model wrote them, to fill the editable
+/// fields.
+class BridgePullRequestText {
+  final String title;
+  final String body;
+
+  const BridgePullRequestText({required this.title, required this.body});
+
+  @override
+  int get hashCode => title.hashCode ^ body.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgePullRequestText &&
+          runtimeType == other.runtimeType &&
+          title == other.title &&
+          body == other.body;
+}
 
 /// Exact identities returned unchanged by the default-branch confirmation dialog.
 class BridgePushConfirmation {

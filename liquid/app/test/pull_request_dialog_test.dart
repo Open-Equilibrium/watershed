@@ -453,6 +453,7 @@ void main() {
             added: 0,
             removed: 0,
             url: '',
+            mergeBase: '',
           ),
           head: 'feature/<U+202E>x',
           headBranch: 'feature/\u202ex',
@@ -593,4 +594,112 @@ void main() {
       expect(top('Create pull request…'), lessThan(top('Pull')));
     },
   );
+
+  group("the Chat's model", () {
+    TextField field(WidgetTester tester, String key) =>
+        tester.widget<TextField>(find.byKey(Key(key)));
+
+    testWidgets('writes the title and description from the pushed commits', (
+      tester,
+    ) async {
+      await show(tester);
+      state.model.value = 'anthropic/claude-opus-5-5';
+      await openDialog(tester);
+
+      expect(
+        backend.calls,
+        contains('write anthropic/claude-opus-5-5 ba5e..c0ffee'),
+      );
+      expect(
+        field(tester, 'pull-request-title').controller!.text,
+        'Return 429 when logins are blocked',
+      );
+      expect(
+        field(tester, 'pull-request-description').controller!.text,
+        'Blocked logins now wait for the window.',
+      );
+      expect(
+        find.text(
+          'Written by claude-opus-5-5 from the 2 commits and their diff. Edit before creating.',
+        ),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('keeps what the user typed while it wrote', (tester) async {
+      await show(tester);
+      state.model.value = 'anthropic/claude-opus-5-5';
+      backend.writeGate = Completer();
+      await openDialog(tester);
+      expect(
+        find.text(
+          '◌ claude-opus-5-5 is writing the title and description… The fields stay editable.',
+        ),
+        findsOneWidget,
+      );
+      expect(
+        field(tester, 'pull-request-title').controller!.text,
+        'Return 429 with Retry-After on /login',
+      );
+
+      await tester.enterText(
+        find.byKey(const Key('pull-request-title')),
+        'My title',
+      );
+      backend.writeGate!.complete(backend.written);
+      await tester.pumpAndSettle();
+
+      expect(field(tester, 'pull-request-title').controller!.text, 'My title');
+      expect(
+        field(tester, 'pull-request-description').controller!.text,
+        'Blocked logins now wait for the window.',
+      );
+    });
+
+    testWidgets('that fails leaves the latest commit and says so', (
+      tester,
+    ) async {
+      await show(tester);
+      state.model.value = 'anthropic/claude-opus-5-5';
+      backend.writeError = 'pi failed';
+      await openDialog(tester);
+
+      expect(
+        field(tester, 'pull-request-title').controller!.text,
+        'Return 429 with Retry-After on /login',
+      );
+      expect(
+        find.text(
+          "Could not write the text with claude-opus-5-5. Filled from the latest commit's subject and body instead; edit before creating.",
+        ),
+        findsOneWidget,
+      );
+      expect(button('Create pull request'), findsOneWidget);
+    });
+
+    testWidgets('stops when the dialog closes', (tester) async {
+      await show(tester);
+      state.model.value = 'anthropic/claude-opus-5-5';
+      backend.writeGate = Completer();
+      await openDialog(tester);
+
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+
+      expect(backend.calls, contains('stop writing'));
+    });
+
+    testWidgets('is not asked without one', (tester) async {
+      await show(tester);
+      await openDialog(tester);
+
+      expect(backend.calls.where((call) => call.startsWith('write')), isEmpty);
+      expect(
+        find.text(
+          "Filled from the latest commit's subject and body; the Chat has no model selected.",
+        ),
+        findsOneWidget,
+      );
+    });
+  });
 }

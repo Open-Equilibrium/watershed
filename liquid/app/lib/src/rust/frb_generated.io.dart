@@ -382,6 +382,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgePullRequestState dco_decode_bridge_pull_request_state(dynamic raw);
 
   @protected
+  BridgePullRequestText dco_decode_bridge_pull_request_text(dynamic raw);
+
+  @protected
   BridgePushConfirmation dco_decode_bridge_push_confirmation(dynamic raw);
 
   @protected
@@ -1127,6 +1130,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgePullRequestState sse_decode_bridge_pull_request_state(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgePullRequestText sse_decode_bridge_pull_request_text(
     SseDeserializer deserializer,
   );
 
@@ -2117,6 +2125,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_bridge_pull_request_state(
     BridgePullRequestState self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_pull_request_text(
+    BridgePullRequestText self,
     SseSerializer serializer,
   );
 

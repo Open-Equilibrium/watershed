@@ -571,6 +571,30 @@ class FakeBackend implements SessionBackend {
         pullRequestOutcomeOf(bases: baseBranches, moreBases: moreBases);
   }
 
+  /// What the Chat's model writes for a pull request, until set otherwise; [writeError] fails
+  /// it and [writeGate] holds it.
+  BridgePullRequestText written = const BridgePullRequestText(
+    title: 'Return 429 when logins are blocked',
+    body: 'Blocked logins now wait for the window.',
+  );
+  Object? writeError;
+  Completer<BridgePullRequestText>? writeGate;
+
+  @override
+  Future<BridgePullRequestText> writePullRequestText({
+    required String model,
+    required String mergeBase,
+    required String headCommit,
+  }) async {
+    calls.add('write $model $mergeBase..$headCommit');
+    if (writeGate case final gate?) return gate.future;
+    if (writeError case final error?) throw error;
+    return written;
+  }
+
+  @override
+  Future<void> stopPullRequestText() async => calls.add('stop writing');
+
   /// What reverting to before a turn would change.
   BridgeRevertPlan revertPlanned = revertPlanOf();
 
@@ -1039,6 +1063,7 @@ BridgePullRequestPlan planOf({
     added: 12,
     removed: 1,
     url: 'https://github.com/acme/api/compare/main...feature/retry-after',
+    mergeBase: 'ba5e',
   ),
   bool comparisonFailed = false,
   bool baseMissing = false,

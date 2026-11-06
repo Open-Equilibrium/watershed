@@ -150,6 +150,19 @@ class PullRequests {
   Future<BridgePullRequestOutcome> bases(String host, String target) =>
       _backend.pullRequestBases(host, target);
 
+  /// The title and description the Chat's `model` writes for `plan`'s commits beyond its
+  /// base; a later request or [stopWriting] stops it.
+  Future<BridgePullRequestText> write(
+    String model,
+    BridgePullRequestPlan plan,
+  ) => _backend.writePullRequestText(
+    model: model,
+    mergeBase: plan.comparison!.mergeBase,
+    headCommit: plan.identity.headCommit,
+  );
+
+  Future<void> stopWriting() => _backend.stopPullRequestText();
+
   /// Creates the reviewed pull request; a created or already open one becomes [current] while
   /// the same branch and upstream are checked out.
   Future<BridgePullRequestOutcome> create(BridgePullRequestDraft draft) async {
