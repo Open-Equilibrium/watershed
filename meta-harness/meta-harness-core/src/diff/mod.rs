@@ -5,7 +5,7 @@
 //! the background fetch, change them.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::fmt;
 use std::fs::DirBuilder;
 use std::hash::{BuildHasher, RandomState};
@@ -22,12 +22,17 @@ use tokio::sync::Mutex;
 mod branches;
 mod commit;
 mod process;
+mod pulls;
 mod revert;
 mod stash;
 mod sync;
 
 pub use branches::{Branch, BranchTarget, Changes, GitStatus, without_credentials};
 pub use commit::Commit;
+pub use pulls::{
+    Comparison, PullRequest, PullRequestDraft, PullRequestError, PullRequestPlan, PullRequestState,
+    ReviewDecision,
+};
 
 pub use stash::Stash;
 #[cfg(test)]

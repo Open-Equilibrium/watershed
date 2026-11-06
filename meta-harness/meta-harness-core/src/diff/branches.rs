@@ -32,6 +32,8 @@ pub struct GitStatus {
     pub merging: bool,
     /// Files with unresolved index conflicts.
     pub conflicts: Vec<String>,
+    /// The Git directory every worktree of the repository shares, which identifies it.
+    pub repository: String,
 }
 
 /// A local or remote branch.
@@ -108,6 +110,10 @@ impl WorkingTree {
             default_branch: None,
             merging: self.resolve("MERGE_HEAD").await?.is_some(),
             conflicts: Vec::new(),
+            repository: std::fs::canonicalize(&self.common)
+                .unwrap_or_else(|_| self.common.clone())
+                .to_string_lossy()
+                .into_owned(),
         };
         let mut records = output
             .split(|byte| *byte == 0)

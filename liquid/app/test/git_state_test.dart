@@ -593,6 +593,17 @@ void main() {
     git.stop();
   });
 
+  test('a branch that only looks like the shown one is a new status', () async {
+    backend.git = gitStatusOf(
+      branch: 'fix/<U+202E>',
+      rawBranch: 'fix/<U+202E>',
+    );
+    await git.refresh();
+    backend.git = gitStatusOf(branch: 'fix/<U+202E>', rawBranch: 'fix/\u202e');
+    await git.refresh();
+    expect(git.status.value?.rawBranch, 'fix/\u202e');
+  });
+
   test('the same stash keeps its value across reads', () async {
     backend.stashed = BridgeStash(
       current: true,

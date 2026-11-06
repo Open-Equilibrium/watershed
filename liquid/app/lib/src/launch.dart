@@ -5,6 +5,7 @@ import 'agent/sidebar.dart';
 import 'rust/api/session.dart';
 import 'rust/api/workspace.dart';
 import 'session/backend.dart';
+import 'session/branch_bases.dart';
 import 'session/session_state.dart';
 import 'workspace/workspace_state.dart';
 
@@ -28,7 +29,10 @@ String projectName(String project) =>
 /// Starts pi for the project the environment names; the start page then begins or continues a
 /// session.
 /// Without Watershed's pi extension there would be no approvals, so the app refuses to start pi.
-Future<Launch> launchFromEnvironment(Map<String, String> environment) async {
+Future<Launch> launchFromEnvironment(
+  Map<String, String> environment, {
+  BranchBases? bases,
+}) async {
   final project = environment['LIQUID_PROJECT'];
   final extension = environment['LIQUID_PI_EXTENSION'];
   // pi reads a relative extension path inside the project, which could supply its own.
@@ -65,7 +69,7 @@ Future<Launch> launchFromEnvironment(Map<String, String> environment) async {
         cwd: project,
       ),
     );
-    final state = SessionState(RustSessionBackend(session));
+    final state = SessionState(RustSessionBackend(session), bases: bases);
     // A reopened session shows its current branch right away.
     unawaited(state.loadChat());
     return Launch.session(

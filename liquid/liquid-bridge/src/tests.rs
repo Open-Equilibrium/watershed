@@ -1576,6 +1576,22 @@ fn git_remote_status_redacts_synthetic_url_credentials() {
 }
 
 #[test]
+fn git_status_keeps_the_raw_branch_behind_its_displayed_name() {
+    let repo = repository("git-raw-branch");
+    git(&repo, &["switch", "-c", "feature/\u{202e}"]);
+    let session = launch(
+        gated("IFS= read -r line || exit 0"),
+        repo.display().to_string(),
+    )
+    .unwrap();
+    let status = session.git_status().unwrap().unwrap();
+    assert!(call(session.shutdown()));
+    let _ = std::fs::remove_dir_all(repo);
+    assert_eq!(status.branch.as_deref(), Some("feature/<U+202E>"));
+    assert_eq!(status.raw_branch.as_deref(), Some("feature/\u{202e}"));
+}
+
+#[test]
 fn git_remote_transfer_display_redacts_synthetic_url_credentials() {
     use crate::api::git::BridgeGitTransfer;
     let remote = "https://fixture:placeholder@example.invalid/repo.git";
@@ -1848,4 +1864,72 @@ fn a_committed_bridge_outcome_survives_failed_inspection() {
     assert_eq!(output.stdout, b"committed\n");
     assert!(call(session.shutdown()));
     let _ = std::fs::remove_dir_all(repo);
+}
+
+#[test]
+fn pull_request_outcomes_say_what_blocks_creation_and_write_out_hidden_text() {
+    use crate::api::git::{
+        BridgePullRequest, BridgePullRequestOutcome, BridgePullRequestOutcomeKind,
+        BridgePullRequestPlan, BridgePullRequestState,
+    };
+    use meta_harness_core::PullRequestError;
+    let local = BridgePullRequestOutcome::failed(PullRequestError::NotGitHub {
+        remote: "origin".into(),
+        host: None,
+        page: None,
+    });
+    assert_eq!(local.kind, BridgePullRequestOutcomeKind::NotGitHub);
+    assert_eq!((local.remote.as_str(), local.host.as_str()), ("origin", ""));
+    let ahead = BridgePullRequestOutcome::failed(PullRequestError::NeedsPush {
+        branch: "fix/\u{202e}gnp".into(),
+        remote: "origin".into(),
+        ahead: 1,
+        first: false,
+    });
+    assert_eq!(ahead.kind, BridgePullRequestOutcomeKind::NeedsPush);
+    assert_eq!((ahead.ahead, ahead.first), (1, false));
+    assert_eq!(ahead.branch, "fix/<U+202E>gnp");
+
+    let pull = meta_harness_core::PullRequest {
+        number: 42,
+        title: "Fix \u{202e}gnp.exe".into(),
+        url: "https://github.com/acme/api/pull/42".into(),
+        state: meta_harness_core::PullRequestState::Draft,
+        repository: "acme/api".into(),
+        base: "main".into(),
+        head: "bw:feature/x".into(),
+        checks_passed: 1,
+        checks_failed: 0,
+        checks_pending: 2,
+        review: None,
+    };
+    let shown = BridgePullRequest::from(pull.clone());
+    assert_eq!(shown.state, BridgePullRequestState::Draft);
+    assert!(!shown.title.contains('\u{202e}'), "{}", shown.title);
+    assert_eq!((shown.checks_passed, shown.checks_pending), (1, 2));
+
+    // The editable title and description start from the commit as Git has it.
+    let plan = BridgePullRequestPlan::from(meta_harness_core::PullRequestPlan {
+        host: "github.com".into(),
+        head_repository: "bw/api".into(),
+        head_branch: "feature/\u{202e}x".into(),
+        head: "bw:feature/\u{202e}x".into(),
+        head_commit: "c".into(),
+        targets: vec!["acme/api".into(), "bw/api".into()],
+        parent_unknown: false,
+        target: Some("acme/api".into()),
+        default_branch: Some("main".into()),
+        base: Some("main".into()),
+        comparison: None,
+        comparison_failed: false,
+        base_missing: false,
+        open: Some(pull),
+        uncommitted: 0,
+        subject: "\u{267b}\u{fe0f} Refactor".into(),
+        body: "Joins \u{1f469}\u{200d}\u{1f4bb} and <U+ text.".into(),
+    });
+    assert_eq!(plan.subject, "\u{267b}\u{fe0f} Refactor");
+    assert_eq!(plan.body, "Joins \u{1f469}\u{200d}\u{1f4bb} and <U+ text.");
+    assert_eq!(plan.head, "bw:feature/<U+202E>x");
+    assert_eq!(plan.identity.head_branch, "feature/\u{202e}x");
 }

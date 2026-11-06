@@ -241,6 +241,10 @@ fn the_status_counts_commits_against_the_upstream_and_uncommitted_files() {
                 default_branch: Some("main".to_owned()),
                 merging: false,
                 conflicts: Vec::new(),
+                repository: std::fs::canonicalize(repo.path().join(".git"))
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned(),
             }
         );
         assert_eq!(

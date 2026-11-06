@@ -8,6 +8,7 @@ import '../rust/api/events.dart';
 import '../rust/api/git.dart';
 import '../rust/api/history.dart';
 import 'backend.dart';
+import 'branch_bases.dart';
 
 /// How often Liquid fetches the upstream's remote while a session is open, as T3 Code does
 /// (approved Git mockups).
@@ -22,9 +23,13 @@ Duration fetchWait(int failures) => failures == 0
 /// The checkout's Git state for the session header, the sidebar and the Diff tab, read again
 /// after each fetch, turn and Git write.
 class GitState {
-  GitState(this._backend, {required this.notify});
+  GitState(this._backend, {required this.notify, BranchBases? bases})
+    : _bases = bases ?? BranchBases();
 
   final SessionBackend _backend;
+
+  /// Where a branch Liquid creates records the branch it was created from.
+  final BranchBases _bases;
   final void Function(BridgeLevel level, String text) notify;
 
   /// The branch and its counts; null outside Git or before the first read.
@@ -290,11 +295,36 @@ class GitState {
   }
 
   /// Creates the branch `name` at the current commit and switches to it.
-  Future<BridgeGitOutcome?> create(String name) => _write(
-    'create the branch',
-    () => _backend.createBranch(name),
-    done: (_, _) => 'Created and switched to $name.',
-  );
+  Future<BridgeGitOutcome?> create(String name) async {
+    // Read when the write starts, after the writes queued before it.
+    BridgeGitStatus? from;
+    final outcome = await _write('create the branch', () {
+      from = status.value;
+      return _backend.createBranch(name);
+    }, done: (_, _) => 'Created and switched to $name.');
+    // Git created the branch, also when a hook failed after.
+    if ({
+      BridgeGitOutcomeKind.done,
+      BridgeGitOutcomeKind.hookFailed,
+    }.contains(outcome?.kind)) {
+      await _recordBase(from, name);
+    }
+    return outcome;
+  }
+
+  /// Remembers the branch `from` was on as the base of the new branch `name`.
+  Future<void> _recordBase(BridgeGitStatus? from, String name) async {
+    final base = from?.rawBranch;
+    if (from == null || base == null) return;
+    try {
+      await _bases.record(from.repository, name, base);
+    } on Object catch (error) {
+      notify(
+        BridgeLevel.warning,
+        'Could not remember that $name was created from ${from.branch}: $error',
+      );
+    }
+  }
 
   Future<BridgeCommitPlan>? _planRead;
   bool _openingCommit = false;
@@ -333,16 +363,32 @@ class GitState {
     String message, {
     required String snapshot,
     String? branch,
-  }) => _write(
-    'commit',
-    () => _backend.commitFiles(snapshot, paths, message, branch),
-    done: (now, outcome) {
-      final commit = outcome.commit!;
-      final text =
-          'Committed ${plural(commit.count, 'file')} on ${commit.branch}';
-      return commit.subject == null ? '$text.' : '$text: “${commit.subject}”';
-    },
-  );
+  }) async {
+    BridgeGitStatus? from;
+    final outcome = await _write(
+      'commit',
+      () {
+        from = status.value;
+        return _backend.commitFiles(snapshot, paths, message, branch);
+      },
+      done: (now, outcome) {
+        final commit = outcome.commit!;
+        final text =
+            'Committed ${plural(commit.count, 'file')} on ${commit.branch}';
+        return commit.subject == null ? '$text.' : '$text: “${commit.subject}”';
+      },
+    );
+    // The branch exists once Git created it, even when its commit failed.
+    if (branch != null &&
+        {
+          BridgeGitOutcomeKind.done,
+          BridgeGitOutcomeKind.hookChanged,
+          BridgeGitOutcomeKind.commitBranchFailed,
+        }.contains(outcome?.kind)) {
+      await _recordBase(from, branch);
+    }
+    return outcome;
+  }
 
   /// Creates Git explicitly, once at a time, after status confirmed this folder is outside it.
   Future<void> initialize() async {
@@ -636,6 +682,8 @@ bool _sameStatus(BridgeGitStatus? a, BridgeGitStatus? b) =>
     (a != null &&
         b != null &&
         a.branch == b.branch &&
+        a.rawBranch == b.rawBranch &&
+        a.repository == b.repository &&
         a.commit == b.commit &&
         a.upstream == b.upstream &&
         a.remote == b.remote &&

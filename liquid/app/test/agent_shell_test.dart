@@ -890,6 +890,50 @@ void main() {
     expect(inHeader('faux-1'), findsOneWidget);
   });
 
+  testWidgets(
+    'the PR chip sits between the branch chip and the Git action and refreshes on focus',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1600, 900));
+      backend = FakeBackend()
+        ..git = gitStatusOf(
+          branch: 'feature/retry-after',
+          upstream: 'origin/feature/retry-after',
+        )
+        ..current = pullRequestOutcomeOf(pullRequest: pullRequestOf());
+      state = SessionState(backend);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: liquidTheme(Brightness.light),
+          home: AgentShell(state: state, info: info),
+        ),
+      );
+      await tester.pumpAndSettle();
+      double left(Finder finder) => tester
+          .getTopLeft(
+            find.descendant(
+              of: find.byKey(const Key('session-header')),
+              matching: finder,
+            ),
+          )
+          .dx;
+      expect(
+        left(find.byKey(const Key('branch-chip'))),
+        lessThan(left(find.byKey(const Key('pull-request-chip')))),
+      );
+      expect(
+        left(find.byKey(const Key('pull-request-chip'))),
+        lessThan(left(find.byKey(const Key('git-next')))),
+      );
+      int reads() => backend.pullRequestReads;
+      final before = reads();
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pumpAndSettle();
+      expect(reads(), before + 1);
+      state.git.stop();
+    },
+  );
+
   testWidgets('messages start at the top and flow down', (tester) async {
     await show(tester);
     await emit(tester, event(BridgeEventKind.turnStarted));

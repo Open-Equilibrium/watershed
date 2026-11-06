@@ -8,9 +8,11 @@ import '../rust/api/git.dart';
 import '../rust/api/history.dart';
 import '../rust/api/session.dart';
 import 'backend.dart';
+import 'branch_bases.dart';
 import 'chat_history.dart';
 import 'chat_items.dart';
 import 'git_state.dart';
+import 'pull_requests.dart';
 
 export 'chat_items.dart';
 export 'git_state.dart';
@@ -37,7 +39,8 @@ const _noticeFades = Duration(seconds: 6);
 /// One agent session's state for the UI. It owns the event subscription and the backend, and
 /// releases both in [dispose] (client architecture rule 14).
 class SessionState {
-  SessionState(this._backend) {
+  SessionState(this._backend, {BranchBases? bases})
+    : _bases = bases ?? BranchBases() {
     _subscription = _backend.events().listen(_apply);
     hideWhitespace.addListener(() => unawaited(readChanges()));
     git.refreshed.addListener(() {
@@ -112,7 +115,14 @@ class SessionState {
   ValueNotifier<bool> get chatMore => _chat.more;
 
   /// The checkout's branch, its counts and its stash.
-  late final git = GitState(_backend, notify: notify);
+  late final git = GitState(_backend, notify: notify, bases: _bases);
+
+  /// Where branches Liquid creates record the branch they were created from.
+  final BranchBases _bases;
+
+  /// The branch's pull request on GitHub.
+  PullRequests get pulls => _pulls ??= PullRequests(_backend, git, _bases);
+  PullRequests? _pulls;
 
   /// Counts the changes of the session's stored history; the Trajectory reloads on each.
   final stored = ValueNotifier(0);
@@ -800,6 +810,7 @@ class SessionState {
   Future<void> dispose() async {
     _fade?.cancel();
     git.stop();
+    _pulls?.dispose();
     // The bridge's stream finishes cancelling only with its next event, which an idle agent
     // sends once it is shut down, so the agent stops first.
     final cancelled = _subscription.cancel();

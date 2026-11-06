@@ -10,6 +10,7 @@ import 'src/appearance.dart';
 import 'src/diff/diff_settings.dart';
 import 'src/launch.dart';
 import 'src/rust/frb_generated.dart';
+import 'src/session/branch_bases.dart';
 import 'src/settings_file.dart';
 import 'src/shortcuts/key_log.dart';
 import 'src/shortcuts/shortcut_store.dart';
@@ -32,7 +33,10 @@ Future<void> main() async {
     Platform.environment,
     defaultTargetPlatform,
   );
-  final launch = await launchFromEnvironment(Platform.environment);
+  final launch = await launchFromEnvironment(
+    Platform.environment,
+    bases: BranchBases(file: SettingsFile(File('$settings/git-bases.json'))),
+  );
   // Without a session the Workspace still opens; the reason stays in the terminal.
   if (launch.problem case final problem?) stderr.writeln('Liquid: $problem');
   // Beside the settings, in the data folder agents are kept out of (ADR-0229).

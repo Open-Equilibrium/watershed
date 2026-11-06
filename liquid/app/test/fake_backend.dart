@@ -302,6 +302,7 @@ class FakeBackend implements SessionBackend {
         ? null
         : BridgeGitStatus(
             branch: now.branch,
+            rawBranch: now.rawBranch,
             commit: now.commit,
             upstream: now.upstream,
             remote: now.remote,
@@ -314,6 +315,7 @@ class FakeBackend implements SessionBackend {
             defaultBranch: now.defaultBranch,
             merging: now.merging,
             conflicts: List.of(now.conflicts),
+            repository: now.repository,
           );
   }
 
@@ -335,8 +337,12 @@ class FakeBackend implements SessionBackend {
   @override
   Future<BridgeGitOutcome> createBranch(String name) async {
     calls.add('create $name');
+    onCreateBranch?.call(name);
     return outcome;
   }
+
+  /// Runs when a branch is created, as Git would switch to it.
+  void Function(String name)? onCreateBranch;
 
   BridgeCommitPlan commitPlanned = const BridgeCommitPlan(
     snapshot: 'snapshot',
@@ -506,6 +512,63 @@ class FakeBackend implements SessionBackend {
       detail: '',
       transfer: transferOf(behind: git!.behind.toInt()),
     );
+  }
+
+  /// What planning, creating and reading pull requests return, until set otherwise.
+  BridgePullRequestOutcome planned = pullRequestOutcomeOf(plan: planOf());
+  BridgePullRequestOutcome created = pullRequestOutcomeOf(
+    pullRequest: pullRequestOf(),
+  );
+  BridgePullRequestOutcome current = pullRequestOutcomeOf();
+  Completer<BridgePullRequestOutcome>? createGate;
+  Completer<BridgePullRequestOutcome>? pullRequestPlanGate;
+  Completer<BridgePullRequestOutcome>? currentGate;
+  List<BridgeName> baseBranches = const [];
+  bool moreBases = false;
+
+  /// What listing bases returns instead of [baseBranches], until cleared.
+  BridgePullRequestOutcome? basesOutcome;
+  BridgePullRequestDraft? lastDraft;
+
+  @override
+  Future<BridgePullRequestOutcome> pullRequestPlan({
+    String? target,
+    String? base,
+  }) async {
+    calls.add('plan ${target ?? '-'} ${base ?? '-'}');
+    if (pullRequestPlanGate case final gate?) return gate.future;
+    return planned;
+  }
+
+  @override
+  Future<BridgePullRequestOutcome> createPullRequest(
+    BridgePullRequestDraft draft,
+  ) async {
+    calls.add('create pull request');
+    lastDraft = draft;
+    if (createGate case final gate?) return gate.future;
+    return created;
+  }
+
+  /// Pull request reads, which follow every status read with an upstream, so they stay out
+  /// of [calls].
+  int pullRequestReads = 0;
+
+  @override
+  Future<BridgePullRequestOutcome> pullRequest() async {
+    pullRequestReads++;
+    if (currentGate case final gate?) return gate.future;
+    return current;
+  }
+
+  @override
+  Future<BridgePullRequestOutcome> pullRequestBases(
+    String host,
+    String target,
+  ) async {
+    calls.add('bases $target');
+    return basesOutcome ??
+        pullRequestOutcomeOf(bases: baseBranches, moreBases: moreBases);
   }
 
   /// What reverting to before a turn would change.
@@ -800,6 +863,7 @@ BridgeTurn turnOf(
 BridgeGitStatus gitStatusOf({
   String? commit = '1a2b3c4',
   String? branch = 'main',
+  String? rawBranch,
   String? upstream = 'origin/main',
   String? remote = 'origin',
   bool? hasRemotes,
@@ -810,8 +874,10 @@ BridgeGitStatus gitStatusOf({
   String? defaultBranch,
   bool merging = false,
   List<String> conflicts = const [],
+  String repository = '/work/api/.git',
 }) => BridgeGitStatus(
   branch: branch,
+  rawBranch: rawBranch ?? branch,
   commit: commit,
   upstream: upstream,
   remote: remote,
@@ -824,6 +890,7 @@ BridgeGitStatus gitStatusOf({
   defaultBranch: defaultBranch,
   merging: merging,
   conflicts: conflicts,
+  repository: repository,
 );
 
 BridgeGitTransfer transferOf({
@@ -898,4 +965,109 @@ BridgeCommitFile commitFileOf(
   attributionAvailable: attributionAvailable,
   edited: edited,
   stagedPartly: stagedPartly,
+);
+
+BridgePullRequestOutcome pullRequestOutcomeOf({
+  BridgePullRequestOutcomeKind kind = BridgePullRequestOutcomeKind.done,
+  BridgePullRequestPlan? plan,
+  BridgePullRequest? pullRequest,
+  List<BridgeName> bases = const [],
+  bool moreBases = false,
+  String host = '',
+  String remote = '',
+  String branch = '',
+  String upstream = '',
+  String repository = '',
+  int ahead = 0,
+  int behind = 0,
+  bool first = false,
+  String page = '',
+  String detail = '',
+}) => BridgePullRequestOutcome(
+  kind: kind,
+  plan: plan,
+  pullRequest: pullRequest,
+  bases: bases,
+  moreBases: moreBases,
+  page: page,
+  host: host,
+  remote: remote,
+  branch: branch,
+  upstream: upstream,
+  repository: repository,
+  ahead: ahead,
+  behind: behind,
+  first: first,
+  detail: detail,
+);
+
+BridgePullRequest pullRequestOf({
+  int number = 42,
+  String title = 'Return 429 with Retry-After on /login',
+  BridgePullRequestState state = BridgePullRequestState.open,
+  String head = 'feature/retry-after',
+  String base = 'main',
+  int passed = 0,
+  int failed = 0,
+  int pending = 0,
+  BridgeReviewDecision? review,
+}) => BridgePullRequest(
+  number: number,
+  title: title,
+  url: 'https://github.com/acme/api/pull/$number',
+  state: state,
+  repository: 'acme/api',
+  base: base,
+  head: head,
+  checksPassed: passed,
+  checksFailed: failed,
+  checksPending: pending,
+  review: review,
+);
+
+BridgeName nameOf(String name) => BridgeName(name: name, shown: name);
+
+BridgePullRequestPlan planOf({
+  List<String> targets = const ['acme/api'],
+  String? target = 'acme/api',
+  String head = 'feature/retry-after',
+  String? defaultBranch = 'main',
+  String? base = 'main',
+  BridgeComparison? comparison = const BridgeComparison(
+    commits: 2,
+    files: 3,
+    added: 12,
+    removed: 1,
+    url: 'https://github.com/acme/api/compare/main...feature/retry-after',
+  ),
+  bool comparisonFailed = false,
+  bool baseMissing = false,
+  bool parentUnknown = false,
+  BridgePullRequest? open,
+  int uncommitted = 0,
+  String subject = 'Return 429 with Retry-After on /login',
+  String body = 'Blocked login attempts now get 429.',
+  String commit = 'c0ffee',
+  String headBranch = 'feature/retry-after',
+}) => BridgePullRequestPlan(
+  identity: BridgePullRequestHead(
+    host: 'github.com',
+    headRepository: targets.last,
+    headBranch: headBranch,
+    headCommit: commit,
+  ),
+  host: 'github.com',
+  head: head,
+  targets: targets,
+  parentUnknown: parentUnknown,
+  target: target,
+  defaultBranch: defaultBranch == null ? null : nameOf(defaultBranch),
+  base: base == null ? null : nameOf(base),
+  comparison: comparison,
+  comparisonFailed: comparisonFailed,
+  baseMissing: baseMissing,
+  open: open,
+  uncommitted: uncommitted,
+  subject: subject,
+  body: body,
 );

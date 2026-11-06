@@ -263,15 +263,31 @@ Future<void> confirmRemoveCheckpoints(
 }
 
 /// Shows the folder at `path` in the system's file manager; a failure is reported.
-Future<void> openInFileManager(SessionState state, String path) async {
+Future<void> openInFileManager(SessionState state, String path) =>
+    _openWithSystem(state, path);
+
+/// Opens a GitHub page in the system's browser; only HTTPS pages, and a failure is reported.
+Future<void> openInBrowser(SessionState state, String url) async {
+  if (!url.startsWith('https://')) {
+    state.notify(BridgeLevel.error, 'Could not open $url: not an HTTPS page.');
+    return;
+  }
+  await _openWithSystem(state, url);
+}
+
+/// Opens `target` with the system's default application; a failure is reported.
+Future<void> _openWithSystem(SessionState state, String target) async {
   try {
     final result = await Process.run(Platform.isMacOS ? 'open' : 'xdg-open', [
-      path,
+      target,
     ]);
     if (result.exitCode != 0) {
-      state.notify(BridgeLevel.error, 'Could not open $path: ${result.stderr}');
+      state.notify(
+        BridgeLevel.error,
+        'Could not open $target: ${result.stderr}',
+      );
     }
   } on ProcessException catch (error) {
-    state.notify(BridgeLevel.error, 'Could not open $path: ${error.message}');
+    state.notify(BridgeLevel.error, 'Could not open $target: ${error.message}');
   }
 }

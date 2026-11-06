@@ -6,6 +6,7 @@ mod diff;
 mod framing;
 mod outcome;
 mod pi;
+mod pulls;
 mod session;
 mod stored;
 mod sync;
