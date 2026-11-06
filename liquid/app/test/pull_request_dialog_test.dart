@@ -752,6 +752,76 @@ void main() {
       );
     });
 
+    testWidgets('puts the commit back when a rewrite for a new base fails', (
+      tester,
+    ) async {
+      await show(tester);
+      state.model.value = 'anthropic/claude-opus-5-5';
+      backend.baseBranches = [nameOf('main'), nameOf('develop')];
+      await openDialog(tester);
+      expect(
+        field(tester, 'pull-request-title').controller!.text,
+        'Return 429 when logins are blocked',
+      );
+
+      backend.writeError = 'pi failed';
+      backend.planned = pullRequestOutcomeOf(
+        plan: planOf(
+          base: 'develop',
+          comparison: const BridgeComparison(
+            commits: 3,
+            files: 4,
+            added: 20,
+            removed: 2,
+            url: 'https://github.com/acme/api/compare/develop...feature/retry-after',
+            mergeBase: 'de7e',
+          ),
+        ),
+      );
+      await tester.tap(find.text('main').first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('develop').last);
+      await tester.pumpAndSettle();
+
+      expect(
+        field(tester, 'pull-request-title').controller!.text,
+        'Return 429 with Retry-After on /login',
+      );
+      expect(
+        find.textContaining('Could not write the text with claude-opus-5-5.'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('stops for a base without commits to describe', (tester) async {
+      await show(tester);
+      state.model.value = 'anthropic/claude-opus-5-5';
+      backend.baseBranches = [nameOf('main'), nameOf('develop')];
+      backend.writeGate = Completer();
+      await openDialog(tester);
+
+      backend.planned = pullRequestOutcomeOf(
+        plan: planOf(
+          base: 'develop',
+          comparison: const BridgeComparison(
+            commits: 0,
+            files: 0,
+            added: 0,
+            removed: 0,
+            url: '',
+            mergeBase: 'de7e',
+          ),
+        ),
+      );
+      await tester.tap(find.text('main').first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('develop').last);
+      await tester.pumpAndSettle();
+
+      expect(backend.calls, contains('stop writing'));
+      expect(find.textContaining('is writing the title'), findsNothing);
+    });
+
     testWidgets('stops when Create is pressed and sends the shown text', (
       tester,
     ) async {

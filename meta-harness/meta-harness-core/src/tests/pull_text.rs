@@ -233,8 +233,10 @@ fn a_caller_that_stops_waiting_lets_pi_end_by_itself() {
         }
 
         assert!(ended.exists(), "pi was killed");
-        tokio::time::sleep(Duration::from_millis(200)).await;
         let cwd = PathBuf::from(branch.read("cwd").trim_end());
+        while cwd.exists() && waited.elapsed() < Duration::from_secs(10) {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
         assert!(!cwd.exists(), "pi's folder stays");
     });
 }
