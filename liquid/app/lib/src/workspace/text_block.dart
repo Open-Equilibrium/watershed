@@ -73,8 +73,16 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
   var _choices = const <BlockChoice>[];
   var _chosen = 0;
 
-  /// While a Table chosen in the Block menu is added in this line's place.
+  /// While a Table chosen in the Block menu takes this line's place: what is typed stays in
+  /// the field, unsent, and becomes the Table's name once the Table takes the caret, the
+  /// person moves to another field or the line goes.
   var _adding = false;
+
+  /// The Table taking this line's place, once added.
+  BridgeApplied? _added;
+
+  /// What the line held when it went before its Table was added.
+  String? _gone;
 
   WorkspaceState get _state => widget.views.state;
   PageEditor get _editor => widget.views.editor;
@@ -110,6 +118,15 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
 
   @override
   void dispose() {
+    // What the line held while its Table was added is the Table's name, also if the
+    // Table never takes the caret.
+    if (_adding) {
+      final typed = _gone = _text.text;
+      if (_added case final added?) {
+        _name(widget.views, added, typed);
+        widget.views.naming[added.view!] = () => typed;
+      }
+    }
     // A composition still open, or anything else not yet sent, is written as it stands.
     if (!_editor.owns(this) &&
         !_adding &&
@@ -139,7 +156,10 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
   bool get focused => _focus.hasFocus;
 
   void _focusChanged() {
-    if (!_focus.hasFocus) _closeMenu();
+    if (_focus.hasFocus) return;
+    _closeMenu();
+    // A person who moved to another field keeps the caret there.
+    if (_adding && _added != null) _finish(_text.text);
   }
 
   void _closeMenu() {
@@ -176,7 +196,6 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     final views = widget.views;
     final view = widget.view;
     final last = widget.index == (views.count ?? 0) - 1;
-    // What is typed meanwhile stays in the field and becomes the Table's name.
     _adding = true;
     final BridgeApplied added;
     try {
@@ -207,14 +226,27 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
       if (mounted) {
         _adding = false;
         _typed();
+      } else if (_gone case final gone? when gone.isNotEmpty) {
+        // The line went meanwhile; what it held is its text.
+        unawaited(
+          views
+              .write(textEdit(_page, block, '', gone), [block])
+              .then<void>((_) {}, onError: (Object _) {}),
+        );
       }
       return;
     }
-    // Once the Table exists it takes the name, and the caret unless the person moved to
-    // another field meanwhile, also if a later write is refused, whose problem shows on
-    // the Page.
-    var typed = '';
-    var stayed = true;
+    _added = added;
+    if (!mounted) {
+      _name(views, added, _gone ?? '');
+    } else if (!_focus.hasFocus) {
+      _finish(_text.text);
+    } else {
+      // The Table reads the name from the line once it takes the caret.
+      views.naming[added.view!] = _handOver;
+      views.moveCaret(Caret(added.view!, 0));
+    }
+    // A refused write's problem shows on the Page; the Table stays.
     try {
       Future<void> boundary(String view, bool starts) => views.write(
         mutation(
@@ -230,9 +262,6 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
         if (last) await boundary(view.id, false);
       }
       if (!last) {
-        // As the line may be gone once its View is.
-        typed = _text.text;
-        stayed = _focus.hasFocus;
         await views.write(
           mutation(BridgeMutationKind.removeView, page: _page, view: view.id),
           [block],
@@ -240,31 +269,50 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
       }
     } on Object {
       // Shown on the Page.
-    } finally {
-      if (mounted) {
-        typed = _text.text;
-        stayed = _focus.hasFocus;
-        _set('', 0);
-        _adding = false;
-      }
-      if (stayed) {
-        views.moveCaret(Caret(added.view!, typed.length, text: typed));
-      } else if (typed.isNotEmpty) {
-        unawaited(
-          views
-              .write(
-                mutation(
-                  BridgeMutationKind.renameDatabase,
-                  page: _page,
-                  block: added.block,
-                  text: typed,
-                ),
-                [added.block!],
-              )
-              .then<void>((_) {}, onError: (Object _) {}),
-        );
-      }
     }
+  }
+
+  /// What the line holds, for the Table that took its place and now the caret.
+  String _handOver() {
+    final typed = _text.text;
+    _release();
+    return typed;
+  }
+
+  /// Gives what the line holds to its Table without the caret.
+  void _finish(String typed) {
+    final added = _added!;
+    final views = widget.views;
+    if (views.caret.value?.view == added.view) views.caret.value = null;
+    _name(views, added, typed);
+    _release();
+  }
+
+  /// Renames the Table `added` to `typed`, if anything was typed.
+  void _name(PageViews views, BridgeApplied added, String typed) {
+    views.naming.remove(added.view);
+    if (typed.isEmpty) return;
+    unawaited(
+      views
+          .write(
+            mutation(
+              BridgeMutationKind.renameDatabase,
+              page: _page,
+              block: added.block,
+              text: typed,
+            ),
+            [added.block!],
+          )
+          .then<void>((_) {}, onError: (Object _) {}),
+    );
+  }
+
+  /// The line is itself again, empty if it stays.
+  void _release() {
+    widget.views.naming.remove(_added?.view);
+    _adding = false;
+    _added = null;
+    if (mounted) _set('', 0);
   }
 
   /// ↑↓ choose in the open Block menu, ⏎ takes the choice and esc closes it.

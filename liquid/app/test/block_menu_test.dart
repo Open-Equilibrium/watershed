@@ -520,4 +520,54 @@ void main() {
     expect(field(tester, 0).focusNode!.hasFocus, isTrue);
     expect(fake.databases[fake.views[page]![1].block]!.name, 'Ex');
   });
+
+  testWidgets('the last line takes no keys until its Table took the caret', (
+    tester,
+  ) async {
+    await show(tester, ['Intro', '']);
+    await type(tester, 1, '/');
+    await type(tester, 1, 'table');
+    final gate = fake.gate = Completer<void>();
+    fake.gatedKinds = {BridgeMutationKind.addDatabaseBlock};
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    await type(tester, 1, 'E');
+    // The Page reads its Views again only after the next keys.
+    final reads = fake.deferred = [];
+    fake.deferredKinds = {BridgeQueryKind.views};
+    fake.gate = null;
+    gate.complete();
+    await tester.pump();
+    await type(tester, 1, 'x');
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    fake.deferred = null;
+    for (final read in reads) {
+      read.complete();
+    }
+    await tester.pumpAndSettle();
+    expect(fake.databases[fake.views[page]![1].block]!.name, 'Ex');
+    expect(fake.textsOf(page), ['Intro', '']);
+  });
+
+  testWidgets('a name typed while a Table is added survives the Page closing', (
+    tester,
+  ) async {
+    await show(tester, ['Intro', '']);
+    await type(tester, 1, '/');
+    await type(tester, 1, 'table');
+    final gate = fake.gate = Completer<void>();
+    fake.gatedKinds = {BridgeMutationKind.addDatabaseBlock};
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    await type(tester, 1, 'Ex');
+    final area = workspace.open.value!.area;
+    unawaited(workspace.newPage(area));
+    await tester.pump();
+    await tester.pump();
+    fake.gate = null;
+    gate.complete();
+    await tester.pumpAndSettle();
+    expect(fake.databases[fake.views[page]![1].block]!.name, 'Ex');
+  });
 }

@@ -195,8 +195,9 @@ class _TableBlockState extends State<TableBlock> {
     final caret = widget.views.caret.value;
     if (caret == null || caret.view != widget.view.id) return;
     widget.views.caret.value = null;
-    // What was typed while the Table was added is its name.
-    if (caret.text case final text? when text.isNotEmpty) {
+    // What was typed in the line it took the place of is its name.
+    final text = widget.views.naming.remove(widget.view.id)?.call() ?? '';
+    if (text.isNotEmpty) {
       _name.value = TextEditingValue(
         text: text,
         selection: TextSelection.collapsed(offset: text.length),
