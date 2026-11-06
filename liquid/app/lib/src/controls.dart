@@ -300,6 +300,7 @@ class ActionDialog extends StatelessWidget {
     this.bindings = const {},
     this.cancelled,
     this.dismiss,
+    this.dismissible = true,
   });
 
   final String title;
@@ -311,59 +312,70 @@ class ActionDialog extends StatelessWidget {
   /// The label of the button esc takes, if not Cancel or, without actions, Close.
   final String? dismiss;
 
+  /// Whether esc, the dismiss button and a click beside the dialog close it; off while
+  /// something it started must finish first.
+  final bool dismissible;
+
   @override
   Widget build(BuildContext context) => CallbackShortcuts(
     bindings: {
       ...bindings,
-      const Keys(LogicalKeyboardKey.escape).activator: () =>
-          Navigator.of(context).pop(cancelled),
+      if (dismissible)
+        const Keys(LogicalKeyboardKey.escape).activator: () =>
+            Navigator.of(context).pop(cancelled),
     },
-    child: Focus(
-      autofocus: true,
-      child: Dialog(
-        backgroundColor: context.ws.surface,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(WsMetrics.radiusXl),
-        ),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 520),
-          child: Padding(
-            padding: const EdgeInsets.all(WsMetrics.space5),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              spacing: WsMetrics.space4,
-              children: [
-                Text(
-                  title,
-                  style: Theme.of(context).textTheme.titleSmall
-                      ?.copyWith(fontWeight: WsMetrics.fwSemibold),
-                ),
-                Flexible(
-                  child: SingleChildScrollView(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      spacing: WsMetrics.space4,
-                      children: children,
+    child: PopScope(
+      canPop: dismissible,
+      child: Focus(
+        autofocus: true,
+        child: Dialog(
+          backgroundColor: context.ws.surface,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(WsMetrics.radiusXl),
+          ),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 520),
+            child: Padding(
+              padding: const EdgeInsets.all(WsMetrics.space5),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                spacing: WsMetrics.space4,
+                children: [
+                  Text(
+                    title,
+                    style: Theme.of(context).textTheme.titleSmall
+                        ?.copyWith(fontWeight: WsMetrics.fwSemibold),
+                  ),
+                  Flexible(
+                    child: SingleChildScrollView(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        spacing: WsMetrics.space4,
+                        children: children,
+                      ),
                     ),
                   ),
-                ),
-                // Long labels wrap below each other rather than overflow.
-                OverflowBar(
-                  alignment: MainAxisAlignment.spaceBetween,
-                  spacing: WsMetrics.space3,
-                  overflowSpacing: WsMetrics.space3,
-                  children: [
-                    ...actions,
-                    SecondaryButton(
-                      label: dismiss ?? (actions.isEmpty ? 'Close' : 'Cancel'),
-                      shortcut: 'esc',
-                      onPressed: () => Navigator.of(context).pop(cancelled),
-                    ),
-                  ],
-                ),
-              ],
+                  // Long labels wrap below each other rather than overflow.
+                  OverflowBar(
+                    alignment: MainAxisAlignment.spaceBetween,
+                    spacing: WsMetrics.space3,
+                    overflowSpacing: WsMetrics.space3,
+                    children: [
+                      ...actions,
+                      SecondaryButton(
+                        label:
+                            dismiss ?? (actions.isEmpty ? 'Close' : 'Cancel'),
+                        shortcut: 'esc',
+                        onPressed: dismissible
+                            ? () => Navigator.of(context).pop(cancelled)
+                            : null,
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -374,12 +386,20 @@ class ActionDialog extends StatelessWidget {
 
 /// A warning inside a dialog or menu, such as which agent holds an action up.
 class WarningNotice extends StatelessWidget {
-  const WarningNotice(this.text, {super.key, this.danger = false});
+  const WarningNotice(
+    this.text, {
+    super.key,
+    this.danger = false,
+    this.info = false,
+  });
 
   final String text;
 
   /// Something failed rather than needs attention.
   final bool danger;
+
+  /// Something to know, not to act on.
+  final bool info;
 
   @override
   Widget build(BuildContext context) {
@@ -390,13 +410,21 @@ class WarningNotice extends StatelessWidget {
         vertical: WsMetrics.space3,
       ),
       decoration: BoxDecoration(
-        color: danger ? ws.dangerSubtle : ws.warningSubtle,
+        color: info
+            ? ws.subtle
+            : danger
+            ? ws.dangerSubtle
+            : ws.warningSubtle,
         borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
       ),
       child: Text(
         text,
         style: TextStyle(
-          color: danger ? ws.danger : ws.warning,
+          color: info
+              ? ws.textMuted
+              : danger
+              ? ws.danger
+              : ws.warning,
           fontSize: WsMetrics.fsCompact,
         ),
       ),

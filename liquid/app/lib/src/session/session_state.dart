@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import '../diff/turn_scope.dart';
 import '../rust/api/events.dart';
 import '../rust/api/git.dart';
+import '../rust/api/worktrees.dart';
 import '../rust/api/history.dart';
 import '../rust/api/session.dart';
 import 'backend.dart';
@@ -132,6 +133,18 @@ class SessionState {
   final recent = ValueNotifier<List<BridgeStoredSession>>(const []);
   final models = ValueNotifier<List<BridgeModel>>(const []);
   final model = ValueNotifier<String?>(null);
+
+  /// Git's registered worktrees of the session's repository, the main checkout first.
+  Future<List<BridgeWorktree>> worktrees() => _backend.worktrees();
+
+  /// What removing the worktree at `path` would lose, or what keeps it.
+  Future<BridgeWorktreeRemoval> worktreeRemoval(String path) =>
+      _backend.worktreeRemoval(path);
+
+  /// Removes the `reviewed` worktree once a recheck finds it unchanged and removable.
+  Future<BridgeWorktreeOutcome> removeWorktree(
+    BridgeWorktreeRemoval reviewed,
+  ) => _backend.removeWorktree(reviewed);
 
   /// Reads what the start page offers, and the open session's title.
   Future<void> loadStart() async {

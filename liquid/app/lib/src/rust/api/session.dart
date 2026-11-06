@@ -10,6 +10,8 @@ import 'history.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
+import 'worktrees.dart';
+
 // These functions are ignored because they are not marked as `pub`: `answer`, `branch_turns`, `checkpoint_ids`, `checkpoint`, `checkpoints_of`, `left_unreverted`, `open`, `session_dir`, `shown`, `stored_session`, `turn_of`, `unread`, `whitespace`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `Open`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`
@@ -151,6 +153,11 @@ abstract class AgentSession implements RustOpaqueInterface {
   /// of its worktrees. Outside Git there is nothing to remove.
   Future<void> removeAllCheckpoints();
 
+  /// Removes the `reviewed` worktree once a recheck finds it unchanged and removable.
+  Future<BridgeWorktreeOutcome> removeWorktree({
+    required BridgeWorktreeRemoval reviewed,
+  });
+
   /// Moves the stashed changes `id` back into the checkout.
   Future<BridgeGitOutcome> restoreStash({required String id});
 
@@ -261,6 +268,12 @@ abstract class AgentSession implements RustOpaqueInterface {
     required String path,
     required bool hideWhitespace,
   });
+
+  /// What removing the worktree at `path` would lose, or what keeps it.
+  Future<BridgeWorktreeRemoval> worktreeRemoval({required String path});
+
+  /// Git's registered worktrees of the session's repository, the main checkout first.
+  Future<List<BridgeWorktree>> worktrees();
 
   /// As [`AgentSession::write_pull_request_text`], before a commit and push: about the commits
   /// the base branch `base` lacks, as far as Git has it, and the files at `paths` as the

@@ -7,6 +7,7 @@ import 'dart:math' as math;
 
 import 'package:liquid/src/rust/api/events.dart';
 import 'package:liquid/src/rust/api/git.dart';
+import 'package:liquid/src/rust/api/worktrees.dart';
 import 'package:liquid/src/rust/api/history.dart';
 import 'package:liquid/src/rust/api/session.dart';
 import 'package:liquid/src/session/backend.dart';
@@ -630,6 +631,36 @@ class FakeBackend implements SessionBackend {
   @override
   Future<void> stopPullRequestText() async => calls.add('stop writing');
 
+  /// Git's worktrees, the reviews of their removal by path, and what removing returns.
+  List<BridgeWorktree> worktreeList = const [];
+  Map<String, BridgeWorktreeRemoval> reviews = {};
+  BridgeWorktreeOutcome? removed;
+
+  @override
+  Future<List<BridgeWorktree>> worktrees() async {
+    calls.add('worktrees');
+    return worktreeList;
+  }
+
+  @override
+  Future<BridgeWorktreeRemoval> worktreeRemoval(String path) async {
+    calls.add('review $path');
+    return reviews[path]!;
+  }
+
+  @override
+  Future<BridgeWorktreeOutcome> removeWorktree(
+    BridgeWorktreeRemoval reviewed,
+  ) async {
+    calls.add('remove ${reviewed.worktree.path}');
+    return removed ??
+        const BridgeWorktreeOutcome(
+          kind: BridgeWorktreeOutcomeKind.done,
+          running: [],
+          detail: '',
+        );
+  }
+
   /// What reverting to before a turn would change.
   BridgeRevertPlan revertPlanned = revertPlanOf();
 
@@ -1130,4 +1161,56 @@ BridgePullRequestPlan planOf({
   uncommitted: uncommitted,
   subject: subject,
   body: body,
+);
+
+BridgeWorktree worktreeOf(
+  String path, {
+  String? branch,
+  bool main = false,
+  bool current = false,
+  bool locked = false,
+  bool missing = false,
+  bool unreadable = false,
+  List<BridgeRunningAgent> running = const [],
+}) => BridgeWorktree(
+  path: path,
+  shown: path,
+  branch: branch == null ? null : nameOf(branch),
+  main: main,
+  current: current,
+  locked: locked,
+  missing: missing,
+  unreadable: unreadable,
+  running: running,
+  sessions: [for (final _ in running) 's'],
+);
+
+BridgeWorktreeRemoval removalOf(
+  BridgeWorktree worktree, {
+  List<BridgeWorktreeFile> files = const [],
+  int ignored = 0,
+  int unpushed = 0,
+  int stranded = 0,
+  bool moreMarked = false,
+}) => BridgeWorktreeRemoval(
+  worktree: worktree,
+  head: 'c0ffee',
+  files: files,
+  moreFiles: false,
+  moreMarked: moreMarked,
+  ignored: ignored,
+  moreIgnored: false,
+  unpushed: unpushed,
+  stranded: stranded,
+  removable:
+      files.isEmpty &&
+      ignored == 0 &&
+      stranded == 0 &&
+      !moreMarked &&
+      !worktree.unreadable &&
+      worktree.running.isEmpty &&
+      !worktree.main &&
+      !worktree.current &&
+      !worktree.locked &&
+      !worktree.missing,
 );

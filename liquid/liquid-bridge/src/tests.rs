@@ -1987,3 +1987,49 @@ fn the_chats_model_writes_pull_request_text_until_stopped() {
     let _ = std::fs::remove_file(slow);
     let _ = std::fs::remove_dir_all(repo);
 }
+
+#[test]
+fn a_reviewed_worktree_is_removed_as_the_user_saw_it() {
+    use crate::api::worktrees::BridgeWorktreeOutcomeKind;
+    let repo = repository("worktrees");
+    let linked = repo.with_extension("linked");
+    let _ = std::fs::remove_dir_all(&linked);
+    git(
+        &repo,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "linked",
+            linked.to_str().unwrap(),
+        ],
+    );
+    let session = launch(
+        gated("IFS= read -r line || exit 0\n"),
+        repo.display().to_string(),
+    )
+    .unwrap();
+
+    let listed = session.worktrees().unwrap();
+    assert_eq!(listed.len(), 2);
+    assert!(listed[0].main && listed[0].current);
+    let path = listed[1].path.clone();
+    assert_eq!(listed[1].branch.as_ref().unwrap().name, "linked");
+    let review = session.worktree_removal(path.clone()).unwrap();
+    assert!(review.removable);
+
+    // A file that appears after the review keeps the worktree and asks for a new review.
+    std::fs::write(linked.join("late.txt"), "late\n").unwrap();
+    let changed = session.remove_worktree(review).unwrap();
+    assert_eq!(changed.kind, BridgeWorktreeOutcomeKind::Changed);
+    assert!(!changed.removal.as_ref().unwrap().removable);
+    std::fs::remove_file(linked.join("late.txt")).unwrap();
+
+    let review = session.worktree_removal(path).unwrap();
+    let removed = session.remove_worktree(review).unwrap();
+    assert_eq!(removed.kind, BridgeWorktreeOutcomeKind::Done);
+    assert!(!linked.exists());
+    assert!(call(session.shutdown()));
+    let _ = std::fs::remove_dir_all(repo);
+}

@@ -1,5 +1,6 @@
 import '../rust/api/events.dart';
 import '../rust/api/git.dart';
+import '../rust/api/worktrees.dart';
 import '../rust/api/history.dart';
 import '../rust/api/session.dart';
 
@@ -188,6 +189,15 @@ abstract interface class SessionBackend {
 
   /// Stops the pull request text being written.
   Future<void> stopPullRequestText();
+
+  /// Git's registered worktrees of the repository, the main checkout first.
+  Future<List<BridgeWorktree>> worktrees();
+
+  /// What removing the worktree at `path` would lose, or what keeps it.
+  Future<BridgeWorktreeRemoval> worktreeRemoval(String path);
+
+  /// Removes the `reviewed` worktree once a recheck finds it unchanged and removable.
+  Future<BridgeWorktreeOutcome> removeWorktree(BridgeWorktreeRemoval reviewed);
 
   Future<List<BridgeModel>> models();
 
@@ -407,6 +417,18 @@ class RustSessionBackend implements SessionBackend {
 
   @override
   Future<void> stopPullRequestText() => _session.stopPullRequestText();
+
+  @override
+  Future<List<BridgeWorktree>> worktrees() => _session.worktrees();
+
+  @override
+  Future<BridgeWorktreeRemoval> worktreeRemoval(String path) =>
+      _session.worktreeRemoval(path: path);
+
+  @override
+  Future<BridgeWorktreeOutcome> removeWorktree(
+    BridgeWorktreeRemoval reviewed,
+  ) => _session.removeWorktree(reviewed: reviewed);
   @override
   Future<List<BridgeModel>> models() => _session.models();
   @override

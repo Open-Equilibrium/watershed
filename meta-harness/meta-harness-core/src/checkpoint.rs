@@ -536,6 +536,56 @@ impl Checkpoints {
         self.bounded(tree.delete_references(&references)).await
     }
 
+    /// Git's registered worktrees of the project's repository, the main checkout first.
+    pub async fn worktrees(&self) -> Result<Vec<crate::Worktree>, DiffError> {
+        let tree = self.tree().await?;
+        self.bounded(tree.worktrees()).await
+    }
+
+    /// What removing the worktree Git registers at `path` would lose, or what keeps it.
+    pub async fn worktree_removal(&self, path: &str) -> Result<crate::WorktreeRemoval, DiffError> {
+        let tree = self.tree().await?;
+        self.bounded(tree.worktree_removal(path)).await
+    }
+
+    /// Removes the `reviewed` worktree with the repository held alone, so no turn runs in any
+    /// of its worktrees, and its own checkout held alone, so no Git write from another window
+    /// runs there; then a recheck must find it as reviewed and removable, and Git removes it
+    /// without force, keeping its branch. Stopping Git midway would leave a half-deleted
+    /// folder, so the removal runs to its end, as a user's Git write does; the recheck before
+    /// it runs the same checks within the time limit.
+    pub async fn remove_worktree(
+        &self,
+        reviewed: &crate::WorktreeRemoval,
+    ) -> Result<crate::WorktreeRemoved, DiffError> {
+        let tree = self.tree().await?;
+        let _alone = self.alone_everywhere(&tree).await?;
+        let recheck = || async {
+            let now = self
+                .bounded(tree.worktree_removal(&reviewed.worktree.path))
+                .await?;
+            if &now == reviewed && !now.removable() {
+                return Err(DiffError::Git(
+                    "This worktree cannot be removed.".to_owned(),
+                ));
+            }
+            Ok::<_, DiffError>((&now != reviewed).then_some(now))
+        };
+        // A worktree gone or changed since its review is shown again before its own locks are
+        // taken, which a missing folder has none of.
+        if let Some(now) = recheck().await? {
+            return Ok(crate::WorktreeRemoved::Changed(Box::new(now)));
+        }
+        let locks = self.bounded(tree.locks_of(&reviewed.worktree.path)).await?;
+        let _there = tree.checkout_at(locks).alone().await?;
+        if let Some(now) = recheck().await? {
+            return Ok(crate::WorktreeRemoved::Changed(Box::new(now)));
+        }
+        let now = reviewed;
+        tree.remove_worktree(&now.worktree.path).await?;
+        Ok(crate::WorktreeRemoved::Done)
+    }
+
     /// Holds the repository alone, so no turn runs or starts in any of its worktrees, waiting a
     /// moment for a turn that is ending; a refusal names the sessions running in its worktrees.
     async fn alone_everywhere(&self, tree: &WorkingTree) -> Result<Alone, DiffError> {

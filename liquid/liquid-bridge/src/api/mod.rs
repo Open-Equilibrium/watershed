@@ -6,3 +6,4 @@ pub mod git;
 pub mod history;
 pub mod session;
 pub mod workspace;
+pub mod worktrees;

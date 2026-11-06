@@ -614,9 +614,11 @@ class GitState {
   }
 }
 
-/// Which agents run in the checkout, such as “Fix flaky sync test” is running in this
-/// checkout.
-String whoRuns(List<BridgeRunningAgent> running) {
+/// Which agents run `where`, such as “Fix flaky sync test” is running in this checkout.
+String whoRuns(
+  List<BridgeRunningAgent> running, {
+  String where = 'in this checkout',
+}) {
   final first = running.firstOrNull;
   final name = switch ((first?.own, first?.title)) {
     (true, _) => 'This session’s agent',
@@ -624,10 +626,8 @@ String whoRuns(List<BridgeRunningAgent> running) {
     _ => 'Another agent session',
   };
   final more = running.length - 1;
-  if (more > 0) return '$name and $more more are running in this checkout';
-  return first?.own == true
-      ? '$name is running'
-      : '$name is running in this checkout';
+  if (more > 0) return '$name and $more more are running $where';
+  return first?.own == true ? '$name is running' : '$name is running $where';
 }
 
 /// What to do before trying again while `running` run.
