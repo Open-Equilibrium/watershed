@@ -8,6 +8,7 @@ import '../rust/api/workspace.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
+import 'block_menu.dart';
 import 'follow.dart';
 import 'page_editor.dart';
 import 'page_views.dart';
@@ -66,6 +67,12 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
   StreamSubscription<BridgeChange>? _followed;
   StreamSubscription<String>? _settled;
 
+  /// The Block menu `/` opens, its choices for what follows `/` and the one ⏎ takes.
+  final _menu = OverlayPortalController();
+  final _menuAnchor = LayerLink();
+  var _choices = const <BlockChoice>[];
+  var _chosen = 0;
+
   WorkspaceState get _state => widget.views.state;
   PageEditor get _editor => widget.views.editor;
   String get _page => widget.views.page;
@@ -83,6 +90,7 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     _state.finishing.add(_typed);
     widget.views.caret.addListener(_takeCaret);
     widget.views.ready.addListener(_readied);
+    _focus.addListener(_focusChanged);
     _followed = follow(
       _state.workspace,
       BridgeResource(kind: BridgeResourceKind.block, page: _page, block: block),
@@ -123,6 +131,84 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
 
   @override
   bool get focused => _focus.hasFocus;
+
+  void _focusChanged() {
+    if (!_focus.hasFocus) _closeMenu();
+  }
+
+  void _closeMenu() {
+    if (_menu.isShowing) _menu.hide();
+  }
+
+  /// Opens the Block menu once `/` is typed in an empty Text Block, filters it by what
+  /// follows, and closes it when nothing matches or the `/` is gone.
+  void _offer(String text, String stored) {
+    final opening = text == '/' && stored.isEmpty;
+    if (!opening && !_menu.isShowing) return;
+    final choices = text.startsWith('/')
+        ? blockChoicesFor(text.substring(1))
+        : const <BlockChoice>[];
+    if (choices.isEmpty) return _closeMenu();
+    setState(() {
+      _choices = choices;
+      _chosen = 0;
+    });
+    _menu.show();
+  }
+
+  /// Applies `choice` in place of what was typed for it: a style, or a Table in this line's
+  /// place. A line that ends the Page stays, empty, below the Table, so the Page goes on.
+  Future<void> _choose(BlockChoice choice) async {
+    _closeMenu();
+    _set('', 0);
+    _send('');
+    if (choice.style case final style?) {
+      if (style != _style) _restyle(style);
+      return;
+    }
+    final views = widget.views;
+    final last = widget.index == (views.count ?? 0) - 1;
+    try {
+      final added = await views.write(
+        mutation(
+          BridgeMutationKind.addDatabaseBlock,
+          page: _page,
+          after: last ? views.at(widget.index - 1)?.id : widget.view.id,
+          text: '',
+        ),
+        const [],
+      );
+      if (!last) {
+        await views.write(
+          mutation(
+            BridgeMutationKind.removeView,
+            page: _page,
+            view: widget.view.id,
+          ),
+          [block],
+        );
+      }
+      views.moveCaret(Caret(added.view!, 0));
+    } on Object {
+      // The problem shows on the Page.
+    }
+  }
+
+  /// ↑↓ choose in the open Block menu, ⏎ takes the choice and esc closes it.
+  KeyEventResult _menuKey(LogicalKeyboardKey key) {
+    switch (key) {
+      case LogicalKeyboardKey.arrowDown || LogicalKeyboardKey.arrowUp:
+        final by = key == LogicalKeyboardKey.arrowDown ? 1 : -1;
+        setState(() => _chosen = (_chosen + by) % _choices.length);
+      case LogicalKeyboardKey.enter || LogicalKeyboardKey.numpadEnter:
+        unawaited(_choose(_choices[_chosen]));
+      case LogicalKeyboardKey.escape:
+        _closeMenu();
+      default:
+        return KeyEventResult.ignored;
+    }
+    return KeyEventResult.handled;
+  }
 
   void _report(Object error) {
     if (mounted) _state.problem.value = '$error';
@@ -273,6 +359,7 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
       return;
     }
     _send(text);
+    _offer(text, stored);
   }
 
   /// Sends the change from the stored text to `text` as one edit.
@@ -317,6 +404,7 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
         !keys.isAltPressed;
     if (!plain) return KeyEventResult.ignored;
     if (_editor.isSource(this)) return _editor.queue(this, event);
+    if (_menu.isShowing) return _menuKey(event.logicalKey);
     // While another Text Block's change of structure runs, this field types and deletes as
     // usual, and its own ⏎ or ⌫ at the start joins the queue behind that change.
     final selection = _text.selection;
@@ -446,6 +534,31 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
         decoration: done ? TextDecoration.lineThrough : null,
       ),
       decoration: const InputDecoration.collapsed(hintText: null),
+    );
+    // The Block menu opens under the line `/` was typed in; clicking it keeps the field's
+    // focus.
+    text = CompositedTransformTarget(
+      link: _menuAnchor,
+      child: OverlayPortal(
+        controller: _menu,
+        overlayChildBuilder: (context) => Align(
+          alignment: Alignment.topLeft,
+          child: CompositedTransformFollower(
+            link: _menuAnchor,
+            targetAnchor: Alignment.bottomLeft,
+            offset: const Offset(0, WsMetrics.space1),
+            child: TextFieldTapRegion(
+              child: BlockMenu(
+                choices: _choices,
+                chosen: _chosen,
+                onChoose: (choice) => unawaited(_choose(choice)),
+                onHover: (index) => setState(() => _chosen = index),
+              ),
+            ),
+          ),
+        ),
+        child: text,
+      ),
     );
     Widget marker(Widget child) => SizedBox(
       width: 24,

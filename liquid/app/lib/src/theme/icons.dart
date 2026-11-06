@@ -41,4 +41,10 @@ abstract final class LucideIcons {
   static const calendar = IconData(0xe063, fontFamily: _family);
   static const squareCheck = IconData(0xe559, fontFamily: _family);
   static const puzzle = IconData(0xe29c, fontFamily: _family);
+  static const heading1 = IconData(0xe385, fontFamily: _family);
+  static const heading2 = IconData(0xe386, fontFamily: _family);
+  static const heading3 = IconData(0xe387, fontFamily: _family);
+  static const list = IconData(0xe106, fontFamily: _family);
+  static const listOrdered = IconData(0xe1d1, fontFamily: _family);
+  static const textQuote = IconData(0xe49e, fontFamily: _family);
 }

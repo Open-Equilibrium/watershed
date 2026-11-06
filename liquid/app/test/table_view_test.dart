@@ -260,8 +260,9 @@ void main() {
     );
     expect(
       find.byType(TextField),
-      findsNWidgets(2),
-      reason: 'the title and the Text Block; the Table is no text',
+      findsNWidgets(3),
+      reason:
+          'the title, the Text Block and the Table\'s name; no cell is text',
     );
   });
 

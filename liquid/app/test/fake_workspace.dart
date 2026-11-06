@@ -200,6 +200,20 @@ class FakeWorkspace implements LiquidWorkspace {
           BridgeResource(kind: BridgeResourceKind.views, page: mutation.page),
         );
         return BridgeApplied(action: _id());
+      case BridgeMutationKind.removeView:
+        views[mutation.page]!.removeWhere((view) => view.id == mutation.view);
+        _changed(
+          BridgeResource(kind: BridgeResourceKind.views, page: mutation.page),
+        );
+        return BridgeApplied(action: _id());
+      case BridgeMutationKind.renameDatabase:
+        final database = databases[mutation.block]!;
+        databases[mutation.block!] = BridgeDatabase(
+          name: mutation.text!,
+          fields: database.fields,
+        );
+        _changed(_blockResource(mutation));
+        return BridgeApplied(action: _id());
       case BridgeMutationKind.addDatabaseBlock:
         final page = views.putIfAbsent(mutation.page!, () => []);
         final view = BridgeView(
