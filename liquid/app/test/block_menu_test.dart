@@ -500,4 +500,24 @@ void main() {
     expect(fake.databases[fake.views[page]![1].block]!.name, 'Ex');
     expect(fake.textsOf(page), ['Intro', '']);
   });
+
+  testWidgets('a person who moved on while a Table is added keeps the caret', (
+    tester,
+  ) async {
+    await show(tester, ['Intro', '', 'After']);
+    await type(tester, 1, '/');
+    await type(tester, 1, 'table');
+    final gate = fake.gate = Completer<void>();
+    fake.gatedKinds = {BridgeMutationKind.addDatabaseBlock};
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    await type(tester, 1, 'Ex');
+    await tester.tap(block(0));
+    await tester.pump();
+    fake.gate = null;
+    gate.complete();
+    await tester.pumpAndSettle();
+    expect(field(tester, 0).focusNode!.hasFocus, isTrue);
+    expect(fake.databases[fake.views[page]![1].block]!.name, 'Ex');
+  });
 }

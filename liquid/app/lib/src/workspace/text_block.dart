@@ -210,9 +210,11 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
       }
       return;
     }
-    // Once the Table exists it takes the caret and the name, also if a later write is
-    // refused, whose problem shows on the Page.
+    // Once the Table exists it takes the name, and the caret unless the person moved to
+    // another field meanwhile, also if a later write is refused, whose problem shows on
+    // the Page.
     var typed = '';
+    var stayed = true;
     try {
       Future<void> boundary(String view, bool starts) => views.write(
         mutation(
@@ -230,6 +232,7 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
       if (!last) {
         // As the line may be gone once its View is.
         typed = _text.text;
+        stayed = _focus.hasFocus;
         await views.write(
           mutation(BridgeMutationKind.removeView, page: _page, view: view.id),
           [block],
@@ -240,10 +243,27 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     } finally {
       if (mounted) {
         typed = _text.text;
+        stayed = _focus.hasFocus;
         _set('', 0);
         _adding = false;
       }
-      views.moveCaret(Caret(added.view!, typed.length, text: typed));
+      if (stayed) {
+        views.moveCaret(Caret(added.view!, typed.length, text: typed));
+      } else if (typed.isNotEmpty) {
+        unawaited(
+          views
+              .write(
+                mutation(
+                  BridgeMutationKind.renameDatabase,
+                  page: _page,
+                  block: added.block,
+                  text: typed,
+                ),
+                [added.block!],
+              )
+              .then<void>((_) {}, onError: (Object _) {}),
+        );
+      }
     }
   }
 
