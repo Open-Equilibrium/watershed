@@ -29,6 +29,7 @@ import 'input_lane.dart';
 import 'pull_request_status.dart';
 import 'sidebar.dart';
 import 'status_bar.dart';
+import 'worktrees_pane.dart';
 
 enum AgentTab { chat, trajectory, diff }
 
@@ -348,6 +349,12 @@ class _AgentShellState extends State<AgentShell> {
                             shortcuts: _shortcuts,
                             appearance: widget.appearance,
                             onClose: _toggleSettings,
+                            worktrees: widget.state == null
+                                ? null
+                                : WorktreesPane(
+                                    state: widget.state!,
+                                    device: widget.info!.device,
+                                  ),
                           );
                         }
                         final open = widget.workspace?.open.value;

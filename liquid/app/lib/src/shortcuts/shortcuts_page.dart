@@ -118,15 +118,19 @@ const List<_Group> _right = [
   ),
 ];
 
-/// Settings (approved mockups): Appearance with theme and text size, and Shortcuts with the
-/// profile, every action's keys and recording new ones. It replaces the main area; esc closes
-/// it.
+/// Settings (approved mockups): Appearance with theme and text size, Shortcuts with the
+/// profile, every action's keys and recording new ones, and Worktrees when a session's
+/// repository is open. It replaces the main area; esc closes it.
+/// A section of Settings.
+enum _Section { appearance, shortcuts, worktrees }
+
 class SettingsPage extends StatefulWidget {
   const SettingsPage({
     super.key,
     required this.shortcuts,
     required this.onClose,
     this.appearance,
+    this.worktrees,
   });
 
   final ShortcutController shortcuts;
@@ -135,6 +139,9 @@ class SettingsPage extends StatefulWidget {
   /// Theme and text size; without them Settings show only Shortcuts.
   final AppearanceController? appearance;
 
+  /// The Worktrees section; none without a session.
+  final Widget? worktrees;
+
   @override
   State<SettingsPage> createState() => _SettingsPageState();
 }
@@ -142,8 +149,10 @@ class SettingsPage extends StatefulWidget {
 class _SettingsPageState extends State<SettingsPage> {
   final _keys = FocusNode(debugLabel: 'shortcuts');
 
-  /// Whether Appearance shows rather than Shortcuts; it opens first.
-  late bool _appearance = widget.appearance != null;
+  /// The section shown; Appearance opens first.
+  late _Section _section = widget.appearance != null
+      ? _Section.appearance
+      : _Section.shortcuts;
   final _search = TextEditingController();
 
   /// The command taking new keys, the keys pressed for it and who runs them already.
@@ -341,17 +350,19 @@ class _SettingsPageState extends State<SettingsPage> {
                       ),
                     ),
                     const SizedBox(height: WsMetrics.space2),
-                    for (final (label, appearance) in [
-                      if (widget.appearance != null) ('Appearance', true),
-                      ('Shortcuts', false),
+                    for (final (label, section) in [
+                      if (widget.appearance != null)
+                        ('Appearance', _Section.appearance),
+                      ('Shortcuts', _Section.shortcuts),
+                      if (widget.worktrees != null)
+                        ('Worktrees', _Section.worktrees),
                     ])
                       Semantics(
-                        selected: _appearance == appearance,
+                        selected: _section == section,
                         child: Shortcuts(
                           shortcuts: activateKeys,
                           child: InkWell(
-                            onTap: () =>
-                                setState(() => _appearance = appearance),
+                            onTap: () => setState(() => _section = section),
                             borderRadius: BorderRadius.circular(
                               WsMetrics.radiusMd,
                             ),
@@ -362,9 +373,7 @@ class _SettingsPageState extends State<SettingsPage> {
                               ),
                               alignment: Alignment.centerLeft,
                               decoration: BoxDecoration(
-                                color: _appearance == appearance
-                                    ? ws.selected
-                                    : null,
+                                color: _section == section ? ws.selected : null,
                                 borderRadius: BorderRadius.circular(
                                   WsMetrics.radiusMd,
                                 ),
@@ -383,10 +392,15 @@ class _SettingsPageState extends State<SettingsPage> {
                 ),
               ),
               Expanded(
-                child: switch (widget.appearance) {
-                  final appearance? when _appearance => AppearancePane(
+                child: switch ((
+                  _section,
+                  widget.appearance,
+                  widget.worktrees,
+                )) {
+                  (_Section.appearance, final appearance?, _) => AppearancePane(
                     appearance: appearance,
                   ),
+                  (_Section.worktrees, _, final worktrees?) => worktrees,
                   _ => _main(context, settings),
                 },
               ),

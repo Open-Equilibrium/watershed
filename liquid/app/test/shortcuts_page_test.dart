@@ -81,6 +81,22 @@ void main() {
     expect(find.text('Chat'), findsOneWidget);
   });
 
+  testWidgets("Settings › Worktrees lists the session's worktrees", (
+    tester,
+  ) async {
+    await show(tester, ShortcutSettings.liquidKey());
+    backend.worktreeList = [
+      worktreeOf('/code/api', branch: 'main', main: true, current: true),
+    ];
+    await openSettings(tester);
+
+    await tester.tap(find.text('Worktrees'));
+    await tester.pumpAndSettle();
+
+    expect(backend.calls, contains('worktrees'));
+    expect(find.text('main checkout · this window'), findsOneWidget);
+  });
+
   testWidgets('recording new keys switches to Custom and offers a reset', (
     tester,
   ) async {
