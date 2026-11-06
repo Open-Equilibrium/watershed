@@ -3,8 +3,9 @@
 //! rule 13).
 
 use liquid_core::{
-    Actor, Applied, BlockId, Cell, Created, Error, FieldId, FieldKind, MAX_FIELDS, MAX_OPTIONS,
-    Match, MemoryStore, Mutation, Origin, PageId, PersonId, Request, RowId, RowQuery, Sort,
+    Actor, Applied, BlockId, BlockKind, Cell, Created, Error, FieldId, FieldKind, MAX_FIELDS,
+    MAX_OPTIONS, Match, MemoryStore, Mutation, Origin, PageId, PersonId, Request, RowId, RowQuery,
+    Sort,
 };
 
 type Workspace = liquid_core::Workspace<MemoryStore>;
@@ -739,5 +740,31 @@ fn a_database_holds_a_bounded_number_of_fields_and_options() {
     assert_eq!(
         apply(&mut workspace, option(MAX_OPTIONS)),
         Err(Error::TooMany)
+    );
+}
+
+#[test]
+fn a_view_names_the_kind_of_its_block() {
+    let (mut workspace, page, _) = expenses();
+    let table = workspace.views(&page, 0, 10).unwrap()[0].id.clone();
+    let add = Mutation::AddTextBlock {
+        page: page.clone(),
+        after: Some(table),
+        text: "October".into(),
+    };
+    apply(&mut workspace, add).unwrap();
+    let kinds = |workspace: &mut Workspace| -> Vec<BlockKind> {
+        let views = workspace.views(&page, 0, 10).unwrap();
+        views.into_iter().map(|view| view.kind).collect()
+    };
+    assert_eq!(
+        kinds(&mut workspace),
+        [BlockKind::Database, BlockKind::Text]
+    );
+    // Read again from the document, as after a restart.
+    workspace.close_page(&page);
+    assert_eq!(
+        kinds(&mut workspace),
+        [BlockKind::Database, BlockKind::Text]
     );
 }

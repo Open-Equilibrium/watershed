@@ -9,8 +9,8 @@ use crate::api::database::{
     BridgeCell, BridgeCellKind, BridgeFieldKind, BridgeFilter, BridgeMatch, BridgeSort,
 };
 use crate::api::workspace::{
-    BridgeAnswer, BridgeMutation, BridgeMutationKind, BridgeQuery, BridgeQueryKind, BridgeResource,
-    BridgeResourceKind, LiquidWorkspace, MAX_WINDOW,
+    BridgeAnswer, BridgeBlockKind, BridgeMutation, BridgeMutationKind, BridgeQuery,
+    BridgeQueryKind, BridgeResource, BridgeResourceKind, LiquidWorkspace, MAX_WINDOW,
 };
 
 fn cell(kind: BridgeCellKind) -> BridgeCell {
@@ -422,4 +422,20 @@ fn malformed_database_requests_are_refused() {
         ..query(BridgeQueryKind::Rows)
     });
     assert_eq!(unmatched.unwrap_err(), "the filter's value is missing");
+}
+
+#[test]
+fn a_view_names_its_block_s_kind() {
+    let expenses = Expenses::new("database-kind");
+    let views = expenses
+        .workspace
+        .query(BridgeQuery {
+            page: Some(expenses.page.clone()),
+            ..query(BridgeQueryKind::Views)
+        })
+        .unwrap()
+        .views;
+    let kinds: Vec<_> = views.iter().map(|view| view.kind).collect();
+    // Lisbon's Text Block, then the Table after it.
+    assert_eq!(kinds, [BridgeBlockKind::Text, BridgeBlockKind::Database]);
 }

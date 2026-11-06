@@ -578,7 +578,7 @@ pub(crate) fn rows(
 fn shown(live: &[&FieldId], row: &Indexed) -> Row {
     let mut cells: Vec<(FieldId, Cell)> = live
         .iter()
-        .filter_map(|field| Some(((*field).clone(), cell(live, row, field)?.clone())))
+        .filter_map(|field| Some(((*field).clone(), row.cells.get(field.as_str())?.clone())))
         .collect();
     cells.sort_by(|(a, _), (b, _)| a.cmp(b));
     Row {

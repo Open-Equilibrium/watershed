@@ -17,9 +17,9 @@ use crate::model::{
 use crate::order::Order;
 use crate::store::{Commit, Store, Write};
 use crate::{
-    Action, ActionId, Actor, Applied, Area, AreaId, BlockId, Changed, Created, Document, Error,
-    Mutation, Operation, Origin, PageEntry, PageId, Permission, PersonId, Request, TextStyle, View,
-    ViewId,
+    Action, ActionId, Actor, Applied, Area, AreaId, BlockId, BlockKind, Changed, Created, Document,
+    Error, Mutation, Operation, Origin, PageEntry, PageId, Permission, PersonId, Request,
+    TextStyle, View, ViewId,
 };
 
 /// A document is stored again as one snapshot once it has this many chunks, so loading it
@@ -468,8 +468,7 @@ impl<S: Store> Workspace<S> {
                 insert,
             } => {
                 let doc = self.doc(&Document::Page(page.clone()))?;
-                let entry = model::live(doc, BLOCKS, block.as_str()).ok_or(Error::NotFound)?;
-                let content = model::child(doc, &entry, TEXT).ok_or(Error::NotFound)?;
+                let content = text_of(doc, block)?;
                 let end = at.checked_add(*delete).ok_or(Error::OutOfRange)?;
                 if !model::on_boundary(doc, &content, *at)
                     || !model::on_boundary(doc, &content, end)
@@ -487,7 +486,7 @@ impl<S: Store> Workspace<S> {
                 let (doc, order) = self.page(page)?;
                 let block = BlockId::new()?;
                 database::create(doc, &block, name)?;
-                let view = add_view(doc, order, after.as_ref(), &block)?;
+                let view = add_view(doc, order, after.as_ref(), &block, BlockKind::Database)?;
                 let mut written =
                     Written::new(Document::Page(page.clone()), Changed::Views(page.clone()));
                 written.created = Some(Created::Block { block, view });
@@ -662,7 +661,7 @@ fn add_text_block(
     )?;
     let content = doc.put_object(&entry, TEXT, ObjType::Text)?;
     doc.splice_text(&content, 0, 0, text)?;
-    let view = add_view(doc, order, after, &block)?;
+    let view = add_view(doc, order, after, &block, BlockKind::Text)?;
     Ok((block, view))
 }
 
@@ -682,6 +681,7 @@ fn add_view(
     order: &mut Order,
     after: Option<&ViewId>,
     block: &BlockId,
+    kind: BlockKind,
 ) -> Result<ViewId, Error> {
     let sort = order.key_after(after)?;
     let view = ViewId::new()?;
@@ -702,6 +702,7 @@ fn add_view(
         id: view.clone(),
         block: block.clone(),
         boundary: false,
+        kind,
     };
     order.insert(sort, placed);
     Ok(view)
@@ -713,9 +714,9 @@ fn text_block(doc: &AutoCommit, block: &BlockId) -> Option<automerge::ObjId> {
     (model::string(doc, &entry, KIND).as_deref() == Some("text")).then_some(entry)
 }
 
-/// A live Text Block's text object.
+/// A live Text Block's text object; none for a Block of another kind.
 fn text_of(doc: &AutoCommit, block: &BlockId) -> Result<automerge::ObjId, Error> {
-    let entry = model::live(doc, BLOCKS, block.as_str()).ok_or(Error::NotFound)?;
+    let entry = text_block(doc, block).ok_or(Error::NotFound)?;
     model::child(doc, &entry, TEXT).ok_or(Error::NotFound)
 }
 

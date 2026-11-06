@@ -227,6 +227,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeArea dco_decode_bridge_area(dynamic raw);
 
   @protected
+  BridgeBlockKind dco_decode_bridge_block_kind(dynamic raw);
+
+  @protected
   BridgeBranch dco_decode_bridge_branch(dynamic raw);
 
   @protected
@@ -941,6 +944,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeArea sse_decode_bridge_area(SseDeserializer deserializer);
+
+  @protected
+  BridgeBlockKind sse_decode_bridge_block_kind(SseDeserializer deserializer);
 
   @protected
   BridgeBranch sse_decode_bridge_branch(SseDeserializer deserializer);
@@ -1858,6 +1864,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_bridge_area(BridgeArea self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_bridge_block_kind(
+    BridgeBlockKind self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_bridge_branch(BridgeBranch self, SseSerializer serializer);

@@ -3151,6 +3151,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgeBlockKind dco_decode_bridge_block_kind(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return BridgeBlockKind.values[raw as int];
+  }
+
+  @protected
   BridgeBranch dco_decode_bridge_branch(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
@@ -4203,12 +4209,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeView dco_decode_bridge_view(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 3)
-      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+    if (arr.length != 4)
+      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
     return BridgeView(
       id: dco_decode_String(arr[0]),
       block: dco_decode_String(arr[1]),
       boundary: dco_decode_bool(arr[2]),
+      kind: dco_decode_bridge_block_kind(arr[3]),
     );
   }
 
@@ -5162,6 +5169,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_id = sse_decode_String(deserializer);
     var var_name = sse_decode_String(deserializer);
     return BridgeArea(id: var_id, name: var_name);
+  }
+
+  @protected
+  BridgeBlockKind sse_decode_bridge_block_kind(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var inner = sse_decode_i_32(deserializer);
+    return BridgeBlockKind.values[inner];
   }
 
   @protected
@@ -6391,7 +6405,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_id = sse_decode_String(deserializer);
     var var_block = sse_decode_String(deserializer);
     var var_boundary = sse_decode_bool(deserializer);
-    return BridgeView(id: var_id, block: var_block, boundary: var_boundary);
+    var var_kind = sse_decode_bridge_block_kind(deserializer);
+    return BridgeView(
+      id: var_id,
+      block: var_block,
+      boundary: var_boundary,
+      kind: var_kind,
+    );
   }
 
   @protected
@@ -7777,6 +7797,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_bridge_block_kind(
+    BridgeBlockKind self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.index, serializer);
+  }
+
+  @protected
   void sse_encode_bridge_branch(BridgeBranch self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_String(self.name, serializer);
@@ -8694,6 +8723,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.id, serializer);
     sse_encode_String(self.block, serializer);
     sse_encode_bool(self.boundary, serializer);
+    sse_encode_bridge_block_kind(self.kind, serializer);
   }
 
   @protected

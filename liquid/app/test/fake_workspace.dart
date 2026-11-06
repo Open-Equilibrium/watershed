@@ -128,6 +128,7 @@ class FakeWorkspace implements LiquidWorkspace {
             id: shown.id,
             block: shown.block,
             boundary: false,
+            kind: shown.kind,
           );
           created = _block(
             mutation.page!,
@@ -182,6 +183,7 @@ class FakeWorkspace implements LiquidWorkspace {
           id: shown.id,
           block: shown.block,
           boundary: mutation.boundary,
+          kind: shown.kind,
         );
         _changed(
           BridgeResource(kind: BridgeResourceKind.views, page: mutation.page),
@@ -206,7 +208,12 @@ class FakeWorkspace implements LiquidWorkspace {
     BridgeTextStyle style, {
     bool boundary = false,
   }) {
-    final view = BridgeView(id: _id(), block: _id(), boundary: boundary);
+    final view = BridgeView(
+      id: _id(),
+      block: _id(),
+      boundary: boundary,
+      kind: BridgeBlockKind.text,
+    );
     texts[view.block] = text;
     styles[view.block] = style;
     views[page]!.insert(at, view);

@@ -63,6 +63,30 @@ pub struct View {
     pub block: BlockId,
     /// Whether a Section starts here.
     pub boundary: bool,
+    /// The kind of Block it shows.
+    pub kind: BlockKind,
+}
+
+/// The kind of a Block.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BlockKind {
+    /// A Text Block.
+    Text,
+    /// A Database Block.
+    Database,
+    /// A Block of a kind a later version adds, which shows as a placeholder (ADR-0245).
+    Unknown,
+}
+
+impl BlockKind {
+    /// The kind a Block's entry names.
+    pub(crate) fn of(name: Option<&str>) -> Self {
+        match name {
+            Some("text") => Self::Text,
+            Some("database") => Self::Database,
+            _ => Self::Unknown,
+        }
+    }
 }
 
 /// A new document for this device. Text positions count UTF-16 code units, also when
@@ -265,8 +289,13 @@ pub(crate) fn pages(doc: &AutoCommit) -> Vec<PageEntry> {
     tree
 }
 
+/// A live Text Block's text; none for a Block of another kind.
 pub(crate) fn text(doc: &AutoCommit, block: &str) -> Option<String> {
-    let text = child(doc, &live(doc, BLOCKS, block)?, TEXT)?;
+    let entry = live(doc, BLOCKS, block)?;
+    if string(doc, &entry, KIND).as_deref() != Some("text") {
+        return None;
+    }
+    let text = child(doc, &entry, TEXT)?;
     doc.text(&text).ok()
 }
 
