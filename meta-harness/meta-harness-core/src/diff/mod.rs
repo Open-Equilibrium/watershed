@@ -30,6 +30,7 @@ mod sync;
 
 pub use branches::{Branch, BranchTarget, Changes, GitStatus, without_credentials};
 pub use commit::Commit;
+pub(crate) use pull_text::PiQuestion;
 pub use pull_text::PullRequestText;
 pub use pulls::{
     Comparison, PullRequest, PullRequestDraft, PullRequestError, PullRequestPlan, PullRequestState,

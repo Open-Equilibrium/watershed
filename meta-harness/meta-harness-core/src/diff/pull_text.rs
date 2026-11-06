@@ -12,6 +12,18 @@ const MAX_PATCH_BYTES: u64 = 64 * 1024;
 /// The commit messages and the file list the model reads, each cut beyond this.
 const MAX_LIST_BYTES: u64 = 16 * 1024;
 
+/// Uncommitted files one Git diff names, so a long selection never outgrows a command line.
+const PATHS_PER_DIFF: usize = 100;
+
+/// Git's diff with no program a project names (ADR-0206).
+const DIFF: [&str; 5] = [
+    "diff",
+    "--no-color",
+    "--no-ext-diff",
+    "--no-textconv",
+    "--no-renames",
+];
+
 /// The longest title GitHub takes.
 const MAX_TITLE_CHARS: usize = 256;
 
@@ -41,6 +53,8 @@ pub struct PullRequestText {
     pub title: String,
     /// GitHub Markdown, possibly empty.
     pub body: String,
+    /// The commits the model read about, besides any uncommitted files.
+    pub commits: u64,
 }
 
 /// One question to pi that owns all it needs, so it can run to its end apart from its asker.
@@ -48,6 +62,7 @@ pub(crate) struct PiQuestion {
     program: PathBuf,
     args: Vec<OsString>,
     material: String,
+    commits: u64,
 }
 
 impl PiQuestion {
@@ -70,8 +85,13 @@ impl PiQuestion {
                 error => format!("pi failed: {error}"),
             })
         })?;
-        parse_answer(&String::from_utf8_lossy(&output))
-            .ok_or_else(|| PullRequestError::Failed("pi wrote no title.".into()))
+        let (title, body) = parse_answer(&String::from_utf8_lossy(&output))
+            .ok_or_else(|| PullRequestError::Failed("pi wrote no title.".into()))?;
+        Ok(PullRequestText {
+            title,
+            body,
+            commits: self.commits,
+        })
     }
 }
 
@@ -86,32 +106,170 @@ impl WorkingTree {
         base: &str,
         head: &str,
     ) -> Result<PiQuestion, PullRequestError> {
-        let (provider, id) = model
-            .split_once('/')
-            .filter(|(provider, id)| [provider, id].iter().all(|part| option_safe(part)))
-            .ok_or_else(|| PullRequestError::Failed(format!("pi cannot name {model:?}.")))?;
+        let model = model_parts(model)?;
         let material = self.pull_request_material(base, head).await?;
-        let mut all = args.to_vec();
-        all.extend(ALONE.map(OsString::from));
-        all.extend(
-            [
-                "--provider",
-                provider,
-                "--model",
-                id,
-                "--thinking",
-                "low",
-                "--system-prompt",
-                SYSTEM,
-                PROMPT,
-            ]
-            .map(OsString::from),
+        let commits = self.count(base, head).await?;
+        Ok(question(program, args, model, material, commits))
+    }
+
+    /// The question before a commit and push, for "Commit, push & create PR": the commits the
+    /// base branch `base` on the push remote lacks, when Git has it, else those its upstream
+    /// lacks, and the whole files at `paths` as the commit plan's `snapshot` holds them; none
+    /// when there are neither.
+    pub(crate) async fn pull_request_draft_question(
+        &self,
+        program: &Path,
+        args: &[OsString],
+        model: &str,
+        base: Option<&str>,
+        snapshot: &str,
+        paths: &[String],
+    ) -> Result<Option<PiQuestion>, PullRequestError> {
+        let model = model_parts(model)?;
+        let range = self.draft_range(base).await?;
+        if range.is_none() && paths.is_empty() {
+            return Ok(None);
+        }
+        let mut list = Vec::new();
+        let (mut patch, mut patch_cut) = (Vec::new(), false);
+        if !paths.is_empty() {
+            if !commit_id(snapshot) {
+                return Err(DiffError::Git("the files' snapshot is not a full id".into()).into());
+            }
+            let from = self.committed("HEAD").await?;
+            let to = Snapshot(snapshot.to_owned());
+            let changes = self.changes(&from, &to, Whitespace::Shown).await?;
+            let selected: BTreeSet<&str> = paths.iter().map(String::as_str).collect();
+            for file in changes
+                .iter()
+                .filter(|file| selected.contains(file.path.as_str()))
+            {
+                list.extend(format!("{}\t{}\t{}\n", file.added, file.removed, file.path).bytes());
+            }
+            // A literal pathspec also names what lies below it, such as a folder that replaced
+            // a selected file; changes there that are not selected stay out.
+            let left_out: Vec<String> = changes
+                .iter()
+                .map(|file| file.path.as_str())
+                .filter(|path| {
+                    !selected.contains(path)
+                        && path
+                            .match_indices('/')
+                            .any(|(end, _)| selected.contains(&path[..end]))
+                })
+                .map(|path| format!(":(exclude,literal){path}"))
+                .collect();
+            for chunk in paths.chunks(PATHS_PER_DIFF) {
+                let room = MAX_PATCH_BYTES - patch.len() as u64;
+                let named: Vec<String> = chunk
+                    .iter()
+                    .map(|path| format!(":(literal){path}"))
+                    .collect();
+                let mut args = [&DIFF[..], &[from.0.as_str(), to.0.as_str(), "--"][..]].concat();
+                args.extend(named.iter().chain(&left_out).map(String::as_str));
+                let (part, more) = git_start(&self.root, &args, room).await?;
+                patch.extend(part);
+                if more {
+                    patch_cut = true;
+                    break;
+                }
+            }
+        }
+        let (mut commits, mut list_cut, mut count) = ((Vec::new(), false), false, 0);
+        if let Some((start, head)) = &range {
+            commits = self.commit_messages(start, head).await?;
+            let (committed, more) = self.files(start, head).await?;
+            list.extend(committed);
+            list_cut = more;
+            count = self.count(start, head).await?;
+            if !patch_cut {
+                let room = MAX_PATCH_BYTES - patch.len() as u64;
+                let (part, more) = git_start(
+                    &self.root,
+                    &[&DIFF[..], &[start.as_str(), head.as_str()][..]].concat(),
+                    room,
+                )
+                .await?;
+                patch.extend(part);
+                patch_cut = more;
+            }
+        }
+        if list.len() as u64 > MAX_LIST_BYTES {
+            list.truncate(MAX_LIST_BYTES as usize);
+            list_cut = true;
+        }
+        let material = format!(
+            "Commits:\n{}\nChanged files (added lines, removed lines, path):\n{}\nPatch of the uncommitted files, then of the commits:\n{}",
+            cut(commits, "The commit messages are"),
+            cut((list, list_cut), "The file list is"),
+            cut((patch, patch_cut), "The patch is"),
         );
-        Ok(PiQuestion {
-            program: program.to_owned(),
-            args: all,
-            material,
-        })
+        Ok(Some(question(program, args, model, material, count)))
+    }
+
+    /// The commits HEAD has beyond the base branch `base` on the push remote, when Git has it,
+    /// else beyond its upstream, as the shared commit and HEAD; none without either, when they
+    /// share no history, or when HEAD has no commits beyond it.
+    async fn draft_range(&self, base: Option<&str>) -> Result<Option<(String, String)>, DiffError> {
+        let status = self.status().await?;
+        let Some(head) = status.commit else {
+            return Ok(None);
+        };
+        let mut starts = Vec::new();
+        if let (Some(remote), Some(base)) = (&status.remote, base) {
+            starts.push(format!("refs/remotes/{remote}/{base}^{{commit}}"));
+        }
+        if status.upstream.is_some() && !status.gone {
+            starts.push("@{upstream}^{commit}".to_owned());
+        }
+        for name in starts {
+            let Some(start) = self.resolve(&name).await? else {
+                continue;
+            };
+            match git(&self.root, &[], &["merge-base", &start, &head]).await {
+                // A branch with no commits beyond its base has none to describe.
+                Ok(shared) if self.count(shared.trim(), &head).await? == 0 => return Ok(None),
+                Ok(shared) => return Ok(Some((shared.trim().to_owned(), head))),
+                // Git says nothing when the histories share no commit.
+                Err(DiffError::Git(reason)) if reason.is_empty() => {}
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(None)
+    }
+
+    /// How many commits `head` has beyond `base`.
+    async fn count(&self, base: &str, head: &str) -> Result<u64, DiffError> {
+        let count = git(
+            &self.root,
+            &[],
+            &["rev-list", "--count", &format!("{base}..{head}")],
+        )
+        .await?;
+        Ok(count.trim().parse().unwrap_or(0))
+    }
+
+    async fn commit_messages(&self, base: &str, head: &str) -> Result<(Vec<u8>, bool), DiffError> {
+        git_start(
+            &self.root,
+            &[
+                "log",
+                "--no-color",
+                "--format=commit %h%n%B",
+                &format!("{base}..{head}"),
+            ],
+            MAX_LIST_BYTES,
+        )
+        .await
+    }
+
+    async fn files(&self, base: &str, head: &str) -> Result<(Vec<u8>, bool), DiffError> {
+        git_start(
+            &self.root,
+            &[&DIFF[..], &["--numstat", base, head][..]].concat(),
+            MAX_LIST_BYTES,
+        )
+        .await
     }
 
     /// The commit messages, changed files and patch from `base` to `head`, each cut at its
@@ -120,23 +278,11 @@ impl WorkingTree {
         if ![base, head].iter().all(|id| commit_id(id)) {
             return Err(DiffError::Git("a commit is not a full id".into()));
         }
-        let range = format!("{base}..{head}");
-        let diff = ["diff", "--no-color", "--no-ext-diff", "--no-textconv"];
-        let commits = git_start(
-            &self.root,
-            &["log", "--no-color", "--format=commit %h%n%B", &range],
-            MAX_LIST_BYTES,
-        )
-        .await?;
-        let files = git_start(
-            &self.root,
-            &[&diff[..], &["--numstat", base, head][..]].concat(),
-            MAX_LIST_BYTES,
-        )
-        .await?;
+        let commits = self.commit_messages(base, head).await?;
+        let files = self.files(base, head).await?;
         let patch = git_start(
             &self.root,
-            &[&diff[..], &[base, head][..]].concat(),
+            &[&DIFF[..], &[base, head][..]].concat(),
             MAX_PATCH_BYTES,
         )
         .await?;
@@ -147,6 +293,46 @@ impl WorkingTree {
             cut(patch, "The patch is"),
         ))
     }
+}
+
+/// pi's question for `model`'s provider and id, with nothing loaded that could run or steer it.
+fn question(
+    program: &Path,
+    args: &[OsString],
+    (provider, id): (&str, &str),
+    material: String,
+    commits: u64,
+) -> PiQuestion {
+    let mut all = args.to_vec();
+    all.extend(ALONE.map(OsString::from));
+    all.extend(
+        [
+            "--provider",
+            provider,
+            "--model",
+            id,
+            "--thinking",
+            "low",
+            "--system-prompt",
+            SYSTEM,
+            PROMPT,
+        ]
+        .map(OsString::from),
+    );
+    PiQuestion {
+        program: program.to_owned(),
+        args: all,
+        material,
+        commits,
+    }
+}
+
+/// `model` (`provider/id`) as parts pi reads as option values, never as options.
+fn model_parts(model: &str) -> Result<(&str, &str), PullRequestError> {
+    model
+        .split_once('/')
+        .filter(|(provider, id)| [provider, id].iter().all(|part| option_safe(part)))
+        .ok_or_else(|| PullRequestError::Failed(format!("pi cannot name {model:?}.")))
 }
 
 /// A part of a model name pi reads as an option value, never as an option.
@@ -169,7 +355,7 @@ fn cut((output, more): (Vec<u8>, bool), what: &str) -> String {
 
 /// The title on the answer's first line and the description after it, without control
 /// characters but line breaks and tabs; none without a title.
-fn parse_answer(answer: &str) -> Option<PullRequestText> {
+fn parse_answer(answer: &str) -> Option<(String, String)> {
     let answer: String = answer
         .chars()
         .filter(|c| !c.is_control() || matches!(c, '\n' | '\t'))
@@ -182,8 +368,5 @@ fn parse_answer(answer: &str) -> Option<PullRequestText> {
         .chars()
         .take(MAX_TITLE_CHARS)
         .collect();
-    (!title.is_empty()).then(|| PullRequestText {
-        title,
-        body: body.trim().to_owned(),
-    })
+    (!title.is_empty()).then(|| (title, body.trim().to_owned()))
 }

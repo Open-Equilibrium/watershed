@@ -713,6 +713,7 @@ void main() {
       backend.written = const BridgePullRequestText(
         title: 'For develop',
         body: 'Three commits.',
+        commits: 3,
       );
       backend.planned = pullRequestOutcomeOf(
         plan: planOf(
@@ -732,7 +733,11 @@ void main() {
       await tester.tap(find.text('develop').last);
       await tester.pumpAndSettle();
       first.complete(
-        const BridgePullRequestText(title: 'For main', body: 'Two commits.'),
+        const BridgePullRequestText(
+          title: 'For main',
+          body: 'Two commits.',
+          commits: 2,
+        ),
       );
       await tester.pumpAndSettle();
 

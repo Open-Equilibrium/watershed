@@ -592,3 +592,55 @@ fn a_recheck_that_times_out_created_nothing_and_a_stopped_request_is_unknown() {
         ));
     });
 }
+
+#[test]
+fn before_a_push_the_target_base_and_open_pull_request_are_known() {
+    run(async {
+        let pushed = Pushed::new("prepared", "https://github.com/bw/api.git");
+        pushed.repo.write("c.txt", "more\n");
+        pushed.repo.git(&["add", "c.txt"]);
+        pushed.repo.git(&["commit", "-m", "More"]);
+        pushed.repo.write("d.txt", "uncommitted\n");
+        let checkpoints = pushed.checkpoints(
+            "'api --hostname github.com repos/acme/api/branches/develop --jq .name') echo develop ;;\n\
+             'api --hostname github.com repos/acme/api/branches/'*) echo 'gh: Not Found (HTTP 404)' >&2; exit 1 ;;",
+        );
+
+        let plan = checkpoints
+            .pull_request_prepared(None, Some("develop"))
+            .await
+            .unwrap();
+
+        assert_eq!(plan.targets, ["acme/api", "bw/api"]);
+        assert_eq!(plan.target.as_deref(), Some("acme/api"));
+        assert_eq!(plan.base.as_deref(), Some("develop"));
+        assert_eq!(plan.head, "bw:feature/retry-after");
+        assert_eq!(plan.head_commit, pushed.head());
+        assert_eq!((plan.subject.as_str(), plan.uncommitted), ("More", 1));
+        assert!(plan.comparison.is_none() && plan.open.is_none());
+        assert!(!plan.base_missing);
+        // The head branch on GitHub is not read: it may not exist yet.
+        assert!(
+            !pushed.read("log").contains("branches/feature"),
+            "{}",
+            pushed.read("log")
+        );
+        // A base GitHub lacks is known before anything is committed or pushed.
+        let missing = checkpoints
+            .pull_request_prepared(None, Some("release"))
+            .await
+            .unwrap();
+        assert!(missing.base_missing);
+
+        pushed.repo.git(&[
+            "remote",
+            "set-url",
+            "origin",
+            "https://gitlab.com/bw/api.git",
+        ]);
+        assert!(matches!(
+            checkpoints.pull_request_prepared(None, None).await,
+            Err(PullRequestError::NotGitHub { .. })
+        ));
+    });
+}

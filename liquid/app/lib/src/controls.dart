@@ -374,9 +374,12 @@ class ActionDialog extends StatelessWidget {
 
 /// A warning inside a dialog or menu, such as which agent holds an action up.
 class WarningNotice extends StatelessWidget {
-  const WarningNotice(this.text, {super.key});
+  const WarningNotice(this.text, {super.key, this.danger = false});
 
   final String text;
+
+  /// Something failed rather than needs attention.
+  final bool danger;
 
   @override
   Widget build(BuildContext context) {
@@ -387,12 +390,15 @@ class WarningNotice extends StatelessWidget {
         vertical: WsMetrics.space3,
       ),
       decoration: BoxDecoration(
-        color: ws.warningSubtle,
+        color: danger ? ws.dangerSubtle : ws.warningSubtle,
         borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
       ),
       child: Text(
         text,
-        style: TextStyle(color: ws.warning, fontSize: WsMetrics.fsCompact),
+        style: TextStyle(
+          color: danger ? ws.danger : ws.warning,
+          fontSize: WsMetrics.fsCompact,
+        ),
       ),
     );
   }

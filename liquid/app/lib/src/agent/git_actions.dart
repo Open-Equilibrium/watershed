@@ -16,23 +16,27 @@ import 'commit_dialog.dart';
 import 'pull_request.dart';
 
 /// Pushes the branch, asking first before pushing to the remote's default branch; a completed
-/// push to another branch offers a pull request.
-Future<void> pushBranch(
+/// push to another branch offers a pull request unless `offer` is false. Returns the last
+/// push's outcome, none when the user did not confirm or the push could not run.
+Future<BridgeGitOutcome?> pushBranch(
   BuildContext context,
   SessionState state, {
   required String device,
+  bool offer = true,
 }) async {
   final generation = state.generation;
   BridgePushConfirmation? confirmed;
   while (context.mounted && generation == state.generation) {
     final outcome = await state.git.push(device: device, confirmed: confirmed);
-    if (outcome?.kind == BridgeGitOutcomeKind.done && confirmed == null) {
+    if (outcome?.kind == BridgeGitOutcomeKind.done &&
+        confirmed == null &&
+        offer) {
       unawaited(state.pulls.pushed(outcome!.transfer!));
     }
     if (outcome?.kind != BridgeGitOutcomeKind.pushDefault ||
         !context.mounted ||
         generation != state.generation) {
-      return;
+      return outcome;
     }
     final branch = outcome!.transfer!.destination;
     final transfer = outcome.transfer!;
@@ -65,18 +69,23 @@ Future<void> pushBranch(
         );
       },
     );
-    if (!context.mounted || generation != state.generation) return;
+    if (!context.mounted || generation != state.generation) return null;
     if (decision == true) {
       confirmed = transfer.confirmation;
       continue;
     } else if (decision == false) {
       await showBranchMenu(context, state);
     }
-    return;
+    return null;
   }
+  return null;
 }
 
-enum _GitAction { commit, push, pull, fetch, create, pullRequest }
+enum _GitAction { commit, compose, push, pull, fetch, create, pullRequest }
+
+const _nothingToPush = 'Branch is up to date. Nothing to push.';
+const _nothingToCompose =
+    'Nothing to commit or push. Create pull request… opens one for a pushed branch.';
 
 /// The next single Git step and the approved, explicitly invoked Git menu.
 class GitActions extends StatelessWidget {
@@ -132,6 +141,11 @@ class GitActions extends StatelessWidget {
             return status.changed == 0
                 ? 'Branch is up to date. Nothing to commit.'
                 : null;
+          case _GitAction.compose:
+            // It pushes what Push would, after committing any changes.
+            final push = blocker(_GitAction.push);
+            if (push != _nothingToPush) return push;
+            return status.changed == 0 ? _nothingToCompose : null;
           case _GitAction.push:
             if (status.commit == null) {
               return 'Commit before pushing this branch.';
@@ -146,7 +160,7 @@ class GitActions extends StatelessWidget {
               );
             }
             return status.upstream != null && !status.gone && status.ahead == 0
-                ? 'Branch is up to date. Nothing to push.'
+                ? _nothingToPush
                 : null;
           case _GitAction.pull:
             if (remote == null) return noDestination;
@@ -190,6 +204,7 @@ class GitActions extends StatelessWidget {
       };
       final icons = {
         _GitAction.commit: LucideIcons.gitCommit,
+        _GitAction.compose: LucideIcons.gitPullRequest,
         _GitAction.push: LucideIcons.arrowUp,
         _GitAction.pull: LucideIcons.arrowDown,
         _GitAction.create: LucideIcons.gitBranch,
@@ -209,6 +224,11 @@ class GitActions extends StatelessWidget {
         _GitAction.pull:
             blockers[_GitAction.pull] ??
             'Pull ${plural(status.behind, 'commit')} from ${status.upstream}.',
+        _GitAction.compose:
+            blockers[_GitAction.compose] ??
+            (status.changed == 0
+                ? 'Push ${status.branch} and review a pull request on GitHub in one dialog.'
+                : 'Commit, push and review a pull request on GitHub in one dialog.'),
         _GitAction.fetch: blockers[_GitAction.fetch] ?? 'Fetch from $remote.',
         _GitAction.create:
             blockers[_GitAction.create] ??
@@ -240,6 +260,15 @@ class GitActions extends StatelessWidget {
             unawaited(git.fetchNow());
           case _GitAction.create:
             unawaited(showBranchMenu(context, state));
+          case _GitAction.compose:
+            unawaited(
+              showPullRequestDialog(
+                context,
+                state,
+                device: device,
+                compose: true,
+              ),
+            );
           case _GitAction.pullRequest:
             unawaited(showPullRequestDialog(context, state, device: device));
         }
@@ -353,6 +382,13 @@ class GitActions extends StatelessWidget {
                   'Commit…',
                   enabled[_GitAction.commit]!
                       ? plural(status.changed, 'file')
+                      : '',
+                ),
+                item(
+                  _GitAction.compose,
+                  'Commit, push & create PR…',
+                  blockers[_GitAction.compose] == _nothingToCompose
+                      ? 'no changes'
                       : '',
                 ),
                 item(_GitAction.push, 'Push', counts[_GitAction.push]!),

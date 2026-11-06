@@ -169,6 +169,23 @@ abstract interface class SessionBackend {
     required String headCommit,
   });
 
+  /// As [writePullRequestText], before a commit and push: about the commits the base branch
+  /// `base` lacks, as far as Git has it, and the files at `paths` as the commit plan's
+  /// `snapshot` holds them; none when there are neither.
+  Future<BridgePullRequestText?> writePullRequestDraftText({
+    required String model,
+    String? base,
+    required String snapshot,
+    required List<String> paths,
+  });
+
+  /// The branch's target, base and any open pull request before it is pushed, for "Commit,
+  /// push & create PR".
+  Future<BridgePullRequestOutcome> pullRequestPrepared({
+    String? target,
+    String? base,
+  });
+
   /// Stops the pull request text being written.
   Future<void> stopPullRequestText();
 
@@ -368,6 +385,25 @@ class RustSessionBackend implements SessionBackend {
     mergeBase: mergeBase,
     headCommit: headCommit,
   );
+
+  @override
+  Future<BridgePullRequestText?> writePullRequestDraftText({
+    required String model,
+    String? base,
+    required String snapshot,
+    required List<String> paths,
+  }) => _session.writePullRequestDraftText(
+    model: model,
+    base: base,
+    snapshot: snapshot,
+    paths: paths,
+  );
+
+  @override
+  Future<BridgePullRequestOutcome> pullRequestPrepared({
+    String? target,
+    String? base,
+  }) => _session.pullRequestPrepared(target: target, base: base);
 
   @override
   Future<void> stopPullRequestText() => _session.stopPullRequestText();
