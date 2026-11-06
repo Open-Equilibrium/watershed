@@ -77,6 +77,12 @@ impl Branch {
     }
 }
 
+impl Drop for Branch {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.pi);
+    }
+}
+
 #[test]
 fn the_chats_model_writes_the_text_from_the_commits_and_diff_without_tools_or_project() {
     run(async {
@@ -238,5 +244,64 @@ fn a_caller_that_stops_waiting_lets_pi_end_by_itself() {
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
         assert!(!cwd.exists(), "pi's folder stays");
+    });
+}
+
+#[test]
+fn pis_own_error_survives_input_it_never_read() {
+    run(async {
+        let long = "x".repeat(99) + "\n";
+        let branch = Branch::new("early", "big.txt", &long.repeat(2000));
+        let checkpoints = Checkpoints::new(branch.repo.path());
+        std::fs::write(
+            branch.pi.join("pi"),
+            "#!/bin/sh\necho 'No API key for anthropic.' >&2\nexit 1\n",
+        )
+        .unwrap();
+
+        let error = branch.write(&checkpoints).await.unwrap_err();
+
+        assert!(error.contains("No API key for anthropic."), "{error}");
+    });
+}
+
+#[test]
+fn reading_signed_commits_runs_no_signature_program() {
+    run(async {
+        let branch = Branch::new("signed", "b.txt", "retry\n");
+        let verifier = branch.pi.join("gpg");
+        let ran = branch.pi.join("verified");
+        std::fs::write(
+            &verifier,
+            format!("#!/bin/sh\n: > {}\n", shell_word(ran.display())),
+        )
+        .unwrap();
+        std::fs::set_permissions(&verifier, std::fs::Permissions::from_mode(0o755)).unwrap();
+        // A signed commit on the branch, whose log the project asks Git to verify.
+        let tree = branch.repo.git(&["rev-parse", "HEAD^{tree}"]);
+        let signed = format!(
+            "tree {}\nparent {}\nauthor T <t@example.com> 0 +0000\ncommitter T <t@example.com> 0 +0000\ngpgsig -----BEGIN PGP SIGNATURE-----\n \n -----END PGP SIGNATURE-----\n\nSigned retry\n",
+            tree.trim(),
+            branch.head
+        );
+        let object = branch.repo.path().join("signed-commit");
+        std::fs::write(&object, signed).unwrap();
+        let head = branch
+            .repo
+            .git(&["hash-object", "-t", "commit", "-w", "signed-commit"]);
+        std::fs::remove_file(object).unwrap();
+        branch.repo.git(&["config", "log.showSignature", "true"]);
+        branch
+            .repo
+            .git(&["config", "gpg.program", verifier.to_str().unwrap()]);
+        let checkpoints = Checkpoints::new(branch.repo.path());
+
+        checkpoints
+            .write_pull_request_text(&branch.pi.join("pi"), &[], MODEL, &branch.base, head.trim())
+            .await
+            .unwrap();
+
+        assert!(branch.read("input").contains("Signed retry"));
+        assert!(!ran.exists(), "Git ran the project's signature program");
     });
 }

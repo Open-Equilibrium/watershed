@@ -274,9 +274,12 @@ async fn cut_output(
         output.truncate(limit as usize);
         return Ok((output, true));
     }
-    if let Some(written) = writes.join_next().await {
-        written.map_err(|error| DiffError::Io(std::io::Error::other(error)))??;
-    }
+    // A program that ends without reading its input says why on its error output, so a failed
+    // write counts only once the program succeeded.
+    let written = match writes.join_next().await {
+        Some(written) => written.map_err(|error| DiffError::Io(std::io::Error::other(error)))?,
+        None => Ok(()),
+    };
     // A program Git started can hold its error output after Git ended. Git is reaped only once
     // that output ended too, so until then its time limit still ends such programs with it.
     let errors = errors
@@ -296,6 +299,7 @@ async fn cut_output(
             String::from_utf8_lossy(&errors).trim().to_owned(),
         ));
     }
+    written?;
     Ok((output, false))
 }
 
@@ -310,6 +314,9 @@ pub(super) fn git_command(dir: &Path, env: &[(&str, OsString)], args: &[&str]) -
             "core.hooksPath=/dev/null",
             "-c",
             "core.fsmonitor=false",
+            // Nor does it verify signatures, which runs the project's signature program.
+            "-c",
+            "log.showSignature=false",
             // Every file's state is checked in full, so no setting hides a change.
             "-c",
             "core.ignoreStat=false",
