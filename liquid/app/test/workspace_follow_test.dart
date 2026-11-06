@@ -19,9 +19,7 @@ class FakeWorkspace implements LiquidWorkspace {
     required BridgeResource resource,
   }) {
     final ended = _ended[subscription] = Completer<void>();
-    final controller = StreamController<BridgeChange>(
-      onCancel: () => ended.future,
-    );
+    final controller = StreamController<BridgeChange>(onCancel: () => ended.future);
     streams[subscription] = controller;
     return controller.stream;
   }
