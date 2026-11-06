@@ -570,4 +570,45 @@ void main() {
     await tester.pumpAndSettle();
     expect(fake.databases[fake.views[page]![1].block]!.name, 'Ex');
   });
+
+  for (final held in [true, false]) {
+    testWidgets(
+      'a name typed while a Table is added is written when Liquid quits'
+      '${held ? ' during the add' : ' before the Table takes the caret'}',
+      (tester) async {
+        await show(tester, ['Intro', '', 'After']);
+        await type(tester, 1, '/');
+        await type(tester, 1, 'table');
+        final gate = fake.gate = Completer<void>();
+        fake.gatedKinds = {BridgeMutationKind.addDatabaseBlock};
+        final reads = fake.deferred = [];
+        fake.deferredKinds = {BridgeQueryKind.views};
+        await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+        await tester.pump();
+        await type(tester, 1, 'Ex');
+        if (!held) {
+          fake.gate = null;
+          gate.complete();
+          await tester.pump();
+        }
+        final draining = workspace.drain();
+        if (held) {
+          fake.gate = null;
+          gate.complete();
+        }
+        await tester.pump();
+        await draining;
+        // Liquid exits now, before the Table is built.
+        final table = fake.views[page]!.firstWhere(
+          (view) => view.kind == BridgeBlockKind.database,
+        );
+        expect(fake.databases[table.block]!.name, 'Ex');
+        fake.deferred = null;
+        for (final read in reads) {
+          read.complete();
+        }
+        await tester.pumpAndSettle();
+      },
+    );
+  }
 }

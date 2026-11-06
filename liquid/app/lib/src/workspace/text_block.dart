@@ -182,6 +182,9 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     _menu.show();
   }
 
+  /// Takes `choice`, whose writes quitting waits for.
+  void _take(BlockChoice choice) => _state.track(_choose(choice));
+
   /// Applies `choice` in place of what was typed for it: a style, or a Table in this line's
   /// place, starting the Section the line started. A line that ends the Page stays, empty,
   /// below the Table, so the Page goes on.
@@ -239,7 +242,7 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     _added = added;
     if (!mounted) {
       _name(views, added, _gone ?? '');
-    } else if (!_focus.hasFocus) {
+    } else if (!_focus.hasFocus || _state.quitting) {
       _finish(_text.text);
     } else {
       // The Table reads the name from the line once it takes the caret.
@@ -322,7 +325,7 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
         final by = key == LogicalKeyboardKey.arrowDown ? 1 : -1;
         setState(() => _chosen = (_chosen + by) % _choices.length);
       case LogicalKeyboardKey.enter || LogicalKeyboardKey.numpadEnter:
-        unawaited(_choose(_choices[_chosen]));
+        _take(_choices[_chosen]);
       case LogicalKeyboardKey.escape:
         _closeMenu();
       default:
@@ -445,7 +448,13 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
   /// structure changes from here, the input queue takes it instead.
   void _typed() {
     final stored = _stored;
-    if (_quiet || stored == null || _adding) return;
+    if (_adding) {
+      // Quitting names the Table with what the line holds, as the Table cannot take the
+      // caret any more; while it is added, that happens once it answers.
+      if (_state.quitting && _added != null) _finish(_text.text);
+      return;
+    }
+    if (_quiet || stored == null) return;
     if (_editor.isSource(this)) {
       _editor.typed(this);
       return;
@@ -755,7 +764,7 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
               child: BlockMenu(
                 choices: _choices,
                 chosen: _chosen,
-                onChoose: (choice) => unawaited(_choose(choice)),
+                onChoose: _take,
                 onHover: (index) => setState(() => _chosen = index),
               ),
             ),
