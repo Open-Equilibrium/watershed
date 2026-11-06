@@ -180,18 +180,30 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     _adding = true;
     final BridgeApplied added;
     try {
+      // The last line keeps its place below the Table, which goes after the View above,
+      // read first if its window was not; only the Page's first line has none.
+      String? after = view.id;
+      if (last) {
+        final above = widget.index > 0
+            ? await views.viewAt(widget.index - 1)
+            : null;
+        if (widget.index > 0 && above == null) {
+          throw 'The Page changed; choose Table again.';
+        }
+        after = above?.id;
+      }
       added = await views.write(
         mutation(
           BridgeMutationKind.addDatabaseBlock,
           page: _page,
-          // The View above is read first if its window was not.
-          after: last ? (await views.viewAt(widget.index - 1))?.id : view.id,
+          after: after,
           text: '',
         ),
         const [],
       );
-    } on Object {
+    } on Object catch (error) {
       // The problem shows on the Page; what was typed stays in the line.
+      _report(error);
       if (mounted) {
         _adding = false;
         _typed();
