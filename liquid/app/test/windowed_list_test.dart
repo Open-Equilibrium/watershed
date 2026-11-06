@@ -53,4 +53,35 @@ void main() {
     }
     expect(await last.timeout(const Duration(seconds: 1)), 950);
   });
+
+  test('a window read across a whole reread is read again', () async {
+    final held = <Completer<void>>[];
+    final windows = WindowedList<int>((start, limit) async {
+      final release = Completer<void>();
+      held.add(release);
+      await release.future;
+      return (1000, [for (var at = start; at < start + limit; at++) at]);
+    }, (error) => fail('$error'));
+    addTearDown(windows.dispose);
+    final first = windows.load(0);
+    held.removeAt(0).complete();
+    expect(await first, 0);
+    final last = windows.load(950);
+    final window = held.removeAt(0);
+    // A whole reread runs and ends before the window's read answers.
+    final reread = windows.reread();
+    await Future<void>.delayed(Duration.zero);
+    held.removeAt(0).complete();
+    await reread;
+    window.complete();
+    var answered = false;
+    unawaited(last.then((_) => answered = true));
+    for (var turn = 0; turn < 10 && !answered; turn++) {
+      await Future<void>.delayed(Duration.zero);
+      while (held.isNotEmpty) {
+        held.removeAt(0).complete();
+      }
+    }
+    expect(await last.timeout(const Duration(seconds: 1)), 950);
+  });
 }

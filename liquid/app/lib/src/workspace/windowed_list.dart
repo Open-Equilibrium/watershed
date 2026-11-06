@@ -35,6 +35,9 @@ class WindowedList<T> extends ChangeNotifier {
   /// Done once the running reread is, which reads the windows asked for meanwhile.
   Future<void>? _rereading;
 
+  /// Reads that failed so far.
+  int _failures = 0;
+
   /// The item at `index`, or null outside the list or while its window is read.
   T? at(int index) {
     if (index < 0 || index >= (_count ?? index + 1)) return null;
@@ -59,16 +62,18 @@ class WindowedList<T> extends ChangeNotifier {
     return null;
   }
 
-  /// The item at `index`, read first if its window was not; a window asked for while a
-  /// reread runs comes with that reread.
+  /// The item at `index`, read first if its window was not. A read a reread crossed is
+  /// dropped, so its window comes with that reread or is read again, a few times at most;
+  /// a failed read ends the wait, as its problem shows.
   Future<T?> load(int index) async {
     if (index < 0) return null;
     final chunk = index ~/ _chunk;
-    if (!_chunks.containsKey(chunk)) await _load(chunk);
-    while (!_chunks.containsKey(chunk) && !_disposed) {
-      final running = _rereading;
-      if (running == null) break;
-      await running;
+    final failures = _failures;
+    for (var tries = 0; tries < 3; tries++) {
+      if (_chunks.containsKey(chunk) || _disposed || _failures != failures) {
+        break;
+      }
+      await (_rereading ?? _load(chunk));
     }
     return at(index);
   }
@@ -100,6 +105,7 @@ class WindowedList<T> extends ChangeNotifier {
       _trim();
       notifyListeners();
     } on Object catch (error) {
+      _failures++;
       if (!_disposed) _report(error);
     }
   }
@@ -139,6 +145,7 @@ class WindowedList<T> extends ChangeNotifier {
         notifyListeners();
       } while (_again);
     } on Object catch (error) {
+      _failures++;
       if (!_disposed) _report(error);
     } finally {
       _reading = false;
