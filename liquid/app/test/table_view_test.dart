@@ -977,4 +977,14 @@ void main() {
     expect(adds.last.after, fields[5].id);
     expect(panel, findsNothing);
   });
+
+  testWidgets('+ for a new field is announced as a button', (tester) async {
+    final semantics = tester.ensureSemantics();
+    await show(tester, [_Table(_expenses)]);
+    expect(
+      tester.getSemantics(inTable(find.byKey(const Key('add field')))),
+      matchesSemantics(label: 'Add field', isButton: true, hasTapAction: true),
+    );
+    semantics.dispose();
+  });
 }

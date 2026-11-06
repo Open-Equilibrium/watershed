@@ -789,12 +789,20 @@ class _AddField extends StatelessWidget {
     link: link,
     child: TapRegion(
       groupId: panel,
-      child: GestureDetector(
-        key: const Key('add field'),
-        behavior: HitTestBehavior.opaque,
-        onTap: onTap,
-        child: Center(
-          child: Icon(LucideIcons.plus, size: 14, color: context.ws.textMuted),
+      child: Semantics(
+        button: true,
+        label: 'Add field',
+        child: GestureDetector(
+          key: const Key('add field'),
+          behavior: HitTestBehavior.opaque,
+          onTap: onTap,
+          child: Center(
+            child: Icon(
+              LucideIcons.plus,
+              size: 14,
+              color: context.ws.textMuted,
+            ),
+          ),
         ),
       ),
     ),
