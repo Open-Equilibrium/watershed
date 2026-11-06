@@ -199,7 +199,7 @@ class _TableBlockState extends State<TableBlock> {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      fontSize: 16,
+                      fontSize: WsMetrics.fsProse,
                       fontWeight: WsMetrics.fwSemibold,
                       color: name.isEmpty ? ws.textFaint : ws.text,
                     ),
