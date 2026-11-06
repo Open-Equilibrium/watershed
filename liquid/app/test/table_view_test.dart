@@ -893,4 +893,29 @@ void main() {
       expect(fake.rows[table], hasLength(2));
     },
   );
+
+  testWidgets('a failed read keeps + New after the row just added', (
+    tester,
+  ) async {
+    await show(tester, [_Table(_expenses)]);
+    final table = fake.views[page]!.single.block;
+    final reads = fake.deferred = [];
+    fake.deferredKinds = {BridgeQueryKind.database};
+    await tester.tap(inTable(find.text('New')));
+    await tester.pump();
+    final added = fake.rows[table]!.last.id;
+    // The reads after the add fail, as when the bridge is briefly gone.
+    fake.refuseQueries = 'gone';
+    fake.deferred = null;
+    for (final read in reads) {
+      read.complete();
+    }
+    await tester.pumpAndSettle();
+    fake.putRows(page, table, [...fake.rows[table]!]);
+    await tester.pumpAndSettle();
+    fake.refuseQueries = null;
+    await tester.tap(inTable(find.text('New')));
+    await tester.pumpAndSettle();
+    expect(applied(BridgeMutationKind.addRow).last.after, added);
+  });
 }

@@ -32,8 +32,9 @@ class WindowedList<T> extends ChangeNotifier {
   bool _reading = false;
   bool _again = false;
 
-  /// Done once the running reread is, which reads the windows asked for meanwhile.
-  Future<void>? _rereading;
+  /// Done once the running reread is, which reads the windows asked for meanwhile, with
+  /// whether it read them all.
+  Future<bool>? _rereading;
 
   /// Reads that failed so far.
   int _failures = 0;
@@ -111,15 +112,17 @@ class WindowedList<T> extends ChangeNotifier {
   }
 
   /// Rereads the count and every window kept, one reread at a time; one asked for while
-  /// another runs completes once the pass it asked for has read.
-  Future<void> reread() async {
+  /// another runs completes once the pass it asked for has read. True if every read
+  /// answered.
+  Future<bool> reread() async {
     if (_reading) {
       _again = true;
-      return _rereading;
+      return _rereading!;
     }
     _reading = true;
-    final done = Completer<void>();
+    final done = Completer<bool>();
     _rereading = done.future;
+    var answered = true;
     try {
       do {
         _again = false;
@@ -131,7 +134,7 @@ class WindowedList<T> extends ChangeNotifier {
           count = all;
           read[chunk] = items;
         }
-        if (_disposed || generation != _generation) return;
+        if (_disposed || generation != _generation) return answered = false;
         // Windows read across a change may disagree; read them all again first.
         if (_again) continue;
         _count = count;
@@ -146,13 +149,15 @@ class WindowedList<T> extends ChangeNotifier {
         notifyListeners();
       } while (_again);
     } on Object catch (error) {
+      answered = false;
       _failures++;
       if (!_disposed) _report(error);
     } finally {
       _reading = false;
       _rereading = null;
-      done.complete();
+      done.complete(answered);
     }
+    return answered;
   }
 
   /// Drops the windows used longest ago beyond the kept ones.

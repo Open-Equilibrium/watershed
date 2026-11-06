@@ -135,6 +135,9 @@ class _TableBlockState extends State<TableBlock> {
   /// The reads started when the last row add returned; any later one holds that row.
   int _readsAtRowAdd = 0;
 
+  /// Row adds asked for and not yet returned.
+  int _rowsAdding = 0;
+
   /// Whether to scroll to the last row or field once the next build laid it out.
   var _toLastRow = false;
   var _toLastField = false;
@@ -224,6 +227,7 @@ class _TableBlockState extends State<TableBlock> {
   /// + New adds a row after the last one and shows it; the last row is read first if its
   /// window was not.
   void _addRow() {
+    _rowsAdding++;
     _rowAdds = _rowAdds.then((_) => _addOneRow());
   }
 
@@ -257,6 +261,8 @@ class _TableBlockState extends State<TableBlock> {
       _toNewRow = null;
       _rowAdded = null;
       _report(error);
+    } finally {
+      _rowsAdding--;
     }
   }
 
@@ -388,12 +394,13 @@ class _TableBlockState extends State<TableBlock> {
       _report(error);
       return;
     }
-    await _rows.reread();
+    final answered = await _rows.reread();
     // Counts may not tell when rows also go elsewhere; a read begun after the last add
-    // holds its row.
-    if (mounted && _rowAdded != null && read > _readsAtRowAdd) {
+    // holds its row, if it answered.
+    if (answered && mounted && _rowAdded != null && read > _readsAtRowAdd) {
       _rowAdded = null;
-      if (_toNewRow != null) {
+      // The scroll waits for an add still on its way.
+      if (_toNewRow != null && _rowsAdding == 0) {
         _toNewRow = null;
         setState(() => _toLastRow = true);
       }

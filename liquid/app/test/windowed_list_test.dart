@@ -104,7 +104,7 @@ void main() {
       var second = false;
       final asked = windows.reread().then((_) => second = true);
       held.removeAt(0).complete();
-      await first.timeout(const Duration(seconds: 1), onTimeout: () {});
+      await first.timeout(const Duration(seconds: 1), onTimeout: () => false);
       await Future<void>.delayed(Duration.zero);
       expect(second, isFalse, reason: 'its own pass has not read yet');
       while (held.isNotEmpty) {
