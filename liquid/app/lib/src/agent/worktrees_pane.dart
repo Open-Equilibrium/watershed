@@ -27,10 +27,17 @@ class _WorktreesPaneState extends State<WorktreesPane> {
   List<BridgeWorktree>? _worktrees;
   String? _error;
 
+  /// A worktree is being reviewed for removal.
+  bool _reviewing = false;
+
+  /// The folder is outside Git, so it has no worktrees.
+  bool get _outsideGit =>
+      widget.state.git.loaded.value && widget.state.git.status.value == null;
+
   @override
   void initState() {
     super.initState();
-    unawaited(_list());
+    if (!_outsideGit) unawaited(_list());
   }
 
   Future<void> _list() async {
@@ -48,35 +55,45 @@ class _WorktreesPaneState extends State<WorktreesPane> {
   }
 
   Future<void> _remove(BridgeWorktree worktree) async {
-    BridgeWorktreeRemoval review;
+    if (_reviewing) return;
+    _reviewing = true;
     try {
-      review = await widget.state.worktreeRemoval(worktree.path);
-    } on Object catch (error) {
-      widget.state.notify(
-        BridgeLevel.error,
-        'Could not check ${worktree.shown}: $error',
+      final BridgeWorktreeRemoval review;
+      try {
+        review = await widget.state.worktreeRemoval(worktree.path);
+      } on Object catch (error) {
+        widget.state.notify(
+          BridgeLevel.error,
+          'Could not check ${worktree.shown}: $error',
+        );
+        return;
+      }
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (_) => _RemoveWorktree(
+          state: widget.state,
+          device: widget.device,
+          review: review,
+        ),
       );
-      return;
+    } finally {
+      _reviewing = false;
+      // What Git lists may have changed, whatever the dialog did.
+      if (mounted) await _list();
     }
-    if (!mounted) return;
-    final removed = await showDialog<bool>(
-      context: context,
-      builder: (_) => _RemoveWorktree(
-        state: widget.state,
-        device: widget.device,
-        review: review,
-      ),
-    );
-    if (removed == true) await _list();
   }
 
   @override
   Widget build(BuildContext context) {
     final ws = context.ws;
     final faint = TextStyle(color: ws.textFaint, fontSize: WsMetrics.fsSmall);
-    final repository = widget.state.git.status.value?.repository;
     final worktrees = _worktrees;
-    Widget row(List<Widget> cells, {bool header = false}) => Container(
+    // The main checkout comes first; its folder names the repository.
+    final repository = worktrees?.firstOrNull?.shown
+        .split('/')
+        .lastWhere((part) => part.isNotEmpty, orElse: () => 'this repository');
+    Widget row(List<Widget> cells) => Container(
       padding: const EdgeInsets.symmetric(
         horizontal: WsMetrics.space4,
         vertical: WsMetrics.space2,
@@ -89,7 +106,7 @@ class _WorktreesPaneState extends State<WorktreesPane> {
         children: [
           Expanded(child: cells[0]),
           SizedBox(width: 150, child: cells[1]),
-          SizedBox(width: 180, child: cells[2]),
+          SizedBox(width: 140, child: cells[2]),
         ],
       ),
     );
@@ -110,11 +127,19 @@ class _WorktreesPaneState extends State<WorktreesPane> {
                 ?.copyWith(fontWeight: WsMetrics.fwSemibold),
           ),
           Text(
-            "Git's registered worktrees of ${repository == null ? 'this repository' : projectOf(repository)} on ${widget.device}, including ones created outside Liquid. Remove… opens the removal dialog: only clean worktrees, never forced; the branch stays.",
+            "Git's registered worktrees of ${repository ?? 'this repository'} on ${widget.device}, including ones created outside Liquid. Remove… opens the removal dialog: only clean worktrees, never forced; the branch stays.",
             style: faint,
           ),
-          if (_error case final error?) WarningNotice(error),
-          if (worktrees == null && _error == null)
+          if (_outsideGit)
+            Text(
+              'This folder has no Git repository, so it has no worktrees.',
+              style: faint,
+            )
+          else if (_error case final error?)
+            WarningNotice(error),
+          if (_outsideGit)
+            const SizedBox.shrink()
+          else if (worktrees == null && _error == null)
             Text('Reading worktrees…', style: faint)
           else if (worktrees != null)
             Container(
@@ -131,11 +156,7 @@ class _WorktreesPaneState extends State<WorktreesPane> {
                   ]),
                   for (final worktree in worktrees)
                     row([
-                      Text(
-                        worktree.shown,
-                        style: monoStyle(context),
-                        overflow: TextOverflow.ellipsis,
-                      ),
+                      Text(worktree.shown, style: monoStyle(context)),
                       Text(
                         worktree.branch?.shown ?? 'detached',
                         style: monoStyle(context),
@@ -145,9 +166,14 @@ class _WorktreesPaneState extends State<WorktreesPane> {
                         final kept? => Text(kept, style: faint),
                         null => Align(
                           alignment: Alignment.centerLeft,
-                          child: SecondaryButton(
-                            label: 'Remove…',
-                            onPressed: () => unawaited(_remove(worktree)),
+                          child: Semantics(
+                            label: 'Remove the worktree at ${worktree.shown}',
+                            excludeSemantics: true,
+                            button: true,
+                            child: SecondaryButton(
+                              label: 'Remove…',
+                              onPressed: () => unawaited(_remove(worktree)),
+                            ),
                           ),
                         ),
                       },
@@ -169,16 +195,9 @@ String? _kept(BridgeWorktree worktree) {
     if (worktree.running.isNotEmpty) 'agent running',
     if (worktree.locked) 'locked by Git',
     if (worktree.missing) 'folder missing',
+    if (worktree.unreadable) 'unreadable by Git',
   ];
   return reasons.isEmpty ? null : reasons.join(' · ');
-}
-
-/// The repository folder's name from its Git directory.
-String projectOf(String gitDir) {
-  final parts = gitDir.split('/').where((part) => part.isNotEmpty).toList();
-  return parts.length > 1 && parts.last == '.git'
-      ? parts[parts.length - 2]
-      : parts.lastOrNull ?? gitDir;
 }
 
 /// The approved removal dialog: a clean worktree is removed after confirmation, one with local
@@ -228,7 +247,7 @@ class _RemoveWorktreeState extends State<_RemoveWorktree> {
           BridgeLevel.info,
           'Removed the worktree at ${worktree.shown}${worktree.branch == null ? '' : '; the branch ${worktree.branch!.shown} stays'}.',
         );
-        Navigator.of(context).pop(true);
+        Navigator.of(context).pop();
       case BridgeWorktreeOutcomeKind.changed:
         setState(() {
           _review = outcome.removal!;
@@ -239,13 +258,13 @@ class _RemoveWorktreeState extends State<_RemoveWorktree> {
         setState(() {
           _removing = false;
           _error =
-              '${whoRuns(outcome.running)}. Stop it or wait until it finishes; nothing was removed.';
+              '${whoRuns(outcome.running, where: 'in this repository')}. Stop it or wait until it finishes; nothing was removed.';
         });
       case BridgeWorktreeOutcomeKind.failed:
         setState(() {
           _removing = false;
           _error =
-              'Could not remove this worktree: ${outcome.detail} It stays listed until Git removes it.';
+              'Could not remove this worktree. Git said: “${outcome.detail}” It stays listed until Git removes it.';
         });
     }
   }
@@ -271,6 +290,7 @@ class _RemoveWorktreeState extends State<_RemoveWorktree> {
       return ActionDialog(
         title: 'Could not remove this worktree',
         dismiss: 'Close',
+        dismissible: !_removing,
         actions: [
           remove,
           if (ignored > 0 || review.moreIgnored)
@@ -282,9 +302,39 @@ class _RemoveWorktreeState extends State<_RemoveWorktree> {
         ],
         children: [
           ?changed,
+          if (worktree.main)
+            Text(
+              'The main checkout cannot be removed as a linked worktree.',
+              style: text,
+            ),
+          if (worktree.current)
+            Text(
+              'This window works in this worktree, so it cannot remove it.',
+              style: text,
+            ),
+          if (worktree.locked)
+            Text(
+              'A worktree locked by Git stays locked; Liquid does not force removal.',
+              style: text,
+            ),
+          if (worktree.missing)
+            Text(
+              'Its folder is missing, so there is nothing to remove; Git can prune its record.',
+              style: text,
+            ),
+          if (worktree.unreadable)
+            Text(
+              'Git cannot read this worktree, so Liquid cannot check what removing it would lose.',
+              style: text,
+            ),
           if (worktree.running.isNotEmpty)
             Text(
-              '${whoRuns(worktree.running).replaceFirst('in this checkout', 'in this worktree')}. Stop it or wait until it finishes.',
+              '${whoRuns(worktree.running, where: 'in this worktree')}. Stop it or wait until it finishes.',
+              style: text,
+            ),
+          if (review.stranded > 0)
+            Text(
+              '${plural(review.stranded.toInt(), 'commit')} ${review.stranded == 1 ? 'is' : 'are'} on no branch in this detached worktree and would be lost with it. Create a branch for ${review.stranded == 1 ? 'it' : 'them'} first.',
               style: text,
             ),
           if (files > 0) ...[
@@ -307,6 +357,7 @@ class _RemoveWorktreeState extends State<_RemoveWorktree> {
                     BridgeWorktreeFileState.staged => 'staged',
                     BridgeWorktreeFileState.unstaged => 'unstaged',
                     BridgeWorktreeFileState.untracked => 'untracked',
+                    BridgeWorktreeFileState.marked => 'hidden from Git',
                   }, style: text),
                 ],
               ),
@@ -321,8 +372,10 @@ class _RemoveWorktreeState extends State<_RemoveWorktree> {
       );
     }
     final unpushed = review.unpushed.toInt();
+    final ws = context.ws;
     return ActionDialog(
       title: 'Remove ${worktree.branch?.shown ?? worktree.shown} worktree?',
+      dismissible: !_removing,
       actions: [remove],
       children: [
         ?changed,
@@ -330,9 +383,21 @@ class _RemoveWorktreeState extends State<_RemoveWorktree> {
           'Removes ${worktree.shown} on ${widget.device}. Git reports no staged, unstaged, untracked or ignored files to preserve.',
           style: text,
         ),
-        Text(
-          '${unpushed > 0 ? 'The branch has ${plural(unpushed, 'unpushed commit')}. ' : ''}The branch and its commits remain in this repository.',
-          style: text,
+        Container(
+          padding: const EdgeInsets.symmetric(
+            horizontal: WsMetrics.space4,
+            vertical: WsMetrics.space3,
+          ),
+          decoration: BoxDecoration(
+            color: ws.subtle,
+            borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
+          ),
+          child: Text(
+            worktree.branch == null
+                ? 'Its commits remain in this repository on other branches.'
+                : '${unpushed > 0 ? 'The branch has ${plural(unpushed, 'unpushed commit')}. ' : ''}The branch and its commits remain in this repository.',
+            style: text,
+          ),
         ),
         Text(
           'Sessions that worked in this folder keep their history and checkpoints, but cannot resume file work in the removed folder.',

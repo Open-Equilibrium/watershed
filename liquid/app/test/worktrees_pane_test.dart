@@ -166,4 +166,116 @@ void main() {
     );
     expect(find.text('late.txt'), findsOneWidget);
   });
+
+  Future<void> review(
+    WidgetTester tester,
+    BridgeWorktreeRemoval removal,
+  ) async {
+    backend.reviews[hotfix.path] = removal;
+    await tester.tap(button('Remove…'));
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets('says why a worktree is kept when only its state keeps it', (
+    tester,
+  ) async {
+    await show(tester);
+    await review(
+      tester,
+      removalOf(
+        worktreeOf('/code/api-hotfix', branch: 'hotfix/login', locked: true),
+      ),
+    );
+
+    expect(
+      find.text(
+        'A worktree locked by Git stays locked; Liquid does not force removal.',
+      ),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('keeps a detached worktree whose commits no branch holds', (
+    tester,
+  ) async {
+    await show(tester);
+    await review(
+      tester,
+      removalOf(worktreeOf('/code/api-hotfix'), stranded: 2),
+    );
+
+    expect(
+      find.text(
+        '2 commits are on no branch in this detached worktree and would be lost with it. Create a branch for them first.',
+      ),
+      findsOneWidget,
+    );
+    expect(tester.widget<InkWell>(button('Remove worktree')).onTap, isNull);
+  });
+
+  testWidgets(
+    'a refused or failed removal keeps the worktree and lists again',
+    (tester) async {
+      await show(tester);
+      await review(tester, removalOf(hotfix));
+      backend.removed = const BridgeWorktreeOutcome(
+        kind: BridgeWorktreeOutcomeKind.agentRunning,
+        running: [BridgeRunningAgent(own: false, title: 'Fix sync')],
+        detail: '',
+      );
+
+      await tester.tap(button('Remove worktree'));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text(
+          '“Fix sync” is running in this repository. Stop it or wait until it finishes; nothing was removed.',
+        ),
+        findsOneWidget,
+      );
+
+      backend.removed = const BridgeWorktreeOutcome(
+        kind: BridgeWorktreeOutcomeKind.failed,
+        running: [],
+        detail: 'fatal: cannot remove',
+      );
+      await tester.tap(button('Remove worktree'));
+      await tester.pumpAndSettle();
+      expect(
+        find.text(
+          'Could not remove this worktree. Git said: “fatal: cannot remove” It stays listed until Git removes it.',
+        ),
+        findsOneWidget,
+      );
+
+      final listed = backend.calls.where((call) => call == 'worktrees').length;
+      await tester.tap(button('Cancel'));
+      await tester.pumpAndSettle();
+      expect(
+        backend.calls.where((call) => call == 'worktrees'),
+        hasLength(listed + 1),
+      );
+    },
+  );
+
+  testWidgets('a folder outside Git has no worktrees to list', (tester) async {
+    backend = FakeBackend()..git = null;
+    state = SessionState(backend);
+    await state.git.refresh();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: liquidTheme(Brightness.light),
+        home: Scaffold(
+          body: WorktreesPane(state: state, device: 'MacBook'),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text('This folder has no Git repository, so it has no worktrees.'),
+      findsOneWidget,
+    );
+    expect(backend.calls, isNot(contains('worktrees')));
+  });
 }

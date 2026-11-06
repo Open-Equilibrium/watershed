@@ -1170,6 +1170,7 @@ BridgeWorktree worktreeOf(
   bool current = false,
   bool locked = false,
   bool missing = false,
+  bool unreadable = false,
   List<BridgeRunningAgent> running = const [],
 }) => BridgeWorktree(
   path: path,
@@ -1179,6 +1180,7 @@ BridgeWorktree worktreeOf(
   current: current,
   locked: locked,
   missing: missing,
+  unreadable: unreadable,
   running: running,
   sessions: [for (final _ in running) 's'],
 );
@@ -1188,6 +1190,7 @@ BridgeWorktreeRemoval removalOf(
   List<BridgeWorktreeFile> files = const [],
   int ignored = 0,
   int unpushed = 0,
+  int stranded = 0,
 }) => BridgeWorktreeRemoval(
   worktree: worktree,
   head: 'c0ffee',
@@ -1196,9 +1199,12 @@ BridgeWorktreeRemoval removalOf(
   ignored: ignored,
   moreIgnored: false,
   unpushed: unpushed,
+  stranded: stranded,
   removable:
       files.isEmpty &&
       ignored == 0 &&
+      stranded == 0 &&
+      !worktree.unreadable &&
       worktree.running.isEmpty &&
       !worktree.main &&
       !worktree.current &&

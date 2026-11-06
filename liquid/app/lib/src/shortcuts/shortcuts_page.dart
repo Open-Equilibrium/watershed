@@ -118,12 +118,12 @@ const List<_Group> _right = [
   ),
 ];
 
-/// Settings (approved mockups): Appearance with theme and text size, Shortcuts with the
-/// profile, every action's keys and recording new ones, and Worktrees when a session's
-/// repository is open. It replaces the main area; esc closes it.
 /// A section of Settings.
 enum _Section { appearance, shortcuts, worktrees }
 
+/// Settings (approved mockups): Appearance with theme and text size, Shortcuts with the
+/// profile, every action's keys and recording new ones, and Worktrees with a session. It
+/// replaces the main area; esc closes it.
 class SettingsPage extends StatefulWidget {
   const SettingsPage({
     super.key,
