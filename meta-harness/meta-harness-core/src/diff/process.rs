@@ -1,5 +1,5 @@
-//! Running the host's `git`: bounded output, kept error text and a process group that ends with
-//! it.
+//! Running the host's `git`, and pi once for a pull request's text: bounded output, kept error
+//! text and a process group that ends with it.
 
 use super::*;
 use std::future::{Future, poll_fn};
@@ -341,7 +341,7 @@ fn piped(mut command: Command, env: &[(&str, impl AsRef<std::ffi::OsStr>)]) -> C
     command
         // A group of its own, so Git ends with the programs it starts (see [`Git`]).
         .process_group(0)
-        // Git's messages in English, as Liquid shows them and reads one.
+        // Git's messages in English, as Liquid shows them and reads one; pi runs with it too.
         .env("LC_ALL", "C")
         .envs(env.iter().map(|(name, value)| (name, value)))
         .stdin(Stdio::null())
@@ -356,7 +356,7 @@ pub(super) fn unreadable(error: std::io::Error) -> DiffError {
     DiffError::Git(error.to_string())
 }
 
-/// A running Git. Dropped before it ended, as at its time limit, it ends with the programs it
+/// A running Git, or pi once. Dropped before it ended, as at its time limit, it ends with the programs it
 /// started that stay in its process group, such as a project's clean filter (ADR-0210).
 pub(super) struct Git {
     pub(super) child: Child,

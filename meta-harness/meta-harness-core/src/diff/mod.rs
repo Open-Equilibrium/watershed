@@ -282,6 +282,11 @@ pub struct WorkingTree {
     busy: Mutex<()>,
 }
 
+/// A full commit id, which no Git option can start with.
+pub(crate) fn commit_id(id: &str) -> bool {
+    matches!(id.len(), 40 | 64) && id.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
 /// A private temporary directory, removed on drop.
 #[derive(Debug)]
 struct Store(PathBuf);

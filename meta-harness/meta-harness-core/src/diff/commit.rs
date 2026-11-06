@@ -231,7 +231,7 @@ impl WorkingTree {
                 "Select both sides of a file and directory replacement; resolve conflicting excluded staging in Git first.".to_owned(),
             ));
         }
-        if !matches!(snapshot.len(), 40 | 64) || !snapshot.bytes().all(|c| c.is_ascii_hexdigit()) {
+        if !commit_id(snapshot) {
             return Err(stale());
         }
         if self

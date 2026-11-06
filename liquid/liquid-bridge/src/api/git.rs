@@ -967,7 +967,7 @@ impl AgentSession {
 
     /// The title and description the Chat's `model` (`provider/id`) writes about the commits
     /// from `merge_base` to `head_commit`, through pi as the session started it; a later request
-    /// or [`AgentSession::stop_pull_request_text`] stops this one.
+    /// or [`AgentSession::stop_pull_request_text`] stops waiting for this one.
     pub fn write_pull_request_text(
         &self,
         model: String,
@@ -976,18 +976,17 @@ impl AgentSession {
     ) -> Result<BridgePullRequestText, String> {
         let (stop, stopped) = tokio::sync::oneshot::channel();
         *self.writing.lock().unwrap_or_else(PoisonError::into_inner) = Some(stop);
-        let (program, args) = &self.pi;
         RUNTIME.block_on(async {
             // Boxed, as flutter_rust_bridge cannot parse what `pin!` expands to.
             let mut text = Box::pin(self.checkpoints.write_pull_request_text(
-                program,
-                args,
+                &self.pi_program,
+                &self.pi_args,
                 &model,
                 &merge_base,
                 &head_commit,
             ));
             let mut stopped = stopped;
-            // Stopping drops the write, whose pi ends with it.
+            // Stopping only stops the wait; pi ends by itself or at its time limit.
             std::future::poll_fn(|context| {
                 if let std::task::Poll::Ready(text) = text.as_mut().poll(context) {
                     return std::task::Poll::Ready(text.map_err(|error| error.to_string()));
@@ -1004,7 +1003,7 @@ impl AgentSession {
         })
     }
 
-    /// Stops the pull request text being written; pi ends with it.
+    /// Stops waiting for the pull request text being written.
     pub fn stop_pull_request_text(&self) {
         self.writing
             .lock()

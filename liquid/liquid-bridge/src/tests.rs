@@ -1954,7 +1954,7 @@ fn the_chats_model_writes_pull_request_text_until_stopped() {
     let _ = std::fs::remove_file(&slow);
     // pi's one answer, as `sh -c` takes its first argument as `$0`; else the session's pi.
     let once = format!(
-        "if [ \"$0\" = --print ]; then cat > /dev/null; if [ -e {0} ]; then : > {0}.started; sleep 30; fi; printf 'Retry after\\n\\nWaits.\\n'; exit 0; fi\n",
+        "if [ \"$0\" = --print ]; then cat > /dev/null; if [ -e {0} ]; then : > {0}.started; sleep 12; fi; printf 'Retry after\\n\\nWaits.\\n'; exit 0; fi\n",
         shell_word(&slow.display().to_string())
     );
     let script = format!("{once}{}", gated("IFS= read -r line || exit 0\n"));

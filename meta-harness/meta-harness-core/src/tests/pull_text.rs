@@ -209,3 +209,32 @@ fn a_model_that_does_not_answer_in_time_is_stopped() {
         assert!(!cwd.exists(), "the stopped pi's folder stays");
     });
 }
+
+#[test]
+fn a_caller_that_stops_waiting_lets_pi_end_by_itself() {
+    run(async {
+        let branch = Branch::new("stopped", "b.txt", "retry\n");
+        let checkpoints = Checkpoints::new(branch.repo.path());
+        let dir = shell_word(branch.pi.display());
+        // Killed midway, pi could leave its login half stored.
+        std::fs::write(
+            branch.pi.join("pi"),
+            format!("#!/bin/sh\npwd > {dir}/cwd\nsleep 1\n: > {dir}/ended\necho Title\n"),
+        )
+        .unwrap();
+
+        let stopped =
+            tokio::time::timeout(Duration::from_millis(300), branch.write(&checkpoints)).await;
+        assert!(stopped.is_err());
+        let ended = branch.pi.join("ended");
+        let waited = std::time::Instant::now();
+        while !ended.exists() && waited.elapsed() < Duration::from_secs(10) {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+
+        assert!(ended.exists(), "pi was killed");
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        let cwd = PathBuf::from(branch.read("cwd").trim_end());
+        assert!(!cwd.exists(), "pi's folder stays");
+    });
+}

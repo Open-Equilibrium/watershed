@@ -43,23 +43,54 @@ pub struct PullRequestText {
     pub body: String,
 }
 
+/// One question to pi that owns all it needs, so it can run to its end apart from its asker.
+pub(crate) struct PiQuestion {
+    program: PathBuf,
+    args: Vec<OsString>,
+    material: String,
+}
+
+impl PiQuestion {
+    /// pi's answer, from an empty private folder that is removed after.
+    pub(crate) async fn ask(self) -> Result<PullRequestText, PullRequestError> {
+        let folder = Store(private_dir().map_err(DiffError::Io)?);
+        // pi runs with the Git process limits, so its failures come back as Git's.
+        let output = pi_once(
+            &folder.0,
+            &self.program,
+            &self.args,
+            self.material.as_bytes(),
+        )
+        .await
+        .map_err(|error| {
+            PullRequestError::Failed(match error {
+                DiffError::Git(reason) => format!("pi failed: {reason}"),
+                DiffError::GitStart(error) => format!("pi could not start: {error}"),
+                DiffError::TooLarge => "pi wrote more than Liquid reads.".to_owned(),
+                error => format!("pi failed: {error}"),
+            })
+        })?;
+        parse_answer(&String::from_utf8_lossy(&output))
+            .ok_or_else(|| PullRequestError::Failed("pi wrote no title.".into()))
+    }
+}
+
 impl WorkingTree {
-    /// The text `model` (`provider/id`) writes, through `program` with `args`, about the commits
-    /// from `base` to `head`, both full commit ids.
-    pub(crate) async fn write_pull_request_text(
+    /// The question for `model` (`provider/id`), through `program` with `args`, about the
+    /// commits from `base` to `head`, both full commit ids.
+    pub(crate) async fn pull_request_question(
         &self,
         program: &Path,
         args: &[OsString],
         model: &str,
         base: &str,
         head: &str,
-    ) -> Result<PullRequestText, PullRequestError> {
+    ) -> Result<PiQuestion, PullRequestError> {
         let (provider, id) = model
             .split_once('/')
             .filter(|(provider, id)| [provider, id].iter().all(|part| option_safe(part)))
             .ok_or_else(|| PullRequestError::Failed(format!("pi cannot name {model:?}.")))?;
         let material = self.pull_request_material(base, head).await?;
-        let folder = Store(private_dir().map_err(DiffError::Io)?);
         let mut all = args.to_vec();
         all.extend(ALONE.map(OsString::from));
         all.extend(
@@ -76,17 +107,11 @@ impl WorkingTree {
             ]
             .map(OsString::from),
         );
-        let output = pi_once(&folder.0, program, &all, material.as_bytes())
-            .await
-            .map_err(|error| match error {
-                DiffError::Git(reason) => PullRequestError::Failed(format!("pi failed: {reason}")),
-                DiffError::GitStart(error) => {
-                    PullRequestError::Failed(format!("pi could not start: {error}"))
-                }
-                error => error.into(),
-            })?;
-        text(&String::from_utf8_lossy(&output))
-            .ok_or_else(|| PullRequestError::Failed("pi wrote no title.".into()))
+        Ok(PiQuestion {
+            program: program.to_owned(),
+            args: all,
+            material,
+        })
     }
 
     /// The commit messages, changed files and patch from `base` to `head`, each cut at its
@@ -124,11 +149,6 @@ impl WorkingTree {
     }
 }
 
-/// A full commit id, which no Git option can start with.
-fn commit_id(id: &str) -> bool {
-    matches!(id.len(), 40 | 64) && id.bytes().all(|byte| byte.is_ascii_hexdigit())
-}
-
 /// A part of a model name pi reads as an option value, never as an option.
 fn option_safe(part: &str) -> bool {
     !part.is_empty() && !part.starts_with('-') && !part.chars().any(char::is_control)
@@ -149,7 +169,7 @@ fn cut((output, more): (Vec<u8>, bool), what: &str) -> String {
 
 /// The title on the answer's first line and the description after it, without control
 /// characters but line breaks and tabs; none without a title.
-fn text(answer: &str) -> Option<PullRequestText> {
+fn parse_answer(answer: &str) -> Option<PullRequestText> {
     let answer: String = answer
         .chars()
         .filter(|c| !c.is_control() || matches!(c, '\n' | '\t'))
