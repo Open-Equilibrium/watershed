@@ -343,7 +343,7 @@ class _RemoveWorktreeState extends State<_RemoveWorktree> {
             ),
           if (marked > 0 || review.moreMarked)
             Text(
-              '${plural(marked, 'file')}${review.moreMarked ? ' and more' : ''} ${marked == 1 && !review.moreMarked ? 'is' : 'are'} marked so that Git does not check ${marked == 1 && !review.moreMarked ? 'it' : 'them'} for edits, which removing the folder would lose. Clear the marks with git update-index --no-assume-unchanged or --no-skip-worktree, then review again.',
+              '${marked == 0 ? 'More files' : '${plural(marked, 'file')}${review.moreMarked ? ' and more' : ''}'} ${marked == 1 && !review.moreMarked ? 'is' : 'are'} marked so that Git does not check ${marked == 1 && !review.moreMarked ? 'it' : 'them'} for edits, which removing the folder would lose. Clear the marks with git update-index --no-assume-unchanged or --no-skip-worktree, then review again.',
               style: text,
             ),
           if (files > 0 || review.moreFiles)

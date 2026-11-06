@@ -328,4 +328,19 @@ void main() {
       findsOneWidget,
     );
   });
+
+  testWidgets('more marked files than named are counted only as marked', (
+    tester,
+  ) async {
+    await show(tester);
+    await review(tester, removalOf(hotfix, moreMarked: true));
+
+    expect(
+      find.text(
+        'More files are marked so that Git does not check them for edits, which removing the folder would lose. Clear the marks with git update-index --no-assume-unchanged or --no-skip-worktree, then review again.',
+      ),
+      findsOneWidget,
+    );
+    expect(find.textContaining('local changes'), findsNothing);
+  });
 }

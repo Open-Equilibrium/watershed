@@ -1191,12 +1191,13 @@ BridgeWorktreeRemoval removalOf(
   int ignored = 0,
   int unpushed = 0,
   int stranded = 0,
+  bool moreMarked = false,
 }) => BridgeWorktreeRemoval(
   worktree: worktree,
   head: 'c0ffee',
   files: files,
   moreFiles: false,
-  moreMarked: false,
+  moreMarked: moreMarked,
   ignored: ignored,
   moreIgnored: false,
   unpushed: unpushed,
@@ -1205,6 +1206,7 @@ BridgeWorktreeRemoval removalOf(
       files.isEmpty &&
       ignored == 0 &&
       stranded == 0 &&
+      !moreMarked &&
       !worktree.unreadable &&
       worktree.running.isEmpty &&
       !worktree.main &&
