@@ -213,6 +213,11 @@ class FakeWorkspace implements LiquidWorkspace {
         return BridgeApplied(action: _id());
       case BridgeMutationKind.addRow:
         final table = rows[mutation.block]!;
+        // The core refuses a row to go after one it does not have.
+        if (mutation.after case final after?
+            when !table.any((row) => row.id == after)) {
+          throw 'not found';
+        }
         final row = BridgeRow(id: _id(), cells: const []);
         table.insert(
           mutation.after == null
@@ -225,6 +230,10 @@ class FakeWorkspace implements LiquidWorkspace {
       case BridgeMutationKind.addField:
         final database = databases[mutation.block]!;
         final fields = [...database.fields];
+        if (mutation.after case final after?
+            when !fields.any((field) => field.id == after)) {
+          throw 'not found';
+        }
         final field = BridgeField(
           id: _id(),
           name: mutation.text!,

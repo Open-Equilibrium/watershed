@@ -259,17 +259,24 @@ class _TableBlockState extends State<TableBlock> {
   /// Adds a field after the last one and shows it once a read holds it; a refused one
   /// keeps the panel open.
   Future<void> _addField(String name, BridgeFieldKind kind) async {
-    final added = await widget.views.write(
-      mutation(
-        BridgeMutationKind.addField,
-        page: _page,
-        block: _block,
-        text: name,
-        fieldKind: kind,
-        after: _fieldAdded ?? _database?.fields.lastOrNull?.id,
-      ),
-      const [],
-    );
+    final BridgeApplied added;
+    try {
+      added = await widget.views.write(
+        mutation(
+          BridgeMutationKind.addField,
+          page: _page,
+          block: _block,
+          text: name,
+          fieldKind: kind,
+          after: _fieldAdded ?? _database?.fields.lastOrNull?.id,
+        ),
+        const [],
+      );
+    } on Object {
+      // The field it went after may be gone; the next goes after the last one read.
+      _fieldAdded = null;
+      rethrow;
+    }
     if (!mounted) return;
     _panel.hide();
     _fieldAdded = added.field;

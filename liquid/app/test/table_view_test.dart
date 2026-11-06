@@ -831,4 +831,37 @@ void main() {
     final fields = fake.databases[fake.views[page]!.single.block]!.fields;
     expect(adds.last.after, fields[5].id, reason: 'after the field just added');
   });
+
+  testWidgets('a field removed before it was read leaves + working', (
+    tester,
+  ) async {
+    await show(tester, [_Table(_expenses)]);
+    final table = fake.views[page]!.single.block;
+    final reads = fake.deferred = [];
+    fake.deferredKinds = {BridgeQueryKind.database};
+    Future<void> add() async {
+      await tester.tap(inTable(find.byKey(const Key('add field'))));
+      await tester.pumpAndSettle();
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pump();
+    }
+
+    await add();
+    // Another device removes it before this one read it.
+    fake.databases[table] = const BridgeDatabase(
+      name: 'Expenses',
+      fields: _fields,
+    );
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    await add();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    fake.deferred = null;
+    for (final read in reads) {
+      read.complete();
+    }
+    await tester.pumpAndSettle();
+    expect(fake.databases[table]!.fields, hasLength(6));
+  });
 }

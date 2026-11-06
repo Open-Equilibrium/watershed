@@ -32,6 +32,9 @@ class WindowedList<T> extends ChangeNotifier {
   bool _reading = false;
   bool _again = false;
 
+  /// Done once the running reread is, which reads the windows asked for meanwhile.
+  Future<void>? _rereading;
+
   /// The item at `index`, or null outside the list or while its window is read.
   T? at(int index) {
     if (index < 0 || index >= (_count ?? index + 1)) return null;
@@ -56,11 +59,17 @@ class WindowedList<T> extends ChangeNotifier {
     return null;
   }
 
-  /// The item at `index`, read first if its window was not.
+  /// The item at `index`, read first if its window was not; a window asked for while a
+  /// reread runs comes with that reread.
   Future<T?> load(int index) async {
     if (index < 0) return null;
     final chunk = index ~/ _chunk;
     if (!_chunks.containsKey(chunk)) await _load(chunk);
+    while (!_chunks.containsKey(chunk) && !_disposed) {
+      final running = _rereading;
+      if (running == null) break;
+      await running;
+    }
     return at(index);
   }
 
@@ -102,6 +111,8 @@ class WindowedList<T> extends ChangeNotifier {
       return;
     }
     _reading = true;
+    final done = Completer<void>();
+    _rereading = done.future;
     try {
       do {
         _again = false;
@@ -131,6 +142,8 @@ class WindowedList<T> extends ChangeNotifier {
       if (!_disposed) _report(error);
     } finally {
       _reading = false;
+      _rereading = null;
+      done.complete();
     }
   }
 
