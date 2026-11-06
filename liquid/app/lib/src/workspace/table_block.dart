@@ -120,6 +120,20 @@ class _TableBlockState extends State<TableBlock> {
   final _sideways = ScrollController();
   StreamSubscription<BridgeChange>? _followed;
 
+  /// The name as typed; a name changed elsewhere shows unless the person is typing one.
+  final _name = TextEditingController();
+  final _nameFocus = FocusNode(debugLabel: 'Table name');
+
+  /// Renames asked for, so only the latest refusal puts the stored name back.
+  int _renames = 0;
+
+  /// The name as last read or written, which typing changes once a composition ends.
+  String _named = '';
+
+  /// The renames sent when the name shown last was read.
+  int _readSent = 0;
+  StreamSubscription<String>? _settled;
+
   /// Reads asked for, so only the latest shows.
   int _reads = 0;
 
@@ -131,6 +145,18 @@ class _TableBlockState extends State<TableBlock> {
   void initState() {
     super.initState();
     _rows.addListener(_changed);
+    _name.addListener(_typed);
+    _state.finishing.add(_typed);
+    _nameFocus.addListener(_left);
+    // Once every rename arrived, the name is read again.
+    _settled = widget.views.settled
+        .where((settled) => settled == _block)
+        .listen((_) => unawaited(_read()));
+    widget.views.caret.addListener(_takeCaret);
+    // Built after the caret was handed to it, as a new Table is.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _takeCaret();
+    });
     _followed = follow(
       _state.workspace,
       BridgeResource(
@@ -143,9 +169,16 @@ class _TableBlockState extends State<TableBlock> {
 
   @override
   void dispose() {
+    // A composition still open is written as it stands.
+    _write();
+    _state.finishing.remove(_typed);
     unawaited(_followed?.cancel());
+    unawaited(_settled?.cancel());
+    widget.views.caret.removeListener(_takeCaret);
     _rows.dispose();
     _sideways.dispose();
+    _name.dispose();
+    _nameFocus.dispose();
     super.dispose();
   }
 
@@ -157,14 +190,89 @@ class _TableBlockState extends State<TableBlock> {
     if (mounted) _state.problem.value = '$error';
   }
 
+  /// A caret handed to this Table goes to its name, as for a new Table.
+  void _takeCaret() {
+    final caret = widget.views.caret.value;
+    if (caret == null || caret.view != widget.view.id) return;
+    widget.views.caret.value = null;
+    // What was typed in the line it took the place of is its name.
+    final (text, written) =
+        widget.views.naming.remove(widget.view.id)?.call() ?? ('', false);
+    if (text.isNotEmpty) {
+      if (written) _named = text;
+      _name.value = TextEditingValue(
+        text: text,
+        selection: TextSelection.collapsed(offset: text.length),
+      );
+    }
+    _nameFocus.requestFocus();
+  }
+
+  /// Each change of the name, once any composition ends, is one rename; a refused one puts
+  /// the stored name back.
+  void _typed() {
+    // On quitting, a composition still open is written as it stands.
+    if (!_name.value.composing.isCollapsed && !_state.quitting) return;
+    _write();
+  }
+
+  void _write() {
+    final name = _name.text;
+    if (name == _named) return;
+    _named = name;
+    final rename = ++_renames;
+    unawaited(
+      widget.views
+          .write(
+            mutation(
+              BridgeMutationKind.renameDatabase,
+              page: _page,
+              block: _block,
+              text: name,
+            ),
+            [_block],
+          )
+          .then<void>(
+            (_) {},
+            onError: (Object _) {
+              if (!mounted || rename != _renames) return;
+              _show(_database?.name ?? '');
+            },
+          ),
+    );
+  }
+
+  /// Leaving the name writes a composition still open as it stands; a name changed
+  /// elsewhere meanwhile then shows, unless the person's own rename is on its way.
+  void _left() {
+    if (_nameFocus.hasFocus) return;
+    _write();
+    final views = widget.views;
+    if (views.pending(_block) > 0 || views.sent(_block) != _readSent) return;
+    _show(_database?.name ?? '');
+  }
+
+  void _show(String name) {
+    _named = name;
+    if (_name.text != name) _name.text = name;
+  }
+
   /// Reads the name and fields, then the rows read so far.
   Future<void> _read() async {
     final read = ++_reads;
+    final views = widget.views;
+    // A read that crosses a rename on its way may miss it, whenever it answers.
+    final clean = views.pending(_block) == 0;
+    final sent = views.sent(_block);
     try {
       final answer = await _state.workspace.query(
         query: query(BridgeQueryKind.database, page: _page, block: _block),
       );
       if (!mounted || read != _reads) return;
+      if (clean && views.pending(_block) == 0 && sent == views.sent(_block)) {
+        _readSent = sent;
+        if (!_nameFocus.hasFocus) _show(answer.database?.name ?? '');
+      }
       setState(() => _database = answer.database);
     } on Object catch (error) {
       _report(error);
@@ -181,7 +289,6 @@ class _TableBlockState extends State<TableBlock> {
     final numbers = _formats(locale, NumberFormat.localeExists);
     final days = _formats(locale, DateFormat.localeExists);
     final count = _rows.count ?? 0;
-    final name = database?.name ?? '';
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: WsMetrics.space3),
       child: Column(
@@ -193,15 +300,18 @@ class _TableBlockState extends State<TableBlock> {
               children: [
                 Icon(LucideIcons.table, size: 16, color: ws.textFaint),
                 const SizedBox(width: WsMetrics.space3),
-                Flexible(
-                  child: Text(
-                    name.isEmpty ? 'Untitled' : name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+                Expanded(
+                  child: TextField(
+                    controller: _name,
+                    focusNode: _nameFocus,
                     style: TextStyle(
                       fontSize: WsMetrics.fsProse,
                       fontWeight: WsMetrics.fwSemibold,
-                      color: name.isEmpty ? ws.textFaint : ws.text,
+                      color: ws.text,
+                    ),
+                    decoration: InputDecoration.collapsed(
+                      hintText: 'Untitled',
+                      hintStyle: TextStyle(color: ws.textFaint),
                     ),
                   ),
                 ),
@@ -230,20 +340,21 @@ class _TableBlockState extends State<TableBlock> {
                           DateFormat.yMMMd(days),
                         ),
                       ),
-                    Container(
-                      height: _footerHeight,
-                      color: ws.subtle,
-                      padding: const EdgeInsets.symmetric(horizontal: 10),
-                      alignment: Alignment.centerLeft,
-                      child: Text(
-                        '${NumberFormat.decimalPattern(numbers).format(count)} '
-                        '${count == 1 ? 'row' : 'rows'}',
-                        style: TextStyle(
-                          fontSize: WsMetrics.fsCompact,
-                          color: ws.textFaint,
+                    if (count > 0)
+                      Container(
+                        height: _footerHeight,
+                        color: ws.subtle,
+                        padding: const EdgeInsets.symmetric(horizontal: 10),
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          '${NumberFormat.decimalPattern(numbers).format(count)} '
+                          '${count == 1 ? 'row' : 'rows'}',
+                          style: TextStyle(
+                            fontSize: WsMetrics.fsCompact,
+                            color: ws.textFaint,
+                          ),
                         ),
                       ),
-                    ),
                   ],
                 ),
               ),

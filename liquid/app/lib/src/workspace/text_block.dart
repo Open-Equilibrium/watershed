@@ -8,6 +8,7 @@ import '../rust/api/workspace.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
+import 'slash_commands.dart';
 import 'follow.dart';
 import 'page_editor.dart';
 import 'page_views.dart';
@@ -66,6 +67,24 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
   StreamSubscription<BridgeChange>? _followed;
   StreamSubscription<String>? _settled;
 
+  /// The slash command menu `/` opens, its commands for what follows `/` and the one ⏎
+  /// takes.
+  final _menu = OverlayPortalController();
+  final _menuAnchor = LayerLink();
+  var _choices = const <SlashCommand>[];
+  var _chosen = 0;
+
+  /// While a Table chosen with a slash command takes this line's place: what is typed stays in
+  /// the field, unsent, and becomes the Table's name once the Table takes the caret, the
+  /// person moves to another field or the line goes.
+  var _adding = false;
+
+  /// The Table taking this line's place, once added.
+  BridgeApplied? _added;
+
+  /// What the line held when it went before its Table was added.
+  String? _gone;
+
   WorkspaceState get _state => widget.views.state;
   PageEditor get _editor => widget.views.editor;
   String get _page => widget.views.page;
@@ -83,6 +102,7 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     _state.finishing.add(_typed);
     widget.views.caret.addListener(_takeCaret);
     widget.views.ready.addListener(_readied);
+    _focus.addListener(_focusChanged);
     _followed = follow(
       _state.workspace,
       BridgeResource(kind: BridgeResourceKind.block, page: _page, block: block),
@@ -99,8 +119,20 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
 
   @override
   void dispose() {
+    // What the line held while its Table was added is the Table's name, also if the
+    // Table never takes the caret.
+    if (_adding) {
+      final typed = _gone = _text.text;
+      if (_added case final added?) {
+        _name(widget.views, added, typed);
+        widget.views.naming[added.view!] = () => (typed, true);
+      }
+    }
     // A composition still open, or anything else not yet sent, is written as it stands.
-    if (!_editor.owns(this) && _stored != null && _text.text != _stored) {
+    if (!_editor.owns(this) &&
+        !_adding &&
+        _stored != null &&
+        _text.text != _stored) {
       _send(_text.text);
     }
     _editor.left(this);
@@ -124,6 +156,185 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
   @override
   bool get focused => _focus.hasFocus;
 
+  void _focusChanged() {
+    if (_focus.hasFocus) return;
+    _closeMenu();
+    // A person who moved to another field keeps the caret there.
+    if (_adding && _added != null) _finish(_text.text);
+  }
+
+  void _closeMenu() {
+    if (_menu.isShowing) _menu.hide();
+  }
+
+  /// Opens the slash command menu once `/` is typed in an empty Text Block, filters it by what
+  /// follows, and closes it when nothing matches or the `/` is gone.
+  void _offer(String text, String stored) {
+    final opening = text == '/' && stored.isEmpty;
+    if (!opening && !_menu.isShowing) return;
+    final choices = text.startsWith('/')
+        ? slashCommandsFor(text.substring(1))
+        : const <SlashCommand>[];
+    if (choices.isEmpty) return _closeMenu();
+    setState(() {
+      _choices = choices;
+      _chosen = 0;
+    });
+    _menu.show();
+  }
+
+  /// Takes `choice`, whose writes quitting waits for.
+  void _take(SlashCommand choice) => _state.track(_choose(choice));
+
+  /// Applies `choice` in place of what was typed for it: a style, or a Table in this line's
+  /// place, starting the Section the line started. A line that ends the Page stays, empty,
+  /// below the Table, so the Page goes on.
+  Future<void> _choose(SlashCommand choice) async {
+    _closeMenu();
+    _set('', 0);
+    _send('');
+    if (choice.style case final style?) {
+      if (style != _style) _restyle(style);
+      return;
+    }
+    final views = widget.views;
+    final view = widget.view;
+    final last = widget.index == (views.count ?? 0) - 1;
+    _adding = true;
+    final BridgeApplied added;
+    try {
+      // The last line keeps its place below the Table, which goes after the View above,
+      // read first if its window was not; only the Page's first line has none.
+      String? after = view.id;
+      if (last) {
+        final above = widget.index > 0
+            ? await views.viewAt(widget.index - 1)
+            : null;
+        if (widget.index > 0 && above == null) {
+          throw 'The Page changed; choose Table again.';
+        }
+        after = above?.id;
+      }
+      added = await views.write(
+        mutation(
+          BridgeMutationKind.addDatabaseBlock,
+          page: _page,
+          after: after,
+          text: '',
+        ),
+        const [],
+      );
+    } on Object catch (error) {
+      // The problem shows on the Page; what was typed stays in the line.
+      _report(error);
+      if (mounted) {
+        _adding = false;
+        _typed();
+      } else if (_gone case final gone? when gone.isNotEmpty) {
+        // The line went meanwhile; what it held is its text.
+        unawaited(
+          views
+              .write(textEdit(_page, block, '', gone), [block])
+              .then<void>((_) {}, onError: (Object _) {}),
+        );
+      }
+      return;
+    }
+    _added = added;
+    if (!mounted) {
+      _name(views, added, _gone ?? '');
+    } else if (!_focus.hasFocus || _state.quitting) {
+      _finish(_text.text);
+    } else {
+      // The Table reads the name from the line once it takes the caret.
+      views.naming[added.view!] = _handOver;
+      views.moveCaret(Caret(added.view!, 0));
+    }
+    // A refused write's problem shows on the Page; the Table stays.
+    try {
+      Future<void> boundary(String view, bool starts) => views.write(
+        mutation(
+          BridgeMutationKind.setSectionBoundary,
+          page: _page,
+          view: view,
+          boundary: starts,
+        ),
+        const [],
+      );
+      if (view.boundary) {
+        await boundary(added.view!, true);
+        if (last) await boundary(view.id, false);
+      }
+      if (!last) {
+        await views.write(
+          mutation(BridgeMutationKind.removeView, page: _page, view: view.id),
+          [block],
+        );
+      }
+    } on Object {
+      // Shown on the Page.
+    }
+  }
+
+  /// What the line holds, for the Table that took its place and now the caret.
+  (String, bool) _handOver() {
+    final typed = _text.text;
+    _release();
+    return (typed, false);
+  }
+
+  /// Gives what the line holds to its Table without the caret.
+  void _finish(String typed) {
+    final added = _added!;
+    final views = widget.views;
+    if (views.caret.value?.view == added.view) views.caret.value = null;
+    _name(views, added, typed);
+    _release();
+  }
+
+  /// Renames the Table `added` to `typed`, if anything was typed.
+  void _name(PageViews views, BridgeApplied added, String typed) {
+    views.naming.remove(added.view);
+    if (typed.isEmpty) return;
+    unawaited(
+      views
+          .write(
+            mutation(
+              BridgeMutationKind.renameDatabase,
+              page: _page,
+              block: added.block,
+              text: typed,
+            ),
+            [added.block!],
+          )
+          .then<void>((_) {}, onError: (Object _) {}),
+    );
+  }
+
+  /// The line is itself again, empty if it stays.
+  void _release() {
+    widget.views.naming.remove(_added?.view);
+    _adding = false;
+    _added = null;
+    if (mounted) _set('', 0);
+  }
+
+  /// ↑↓ choose in the open slash command menu, ⏎ takes the choice and esc closes it.
+  KeyEventResult _menuKey(LogicalKeyboardKey key) {
+    switch (key) {
+      case LogicalKeyboardKey.arrowDown || LogicalKeyboardKey.arrowUp:
+        final by = key == LogicalKeyboardKey.arrowDown ? 1 : -1;
+        setState(() => _chosen = (_chosen + by) % _choices.length);
+      case LogicalKeyboardKey.enter || LogicalKeyboardKey.numpadEnter:
+        _take(_choices[_chosen]);
+      case LogicalKeyboardKey.escape:
+        _closeMenu();
+      default:
+        return KeyEventResult.ignored;
+    }
+    return KeyEventResult.handled;
+  }
+
   void _report(Object error) {
     if (mounted) _state.problem.value = '$error';
   }
@@ -145,7 +356,10 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
       _report(error);
       return;
     }
-    if (!mounted || read != _reads || _editor.isSource(this)) return;
+    // While a Table takes this line's place, what is typed there is its name.
+    if (!mounted || read != _reads || _editor.isSource(this) || _adding) {
+      return;
+    }
     final text = answer.text;
     if (text == null ||
         !clean ||
@@ -224,6 +438,8 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     }
     widget.views.caret.value = null;
     _focus.requestFocus();
+    // `/` typed on a blank Page opens the slash command menu in the Text Block it made.
+    if (caret.text == '/' && widget.views.count == 1) _offer('/', '');
     final length = _text.text.length;
     if (caret.offset > length && caret.offset < _end) _wanted = caret.offset;
     _text.selection = TextSelection.collapsed(
@@ -235,6 +451,12 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
   /// structure changes from here, the input queue takes it instead.
   void _typed() {
     final stored = _stored;
+    if (_adding) {
+      // Quitting names the Table with what the line holds, as the Table cannot take the
+      // caret any more; while it is added, that happens once it answers.
+      if (_state.quitting && _added != null) _finish(_text.text);
+      return;
+    }
     if (_quiet || stored == null) return;
     if (_editor.isSource(this)) {
       _editor.typed(this);
@@ -273,6 +495,7 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
       return;
     }
     _send(text);
+    _offer(text, stored);
   }
 
   /// Sends the change from the stored text to `text` as one edit.
@@ -317,6 +540,23 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
         !keys.isAltPressed;
     if (!plain) return KeyEventResult.ignored;
     if (_editor.isSource(this)) return _editor.queue(this, event);
+    if (_menu.isShowing) return _menuKey(event.logicalKey);
+    // While a Table takes this line's place, only typing reaches the field.
+    if (_adding) {
+      return switch (event.logicalKey) {
+        LogicalKeyboardKey.enter ||
+        LogicalKeyboardKey.numpadEnter ||
+        LogicalKeyboardKey.arrowUp ||
+        LogicalKeyboardKey.arrowDown ||
+        LogicalKeyboardKey.arrowLeft ||
+        LogicalKeyboardKey.arrowRight => KeyEventResult.handled,
+        LogicalKeyboardKey.backspace
+            when _text.selection.isCollapsed &&
+                _text.selection.baseOffset == 0 =>
+          KeyEventResult.handled,
+        _ => KeyEventResult.ignored,
+      };
+    }
     // While another Text Block's change of structure runs, this field types and deletes as
     // usual, and its own ⏎ or ⌫ at the start joins the queue behind that change.
     final selection = _text.selection;
@@ -512,14 +752,38 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
       ),
       _ => text,
     };
-    return Padding(
-      padding: EdgeInsets.only(top: top, bottom: WsMetrics.space1),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          if (widget.view.boundary && widget.index > 0) const SectionDivider(),
-          text,
-        ],
+    // The slash command menu opens under the line `/` was typed in, and clicking it keeps the
+    // field's focus. It sits above the style's frame, which a restyle rebuilds.
+    return CompositedTransformTarget(
+      link: _menuAnchor,
+      child: OverlayPortal(
+        controller: _menu,
+        overlayChildBuilder: (context) => Align(
+          alignment: Alignment.topLeft,
+          child: CompositedTransformFollower(
+            link: _menuAnchor,
+            targetAnchor: Alignment.bottomLeft,
+            child: TextFieldTapRegion(
+              child: SlashCommands(
+                choices: _choices,
+                chosen: _chosen,
+                onChoose: _take,
+                onHover: (index) => setState(() => _chosen = index),
+              ),
+            ),
+          ),
+        ),
+        child: Padding(
+          padding: EdgeInsets.only(top: top, bottom: WsMetrics.space1),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (widget.view.boundary && widget.index > 0)
+                const SectionDivider(),
+              text,
+            ],
+          ),
+        ),
       ),
     );
   }

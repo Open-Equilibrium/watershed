@@ -25,8 +25,12 @@ class FakeWorkspace implements LiquidWorkspace {
   /// Fails this many of the next applies.
   int refuseNext = 0;
 
-  /// Holds applies until it completes.
+  /// Fails every apply of these kinds.
+  Set<BridgeMutationKind> refuseKinds = {};
+
+  /// Holds applies until it completes; only those of [gatedKinds] when set.
   Completer<void>? gate;
+  Set<BridgeMutationKind>? gatedKinds;
 
   /// How long each apply takes, as a slow disk would.
   Duration Function()? delay;
@@ -55,9 +59,10 @@ class FakeWorkspace implements LiquidWorkspace {
 
   @override
   Future<BridgeApplied> apply({required BridgeMutation mutation}) async {
-    await gate?.future;
+    if (gatedKinds?.contains(mutation.kind) ?? true) await gate?.future;
     if (delay case final delay?) await Future<void>.delayed(delay());
     if (refuse case final refused?) throw refused;
+    if (refuseKinds.contains(mutation.kind)) throw 'refused';
     if (refuseNext > 0) {
       refuseNext--;
       throw 'refused';
@@ -199,6 +204,20 @@ class FakeWorkspace implements LiquidWorkspace {
         _changed(
           BridgeResource(kind: BridgeResourceKind.views, page: mutation.page),
         );
+        return BridgeApplied(action: _id());
+      case BridgeMutationKind.removeView:
+        views[mutation.page]!.removeWhere((view) => view.id == mutation.view);
+        _changed(
+          BridgeResource(kind: BridgeResourceKind.views, page: mutation.page),
+        );
+        return BridgeApplied(action: _id());
+      case BridgeMutationKind.renameDatabase:
+        final database = databases[mutation.block]!;
+        databases[mutation.block!] = BridgeDatabase(
+          name: mutation.text!,
+          fields: database.fields,
+        );
+        _changed(_blockResource(mutation));
         return BridgeApplied(action: _id());
       case BridgeMutationKind.addDatabaseBlock:
         final page = views.putIfAbsent(mutation.page!, () => []);
