@@ -978,12 +978,32 @@ void main() {
     expect(panel, findsNothing);
   });
 
-  testWidgets('+ for a new field is announced as a button', (tester) async {
+  testWidgets('+, + New and the field kinds are announced as buttons', (
+    tester,
+  ) async {
     final semantics = tester.ensureSemantics();
     await show(tester, [_Table(_expenses)]);
     expect(
       tester.getSemantics(inTable(find.byKey(const Key('add field')))),
       matchesSemantics(label: 'Add field', isButton: true, hasTapAction: true),
+    );
+    expect(
+      tester.getSemantics(inTable(find.text('New'))),
+      matchesSemantics(label: 'New', isButton: true, hasTapAction: true),
+    );
+    await tester.tap(inTable(find.byKey(const Key('add field'))));
+    await tester.pumpAndSettle();
+    expect(
+      tester.getSemantics(
+        find.descendant(of: panel, matching: find.text('Text')),
+      ),
+      matchesSemantics(
+        label: 'Text',
+        isButton: true,
+        hasTapAction: true,
+        hasSelectedState: true,
+        isSelected: true,
+      ),
     );
     semantics.dispose();
   });

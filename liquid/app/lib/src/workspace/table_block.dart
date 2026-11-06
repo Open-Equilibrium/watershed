@@ -818,24 +818,27 @@ class _NewRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ws = context.ws;
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: onTap,
-      child: Container(
-        height: WsMetrics.rowTable,
-        padding: const EdgeInsets.symmetric(horizontal: 10),
-        child: Row(
-          children: [
-            Icon(LucideIcons.plus, size: 14, color: ws.textFaint),
-            const SizedBox(width: WsMetrics.space2),
-            Text(
-              'New',
-              style: TextStyle(
-                fontSize: WsMetrics.fsCompact,
-                color: ws.textFaint,
+    return Semantics(
+      button: true,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: Container(
+          height: WsMetrics.rowTable,
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          child: Row(
+            children: [
+              Icon(LucideIcons.plus, size: 14, color: ws.textFaint),
+              const SizedBox(width: WsMetrics.space2),
+              Text(
+                'New',
+                style: TextStyle(
+                  fontSize: WsMetrics.fsCompact,
+                  color: ws.textFaint,
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

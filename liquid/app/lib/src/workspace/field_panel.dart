@@ -160,27 +160,31 @@ class _FieldPanelState extends State<FieldPanel> {
             for (final kind in BridgeFieldKind.values)
               MouseRegion(
                 onEnter: (_) => setState(() => _kind = kind),
-                child: GestureDetector(
-                  onTap: () => unawaited(_add(kind)),
-                  child: Container(
-                    height: 30,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: WsMetrics.space3,
-                    ),
-                    decoration: BoxDecoration(
-                      color: kind == _kind ? ws.hover : null,
-                      borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(
-                          fieldKindIcon(kind),
-                          size: 14,
-                          color: ws.textFaint,
-                        ),
-                        const SizedBox(width: 10),
-                        Text(fieldKindName(kind)),
-                      ],
+                child: Semantics(
+                  button: true,
+                  selected: kind == _kind,
+                  child: GestureDetector(
+                    onTap: () => unawaited(_add(kind)),
+                    child: Container(
+                      height: 30,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: WsMetrics.space3,
+                      ),
+                      decoration: BoxDecoration(
+                        color: kind == _kind ? ws.hover : null,
+                        borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            fieldKindIcon(kind),
+                            size: 14,
+                            color: ws.textFaint,
+                          ),
+                          const SizedBox(width: 10),
+                          Text(fieldKindName(kind)),
+                        ],
+                      ),
                     ),
                   ),
                 ),
