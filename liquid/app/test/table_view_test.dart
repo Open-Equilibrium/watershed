@@ -864,4 +864,33 @@ void main() {
     await tester.pumpAndSettle();
     expect(fake.databases[table]!.fields, hasLength(6));
   });
+
+  testWidgets(
+    'a row removed elsewhere while + New is read leaves + New working',
+    (tester) async {
+      await show(tester, [_Table(_expenses)]);
+      final table = fake.views[page]!.single.block;
+      final reads = fake.deferred = [];
+      fake.deferredKinds = {BridgeQueryKind.database};
+      await tester.tap(inTable(find.text('New')));
+      await tester.pump();
+      // Before this device reads its new row, another one removes the first row.
+      fake.rows[table]!.removeAt(0);
+      fake.deferred = null;
+      for (final read in reads) {
+        read.complete();
+      }
+      await tester.pumpAndSettle();
+      expect(inTable(find.text('2 rows')), findsOneWidget);
+      // A later change, then the other device removes the row this one added.
+      fake.putRows(page, table, [...fake.rows[table]!]);
+      await tester.pumpAndSettle();
+      fake.putRows(page, table, [fake.rows[table]!.first]);
+      await tester.pumpAndSettle();
+      await tester.tap(inTable(find.text('New')));
+      await tester.pumpAndSettle();
+      expect(workspace.problem.value, isNull);
+      expect(fake.rows[table], hasLength(2));
+    },
+  );
 }

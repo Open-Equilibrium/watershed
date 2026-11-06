@@ -132,6 +132,9 @@ class _TableBlockState extends State<TableBlock> {
   String? _rowAdded;
   int _rowAddedAt = 0;
 
+  /// The reads started when the last row add returned; any later one holds that row.
+  int _readsAtRowAdd = 0;
+
   /// Whether to scroll to the last row or field once the next build laid it out.
   var _toLastRow = false;
   var _toLastField = false;
@@ -249,6 +252,7 @@ class _TableBlockState extends State<TableBlock> {
       );
       _rowAdded = added.row;
       _rowAddedAt = at;
+      _readsAtRowAdd = _reads;
     } on Object catch (error) {
       _toNewRow = null;
       _rowAdded = null;
@@ -385,6 +389,15 @@ class _TableBlockState extends State<TableBlock> {
       return;
     }
     await _rows.reread();
+    // Counts may not tell when rows also go elsewhere; a read begun after the last add
+    // holds its row.
+    if (mounted && _rowAdded != null && read > _readsAtRowAdd) {
+      _rowAdded = null;
+      if (_toNewRow != null) {
+        _toNewRow = null;
+        setState(() => _toLastRow = true);
+      }
+    }
   }
 
   @override
