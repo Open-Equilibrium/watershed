@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -631,5 +633,51 @@ void main() {
     await tester.pumpAndSettle();
     expect(panel, findsNothing);
     expect(applied(BridgeMutationKind.addField), isEmpty);
+  });
+
+  testWidgets('⏎ pressed again while a field is added adds it once', (
+    tester,
+  ) async {
+    await show(tester, [_Table(_expenses)]);
+    await tester.tap(inTable(find.byKey(const Key('add field'))));
+    await tester.pumpAndSettle();
+    final gate = fake.gate = Completer<void>();
+    fake.gatedKinds = {BridgeMutationKind.addField};
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.sendKeyRepeatEvent(LogicalKeyboardKey.enter);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    fake.gate = null;
+    gate.complete();
+    await tester.pumpAndSettle();
+    expect(applied(BridgeMutationKind.addField), hasLength(1));
+  });
+
+  testWidgets(
+    'a refused field keeps the panel open, a click outside closes it',
+    (tester) async {
+      await show(tester, [_Table(_expenses)]);
+      await tester.tap(inTable(find.byKey(const Key('add field'))));
+      await tester.pumpAndSettle();
+      fake.refuseKinds = {BridgeMutationKind.addField};
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      expect(panel, findsOneWidget);
+      expect(workspace.problem.value, isNotNull);
+      await tester.tapAt(const Offset(1300, 850));
+      await tester.pumpAndSettle();
+      expect(panel, findsNothing);
+    },
+  );
+
+  testWidgets('a Table without fields offers + to add one', (tester) async {
+    await show(tester, [_Table(_expenses, fields: const [])]);
+    await tester.tap(inTable(find.byKey(const Key('add field'))));
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    final added = applied(BridgeMutationKind.addField).single;
+    expect(added.after, isNull);
+    expect(inTable(find.text('Text')), findsOneWidget);
   });
 }

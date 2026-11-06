@@ -122,7 +122,7 @@ class _TableBlockState extends State<TableBlock> {
 
   /// What was just added, to scroll to once it shows: rows beyond this count, a field.
   int? _toNewRow;
-  var _toNewField = false;
+  String? _toNewField;
 
   /// Whether to scroll to the last row or field once the next build laid it out.
   var _toLastRow = false;
@@ -224,24 +224,26 @@ class _TableBlockState extends State<TableBlock> {
     }
   }
 
-  /// Adds a field after the last one and shows it; a refused one keeps the panel open.
+  /// Adds a field after the last one and shows it once a read holds it; a refused one
+  /// keeps the panel open.
   Future<void> _addField(String name, BridgeFieldKind kind) async {
-    try {
-      await widget.views.write(
-        mutation(
-          BridgeMutationKind.addField,
-          page: _page,
-          block: _block,
-          text: name,
-          fieldKind: kind,
-          after: _database?.fields.lastOrNull?.id,
-        ),
-        const [],
-      );
-      _panel.hide();
-      _toNewField = true;
-    } on Object {
-      // The problem shows on the Page.
+    final added = await widget.views.write(
+      mutation(
+        BridgeMutationKind.addField,
+        page: _page,
+        block: _block,
+        text: name,
+        fieldKind: kind,
+        after: _database?.fields.lastOrNull?.id,
+      ),
+      const [],
+    );
+    if (!mounted) return;
+    _panel.hide();
+    _toNewField = added.field;
+    if (_database?.fields.any((field) => field.id == added.field) ?? false) {
+      _toNewField = null;
+      setState(() => _toLastField = true);
     }
   }
 
@@ -328,8 +330,10 @@ class _TableBlockState extends State<TableBlock> {
         query: query(BridgeQueryKind.database, page: _page, block: _block),
       );
       if (!mounted || read != _reads) return;
-      if (_toNewField) {
-        _toNewField = false;
+      if (_toNewField case final field?
+          when answer.database?.fields.any((shown) => shown.id == field) ??
+              false) {
+        _toNewField = null;
         _toLastField = true;
       }
       if (clean && views.pending(_block) == 0 && sent == views.sent(_block)) {
@@ -382,10 +386,7 @@ class _TableBlockState extends State<TableBlock> {
           child: TapRegion(
             groupId: _panel,
             onTapOutside: (_) => _panel.hide(),
-            child: FieldPanel(
-              onAdd: (name, kind) => unawaited(_addField(name, kind)),
-              onClose: _panel.hide,
-            ),
+            child: FieldPanel(onAdd: _addField, onClose: _panel.hide),
           ),
         ),
       ),

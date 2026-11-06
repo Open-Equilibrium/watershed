@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -30,8 +32,8 @@ IconData fieldKindIcon(BridgeFieldKind kind) => switch (kind) {
 class FieldPanel extends StatefulWidget {
   const FieldPanel({super.key, required this.onAdd, required this.onClose});
 
-  /// Adds a field named so, of that kind.
-  final void Function(String name, BridgeFieldKind kind) onAdd;
+  /// Adds a field named so, of that kind; a refused one completes with an error.
+  final Future<void> Function(String name, BridgeFieldKind kind) onAdd;
   final VoidCallback onClose;
 
   @override
@@ -42,6 +44,9 @@ class _FieldPanelState extends State<FieldPanel> {
   final _name = TextEditingController();
   late final _focus = FocusNode(debugLabel: 'Field name', onKeyEvent: _key);
   var _kind = BridgeFieldKind.text;
+
+  /// While a field is added, so a second ⏎ or click adds no second one.
+  var _adding = false;
 
   @override
   void initState() {
@@ -59,14 +64,28 @@ class _FieldPanelState extends State<FieldPanel> {
     super.dispose();
   }
 
-  void _add(BridgeFieldKind kind) {
+  Future<void> _add(BridgeFieldKind kind) async {
+    if (_adding) return;
+    _adding = true;
     final name = _name.text.trim();
-    widget.onAdd(name.isEmpty ? fieldKindName(kind) : name, kind);
+    try {
+      await widget.onAdd(name.isEmpty ? fieldKindName(kind) : name, kind);
+    } on Object {
+      // The problem shows on the Page; the panel stays to try again.
+    } finally {
+      _adding = false;
+    }
   }
 
   KeyEventResult _key(FocusNode _, KeyEvent event) {
     if (event is KeyUpEvent || !_name.value.composing.isCollapsed) {
       return KeyEventResult.ignored;
+    }
+    // A held ⏎ adds one field.
+    if (event is KeyRepeatEvent &&
+        (event.logicalKey == LogicalKeyboardKey.enter ||
+            event.logicalKey == LogicalKeyboardKey.numpadEnter)) {
+      return KeyEventResult.handled;
     }
     const kinds = BridgeFieldKind.values;
     switch (event.logicalKey) {
@@ -76,7 +95,7 @@ class _FieldPanelState extends State<FieldPanel> {
           () => _kind = kinds[(kinds.indexOf(_kind) + by) % kinds.length],
         );
       case LogicalKeyboardKey.enter || LogicalKeyboardKey.numpadEnter:
-        _add(_kind);
+        unawaited(_add(_kind));
       case LogicalKeyboardKey.escape:
         widget.onClose();
       default:
@@ -142,7 +161,7 @@ class _FieldPanelState extends State<FieldPanel> {
               MouseRegion(
                 onEnter: (_) => setState(() => _kind = kind),
                 child: GestureDetector(
-                  onTap: () => _add(kind),
+                  onTap: () => unawaited(_add(kind)),
                   child: Container(
                     height: 30,
                     padding: const EdgeInsets.symmetric(
