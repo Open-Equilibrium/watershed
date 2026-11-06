@@ -126,6 +126,12 @@ class _TableBlockState extends State<TableBlock> {
   /// The field the last add made, the last until a read holds it, then shown.
   String? _fieldAdded;
 
+  /// Field adds, one after another, so each goes after the one before it.
+  Future<void> _fieldAdds = Future.value();
+
+  /// Times the field panel opened, so an add closes only the panel it came from.
+  int _panelOpened = 0;
+
   /// + New's adds, one after another. The row one added is the last until a read counts
   /// it, so the next goes after it.
   Future<void> _rowAdds = Future.value();
@@ -209,8 +215,11 @@ class _TableBlockState extends State<TableBlock> {
   }
 
   void _closePanel() {
-    if (_panel.isShowing) _panel.hide();
+    if (_panel.isShowing && !_showingField) _panel.hide();
   }
+
+  /// While the Table scrolls to a new field itself, which moves + along with the panel.
+  var _showingField = false;
 
   void _changed() {
     if (!mounted) return;
@@ -266,9 +275,26 @@ class _TableBlockState extends State<TableBlock> {
     }
   }
 
-  /// Adds a field after the last one and shows it once a read holds it; a refused one
-  /// keeps the panel open.
-  Future<void> _addField(String name, BridgeFieldKind kind) async {
+  void _togglePanel() {
+    if (_panel.isShowing) return _panel.hide();
+    _panelOpened++;
+    _panel.show();
+  }
+
+  /// Adds a field after the last one, once the adds before it returned, and shows it
+  /// once a read holds it; a refused one keeps the panel open.
+  Future<void> _addField(String name, BridgeFieldKind kind) {
+    final opened = _panelOpened;
+    final add = _fieldAdds.then((_) => _addOneField(name, kind, opened));
+    _fieldAdds = add.then<void>((_) {}, onError: (Object _) {});
+    return add;
+  }
+
+  Future<void> _addOneField(
+    String name,
+    BridgeFieldKind kind,
+    int opened,
+  ) async {
     final BridgeApplied added;
     try {
       added = await widget.views.write(
@@ -288,7 +314,7 @@ class _TableBlockState extends State<TableBlock> {
       rethrow;
     }
     if (!mounted) return;
-    _panel.hide();
+    if (opened == _panelOpened) _panel.hide();
     _fieldAdded = added.field;
     if (_database?.fields.any((field) => field.id == added.field) ?? false) {
       _fieldAdded = null;
@@ -427,7 +453,9 @@ class _TableBlockState extends State<TableBlock> {
           );
         }
         if (sideways && _sideways.hasClients) {
+          _showingField = true;
           _sideways.jumpTo(_sideways.position.maxScrollExtent);
+          _showingField = false;
         }
       });
     }
@@ -498,7 +526,11 @@ class _TableBlockState extends State<TableBlock> {
                           alignment: Alignment.centerRight,
                           child: SizedBox(
                             width: _addWidth,
-                            child: _AddField(link: _plus, panel: _panel),
+                            child: _AddField(
+                              link: _plus,
+                              panel: _panel,
+                              onTap: _togglePanel,
+                            ),
                           ),
                         )
                       else
@@ -662,7 +694,11 @@ class _TableBlockState extends State<TableBlock> {
                   height: _headerHeight,
                   color: ws.subtle,
                   cell: (index) => index == fields.length
-                      ? _AddField(link: _plus, panel: _panel)
+                      ? _AddField(
+                          link: _plus,
+                          panel: _panel,
+                          onTap: _togglePanel,
+                        )
                       : Row(
                           children: [
                             Icon(
@@ -729,10 +765,15 @@ class _TableBlockState extends State<TableBlock> {
 
 /// + after the last field, which opens the field panel.
 class _AddField extends StatelessWidget {
-  const _AddField({required this.link, required this.panel});
+  const _AddField({
+    required this.link,
+    required this.panel,
+    required this.onTap,
+  });
 
   final LayerLink link;
   final OverlayPortalController panel;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) => CompositedTransformTarget(
@@ -742,7 +783,7 @@ class _AddField extends StatelessWidget {
       child: GestureDetector(
         key: const Key('add field'),
         behavior: HitTestBehavior.opaque,
-        onTap: panel.toggle,
+        onTap: onTap,
         child: Center(
           child: Icon(LucideIcons.plus, size: 14, color: context.ws.textMuted),
         ),

@@ -918,4 +918,63 @@ void main() {
     await tester.pumpAndSettle();
     expect(applied(BridgeMutationKind.addRow).last.after, added);
   });
+
+  testWidgets(
+    'a field added from a reopened panel goes after the one on its way',
+    (tester) async {
+      await show(tester, [_Table(_expenses)]);
+      Future<void> open() async {
+        await tester.tap(inTable(find.byKey(const Key('add field'))));
+        await tester.pumpAndSettle();
+      }
+
+      await open();
+      final gate = fake.gate = Completer<void>();
+      fake.gatedKinds = {BridgeMutationKind.addField};
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      await open();
+      fake.gate = null;
+      gate.complete();
+      await tester.pumpAndSettle();
+      expect(panel, findsOneWidget, reason: 'the reopened panel stays');
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      final fields = fake.databases[fake.views[page]!.single.block]!.fields;
+      final adds = applied(BridgeMutationKind.addField).toList();
+      expect(adds, hasLength(2));
+      expect(adds.last.after, fields[5].id);
+    },
+  );
+
+  testWidgets('a field added while another is on its way goes after it', (
+    tester,
+  ) async {
+    await show(tester, [_Table(_expenses)]);
+    Future<void> open() async {
+      await tester.tap(inTable(find.byKey(const Key('add field'))));
+      await tester.pumpAndSettle();
+    }
+
+    await open();
+    final gate = fake.gate = Completer<void>();
+    fake.gatedKinds = {BridgeMutationKind.addField};
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    await open();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    fake.gate = null;
+    gate.complete();
+    await tester.pumpAndSettle();
+    final fields = fake.databases[fake.views[page]!.single.block]!.fields;
+    final adds = applied(BridgeMutationKind.addField).toList();
+    expect(adds, hasLength(2));
+    expect(adds.last.after, fields[5].id);
+    expect(panel, findsNothing);
+  });
 }
