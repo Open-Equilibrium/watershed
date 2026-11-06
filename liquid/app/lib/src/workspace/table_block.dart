@@ -124,6 +124,12 @@ class _TableBlockState extends State<TableBlock> {
   int? _toNewRow;
   String? _toNewField;
 
+  /// + New's adds, one after another; while more wait, each goes after the row the one
+  /// before it added.
+  Future<void> _rowAdds = Future.value();
+  int _rowsWaiting = 0;
+  String? _rowAdded;
+
   /// Whether to scroll to the last row or field once the next build laid it out.
   var _toLastRow = false;
   var _toLastField = false;
@@ -154,6 +160,8 @@ class _TableBlockState extends State<TableBlock> {
   void initState() {
     super.initState();
     _rows.addListener(_changed);
+    // A sideways scroll moves + away from the field panel, which closes.
+    _sideways.addListener(_closePanel);
     _name.addListener(_typed);
     _state.finishing.add(_typed);
     _nameFocus.addListener(_left);
@@ -192,6 +200,10 @@ class _TableBlockState extends State<TableBlock> {
     super.dispose();
   }
 
+  void _closePanel() {
+    if (_panel.isShowing) _panel.hide();
+  }
+
   void _changed() {
     if (!mounted) return;
     setState(() {});
@@ -203,24 +215,36 @@ class _TableBlockState extends State<TableBlock> {
 
   /// + New adds a row after the last one and shows it; the last row is read first if its
   /// window was not.
-  Future<void> _addRow() async {
+  void _addRow() {
+    _rowsWaiting++;
+    _rowAdds = _rowAdds.then((_) => _addOneRow());
+  }
+
+  Future<void> _addOneRow() async {
     try {
       final count = _rows.count ?? 0;
-      final last = count == 0 ? null : await _rows.load(count - 1);
-      if (count > 0 && last == null) throw 'The Table changed; try again.';
+      var after = _rowAdded;
+      if (after == null && count > 0) {
+        after = (await _rows.load(count - 1))?.id;
+        if (after == null) throw 'The Table changed; try again.';
+      }
       _toNewRow = count;
-      await widget.views.write(
+      final added = await widget.views.write(
         mutation(
           BridgeMutationKind.addRow,
           page: _page,
           block: _block,
-          after: last?.id,
+          after: after,
         ),
         const [],
       );
+      _rowAdded = _rowsWaiting > 1 ? added.row : null;
     } on Object catch (error) {
       _toNewRow = null;
+      _rowAdded = null;
       _report(error);
+    } finally {
+      _rowsWaiting--;
     }
   }
 
@@ -451,7 +475,7 @@ class _TableBlockState extends State<TableBlock> {
                             DateFormat.yMMMd(days),
                           ),
                         ),
-                      _NewRow(onTap: () => unawaited(_addRow())),
+                      _NewRow(onTap: _addRow),
                       if (count > 0)
                         Container(
                           height: _footerHeight,

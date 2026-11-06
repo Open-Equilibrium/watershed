@@ -680,4 +680,55 @@ void main() {
     expect(added.after, isNull);
     expect(inTable(find.text('Text')), findsOneWidget);
   });
+
+  testWidgets('two quick + New add their rows in order', (tester) async {
+    await show(tester, [_Table(_expenses)]);
+    final gate = fake.gate = Completer<void>();
+    fake.gatedKinds = {BridgeMutationKind.addRow};
+    await tester.tap(inTable(find.text('New')));
+    await tester.pump();
+    await tester.tap(inTable(find.text('New')));
+    await tester.pump();
+    fake.gate = null;
+    gate.complete();
+    await tester.pumpAndSettle();
+    final table = fake.rows[fake.views[page]!.single.block]!;
+    expect(table, hasLength(4));
+    final adds = applied(BridgeMutationKind.addRow).toList();
+    expect(adds.first.after, 'r2');
+    expect(adds.last.after, table[2].id, reason: 'after the row just added');
+  });
+
+  testWidgets('scrolling a Table sideways closes its field panel', (
+    tester,
+  ) async {
+    await show(tester, [
+      _Table(
+        _expenses,
+        fields: [
+          ..._fields,
+          for (var number = 1; number < 10; number++)
+            BridgeField(
+              id: 'f$number',
+              name: 'Field $number',
+              kind: BridgeFieldKind.text,
+              options: const [],
+            ),
+        ],
+      ),
+    ]);
+    final sideways = tester
+        .widget<SingleChildScrollView>(
+          inTable(find.byType(SingleChildScrollView)),
+        )
+        .controller!;
+    sideways.jumpTo(sideways.position.maxScrollExtent);
+    await tester.pumpAndSettle();
+    await tester.tap(inTable(find.byKey(const Key('add field'))));
+    await tester.pumpAndSettle();
+    expect(panel, findsOneWidget);
+    sideways.jumpTo(0);
+    await tester.pumpAndSettle();
+    expect(panel, findsNothing);
+  });
 }
