@@ -908,4 +908,59 @@ void main() {
     );
     semantics.dispose();
   });
+
+  testWidgets(
+    'a row this device added and one removed elsewhere leave the rows '
+    'where the person reads',
+    (tester) async {
+      await show(tester, [
+        _Table([for (var number = 1; number <= 20; number++) _named(number)]),
+      ]);
+      final table = fake.views[page]!.single.block;
+      final reads = fake.deferred = [];
+      fake.deferredKinds = {BridgeQueryKind.database};
+      await tester.tap(inTable(find.text('New')));
+      await tester.pump();
+      // Another device removes a row before this one reads its new one.
+      fake.rows[table]!.removeAt(0);
+      fake.deferred = null;
+      for (final read in reads) {
+        read.complete();
+      }
+      await tester.pumpAndSettle();
+      final rows = tester
+          .widget<ListView>(find.byKey(const Key('table rows')))
+          .controller!;
+      rows.jumpTo(0);
+      await tester.pumpAndSettle();
+      // Later, another device adds a row.
+      fake.putRows(page, table, [...fake.rows[table]!, _named(99)]);
+      await tester.pumpAndSettle();
+      expect(rows.offset, 0, reason: 'the rows stay where the person reads');
+    },
+  );
+
+  testWidgets('the field panel closes when + leaves the view', (tester) async {
+    await show(tester, [_Table(_expenses)]);
+    final table = fake.views[page]!.single.block;
+    await tester.tap(inTable(find.byKey(const Key('add field'))));
+    await tester.pumpAndSettle();
+    expect(panel, findsOneWidget);
+    // Another device adds a field, which pushes + out of view.
+    fake.databases[table] = const BridgeDatabase(
+      name: 'Expenses',
+      fields: [
+        ..._fields,
+        BridgeField(
+          id: 'shop',
+          name: 'Shop',
+          kind: BridgeFieldKind.text,
+          options: [],
+        ),
+      ],
+    );
+    fake.putRows(page, table, [...fake.rows[table]!]);
+    await tester.pumpAndSettle();
+    expect(panel, findsNothing);
+  });
 }

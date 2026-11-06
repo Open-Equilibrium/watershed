@@ -125,6 +125,11 @@ class _TableBlockState extends State<TableBlock> {
   int _rowsAwaited = 0;
   int? _rowsSeen;
 
+  /// Row adds on their way, and the reads started when the last returned; a read begun
+  /// later holds every row added, so it ends the wait.
+  int _rowsWriting = 0;
+  int _readsAtRowAdd = 0;
+
   /// The field the last add made, shown once a read holds it.
   String? _fieldAdded;
 
@@ -205,6 +210,18 @@ class _TableBlockState extends State<TableBlock> {
     super.dispose();
   }
 
+  void _panelOutOfView() {
+    if (!_panel.isShowing) return;
+    // Checked once laid out, after any scroll to a new field, which brings + back.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_sideways.hasClients) return;
+      final position = _sideways.position;
+      if (position.pixels <= position.maxScrollExtent - _addWidth) {
+        _closePanel();
+      }
+    });
+  }
+
   void _closePanel() {
     if (_panel.isShowing && !_showingField) _panel.hide();
   }
@@ -230,6 +247,7 @@ class _TableBlockState extends State<TableBlock> {
   Future<void> _addRow() async {
     // Counted before the write, as its change may arrive first.
     _rowsAwaited++;
+    _rowsWriting++;
     try {
       await widget.views.write(
         mutation(
@@ -243,6 +261,9 @@ class _TableBlockState extends State<TableBlock> {
     } on Object catch (error) {
       _rowsAwaited = math.max(0, _rowsAwaited - 1);
       _report(error);
+    } finally {
+      _rowsWriting--;
+      _readsAtRowAdd = _reads;
     }
   }
 
@@ -381,6 +402,14 @@ class _TableBlockState extends State<TableBlock> {
       return;
     }
     await _rows.reread();
+    // Rows also removed elsewhere may hide the added ones in the count.
+    if (mounted &&
+        _rowsAwaited > 0 &&
+        _rowsWriting == 0 &&
+        read > _readsAtRowAdd) {
+      _rowsAwaited = 0;
+      setState(() => _toLastRow = true);
+    }
   }
 
   @override
@@ -570,6 +599,7 @@ class _TableBlockState extends State<TableBlock> {
       required double height,
       required Color? color,
       required Widget Function(int index) cell,
+      VoidCallback? addOutOfView,
     }) => ListenableBuilder(
       listenable: _sideways,
       builder: (context, _) {
@@ -606,6 +636,7 @@ class _TableBlockState extends State<TableBlock> {
         while (to < widths.length && starts[to] < offset + width) {
           to++;
         }
+        if (to < widths.length) addOutOfView?.call();
         return Stack(
           children: [
             Row(
@@ -643,6 +674,8 @@ class _TableBlockState extends State<TableBlock> {
                 child: line(
                   height: _headerHeight,
                   color: ws.subtle,
+                  // The field panel follows +, so it closes once + is out of view.
+                  addOutOfView: _panelOutOfView,
                   cell: (index) => index == fields.length
                       ? _AddField(
                           link: _plus,
