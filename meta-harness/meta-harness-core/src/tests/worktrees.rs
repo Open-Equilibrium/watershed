@@ -1,19 +1,18 @@
 use super::checkpoint::{Repo, run};
 use crate::{Checkpoint, Checkpoints, DiffError, Phase, WorktreeFileState, WorktreeRemoved};
-use std::path::{Path, PathBuf};
 
 /// A repository without remotes and a linked worktree on branch `linked`, one commit ahead of
 /// `main`.
 struct Linked {
     repo: Repo,
-    linked: PathBuf,
+    linked: Repo,
 }
 
 impl Linked {
     fn new(name: &str) -> Self {
         let repo = Repo::new(&format!("worktrees-{name}"));
         repo.git(&["branch", "-M", "main"]);
-        let linked = repo.path().with_extension("linked");
+        let linked = repo.path().with_extension("linked lane");
         let _ = std::fs::remove_dir_all(&linked);
         repo.git(&[
             "worktree",
@@ -23,40 +22,21 @@ impl Linked {
             "linked",
             linked.to_str().unwrap(),
         ]);
-        std::fs::write(linked.join("b.txt"), "linked\n").unwrap();
-        git_in(&linked, &["add", "b.txt"]);
-        git_in(&linked, &["commit", "-q", "-m", "Linked work"]);
+        let linked = Repo(linked);
+        linked.write("b.txt", "linked\n");
+        linked.git(&["add", "b.txt"]);
+        linked.git(&["commit", "-q", "-m", "Linked work"]);
         Self { repo, linked }
     }
 
     fn path(&self) -> String {
-        self.linked.canonicalize().unwrap().display().to_string()
+        self.linked
+            .path()
+            .canonicalize()
+            .unwrap()
+            .display()
+            .to_string()
     }
-}
-
-impl Drop for Linked {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.linked);
-    }
-}
-
-fn git_in(dir: &Path, args: &[&str]) {
-    let status = std::process::Command::new("git")
-        .args([
-            "-c",
-            "user.name=Test",
-            "-c",
-            "user.email=test@example.com",
-            "-c",
-            "commit.gpgsign=false",
-        ])
-        .args(args)
-        .current_dir(dir)
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_NOSYSTEM", "1")
-        .status()
-        .unwrap();
-    assert!(status.success(), "git {args:?}");
 }
 
 #[test]
@@ -82,7 +62,7 @@ fn lists_every_worktree_git_registers_with_what_keeps_it() {
         std::fs::remove_dir_all(&gone).unwrap();
         let checkpoints = Checkpoints::new(linked.repo.path());
         // A turn runs in the linked worktree.
-        let there = Checkpoints::new(&linked.linked);
+        let there = Checkpoints::new(linked.linked.path());
         there
             .capture(&Checkpoint {
                 session: "s".into(),
@@ -104,7 +84,7 @@ fn lists_every_worktree_git_registers_with_what_keeps_it() {
                 .unwrap()
         };
         let running = find("linked");
-        assert_eq!(running.path, linked.path());
+        assert_eq!(running.path, linked.path(), "a folder with a space");
         assert!(!running.main && !running.current && !running.running.is_empty());
         assert!(find("locked").locked);
         assert!(find("gone").missing);
@@ -128,7 +108,7 @@ fn removes_a_clean_worktree_and_keeps_its_branch_and_commits() {
             checkpoints.remove_worktree(&review).await.unwrap(),
             WorktreeRemoved::Done
         ));
-        assert!(!linked.linked.exists());
+        assert!(!linked.linked.path().exists());
         let log = linked.repo.git(&["log", "-1", "--format=%s", "linked"]);
         assert_eq!(log.trim(), "Linked work");
     });
@@ -139,10 +119,10 @@ fn keeps_a_worktree_with_local_or_ignored_files() {
     run(async {
         let linked = Linked::new("dirty");
         let checkpoints = Checkpoints::new(linked.repo.path());
-        std::fs::write(linked.linked.join("a.txt"), "staged\n").unwrap();
-        git_in(&linked.linked, &["add", "a.txt"]);
-        std::fs::write(linked.linked.join("b.txt"), "unstaged\n").unwrap();
-        std::fs::write(linked.linked.join("new.txt"), "untracked\n").unwrap();
+        linked.linked.write("a.txt", "staged\n");
+        linked.linked.git(&["add", "a.txt"]);
+        linked.linked.write("b.txt", "unstaged\n");
+        linked.linked.write("new.txt", "untracked\n");
 
         let review = checkpoints.worktree_removal(&linked.path()).await.unwrap();
 
@@ -161,24 +141,23 @@ fn keeps_a_worktree_with_local_or_ignored_files() {
             ]
         );
         assert!(checkpoints.remove_worktree(&review).await.is_err());
-        assert!(linked.linked.exists());
+        assert!(linked.linked.path().exists());
 
         // Ignored files alone keep it too: Git would delete them with the folder.
-        git_in(
-            &linked.linked,
-            &["checkout", "-q", "HEAD", "--", "a.txt", "b.txt"],
-        );
-        std::fs::remove_file(linked.linked.join("new.txt")).unwrap();
-        std::fs::write(linked.linked.join(".gitignore"), "*.log\n").unwrap();
-        git_in(&linked.linked, &["add", ".gitignore"]);
-        git_in(&linked.linked, &["commit", "-q", "-m", "Ignore logs"]);
-        std::fs::write(linked.linked.join("run.log"), "kept\n").unwrap();
+        linked
+            .linked
+            .git(&["checkout", "-q", "HEAD", "--", "a.txt", "b.txt"]);
+        std::fs::remove_file(linked.linked.path().join("new.txt")).unwrap();
+        linked.linked.write(".gitignore", "*.log\n");
+        linked.linked.git(&["add", ".gitignore"]);
+        linked.linked.git(&["commit", "-q", "-m", "Ignore logs"]);
+        linked.linked.write("run.log", "kept\n");
         let review = checkpoints.worktree_removal(&linked.path()).await.unwrap();
         assert!(review.files.is_empty(), "{review:?}");
         assert_eq!(review.ignored, 1);
         assert!(!review.removable());
         assert!(checkpoints.remove_worktree(&review).await.is_err());
-        assert!(linked.linked.join("run.log").exists());
+        assert!(linked.linked.path().join("run.log").exists());
     });
 }
 
@@ -187,7 +166,7 @@ fn never_removes_the_main_or_own_checkout_or_an_unlisted_folder() {
     run(async {
         let linked = Linked::new("refused");
         let main = Checkpoints::new(linked.repo.path());
-        let own = Checkpoints::new(&linked.linked);
+        let own = Checkpoints::new(linked.linked.path());
 
         let review = main
             .worktree_removal(
@@ -209,7 +188,7 @@ fn never_removes_the_main_or_own_checkout_or_an_unlisted_folder() {
             main.worktree_removal("/tmp/not-a-worktree").await,
             Err(DiffError::Git(_))
         ));
-        assert!(linked.linked.exists());
+        assert!(linked.linked.path().exists());
     });
 }
 
@@ -219,7 +198,7 @@ fn a_worktree_that_changed_since_its_review_is_reviewed_again() {
         let linked = Linked::new("changed");
         let checkpoints = Checkpoints::new(linked.repo.path());
         let review = checkpoints.worktree_removal(&linked.path()).await.unwrap();
-        std::fs::write(linked.linked.join("late.txt"), "late\n").unwrap();
+        linked.linked.write("late.txt", "late\n");
 
         let removed = checkpoints.remove_worktree(&review).await.unwrap();
 
@@ -227,6 +206,98 @@ fn a_worktree_that_changed_since_its_review_is_reviewed_again() {
             panic!("removed despite the change");
         };
         assert_eq!(now.files.len(), 1);
-        assert!(linked.linked.exists());
+        assert!(linked.linked.path().exists());
+    });
+}
+
+#[test]
+fn keeps_a_worktree_whose_edits_git_is_told_to_ignore() {
+    run(async {
+        let linked = Linked::new("marked");
+        let checkpoints = Checkpoints::new(linked.repo.path());
+        for (mark, file) in [
+            ("--skip-worktree", "a.txt"),
+            ("--assume-unchanged", "b.txt"),
+        ] {
+            linked.linked.git(&["update-index", mark, file]);
+            linked
+                .linked
+                .write(file, "edited where Git does not look\n");
+        }
+
+        let review = checkpoints.worktree_removal(&linked.path()).await.unwrap();
+
+        let files: Vec<(&str, WorktreeFileState)> = review
+            .files
+            .iter()
+            .map(|file| (file.path.as_str(), file.state))
+            .collect();
+        assert_eq!(
+            files,
+            [
+                ("a.txt", WorktreeFileState::Marked),
+                ("b.txt", WorktreeFileState::Marked),
+            ]
+        );
+        assert!(checkpoints.remove_worktree(&review).await.is_err());
+        assert!(linked.linked.path().exists());
+    });
+}
+
+#[test]
+fn keeps_a_detached_worktree_with_commits_no_branch_holds() {
+    run(async {
+        let repo = Repo::new("worktrees-detached");
+        let detached = repo.path().with_extension("detached");
+        let _ = std::fs::remove_dir_all(&detached);
+        repo.git(&[
+            "worktree",
+            "add",
+            "-q",
+            "--detach",
+            detached.to_str().unwrap(),
+        ]);
+        let detached = Repo(detached);
+        detached.write("c.txt", "only here\n");
+        detached.git(&["add", "c.txt"]);
+        detached.git(&["commit", "-q", "-m", "Only here"]);
+        let checkpoints = Checkpoints::new(repo.path());
+        let path = detached
+            .path()
+            .canonicalize()
+            .unwrap()
+            .display()
+            .to_string();
+
+        let review = checkpoints.worktree_removal(&path).await.unwrap();
+
+        assert!(review.worktree.branch.is_none());
+        assert_eq!(review.stranded, 1);
+        assert!(!review.removable());
+        assert!(checkpoints.remove_worktree(&review).await.is_err());
+        assert!(detached.path().exists());
+    });
+}
+
+#[test]
+fn a_turn_running_in_any_worktree_keeps_the_others_too() {
+    run(async {
+        let linked = Linked::new("busy");
+        let checkpoints = Checkpoints::new(linked.repo.path());
+        let review = checkpoints.worktree_removal(&linked.path()).await.unwrap();
+        assert!(review.removable());
+        let main = Checkpoints::new(linked.repo.path());
+        main.capture(&Checkpoint {
+            session: "busy".into(),
+            turn: "t1".into(),
+            phase: Phase::Start,
+        })
+        .await
+        .unwrap();
+
+        let refused = checkpoints.remove_worktree(&review).await;
+
+        assert!(matches!(refused, Err(DiffError::AgentRunning(sessions)) if sessions == ["busy"]));
+        assert!(linked.linked.path().exists());
     });
 }

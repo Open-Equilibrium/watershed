@@ -25,6 +25,8 @@ pub struct Worktree {
     pub locked: bool,
     /// Its folder is gone.
     pub missing: bool,
+    /// Git could not read it, or names it in a way Liquid cannot show exactly.
+    pub unreadable: bool,
     /// Sessions running a turn there.
     pub running: Vec<String>,
 }
@@ -38,6 +40,9 @@ pub enum WorktreeFileState {
     Unstaged,
     /// New and not ignored.
     Untracked,
+    /// Marked in its index as assumed unchanged or outside the work, so Git does not look at
+    /// it and would delete any edit with the folder.
+    Marked,
 }
 
 /// A local file that keeps a worktree.
@@ -66,6 +71,8 @@ pub struct WorktreeRemoval {
     pub more_ignored: bool,
     /// Commits of its branch no remote has; they stay with the branch.
     pub unpushed: u64,
+    /// Commits only its detached HEAD holds, which removal would lose.
+    pub stranded: u64,
 }
 
 impl WorktreeRemoval {
@@ -77,11 +84,13 @@ impl WorktreeRemoval {
             && !worktree.current
             && !worktree.locked
             && !worktree.missing
+            && !worktree.unreadable
             && worktree.running.is_empty()
             && self.files.is_empty()
             && !self.more_files
             && self.ignored == 0
             && !self.more_ignored
+            && self.stranded == 0
     }
 }
 
@@ -105,13 +114,16 @@ impl WorkingTree {
             .collect::<Vec<_>>()
             .split(|line| line.is_empty())
         {
-            let mut lines = record.iter().map(|line| String::from_utf8_lossy(line));
-            let Some(path) = lines
-                .next()
-                .and_then(|line| line.strip_prefix("worktree ").map(str::to_owned))
+            let Some(path) = record
+                .first()
+                .and_then(|line| line.strip_prefix(b"worktree "))
             else {
                 continue;
             };
+            // A path that is not UTF-8 could alias another one once shown, so it is kept.
+            let unreadable = std::str::from_utf8(path).is_err();
+            let path = String::from_utf8_lossy(path).into_owned();
+            let lines = record[1..].iter().map(|line| String::from_utf8_lossy(line));
             let mut worktree = Worktree {
                 main: worktrees.is_empty(),
                 current: Path::new(&path)
@@ -121,6 +133,7 @@ impl WorkingTree {
                 path,
                 branch: None,
                 locked: false,
+                unreadable,
                 running: Vec::new(),
             };
             for line in lines {
@@ -138,26 +151,31 @@ impl WorkingTree {
                 }
             }
             if !worktree.missing {
-                worktree.running = self.running_in(&worktree.path).await?;
+                // One worktree Git cannot read, such as another user's, keeps only itself.
+                match self.locks_of(&worktree.path).await {
+                    Ok(locks) => worktree.running = self.checkout_at(locks).running(),
+                    Err(_) => worktree.unreadable = true,
+                }
             }
             worktrees.push(worktree);
         }
         Ok(worktrees)
     }
 
-    /// The sessions running a turn in the worktree at `path`, from its checkout locks.
-    async fn running_in(&self, path: &str) -> Result<Vec<String>, DiffError> {
-        let locks = git_path(
-            Path::new(path),
-            &[
-                "rev-parse",
-                "--path-format=absolute",
-                "--git-path",
-                "watershed",
-            ],
-        )
-        .await?;
-        Ok(crate::checkout::Checkout::new(locks.into(), self.common.join("watershed")).running())
+    /// The folder of the checkout locks of the worktree at `path`.
+    pub(crate) async fn locks_of(&self, path: &str) -> Result<PathBuf, DiffError> {
+        let args = [
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-path",
+            "watershed",
+        ];
+        git_path(Path::new(path), &args).await.map(PathBuf::from)
+    }
+
+    /// The checkout whose locks are in `locks`.
+    pub(crate) fn checkout_at(&self, locks: PathBuf) -> crate::checkout::Checkout {
+        crate::checkout::Checkout::new(locks, self.common.join("watershed"))
     }
 
     /// What removing the worktree Git registers at `path` would lose, or what keeps it.
@@ -177,10 +195,11 @@ impl WorkingTree {
             ignored: 0,
             more_ignored: false,
             unpushed: 0,
+            stranded: 0,
             worktree,
         };
         let worktree = &removal.worktree;
-        if worktree.main || worktree.current || worktree.missing {
+        if worktree.main || worktree.current || worktree.missing || worktree.unreadable {
             return Ok(removal);
         }
         let dir = Path::new(&worktree.path).to_owned();
@@ -225,34 +244,77 @@ impl WorkingTree {
                 removal.more_files = true;
             }
         }
-        removal.more_ignored = more;
-        removal.head = self.resolve_in(&dir, "HEAD").await?;
+        // Git lists ignored entries last, so a cut status ends in them once any was read, and
+        // otherwise in local files.
+        if more && removal.ignored > 0 {
+            removal.more_ignored = true;
+        } else if more {
+            removal.more_files = true;
+        }
+        self.marked_in(&dir, &mut removal).await?;
+        removal.head = resolve_at(&dir, "HEAD").await?;
         if removal.head.is_some() {
-            removal.unpushed = git(
-                &dir,
-                &[],
-                &["rev-list", "--count", "HEAD", "--not", "--remotes"],
-            )
-            .await?
-            .trim()
-            .parse()
-            .unwrap_or(0);
+            let count = |args: &'static [&'static str]| {
+                let dir = dir.clone();
+                async move {
+                    git(&dir, &[], args)
+                        .await
+                        .map(|count| count.trim().parse().unwrap_or(0))
+                }
+            };
+            removal.unpushed =
+                count(&["rev-list", "--count", "HEAD", "--not", "--remotes"]).await?;
+            if removal.worktree.branch.is_none() {
+                removal.stranded = count(&[
+                    "rev-list",
+                    "--count",
+                    "HEAD",
+                    "--not",
+                    "--branches",
+                    "--tags",
+                    "--remotes",
+                ])
+                .await?;
+            }
         }
         Ok(removal)
     }
 
-    /// The commit `name` names in the worktree at `dir`; none when it names nothing.
-    async fn resolve_in(&self, dir: &Path, name: &str) -> Result<Option<String>, DiffError> {
-        match git(dir, &[], &["rev-parse", "--verify", "--quiet", name]).await {
-            Ok(id) => Ok(Some(id.trim().to_owned())),
-            Err(DiffError::Git(reason)) if reason.is_empty() => Ok(None),
-            Err(error) => Err(error),
+    /// Adds the files the worktree at `dir` marks in its index as assumed unchanged or outside
+    /// the work: its status cannot show their edits, and Git's own check before removal skips
+    /// them too.
+    async fn marked_in(&self, dir: &Path, removal: &mut WorktreeRemoval) -> Result<(), DiffError> {
+        let mut command = git_command(dir, &[], &["ls-files", "-z", "-v"]);
+        let mut listing = Git::spawn(command.stderr(Stdio::null()))?;
+        let stdout = listing.child.stdout.take().expect("stdout is piped");
+        let mut entries = BufReader::new(stdout).split(0);
+        while let Some(entry) = entries.next_segment().await.map_err(unreadable)? {
+            // `ls-files -v` tags a file assumed unchanged with a lowercase letter and one
+            // outside the work with `S`.
+            if let [tag, b' ', path @ ..] = entry.as_slice()
+                && (tag.is_ascii_lowercase() || *tag == b'S')
+            {
+                if removal.files.len() < MAX_FILES {
+                    removal.files.push(WorktreeFile {
+                        path: String::from_utf8_lossy(path).into_owned(),
+                        state: WorktreeFileState::Marked,
+                    });
+                } else {
+                    removal.more_files = true;
+                }
+            }
         }
+        if !listing.wait().await.map_err(unreadable)?.success() {
+            return Err(DiffError::Git(
+                "could not list the worktree's files".to_owned(),
+            ));
+        }
+        Ok(())
     }
 
     /// Has Git remove the worktree at `path`, never forced: Git refuses one with local files.
     pub(crate) async fn remove_worktree(&self, path: &str) -> Result<(), DiffError> {
-        git(&self.root, &[], &["worktree", "remove", path])
+        git(&self.root, &[], &["worktree", "remove", "--", path])
             .await
             .map(|_| ())
     }

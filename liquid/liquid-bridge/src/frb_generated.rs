@@ -5402,6 +5402,7 @@ impl SseDecode for crate::api::worktrees::BridgeWorktree {
         let mut var_current = <bool>::sse_decode(deserializer);
         let mut var_locked = <bool>::sse_decode(deserializer);
         let mut var_missing = <bool>::sse_decode(deserializer);
+        let mut var_unreadable = <bool>::sse_decode(deserializer);
         let mut var_running =
             <Vec<crate::api::history::BridgeRunningAgent>>::sse_decode(deserializer);
         let mut var_sessions = <Vec<String>>::sse_decode(deserializer);
@@ -5413,6 +5414,7 @@ impl SseDecode for crate::api::worktrees::BridgeWorktree {
             current: var_current,
             locked: var_locked,
             missing: var_missing,
+            unreadable: var_unreadable,
             running: var_running,
             sessions: var_sessions,
         };
@@ -5442,6 +5444,7 @@ impl SseDecode for crate::api::worktrees::BridgeWorktreeFileState {
             0 => crate::api::worktrees::BridgeWorktreeFileState::Staged,
             1 => crate::api::worktrees::BridgeWorktreeFileState::Unstaged,
             2 => crate::api::worktrees::BridgeWorktreeFileState::Untracked,
+            3 => crate::api::worktrees::BridgeWorktreeFileState::Marked,
             _ => unreachable!("Invalid variant for BridgeWorktreeFileState: {}", inner),
         };
     }
@@ -5491,6 +5494,7 @@ impl SseDecode for crate::api::worktrees::BridgeWorktreeRemoval {
         let mut var_ignored = <i64>::sse_decode(deserializer);
         let mut var_moreIgnored = <bool>::sse_decode(deserializer);
         let mut var_unpushed = <i64>::sse_decode(deserializer);
+        let mut var_stranded = <i64>::sse_decode(deserializer);
         let mut var_removable = <bool>::sse_decode(deserializer);
         return crate::api::worktrees::BridgeWorktreeRemoval {
             worktree: var_worktree,
@@ -5500,6 +5504,7 @@ impl SseDecode for crate::api::worktrees::BridgeWorktreeRemoval {
             ignored: var_ignored,
             more_ignored: var_moreIgnored,
             unpushed: var_unpushed,
+            stranded: var_stranded,
             removable: var_removable,
         };
     }
@@ -9015,6 +9020,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::worktrees::BridgeWorktree {
             self.current.into_into_dart().into_dart(),
             self.locked.into_into_dart().into_dart(),
             self.missing.into_into_dart().into_dart(),
+            self.unreadable.into_into_dart().into_dart(),
             self.running.into_into_dart().into_dart(),
             self.sessions.into_into_dart().into_dart(),
         ]
@@ -9061,6 +9067,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::worktrees::BridgeWorktreeFile
             Self::Staged => 0.into_dart(),
             Self::Unstaged => 1.into_dart(),
             Self::Untracked => 2.into_dart(),
+            Self::Marked => 3.into_dart(),
             _ => unreachable!(),
         }
     }
@@ -9133,6 +9140,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::worktrees::BridgeWorktreeRemo
             self.ignored.into_into_dart().into_dart(),
             self.more_ignored.into_into_dart().into_dart(),
             self.unpushed.into_into_dart().into_dart(),
+            self.stranded.into_into_dart().into_dart(),
             self.removable.into_into_dart().into_dart(),
         ]
         .into_dart()
@@ -10491,6 +10499,7 @@ impl SseEncode for crate::api::worktrees::BridgeWorktree {
         <bool>::sse_encode(self.current, serializer);
         <bool>::sse_encode(self.locked, serializer);
         <bool>::sse_encode(self.missing, serializer);
+        <bool>::sse_encode(self.unreadable, serializer);
         <Vec<crate::api::history::BridgeRunningAgent>>::sse_encode(self.running, serializer);
         <Vec<String>>::sse_encode(self.sessions, serializer);
     }
@@ -10513,6 +10522,7 @@ impl SseEncode for crate::api::worktrees::BridgeWorktreeFileState {
                 crate::api::worktrees::BridgeWorktreeFileState::Staged => 0,
                 crate::api::worktrees::BridgeWorktreeFileState::Unstaged => 1,
                 crate::api::worktrees::BridgeWorktreeFileState::Untracked => 2,
+                crate::api::worktrees::BridgeWorktreeFileState::Marked => 3,
                 _ => {
                     unimplemented!("");
                 }
@@ -10563,6 +10573,7 @@ impl SseEncode for crate::api::worktrees::BridgeWorktreeRemoval {
         <i64>::sse_encode(self.ignored, serializer);
         <bool>::sse_encode(self.more_ignored, serializer);
         <i64>::sse_encode(self.unpushed, serializer);
+        <i64>::sse_encode(self.stranded, serializer);
         <bool>::sse_encode(self.removable, serializer);
     }
 }

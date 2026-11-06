@@ -22,6 +22,8 @@ pub struct BridgeWorktree {
     pub current: bool,
     pub locked: bool,
     pub missing: bool,
+    /// Git could not read it, or names it in a way Liquid cannot show exactly.
+    pub unreadable: bool,
     /// The agents running a turn there.
     pub running: Vec<BridgeRunningAgent>,
     /// Their sessions, returned unchanged with a reviewed removal.
@@ -34,6 +36,8 @@ pub enum BridgeWorktreeFileState {
     Staged,
     Unstaged,
     Untracked,
+    /// Marked as assumed unchanged or outside the work, so Git does not see its edits.
+    Marked,
 }
 
 /// A local file that keeps a worktree; `path` identifies it, `shown` is its visible form.
@@ -56,6 +60,8 @@ pub struct BridgeWorktreeRemoval {
     pub more_ignored: bool,
     /// Commits of its branch no remote has; they stay with the branch.
     pub unpushed: i64,
+    /// Commits only its detached HEAD holds, which removal would lose.
+    pub stranded: i64,
     /// Nothing keeps it.
     pub removable: bool,
 }
@@ -147,6 +153,7 @@ impl AgentSession {
             current: worktree.current,
             locked: worktree.locked,
             missing: worktree.missing,
+            unreadable: worktree.unreadable,
         }
     }
 
@@ -165,6 +172,7 @@ impl AgentSession {
                         WorktreeFileState::Staged => BridgeWorktreeFileState::Staged,
                         WorktreeFileState::Unstaged => BridgeWorktreeFileState::Unstaged,
                         WorktreeFileState::Untracked => BridgeWorktreeFileState::Untracked,
+                        WorktreeFileState::Marked => BridgeWorktreeFileState::Marked,
                     },
                 })
                 .collect(),
@@ -172,6 +180,7 @@ impl AgentSession {
             ignored: count(removal.ignored),
             more_ignored: removal.more_ignored,
             unpushed: count(removal.unpushed),
+            stranded: count(removal.stranded),
         }
     }
 }
@@ -187,6 +196,7 @@ fn core_removal(removal: BridgeWorktreeRemoval) -> WorktreeRemoval {
             current: worktree.current,
             locked: worktree.locked,
             missing: worktree.missing,
+            unreadable: worktree.unreadable,
             running: worktree.sessions,
         },
         head: removal.head,
@@ -199,6 +209,7 @@ fn core_removal(removal: BridgeWorktreeRemoval) -> WorktreeRemoval {
                     BridgeWorktreeFileState::Staged => WorktreeFileState::Staged,
                     BridgeWorktreeFileState::Unstaged => WorktreeFileState::Unstaged,
                     BridgeWorktreeFileState::Untracked => WorktreeFileState::Untracked,
+                    BridgeWorktreeFileState::Marked => WorktreeFileState::Marked,
                 },
             })
             .collect(),
@@ -206,5 +217,6 @@ fn core_removal(removal: BridgeWorktreeRemoval) -> WorktreeRemoval {
         ignored: u64::try_from(removal.ignored).unwrap_or(0),
         more_ignored: removal.more_ignored,
         unpushed: u64::try_from(removal.unpushed).unwrap_or(0),
+        stranded: u64::try_from(removal.stranded).unwrap_or(0),
     }
 }

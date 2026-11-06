@@ -290,6 +290,16 @@ pub(crate) fn commit_id(id: &str) -> bool {
     matches!(id.len(), 40 | 64) && id.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
+/// The commit `name` names in the checkout at `dir`; none when it names nothing.
+pub(crate) async fn resolve_at(dir: &Path, name: &str) -> Result<Option<String>, DiffError> {
+    match git(dir, &[], &["rev-parse", "--verify", "--quiet", name]).await {
+        Ok(id) => Ok(Some(id.trim().to_owned())),
+        // `--quiet` fails silently only when the name names nothing.
+        Err(DiffError::Git(reason)) if reason.is_empty() => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
 /// A private temporary directory, removed on drop.
 #[derive(Debug)]
 struct Store(PathBuf);
@@ -494,12 +504,7 @@ impl WorkingTree {
 
     /// The object `name` names, or none when it names nothing.
     async fn resolve(&self, name: &str) -> Result<Option<String>, DiffError> {
-        match git(&self.root, &[], &["rev-parse", "--verify", "--quiet", name]).await {
-            Ok(id) => Ok(Some(id.trim().to_owned())),
-            // `--quiet` fails silently only when the name names nothing.
-            Err(DiffError::Git(reason)) if reason.is_empty() => Ok(None),
-            Err(error) => Err(error),
-        }
+        resolve_at(&self.root, name).await
     }
 
     /// Lists the files that changed from `from` to `to`.

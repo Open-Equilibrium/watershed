@@ -549,15 +549,19 @@ impl Checkpoints {
     }
 
     /// Removes the `reviewed` worktree with the repository held alone, so no turn runs in any
-    /// of its worktrees, once a recheck finds it as reviewed and removable; Git removes it
-    /// without force and keeps its branch. Stopping Git midway would leave a half-deleted
-    /// folder, so the removal runs to its end.
+    /// of its worktrees, and its own checkout held alone, so no Git write from another window
+    /// runs there; then a recheck must find it as reviewed and removable, and Git removes it
+    /// without force, keeping its branch. Stopping Git midway would leave a half-deleted
+    /// folder, so the removal runs to its end, as a user's Git write does; the recheck before
+    /// it runs the same checks within the time limit.
     pub async fn remove_worktree(
         &self,
         reviewed: &crate::WorktreeRemoval,
     ) -> Result<crate::WorktreeRemoved, DiffError> {
         let tree = self.tree().await?;
         let _alone = self.alone_everywhere(&tree).await?;
+        let locks = self.bounded(tree.locks_of(&reviewed.worktree.path)).await?;
+        let _there = tree.checkout_at(locks).alone().await?;
         let now = self
             .bounded(tree.worktree_removal(&reviewed.worktree.path))
             .await?;

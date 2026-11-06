@@ -4576,8 +4576,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeWorktree dco_decode_bridge_worktree(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 9)
-      throw Exception('unexpected arr length: expect 9 but see ${arr.length}');
+    if (arr.length != 10)
+      throw Exception('unexpected arr length: expect 10 but see ${arr.length}');
     return BridgeWorktree(
       path: dco_decode_String(arr[0]),
       shown: dco_decode_String(arr[1]),
@@ -4586,8 +4586,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       current: dco_decode_bool(arr[4]),
       locked: dco_decode_bool(arr[5]),
       missing: dco_decode_bool(arr[6]),
-      running: dco_decode_list_bridge_running_agent(arr[7]),
-      sessions: dco_decode_list_String(arr[8]),
+      unreadable: dco_decode_bool(arr[7]),
+      running: dco_decode_list_bridge_running_agent(arr[8]),
+      sessions: dco_decode_list_String(arr[9]),
     );
   }
 
@@ -4636,8 +4637,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeWorktreeRemoval dco_decode_bridge_worktree_removal(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 8)
-      throw Exception('unexpected arr length: expect 8 but see ${arr.length}');
+    if (arr.length != 9)
+      throw Exception('unexpected arr length: expect 9 but see ${arr.length}');
     return BridgeWorktreeRemoval(
       worktree: dco_decode_bridge_worktree(arr[0]),
       head: dco_decode_opt_String(arr[1]),
@@ -4646,7 +4647,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       ignored: dco_decode_i_64(arr[4]),
       moreIgnored: dco_decode_bool(arr[5]),
       unpushed: dco_decode_i_64(arr[6]),
-      removable: dco_decode_bool(arr[7]),
+      stranded: dco_decode_i_64(arr[7]),
+      removable: dco_decode_bool(arr[8]),
     );
   }
 
@@ -6920,6 +6922,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_current = sse_decode_bool(deserializer);
     var var_locked = sse_decode_bool(deserializer);
     var var_missing = sse_decode_bool(deserializer);
+    var var_unreadable = sse_decode_bool(deserializer);
     var var_running = sse_decode_list_bridge_running_agent(deserializer);
     var var_sessions = sse_decode_list_String(deserializer);
     return BridgeWorktree(
@@ -6930,6 +6933,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       current: var_current,
       locked: var_locked,
       missing: var_missing,
+      unreadable: var_unreadable,
       running: var_running,
       sessions: var_sessions,
     );
@@ -6999,6 +7003,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_ignored = sse_decode_i_64(deserializer);
     var var_moreIgnored = sse_decode_bool(deserializer);
     var var_unpushed = sse_decode_i_64(deserializer);
+    var var_stranded = sse_decode_i_64(deserializer);
     var var_removable = sse_decode_bool(deserializer);
     return BridgeWorktreeRemoval(
       worktree: var_worktree,
@@ -7008,6 +7013,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       ignored: var_ignored,
       moreIgnored: var_moreIgnored,
       unpushed: var_unpushed,
+      stranded: var_stranded,
       removable: var_removable,
     );
   }
@@ -9421,6 +9427,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_bool(self.current, serializer);
     sse_encode_bool(self.locked, serializer);
     sse_encode_bool(self.missing, serializer);
+    sse_encode_bool(self.unreadable, serializer);
     sse_encode_list_bridge_running_agent(self.running, serializer);
     sse_encode_list_String(self.sessions, serializer);
   }
@@ -9482,6 +9489,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_i_64(self.ignored, serializer);
     sse_encode_bool(self.moreIgnored, serializer);
     sse_encode_i_64(self.unpushed, serializer);
+    sse_encode_i_64(self.stranded, serializer);
     sse_encode_bool(self.removable, serializer);
   }
 

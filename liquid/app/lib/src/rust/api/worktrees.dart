@@ -25,6 +25,9 @@ class BridgeWorktree {
   final bool locked;
   final bool missing;
 
+  /// Git could not read it, or names it in a way Liquid cannot show exactly.
+  final bool unreadable;
+
   /// The agents running a turn there.
   final List<BridgeRunningAgent> running;
 
@@ -39,6 +42,7 @@ class BridgeWorktree {
     required this.current,
     required this.locked,
     required this.missing,
+    required this.unreadable,
     required this.running,
     required this.sessions,
   });
@@ -52,6 +56,7 @@ class BridgeWorktree {
       current.hashCode ^
       locked.hashCode ^
       missing.hashCode ^
+      unreadable.hashCode ^
       running.hashCode ^
       sessions.hashCode;
 
@@ -67,6 +72,7 @@ class BridgeWorktree {
           current == other.current &&
           locked == other.locked &&
           missing == other.missing &&
+          unreadable == other.unreadable &&
           running == other.running &&
           sessions == other.sessions;
 }
@@ -97,7 +103,14 @@ class BridgeWorktreeFile {
 }
 
 /// How a local file differs in a worktree.
-enum BridgeWorktreeFileState { staged, unstaged, untracked }
+enum BridgeWorktreeFileState {
+  staged,
+  unstaged,
+  untracked,
+
+  /// Marked as assumed unchanged or outside the work, so Git does not see its edits.
+  marked,
+}
 
 class BridgeWorktreeOutcome {
   final BridgeWorktreeOutcomeKind kind;
@@ -155,6 +168,9 @@ class BridgeWorktreeRemoval {
   /// Commits of its branch no remote has; they stay with the branch.
   final PlatformInt64 unpushed;
 
+  /// Commits only its detached HEAD holds, which removal would lose.
+  final PlatformInt64 stranded;
+
   /// Nothing keeps it.
   final bool removable;
 
@@ -166,6 +182,7 @@ class BridgeWorktreeRemoval {
     required this.ignored,
     required this.moreIgnored,
     required this.unpushed,
+    required this.stranded,
     required this.removable,
   });
 
@@ -178,6 +195,7 @@ class BridgeWorktreeRemoval {
       ignored.hashCode ^
       moreIgnored.hashCode ^
       unpushed.hashCode ^
+      stranded.hashCode ^
       removable.hashCode;
 
   @override
@@ -192,5 +210,6 @@ class BridgeWorktreeRemoval {
           ignored == other.ignored &&
           moreIgnored == other.moreIgnored &&
           unpushed == other.unpushed &&
+          stranded == other.stranded &&
           removable == other.removable;
 }
