@@ -172,7 +172,7 @@ void main() {
             name: 'Expenses',
             fields: fields,
           );
-          fake.rows[added.block!] = rows;
+          fake.rows[added.block!] = [...rows];
         case _Unknown(:final boundary):
           final views = fake.views[page] ??= [];
           final at = after == null
@@ -539,5 +539,97 @@ void main() {
       isEmpty,
       reason: 'the run ends at the Table, which is never read as text',
     );
+  });
+
+  Iterable<BridgeMutation> applied(BridgeMutationKind kind) =>
+      fake.applied.where((applied) => applied.kind == kind);
+
+  testWidgets('+ New adds a row after the last one and shows it', (
+    tester,
+  ) async {
+    await show(tester, [
+      _Table([for (var number = 1; number <= 20; number++) _named(number)]),
+    ]);
+    await tester.tap(inTable(find.text('New')));
+    await tester.pumpAndSettle();
+    expect(applied(BridgeMutationKind.addRow).single.after, 'r20');
+    final table = fake.views[page]!.single.block;
+    expect(fake.rows[table], hasLength(21));
+    expect(inTable(find.text('21 rows')), findsOneWidget);
+    final rows = tester.widget<ListView>(find.byKey(const Key('table rows')));
+    expect(rows.controller!.offset, rows.controller!.position.maxScrollExtent);
+    expect(rows.controller!.offset, greaterThan(0));
+  });
+
+  testWidgets('+ New in an empty Table adds its first row', (tester) async {
+    await show(tester, [const _Table([])]);
+    expect(inTable(find.textContaining('rows')), findsNothing);
+    await tester.tap(inTable(find.text('New')));
+    await tester.pumpAndSettle();
+    expect(applied(BridgeMutationKind.addRow).single.after, isNull);
+    expect(inTable(find.text('1 row')), findsOneWidget);
+  });
+
+  final panel = find.byKey(const Key('field panel'));
+
+  testWidgets(
+    '+ in the header adds a field of the chosen kind after the last',
+    (tester) async {
+      await show(tester, [_Table(_expenses)]);
+      await tester.tap(inTable(find.byKey(const Key('add field'))));
+      await tester.pumpAndSettle();
+      expect(panel, findsOneWidget);
+      for (final kind in ['Text', 'Number', 'Select', 'Date', 'Checkbox']) {
+        expect(
+          find.descendant(of: panel, matching: find.text(kind)),
+          findsOneWidget,
+          reason: kind,
+        );
+      }
+      await tester.enterText(
+        find.descendant(of: panel, matching: find.byType(TextField)),
+        'Tip',
+      );
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      final added = applied(BridgeMutationKind.addField).single;
+      expect(added.after, 'paid');
+      expect(added.text, 'Tip');
+      expect(added.fieldKind, BridgeFieldKind.number);
+      expect(panel, findsNothing);
+      expect(inTable(find.text('Tip')), findsOneWidget);
+      final sideways = tester
+          .widget<SingleChildScrollView>(
+            inTable(find.byType(SingleChildScrollView)),
+          )
+          .controller!;
+      expect(sideways.offset, greaterThan(0), reason: 'the new field shows');
+      expect(sideways.offset, sideways.position.maxScrollExtent);
+    },
+  );
+
+  testWidgets('a field without a name takes its kind\'s, and a click adds it', (
+    tester,
+  ) async {
+    await show(tester, [_Table(_expenses)]);
+    await tester.tap(inTable(find.byKey(const Key('add field'))));
+    await tester.pumpAndSettle();
+    await tester.tap(find.descendant(of: panel, matching: find.text('Date')));
+    await tester.pumpAndSettle();
+    final added = applied(BridgeMutationKind.addField).single;
+    expect(added.text, 'Date');
+    expect(added.fieldKind, BridgeFieldKind.date);
+    expect(panel, findsNothing);
+  });
+
+  testWidgets('esc closes the field panel and adds nothing', (tester) async {
+    await show(tester, [_Table(_expenses)]);
+    await tester.tap(inTable(find.byKey(const Key('add field'))));
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(panel, findsNothing);
+    expect(applied(BridgeMutationKind.addField), isEmpty);
   });
 }
