@@ -75,7 +75,7 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  final menu = find.byKey(const Key('block menu'));
+  final menu = find.byKey(const Key('slash commands'));
   Finder item(String label) => find.descendant(
     of: menu,
     matching: find.byKey(ValueKey('choice $label')),
@@ -85,7 +85,7 @@ void main() {
       fake.styles[fake.views[page]![index].block];
 
   testWidgets(
-    '/ in an empty Text Block opens the Block menu, typing filters it',
+    '/ in an empty Text Block opens the slash command menu, typing filters it',
     (tester) async {
       await show(tester, ['Intro', '']);
       await type(tester, 1, '/');
@@ -115,9 +115,7 @@ void main() {
     },
   );
 
-  testWidgets('↑↓ choose in the Block menu and a click inserts', (
-    tester,
-  ) async {
+  testWidgets('↑↓ choose a slash command and a click takes it', (tester) async {
     await show(tester, ['']);
     await type(tester, 0, '/');
     await key(tester, LogicalKeyboardKey.arrowDown);
@@ -197,7 +195,7 @@ void main() {
     expect(fake.textsOf(page), ['Intro', '']);
   });
 
-  testWidgets('esc closes the Block menu and keeps what was typed', (
+  testWidgets('esc closes the slash command menu and keeps what was typed', (
     tester,
   ) async {
     await show(tester, ['']);
@@ -209,21 +207,24 @@ void main() {
     expect(field(tester, 0).focusNode!.hasFocus, isTrue);
   });
 
-  testWidgets('the Block menu opens only in an empty Text Block and closes '
-      'when nothing matches', (tester) async {
-    await show(tester, ['Lisbon', '']);
-    await type(tester, 0, '/');
-    expect(menu, findsNothing);
-    await type(tester, 1, '/');
-    await type(tester, 1, 'zzz');
-    expect(menu, findsNothing);
-    await key(tester, LogicalKeyboardKey.enter);
-    expect(fake.textsOf(page), [
-      'Lisbon/',
-      '/zzz',
-      '',
-    ], reason: '⏎ splits again');
-  });
+  testWidgets(
+    'the slash command menu opens only in an empty Text Block and closes '
+    'when nothing matches',
+    (tester) async {
+      await show(tester, ['Lisbon', '']);
+      await type(tester, 0, '/');
+      expect(menu, findsNothing);
+      await type(tester, 1, '/');
+      await type(tester, 1, 'zzz');
+      expect(menu, findsNothing);
+      await key(tester, LogicalKeyboardKey.enter);
+      expect(fake.textsOf(page), [
+        'Lisbon/',
+        '/zzz',
+        '',
+      ], reason: '⏎ splits again');
+    },
+  );
 
   testWidgets('a Table\'s name follows a rename elsewhere', (tester) async {
     await show(tester, ['']);
@@ -303,7 +304,9 @@ void main() {
     expect(fake.databases[fake.views[page]![0].block]!.name, '你好');
   });
 
-  testWidgets('the Block menu opens in a list item too', (tester) async {
+  testWidgets('the slash command menu opens in a list item too', (
+    tester,
+  ) async {
     await show(tester, ['']);
     await type(tester, 0, '- ');
     expect(styleOf(0), BridgeTextStyle.bullet);
@@ -642,7 +645,7 @@ void main() {
     expect(fake.databases[fake.views[page]![1].block]!.name, 'Ex');
   });
 
-  testWidgets('/ on a blank Page opens the Block menu', (tester) async {
+  testWidgets('/ on a blank Page opens the slash command menu', (tester) async {
     await show(tester, []);
     await tester.enterText(find.byKey(const Key('first-line')), '/');
     await tester.pumpAndSettle();

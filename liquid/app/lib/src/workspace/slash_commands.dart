@@ -5,10 +5,10 @@ import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 
-/// What the Block menu inserts: a Text Block style, or a Table without one.
+/// A slash command: a Text Block style, or a Table without one.
 @immutable
-class BlockChoice {
-  const BlockChoice(
+class SlashCommand {
+  const SlashCommand(
     this.label,
     this.icon, {
     this.style,
@@ -27,64 +27,65 @@ class BlockChoice {
   final String? shortcut;
 }
 
-/// The Block menu's choices in order: the Text Block styles, then Table.
-const blockChoices = [
-  BlockChoice('Text', LucideIcons.text, style: BridgeTextStyle.paragraph),
-  BlockChoice(
+/// The slash commands in order: the Text Block styles, then Table.
+const slashCommands = [
+  SlashCommand('Text', LucideIcons.text, style: BridgeTextStyle.paragraph),
+  SlashCommand(
     'Heading 1',
     LucideIcons.heading1,
     style: BridgeTextStyle.heading1,
     shortcut: '#',
   ),
-  BlockChoice(
+  SlashCommand(
     'Heading 2',
     LucideIcons.heading2,
     style: BridgeTextStyle.heading2,
     shortcut: '##',
   ),
-  BlockChoice(
+  SlashCommand(
     'Heading 3',
     LucideIcons.heading3,
     style: BridgeTextStyle.heading3,
     shortcut: '###',
   ),
-  BlockChoice(
+  SlashCommand(
     'Bulleted list',
     LucideIcons.list,
     style: BridgeTextStyle.bullet,
     shortcut: '-',
   ),
-  BlockChoice(
+  SlashCommand(
     'Numbered list',
     LucideIcons.listOrdered,
     style: BridgeTextStyle.numbered,
     shortcut: '1.',
   ),
-  BlockChoice(
+  SlashCommand(
     'To-do list',
     LucideIcons.squareCheck,
     style: BridgeTextStyle.todo,
     shortcut: '[]',
   ),
-  BlockChoice(
+  SlashCommand(
     'Quote',
     LucideIcons.textQuote,
     style: BridgeTextStyle.quote,
     shortcut: '"',
   ),
-  BlockChoice('Table', LucideIcons.table, description: 'Fields and rows'),
+  SlashCommand('Table', LucideIcons.table, description: 'Fields and rows'),
 ];
 
 /// The choices whose label holds `query`, ignoring case.
-List<BlockChoice> blockChoicesFor(String query) => [
-  for (final choice in blockChoices)
+List<SlashCommand> slashCommandsFor(String query) => [
+  for (final choice in slashCommands)
     if (choice.label.toLowerCase().contains(query.toLowerCase())) choice,
 ];
 
-/// The Block menu that `/` opens in an empty Text Block, as in Notion (approved Table View
+/// The slash command menu that `/` opens in an empty Text Block, as in Notion and T3 Code
+/// (approved Table View
 /// mockups, section 2): the Text Block styles, then Table, filtered by what follows `/`.
-class BlockMenu extends StatelessWidget {
-  const BlockMenu({
+class SlashCommands extends StatelessWidget {
+  const SlashCommands({
     super.key,
     required this.choices,
     required this.chosen,
@@ -92,11 +93,11 @@ class BlockMenu extends StatelessWidget {
     required this.onHover,
   });
 
-  final List<BlockChoice> choices;
+  final List<SlashCommand> choices;
 
   /// The choice ⏎ takes.
   final int chosen;
-  final ValueChanged<BlockChoice> onChoose;
+  final ValueChanged<SlashCommand> onChoose;
   final ValueChanged<int> onHover;
 
   @override
@@ -116,7 +117,7 @@ class BlockMenu extends StatelessWidget {
     );
     final texts = choices.where((choice) => choice.style != null);
     final tables = choices.where((choice) => choice.style == null);
-    Widget item(BlockChoice choice) {
+    Widget item(SlashCommand choice) {
       final index = choices.indexOf(choice);
       return MouseRegion(
         key: ValueKey('choice ${choice.label}'),
@@ -175,7 +176,7 @@ class BlockMenu extends StatelessWidget {
     }
 
     return Container(
-      key: const Key('block menu'),
+      key: const Key('slash commands'),
       width: 300,
       padding: const EdgeInsets.all(WsMetrics.space2),
       decoration: BoxDecoration(

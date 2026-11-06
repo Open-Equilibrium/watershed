@@ -8,7 +8,7 @@ import '../rust/api/workspace.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
-import 'block_menu.dart';
+import 'slash_commands.dart';
 import 'follow.dart';
 import 'page_editor.dart';
 import 'page_views.dart';
@@ -67,13 +67,14 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
   StreamSubscription<BridgeChange>? _followed;
   StreamSubscription<String>? _settled;
 
-  /// The Block menu `/` opens, its choices for what follows `/` and the one ⏎ takes.
+  /// The slash command menu `/` opens, its commands for what follows `/` and the one ⏎
+  /// takes.
   final _menu = OverlayPortalController();
   final _menuAnchor = LayerLink();
-  var _choices = const <BlockChoice>[];
+  var _choices = const <SlashCommand>[];
   var _chosen = 0;
 
-  /// While a Table chosen in the Block menu takes this line's place: what is typed stays in
+  /// While a Table chosen with a slash command takes this line's place: what is typed stays in
   /// the field, unsent, and becomes the Table's name once the Table takes the caret, the
   /// person moves to another field or the line goes.
   var _adding = false;
@@ -166,14 +167,14 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     if (_menu.isShowing) _menu.hide();
   }
 
-  /// Opens the Block menu once `/` is typed in an empty Text Block, filters it by what
+  /// Opens the slash command menu once `/` is typed in an empty Text Block, filters it by what
   /// follows, and closes it when nothing matches or the `/` is gone.
   void _offer(String text, String stored) {
     final opening = text == '/' && stored.isEmpty;
     if (!opening && !_menu.isShowing) return;
     final choices = text.startsWith('/')
-        ? blockChoicesFor(text.substring(1))
-        : const <BlockChoice>[];
+        ? slashCommandsFor(text.substring(1))
+        : const <SlashCommand>[];
     if (choices.isEmpty) return _closeMenu();
     setState(() {
       _choices = choices;
@@ -183,12 +184,12 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
   }
 
   /// Takes `choice`, whose writes quitting waits for.
-  void _take(BlockChoice choice) => _state.track(_choose(choice));
+  void _take(SlashCommand choice) => _state.track(_choose(choice));
 
   /// Applies `choice` in place of what was typed for it: a style, or a Table in this line's
   /// place, starting the Section the line started. A line that ends the Page stays, empty,
   /// below the Table, so the Page goes on.
-  Future<void> _choose(BlockChoice choice) async {
+  Future<void> _choose(SlashCommand choice) async {
     _closeMenu();
     _set('', 0);
     _send('');
@@ -318,7 +319,7 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     if (mounted) _set('', 0);
   }
 
-  /// ↑↓ choose in the open Block menu, ⏎ takes the choice and esc closes it.
+  /// ↑↓ choose in the open slash command menu, ⏎ takes the choice and esc closes it.
   KeyEventResult _menuKey(LogicalKeyboardKey key) {
     switch (key) {
       case LogicalKeyboardKey.arrowDown || LogicalKeyboardKey.arrowUp:
@@ -437,7 +438,7 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     }
     widget.views.caret.value = null;
     _focus.requestFocus();
-    // `/` typed on a blank Page opens the Block menu in the Text Block it made.
+    // `/` typed on a blank Page opens the slash command menu in the Text Block it made.
     if (caret.text == '/' && widget.views.count == 1) _offer('/', '');
     final length = _text.text.length;
     if (caret.offset > length && caret.offset < _end) _wanted = caret.offset;
@@ -751,7 +752,7 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
       ),
       _ => text,
     };
-    // The Block menu opens under the line `/` was typed in, and clicking it keeps the
+    // The slash command menu opens under the line `/` was typed in, and clicking it keeps the
     // field's focus. It sits above the style's frame, which a restyle rebuilds.
     return CompositedTransformTarget(
       link: _menuAnchor,
@@ -763,7 +764,7 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
             link: _menuAnchor,
             targetAnchor: Alignment.bottomLeft,
             child: TextFieldTapRegion(
-              child: BlockMenu(
+              child: SlashCommands(
                 choices: _choices,
                 chosen: _chosen,
                 onChoose: _take,
