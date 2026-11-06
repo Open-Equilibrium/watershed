@@ -166,10 +166,11 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **Recovery key** — The second way to regain a Workspace's keys when no signed-in device can approve a new one. Area keys are also wrapped for it, and the person or their company holds it (ADR-0228).
 - **Headless Liquid replica** — Optional Liquid replica without a user interface. A Workspace must opt in before this replica can sync it; same-host agents then use Liquid's normal permission and action surfaces while user devices are offline.
 - **Text Block** — One paragraph, heading, list item, to-do or quote; ⏎ ends it and starts the next.
-- **Database Block** — A Block of typed fields and rows, kept in its home Page's document.
+- **Table** — The Block of typed fields and rows, kept in its home Page's document and shown through Views such as Table, Board and Calendar. The core calls it the Database Block (ADR-0244).
+- **Calculation Block** — A Block of lines that each pair a label with a value or formula, laid out as labels left and values right, for reports in Excel's layout (ADR-0244).
 - **Section** — Consecutive Text Blocks up to `---`, a Block of another type or the Page's edge; Arrange mode places it as one tile, inside which its Text Blocks can be arranged in columns. It is layout only and owns no content, rights or Views (ADR-0235).
 - **Chat** — Liquid's one kind of conversation, as in WhatsApp: one-to-one or a group, whose participants are people or agents alike; a Block that Pages can show. A planned replacement for separate agent sessions and projects (ADR-0239, ADR-0241).
-- **Inbox** — Liquid's one list of what needs the person, from every Chat and Database: agents' approvals and questions, mentions, direct messages and tasks due soon, ordered by when they are due (ADR-0241).
+- **Inbox** — Liquid's one list of what needs the person, from every Chat and Table: agents' approvals and questions, mentions, direct messages and tasks due soon, ordered by when they are due (ADR-0241).
 - **Arrange mode** — The explicit Page state that reveals the responsive grid and resize/reorder handles. Outside Arrange mode, a Page remains a content-first flow.
 - **Block SDK** — Versioned contract for reusable built-in and Block Registry Block Types: state/migrations, Views, ports/actions, permissions, lifecycle and responsive behavior. It is for product/community extension, not end-user app creation.
 - **Block Registry** — Official distribution catalog for reusable Block Types. Community packages are signed, sandboxed and capability-scoped; the initial model loads no arbitrary third-party native code.

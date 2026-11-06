@@ -1,0 +1,304 @@
+<!doctype html>
+<html lang="en"><head><title>Liquid: Table View mockups</title>
+<link rel="stylesheet" href="../tokens.css"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+.chrome{--foreground:var(--ws-text);--muted-foreground:var(--ws-text-muted);--muted:var(--ws-subtle);--border:var(--ws-border-strong);--secondary:var(--ws-hover);background:var(--ws-canvas);padding:24px}
+body{margin:0;font-family:var(--ws-font-ui);color:var(--foreground)}
+.page{display:flex;flex-direction:column;gap:28px;max-width:1400px}
+.toolbar{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;font-size:13px;color:var(--muted-foreground)}
+.toolbar>div{display:flex;gap:8px;align-items:center}
+.seg{display:inline-flex;border:1px solid var(--border);border-radius:6px;overflow:hidden}
+.seg button{all:unset;cursor:pointer;padding:4px 10px;font-size:12.5px;color:var(--muted-foreground)}
+.seg button.on{background:var(--secondary);color:var(--foreground)}
+h1{margin:0 0 6px;font-size:var(--ws-fs-h1);line-height:var(--ws-lh-h1)}
+h3.sec{margin:0 0 4px;font-size:15px;font-weight:600}
+p.sub{margin:0 0 10px;font-size:13px;color:var(--muted-foreground);line-height:1.5;max-width:900px}
+.stage{padding:16px;border-radius:8px;background:var(--muted);overflow:hidden}
+.scaler{position:relative}
+.scaler>.win{position:absolute;top:0;left:0;transform-origin:0 0}
+.win{font-family:var(--ws-font-ui);color:var(--ws-text);font-size:var(--ws-fs-ui);line-height:var(--ws-lh-ui);-webkit-font-smoothing:antialiased;background:var(--ws-canvas);border-radius:var(--ws-radius-xl);overflow:hidden;box-shadow:var(--ws-shadow);position:relative}
+.win.bare{background:transparent;box-shadow:none;overflow:visible;border-radius:0}
+.head{height:var(--ws-row-header);display:flex;align-items:center;gap:8px;padding:0 16px 0 24px;font-size:14px}
+.crumb{color:var(--ws-text-muted);display:flex;gap:6px;align-items:center;white-space:nowrap}
+.crumb b{color:var(--ws-text);font-weight:500}
+.pg{height:var(--h);overflow:hidden;padding:20px 0 0;position:relative}
+.col{width:var(--ws-width-reading);margin:0 auto;display:flex;flex-direction:column;gap:12px}
+.ttl{font-size:var(--ws-fs-display);line-height:var(--ws-lh-display);font-weight:var(--ws-fw-bold);margin:0 0 4px}
+.prose{font-size:var(--ws-fs-prose);line-height:var(--ws-lh-prose)}
+.prose p{margin:0}
+.ph{color:var(--ws-text-faint)}
+.caret{display:inline-block;width:1.5px;height:18px;background:var(--ws-text);vertical-align:middle;margin:0 1px}
+.blk{position:relative}
+.bh{display:flex;align-items:center;gap:8px;height:32px;font-size:14px;color:var(--ws-text-muted)}
+.bh b{color:var(--ws-text);font-weight:600;font-size:16px}
+.bh .end{margin-left:auto;display:flex;gap:2px;align-items:center}
+.ico{width:16px;flex:none;display:inline-flex;justify-content:center;color:var(--ws-text-faint)}
+.ib{height:28px;min-width:28px;padding:0 6px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;gap:6px;color:var(--ws-text-muted);font-size:13px;box-sizing:border-box}
+.ib.on{background:var(--ws-hover);color:var(--ws-text)}
+.chips{display:flex;gap:6px;align-items:center;font-size:13px}
+.fchip{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 8px;border-radius:12px;color:var(--ws-accent);background:var(--ws-accent-subtle);font-size:13px;white-space:nowrap}
+.fchip.add{background:none;color:var(--ws-text-faint)}
+.tbl{border-radius:8px;box-shadow:0 0 0 1px var(--ws-border);overflow:hidden;font-size:14px;position:relative}
+.tr{display:grid;grid-template-columns:var(--cols);height:var(--ws-row-table);align-items:center;box-shadow:inset 0 -1px 0 var(--ws-border);white-space:nowrap;position:relative}
+.tr>span{padding:0 10px;overflow:hidden;text-overflow:ellipsis;height:100%;display:flex;align-items:center;gap:6px;box-sizing:border-box}
+.tr>span+span{box-shadow:inset 1px 0 0 var(--ws-border)}
+.tr.hd{color:var(--ws-text-muted);font-size:13px;height:32px;background:var(--ws-subtle)}
+.tr.hd>span.on{background:var(--ws-hover);color:var(--ws-text)}
+.tr.add{color:var(--ws-text-faint);font-size:13px;box-shadow:none}
+.tr.add>span+span{box-shadow:none}
+.tr.hov{background:var(--ws-hover)}
+.tr.foot{color:var(--ws-text-faint);font-size:13px;box-shadow:none;background:var(--ws-subtle);height:30px}
+.tr.more{color:var(--ws-text-muted);font-size:13px;box-shadow:inset 0 -1px 0 var(--ws-border)}
+.num{justify-content:flex-end;font-variant-numeric:tabular-nums}
+.cell-on{box-shadow:inset 0 0 0 2px var(--ws-accent)!important;border-radius:2px}
+.cell-sel{box-shadow:inset 0 0 0 2px color-mix(in srgb,var(--ws-accent) 45%,transparent)!important;background:color-mix(in srgb,var(--ws-accent) 6%,transparent)}
+.handle{position:absolute;left:-46px;top:5px;display:flex;gap:2px;color:var(--ws-text-faint)}
+.handle span{width:20px;height:24px;display:grid;place-items:center;border-radius:4px}
+.handle span.on{background:var(--ws-hover);color:var(--ws-text-muted)}
+.tag{display:inline-block;font-size:13px;padding:0 6px;border-radius:4px;line-height:20px;color:var(--ws-tag-text);white-space:nowrap}
+.c0{background:var(--ws-tag-0)}.c1{background:var(--ws-tag-1)}.c2{background:var(--ws-tag-2)}.c3{background:var(--ws-tag-3)}.c4{background:var(--ws-tag-4)}.c5{background:var(--ws-tag-5)}.c6{background:var(--ws-tag-6)}.c7{background:var(--ws-tag-7)}.c8{background:var(--ws-tag-8)}.c9{background:var(--ws-tag-9)}
+.cb{width:14px;height:14px;border-radius:3px;box-shadow:inset 0 0 0 1.5px var(--ws-border-strong);display:inline-grid;place-items:center;font-size:10px;flex:none}
+.cb.on{background:var(--ws-accent);box-shadow:none;color:var(--ws-on-accent)}
+.pop{position:absolute;z-index:3;border-radius:8px;background:var(--ws-surface);box-shadow:var(--ws-shadow);padding:6px;display:flex;flex-direction:column;gap:1px;font-size:14px;box-sizing:border-box}
+.pop .lbl{font-size:12px;color:var(--ws-text-faint);padding:6px 8px 2px}
+.pop .it{display:flex;gap:10px;align-items:center;min-height:30px;padding:0 8px;border-radius:6px;white-space:nowrap;color:var(--ws-text)}
+.pop .it.on{background:var(--ws-hover)}
+.pop .it .r{margin-left:auto;color:var(--ws-text-faint);font-size:12px}
+.pop .it.dng{color:var(--ws-danger)}.pop .it.dng .ico{color:var(--ws-danger)}
+.pop .it .bi{width:28px;height:28px;border-radius:6px;box-shadow:inset 0 0 0 1px var(--ws-border);display:grid;place-items:center;color:var(--ws-text-muted);flex:none}
+.pop .it .tx{display:flex;flex-direction:column;line-height:18px;padding:4px 0}
+.pop .it .tx small{color:var(--ws-text-faint);font-size:12px}
+.pop hr{border:0;height:1px;background:var(--ws-border);margin:4px 2px}
+.pop .inp{height:30px;border-radius:6px;box-shadow:inset 0 0 0 1px var(--ws-border-strong);display:flex;align-items:center;padding:0 8px;margin:2px 2px 4px;font-size:14px;background:var(--ws-canvas)}
+.pop .inp.on{box-shadow:inset 0 0 0 1.5px var(--ws-accent)}
+.pop .tagsin{min-height:34px;display:flex;flex-wrap:wrap;gap:4px;align-items:center;padding:4px 8px;margin:-6px -6px 4px;background:var(--ws-subtle);border-radius:8px 8px 0 0;box-shadow:inset 0 -1px 0 var(--ws-border)}
+.cal{display:grid;grid-template-columns:repeat(7,32px);gap:2px;padding:4px 6px 6px;font-size:12px;text-align:center}
+.cal span{height:28px;display:grid;place-items:center;border-radius:6px;color:var(--ws-text)}
+.cal span.dim{color:var(--ws-text-faint)}
+.cal span.h{color:var(--ws-text-faint);height:22px}
+.cal span.on{background:var(--ws-accent);color:var(--ws-on-accent)}
+.cal span.today{color:var(--ws-danger);font-weight:600}
+.calh{display:flex;align-items:center;justify-content:space-between;padding:4px 8px;font-size:13px;font-weight:500}
+.calh span{color:var(--ws-text-faint);display:flex;gap:10px}
+.btn{height:28px;padding:0 10px;border-radius:6px;background:var(--ws-canvas);box-shadow:inset 0 0 0 1px var(--ws-border-strong);color:var(--ws-text);font-size:13px;display:inline-flex;align-items:center;gap:8px;font-weight:500;white-space:nowrap}
+.btn.dngp{background:var(--ws-danger);color:var(--ws-on-accent);box-shadow:none}
+.scrim{position:absolute;inset:0;background:rgba(15,15,15,.24);z-index:2}
+.dlg{position:absolute;left:50%;top:120px;transform:translateX(-50%);z-index:4;width:420px;box-sizing:border-box;border-radius:12px;background:var(--ws-surface);box-shadow:var(--ws-shadow);padding:16px;display:flex;flex-direction:column;gap:12px;font-size:13px;line-height:20px}
+.dlg h4{margin:0;font-size:16px;line-height:22px;font-weight:600}
+.dlg p{margin:0;color:var(--ws-text-muted)}
+.dlg .acts{display:flex;gap:8px;justify-content:flex-end}
+.gal{display:grid;align-items:start;grid-template-columns:repeat(auto-fill,minmax(min(100%,400px),1fr));gap:16px}
+.gcell{padding:14px 16px 16px;border-radius:12px;background:var(--ws-canvas);box-shadow:var(--ws-shadow);display:flex;flex-direction:column;gap:10px;font-family:var(--ws-font-ui);color:var(--ws-text);font-size:14px;line-height:20px;position:relative}
+.gcell h4{margin:0;font-size:13px;font-weight:600}
+.gcell .cap{font-size:12px;line-height:18px;color:var(--ws-text-faint)}
+.gcell .room{position:relative}
+.sw{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}
+.sw div{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--ws-text-faint)}
+.maps{border-collapse:collapse;font-size:13px;line-height:1.5;width:100%;max-width:900px}
+.maps td,.maps th{padding:6px 10px;text-align:left;vertical-align:top;border-bottom:1px solid var(--ws-border)}
+.maps th{color:var(--muted-foreground);font-weight:500;font-size:12px}
+kbd{font-family:var(--ws-font-mono);font-size:11.5px;padding:0 5px;border-radius:4px;border:1px solid var(--ws-border-strong);line-height:18px;color:var(--ws-text-muted)}
+.qs,.notes{font-size:13px;line-height:1.6;margin:0;padding-left:18px;max-width:900px}.qs li,.notes li{margin:0 0 8px}
+.qs .opt{display:block;color:var(--muted-foreground)}
+h4.qh{margin:14px 0 6px;font-size:13px}
+.scroll{position:absolute;left:12px;right:12px;bottom:4px;height:4px;border-radius:2px;background:var(--ws-border)}
+.scroll i{display:block;width:55%;margin-left:40%;height:100%;border-radius:2px;background:var(--ws-border-strong)}
+.vscroll{position:absolute;right:3px;top:36px;bottom:68px;width:4px;border-radius:2px;background:var(--ws-border)}
+.vscroll i{display:block;height:12%;margin-top:30%;border-radius:2px;background:var(--ws-border-strong)}
+.pin .tr>span:first-child{box-shadow:4px 0 6px -4px rgba(0,0,0,.25);position:relative;z-index:1}
+.unk{display:flex;align-items:center;gap:10px;height:40px;padding:0 12px;border-radius:8px;background:var(--ws-subtle);box-shadow:inset 0 0 0 1px var(--ws-border);color:var(--ws-text-muted);font-size:14px}
+.unk .ico{color:var(--ws-text-faint)}
+</style></head><body class="theme-light chrome">
+<div class="page">
+  <div class="toolbar">
+    <div>Theme <span class="seg" id="theme"><button data-v="light">Light</button><button data-v="dark">Dark</button><button data-v="system" class="on">System</button></span></div>
+    <div>Size <span class="seg" id="size"><button data-v="fit" class="on">Fit</button><button data-v="full">100 %</button></span></div>
+  </div>
+  <section>
+    <h1>Liquid Workspace: Table View</h1>
+    <p class="sub">Mockups for the Table View of M3a's Database slice in <a href="../../../PLAN.md#m3a--local-workspace-foundation">PLAN.md</a>, over the merged core and bridge: text, number, select, date and checkbox fields (ADR-0242, ADR-0243), rows read in windows (client architecture rule 3). The table's look follows the approved <a href="liquid-workspace-blocks.html">Blocks mockups</a>, and the app's frame <a href="liquid-app-concept.html">the app's structure</a> (ADR-0241), at Notion's scale; frames here show only the Page. Approved by the maintainer on 2026-11-03, section 10 on 2026-11-06, with sort and filter deferred to the Views slice and long tables scrolling inside a fixed height. The Block is called Table in the app (ADR-0244, <a href="liquid-tables-concept.html">concept</a>).</p>
+  </section>
+  <section>
+    <h3 class="sec">1 · A table on a Page</h3>
+    <p class="sub">The Database Block shows its name, then a table: one column per field with the kind's icon, one row per row. Hovering a row shows its handle at the left; <b>+ New</b> under the last row adds one, <b>+</b> after the last column adds a field. Numbers sit right-aligned and days read in the person's locale, options as colored tags. The footer counts the rows.</p>
+    <div class="stage"><div class="scaler"><div class="win" id="w-table" data-w="1040"></div></div></div>
+  </section>
+  <section>
+    <h3 class="sec">2 · Adding a table</h3>
+    <p class="sub">Typing <b>/</b> in an empty Text Block opens the Block menu, as in Notion: the Text Block styles that exist today and <b>Table</b>. Typing filters it, ↑↓ choose, ⏎ inserts. A new table has the text field "Name", no rows and its name field focused with the placeholder "Untitled".</p>
+    <div class="stage"><div class="scaler"><div class="win" id="w-slash" data-w="1040"></div></div></div>
+  </section>
+  <section>
+    <h3 class="sec">3 · Adding a field</h3>
+    <p class="sub"><b>+</b> in the header opens a small panel: the field's name, then its kind. ⏎ or a click on a kind adds it after the last field. A field's kind cannot change yet; renaming happens in the field's menu (section 5).</p>
+    <div class="stage"><div class="scaler"><div class="win" id="w-field" data-w="1040"></div></div></div>
+  </section>
+  <section>
+    <h3 class="sec">4 · Editing cells</h3>
+    <p class="sub">A click selects a cell, a second click or ⏎ edits it, and typing replaces it, as in a spreadsheet and in Notion. Text and numbers edit in place; a select cell and a date cell open a picker; a checkbox ticks on click or Space. A number that is not one is refused in place.</p>
+    <div class="gal" id="g-cells"></div>
+  </section>
+  <section>
+    <h3 class="sec">5 · Field and row menus</h3>
+    <p class="sub">Clicking a field's header opens its menu: rename it in place, or delete it. Deleting a field asks first, since its whole column goes. A row's handle opens its menu: insert a row above or below, or delete it without asking.</p>
+    <div class="stage"><div class="scaler"><div class="win" id="w-menus" data-w="1040"></div></div></div>
+    <div class="stage" style="margin-top:12px"><div class="scaler"><div class="win" id="w-delete" data-w="1040"></div></div></div>
+  </section>
+  <section>
+    <h3 class="sec">6 · Sort and filter, with the Views slice</h3>
+    <p class="sub">The table's header holds <b>Sort</b> and <b>Filter</b>. The core sorts by one field and filters by one condition; each shows as a chip under the name, which opens it again or removes it. The footer says how many rows pass. They are built with the Views slice, which stores them on the View, so every device and person sees the same order, as in Notion.</p>
+    <div class="stage"><div class="scaler"><div class="win" id="w-sort" data-w="1040"></div></div></div>
+  </section>
+  <section>
+    <h3 class="sec">7 · Long and wide tables</h3>
+    <p class="sub">A table keeps a fixed height, as the Chat Block does: about ten rows, with its header and footer in place, and its rows scrolling inside; it reads them window by window as they scroll in. Arrange mode will change the height. A table shorter than that takes only its rows' height. Fields wider than the reading column scroll sideways inside the table, with the first field kept in view.</p>
+    <div class="gal" id="g-long"></div>
+  </section>
+  <section>
+    <h3 class="sec">8 · Tag colors</h3>
+    <p class="sub">Ten tag colors in <code>tokens.css</code>, as Notion's: default, gray, brown, orange, yellow, green, blue, purple, pink and red, each in light and dark. The core stores an option's color as a number; the number picks a color in this order, wrapping after ten. A new option takes the next color after the field's last option. Changing an option's name or color follows once the core can.</p>
+    <div class="gal" id="g-colors"></div>
+  </section>
+  <section>
+    <h3 class="sec">9 · Keyboard</h3>
+    <div class="wrapx"><table class="maps">
+      <tr><th>Key</th><th>On a selected cell</th><th>While editing</th></tr>
+      <tr><td><kbd>↑</kbd> <kbd>↓</kbd> <kbd>←</kbd> <kbd>→</kbd></td><td>Select the next cell</td><td>Move the caret; a picker moves its choice</td></tr>
+      <tr><td><kbd>⏎</kbd></td><td>Edit, or open the picker</td><td>Keep the value and select the cell</td></tr>
+      <tr><td><kbd>⇥</kbd> <kbd>⇧⇥</kbd></td><td>Select the next or previous cell</td><td>Keep the value and select the next or previous cell</td></tr>
+      <tr><td><kbd>esc</kbd></td><td>Leave the table; the caret goes to the Page</td><td>Undo the edit and select the cell</td></tr>
+      <tr><td>Typing</td><td>Replace a text or number cell; open a picker filtered by it</td><td>Edit</td></tr>
+      <tr><td><kbd>Space</kbd></td><td>Tick or untick a checkbox</td><td></td></tr>
+      <tr><td><kbd>⌫</kbd></td><td>Clear the cell</td><td>Delete a character</td></tr>
+    </table></div>
+  </section>
+  <section>
+    <h3 class="sec">10 · Next to a table, and a Block Liquid does not know</h3>
+    <p class="sub">A Block of a kind a later version adds shows as a quiet placeholder in its place (ADR-0245), never as text. The caret passes a table or a placeholder: ↑ or ← at a Text Block's start goes to the end of the Text Block above it, ↓ or → at the end to the start of the one below. ⌫ at the start of the Text Block below joins nothing, and a numbered list after it starts at 1 again.</p>
+    <div class="stage"><div class="scaler"><div class="win" id="w-around" data-w="1040"></div></div></div>
+  </section>
+  <section>
+    <h3 class="sec">Decisions</h3>
+    <ol class="notes">
+      <li>The table, the field kinds' icons, + New, + for a field and the row count as in section 1; days and numbers in the person's locale; decimals, currencies and sums come with field formats.</li>
+      <li><b>/</b> opens the Block menu with the Text Block styles and Table; it is the first part of the planned <code>/</code> menu.</li>
+      <li>Cells select, then edit, as in section 4 and the keyboard table; a refused value stays in the cell with its reason.</li>
+      <li>Deleting a field asks first; deleting a row does not. Both stay in the document, so History can restore them once it exists.</li>
+      <li>Ten tag colors as tokens, a new option taking the next one.</li>
+    </ol>
+    <h4 class="qh">Decided on 2026-11-03</h4>
+    <ol class="qs">
+      <li>Sort and filter come with the Views slice, which stores them on the View; this slice builds the table without them.</li>
+      <li>A long table keeps a fixed height and scrolls inside, like the Chat Block, rather than Notion's Load more.</li>
+    </ol>
+    <h4 class="qh">Decided on 2026-11-06</h4>
+    <ol class="qs">
+      <li>The caret passes a table or a placeholder, as section 10 shows; selecting a whole Block, as Notion does, follows with Block handles.</li>
+      <li>Numbers and days read as in the person's region, Material's texts in their language, through <code>intl</code> and <code>flutter_localizations</code> (ADR-0246).</li>
+    </ol>
+  </section>
+</div>
+<script>
+const DW=1040;
+const sv=(p,w=14)=>`<svg viewBox="0 0 16 16" width="${w}" height="${w}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
+const I={
+text:sv('<path d="M3 4h10M3 8h10M3 12h6"/>'),
+num:sv('<path d="M6 2.5L5 13.5M11 2.5l-1 11M2.5 6h11M2 10h11"/>'),
+sel:sv('<circle cx="8" cy="8" r="6"/><path d="M5.5 7l2.5 2.5L10.5 7"/>'),
+date:sv('<rect x="2" y="3" width="12" height="11" rx="1.5"/><path d="M2 6.5h12M5.5 1.5v3M10.5 1.5v3"/>'),
+check:sv('<rect x="2.5" y="2.5" width="11" height="11" rx="2"/><path d="M5 8l2 2 4-4"/>'),
+tick:sv('<path d="M3.5 8.5l3 3 6-7"/>',10),
+plus:sv('<path d="M8 3v10M3 8h10"/>'),
+drag:sv('<circle cx="6" cy="4" r=".8"/><circle cx="10" cy="4" r=".8"/><circle cx="6" cy="8" r=".8"/><circle cx="10" cy="8" r=".8"/><circle cx="6" cy="12" r=".8"/><circle cx="10" cy="12" r=".8"/>'),
+more:sv('<circle cx="3.5" cy="8" r=".8"/><circle cx="8" cy="8" r=".8"/><circle cx="12.5" cy="8" r=".8"/>'),
+sort:sv('<path d="M5 3v10M2.5 10.5L5 13l2.5-2.5M11 13V3M8.5 5.5L11 3l2.5 2.5"/>'),
+filter:sv('<path d="M2.5 3.5h11L9.5 8.5v4l-3 1.5v-5.5z"/>'),
+db:sv('<rect x="2" y="2.5" width="12" height="11" rx="1.5"/><path d="M2 6h12M6 6v7.5"/>'),
+pen:sv('<path d="M10.5 2.5l3 3L6 13H3v-3z"/>'),
+trash:sv('<path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.7 9h5.6l.7-9"/>'),
+up:sv('<path d="M8 13V3M4 7l4-4 4 4"/>'),
+down:sv('<path d="M8 3v10M4 9l4 4 4-4"/>'),
+h:sv('<path d="M3 3v10M10 3v10M3 8h7"/>'),
+list:sv('<circle cx="3" cy="4.5" r=".8"/><circle cx="3" cy="11.5" r=".8"/><path d="M6 4.5h7.5M6 11.5h7.5"/>'),
+quote:sv('<path d="M3 3v10M6.5 5h7M6.5 8h7M6.5 11h5"/>'),
+puzzle:sv('<path d="M6 2.5h4v2a1.5 1.5 0 0 0 3 0V4h.5v4h-1a1.5 1.5 0 0 0 0 3h1v2.5h-4v-1a1.5 1.5 0 0 0-3 0v1H2.5V9.5h1a1.5 1.5 0 0 0 0-3h-1v-4z"/>'),
+};
+const K={text:I.text,num:I.num,sel:I.sel,date:I.date,check:I.check};
+const fields=[['Name','text','1fr'],['Date','date','120px'],['Category','sel','128px'],['Amount','num','104px'],['Paid','check','64px']];
+const data=[['Groceries','Nov 1, 2026',['Food',5],'84.2',true],['Electricity','Oct 30, 2026',['Home',6],'96',true],['Train to Porto','Oct 28, 2026',['Travel',3],'42.5',false],['Rent','Oct 27, 2026',['Home',6],'950',true],['Cinema','Oct 25, 2026',['Leisure',8],'111.8',false]];
+const cols=(f)=>f.map(x=>x[2]).join(' ')+' 40px';
+const cell=(k,v,o={})=>{const c=o.cls||'';if(k=='sel')return `<span class="${c}">${v?`<span class="tag c${v[1]}">${v[0]}</span>`:''}</span>`;if(k=='check')return `<span class="${c}" style="justify-content:center"><span class="cb ${v?'on':''}">${v?I.tick:''}</span></span>`;if(k=='num')return `<span class="num ${c}">${v??''}</span>`;return `<span class="${c}">${v??''}</span>`};
+function table(o={}){const f=o.fields||fields;const rows=o.rows||data;
+const hd=`<div class="tr hd">${f.map((x,i)=>`<span class="${o.hdOn==i?'on':''}"><span class="ico">${K[x[1]]}</span>${x[0]}</span>`).join('')}<span style="justify-content:center">${I.plus}</span></div>`;
+const body=rows.map((r,ri)=>`<div class="tr ${o.hov==ri?'hov':''}">${o.hov==ri&&!o.noHandle?`<div class="handle"><span>${I.plus}</span><span class="${o.handleOn?'on':''}">${I.drag}</span></div>`:''}${f.map((x,i)=>cell(x[1],r[i],{cls:(o.on&&o.on[0]==ri&&o.on[1]==i)?(o.edit?'cell-on':'cell-sel'):''})).join('')}<span></span></div>`).join('');
+const more=o.more?`<div class="tr more"><span style="grid-column:1/-1;gap:8px">${I.down}Load more<span class="ph" style="font-size:12px">· ${o.more}</span></span></div>`:'';
+return `<div class="tbl ${o.pin?'pin':''}" style="--cols:${cols(f)}">${hd}${body}${more}<div class="tr add"><span style="grid-column:1/-1">${I.plus}&nbsp;New</span></div><div class="tr foot"><span style="grid-column:1/-1">${o.count||rows.length+' rows'}</span></div>${o.scroll?'<div class="scroll"><i></i></div>':''}</div>`}
+const bhead=(o={})=>`<div class="bh"><span class="ico">${I.db}</span><b ${o.ph?'class="ph"':''}>${o.name||'Expenses'}</b>${o.caret?'<span class="caret"></span>':''}<span class="end">${o.tools===false?'':`<span class="ib ${o.sortOn?'on':''}" title="Sort">${I.sort}</span><span class="ib ${o.filterOn?'on':''}" title="Filter">${I.filter}</span><span class="ib">${I.more}</span>`}</span></div>`;
+function win(id,o){document.getElementById(id).innerHTML=`<div class="head"><span class="crumb">Private <span>›</span> <b>💰 Household budget</b></span></div><div class="pg" style="--h:${o.h}px"><div class="col"><div class="ttl">💰 Household budget</div>${o.main}</div>${o.over||''}</div>`}
+const intro=`<div class="prose"><p>October is almost done; here is what went out.</p></div>`;
+
+win('w-table',{h:420,main:`${intro}<div class="blk">${bhead()}${table({hov:2})}</div>`});
+
+const slash=`<div class="pop" style="left:166px;top:178px;width:300px"><div class="lbl">Text</div>
+<div class="it"><span class="bi">${I.text}</span><span class="tx">Text</span></div>
+<div class="it"><span class="bi">${I.h}</span><span class="tx">Heading 1</span><span class="r">#</span></div>
+<div class="it"><span class="bi">${I.list}</span><span class="tx">Bulleted list</span><span class="r">-</span></div>
+<div class="it"><span class="bi">${I.check}</span><span class="tx">To-do list</span><span class="r">[]</span></div>
+<div class="it"><span class="bi">${I.quote}</span><span class="tx">Quote</span><span class="r">"</span></div>
+<div class="lbl">Table</div>
+<div class="it on"><span class="bi">${I.db}</span><span class="tx">Table<small>Fields and rows, sorted and filtered</small></span></div>
+<hr><div class="it" style="color:var(--ws-text-faint);font-size:12px">Type to filter · ↑↓ · ⏎</div></div>`;
+const fresh=`<div class="blk">${bhead({name:'Untitled',ph:true,caret:true,tools:false})}<div class="tbl" style="--cols:1fr 40px"><div class="tr hd"><span><span class="ico">${I.text}</span>Name</span><span style="justify-content:center">${I.plus}</span></div><div class="tr add"><span style="grid-column:1/-1">${I.plus}&nbsp;New</span></div></div></div>`;
+document.getElementById('w-slash').innerHTML=`<div style="display:grid;grid-template-columns:1fr 1fr">
+<div><div class="head"><span class="crumb">Private <span>›</span> <b>💰 Household budget</b></span></div><div class="pg" style="--h:470px"><div class="col" style="width:440px"><div class="ttl" style="font-size:30px;line-height:38px">💰 Household budget</div>${intro}<div class="prose"><p>/<span class="caret"></span></p></div></div>${slash.replace('left:166px;top:178px','left:40px;top:150px')}</div></div>
+<div style="box-shadow:inset 1px 0 0 var(--ws-border)"><div class="head"><span class="crumb">After ⏎</span></div><div class="pg" style="--h:470px"><div class="col" style="width:440px"><div class="ttl" style="font-size:30px;line-height:38px">💰 Household budget</div>${intro}${fresh}<div class="prose ph"><p>The Page goes on below.</p></div></div></div></div></div>`;
+
+const fieldPop=`<div class="pop" style="left:624px;top:186px;width:250px"><div class="inp on">Amount<span class="caret"></span></div><div class="lbl">Kind</div>
+<div class="it"><span class="ico">${I.text}</span>Text</div><div class="it on"><span class="ico">${I.num}</span>Number</div><div class="it"><span class="ico">${I.sel}</span>Select</div><div class="it"><span class="ico">${I.date}</span>Date</div><div class="it"><span class="ico">${I.check}</span>Checkbox</div></div>`;
+win('w-field',{h:440,main:`${intro}<div class="blk">${bhead()}${table({fields:fields.filter(f=>f[0]!='Amount'&&f[0]!='Paid'),rows:data.map(r=>[r[0],r[1],r[2]])})}</div>`,over:fieldPop});
+
+const mini=(f,rows,o)=>table(Object.assign({fields:f,rows},o));
+const cells=[
+['Text',`<div class="room">${mini([['Name','text','1fr'],['Amount','num','104px']],[['Groceries','84.2'],['Train to Porto<span class="caret"></span>','42.5']],{on:[1,0],edit:true,count:'2 rows'})}</div>`,'Editing in place; ⏎ or ⇥ keeps it, esc undoes it.'],
+['Number',`<div class="room">${mini([['Name','text','1fr'],['Amount','num','104px']],[['Groceries','84.2'],['Train to Porto','42.5x<span class="caret"></span>']],{on:[1,1],edit:true,count:'2 rows'})}<div style="margin-top:6px;color:var(--ws-danger);font-size:12px">“42.5x” is no number.</div></div>`,'Typed and shown in the person\'s locale; a refused value stays to be fixed.'],
+['Select',`<div class="room" style="height:230px">${mini([['Name','text','1fr'],['Category','sel','128px']],[['Groceries',['Food',5]],['Hotel in Porto',null]],{on:[1,1],edit:true,count:'2 rows'})}<div class="pop" style="right:40px;top:102px;width:240px"><div class="tagsin">Ho<span class="caret"></span></div><div class="lbl">Choose an option or create one</div><div class="it"><span class="tag c6">Home</span></div><div class="it on">Create <span class="tag c9">Ho</span></div></div></div>`,'Typing filters the options; ⏎ picks the first or creates the typed one in the next color.'],
+['Date',`<div class="room" style="height:400px">${mini([['Name','text','1fr'],['Date','date','120px']],[['Groceries','Nov 1, 2026'],['Train to Porto','Oct 28, 2026']],{on:[1,1],edit:true,count:'2 rows'})}<div class="pop" style="right:40px;top:102px;width:244px"><div class="inp on">Oct 28, 2026<span class="caret"></span></div><div class="calh">October 2026<span>‹ ›</span></div><div class="cal">${['Mo','Tu','We','Th','Fr','Sa','Su'].map(d=>`<span class="h">${d}</span>`).join('')}${[28,29,30].map(d=>`<span class="dim">${d}</span>`).join('')}${Array.from({length:31},(_,i)=>`<span class="${i+1==28?'on':''}">${i+1}</span>`).join('')}${[1].map(d=>`<span class="dim">${d}</span>`).join('')}</div><hr><div class="it" style="color:var(--ws-text-muted)">Clear</div></div></div>`,'A day only (ADR-0242); typed days parse in the person\'s locale.'],
+['Checkbox',`<div class="room">${mini([['Name','text','1fr'],['Paid','check','64px']],[['Groceries',true],['Train to Porto',false]],{on:[1,1],count:'2 rows'})}</div>`,'A click or Space ticks it.'],
+];
+document.getElementById('g-cells').innerHTML=cells.map(c=>`<div class="gcell"><h4>${c[0]}</h4>${c[1]}<div class="cap">${c[2]}</div></div>`).join('');
+
+const fieldMenu=`<div class="pop" style="left:538px;top:186px;width:230px"><div class="inp on">Category<span class="caret"></span></div>
+<div class="it"><span class="ico">${I.sel}</span>Select<span class="r">kind</span></div><hr>
+<div class="it dng"><span class="ico">${I.trash}</span>Delete field</div></div>`;
+const rowMenu=`<div class="pop" style="left:120px;top:318px;width:200px">
+<div class="it"><span class="ico">${I.up}</span>Insert above</div><div class="it"><span class="ico">${I.down}</span>Insert below</div><hr>
+<div class="it dng"><span class="ico">${I.trash}</span>Delete row</div></div>`;
+win('w-menus',{h:500,main:`${intro}<div class="blk">${bhead()}${table({hdOn:2,hov:3,handleOn:true})}</div>`,over:fieldMenu+rowMenu});
+win('w-delete',{h:420,main:`${intro}<div class="blk">${bhead()}${table({hdOn:2})}</div>`,over:`<div class="scrim"></div><div class="dlg"><h4>Delete the field “Category”?</h4><p>Its values in all 5 rows go with it.</p><div class="acts"><span class="btn">Cancel</span><span class="btn dngp">Delete field</span></div></div>`});
+
+const sorted=data.filter(r=>r[2][0]=='Home').sort((a,b)=>+b[3]-+a[3]);
+const filterPop=`<div class="pop" style="left:250px;top:182px;width:300px"><div style="display:flex;gap:6px;padding:4px"><span class="btn" style="font-weight:400"><span class="ico">${I.sel}</span>Category ⌄</span><span class="btn" style="font-weight:400">is ⌄</span></div><div class="tagsin" style="margin:4px 2px;border-radius:6px;background:var(--ws-canvas);box-shadow:inset 0 0 0 1px var(--ws-border-strong)"><span class="tag c6">Home</span></div><div class="it"><span class="tag c5">Food</span></div><div class="it"><span class="tag c3">Travel</span></div><div class="it"><span class="tag c8">Leisure</span></div><hr><div class="it" style="color:var(--ws-text-muted)">${I.trash}Remove the filter</div></div>`;
+win('w-sort',{h:440,main:`${intro}<div class="blk">${bhead({sortOn:true,filterOn:true})}<div class="chips" style="margin:2px 0 8px"><span class="fchip">${I.down}Amount</span><span class="fchip">Category is Home</span></div>${table({rows:sorted,count:'2 of 5 rows'})}</div>`,over:filterPop});
+
+win('w-around',{h:470,main:`${intro}<div class="blk">${bhead()}${table({rows:data.slice(0,2),count:'2 rows'})}</div><div class="prose"><p><span class="caret"></span>Paid by card.<span style="margin-left:16px;font-size:12px;color:var(--ws-accent)">↑ goes to the end of “…what went out.”</span></p></div><div class="unk"><span class="ico">${I.puzzle}</span>This Block needs a newer version of Liquid.</div><div class="prose"><p>1.&nbsp;&nbsp;Check the bank statement</p></div>`});
+
+const many=Array.from({length:6},(_,i)=>[`Expense ${i+45}`,'Oct '+(20-i)+', 2026',(12.5*i+3).toString()]);
+const narrow=[['Name','text','1fr'],['Date','date','120px'],['Amount','num','90px']];
+const wide=[['Name','text','150px'],['Amount','num','90px'],['Paid','check','64px'],['Shop','text','110px'],['Card','sel','100px']];
+document.getElementById('g-long').innerHTML=`<div class="gcell"><h4>A fixed height</h4><div style="position:relative">${table({fields:narrow,rows:many,count:'2,000 rows'})}<div class="vscroll"><i></i></div></div><div class="cap">2,000 rows scroll inside the table; the header and the row count stay.</div></div>
+<div class="gcell"><h4>Wider than the reading column</h4><div style="overflow:hidden">${table({fields:wide,rows:data.slice(0,3).map(r=>[r[0],r[3],r[4],'Market',['Visa',7]]),scroll:true,pin:true})}</div><div class="cap">Scrolled sideways past Date and Category; the first field stays in view.</div></div>`;
+
+const names=['Default','Gray','Brown','Orange','Yellow','Green','Blue','Purple','Pink','Red'];
+const swatches=(t)=>`<div class="win bare theme-${t}" style="background:var(--ws-canvas);border-radius:8px;padding:12px"><div class="sw">${names.map((n,i)=>`<div><span class="tag c${i}">${n}</span>${i}</div>`).join('')}</div></div>`;
+document.getElementById('g-colors').innerHTML=`<div class="gcell"><h4>Light</h4>${swatches('light')}</div><div class="gcell"><h4>Dark</h4>${swatches('dark')}</div>`;
+
+let mode='system',fit=true;const mq=matchMedia('(prefers-color-scheme: dark)');
+function hostDark(){const v=getComputedStyle(document.documentElement).getPropertyValue('--background').trim();if(!v)return mq.matches;const c=document.createElement('canvas');c.width=c.height=1;const x=c.getContext('2d');x.fillStyle='#808080';x.fillStyle=v;x.fillRect(0,0,1,1);const d=x.getImageData(0,0,1,1).data;return .2126*d[0]+.7152*d[1]+.0722*d[2]<128}
+function applyTheme(){const dark=mode=='dark'||(mode=='system'&&hostDark());document.querySelectorAll('.win:not(.bare),.maps,.stage,.gcell').forEach(w=>{w.classList.toggle('theme-dark',dark);w.classList.toggle('theme-light',!dark)});document.body.classList.toggle('theme-dark',dark);document.body.classList.toggle('theme-light',!dark);document.querySelectorAll('#theme button').forEach(b=>b.classList.toggle('on',b.dataset.v==mode))}
+function layout(){document.querySelectorAll('.stage').forEach(st=>{const sc=st.querySelector('.scaler'),w=sc.firstElementChild;const W=+(w.dataset.w||DW);w.style.width=W+'px';const s=fit?Math.min(1,(st.clientWidth-32)/W):1;w.style.transform=`scale(${s})`;sc.style.width=W*s+'px';sc.style.height=w.offsetHeight*s+'px';st.style.overflowX=fit?'hidden':'auto'});document.querySelectorAll('#size button').forEach(b=>b.classList.toggle('on',(b.dataset.v=='fit')==fit))}
+document.querySelectorAll('#theme button').forEach(b=>b.onclick=()=>{mode=b.dataset.v;applyTheme()});
+document.querySelectorAll('#size button').forEach(b=>b.onclick=()=>{fit=b.dataset.v=='fit';layout()});
+mq.addEventListener('change',applyTheme);addEventListener('resize',layout);setInterval(()=>{if(mode=='system')applyTheme()},1500);
+applyTheme();layout();
+</script>
+</body></html>

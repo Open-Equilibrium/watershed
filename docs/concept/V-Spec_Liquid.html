@@ -114,7 +114,7 @@ Liquid        = local-first workspace and App platform</code></pre>
         <li>Accepted target (ADR-0228): Pages and Blocks in M3; files like a drive and media like a photo library later, as views on the same store. M3 builds attachments only.</li>
         <li>Metadata lives in one CRDT document per Page; Pages group into areas, the unit for Roles, replication and keys.</li>
         <li>Contents are content-addressed, chunked, encrypted blobs outside the CRDT, loaded on demand; a device indexes a file for search when it first loads it. Binary files cannot merge, so concurrent edits keep both versions.</li>
-        <li>Rich text is text with formatting marks, Databases are typed fields and rows (text, number, select, date, checkbox, file, link to a row, formula and button; a new Database starts with a text field "Name"), kept in their home Page's document and read in windows that Rust filters and sorts, and Markdown and HTML serve only import and export. Later drive and media views add OS integration (macOS File Provider, Windows Cloud Files, Linux FUSE) and on-device previews and indexing.</li>
+        <li>Rich text is text with formatting marks, Tables (the core's Database Blocks, ADR-0244) are typed fields and rows (text, number, select, date, checkbox, file, link to a row, formula and button; a new Table starts with a text field "Name"), with a total row, kept in their home Page's document and read in windows that Rust filters and sorts, and Markdown and HTML serve only import and export. Later drive and media views add OS integration (macOS File Provider, Windows Cloud Files, Linux FUSE) and on-device previews and indexing.</li>
       </ul>
     </div></section>
 
@@ -130,7 +130,7 @@ Liquid        = local-first workspace and App platform</code></pre>
 
     <section id="apps" class="section"><h2>5. Apps, extensions and MCP</h2><div class="body">
       <h3>App SDK: Workspace-local functionality</h3>
-      <p>A user should be able to ask, “Build an interactive fitness overview over Database Block X,” and receive a working App Block without knowing runtimes, SDKs, CI, builds or deployment. Liquid AI writes the App through the same reviewed mutation pipeline as a human.</p>
+      <p>A user should be able to ask, “Build an interactive fitness overview over Table X,” and receive a working App Block without knowing runtimes, SDKs, CI, builds or deployment. Liquid AI writes the App through the same reviewed mutation pipeline as a human.</p>
       <ul>
         <li>The App SDK declares UI, versioned state, typed actions, Connections and capabilities with minimal code.</li>
         <li>The App Runtime executes restricted JavaScript/TypeScript locally with declarative UI and resource limits. WASM is a later extension.</li>

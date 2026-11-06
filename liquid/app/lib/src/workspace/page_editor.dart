@@ -582,7 +582,8 @@ class PageEditor {
     }
     await _state.settled;
     final above = await _above(target);
-    if (above == null) return target;
+    // Only Text Blocks join.
+    if (above == null || above.kind != BridgeBlockKind.text) return target;
     final answer = await _state.workspace.query(
       query: query(BridgeQueryKind.text, page: _page, block: above.block),
     );

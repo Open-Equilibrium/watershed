@@ -109,6 +109,17 @@ final class WsPalette {
     required this.data2,
     required this.data3,
     required this.onData,
+    required this.tagText,
+    required this.tag0,
+    required this.tag1,
+    required this.tag2,
+    required this.tag3,
+    required this.tag4,
+    required this.tag5,
+    required this.tag6,
+    required this.tag7,
+    required this.tag8,
+    required this.tag9,
     required this.shadow,
   });
 
@@ -146,6 +157,17 @@ final class WsPalette {
   final Color data2;
   final Color data3;
   final Color onData;
+  final Color tagText;
+  final Color tag0;
+  final Color tag1;
+  final Color tag2;
+  final Color tag3;
+  final Color tag4;
+  final Color tag5;
+  final Color tag6;
+  final Color tag7;
+  final Color tag8;
+  final Color tag9;
   final List<BoxShadow> shadow;
 
   static const light = WsPalette(
@@ -183,6 +205,17 @@ final class WsPalette {
     data2: Color(0xFF8A5FAD),
     data3: Color(0xFF3D7A58),
     onData: Color(0xFFFFFFFF),
+    tagText: Color(0xFF32302C),
+    tag0: Color(0x80E3E2E0),
+    tag1: Color(0xFFE3E2E0),
+    tag2: Color(0xFFEEE0DA),
+    tag3: Color(0xFFFADEC9),
+    tag4: Color(0xFFFDECC8),
+    tag5: Color(0xFFDBEDDB),
+    tag6: Color(0xFFD3E5EF),
+    tag7: Color(0xFFE8DEEE),
+    tag8: Color(0xFFF5E0E9),
+    tag9: Color(0xFFFFE2DD),
     shadow: [
       BoxShadow(
         offset: Offset(0, 0),
@@ -240,6 +273,17 @@ final class WsPalette {
     data2: Color(0xFFB48CE6),
     data3: Color(0xFF4DAB9A),
     onData: Color(0xFF191919),
+    tagText: Color(0xCFFFFFFF),
+    tag0: Color(0xFF373737),
+    tag1: Color(0xFF5A5A5A),
+    tag2: Color(0xFF603B2C),
+    tag3: Color(0xFF854C1D),
+    tag4: Color(0xFF89632A),
+    tag5: Color(0xFF2B593F),
+    tag6: Color(0xFF28456C),
+    tag7: Color(0xFF492F64),
+    tag8: Color(0xFF69314C),
+    tag9: Color(0xFF6E3630),
     shadow: [
       BoxShadow(
         offset: Offset(0, 0),

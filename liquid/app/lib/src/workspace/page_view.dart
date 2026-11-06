@@ -6,16 +6,18 @@ import 'package:flutter/services.dart';
 
 import '../controls.dart';
 import '../rust/api/workspace.dart';
+import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'explorer.dart';
 import 'page_views.dart';
 import 'page_editor.dart';
+import 'table_block.dart';
 import 'text_block.dart';
 import 'workspace_state.dart';
 
-/// An open Page: its breadcrumb, then its title and its Text Blocks in the reading column, as
-/// the approved Pages mockups show it. A just-created Page takes the keys in its title; a
+/// An open Page: its breadcrumb, then its title and its Blocks in the reading column, as the
+/// approved Pages and Table View mockups show it. A just-created Page takes the keys in its title; a
 /// Page without Blocks offers a line to type in.
 class WorkspacePage extends StatefulWidget {
   const WorkspacePage({super.key, required this.state, required this.open});
@@ -143,7 +145,7 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
         event.logicalKey != LogicalKeyboardKey.arrowDown) {
       return KeyEventResult.ignored;
     }
-    if (_views.at(0) case final first?) {
+    if (_views.textFrom(0, 1) case final first?) {
       _views.caret.value = Caret(first.id, 0);
     } else if (_views.count == 0) {
       _firstFocus.requestFocus();
@@ -324,10 +326,10 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
                           ),
                         ),
                       SliverList.builder(
-                        key: const ValueKey('Text Blocks'),
+                        key: const ValueKey('Blocks'),
                         itemCount: _views.count ?? 0,
-                        // A Text Block keeps its state, focus included, when Views
-                        // above it come or go.
+                        // A Block keeps its state, focus included, when Views above
+                        // it come or go.
                         findChildIndexCallback: (key) =>
                             _views.indexOf((key as ValueKey<String>).value),
                         itemBuilder: (context, index) {
@@ -335,14 +337,32 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
                           if (view == null) {
                             return const SizedBox(height: WsMetrics.lhProse);
                           }
+                          if (view.kind == BridgeBlockKind.text) {
+                            return KeyedSubtree(
+                              key: ValueKey(view.id),
+                              child: _column(
+                                TextBlock(
+                                  key: _views.keyFor(view.id),
+                                  views: _views,
+                                  view: view,
+                                  index: index,
+                                ),
+                              ),
+                            );
+                          }
                           return KeyedSubtree(
                             key: ValueKey(view.id),
                             child: _column(
-                              TextBlock(
-                                key: _views.keyFor(view.id),
-                                views: _views,
-                                view: view,
-                                index: index,
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  if (view.boundary && index > 0)
+                                    const SectionDivider(),
+                                  if (view.kind == BridgeBlockKind.database)
+                                    TableBlock(views: _views, view: view)
+                                  else
+                                    const _Placeholder(),
+                                ],
                               ),
                             ),
                           );
@@ -356,6 +376,40 @@ class _WorkspacePageState extends State<WorkspacePage> implements EditorSource {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// A Block of a kind a later version of Liquid adds, which keeps its place (ADR-0245).
+class _Placeholder extends StatelessWidget {
+  const _Placeholder();
+
+  @override
+  Widget build(BuildContext context) {
+    final ws = context.ws;
+    return Container(
+      height: 40,
+      margin: const EdgeInsets.symmetric(vertical: WsMetrics.space1),
+      padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space4),
+      decoration: BoxDecoration(
+        color: ws.subtle,
+        border: Border.all(color: ws.border),
+        borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
+      ),
+      child: Row(
+        children: [
+          Icon(LucideIcons.puzzle, size: 16, color: ws.textFaint),
+          const SizedBox(width: 10),
+          Flexible(
+            child: Text(
+              'This Block needs a newer version of Liquid.',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(color: ws.textMuted),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

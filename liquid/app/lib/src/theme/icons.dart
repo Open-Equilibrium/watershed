@@ -34,4 +34,11 @@ abstract final class LucideIcons {
   static const undo2 = IconData(0xe2a1, fontFamily: _family);
   static const ellipsis = IconData(0xe0b6, fontFamily: _family);
   static const file = IconData(0xe0c0, fontFamily: _family);
+  static const table = IconData(0xe17d, fontFamily: _family);
+  static const text = IconData(0xe185, fontFamily: _family);
+  static const hash = IconData(0xe0ef, fontFamily: _family);
+  static const circleChevronDown = IconData(0xe4dd, fontFamily: _family);
+  static const calendar = IconData(0xe063, fontFamily: _family);
+  static const squareCheck = IconData(0xe559, fontFamily: _family);
+  static const puzzle = IconData(0xe29c, fontFamily: _family);
 }
