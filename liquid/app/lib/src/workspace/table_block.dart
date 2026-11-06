@@ -222,10 +222,12 @@ class _TableBlockState extends State<TableBlock> {
     );
   }
 
-  /// A name changed elsewhere while the person typed shows once they leave, unless their
-  /// own rename is still on its way.
+  /// Leaving the name writes a composition still open as it stands; a name changed
+  /// elsewhere meanwhile then shows, unless the person's own rename is on its way.
   void _left() {
-    if (_nameFocus.hasFocus || widget.views.pending(_block) > 0) return;
+    if (_nameFocus.hasFocus) return;
+    _write();
+    if (widget.views.pending(_block) > 0) return;
     _show(_database?.name ?? '');
   }
 

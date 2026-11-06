@@ -360,4 +360,28 @@ void main() {
       );
     },
   );
+
+  testWidgets('a Table\'s name being composed is written when left', (
+    tester,
+  ) async {
+    await show(tester, ['']);
+    await type(tester, 0, '/');
+    await type(tester, 0, 'table');
+    await key(tester, LogicalKeyboardKey.enter);
+    tester.testTextInput.updateEditingValue(
+      const TextEditingValue(
+        text: 'ni',
+        selection: TextSelection.collapsed(offset: 2),
+        composing: TextRange(start: 0, end: 2),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(block(0));
+    await tester.pumpAndSettle();
+    expect(fake.databases[fake.views[page]![0].block]!.name, 'ni');
+    expect(
+      find.descendant(of: find.byType(TableBlock), matching: find.text('ni')),
+      findsOneWidget,
+    );
+  });
 }
