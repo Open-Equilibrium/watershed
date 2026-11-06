@@ -308,6 +308,43 @@ void main() {
     },
   );
 
+  testWidgets(
+    'a wide Table builds the fields in view, keeping the first one in view',
+    (tester) async {
+      await show(tester, [
+        _Table(
+          _expenses,
+          fields: [
+            _fields.first,
+            for (var number = 1; number < 300; number++)
+              BridgeField(
+                id: 'f$number',
+                name: 'Field $number',
+                kind: BridgeFieldKind.text,
+                options: const [],
+              ),
+          ],
+        ),
+      ]);
+      expect(inTable(find.text('Field 1')), findsOneWidget);
+      expect(inTable(find.text('Field 299')), findsNothing);
+
+      await tester.drag(inTable(find.text('Field 2')), const Offset(-60000, 0));
+      await tester.pumpAndSettle();
+      expect(inTable(find.text('Field 299')), findsOneWidget);
+      expect(inTable(find.text('Field 2')), findsNothing);
+      expect(
+        inTable(find.text('Groceries')),
+        findsOneWidget,
+        reason: 'the first field stays in view',
+      );
+      expect(
+        tester.getRect(inTable(find.text('Name'))).left,
+        lessThan(tester.getRect(inTable(find.text('Field 299'))).left),
+      );
+    },
+  );
+
   testWidgets('a Table follows its rows as they change', (tester) async {
     await show(tester, [_Table(_expenses)]);
     final table = fake.views[page]!.single.block;

@@ -11,7 +11,7 @@ import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'follow.dart';
 import 'page_views.dart';
-import 'windows.dart';
+import 'windowed_list.dart';
 import 'workspace_state.dart';
 
 /// Rows a Table shows before it scrolls inside, as the Chat Block keeps a fixed height.
@@ -87,7 +87,7 @@ class TableBlock extends StatefulWidget {
 
 class _TableBlockState extends State<TableBlock> {
   BridgeDatabase? _database;
-  late final _rows = Windows<BridgeRow>(
+  late final _rows = WindowedList<BridgeRow>(
     (start, limit) async {
       final answer = await _state.workspace.query(
         query: query(
@@ -260,6 +260,12 @@ class _TableBlockState extends State<TableBlock> {
     final others = rest.fold(0.0, (sum, width) => sum + width);
     final first = math.max(_firstWidth, width - others);
     final widths = [first, ...rest];
+    // Where each field starts, to build only the fields in view (client architecture
+    // rule 8).
+    final starts = [0.0];
+    for (final width in widths) {
+      starts.add(starts.last + width);
+    }
     final count = _rows.count ?? 0;
     final options = {
       for (final field in fields)
@@ -317,13 +323,22 @@ class _TableBlockState extends State<TableBlock> {
           ),
           child: cell(index),
         );
-        // The first field stays in view while the others scroll sideways.
+        // The first field stays in view while the others scroll sideways; fields out of
+        // view are not built.
+        var from = 1;
+        while (from < widths.length && starts[from + 1] <= offset + first) {
+          from++;
+        }
+        var to = from;
+        while (to < widths.length && starts[to] < offset + width) {
+          to++;
+        }
         return Stack(
           children: [
             Row(
               children: [
-                SizedBox(width: first),
-                for (var index = 1; index < widths.length; index++) box(index),
+                SizedBox(width: starts[from]),
+                for (var index = from; index < to; index++) box(index),
               ],
             ),
             Positioned(left: offset, top: 0, bottom: 0, child: box(0)),
