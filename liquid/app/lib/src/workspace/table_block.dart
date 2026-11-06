@@ -124,11 +124,11 @@ class _TableBlockState extends State<TableBlock> {
   int? _toNewRow;
   String? _toNewField;
 
-  /// + New's adds, one after another; while more wait, each goes after the row the one
-  /// before it added.
+  /// + New's adds, one after another. The row one added is the last until a read counts
+  /// it, so the next goes after it.
   Future<void> _rowAdds = Future.value();
-  int _rowsWaiting = 0;
   String? _rowAdded;
+  int _rowAddedAt = 0;
 
   /// Whether to scroll to the last row or field once the next build laid it out.
   var _toLastRow = false;
@@ -207,6 +207,9 @@ class _TableBlockState extends State<TableBlock> {
   void _changed() {
     if (!mounted) return;
     setState(() {});
+    if (_rowAdded != null && (_rows.count ?? 0) >= _rowAddedAt) {
+      _rowAdded = null;
+    }
     if (_toNewRow case final before? when (_rows.count ?? 0) > before) {
       _toNewRow = null;
       _toLastRow = true;
@@ -216,7 +219,6 @@ class _TableBlockState extends State<TableBlock> {
   /// + New adds a row after the last one and shows it; the last row is read first if its
   /// window was not.
   void _addRow() {
-    _rowsWaiting++;
     _rowAdds = _rowAdds.then((_) => _addOneRow());
   }
 
@@ -229,6 +231,8 @@ class _TableBlockState extends State<TableBlock> {
         if (after == null) throw 'The Table changed; try again.';
       }
       _toNewRow = count;
+      // The rows a read must count to hold this one too.
+      final at = (_rowAdded == null ? count : _rowAddedAt) + 1;
       final added = await widget.views.write(
         mutation(
           BridgeMutationKind.addRow,
@@ -238,13 +242,12 @@ class _TableBlockState extends State<TableBlock> {
         ),
         const [],
       );
-      _rowAdded = _rowsWaiting > 1 ? added.row : null;
+      _rowAdded = added.row;
+      _rowAddedAt = at;
     } on Object catch (error) {
       _toNewRow = null;
       _rowAdded = null;
       _report(error);
-    } finally {
-      _rowsWaiting--;
     }
   }
 

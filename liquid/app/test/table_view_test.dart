@@ -731,4 +731,28 @@ void main() {
     await tester.pumpAndSettle();
     expect(panel, findsNothing);
   });
+
+  testWidgets('+ New right after a row was added goes after that row', (
+    tester,
+  ) async {
+    await show(tester, [_Table(_expenses)]);
+    // The Table reads its rows again only after the second click.
+    final reads = fake.deferred = [];
+    fake.deferredKinds = {BridgeQueryKind.database, BridgeQueryKind.rows};
+    await tester.tap(inTable(find.text('New')));
+    await tester.pump();
+    await tester.pump();
+    expect(applied(BridgeMutationKind.addRow), hasLength(1));
+    await tester.tap(inTable(find.text('New')));
+    await tester.pump();
+    fake.deferred = null;
+    for (final read in reads) {
+      read.complete();
+    }
+    await tester.pumpAndSettle();
+    final table = fake.rows[fake.views[page]!.single.block]!;
+    final adds = applied(BridgeMutationKind.addRow).toList();
+    expect(adds, hasLength(2));
+    expect(adds.last.after, table[2].id, reason: 'after the row just added');
+  });
 }
