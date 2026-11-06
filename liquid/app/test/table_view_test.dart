@@ -26,8 +26,9 @@ class _Text extends _Part {
 }
 
 class _Table extends _Part {
-  const _Table(this.rows);
+  const _Table(this.rows, {this.fields = _fields});
   final List<BridgeRow> rows;
+  final List<BridgeField> fields;
 }
 
 class _Unknown extends _Part {
@@ -156,7 +157,7 @@ void main() {
           );
           after = added.view;
           fake.styles[added.block!] = style;
-        case _Table(:final rows):
+        case _Table(:final rows, :final fields):
           final added = await workspace.apply(
             mutation(
               BridgeMutationKind.addDatabaseBlock,
@@ -166,9 +167,9 @@ void main() {
             ),
           );
           after = added.view;
-          fake.databases[added.block!] = const BridgeDatabase(
+          fake.databases[added.block!] = BridgeDatabase(
             name: 'Expenses',
-            fields: _fields,
+            fields: fields,
           );
           fake.rows[added.block!] = rows;
         case _Unknown(:final boundary):
@@ -315,14 +316,29 @@ void main() {
     expect(inTable(find.text('3 rows')), findsOneWidget);
   });
 
-  testWidgets('a German person reads numbers and days in German', (
+  for (final (locale, number, day) in [
+    (const Locale('de', 'DE'), '84,2', '1. Nov. 2026'),
+    (const Locale('en', 'GB'), '84.2', '1 Nov 2026'),
+    (const Locale('es', 'MX'), '84.2', '1 nov 2026'),
+  ]) {
+    testWidgets('a person in $locale reads numbers and days as there', (
+      tester,
+    ) async {
+      tester.platformDispatcher.localesTestValue = [locale];
+      addTearDown(tester.platformDispatcher.clearLocalesTestValue);
+      await show(tester, [_Table(_expenses)], app: true);
+      expect(inTable(find.text(number)), findsOneWidget);
+      expect(inTable(find.text(day)), findsOneWidget);
+    });
+  }
+
+  testWidgets('a Table whose fields are all removed still shows its rows', (
     tester,
   ) async {
-    tester.platformDispatcher.localesTestValue = const [Locale('de', 'DE')];
-    addTearDown(tester.platformDispatcher.clearLocalesTestValue);
-    await show(tester, [_Table(_expenses)], app: true);
-    expect(inTable(find.text('84,2')), findsOneWidget);
-    expect(inTable(find.text('1. Nov. 2026')), findsOneWidget);
+    await show(tester, [_Table(_expenses, fields: const [])]);
+    expect(tester.takeException(), isNull);
+    expect(inTable(find.text('Expenses')), findsOneWidget);
+    expect(inTable(find.text('2 rows')), findsOneWidget);
   });
 
   testWidgets(

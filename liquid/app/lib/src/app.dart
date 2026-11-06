@@ -45,14 +45,22 @@ class LiquidApp extends StatelessWidget {
         theme: liquidTheme(Brightness.light),
         darkTheme: liquidTheme(Brightness.dark),
         themeMode: chosen.theme.mode,
-        // Numbers and days read in the person's language (ADR-0246); English comes first,
-        // for a language Material does not know.
+        // Numbers and days read as in the person's region, Material's texts in its
+        // language, English for one Material does not know (ADR-0246).
         localizationsDelegates: GlobalMaterialLocalizations.delegates,
         supportedLocales: [
           const Locale('en'),
           for (final language in kMaterialSupportedLanguages)
             if (language != 'en') Locale(language),
         ],
+        localeListResolutionCallback: (locales, _) =>
+            locales
+                ?.where(
+                  (locale) =>
+                      kMaterialSupportedLanguages.contains(locale.languageCode),
+                )
+                .firstOrNull ??
+            const Locale('en'),
         builder: (context, child) =>
             UiScale(scale: chosen.textSize.scale, child: child!),
         home: state != null || workspace != null

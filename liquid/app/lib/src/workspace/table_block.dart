@@ -166,10 +166,16 @@ class _TableBlockState extends State<TableBlock> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    LayoutBuilder(
-                      builder: (context, constraints) =>
-                          _grid(database.fields, constraints.maxWidth, locale),
-                    ),
+                    // A Table may lose all its fields, as when another device removes
+                    // them; its rows still count.
+                    if (database.fields.isNotEmpty)
+                      LayoutBuilder(
+                        builder: (context, constraints) => _grid(
+                          database.fields,
+                          constraints.maxWidth,
+                          locale,
+                        ),
+                      ),
                     Container(
                       height: _footerHeight,
                       color: ws.subtle,
@@ -220,9 +226,11 @@ class _TableBlockState extends State<TableBlock> {
         final option? => _Tag(option),
         null => const SizedBox.shrink(),
       },
-      BridgeCellKind.date => _text(switch (DateTime.tryParse(cell!.text!)) {
+      BridgeCellKind.date => _text(switch (DateTime.tryParse(
+        cell!.text ?? '',
+      )) {
         final day? => days.format(day),
-        null => cell.text!,
+        null => cell.text ?? '',
       }),
       BridgeCellKind.checkbox => _Checkbox(checked: cell!.checked),
     };
