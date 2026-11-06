@@ -331,4 +331,33 @@ void main() {
     await tester.pumpAndSettle();
     expect(fake.databases[fake.views[page]![0].block]!.name, 'ni');
   });
+
+  testWidgets(
+    'a Table\'s name renamed elsewhere while typed in shows once left',
+    (tester) async {
+      await show(tester, ['']);
+      await type(tester, 0, '/');
+      await type(tester, 0, 'table');
+      await key(tester, LogicalKeyboardKey.enter);
+      final table = fake.views[page]![0].block;
+      await workspace.apply(
+        mutation(
+          BridgeMutationKind.renameDatabase,
+          page: page,
+          block: table,
+          text: 'Trips',
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(block(0));
+      await tester.pumpAndSettle();
+      expect(
+        find.descendant(
+          of: find.byType(TableBlock),
+          matching: find.text('Trips'),
+        ),
+        findsOneWidget,
+      );
+    },
+  );
 }

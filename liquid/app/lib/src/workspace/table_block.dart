@@ -143,6 +143,7 @@ class _TableBlockState extends State<TableBlock> {
     _rows.addListener(_changed);
     _name.addListener(_typed);
     _state.finishing.add(_typed);
+    _nameFocus.addListener(_left);
     widget.views.caret.addListener(_takeCaret);
     // Built after the caret was handed to it, as a new Table is.
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -219,6 +220,13 @@ class _TableBlockState extends State<TableBlock> {
             },
           ),
     );
+  }
+
+  /// A name changed elsewhere while the person typed shows once they leave, unless their
+  /// own rename is still on its way.
+  void _left() {
+    if (_nameFocus.hasFocus || widget.views.pending(_block) > 0) return;
+    _show(_database?.name ?? '');
   }
 
   void _show(String name) {
