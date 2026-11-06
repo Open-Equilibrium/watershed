@@ -110,11 +110,12 @@ class WindowedList<T> extends ChangeNotifier {
     }
   }
 
-  /// Rereads the count and every window kept, one reread at a time.
+  /// Rereads the count and every window kept, one reread at a time; one asked for while
+  /// another runs completes once the pass it asked for has read.
   Future<void> reread() async {
     if (_reading) {
       _again = true;
-      return;
+      return _rereading;
     }
     _reading = true;
     final done = Completer<void>();
