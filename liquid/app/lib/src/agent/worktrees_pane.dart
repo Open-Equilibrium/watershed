@@ -201,8 +201,7 @@ String? _kept(BridgeWorktree worktree) {
 }
 
 /// The approved removal dialog: a clean worktree is removed after confirmation, one with local
-/// or ignored files or a running agent is kept and says why. It closes with `true` once Git
-/// removed it.
+/// or ignored files or a running agent is kept and says why.
 class _RemoveWorktree extends StatefulWidget {
   const _RemoveWorktree({
     required this.state,
@@ -257,14 +256,16 @@ class _RemoveWorktreeState extends State<_RemoveWorktree> {
       case BridgeWorktreeOutcomeKind.agentRunning:
         setState(() {
           _removing = false;
-          _error =
-              '${whoRuns(outcome.running, where: 'in this repository')}. Stop it or wait until it finishes; nothing was removed.';
+          _error = outcome.running.isEmpty
+              // Another window's Git action or revert holds this worktree.
+              ? 'A Git action or a revert is running in this worktree; try again when it ends. Nothing was removed.'
+              : '${whoRuns(outcome.running, where: 'in this repository')}. Stop it or wait until it finishes; nothing was removed.';
         });
       case BridgeWorktreeOutcomeKind.failed:
         setState(() {
           _removing = false;
           _error =
-              'Could not remove this worktree. Git said: “${outcome.detail}” It stays listed until Git removes it.';
+              'Could not remove this worktree: “${outcome.detail}” It stays listed until Git removes it.';
         });
     }
   }
@@ -274,7 +275,10 @@ class _RemoveWorktreeState extends State<_RemoveWorktree> {
     final text = DangerDialog.text(context);
     final review = _review;
     final worktree = review.worktree;
-    final files = review.files.length;
+    final marked = review.files
+        .where((file) => file.state == BridgeWorktreeFileState.marked)
+        .length;
+    final files = review.files.length - marked;
     final ignored = review.ignored.toInt();
     final kept = !review.removable;
     final changed = _changed
@@ -337,31 +341,35 @@ class _RemoveWorktreeState extends State<_RemoveWorktree> {
               '${plural(review.stranded.toInt(), 'commit')} ${review.stranded == 1 ? 'is' : 'are'} on no branch in this detached worktree and would be lost with it. Create a branch for ${review.stranded == 1 ? 'it' : 'them'} first.',
               style: text,
             ),
-          if (files > 0) ...[
+          if (marked > 0)
+            Text(
+              '${plural(marked, 'file')} ${marked == 1 ? 'is' : 'are'} marked so that Git does not check ${marked == 1 ? 'it' : 'them'} for edits, which removing the folder would lose. Clear the marks with git update-index --no-assume-unchanged or --no-skip-worktree, then review again.',
+              style: text,
+            ),
+          if (files > 0 || review.moreFiles)
             Text(
               '${plural(files, 'file')}${review.moreFiles ? ' and more' : ''} ${files == 1 && !review.moreFiles ? 'has' : 'have'} local changes. Commit them or leave them in a stash through the approved branch flow before removing the worktree; a stash remains shared by this repository.',
               style: text,
             ),
-            for (final file in review.files)
-              Row(
-                spacing: WsMetrics.space3,
-                children: [
-                  Expanded(
-                    child: Text(
-                      file.shown,
-                      style: monoStyle(context),
-                      overflow: TextOverflow.ellipsis,
-                    ),
+          for (final file in review.files)
+            Row(
+              spacing: WsMetrics.space3,
+              children: [
+                Expanded(
+                  child: Text(
+                    file.shown,
+                    style: monoStyle(context),
+                    overflow: TextOverflow.ellipsis,
                   ),
-                  Text(switch (file.state) {
-                    BridgeWorktreeFileState.staged => 'staged',
-                    BridgeWorktreeFileState.unstaged => 'unstaged',
-                    BridgeWorktreeFileState.untracked => 'untracked',
-                    BridgeWorktreeFileState.marked => 'hidden from Git',
-                  }, style: text),
-                ],
-              ),
-          ],
+                ),
+                Text(switch (file.state) {
+                  BridgeWorktreeFileState.staged => 'staged',
+                  BridgeWorktreeFileState.unstaged => 'unstaged',
+                  BridgeWorktreeFileState.untracked => 'untracked',
+                  BridgeWorktreeFileState.marked => 'hidden from Git',
+                }, style: text),
+              ],
+            ),
           if (ignored > 0 || review.moreIgnored)
             Text(
               'Git ignores ${review.moreIgnored ? 'more than ' : ''}${plural(ignored, 'file')} in this folder. Checkpoints and a normal stash do not save them. Move or remove them yourself before removing the worktree.',
@@ -372,7 +380,6 @@ class _RemoveWorktreeState extends State<_RemoveWorktree> {
       );
     }
     final unpushed = review.unpushed.toInt();
-    final ws = context.ws;
     return ActionDialog(
       title: 'Remove ${worktree.branch?.shown ?? worktree.shown} worktree?',
       dismissible: !_removing,
@@ -383,21 +390,11 @@ class _RemoveWorktreeState extends State<_RemoveWorktree> {
           'Removes ${worktree.shown} on ${widget.device}. Git reports no staged, unstaged, untracked or ignored files to preserve.',
           style: text,
         ),
-        Container(
-          padding: const EdgeInsets.symmetric(
-            horizontal: WsMetrics.space4,
-            vertical: WsMetrics.space3,
-          ),
-          decoration: BoxDecoration(
-            color: ws.subtle,
-            borderRadius: BorderRadius.circular(WsMetrics.radiusMd),
-          ),
-          child: Text(
-            worktree.branch == null
-                ? 'Its commits remain in this repository on other branches.'
-                : '${unpushed > 0 ? 'The branch has ${plural(unpushed, 'unpushed commit')}. ' : ''}The branch and its commits remain in this repository.',
-            style: text,
-          ),
+        WarningNotice(
+          worktree.branch == null
+              ? 'Its commits remain in this repository; other branches, tags or remotes hold them.'
+              : '${unpushed > 0 ? 'The branch has ${plural(unpushed, 'unpushed commit')}. ' : ''}The branch and its commits remain in this repository.',
+          info: true,
         ),
         Text(
           'Sessions that worked in this folder keep their history and checkpoints, but cannot resume file work in the removed folder.',

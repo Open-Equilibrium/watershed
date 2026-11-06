@@ -243,7 +243,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(
         find.text(
-          'Could not remove this worktree. Git said: “fatal: cannot remove” It stays listed until Git removes it.',
+          'Could not remove this worktree: “fatal: cannot remove” It stays listed until Git removes it.',
         ),
         findsOneWidget,
       );
@@ -277,5 +277,55 @@ void main() {
       findsOneWidget,
     );
     expect(backend.calls, isNot(contains('worktrees')));
+  });
+
+  testWidgets('files hidden from Git are named with how to clear the marks', (
+    tester,
+  ) async {
+    await show(tester);
+    await review(
+      tester,
+      removalOf(
+        hotfix,
+        files: const [
+          BridgeWorktreeFile(
+            path: 'config.local',
+            shown: 'config.local',
+            state: BridgeWorktreeFileState.marked,
+          ),
+        ],
+      ),
+    );
+
+    expect(
+      find.text(
+        '1 file is marked so that Git does not check it for edits, which removing the folder would lose. Clear the marks with git update-index --no-assume-unchanged or --no-skip-worktree, then review again.',
+      ),
+      findsOneWidget,
+    );
+    expect(find.textContaining('local changes'), findsNothing);
+    expect(find.text('hidden from Git'), findsOneWidget);
+  });
+
+  testWidgets('a Git action in the worktree is not called an agent', (
+    tester,
+  ) async {
+    await show(tester);
+    await review(tester, removalOf(hotfix));
+    backend.removed = const BridgeWorktreeOutcome(
+      kind: BridgeWorktreeOutcomeKind.agentRunning,
+      running: [],
+      detail: '',
+    );
+
+    await tester.tap(button('Remove worktree'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text(
+        'A Git action or a revert is running in this worktree; try again when it ends. Nothing was removed.',
+      ),
+      findsOneWidget,
+    );
   });
 }

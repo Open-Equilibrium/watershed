@@ -301,3 +301,37 @@ fn a_turn_running_in_any_worktree_keeps_the_others_too() {
         assert!(linked.linked.path().exists());
     });
 }
+
+#[test]
+fn a_sparse_worktree_without_hidden_edits_can_be_removed() {
+    run(async {
+        let linked = Linked::new("sparse");
+        let checkpoints = Checkpoints::new(linked.repo.path());
+        linked
+            .linked
+            .git(&["sparse-checkout", "set", "--no-cone", "/b.txt"]);
+        assert!(!linked.linked.path().join("a.txt").exists());
+
+        let review = checkpoints.worktree_removal(&linked.path()).await.unwrap();
+
+        assert!(review.files.is_empty(), "{review:?}");
+        assert!(review.removable());
+    });
+}
+
+#[test]
+fn a_worktree_gone_since_its_review_is_reviewed_again() {
+    run(async {
+        let linked = Linked::new("gone");
+        let checkpoints = Checkpoints::new(linked.repo.path());
+        let review = checkpoints.worktree_removal(&linked.path()).await.unwrap();
+        std::fs::remove_dir_all(linked.linked.path()).unwrap();
+
+        let removed = checkpoints.remove_worktree(&review).await.unwrap();
+
+        let WorktreeRemoved::Changed(now) = removed else {
+            panic!("removed a missing worktree");
+        };
+        assert!(now.worktree.missing);
+    });
+}

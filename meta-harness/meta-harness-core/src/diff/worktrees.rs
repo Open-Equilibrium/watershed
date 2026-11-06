@@ -3,6 +3,7 @@
 
 use super::process::{git_bytes, git_start};
 use super::*;
+use std::os::unix::ffi::OsStrExt;
 
 /// A worktree's status output read for a review; what follows counts as more.
 const MAX_STATUS_BYTES: u64 = 1024 * 1024;
@@ -291,8 +292,13 @@ impl WorkingTree {
         while let Some(entry) = entries.next_segment().await.map_err(unreadable)? {
             // `ls-files -v` tags a file assumed unchanged with a lowercase letter and one
             // outside the work with `S`.
+            // A marked file that is absent, as outside a sparse checkout, holds no edit.
             if let [tag, b' ', path @ ..] = entry.as_slice()
                 && (tag.is_ascii_lowercase() || *tag == b'S')
+                && dir
+                    .join(std::ffi::OsStr::from_bytes(path))
+                    .symlink_metadata()
+                    .is_ok()
             {
                 if removal.files.len() < MAX_FILES {
                     removal.files.push(WorktreeFile {

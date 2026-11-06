@@ -560,19 +560,28 @@ impl Checkpoints {
     ) -> Result<crate::WorktreeRemoved, DiffError> {
         let tree = self.tree().await?;
         let _alone = self.alone_everywhere(&tree).await?;
-        let locks = self.bounded(tree.locks_of(&reviewed.worktree.path)).await?;
-        let _there = tree.checkout_at(locks).alone().await?;
-        let now = self
-            .bounded(tree.worktree_removal(&reviewed.worktree.path))
-            .await?;
-        if &now != reviewed {
+        let recheck = || async {
+            let now = self
+                .bounded(tree.worktree_removal(&reviewed.worktree.path))
+                .await?;
+            if &now == reviewed && !now.removable() {
+                return Err(DiffError::Git(
+                    "This worktree cannot be removed.".to_owned(),
+                ));
+            }
+            Ok::<_, DiffError>((&now != reviewed).then_some(now))
+        };
+        // A worktree gone or changed since its review is shown again before its own locks are
+        // taken, which a missing folder has none of.
+        if let Some(now) = recheck().await? {
             return Ok(crate::WorktreeRemoved::Changed(Box::new(now)));
         }
-        if !now.removable() {
-            return Err(DiffError::Git(
-                "This worktree cannot be removed.".to_owned(),
-            ));
+        let locks = self.bounded(tree.locks_of(&reviewed.worktree.path)).await?;
+        let _there = tree.checkout_at(locks).alone().await?;
+        if let Some(now) = recheck().await? {
+            return Ok(crate::WorktreeRemoved::Changed(Box::new(now)));
         }
+        let now = reviewed;
         tree.remove_worktree(&now.worktree.path).await?;
         Ok(crate::WorktreeRemoved::Done)
     }
