@@ -856,4 +856,28 @@ fn actions_stored_before_places_still_read() {
             }
         );
     }
+    let name = workspace.database(&page, &block).unwrap().unwrap().fields[0]
+        .id
+        .clone();
+    for (after, place) in [
+        (serde_json::Value::Null, Place::First),
+        (
+            serde_json::json!(name.to_string()),
+            Place::After(name.clone()),
+        ),
+    ] {
+        let add = |place| Mutation::AddField {
+            page: page.clone(),
+            block: block.clone(),
+            place,
+            name: "Amount".into(),
+            kind: FieldKind::Number,
+        };
+        let mut stored = serde_json::to_value(add(Place::Last)).unwrap();
+        let fields = stored["AddField"].as_object_mut().unwrap();
+        fields.remove("place");
+        fields.insert("after".into(), after);
+        let read: Mutation = serde_json::from_value(stored).unwrap();
+        assert_eq!(read, add(place));
+    }
 }

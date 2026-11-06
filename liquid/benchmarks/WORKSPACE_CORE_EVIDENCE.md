@@ -5,7 +5,7 @@ Observational evidence for `liquid-core`'s mutation pipeline and `liquid-storage
 ## Environment
 
 - Apple M6, 24 GB, macOS 27.0 (26A428), internal SSD; Rust 1.99.0, release build; `automerge` 0.12.0, `rusqlite` 0.41.1 with SQLCipher 4.19.0.
-- Observed on 2026-11-02 at commit `e095071`, three rounds; each round also ran the pipeline example as built at `cbfd545`, before the View order index, for a like-for-like comparison. The Database workload was observed on 2026-11-03 at `6aa3f03`, three rounds, and once against the core at `334fbcf`, before its row index.
+- Observed on 2026-11-02 at commit `e095071`, three rounds; each round also ran the pipeline example as built at `cbfd545`, before the View order index, for a like-for-like comparison. The Database workload was observed on 2026-11-03 at `6aa3f03`, three rounds, and once against the core at `334fbcf`, before its row index; and on 2026-11-06 at `e4193e5`, three rounds, with rows added last (ADR-0247).
 
 ## Workloads
 
@@ -13,7 +13,7 @@ Observational evidence for `liquid-core`'s mutation pipeline and `liquid-storage
 | --- | --- | --- | --- |
 | Typing | `/usr/bin/time -l target/release/examples/pipeline_observe` after `cargo build --release -p liquid-core --example pipeline_observe` | 10,000 keystrokes appended to one Text Block, each its own request and Action, with the in-memory store | Durable commit, bridge and UI |
 | Long Page | the same run | 1,000 Text Blocks, each added after the last; then one read of all the Page's Views in order | the same |
-| Database | the same run | A Database Block of 5,000 rows with a text, number, date and checkbox field, each row added after the last and each cell set as its own request; then one window of 100 rows, filtered by the checkbox and sorted by the number | the same |
+| Database | the same run | A Database Block of 5,000 rows with a text, number, date and checkbox field, each field and row added last (ADR-0247; at `6aa3f03` after the last one) and each cell set as its own request; then one window of 100 rows, filtered by the checkbox and sorted by the number | the same |
 | Durable typing | `/usr/bin/time -l target/release/examples/replica_observe` after `cargo build --release -p liquid-storage --example replica_observe` | 2,000 keystrokes appended to one Text Block in an encrypted replica, each its own Action and durable commit; then 1,000 Text Blocks on that Page | Bridge and UI |
 | Reopening a long Page | `/usr/bin/time -l target/release/examples/replica_observe <path>` with the path that run printed | A new process opens the replica, finds the Page through its area and reads all its 1,001 Views in order | the same |
 
@@ -31,6 +31,7 @@ Observational evidence for `liquid-core`'s mutation pipeline and `liquid-storage
 | … at `cbfd545` | 18.2 MB | 18.3 MB | 18.2 MB |
 | Adding a Database row at the end (2026-11-03, `6aa3f03`) | median 55.7 µs, p99 90.2 µs, max 13.0 ms | median 53.7 µs, p99 82.5 µs, max 12.7 ms | median 52.7 µs, p99 85.6 µs, max 12.6 ms |
 | … at `334fbcf`, before the row index, one run | median 5.22 ms, p99 15.3 ms, max 55.6 ms | | |
+| … added last (2026-11-06, `e4193e5`) | median 47.8 µs, p99 59.1 µs, max 12.7 ms | median 49.1 µs, p99 63.8 µs, max 12.7 ms | median 48.2 µs, p99 60.5 µs, max 12.4 ms |
 | Setting one cell | median 36.9 µs, p99 60.5 µs | median 34.8 µs, p99 50.5 µs | median 34.7 µs, p99 52.7 µs |
 | A filtered, sorted window of 100 of the 5,000 rows | 0.81 ms | 0.82 ms | 0.88 ms |
 | … at `334fbcf`, one run | 77.9 ms | | |
