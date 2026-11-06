@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -15,20 +16,24 @@ import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'branch_menu.dart';
 import 'commit_dialog.dart';
+import 'commit_files.dart';
 import 'git_actions.dart';
 import 'session_menus.dart';
 
-/// The approved "Create pull request" dialog for a pushed branch (pull request mockups §2–3).
-/// Its title and description start from the latest commit, and the Chat's model rewrites the
-/// fields the user has not edited.
+/// The approved "Create pull request" dialog for a pushed branch (pull request mockups §2–3),
+/// or with `compose` "Commit, push & create PR", which commits the selected files, pushes and
+/// then creates, stopping at the first step that fails. Its title and description start from
+/// the latest commit, and the Chat's model rewrites the fields the user has not edited.
 Future<void> showPullRequestDialog(
   BuildContext context,
   SessionState state, {
   required String device,
+  bool compose = false,
 }) async {
   final next = await showDialog<_Next>(
     context: context,
-    builder: (_) => _PullRequestDialog(state: state, device: device),
+    builder: (_) =>
+        _PullRequestDialog(state: state, device: device, compose: compose),
   );
   if (!context.mounted) return;
   switch (next) {
@@ -38,21 +43,33 @@ Future<void> showPullRequestDialog(
       await showBranchMenu(context, state);
     case _Next.commit:
       await showCommitDialog(context, state);
+    case _Next.compose:
+      await showPullRequestDialog(
+        context,
+        state,
+        device: device,
+        compose: true,
+      );
     case null:
   }
 }
 
 /// What the dialog hands off to when the branch needs another step first.
-enum _Next { push, branch, commit }
+enum _Next { push, branch, commit, compose }
 
 /// Where the title and description came from.
 enum _Text { commit, written, failed }
 
 class _PullRequestDialog extends StatefulWidget {
-  const _PullRequestDialog({required this.state, required this.device});
+  const _PullRequestDialog({
+    required this.state,
+    required this.device,
+    required this.compose,
+  });
 
   final SessionState state;
   final String device;
+  final bool compose;
 
   @override
   State<_PullRequestDialog> createState() => _PullRequestDialogState();
@@ -106,14 +123,71 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
   String _filledTitle = '';
   String _filledBody = '';
 
+  /// "Commit, push & create PR": the uncommitted files, the selection and message, and the
+  /// steps done so far, which a later run skips. Once pushed, the dialog creates as for a
+  /// pushed branch.
+  late final bool _compose = widget.compose;
+  BridgeCommitPlan? _files;
+  bool _loadingFiles = false;
+  final _selected = <String>{};
+  bool _editing = false;
+  Set<String> _editStart = const {};
+  final _message = TextEditingController();
+  final _messageFocus = FocusNode();
+  String? _committed;
+  BridgeGitTransfer? _pushed;
+  bool _running = false;
+
+  /// What the steps did and what remains, after one failed.
+  String? _result;
+
   PullRequests get _pulls => widget.state.pulls;
+
+  bool get _hasFiles => _files?.files.isNotEmpty ?? false;
+
+  /// Before its push, "Commit, push & create PR" plans from Liquid's checkout; after it, from
+  /// GitHub.
+  bool get _beforePush => _compose && _pushed == null;
+
+  List<String> get _paths => [
+    for (final file in _files?.files ?? const <BridgeCommitFile>[])
+      if (_selected.contains(file.change.path)) file.change.path,
+  ];
 
   @override
   void initState() {
     super.initState();
     _title.addListener(() => setState(() {}));
+    _message.addListener(() => setState(() {}));
     _bodyFocus.addListener(() => setState(() {}));
+    _messageFocus.addListener(() => setState(() {}));
+    if (_compose && (widget.state.git.status.value?.changed ?? 0) > 0) {
+      unawaited(_readFiles());
+    }
     unawaited(_read());
+  }
+
+  Future<void> _readFiles() async {
+    _loadingFiles = true;
+    BridgeCommitPlan? files;
+    try {
+      files = await widget.state.git.commitPlan();
+    } on Object catch (error) {
+      widget.state.notify(
+        BridgeLevel.error,
+        'Could not read uncommitted changes: $error',
+      );
+    }
+    if (!mounted) return;
+    setState(() {
+      _loadingFiles = false;
+      _files = files;
+      _selected.addAll([
+        for (final file in files?.files ?? const <BridgeCommitFile>[])
+          file.change.path,
+      ]);
+      if (_plan case final plan?) _write(plan);
+    });
   }
 
   @override
@@ -123,6 +197,8 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
     _elapsed?.cancel();
     _title.dispose();
     _body.dispose();
+    _message.dispose();
+    _messageFocus.dispose();
     _titleFocus.dispose();
     _bodyFocus.dispose();
     super.dispose();
@@ -140,7 +216,9 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
     BridgePullRequestOutcome outcome;
     try {
       _recorded ??= await _pulls.recordedBase();
-      outcome = await _pulls.plan(target: target, base: base);
+      outcome = _beforePush
+          ? await _pulls.prepare(target: target, base: base)
+          : await _pulls.plan(target: target, base: base);
     } on Object {
       outcome = unansweredOutcome;
     }
@@ -181,9 +259,28 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
   String get _writer => _model!.substring(_model.indexOf('/') + 1);
 
   /// Has the Chat's model write the fields the user has not edited, once for each range of
-  /// commits.
+  /// commits and, before a commit, selection of files.
   void _write(BridgePullRequestPlan plan) {
     final model = _model;
+    if (_compose) {
+      // After the push the text stays as the user reviewed it.
+      if (!_beforePush || _running || _loadingFiles) return;
+      if (model == null || plan.open != null) {
+        _stopWriting();
+        return;
+      }
+      final paths = _paths;
+      // Liquid's remote has the base only for the head's own repository, not a fork's parent.
+      final base = plan.target == plan.identity.headRepository
+          ? plan.base?.name
+          : null;
+      _ask(
+        plan,
+        'draft ${base ?? ''}\n${paths.join('\n')}',
+        () => _pulls.writeDraft(model, base: base, paths: paths),
+      );
+      return;
+    }
     final comparison = plan.comparison;
     if (model == null ||
         plan.open != null ||
@@ -194,22 +291,34 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
       _stopWriting();
       return;
     }
-    final range = '${comparison.mergeBase}..${plan.identity.headCommit}';
+    _ask(
+      plan,
+      '${comparison.mergeBase}..${plan.identity.headCommit}',
+      () => _pulls.write(model, plan),
+    );
+  }
+
+  /// Asks the model through `write` unless it already wrote for `range`.
+  void _ask(
+    BridgePullRequestPlan plan,
+    String range,
+    Future<BridgePullRequestText> Function() write,
+  ) {
     if (range == _range) return;
     _range = range;
-    final write = ++_writes;
+    final asked = ++_writes;
     _writing = true;
     unawaited(() async {
       BridgePullRequestText? text;
       try {
-        text = await _pulls.write(model, plan);
+        text = await write();
       } on Object {
         text = null;
       }
-      if (!mounted || write != _writes) return;
+      if (!mounted || asked != _writes) return;
       setState(() {
         _writing = false;
-        _written = comparison.commits.toInt();
+        _written = text?.commits.toInt() ?? 0;
         _text = text == null ? _Text.failed : _Text.written;
         // Without an answer, fields that still show earlier model text show the commit again.
         _fill(text?.title ?? plan.subject, text?.body ?? plan.body);
@@ -258,14 +367,109 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
         !_reading &&
         !_stale &&
         !_creating &&
+        !_running &&
         _settling == null &&
         plan.target != null &&
         plan.base != null &&
         !plan.baseMissing &&
-        plan.comparison != null &&
-        plan.comparison!.commits != 0 &&
+        (_beforePush
+            ? _commitReady
+            : plan.comparison != null && plan.comparison!.commits != 0) &&
         !_sameBranch &&
         _title.text.trim().isNotEmpty;
+  }
+
+  /// The commit step can run, is done, or is not needed.
+  bool get _commitReady =>
+      !_loadingFiles &&
+      (_committed != null ||
+          !_hasFiles ||
+          (_selected.isNotEmpty &&
+              _message.text.trim().isNotEmpty &&
+              _files!.running.isEmpty &&
+              widget.state.git.status.value?.merging != true));
+
+  /// Commits the selected files, then pushes, then creates as for a pushed branch; a step
+  /// done in an earlier run is skipped, and a failed step stops the rest.
+  Future<void> _run() async {
+    if (!_ready) return;
+    setState(() {
+      _stopWriting();
+      _running = true;
+      _result = null;
+    });
+    try {
+      if (_hasFiles && _committed == null) {
+        final outcome = await widget.state.git.commit(
+          _paths,
+          _message.text,
+          snapshot: _files!.snapshot,
+        );
+        if (!mounted) return;
+        if (outcome?.kind != BridgeGitOutcomeKind.done &&
+            outcome?.kind != BridgeGitOutcomeKind.hookChanged) {
+          setState(
+            () => _result = 'Could not commit: nothing was committed. Nothing was pushed and no pull request was created.',
+          );
+          return;
+        }
+        _committed = widget.state.git.status.value?.commit ?? '';
+      }
+      final pushed = await pushBranch(
+        context,
+        widget.state,
+        device: widget.device,
+        offer: false,
+      );
+      if (!mounted) return;
+      if (pushed?.kind != BridgeGitOutcomeKind.done) {
+        setState(
+          () => _result =
+              '$_steps✕ Not pushed${_notPushed(pushed)} · Pull request not created. Remaining: Push, then Create pull request…',
+        );
+        return;
+      }
+      _pushed = pushed!.transfer;
+    } finally {
+      if (mounted) setState(() => _running = false);
+    }
+    final plan = _plan!;
+    await _read(target: plan.target, base: plan.base?.name);
+    if (!mounted || _existing != null) return;
+    if (_ready) await _create();
+    if (!mounted || _unknown || (_error == null && !_stale)) return;
+    // The pushed steps stay done; the dialog now creates as for a pushed branch.
+    setState(() {
+      _result =
+          '$_steps✕ Pull request not created: ${_error?.replaceFirst(RegExp(r'\.$'), '') ?? 'GitHub could not compare the branch'}. Remaining: Create pull request…, with the title and description kept.';
+      _error = null;
+    });
+  }
+
+  /// The steps done so far, as the result of a failed run names them.
+  String get _steps {
+    final pushed = _pushed;
+    return [
+      if (_committed case final commit?) '✓ Committed $commit · ',
+      if (pushed != null)
+        pushed.firstPush || pushed.gone
+            ? '✓ Pushed ${pushed.branch} · '
+            : '✓ Pushed ${plural(pushed.ahead.toInt(), 'commit')} · ',
+    ].join();
+  }
+
+  /// Why the push did not happen, as a clause after "Not pushed".
+  String _notPushed(BridgeGitOutcome? outcome) {
+    final remote = outcome?.transfer?.remote ?? 'the remote';
+    return switch (outcome?.kind) {
+      BridgeGitOutcomeKind.diverged => ': $remote rejected the push',
+      BridgeGitOutcomeKind.signInFailed => ': Git could not sign in to $remote',
+      BridgeGitOutcomeKind.fetchFailed => ': Git could not fetch from $remote',
+      BridgeGitOutcomeKind.agentRunning => ': an agent runs in this checkout',
+      BridgeGitOutcomeKind.transferFailed ||
+      BridgeGitOutcomeKind.preflightFailed => ': Git failed',
+      _ => '',
+    };
   }
 
   Future<void> _create() async {
@@ -386,7 +590,7 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
     if (plan != null) return _form(context, plan);
     if (_refused case final refused?) return _refusal(context, refused);
     return ActionDialog(
-      title: 'Create pull request',
+      title: _dialogTitle,
       actions: const [],
       children: [
         Row(
@@ -403,6 +607,12 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
     );
   }
 
+  String get _dialogTitle => !_compose
+      ? 'Create pull request'
+      : _hasFiles || _loadingFiles
+      ? 'Commit, push & create PR'
+      : 'Push & create PR';
+
   /// Where the title and description came from (mockup §2's generating and failure states).
   Widget? _textNote(TextStyle faint) {
     if (_writing) {
@@ -414,7 +624,13 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
     return switch (_text) {
       _Text.commit => null,
       _Text.written => Text(
-        'Written by $_writer from ${_written == 1 ? 'the commit and its diff' : 'the $_written commits and their diff'}. Edit before creating.',
+        'Written by $_writer from ${_compose
+            ? _hasFiles
+                  ? "the branch's commits and the files above"
+                  : "the branch's ${plural(_written, 'commit')}"
+            : _written == 1
+            ? 'the commit and its diff'
+            : 'the $_written commits and their diff'}. Edit before creating.',
         style: faint,
       ),
       _Text.failed => WarningNotice(
@@ -435,7 +651,13 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
     final (title, actions) = switch (outcome.kind) {
       BridgePullRequestOutcomeKind.needsPush => (
         'Push before creating a pull request',
-        [PrimaryButton(label: 'Push…', onPressed: () => next(_Next.push))],
+        [
+          PrimaryButton(label: 'Push…', onPressed: () => next(_Next.push)),
+          SecondaryButton(
+            label: 'Commit, push & create PR…',
+            onPressed: () => next(_Next.compose),
+          ),
+        ],
       ),
       BridgePullRequestOutcomeKind.noBranch => (
         'Detached HEAD',
@@ -562,19 +784,26 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
       }
     }
 
-    final enter = !_bodyFocus.hasFocus;
+    final enter = !_bodyFocus.hasFocus && !_messageFocus.hasFocus;
+    final act = _beforePush ? _run : _create;
     return ActionDialog(
-      title: 'Create pull request',
+      title: _dialogTitle,
       bindings: {
         if (_ready && enter)
           const Keys(LogicalKeyboardKey.enter).activator: () =>
-              unawaited(_create()),
+              unawaited(act()),
       },
       actions: [
         PrimaryButton(
-          label: _draft ? 'Create draft pull request' : 'Create pull request',
+          label: !_beforePush
+              ? _draft
+                    ? 'Create draft pull request'
+                    : 'Create pull request'
+              : _hasFiles && _committed == null
+              ? 'Commit, push & create PR'
+              : 'Push & create PR',
           shortcut: enter ? '⏎' : null,
-          onPressed: _ready ? _create : null,
+          onPressed: _ready ? act : null,
         ),
         if (_unknown || _stale || plan.comparisonFailed)
           SecondaryButton(
@@ -583,6 +812,7 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
           ),
       ],
       children: [
+        if (_compose) ..._branchPart(context, row, mono, faint),
         if (fork || plan.parentUnknown)
           row(
             'Target',
@@ -597,7 +827,7 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
           )
         else
           row('GitHub', mono(target ?? ''), widget.device),
-        row('Head', mono(plan.head)),
+        if (!_compose) row('Head', mono(plan.head)),
         row(
           'Base',
           chooser(
@@ -642,10 +872,10 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
           controller: _title,
           focusNode: _titleFocus,
           enabled: !_creating,
-          onSubmitted: (_) => unawaited(_create()),
+          onSubmitted: (_) => unawaited(act()),
           style: const TextStyle(fontSize: WsMetrics.fsCompact),
-          decoration: const InputDecoration(
-            labelText: 'Title',
+          decoration: InputDecoration(
+            labelText: _compose ? 'Pull request title' : 'Title',
             hintText: 'Describe the change',
           ),
         ),
@@ -664,7 +894,7 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
           ),
         ),
         ?_textNote(faint),
-        if (plan.uncommitted > 0)
+        if (plan.uncommitted > 0 && !_compose)
           Text(
             '${plural(plan.uncommitted.toInt(), 'uncommitted file')} ${plan.uncommitted == 1 ? 'is' : 'are'} not part of the pull request. Commit them first if you want to include them.',
             style: faint,
@@ -688,6 +918,7 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
           WarningNotice(
             '${plan.head} changed since this dialog opened. Review the updated commits before creating the pull request.',
           ),
+        if (_result case final result?) WarningNotice(result),
         if (_error case final error?) WarningNotice(error),
         if (_creating)
           Text(
@@ -699,13 +930,100 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
             'Choose a base and enter a title before creating the pull request.',
             style: faint,
           )
-        else
+        else if (!_beforePush)
           Text(
             'Creates the pull request on GitHub through gh on ${widget.device}.',
             style: faint,
           ),
       ],
     );
+  }
+
+  /// "Commit, push & create PR"'s branch and what it pushes: the approved commit dialog's
+  /// files and message, or the commits to push when there is nothing to commit.
+  List<Widget> _branchPart(
+    BuildContext context,
+    Widget Function(String, Widget, [String?]) row,
+    Widget Function(String) mono,
+    TextStyle faint,
+  ) {
+    final ws = context.ws;
+    final status = widget.state.git.status.value;
+    final files = _files;
+    final editable = !_running && _committed == null;
+    return [
+      Container(
+        padding: const EdgeInsets.all(WsMetrics.space3),
+        decoration: BoxDecoration(
+          color: ws.subtle,
+          borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          spacing: WsMetrics.space2,
+          children: [
+            row(
+              'Branch',
+              mono(status?.branch ?? ''),
+              '→ ${status?.remote ?? ''}',
+            ),
+            if (_loadingFiles)
+              Text('Reading uncommitted changes…', style: faint)
+            else if (files != null && files.files.isNotEmpty)
+              CommitFileList(
+                files: files.files,
+                selected: _selected,
+                editing: _editing,
+                enabled: editable,
+                onEditing: () => setState(() {
+                  if (!_editing) {
+                    _editStart = {..._selected};
+                  } else if (!setEquals(_editStart, _selected)) {
+                    // The text describes the files that will be committed.
+                    _write(_plan!);
+                  }
+                  _editing = !_editing;
+                }),
+                onSelected: (selected) => setState(
+                  () => _selected
+                    ..clear()
+                    ..addAll(selected),
+                ),
+              )
+            else
+              row(
+                'Push',
+                Text(
+                  status == null || status.upstream == null || status.gone
+                      ? 'new branch'
+                      : plural(status.ahead.toInt(), 'commit'),
+                ),
+                'nothing to commit',
+              ),
+          ],
+        ),
+      ),
+      if (files != null && files.running.isNotEmpty)
+        WarningNotice(
+          '${whoRuns(files.running)}. ${stopFirst(files.running)}, then commit.',
+        ),
+      if (_hasFiles) ...[
+        const Text('Commit message'),
+        TextField(
+          key: const Key('commit-message'),
+          controller: _message,
+          focusNode: _messageFocus,
+          enabled: editable,
+          minLines: 2,
+          maxLines: 5,
+          textInputAction: TextInputAction.newline,
+          style: const TextStyle(fontSize: WsMetrics.fsCompact),
+          decoration: const InputDecoration(
+            hintText: 'Describe the change: a short first line, details below',
+          ),
+        ),
+      ],
+    ];
   }
 }
 

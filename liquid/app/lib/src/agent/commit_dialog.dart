@@ -10,6 +10,7 @@ import '../session/session_state.dart';
 import '../shortcuts/keymap.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
+import 'commit_files.dart';
 
 /// The approved whole-file commit dialog; its message and selection remain a draft.
 Future<void> showCommitDialog(BuildContext context, SessionState state) async {
@@ -150,8 +151,6 @@ class _CommitDialogState extends State<_CommitDialog> {
     final included = files.where(
       (file) => _selected.contains(file.change.path),
     );
-    final added = included.fold(0, (sum, file) => sum + file.change.added);
-    final removed = included.fold(0, (sum, file) => sum + file.change.removed);
     final small = TextStyle(color: ws.textFaint, fontSize: WsMetrics.fsSmall);
     return ActionDialog(
       title: 'Commit changes',
@@ -205,66 +204,16 @@ class _CommitDialogState extends State<_CommitDialog> {
                   ],
                 ),
               ),
-              Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: WsMetrics.space3,
-                ),
-                child: Row(
-                  children: [
-                    if (_editing)
-                      Checkbox(
-                        key: const Key('commit-select-all'),
-                        semanticLabel: 'All files',
-                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        visualDensity: VisualDensity.compact,
-                        tristate: true,
-                        value: _selected.isEmpty
-                            ? false
-                            : _selected.length == files.length
-                            ? true
-                            : null,
-                        onChanged: _saving
-                            ? null
-                            : (_) => setState(() {
-                                if (_selected.length == files.length) {
-                                  _selected.clear();
-                                } else {
-                                  _selected.addAll(
-                                    files.map((file) => file.change.path),
-                                  );
-                                }
-                              }),
-                      ),
-                    Text('Files', style: small),
-                    const SizedBox(width: WsMetrics.space2),
-                    Text(
-                      _selected.length == files.length
-                          ? '${files.length}'
-                          : '${_selected.length} of ${files.length}',
-                      style: small,
-                    ),
-                    const SizedBox(width: WsMetrics.space2),
-                    Text('· +$added', style: small.copyWith(color: ws.success)),
-                    const SizedBox(width: WsMetrics.space2),
-                    Text('−$removed', style: small.copyWith(color: ws.danger)),
-                    const Spacer(),
-                    TextButton(
-                      onPressed: _saving
-                          ? null
-                          : () => setState(() => _editing = !_editing),
-                      child: Text(_editing ? 'Done' : 'Edit'),
-                    ),
-                  ],
-                ),
-              ),
-              ConstrainedBox(
-                constraints: const BoxConstraints(maxHeight: 240),
-                child: ColoredBox(
-                  color: ws.canvas,
-                  child: ListView(
-                    shrinkWrap: true,
-                    children: [for (final file in files) _file(context, file)],
-                  ),
+              CommitFileList(
+                files: files,
+                selected: _selected,
+                editing: _editing,
+                enabled: !_saving,
+                onEditing: () => setState(() => _editing = !_editing),
+                onSelected: (selected) => setState(
+                  () => _selected
+                    ..clear()
+                    ..addAll(selected),
                 ),
               ),
             ],
@@ -307,88 +256,6 @@ class _CommitDialogState extends State<_CommitDialog> {
           style: small,
         ),
       ],
-    );
-  }
-
-  Widget _file(BuildContext context, BridgeCommitFile file) {
-    final ws = context.ws;
-    final change = file.change;
-    final selected = _selected.contains(change.path);
-    final turns = file.turns;
-    final attribution = turns.isEmpty
-        ? 'not this session'
-        : '${turns.length == 1 ? 'turn' : 'turns'} ${turns.join(', ')}${file.edited ? ' and you' : ''}';
-    final (letter, color) = switch (change.status) {
-      BridgeChangeStatus.added => ('A', ws.success),
-      BridgeChangeStatus.deleted => ('D', ws.danger),
-      BridgeChangeStatus.modified => ('M', ws.warning),
-    };
-    final small = TextStyle(
-      fontSize: WsMetrics.fsSmall,
-      color: selected ? ws.textFaint : ws.textMuted,
-    );
-    return Padding(
-      padding: const EdgeInsets.symmetric(
-        horizontal: WsMetrics.space3,
-        vertical: WsMetrics.space2,
-      ),
-      child: Row(
-        spacing: WsMetrics.space2,
-        children: [
-          if (_editing)
-            Checkbox(
-              key: Key('commit-select-${change.path}'),
-              semanticLabel: change.shown,
-              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              visualDensity: VisualDensity.compact,
-              value: selected,
-              onChanged: _saving
-                  ? null
-                  : (value) => setState(() {
-                      if (value == true) {
-                        _selected.add(change.path);
-                      } else {
-                        _selected.remove(change.path);
-                      }
-                    }),
-            ),
-          Text(
-            letter,
-            style: small.copyWith(color: selected ? color : ws.textFaint),
-          ),
-          Expanded(
-            flex: 2,
-            child: Text(
-              change.shown,
-              style: monoStyle(
-                context,
-                color: selected ? ws.text : ws.textFaint,
-              ),
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-          if (!selected)
-            Text('Excluded', style: small)
-          else ...[
-            if (!_editing && file.attributionAvailable) ...[
-              Flexible(
-                child: Tooltip(
-                  message: attribution,
-                  child: Text(
-                    attribution,
-                    style: small,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-              ),
-              Text('·', style: small),
-            ],
-            Text('+${change.added}', style: small.copyWith(color: ws.success)),
-            Text('−${change.removed}', style: small.copyWith(color: ws.danger)),
-          ],
-        ],
-      ),
     );
   }
 }

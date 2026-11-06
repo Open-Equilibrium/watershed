@@ -161,7 +161,29 @@ class PullRequests {
     headCommit: plan.identity.headCommit,
   );
 
+  /// The title and description the Chat's `model` writes before a commit and push: about
+  /// the commits the base branch `base` lacks and the uncommitted files at `paths`.
+  Future<BridgePullRequestText> writeDraft(
+    String model, {
+    String? base,
+    required List<String> paths,
+  }) => _backend.writePullRequestDraftText(
+    model: model,
+    base: base,
+    paths: paths,
+  );
+
   Future<void> stopWriting() => _backend.stopPullRequestText();
+
+  /// "Commit, push & create PR"'s target, base and open pull request before any write; without
+  /// a chosen base, the recorded one.
+  Future<BridgePullRequestOutcome> prepare({
+    String? target,
+    String? base,
+  }) async => _backend.pullRequestPrepared(
+    target: target,
+    base: base ?? await recordedBase(),
+  );
 
   /// Creates the reviewed pull request; a created or already open one becomes [current] while
   /// the same branch and upstream are checked out.

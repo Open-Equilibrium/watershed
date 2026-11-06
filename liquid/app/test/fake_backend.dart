@@ -576,6 +576,7 @@ class FakeBackend implements SessionBackend {
   BridgePullRequestText written = const BridgePullRequestText(
     title: 'Return 429 when logins are blocked',
     body: 'Blocked logins now wait for the window.',
+    commits: 2,
   );
   Object? writeError;
   Completer<BridgePullRequestText>? writeGate;
@@ -590,6 +591,32 @@ class FakeBackend implements SessionBackend {
     if (writeGate case final gate?) return gate.future;
     if (writeError case final error?) throw error;
     return written;
+  }
+
+  @override
+  Future<BridgePullRequestText> writePullRequestDraftText({
+    required String model,
+    String? base,
+    required List<String> paths,
+  }) async {
+    calls.add('write draft $model ${base ?? '-'} ${paths.join(',')}');
+    if (writeGate case final gate?) return gate.future;
+    if (writeError case final error?) throw error;
+    return written;
+  }
+
+  /// What preparing "Commit, push & create PR" returns, until set otherwise.
+  BridgePullRequestOutcome prepared = pullRequestOutcomeOf(
+    plan: planOf(comparison: null),
+  );
+
+  @override
+  Future<BridgePullRequestOutcome> pullRequestPrepared({
+    String? target,
+    String? base,
+  }) async {
+    calls.add('prepare ${target ?? '-'} ${base ?? '-'}');
+    return prepared;
   }
 
   @override

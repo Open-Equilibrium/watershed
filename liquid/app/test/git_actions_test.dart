@@ -175,7 +175,12 @@ void main() {
       backend.git = gitStatusOf(upstream: null, remote: null);
       await state.git.refresh();
       await menu(tester);
-      for (final action in ['Push', 'Pull', 'Fetch']) {
+      for (final action in [
+        'Commit, push & create PR…',
+        'Push',
+        'Pull',
+        'Fetch',
+      ]) {
         final item = find.ancestor(
           of: find.text(action),
           matching: find.byWidgetPredicate((widget) => widget is PopupMenuItem),
@@ -190,7 +195,7 @@ void main() {
       await menu(tester);
       expect(
         find.byTooltip('No upstream: set one in Git to push this branch.'),
-        findsNWidgets(3),
+        findsNWidgets(4),
       );
       expect(find.text('up to date'), findsNothing);
       await state.dispose();
