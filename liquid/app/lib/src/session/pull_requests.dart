@@ -162,14 +162,17 @@ class PullRequests {
   );
 
   /// The title and description the Chat's `model` writes before a commit and push: about
-  /// the commits the base branch `base` lacks and the uncommitted files at `paths`.
-  Future<BridgePullRequestText> writeDraft(
+  /// the commits the base branch `base` lacks and the files at `paths` as the commit plan's
+  /// `snapshot` holds them; none when there are neither.
+  Future<BridgePullRequestText?> writeDraft(
     String model, {
     String? base,
+    required String snapshot,
     required List<String> paths,
   }) => _backend.writePullRequestDraftText(
     model: model,
     base: base,
+    snapshot: snapshot,
     paths: paths,
   );
 

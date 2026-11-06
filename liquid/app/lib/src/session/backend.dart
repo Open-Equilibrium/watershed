@@ -170,10 +170,12 @@ abstract interface class SessionBackend {
   });
 
   /// As [writePullRequestText], before a commit and push: about the commits the base branch
-  /// `base` lacks, as far as Git has it, and the uncommitted files at `paths`.
-  Future<BridgePullRequestText> writePullRequestDraftText({
+  /// `base` lacks, as far as Git has it, and the files at `paths` as the commit plan's
+  /// `snapshot` holds them; none when there are neither.
+  Future<BridgePullRequestText?> writePullRequestDraftText({
     required String model,
     String? base,
+    required String snapshot,
     required List<String> paths,
   });
 
@@ -385,13 +387,15 @@ class RustSessionBackend implements SessionBackend {
   );
 
   @override
-  Future<BridgePullRequestText> writePullRequestDraftText({
+  Future<BridgePullRequestText?> writePullRequestDraftText({
     required String model,
     String? base,
+    required String snapshot,
     required List<String> paths,
   }) => _session.writePullRequestDraftText(
     model: model,
     base: base,
+    snapshot: snapshot,
     paths: paths,
   );
 

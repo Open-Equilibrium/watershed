@@ -83,6 +83,10 @@ Future<BridgeGitOutcome?> pushBranch(
 
 enum _GitAction { commit, compose, push, pull, fetch, create, pullRequest }
 
+const _nothingToPush = 'Branch is up to date. Nothing to push.';
+const _nothingToCompose =
+    'Nothing to commit or push. Create pull request… opens one for a pushed branch.';
+
 /// The next single Git step and the approved, explicitly invoked Git menu.
 class GitActions extends StatelessWidget {
   const GitActions({super.key, required this.state, required this.device});
@@ -138,22 +142,10 @@ class GitActions extends StatelessWidget {
                 ? 'Branch is up to date. Nothing to commit.'
                 : null;
           case _GitAction.compose:
-            if (remote == null) return noDestination;
-            if (diverged) return divergence;
-            if (status.behind > 0) {
-              return behindHint(
-                status.branch!,
-                status.upstream!,
-                status.behind,
-              );
-            }
-            // With nothing to commit it pushes; with nothing to push either, it has no step.
-            final toPush =
-                status.commit != null &&
-                (status.upstream == null || status.gone || status.ahead > 0);
-            return status.changed == 0 && !toPush
-                ? 'Nothing to commit or push. Create pull request… opens one for a pushed branch.'
-                : null;
+            // It pushes what Push would, after committing any changes.
+            final push = blocker(_GitAction.push);
+            if (push != _nothingToPush) return push;
+            return status.changed == 0 ? _nothingToCompose : null;
           case _GitAction.push:
             if (status.commit == null) {
               return 'Commit before pushing this branch.';
@@ -168,7 +160,7 @@ class GitActions extends StatelessWidget {
               );
             }
             return status.upstream != null && !status.gone && status.ahead == 0
-                ? 'Branch is up to date. Nothing to push.'
+                ? _nothingToPush
                 : null;
           case _GitAction.pull:
             if (remote == null) return noDestination;
@@ -395,7 +387,9 @@ class GitActions extends StatelessWidget {
                 item(
                   _GitAction.compose,
                   'Commit, push & create PR…',
-                  enabled[_GitAction.compose]! ? '' : 'no changes',
+                  blockers[_GitAction.compose] == _nothingToCompose
+                      ? 'no changes'
+                      : '',
                 ),
                 item(_GitAction.push, 'Push', counts[_GitAction.push]!),
                 item(_GitAction.pullRequest, 'Create pull request…', ''),

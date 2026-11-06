@@ -354,6 +354,9 @@ class FakeBackend implements SessionBackend {
   String? committedMessage;
   String? committedBranch;
 
+  /// What committing throws instead of answering, as when Liquid loses Git's answer.
+  Object? commitError;
+
   @override
   Future<BridgeCommitPlan> commitPlan() async {
     calls.add('commit plan');
@@ -372,6 +375,7 @@ class FakeBackend implements SessionBackend {
     committedMessage = message;
     committedBranch = branch;
     await commitGate?.future;
+    if (commitError case final error?) throw error;
     return outcome.kind == BridgeGitOutcomeKind.done && outcome.commit == null
         ? BridgeGitOutcome(
             kind: BridgeGitOutcomeKind.done,
@@ -593,16 +597,20 @@ class FakeBackend implements SessionBackend {
     return written;
   }
 
+  /// Before a commit, the model has nothing to describe.
+  bool nothingToDescribe = false;
+
   @override
-  Future<BridgePullRequestText> writePullRequestDraftText({
+  Future<BridgePullRequestText?> writePullRequestDraftText({
     required String model,
     String? base,
+    required String snapshot,
     required List<String> paths,
   }) async {
     calls.add('write draft $model ${base ?? '-'} ${paths.join(',')}');
     if (writeGate case final gate?) return gate.future;
     if (writeError case final error?) throw error;
-    return written;
+    return nothingToDescribe ? null : written;
   }
 
   /// What preparing "Commit, push & create PR" returns, until set otherwise.

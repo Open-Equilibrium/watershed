@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/agent/git_actions.dart';
 import 'package:liquid/src/rust/api/git.dart';
@@ -36,6 +37,11 @@ void main() {
       );
     state = SessionState(backend);
     state.model.value = model;
+    // The combined dialog is taller than the default test window.
+    tester.view
+      ..physicalSize = const Size(1200, 1400)
+      ..devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
     await state.git.refresh();
     await tester.pumpWidget(
       MaterialApp(
@@ -136,7 +142,7 @@ void main() {
 
     expect(
       find.text(
-        '✓ Committed 1a2b3c4 · ✕ Not pushed: origin rejected the push · Pull request not created. Remaining: Push, then Create pull request…',
+        '⚠ ✓ Committed 1a2b3c4 · ✕ Not pushed: origin rejected the push · Pull request not created. Remaining: Push, then Create pull request…',
       ),
       findsOneWidget,
     );
@@ -256,5 +262,145 @@ void main() {
 
     expect(backend.calls, contains('prepare - -'));
     expect(find.byKey(const Key('commit-message')), findsOneWidget);
+  });
+
+  Future<void> run(WidgetTester tester, String label) async {
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.tap(button(label));
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets('a failed commit is retried with the files as they are now', (
+    tester,
+  ) async {
+    await show(tester);
+    await openCompose(tester);
+    await tester.enterText(find.byKey(const Key('commit-message')), 'Document');
+    backend.outcome = outcomeOf(
+      BridgeGitOutcomeKind.commitFailed,
+      detail: 'The selected files changed.',
+    );
+
+    await run(tester, 'Commit, push & create PR');
+
+    expect(
+      find.text(
+        '⚠ Could not commit: nothing was committed. Nothing was pushed and no pull request was created.',
+      ),
+      findsOneWidget,
+    );
+    expect(backend.calls, isNot(contains('push false')));
+
+    backend
+      ..outcome = outcomeOf(BridgeGitOutcomeKind.done)
+      ..commitPlanned = BridgeCommitPlan(
+        snapshot: 'later',
+        files: [commitFileOf('src/login.ts', added: 5, removed: 1)],
+        running: const [],
+      );
+    await state.git.refresh();
+    await tester.pumpAndSettle();
+    await run(tester, 'Commit, push & create PR');
+
+    expect(backend.committedSnapshot, 'later');
+    expect(backend.committedPaths, ['src/login.ts']);
+    expect(backend.calls, contains('create pull request'));
+    await tester.pump(const Duration(seconds: 7));
+  });
+
+  testWidgets('a commit whose result is lost is not called undone', (
+    tester,
+  ) async {
+    await show(tester);
+    await openCompose(tester);
+    await tester.enterText(find.byKey(const Key('commit-message')), 'Document');
+    backend.commitError = 'connection lost';
+
+    await run(tester, 'Commit, push & create PR');
+
+    expect(
+      find.textContaining("The commit's result is unknown"),
+      findsOneWidget,
+    );
+    expect(backend.calls, isNot(contains('push false')));
+    await tester.pump(const Duration(seconds: 7));
+  });
+
+  testWidgets('a refused creation after the push keeps the pushed steps', (
+    tester,
+  ) async {
+    await show(tester, ahead: 1);
+    await openCompose(tester);
+    await tester.enterText(find.byKey(const Key('commit-message')), 'Document');
+    backend.created = pullRequestOutcomeOf(
+      kind: BridgePullRequestOutcomeKind.noAccess,
+      repository: 'acme/api',
+    );
+
+    await run(tester, 'Commit, push & create PR');
+
+    expect(
+      find.textContaining(
+        '⚠ ✓ Committed 1a2b3c4 · ✓ Pushed 1 commit · ✕ Pull request not created: ',
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.textContaining(
+        'Remaining: Create pull request…, with the title and description kept.',
+      ),
+      findsOneWidget,
+    );
+    expect(find.textContaining('No pull request was created'), findsNothing);
+    expect(button('Check again'), findsOneWidget);
+
+    backend.created = pullRequestOutcomeOf(pullRequest: pullRequestOf());
+    await run(tester, 'Create pull request');
+    expect(backend.calls.where((call) => call == 'push false'), hasLength(1));
+    expect(find.textContaining('✓ Committed'), findsNothing);
+    await tester.pump(const Duration(seconds: 7));
+  });
+
+  testWidgets('a declined push to the default branch pushes nothing', (
+    tester,
+  ) async {
+    await show(tester);
+    backend.git = gitStatusOf(
+      branch: 'main',
+      upstream: 'origin/main',
+      defaultBranch: 'main',
+      changed: 2,
+    );
+    await state.git.refresh();
+    await openCompose(tester);
+    await tester.enterText(find.byKey(const Key('commit-message')), 'Document');
+
+    await run(tester, 'Commit, push & create PR');
+    expect(find.text('Push to main?'), findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text(
+        '⚠ ✓ Committed 1a2b3c4 · ✕ Not pushed · Pull request not created. Remaining: Push, then Create pull request…',
+      ),
+      findsOneWidget,
+    );
+    expect(backend.calls, isNot(contains('push true')));
+    await tester.pump(const Duration(seconds: 7));
+  });
+
+  testWidgets('with nothing to describe the latest commit stays', (
+    tester,
+  ) async {
+    await show(tester, changed: 0, ahead: 1);
+    backend.nothingToDescribe = true;
+    await openCompose(tester);
+
+    expect(
+      text(tester, 'pull-request-title'),
+      'Return 429 with Retry-After on /login',
+    );
+    expect(find.textContaining('Written by'), findsNothing);
   });
 }
