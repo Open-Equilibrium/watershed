@@ -160,6 +160,7 @@ class BridgeWorktreeRemoval {
   final String? head;
   final List<BridgeWorktreeFile> files;
   final bool moreFiles;
+  final bool moreMarked;
 
   /// Files Git ignores there, which removal would delete.
   final PlatformInt64 ignored;
@@ -179,6 +180,7 @@ class BridgeWorktreeRemoval {
     this.head,
     required this.files,
     required this.moreFiles,
+    required this.moreMarked,
     required this.ignored,
     required this.moreIgnored,
     required this.unpushed,
@@ -192,6 +194,7 @@ class BridgeWorktreeRemoval {
       head.hashCode ^
       files.hashCode ^
       moreFiles.hashCode ^
+      moreMarked.hashCode ^
       ignored.hashCode ^
       moreIgnored.hashCode ^
       unpushed.hashCode ^
@@ -207,6 +210,7 @@ class BridgeWorktreeRemoval {
           head == other.head &&
           files == other.files &&
           moreFiles == other.moreFiles &&
+          moreMarked == other.moreMarked &&
           ignored == other.ignored &&
           moreIgnored == other.moreIgnored &&
           unpushed == other.unpushed &&

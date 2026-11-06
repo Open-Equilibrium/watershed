@@ -335,3 +335,31 @@ fn a_worktree_gone_since_its_review_is_reviewed_again() {
         assert!(now.worktree.missing);
     });
 }
+
+#[test]
+fn more_marked_files_than_named_are_not_called_local_changes() {
+    run(async {
+        let linked = Linked::new("many-marked");
+        let checkpoints = Checkpoints::new(linked.repo.path());
+        let names: Vec<String> = (0..205).map(|n| format!("m{n:03}.txt")).collect();
+        for name in &names {
+            linked.linked.write(name, "kept\n");
+        }
+        linked.linked.git(&["add", "."]);
+        linked.linked.git(&["commit", "-q", "-m", "Many"]);
+        let mut args = vec!["update-index", "--assume-unchanged"];
+        args.extend(names.iter().map(String::as_str));
+        linked.linked.git(&args);
+
+        let review = checkpoints.worktree_removal(&linked.path()).await.unwrap();
+
+        assert!(review.more_marked && !review.more_files, "{review:?}");
+        assert!(
+            review
+                .files
+                .iter()
+                .all(|file| file.state == WorktreeFileState::Marked)
+        );
+        assert!(!review.removable());
+    });
+}

@@ -307,7 +307,7 @@ void main() {
     expect(find.text('hidden from Git'), findsOneWidget);
   });
 
-  testWidgets('a Git action in the worktree is not called an agent', (
+  testWidgets('another action using the repository is not called an agent', (
     tester,
   ) async {
     await show(tester);
@@ -323,7 +323,7 @@ void main() {
 
     expect(
       find.text(
-        'A Git action or a revert is running in this worktree; try again when it ends. Nothing was removed.',
+        'Another action is using this repository; try again when it ends. Nothing was removed.',
       ),
       findsOneWidget,
     );

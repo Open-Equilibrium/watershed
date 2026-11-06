@@ -55,6 +55,7 @@ pub struct BridgeWorktreeRemoval {
     pub head: Option<String>,
     pub files: Vec<BridgeWorktreeFile>,
     pub more_files: bool,
+    pub more_marked: bool,
     /// Files Git ignores there, which removal would delete.
     pub ignored: i64,
     pub more_ignored: bool,
@@ -177,6 +178,7 @@ impl AgentSession {
                 })
                 .collect(),
             more_files: removal.more_files,
+            more_marked: removal.more_marked,
             ignored: count(removal.ignored),
             more_ignored: removal.more_ignored,
             unpushed: count(removal.unpushed),
@@ -214,6 +216,7 @@ fn core_removal(removal: BridgeWorktreeRemoval) -> WorktreeRemoval {
             })
             .collect(),
         more_files: removal.more_files,
+        more_marked: removal.more_marked,
         ignored: u64::try_from(removal.ignored).unwrap_or(0),
         more_ignored: removal.more_ignored,
         unpushed: u64::try_from(removal.unpushed).unwrap_or(0),

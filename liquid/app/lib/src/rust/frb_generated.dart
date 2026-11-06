@@ -4637,18 +4637,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeWorktreeRemoval dco_decode_bridge_worktree_removal(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 9)
-      throw Exception('unexpected arr length: expect 9 but see ${arr.length}');
+    if (arr.length != 10)
+      throw Exception('unexpected arr length: expect 10 but see ${arr.length}');
     return BridgeWorktreeRemoval(
       worktree: dco_decode_bridge_worktree(arr[0]),
       head: dco_decode_opt_String(arr[1]),
       files: dco_decode_list_bridge_worktree_file(arr[2]),
       moreFiles: dco_decode_bool(arr[3]),
-      ignored: dco_decode_i_64(arr[4]),
-      moreIgnored: dco_decode_bool(arr[5]),
-      unpushed: dco_decode_i_64(arr[6]),
-      stranded: dco_decode_i_64(arr[7]),
-      removable: dco_decode_bool(arr[8]),
+      moreMarked: dco_decode_bool(arr[4]),
+      ignored: dco_decode_i_64(arr[5]),
+      moreIgnored: dco_decode_bool(arr[6]),
+      unpushed: dco_decode_i_64(arr[7]),
+      stranded: dco_decode_i_64(arr[8]),
+      removable: dco_decode_bool(arr[9]),
     );
   }
 
@@ -7000,6 +7001,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_head = sse_decode_opt_String(deserializer);
     var var_files = sse_decode_list_bridge_worktree_file(deserializer);
     var var_moreFiles = sse_decode_bool(deserializer);
+    var var_moreMarked = sse_decode_bool(deserializer);
     var var_ignored = sse_decode_i_64(deserializer);
     var var_moreIgnored = sse_decode_bool(deserializer);
     var var_unpushed = sse_decode_i_64(deserializer);
@@ -7010,6 +7012,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       head: var_head,
       files: var_files,
       moreFiles: var_moreFiles,
+      moreMarked: var_moreMarked,
       ignored: var_ignored,
       moreIgnored: var_moreIgnored,
       unpushed: var_unpushed,
@@ -9486,6 +9489,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_opt_String(self.head, serializer);
     sse_encode_list_bridge_worktree_file(self.files, serializer);
     sse_encode_bool(self.moreFiles, serializer);
+    sse_encode_bool(self.moreMarked, serializer);
     sse_encode_i_64(self.ignored, serializer);
     sse_encode_bool(self.moreIgnored, serializer);
     sse_encode_i_64(self.unpushed, serializer);

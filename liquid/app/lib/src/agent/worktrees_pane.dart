@@ -258,7 +258,7 @@ class _RemoveWorktreeState extends State<_RemoveWorktree> {
           _removing = false;
           _error = outcome.running.isEmpty
               // Another window's Git action or revert holds this worktree.
-              ? 'A Git action or a revert is running in this worktree; try again when it ends. Nothing was removed.'
+              ? 'Another action is using this repository; try again when it ends. Nothing was removed.'
               : '${whoRuns(outcome.running, where: 'in this repository')}. Stop it or wait until it finishes; nothing was removed.';
         });
       case BridgeWorktreeOutcomeKind.failed:
@@ -341,9 +341,9 @@ class _RemoveWorktreeState extends State<_RemoveWorktree> {
               '${plural(review.stranded.toInt(), 'commit')} ${review.stranded == 1 ? 'is' : 'are'} on no branch in this detached worktree and would be lost with it. Create a branch for ${review.stranded == 1 ? 'it' : 'them'} first.',
               style: text,
             ),
-          if (marked > 0)
+          if (marked > 0 || review.moreMarked)
             Text(
-              '${plural(marked, 'file')} ${marked == 1 ? 'is' : 'are'} marked so that Git does not check ${marked == 1 ? 'it' : 'them'} for edits, which removing the folder would lose. Clear the marks with git update-index --no-assume-unchanged or --no-skip-worktree, then review again.',
+              '${plural(marked, 'file')}${review.moreMarked ? ' and more' : ''} ${marked == 1 && !review.moreMarked ? 'is' : 'are'} marked so that Git does not check ${marked == 1 && !review.moreMarked ? 'it' : 'them'} for edits, which removing the folder would lose. Clear the marks with git update-index --no-assume-unchanged or --no-skip-worktree, then review again.',
               style: text,
             ),
           if (files > 0 || review.moreFiles)

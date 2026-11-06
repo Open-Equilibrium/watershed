@@ -1196,6 +1196,7 @@ BridgeWorktreeRemoval removalOf(
   head: 'c0ffee',
   files: files,
   moreFiles: false,
+  moreMarked: false,
   ignored: ignored,
   moreIgnored: false,
   unpushed: unpushed,

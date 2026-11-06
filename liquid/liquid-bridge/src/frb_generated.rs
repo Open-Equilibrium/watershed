@@ -5491,6 +5491,7 @@ impl SseDecode for crate::api::worktrees::BridgeWorktreeRemoval {
         let mut var_files =
             <Vec<crate::api::worktrees::BridgeWorktreeFile>>::sse_decode(deserializer);
         let mut var_moreFiles = <bool>::sse_decode(deserializer);
+        let mut var_moreMarked = <bool>::sse_decode(deserializer);
         let mut var_ignored = <i64>::sse_decode(deserializer);
         let mut var_moreIgnored = <bool>::sse_decode(deserializer);
         let mut var_unpushed = <i64>::sse_decode(deserializer);
@@ -5501,6 +5502,7 @@ impl SseDecode for crate::api::worktrees::BridgeWorktreeRemoval {
             head: var_head,
             files: var_files,
             more_files: var_moreFiles,
+            more_marked: var_moreMarked,
             ignored: var_ignored,
             more_ignored: var_moreIgnored,
             unpushed: var_unpushed,
@@ -9137,6 +9139,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::worktrees::BridgeWorktreeRemo
             self.head.into_into_dart().into_dart(),
             self.files.into_into_dart().into_dart(),
             self.more_files.into_into_dart().into_dart(),
+            self.more_marked.into_into_dart().into_dart(),
             self.ignored.into_into_dart().into_dart(),
             self.more_ignored.into_into_dart().into_dart(),
             self.unpushed.into_into_dart().into_dart(),
@@ -10570,6 +10573,7 @@ impl SseEncode for crate::api::worktrees::BridgeWorktreeRemoval {
         <Option<String>>::sse_encode(self.head, serializer);
         <Vec<crate::api::worktrees::BridgeWorktreeFile>>::sse_encode(self.files, serializer);
         <bool>::sse_encode(self.more_files, serializer);
+        <bool>::sse_encode(self.more_marked, serializer);
         <i64>::sse_encode(self.ignored, serializer);
         <bool>::sse_encode(self.more_ignored, serializer);
         <i64>::sse_encode(self.unpushed, serializer);

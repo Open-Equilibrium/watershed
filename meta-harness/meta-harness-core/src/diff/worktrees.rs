@@ -66,6 +66,8 @@ pub struct WorktreeRemoval {
     pub files: Vec<WorktreeFile>,
     /// It has more local files than named.
     pub more_files: bool,
+    /// It has more marked files than named.
+    pub more_marked: bool,
     /// Files Git ignores there, which removal would delete.
     pub ignored: u64,
     /// It has more ignored files than counted.
@@ -89,6 +91,7 @@ impl WorktreeRemoval {
             && worktree.running.is_empty()
             && self.files.is_empty()
             && !self.more_files
+            && !self.more_marked
             && self.ignored == 0
             && !self.more_ignored
             && self.stranded == 0
@@ -193,6 +196,7 @@ impl WorkingTree {
             head: None,
             files: Vec::new(),
             more_files: false,
+            more_marked: false,
             ignored: 0,
             more_ignored: false,
             unpushed: 0,
@@ -290,9 +294,13 @@ impl WorkingTree {
         let stdout = listing.child.stdout.take().expect("stdout is piped");
         let mut entries = BufReader::new(stdout).split(0);
         while let Some(entry) = entries.next_segment().await.map_err(unreadable)? {
+            // Past the named ones, a further marked file is only counted as more, unchecked.
+            if removal.more_marked {
+                continue;
+            }
             // `ls-files -v` tags a file assumed unchanged with a lowercase letter and one
-            // outside the work with `S`.
-            // A marked file that is absent, as outside a sparse checkout, holds no edit.
+            // outside the work with `S`. A marked file that is absent, as outside a sparse
+            // checkout, holds no edit.
             if let [tag, b' ', path @ ..] = entry.as_slice()
                 && (tag.is_ascii_lowercase() || *tag == b'S')
                 && dir
@@ -306,7 +314,7 @@ impl WorkingTree {
                         state: WorktreeFileState::Marked,
                     });
                 } else {
-                    removal.more_files = true;
+                    removal.more_marked = true;
                 }
             }
         }
