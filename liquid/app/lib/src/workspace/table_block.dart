@@ -30,16 +30,35 @@ double _width(BridgeFieldKind kind) => switch (kind) {
   BridgeFieldKind.checkbox => 72,
 };
 
-/// `number` with every digit Dart's shortest form keeps, in `format`'s separators; rounding
-/// comes with field formats (ADR-0242).
+/// `number` with every digit Dart's shortest form keeps, written out in `format`'s digits,
+/// separators and grouping; rounding comes with field formats (ADR-0242). intl itself
+/// keeps at most 18 decimals and 18 grouped digits exactly.
 String _number(NumberFormat format, double number) {
   final [mantissa, ...exponent] = number.abs().toString().split('e');
-  final point = mantissa.indexOf('.');
-  final decimals = point < 0 ? 0 : mantissa.length - point - 1;
-  final shift = exponent.isEmpty ? 0 : int.parse(exponent.single);
-  return (format..maximumFractionDigits = math.max(0, decimals - shift)).format(
-    number,
-  );
+  final [whole, ...fraction] = mantissa.split('.');
+  var digits = whole + fraction.join();
+  var point =
+      whole.length + (exponent.isEmpty ? 0 : int.parse(exponent.single));
+  if (point <= 0) {
+    digits = '0' * (1 - point) + digits;
+    point = 1;
+  }
+  digits = digits.padRight(point, '0');
+  final integer = digits.substring(0, point);
+  final decimals = digits.substring(point).replaceFirst(RegExp(r'0+$'), '');
+  final zero = format.symbols.ZERO_DIGIT.codeUnitAt(0);
+  String local(String digits) =>
+      String.fromCharCodes(digits.codeUnits.map((unit) => unit - 0x30 + zero));
+  final text = [
+    if (integer.length <= 18)
+      format.format(int.parse(integer))
+    else
+      local(integer),
+    if (decimals.isNotEmpty) ...[format.symbols.DECIMAL_SEP, local(decimals)],
+  ].join();
+  return number < 0
+      ? '${format.negativePrefix}$text${format.negativeSuffix}'
+      : text;
 }
 
 IconData _icon(BridgeFieldKind kind) => switch (kind) {

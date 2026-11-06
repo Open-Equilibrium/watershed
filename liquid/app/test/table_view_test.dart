@@ -350,9 +350,22 @@ void main() {
         amount('r2', 1.23456),
         amount('r3', 1234567),
         amount('r4', -2.5e-7),
+        amount('r5', 1 / 3000),
+        amount('r6', 1e-20),
+        amount('r7', 1e20),
+        amount('r8', 84),
       ]),
     ]);
-    for (final text in ['0.0004', '1.23456', '1,234,567', '-0.00000025']) {
+    for (final text in [
+      '0.0004',
+      '1.23456',
+      '1,234,567',
+      '-0.00000025',
+      '0.0003333333333333333',
+      '0.00000000000000000001',
+      '100000000000000000000',
+      '84',
+    ]) {
       expect(inTable(find.text(text)), findsOneWidget, reason: text);
     }
   });
