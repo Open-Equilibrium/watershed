@@ -475,4 +475,29 @@ void main() {
     expect(name.focusNode!.hasFocus, isTrue);
     expect(workspace.problem.value, isNotNull);
   });
+
+  testWidgets('what is typed while a Table is added in the last line becomes '
+      'its name', (tester) async {
+    await show(tester, ['Intro', '']);
+    await type(tester, 1, '/');
+    await type(tester, 1, 'table');
+    final gate = fake.gate = Completer<void>();
+    fake.gatedKinds = {BridgeMutationKind.addDatabaseBlock};
+    // The line's read after its cleared text arrived answers once typing went on.
+    final reads = fake.deferred = [];
+    fake.deferredKinds = {BridgeQueryKind.text};
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    await type(tester, 1, 'Ex');
+    fake.deferred = null;
+    for (final read in reads) {
+      read.complete();
+    }
+    await tester.pumpAndSettle();
+    fake.gate = null;
+    gate.complete();
+    await tester.pumpAndSettle();
+    expect(fake.databases[fake.views[page]![1].block]!.name, 'Ex');
+    expect(fake.textsOf(page), ['Intro', '']);
+  });
 }

@@ -28,8 +28,9 @@ class FakeWorkspace implements LiquidWorkspace {
   /// Fails every apply of these kinds.
   Set<BridgeMutationKind> refuseKinds = {};
 
-  /// Holds applies until it completes.
+  /// Holds applies until it completes; only those of [gatedKinds] when set.
   Completer<void>? gate;
+  Set<BridgeMutationKind>? gatedKinds;
 
   /// How long each apply takes, as a slow disk would.
   Duration Function()? delay;
@@ -58,7 +59,7 @@ class FakeWorkspace implements LiquidWorkspace {
 
   @override
   Future<BridgeApplied> apply({required BridgeMutation mutation}) async {
-    await gate?.future;
+    if (gatedKinds?.contains(mutation.kind) ?? true) await gate?.future;
     if (delay case final delay?) await Future<void>.delayed(delay());
     if (refuse case final refused?) throw refused;
     if (refuseKinds.contains(mutation.kind)) throw 'refused';

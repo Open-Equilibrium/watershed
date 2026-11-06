@@ -271,7 +271,10 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
       _report(error);
       return;
     }
-    if (!mounted || read != _reads || _editor.isSource(this)) return;
+    // While a Table takes this line's place, what is typed there is its name.
+    if (!mounted || read != _reads || _editor.isSource(this) || _adding) {
+      return;
+    }
     final text = answer.text;
     if (text == null ||
         !clean ||
