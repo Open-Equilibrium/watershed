@@ -55,6 +55,7 @@ pub(super) fn mutation(kind: BridgeMutationKind) -> BridgeMutation {
         block: None,
         view: None,
         after: None,
+        last: false,
         text: None,
         at: 0,
         delete: 0,

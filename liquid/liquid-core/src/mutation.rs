@@ -1,7 +1,7 @@
 //! The requests the mutation pipeline accepts and what it answers. These types are the
 //! schema that the UI, the CLI/API, agents and sync share (client architecture rule 2).
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::{ActionId, AreaId, BlockId, FieldId, OptionId, PageId, PersonId, RowId, ViewId};
 
@@ -89,6 +89,47 @@ impl PartialEq for Cell {
 }
 
 impl Eq for Cell {}
+
+/// Where a new row or field goes among the others (ADR-0247).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Place<T> {
+    /// Before all others.
+    First,
+    /// Right after this one.
+    After(T),
+    /// After all others as the core applies it, so adds from any device keep their order,
+    /// as + New and + add.
+    Last,
+}
+
+/// Reads a stored Action's place, also as `after`, which Actions recorded before ADR-0247
+/// hold: none for first, or the one it follows.
+fn stored_place<'de, D, T>(deserializer: D) -> Result<Place<T>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Stored<T> {
+        Place(Place<T>),
+        After(Option<T>),
+    }
+    Ok(match Stored::deserialize(deserializer)? {
+        Stored::Place(place) => place,
+        Stored::After(after) => after.map_or(Place::First, Place::After),
+    })
+}
+
+impl<T> Place<T> {
+    pub(crate) fn as_ref(&self) -> Place<&T> {
+        match self {
+            Self::First => Place::First,
+            Self::After(after) => Place::After(after),
+            Self::Last => Place::Last,
+        }
+    }
+}
 
 /// One write to the Workspace. Text positions count UTF-16 code units, as Dart and
 /// JavaScript do. A Page-scoped mutation names the Page whose document holds its target:
@@ -208,14 +249,15 @@ pub enum Mutation {
         /// The new name.
         name: String,
     },
-    /// Adds a field first or after the field `after`.
+    /// Adds a field at `place` among the others.
     AddField {
         /// The Block's home Page.
         page: PageId,
         /// The Database Block.
         block: BlockId,
-        /// The field it follows.
-        after: Option<FieldId>,
+        /// Where it goes.
+        #[serde(alias = "after", deserialize_with = "stored_place")]
+        place: Place<FieldId>,
         /// Its name.
         name: String,
         /// Its kind.
@@ -254,14 +296,15 @@ pub enum Mutation {
         /// Its color, an index into the tag colors that the Table View's mockups define.
         color: u8,
     },
-    /// Adds an empty row first or after the row `after`.
+    /// Adds an empty row at `place` among the others.
     AddRow {
         /// The Block's home Page.
         page: PageId,
         /// The Database Block.
         block: BlockId,
-        /// The row it follows.
-        after: Option<RowId>,
+        /// Where it goes.
+        #[serde(alias = "after", deserialize_with = "stored_place")]
+        place: Place<RowId>,
     },
     /// Removes a row.
     RemoveRow {

@@ -36,7 +36,8 @@ pub use history::{Action, Document, Operation, Permission};
 pub use id::{ActionId, AreaId, BlockId, FieldId, OptionId, PageId, PersonId, RowId, ViewId};
 pub use model::{Area, BlockKind, PageEntry, View};
 pub use mutation::{
-    Actor, Applied, Cell, Changed, Created, Error, FieldKind, Mutation, Origin, Request, TextStyle,
+    Actor, Applied, Cell, Changed, Created, Error, FieldKind, Mutation, Origin, Place, Request,
+    TextStyle,
 };
 pub use store::{Commit, MemoryStore, Store, Write};
 pub use workspace::Workspace;

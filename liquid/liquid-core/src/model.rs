@@ -16,7 +16,7 @@ use automerge::{
     TextEncoding, Value, ValueRef,
 };
 
-use crate::{AreaId, BlockId, Error, PageId, TextStyle, ViewId};
+use crate::{AreaId, BlockId, Error, PageId, Place, TextStyle, ViewId};
 
 pub(crate) const OWNER: &str = "owner";
 pub(crate) const AREAS: &str = "areas";
@@ -237,15 +237,21 @@ pub(crate) fn mark_deleted(doc: &mut AutoCommit, obj: &ObjId) -> Result<(), Erro
 
 /// The sort key for an object placed after `after` among `siblings`, or first.
 pub(crate) fn sort_after(siblings: &[Entry], after: Option<&str>) -> Result<String, Error> {
-    let index = match after {
-        None => 0,
-        Some(after) => {
+    sort_at(siblings, after.map_or(Place::First, Place::After))
+}
+
+/// The sort key for an entry placed at `place` among `siblings`.
+pub(crate) fn sort_at(siblings: &[Entry], place: Place<&str>) -> Result<String, Error> {
+    let index = match place {
+        Place::First => 0,
+        Place::After(after) => {
             siblings
                 .iter()
                 .position(|entry| entry.id == after)
                 .ok_or(Error::NotFound)?
                 + 1
         }
+        Place::Last => siblings.len(),
     };
     let key = |i: usize| siblings.get(i).and_then(|entry| entry.get(SORT));
     Ok(crate::sort_key::between(

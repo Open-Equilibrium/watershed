@@ -8,7 +8,7 @@ import 'database.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `id`, `message`, `normalized`, `notify`, `of`, `of`, `open_lock`, `open_with`, `optional_id`, `page`, `random_hex`, `read`, `release_page`, `release`, `take_lock`, `to_core`, `to_core`, `units`, `watch`, `window`
+// These functions are ignored because they are not marked as `pub`: `id`, `message`, `normalized`, `notify`, `of`, `of`, `open_lock`, `open_with`, `optional_id`, `page`, `place`, `random_hex`, `read`, `release_page`, `release`, `take_lock`, `to_core`, `to_core`, `units`, `watch`, `window`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `Inner`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `drop`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `hash`, `hash`
 
@@ -246,6 +246,10 @@ class BridgeMutation {
   /// The View, field or row a new one follows.
   final String? after;
 
+  /// Whether a new field or row goes after all others as the core applies it, rather
+  /// than first or after `after` (ADR-0247).
+  final bool last;
+
   /// A name, title or text.
   final String? text;
 
@@ -284,6 +288,7 @@ class BridgeMutation {
     this.block,
     this.view,
     this.after,
+    required this.last,
     this.text,
     required this.at,
     required this.delete,
@@ -305,6 +310,7 @@ class BridgeMutation {
       block.hashCode ^
       view.hashCode ^
       after.hashCode ^
+      last.hashCode ^
       text.hashCode ^
       at.hashCode ^
       delete.hashCode ^
@@ -328,6 +334,7 @@ class BridgeMutation {
           block == other.block &&
           view == other.view &&
           after == other.after &&
+          last == other.last &&
           text == other.text &&
           at == other.at &&
           delete == other.delete &&
@@ -381,8 +388,8 @@ enum BridgeMutationKind {
   /// Renames the Database `block` on its home `page` to `text`.
   renameDatabase,
 
-  /// Adds a field named `text` of `field_kind` to the Database `block` on its home `page`,
-  /// after the field `after` or first.
+  /// Adds a field named `text` of `field_kind` to the Database `block` on its home `page`:
+  /// last, after the field `after`, or first.
   addField,
 
   /// Renames `field` of the Database `block` on its home `page` to `text`.
@@ -395,8 +402,8 @@ enum BridgeMutationKind {
   /// on its home `page`.
   addOption,
 
-  /// Adds an empty row to the Database `block` on its home `page`, after the row `after`
-  /// or first.
+  /// Adds an empty row to the Database `block` on its home `page`: last, after the row
+  /// `after`, or first.
   addRow,
 
   /// Removes `row` from the Database `block` on its home `page`.
