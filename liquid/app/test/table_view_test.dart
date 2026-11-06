@@ -320,6 +320,8 @@ void main() {
     (const Locale('de', 'DE'), '84,2', '1. Nov. 2026'),
     (const Locale('en', 'GB'), '84.2', '1 Nov 2026'),
     (const Locale('es', 'MX'), '84.2', '1 nov 2026'),
+    // Material knows Tibetan, but intl has no formats for it.
+    (const Locale('bo'), '84.2', 'Nov 1, 2026'),
   ]) {
     testWidgets('a person in $locale reads numbers and days as there', (
       tester,
@@ -331,6 +333,29 @@ void main() {
       expect(inTable(find.text(day)), findsOneWidget);
     });
   }
+
+  testWidgets('a number shows every digit it holds', (tester) async {
+    BridgeRow amount(String id, double number) => BridgeRow(
+      id: id,
+      cells: [
+        BridgeFieldCell(
+          field: 'amount',
+          value: _cell(BridgeCellKind.number, number: number),
+        ),
+      ],
+    );
+    await show(tester, [
+      _Table([
+        amount('r1', 0.0004),
+        amount('r2', 1.23456),
+        amount('r3', 1234567),
+        amount('r4', -2.5e-7),
+      ]),
+    ]);
+    for (final text in ['0.0004', '1.23456', '1,234,567', '-0.00000025']) {
+      expect(inTable(find.text(text)), findsOneWidget, reason: text);
+    }
+  });
 
   testWidgets('a Table whose fields are all removed still shows its rows', (
     tester,

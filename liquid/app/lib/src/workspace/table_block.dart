@@ -30,6 +30,18 @@ double _width(BridgeFieldKind kind) => switch (kind) {
   BridgeFieldKind.checkbox => 72,
 };
 
+/// `number` with every digit Dart's shortest form keeps, in `format`'s separators; rounding
+/// comes with field formats (ADR-0242).
+String _number(NumberFormat format, double number) {
+  final [mantissa, ...exponent] = number.abs().toString().split('e');
+  final point = mantissa.indexOf('.');
+  final decimals = point < 0 ? 0 : mantissa.length - point - 1;
+  final shift = exponent.isEmpty ? 0 : int.parse(exponent.single);
+  return (format..maximumFractionDigits = math.max(0, decimals - shift)).format(
+    number,
+  );
+}
+
 IconData _icon(BridgeFieldKind kind) => switch (kind) {
   BridgeFieldKind.text => LucideIcons.text,
   BridgeFieldKind.number => LucideIcons.hash,
@@ -127,6 +139,17 @@ class _TableBlockState extends State<TableBlock> {
     final ws = context.ws;
     final database = _database;
     final locale = Localizations.localeOf(context).toString();
+    // US English where intl has no formats for a language Material knows.
+    final numbers = Intl.verifiedLocale(
+      locale,
+      NumberFormat.localeExists,
+      onFailure: (_) => 'en_US',
+    )!;
+    final days = Intl.verifiedLocale(
+      locale,
+      DateFormat.localeExists,
+      onFailure: (_) => 'en_US',
+    )!;
     final count = _rows.count ?? 0;
     final name = database?.name ?? '';
     return Padding(
@@ -173,7 +196,8 @@ class _TableBlockState extends State<TableBlock> {
                         builder: (context, constraints) => _grid(
                           database.fields,
                           constraints.maxWidth,
-                          locale,
+                          NumberFormat.decimalPattern(numbers),
+                          DateFormat.yMMMd(days),
                         ),
                       ),
                     Container(
@@ -182,7 +206,7 @@ class _TableBlockState extends State<TableBlock> {
                       padding: const EdgeInsets.symmetric(horizontal: 10),
                       alignment: Alignment.centerLeft,
                       child: Text(
-                        '${NumberFormat.decimalPattern(locale).format(count)} '
+                        '${NumberFormat.decimalPattern(numbers).format(count)} '
                         '${count == 1 ? 'row' : 'rows'}',
                         style: TextStyle(
                           fontSize: WsMetrics.fsCompact,
@@ -200,7 +224,12 @@ class _TableBlockState extends State<TableBlock> {
   }
 
   /// The header and the rows, scrolling sideways together when wider than `width`.
-  Widget _grid(List<BridgeField> fields, double width, String locale) {
+  Widget _grid(
+    List<BridgeField> fields,
+    double width,
+    NumberFormat numbers,
+    DateFormat days,
+  ) {
     final ws = context.ws;
     final rest = [for (final field in fields.skip(1)) _width(field.kind)];
     final others = rest.fold(0.0, (sum, width) => sum + width);
@@ -212,14 +241,12 @@ class _TableBlockState extends State<TableBlock> {
         if (field.kind == BridgeFieldKind.select)
           for (final option in field.options) option.id: option,
     };
-    final numbers = NumberFormat.decimalPattern(locale);
-    final days = DateFormat.yMMMd(locale);
 
     Widget content(BridgeCell? cell) => switch (cell?.kind) {
       null || BridgeCellKind.empty => const SizedBox.shrink(),
       BridgeCellKind.text => _text(cell!.text ?? ''),
       BridgeCellKind.number => _text(
-        numbers.format(cell!.number),
+        _number(numbers, cell!.number),
         style: const TextStyle(fontFeatures: [FontFeature.tabularFigures()]),
       ),
       BridgeCellKind.select => switch (options[cell!.text]) {
