@@ -3957,8 +3957,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeMutation dco_decode_bridge_mutation(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 17)
-      throw Exception('unexpected arr length: expect 17 but see ${arr.length}');
+    if (arr.length != 18)
+      throw Exception('unexpected arr length: expect 18 but see ${arr.length}');
     return BridgeMutation(
       kind: dco_decode_bridge_mutation_kind(arr[0]),
       area: dco_decode_opt_String(arr[1]),
@@ -3967,16 +3967,17 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       block: dco_decode_opt_String(arr[4]),
       view: dco_decode_opt_String(arr[5]),
       after: dco_decode_opt_String(arr[6]),
-      text: dco_decode_opt_String(arr[7]),
-      at: dco_decode_i_64(arr[8]),
-      delete: dco_decode_i_64(arr[9]),
-      style: dco_decode_bridge_text_style(arr[10]),
-      boundary: dco_decode_bool(arr[11]),
-      field: dco_decode_opt_String(arr[12]),
-      row: dco_decode_opt_String(arr[13]),
-      fieldKind: dco_decode_opt_box_autoadd_bridge_field_kind(arr[14]),
-      color: dco_decode_i_64(arr[15]),
-      cell: dco_decode_opt_box_autoadd_bridge_cell(arr[16]),
+      last: dco_decode_bool(arr[7]),
+      text: dco_decode_opt_String(arr[8]),
+      at: dco_decode_i_64(arr[9]),
+      delete: dco_decode_i_64(arr[10]),
+      style: dco_decode_bridge_text_style(arr[11]),
+      boundary: dco_decode_bool(arr[12]),
+      field: dco_decode_opt_String(arr[13]),
+      row: dco_decode_opt_String(arr[14]),
+      fieldKind: dco_decode_opt_box_autoadd_bridge_field_kind(arr[15]),
+      color: dco_decode_i_64(arr[16]),
+      cell: dco_decode_opt_box_autoadd_bridge_cell(arr[17]),
     );
   }
 
@@ -6173,6 +6174,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_block = sse_decode_opt_String(deserializer);
     var var_view = sse_decode_opt_String(deserializer);
     var var_after = sse_decode_opt_String(deserializer);
+    var var_last = sse_decode_bool(deserializer);
     var var_text = sse_decode_opt_String(deserializer);
     var var_at = sse_decode_i_64(deserializer);
     var var_delete = sse_decode_i_64(deserializer);
@@ -6193,6 +6195,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       block: var_block,
       view: var_view,
       after: var_after,
+      last: var_last,
       text: var_text,
       at: var_at,
       delete: var_delete,
@@ -8892,6 +8895,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_opt_String(self.block, serializer);
     sse_encode_opt_String(self.view, serializer);
     sse_encode_opt_String(self.after, serializer);
+    sse_encode_bool(self.last, serializer);
     sse_encode_opt_String(self.text, serializer);
     sse_encode_i_64(self.at, serializer);
     sse_encode_i_64(self.delete, serializer);

@@ -4516,6 +4516,7 @@ impl SseDecode for crate::api::workspace::BridgeMutation {
         let mut var_block = <Option<String>>::sse_decode(deserializer);
         let mut var_view = <Option<String>>::sse_decode(deserializer);
         let mut var_after = <Option<String>>::sse_decode(deserializer);
+        let mut var_last = <bool>::sse_decode(deserializer);
         let mut var_text = <Option<String>>::sse_decode(deserializer);
         let mut var_at = <i64>::sse_decode(deserializer);
         let mut var_delete = <i64>::sse_decode(deserializer);
@@ -4535,6 +4536,7 @@ impl SseDecode for crate::api::workspace::BridgeMutation {
             block: var_block,
             view: var_view,
             after: var_after,
+            last: var_last,
             text: var_text,
             at: var_at,
             delete: var_delete,
@@ -7889,6 +7891,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::workspace::BridgeMutation {
             self.block.into_into_dart().into_dart(),
             self.view.into_into_dart().into_dart(),
             self.after.into_into_dart().into_dart(),
+            self.last.into_into_dart().into_dart(),
             self.text.into_into_dart().into_dart(),
             self.at.into_into_dart().into_dart(),
             self.delete.into_into_dart().into_dart(),
@@ -9868,6 +9871,7 @@ impl SseEncode for crate::api::workspace::BridgeMutation {
         <Option<String>>::sse_encode(self.block, serializer);
         <Option<String>>::sse_encode(self.view, serializer);
         <Option<String>>::sse_encode(self.after, serializer);
+        <bool>::sse_encode(self.last, serializer);
         <Option<String>>::sse_encode(self.text, serializer);
         <i64>::sse_encode(self.at, serializer);
         <i64>::sse_encode(self.delete, serializer);

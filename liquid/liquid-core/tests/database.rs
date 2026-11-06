@@ -4,8 +4,8 @@
 
 use liquid_core::{
     Actor, Applied, BlockId, BlockKind, Cell, Created, Error, FieldId, FieldKind, MAX_FIELDS,
-    MAX_OPTIONS, Match, MemoryStore, Mutation, Origin, PageId, PersonId, Request, RowId, RowQuery,
-    Sort,
+    MAX_OPTIONS, Match, MemoryStore, Mutation, Origin, PageId, PersonId, Place, Request, RowId,
+    RowQuery, Sort,
 };
 
 type Workspace = liquid_core::Workspace<MemoryStore>;
@@ -58,18 +58,11 @@ fn field(
     name: &str,
     kind: FieldKind,
 ) -> FieldId {
-    // After the last field, as the header's + adds one.
-    let last = workspace
-        .database(page, block)
-        .unwrap()
-        .unwrap()
-        .fields
-        .last()
-        .map(|field| field.id.clone());
+    // Last, as the header's + adds one.
     let add = Mutation::AddField {
         page: page.clone(),
         block: block.clone(),
-        after: last,
+        place: Place::Last,
         name: name.into(),
         kind,
     };
@@ -80,10 +73,20 @@ fn field(
 }
 
 fn row(workspace: &mut Workspace, page: &PageId, block: &BlockId, after: Option<&RowId>) -> RowId {
+    let place = after.map_or(Place::First, |after| Place::After(after.clone()));
+    add_row(workspace, page, block, place)
+}
+
+fn add_row(
+    workspace: &mut Workspace,
+    page: &PageId,
+    block: &BlockId,
+    place: Place<RowId>,
+) -> RowId {
     let add = Mutation::AddRow {
         page: page.clone(),
         block: block.clone(),
-        after: after.cloned(),
+        place,
     };
     match apply(workspace, add).unwrap().created {
         Some(Created::Row(row)) => row,
@@ -530,7 +533,7 @@ fn database_writes_change_only_their_block_and_its_text_reads_none() {
         Mutation::AddRow {
             page: page.clone(),
             block: block.clone(),
-            after: None,
+            place: Place::First,
         },
     )
     .unwrap();
@@ -701,7 +704,7 @@ fn a_database_holds_a_bounded_number_of_fields_and_options() {
         let add = Mutation::AddField {
             page: page.clone(),
             block: block.clone(),
-            after: None,
+            place: Place::First,
             name: format!("Field {number}"),
             kind: FieldKind::Select,
         };
@@ -710,7 +713,7 @@ fn a_database_holds_a_bounded_number_of_fields_and_options() {
     let one_more = Mutation::AddField {
         page: page.clone(),
         block: block.clone(),
-        after: None,
+        place: Place::First,
         name: "One more".into(),
         kind: FieldKind::Text,
     };
@@ -767,4 +770,90 @@ fn a_view_names_the_kind_of_its_block() {
         kinds(&mut workspace),
         [BlockKind::Database, BlockKind::Text]
     );
+}
+
+#[test]
+fn rows_and_fields_added_last_go_after_all_others_when_applied() {
+    let (mut workspace, page, block) = expenses();
+    let name = workspace.database(&page, &block).unwrap().unwrap().fields[0]
+        .id
+        .clone();
+    let text = |workspace: &mut Workspace, row: &RowId, text: &str| {
+        set(
+            workspace,
+            &page,
+            &block,
+            row,
+            &name,
+            Cell::Text(text.into()),
+        )
+        .unwrap();
+    };
+    let a = add_row(&mut workspace, &page, &block, Place::Last);
+    text(&mut workspace, &a, "A");
+    let b = add_row(&mut workspace, &page, &block, Place::Last);
+    text(&mut workspace, &b, "B");
+    let c = add_row(&mut workspace, &page, &block, Place::After(a.clone()));
+    text(&mut workspace, &c, "C");
+    let d = add_row(&mut workspace, &page, &block, Place::Last);
+    text(&mut workspace, &d, "D");
+    let e = add_row(&mut workspace, &page, &block, Place::First);
+    text(&mut workspace, &e, "E");
+    assert_eq!(
+        column(&mut workspace, &page, &block, &all(), &name),
+        ["E", "A", "C", "B", "D"].map(|text| Cell::Text(text.into())),
+    );
+
+    field(&mut workspace, &page, &block, "Amount", FieldKind::Number);
+    let first = Mutation::AddField {
+        page: page.clone(),
+        block: block.clone(),
+        place: Place::First,
+        name: "Paid".into(),
+        kind: FieldKind::Checkbox,
+    };
+    apply(&mut workspace, first).unwrap();
+    field(&mut workspace, &page, &block, "Date", FieldKind::Date);
+    let names: Vec<_> = workspace
+        .database(&page, &block)
+        .unwrap()
+        .unwrap()
+        .fields
+        .into_iter()
+        .map(|field| field.name)
+        .collect();
+    assert_eq!(names, ["Paid", "Name", "Amount", "Date"]);
+}
+
+#[test]
+fn actions_stored_before_places_still_read() {
+    let (mut workspace, page, block) = expenses();
+    let row = add_row(&mut workspace, &page, &block, Place::Last);
+    // As an Action recorded before ADR-0247 holds it: `after`, none or a row.
+    for (after, place) in [
+        (serde_json::Value::Null, Place::First),
+        (
+            serde_json::json!(row.to_string()),
+            Place::After(row.clone()),
+        ),
+    ] {
+        let mut stored = serde_json::to_value(Mutation::AddRow {
+            page: page.clone(),
+            block: block.clone(),
+            place: Place::Last,
+        })
+        .unwrap();
+        let fields = stored["AddRow"].as_object_mut().unwrap();
+        fields.remove("place");
+        fields.insert("after".into(), after);
+        let read: Mutation = serde_json::from_value(stored).unwrap();
+        assert_eq!(
+            read,
+            Mutation::AddRow {
+                page: page.clone(),
+                block: block.clone(),
+                place,
+            }
+        );
+    }
 }

@@ -16,7 +16,7 @@ use automerge::transaction::Transactable;
 use automerge::{AutoCommit, ObjId, ObjType, ReadDoc, ScalarValue, Value};
 
 use crate::model::{self, BLOCKS, KIND, NAME, SORT};
-use crate::{BlockId, Cell, Error, FieldId, FieldKind, OptionId, RowId};
+use crate::{BlockId, Cell, Error, FieldId, FieldKind, OptionId, Place, RowId};
 
 const DATABASE: &str = "database";
 const FIELDS: &str = "fields";
@@ -175,11 +175,12 @@ impl Index {
         self.rows.iter().position(|indexed| &indexed.id == row)
     }
 
-    /// The sort key for a row placed after `after`, or first.
-    fn key_after(&self, after: Option<&RowId>) -> Result<String, Error> {
-        let index = match after {
-            None => 0,
-            Some(after) => self.position(after).ok_or(Error::NotFound)? + 1,
+    /// The sort key for a row placed at `place`.
+    fn key_at(&self, place: Place<&RowId>) -> Result<String, Error> {
+        let index = match place {
+            Place::First => 0,
+            Place::After(after) => self.position(after).ok_or(Error::NotFound)? + 1,
+            Place::Last => self.rows.len(),
         };
         let key = |i: usize| self.rows.get(i).map(|row| row.sort.as_str());
         Ok(crate::sort_key::between(
@@ -263,7 +264,7 @@ pub(crate) fn create(doc: &mut AutoCommit, block: &BlockId, name: &str) -> Resul
         doc,
         &fields,
         &FieldId::new()?,
-        None,
+        Place::First,
         "Name",
         FieldKind::Text,
     )?;
@@ -274,7 +275,7 @@ fn add_field_to(
     doc: &mut AutoCommit,
     fields: &ObjId,
     field: &FieldId,
-    after: Option<&FieldId>,
+    place: Place<&FieldId>,
     name: &str,
     kind: FieldKind,
 ) -> Result<(), Error> {
@@ -282,7 +283,12 @@ fn add_field_to(
     if siblings.len() >= MAX_FIELDS {
         return Err(Error::TooMany);
     }
-    let sort = model::sort_after(&siblings, after.map(FieldId::as_str))?;
+    let place = match place {
+        Place::First => Place::First,
+        Place::After(after) => Place::After(after.as_str()),
+        Place::Last => Place::Last,
+    };
+    let sort = model::sort_at(&siblings, place)?;
     let entry = model::insert_in(
         doc,
         fields,
@@ -301,13 +307,13 @@ pub(crate) fn rename(doc: &mut AutoCommit, block: &BlockId, name: &str) -> Resul
 pub(crate) fn add_field(
     doc: &mut AutoCommit,
     block: &BlockId,
-    after: Option<&FieldId>,
+    place: Place<&FieldId>,
     name: &str,
     kind: FieldKind,
 ) -> Result<FieldId, Error> {
     let fields = map(doc, &entry(doc, block)?, FIELDS)?;
     let field = FieldId::new()?;
-    add_field_to(doc, &fields, &field, after, name, kind)?;
+    add_field_to(doc, &fields, &field, place, name, kind)?;
     Ok(field)
 }
 
@@ -370,10 +376,10 @@ pub(crate) fn add_row(
     doc: &mut AutoCommit,
     index: &mut Index,
     block: &BlockId,
-    after: Option<&RowId>,
+    place: Place<&RowId>,
 ) -> Result<RowId, Error> {
     let rows = map(doc, &entry(doc, block)?, ROWS)?;
-    let sort = index.key_after(after)?;
+    let sort = index.key_at(place)?;
     let row = RowId::new()?;
     let entry = model::insert_in(doc, &rows, row.as_str(), &[(SORT, &sort)])?;
     doc.put_object(&entry, CELLS, ObjType::Map)?;

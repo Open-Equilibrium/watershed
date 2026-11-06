@@ -15,7 +15,7 @@ use std::sync::{Mutex, PoisonError};
 
 use liquid_core::{
     Actor, AreaId, BlockId, BlockKind, Changed, Created, Error, FieldId, Mutation, Origin, PageId,
-    PersonId, Request, RowId, TextStyle, ViewId, Workspace,
+    PersonId, Place, Request, RowId, TextStyle, ViewId, Workspace,
 };
 use liquid_storage::Sqlite;
 
@@ -59,8 +59,8 @@ pub enum BridgeMutationKind {
     AddDatabaseBlock,
     /// Renames the Database `block` on its home `page` to `text`.
     RenameDatabase,
-    /// Adds a field named `text` of `field_kind` to the Database `block` on its home `page`,
-    /// after the field `after` or first.
+    /// Adds a field named `text` of `field_kind` to the Database `block` on its home `page`:
+    /// last, after the field `after`, or first.
     AddField,
     /// Renames `field` of the Database `block` on its home `page` to `text`.
     RenameField,
@@ -69,8 +69,8 @@ pub enum BridgeMutationKind {
     /// Adds an option named `text` of `color` to the select `field` of the Database `block`
     /// on its home `page`.
     AddOption,
-    /// Adds an empty row to the Database `block` on its home `page`, after the row `after`
-    /// or first.
+    /// Adds an empty row to the Database `block` on its home `page`: last, after the row
+    /// `after`, or first.
     AddRow,
     /// Removes `row` from the Database `block` on its home `page`.
     RemoveRow,
@@ -148,6 +148,9 @@ pub struct BridgeMutation {
     pub view: Option<String>,
     /// The View, field or row a new one follows.
     pub after: Option<String>,
+    /// Whether a new field or row goes after all others as the core applies it, rather
+    /// than first or after `after` (ADR-0247).
+    pub last: bool,
     /// A name, title or text.
     pub text: Option<String>,
     /// Where an edit starts.
@@ -401,6 +404,18 @@ fn optional_id<T>(
     text.as_ref().map(|_| id(text, parse, what)).transpose()
 }
 
+impl BridgeMutation {
+    /// Where a new field or row goes: last, after `after`, or first.
+    fn place<T>(&self, parse: fn(&str) -> Option<T>) -> Result<Place<T>, String> {
+        match (self.last, optional_id(&self.after, parse, "after")?) {
+            (true, Some(_)) => Err("after and last cannot both be set".into()),
+            (true, None) => Ok(Place::Last),
+            (false, Some(after)) => Ok(Place::After(after)),
+            (false, None) => Ok(Place::First),
+        }
+    }
+}
+
 fn units(value: i64, what: &str) -> Result<usize, String> {
     usize::try_from(value).map_err(|_| format!("{what} is negative"))
 }
@@ -477,7 +492,7 @@ impl BridgeMutation {
             BridgeMutationKind::AddField => Mutation::AddField {
                 page: page()?,
                 block: block()?,
-                after: optional_id(&self.after, FieldId::parse, "after")?,
+                place: self.place(FieldId::parse)?,
                 name: text()?,
                 kind: self.field_kind.ok_or("field kind is missing")?.to_core(),
             },
@@ -502,7 +517,7 @@ impl BridgeMutation {
             BridgeMutationKind::AddRow => Mutation::AddRow {
                 page: page()?,
                 block: block()?,
-                after: optional_id(&self.after, RowId::parse, "after")?,
+                place: self.place(RowId::parse)?,
             },
             BridgeMutationKind::RemoveRow => Mutation::RemoveRow {
                 page: page()?,

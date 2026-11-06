@@ -4,8 +4,8 @@
 use std::path::{Path, PathBuf};
 
 use liquid_core::{
-    Actor, Created, Document, Error, Mutation, Operation, Origin, PageId, PersonId, Request, Store,
-    Workspace,
+    Actor, Created, Document, Error, Mutation, Operation, Origin, PageId, PersonId, Place, Request,
+    Store, Workspace,
 };
 use liquid_storage::Sqlite;
 
@@ -218,7 +218,7 @@ fn history_keeps_a_number_cell_exactly() {
     let amount = Mutation::AddField {
         page: page.clone(),
         block: block.clone(),
-        after: Some(field),
+        place: Place::After(field),
         name: "Amount".into(),
         kind: liquid_core::FieldKind::Number,
     };
@@ -228,7 +228,7 @@ fn history_keeps_a_number_cell_exactly() {
     let row = Mutation::AddRow {
         page: page.clone(),
         block: block.clone(),
-        after: None,
+        place: Place::Last,
     };
     let Some(Created::Row(row)) = apply(&mut workspace, row) else {
         panic!("a row")

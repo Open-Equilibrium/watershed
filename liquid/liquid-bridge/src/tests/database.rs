@@ -422,6 +422,37 @@ fn malformed_database_requests_are_refused() {
         ..query(BridgeQueryKind::Rows)
     });
     assert_eq!(unmatched.unwrap_err(), "the filter's value is missing");
+    let both = expenses.apply(BridgeMutation {
+        after: Some(rent),
+        last: true,
+        ..mutation(BridgeMutationKind::AddRow)
+    });
+    assert_eq!(both.unwrap_err(), "after and last cannot both be set");
+}
+
+#[test]
+fn rows_and_fields_added_last_go_after_all_others() {
+    let expenses = Expenses::new("database-last");
+    let last = |kind| BridgeMutation {
+        last: true,
+        ..mutation(kind)
+    };
+    let a = expenses.apply(last(BridgeMutationKind::AddRow)).unwrap();
+    let b = expenses.apply(last(BridgeMutationKind::AddRow)).unwrap();
+    let first = expenses.row(None);
+    let rows = expenses.rows(query(BridgeQueryKind::Rows)).unwrap().rows;
+    let ids: Vec<_> = rows.into_iter().map(|row| row.id).collect();
+    assert_eq!(ids, [first, a, b]);
+
+    let amount = expenses
+        .apply(BridgeMutation {
+            text: Some("Amount".into()),
+            field_kind: Some(BridgeFieldKind::Number),
+            ..last(BridgeMutationKind::AddField)
+        })
+        .unwrap();
+    let fields = expenses.database().database.unwrap().fields;
+    assert_eq!(fields.last().unwrap().id, amount);
 }
 
 #[test]

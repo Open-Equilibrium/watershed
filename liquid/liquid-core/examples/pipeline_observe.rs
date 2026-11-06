@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 
 use liquid_core::{
     Actor, Cell, Created, FieldKind, Filter, Match, MemoryStore, Mutation, Origin, PageId,
-    PersonId, Request, RowQuery, Sort, Workspace,
+    PersonId, Place, Request, RowQuery, Sort, Workspace,
 };
 
 const KEYSTROKES: usize = 10_000;
@@ -147,7 +147,7 @@ fn main() {
         let add = Mutation::AddField {
             page: budget.clone(),
             block: block.clone(),
-            after: fields.last().cloned(),
+            place: Place::Last,
             name: name.into(),
             kind,
         };
@@ -156,13 +156,12 @@ fn main() {
         };
         fields.push(field);
     }
-    let mut after = None;
     let (mut added, mut filled) = (Vec::with_capacity(ROWS), Vec::with_capacity(ROWS * 4));
     for i in 0..ROWS {
         let add = Mutation::AddRow {
             page: budget.clone(),
             block: block.clone(),
-            after: after.clone(),
+            place: Place::Last,
         };
         let start = Instant::now();
         let Some(Created::Row(row)) = workspace.apply(request(add)).unwrap().created else {
@@ -187,7 +186,6 @@ fn main() {
             workspace.apply(request(set)).unwrap();
             filled.push(start.elapsed());
         }
-        after = Some(row);
     }
     summary(
         &format!("Database of {ROWS} rows, per row added at the end"),

@@ -499,12 +499,12 @@ impl<S: Store> Workspace<S> {
             Mutation::AddField {
                 page,
                 block,
-                after,
+                place,
                 name,
                 kind,
             } => {
                 let doc = self.doc(&Document::Page(page.clone()))?;
-                let field = database::add_field(doc, block, after.as_ref(), name, *kind)?;
+                let field = database::add_field(doc, block, place.as_ref(), name, *kind)?;
                 Ok(database_changed(page, block, Some(Created::Field(field))))
             }
             Mutation::RenameField {
@@ -536,9 +536,9 @@ impl<S: Store> Workspace<S> {
                 let option = database::add_option(doc, block, field, name, *color)?;
                 Ok(database_changed(page, block, Some(Created::Option(option))))
             }
-            Mutation::AddRow { page, block, after } => {
+            Mutation::AddRow { page, block, place } => {
                 let (doc, index) = self.database_index(page, block)?;
-                let row = database::add_row(doc, index, block, after.as_ref())?;
+                let row = database::add_row(doc, index, block, place.as_ref())?;
                 Ok(database_changed(page, block, Some(Created::Row(row))))
             }
             Mutation::RemoveRow { page, block, row } => {
