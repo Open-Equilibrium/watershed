@@ -27,6 +27,9 @@ use crate::diff::{
 /// started that stay in its process group.
 const GIT_TIMEOUT: Duration = Duration::from_secs(60);
 
+/// How long the Chat's model may take to write a pull request's text (decided 2026-11-06).
+const TEXT_TIMEOUT: Duration = Duration::from_secs(60);
+
 /// Longest deleting a session or removing all checkpoints waits for a turn that is ending.
 const ENDING_WAIT: Duration = Duration::from_secs(2);
 
@@ -138,6 +141,7 @@ pub struct Checkpoints {
     tree: tokio::sync::Mutex<Option<Result<Arc<WorkingTree>, Unopened>>>,
     timeout: Duration,
     attribution_timeout: Duration,
+    text_timeout: Duration,
     /// Tells commands in progress that the checkpoints closed.
     closed: watch::Sender<bool>,
     /// Checkpoints are taken one after another; one waiting for its turn does not count its wait
@@ -173,6 +177,7 @@ impl Checkpoints {
             tree: tokio::sync::Mutex::new(None),
             timeout,
             attribution_timeout: timeout,
+            text_timeout: TEXT_TIMEOUT,
             closed: watch::Sender::new(false),
             captures: tokio::sync::Mutex::new(()),
             running: std::sync::Mutex::new(None),
@@ -576,6 +581,11 @@ impl Checkpoints {
     #[cfg(test)]
     pub(crate) fn set_timeout(&mut self, timeout: Duration) {
         self.timeout = timeout;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_text_timeout(&mut self, timeout: Duration) {
+        self.text_timeout = timeout;
     }
 
     #[cfg(test)]

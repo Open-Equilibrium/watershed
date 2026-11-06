@@ -3,7 +3,8 @@
 use super::*;
 use crate::TurnCheckpoints;
 use crate::diff::{
-    Commit, PullRequest, PullRequestDraft, PullRequestError, PullRequestPlan, Snapshot,
+    Commit, PullRequest, PullRequestDraft, PullRequestError, PullRequestPlan, PullRequestText,
+    Snapshot,
 };
 use std::collections::BTreeMap;
 
@@ -97,6 +98,45 @@ impl Checkpoints {
         let tree = self.tree().await?;
         self.bounded(async { Ok(tree.pull_request(&self.gh).await) })
             .await?
+    }
+
+    /// The title and description `model` (`provider/id`) writes, through pi as `program` with
+    /// `args`, about the commits from `base` to `head`, within the time limit; closing the
+    /// checkpoints stops the wait.
+    pub async fn write_pull_request_text(
+        &self,
+        program: &Path,
+        args: &[std::ffi::OsString],
+        model: &str,
+        base: &str,
+        head: &str,
+    ) -> Result<PullRequestText, PullRequestError> {
+        let limit = self.text_timeout;
+        let deadline = tokio::time::Instant::now() + limit;
+        let tree = self.tree().await?;
+        let question = self
+            .until_closed(async {
+                tokio::time::timeout_at(
+                    deadline,
+                    tree.pull_request_question(program, args, model, base, head),
+                )
+                .await
+                .map_err(|_| DiffError::TimedOut(limit))
+            })
+            .await??;
+        // A caller that stops waiting leaves pi to end by itself or at the time limit, so it is
+        // never killed while it refreshes and stores its login.
+        let answer = tokio::spawn(async move {
+            tokio::time::timeout_at(deadline, question.ask())
+                .await
+                .map_err(|_| DiffError::TimedOut(limit))?
+        });
+        self.until_closed(async {
+            answer
+                .await
+                .map_err(|error| DiffError::Io(std::io::Error::other(error)))
+        })
+        .await?
     }
 
     /// The branches of `target` on `host`, to choose a base from; `true` when GitHub may list

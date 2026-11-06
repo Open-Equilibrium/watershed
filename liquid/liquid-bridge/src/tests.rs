@@ -1933,3 +1933,57 @@ fn pull_request_outcomes_say_what_blocks_creation_and_write_out_hidden_text() {
     assert_eq!(plan.head, "bw:feature/<U+202E>x");
     assert_eq!(plan.identity.head_branch, "feature/\u{202e}x");
 }
+
+#[test]
+fn the_chats_model_writes_pull_request_text_until_stopped() {
+    let repo = repository("pr-text");
+    let commit = |repo: &std::path::Path| {
+        let output = std::process::Command::new("git")
+            .args(["rev-parse", "HEAD"])
+            .current_dir(repo)
+            .output()
+            .unwrap();
+        String::from_utf8(output.stdout).unwrap().trim().to_owned()
+    };
+    let base = commit(&repo);
+    std::fs::write(repo.join("b.txt"), "retry\n").unwrap();
+    git(&repo, &["add", "b.txt"]);
+    git(&repo, &["commit", "-q", "-m", "Retry after"]);
+    let head = commit(&repo);
+    let slow = repo.with_extension("slow");
+    let _ = std::fs::remove_file(&slow);
+    // pi's one answer, as `sh -c` takes its first argument as `$0`; else the session's pi.
+    let once = format!(
+        "if [ \"$0\" = --print ]; then cat > /dev/null; if [ -e {0} ]; then : > {0}.started; sleep 12; fi; printf 'Retry after\\n\\nWaits.\\n'; exit 0; fi\n",
+        shell_word(&slow.display().to_string())
+    );
+    let script = format!("{once}{}", gated("IFS= read -r line || exit 0\n"));
+    let session = launch(script, repo.display().to_string()).unwrap();
+    let write = || {
+        session.write_pull_request_text("anthropic/claude-test".into(), base.clone(), head.clone())
+    };
+
+    let text = write().unwrap();
+    assert_eq!(
+        (text.title.as_str(), text.body.as_str()),
+        ("Retry after", "Waits.")
+    );
+
+    std::fs::write(&slow, "").unwrap();
+    let started = std::time::Instant::now();
+    let deadline = started + Duration::from_secs(10);
+    std::thread::scope(|scope| {
+        let writing = scope.spawn(write);
+        let started = slow.with_extension("slow.started");
+        while !started.exists() && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        session.stop_pull_request_text();
+        assert!(writing.join().unwrap().is_err());
+    });
+    assert!(started.elapsed() < Duration::from_secs(10));
+    assert!(call(session.shutdown()));
+    let _ = std::fs::remove_file(slow.with_extension("slow.started"));
+    let _ = std::fs::remove_file(slow);
+    let _ = std::fs::remove_dir_all(repo);
+}

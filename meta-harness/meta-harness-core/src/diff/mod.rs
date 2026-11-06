@@ -22,6 +22,7 @@ use tokio::sync::Mutex;
 mod branches;
 mod commit;
 mod process;
+mod pull_text;
 mod pulls;
 mod revert;
 mod stash;
@@ -29,6 +30,7 @@ mod sync;
 
 pub use branches::{Branch, BranchTarget, Changes, GitStatus, without_credentials};
 pub use commit::Commit;
+pub use pull_text::PullRequestText;
 pub use pulls::{
     Comparison, PullRequest, PullRequestDraft, PullRequestError, PullRequestPlan, PullRequestState,
     ReviewDecision,
@@ -278,6 +280,11 @@ pub struct WorkingTree {
     store: Store,
     /// Serializes use of the private index.
     busy: Mutex<()>,
+}
+
+/// A full commit id, which no Git option can start with.
+pub(crate) fn commit_id(id: &str) -> bool {
+    matches!(id.len(), 40 | 64) && id.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
 /// A private temporary directory, removed on drop.

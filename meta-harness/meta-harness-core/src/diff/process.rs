@@ -1,5 +1,5 @@
-//! Running the host's `git`: bounded output, kept error text and a process group that ends with
-//! it.
+//! Running the host's `git`, and pi once for a pull request's text: bounded output, kept error
+//! text and a process group that ends with it.
 
 use super::*;
 use std::future::{Future, poll_fn};
@@ -40,6 +40,16 @@ pub(super) async fn git_bytes(
     args: &[&str],
 ) -> Result<Vec<u8>, DiffError> {
     output(git_command(dir, env, args), false, None).await
+}
+
+/// At most `limit` bytes from the start of Git's output in `dir`, and whether it went on; Git
+/// stops at the cut.
+pub(super) async fn git_start(
+    dir: &Path,
+    args: &[&str],
+    limit: u64,
+) -> Result<(Vec<u8>, bool), DiffError> {
+    cut_output(git_command(dir, &[], args), false, None, limit).await
 }
 
 /// Decodes ref identities without aliasing byte-distinct branches.
@@ -185,6 +195,19 @@ pub(super) async fn gh(
     output(command, false, input).await
 }
 
+/// Runs the host's pi (`program` with `args`) once in `dir` with `input` and returns what it
+/// printed; its login stays its own.
+pub(super) async fn pi_once(
+    dir: &Path,
+    program: &Path,
+    args: &[OsString],
+    input: &[u8],
+) -> Result<Vec<u8>, DiffError> {
+    let mut command = Command::new(program);
+    command.args(args).current_dir(dir);
+    output(piped(command, &[] as &[(&str, &str)]), false, Some(input)).await
+}
+
 /// Keeps Git and its credential helpers from asking on a terminal or in a window, as T3 Code
 /// does.
 pub(super) const NO_PROMPTS: [(&str, &str); 5] = [
@@ -206,10 +229,24 @@ pub(super) fn no_prompts() -> Vec<(&'static str, OsString)> {
 
 /// Runs `command` and returns at most [`MAX_OUTPUT_BYTES`] of its output.
 async fn output(
-    mut command: Command,
+    command: Command,
     missing_config: bool,
     input: Option<&[u8]>,
 ) -> Result<Vec<u8>, DiffError> {
+    match cut_output(command, missing_config, input, MAX_OUTPUT_BYTES).await? {
+        (_, true) => Err(DiffError::TooLarge),
+        (output, false) => Ok(output),
+    }
+}
+
+/// Runs `command` and returns at most `limit` bytes of its output, and whether it went on; the
+/// command stops at the cut.
+async fn cut_output(
+    mut command: Command,
+    missing_config: bool,
+    input: Option<&[u8]>,
+    limit: u64,
+) -> Result<(Vec<u8>, bool), DiffError> {
     if input.is_some() {
         command.stdin(Stdio::piped());
     }
@@ -229,16 +266,20 @@ async fn output(
         writes.spawn(async move { stdin.write_all(&input).await.map_err(unreadable) });
     }
     stdout
-        .take(MAX_OUTPUT_BYTES + 1)
+        .take(limit + 1)
         .read_to_end(&mut output)
         .await
         .map_err(unreadable)?;
-    if output.len() as u64 > MAX_OUTPUT_BYTES {
-        return Err(DiffError::TooLarge);
+    if output.len() as u64 > limit {
+        output.truncate(limit as usize);
+        return Ok((output, true));
     }
-    if let Some(written) = writes.join_next().await {
-        written.map_err(|error| DiffError::Io(std::io::Error::other(error)))??;
-    }
+    // A program that ends without reading its input says why on its error output, so a failed
+    // write counts only once the program succeeded.
+    let written = match writes.join_next().await {
+        Some(written) => written.map_err(|error| DiffError::Io(std::io::Error::other(error)))?,
+        None => Ok(()),
+    };
     // A program Git started can hold its error output after Git ended. Git is reaped only once
     // that output ended too, so until then its time limit still ends such programs with it.
     let errors = errors
@@ -252,13 +293,14 @@ async fn output(
         .map_err(|error| DiffError::Git(error.to_string()))?;
     if !status.success() {
         if missing_config && status.code() == Some(1) && errors.is_empty() {
-            return Ok(Vec::new());
+            return Ok((Vec::new(), false));
         }
         return Err(DiffError::Git(
             String::from_utf8_lossy(&errors).trim().to_owned(),
         ));
     }
-    Ok(output)
+    written?;
+    Ok((output, false))
 }
 
 /// The host's `git` in `dir` with its output piped. Project settings that would run something
@@ -272,6 +314,9 @@ pub(super) fn git_command(dir: &Path, env: &[(&str, OsString)], args: &[&str]) -
             "core.hooksPath=/dev/null",
             "-c",
             "core.fsmonitor=false",
+            // Nor does it verify signatures, which runs the project's signature program.
+            "-c",
+            "log.showSignature=false",
             // Every file's state is checked in full, so no setting hides a change.
             "-c",
             "core.ignoreStat=false",
@@ -303,7 +348,7 @@ fn piped(mut command: Command, env: &[(&str, impl AsRef<std::ffi::OsStr>)]) -> C
     command
         // A group of its own, so Git ends with the programs it starts (see [`Git`]).
         .process_group(0)
-        // Git's messages in English, as Liquid shows them and reads one.
+        // Git's messages in English, as Liquid shows them and reads one; pi runs with it too.
         .env("LC_ALL", "C")
         .envs(env.iter().map(|(name, value)| (name, value)))
         .stdin(Stdio::null())
@@ -318,7 +363,7 @@ pub(super) fn unreadable(error: std::io::Error) -> DiffError {
     DiffError::Git(error.to_string())
 }
 
-/// A running Git. Dropped before it ended, as at its time limit, it ends with the programs it
+/// A running Git, or pi once. Dropped before it ended, as at its time limit, it ends with the programs it
 /// started that stay in its process group, such as a project's clean filter (ADR-0210).
 pub(super) struct Git {
     pub(super) child: Child,
