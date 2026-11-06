@@ -229,7 +229,10 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
       // The form replaces the reading state, whose dialog took the focus first.
       WidgetsBinding.instance.addPostFrameCallback((_) {
         // The commit message comes first when there is one to write.
-        if (mounted) (_files?.messageFocus ?? _titleFocus).requestFocus();
+        if (mounted) {
+          (_hasFiles || _loadingFiles ? _files!.messageFocus : _titleFocus)
+              .requestFocus();
+        }
       });
     }
     _plan = plan;
@@ -252,7 +255,6 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
         return;
       }
       final paths = _files?.paths ?? const <String>[];
-      _writtenFiles = paths.isNotEmpty;
       // Liquid's remote has the base only for the head's own repository, not a fork's parent.
       final base = plan.target == plan.identity.headRepository
           ? plan.base?.name
@@ -260,6 +262,7 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
       _ask(
         plan,
         'draft ${base ?? ''}\n${paths.join('\n')}',
+        files: paths.isNotEmpty,
         () => _pulls.writeDraft(
           model,
           base: base,
@@ -291,8 +294,9 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
   void _ask(
     BridgePullRequestPlan plan,
     String key,
-    Future<BridgePullRequestText?> Function() write,
-  ) {
+    Future<BridgePullRequestText?> Function() write, {
+    bool files = false,
+  }) {
     if (key == _asked) return;
     _asked = key;
     final asked = ++_writes;
@@ -309,6 +313,7 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
       setState(() {
         _writing = false;
         _written = text?.commits.toInt() ?? 0;
+        _writtenFiles = files;
         _text = failed
             ? _Text.failed
             : text == null
