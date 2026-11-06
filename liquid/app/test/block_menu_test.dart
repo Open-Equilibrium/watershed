@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -383,5 +385,74 @@ void main() {
       find.descendant(of: find.byType(TableBlock), matching: find.text('ni')),
       findsOneWidget,
     );
+  });
+
+  testWidgets('what is typed while a Table is added becomes its name', (
+    tester,
+  ) async {
+    await show(tester, ['Intro', '', 'After']);
+    await type(tester, 1, '/');
+    await type(tester, 1, 'table');
+    final gate = fake.gate = Completer<void>();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    await type(tester, 1, 'Ex');
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    fake.gate = null;
+    gate.complete();
+    await tester.pumpAndSettle();
+    expect(fake.views[page]!.map((view) => view.kind), [
+      BridgeBlockKind.text,
+      BridgeBlockKind.database,
+      BridgeBlockKind.text,
+    ]);
+    expect(fake.textsOf(page), ['Intro', 'After']);
+    expect(fake.databases[fake.views[page]![1].block]!.name, 'Ex');
+    final name = tester.widget<TextField>(
+      find.descendant(
+        of: find.byType(TableBlock),
+        matching: find.byType(TextField),
+      ),
+    );
+    expect(name.focusNode!.hasFocus, isTrue);
+    expect(name.controller!.text, 'Ex');
+  });
+
+  testWidgets('a Table\'s name shows no read that crossed its renames', (
+    tester,
+  ) async {
+    await show(tester, ['']);
+    await type(tester, 0, '/');
+    await type(tester, 0, 'table');
+    await key(tester, LogicalKeyboardKey.enter);
+    final reads = fake.deferred = [];
+    fake.deferredKinds = {BridgeQueryKind.database};
+    for (final typed in ['A', 'AB']) {
+      tester.testTextInput.updateEditingValue(
+        TextEditingValue(
+          text: typed,
+          selection: TextSelection.collapsed(offset: typed.length),
+        ),
+      );
+      await tester.pump();
+    }
+    await tester.tap(block(0));
+    await tester.pump();
+    final name = tester.widget<TextField>(
+      find.descendant(
+        of: find.byType(TableBlock),
+        matching: find.byType(TextField),
+      ),
+    );
+    expect(name.controller!.text, 'AB');
+    while (reads.isNotEmpty) {
+      reads.removeAt(0).complete();
+      await tester.pump();
+      expect(name.controller!.text, 'AB');
+    }
+    fake.deferred = null;
+    await tester.pumpAndSettle();
+    expect(name.controller!.text, 'AB');
   });
 }

@@ -73,6 +73,9 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
   var _choices = const <BlockChoice>[];
   var _chosen = 0;
 
+  /// While a Table chosen in the Block menu is added in this line's place.
+  var _adding = false;
+
   WorkspaceState get _state => widget.views.state;
   PageEditor get _editor => widget.views.editor;
   String get _page => widget.views.page;
@@ -108,7 +111,10 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
   @override
   void dispose() {
     // A composition still open, or anything else not yet sent, is written as it stands.
-    if (!_editor.owns(this) && _stored != null && _text.text != _stored) {
+    if (!_editor.owns(this) &&
+        !_adding &&
+        _stored != null &&
+        _text.text != _stored) {
       _send(_text.text);
     }
     _editor.left(this);
@@ -168,13 +174,16 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
       return;
     }
     final views = widget.views;
+    final view = widget.view;
     final last = widget.index == (views.count ?? 0) - 1;
+    // What is typed meanwhile stays in the field and becomes the Table's name.
+    _adding = true;
     try {
       final added = await views.write(
         mutation(
           BridgeMutationKind.addDatabaseBlock,
           page: _page,
-          after: last ? views.at(widget.index - 1)?.id : widget.view.id,
+          after: last ? views.at(widget.index - 1)?.id : view.id,
           text: '',
         ),
         const [],
@@ -188,23 +197,31 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
         ),
         const [],
       );
-      if (widget.view.boundary) {
+      if (view.boundary) {
         await boundary(added.view!, true);
-        if (last) await boundary(widget.view.id, false);
+        if (last) await boundary(view.id, false);
       }
+      var typed = _text.text;
       if (!last) {
         await views.write(
-          mutation(
-            BridgeMutationKind.removeView,
-            page: _page,
-            view: widget.view.id,
-          ),
+          mutation(BridgeMutationKind.removeView, page: _page, view: view.id),
           [block],
         );
       }
-      views.moveCaret(Caret(added.view!, 0));
+      if (mounted) {
+        typed = _text.text;
+        if (last) {
+          _set('', 0);
+          _adding = false;
+        }
+      }
+      views.moveCaret(Caret(added.view!, typed.length, text: typed));
     } on Object {
-      // The problem shows on the Page.
+      // The problem shows on the Page; what was typed stays in the line.
+      if (mounted) {
+        _adding = false;
+        _typed();
+      }
     }
   }
 
@@ -335,7 +352,7 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
   /// structure changes from here, the input queue takes it instead.
   void _typed() {
     final stored = _stored;
-    if (_quiet || stored == null) return;
+    if (_quiet || stored == null || _adding) return;
     if (_editor.isSource(this)) {
       _editor.typed(this);
       return;
@@ -419,6 +436,22 @@ class _TextBlockState extends State<TextBlock> implements EditorSource {
     if (!plain) return KeyEventResult.ignored;
     if (_editor.isSource(this)) return _editor.queue(this, event);
     if (_menu.isShowing) return _menuKey(event.logicalKey);
+    // While a Table takes this line's place, only typing reaches the field.
+    if (_adding) {
+      return switch (event.logicalKey) {
+        LogicalKeyboardKey.enter ||
+        LogicalKeyboardKey.numpadEnter ||
+        LogicalKeyboardKey.arrowUp ||
+        LogicalKeyboardKey.arrowDown ||
+        LogicalKeyboardKey.arrowLeft ||
+        LogicalKeyboardKey.arrowRight => KeyEventResult.handled,
+        LogicalKeyboardKey.backspace
+            when _text.selection.isCollapsed &&
+                _text.selection.baseOffset == 0 =>
+          KeyEventResult.handled,
+        _ => KeyEventResult.ignored,
+      };
+    }
     // While another Text Block's change of structure runs, this field types and deletes as
     // usual, and its own ⏎ or ⌫ at the start joins the queue behind that change.
     final selection = _text.selection;

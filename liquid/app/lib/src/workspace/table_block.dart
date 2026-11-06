@@ -130,6 +130,10 @@ class _TableBlockState extends State<TableBlock> {
   /// The name as last read or written, which typing changes once a composition ends.
   String _named = '';
 
+  /// The renames sent when the name shown last was read.
+  int _readSent = 0;
+  StreamSubscription<String>? _settled;
+
   /// Reads asked for, so only the latest shows.
   int _reads = 0;
 
@@ -144,6 +148,10 @@ class _TableBlockState extends State<TableBlock> {
     _name.addListener(_typed);
     _state.finishing.add(_typed);
     _nameFocus.addListener(_left);
+    // Once every rename arrived, the name is read again.
+    _settled = widget.views.settled
+        .where((settled) => settled == _block)
+        .listen((_) => unawaited(_read()));
     widget.views.caret.addListener(_takeCaret);
     // Built after the caret was handed to it, as a new Table is.
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -165,6 +173,7 @@ class _TableBlockState extends State<TableBlock> {
     _write();
     _state.finishing.remove(_typed);
     unawaited(_followed?.cancel());
+    unawaited(_settled?.cancel());
     widget.views.caret.removeListener(_takeCaret);
     _rows.dispose();
     _sideways.dispose();
@@ -183,8 +192,16 @@ class _TableBlockState extends State<TableBlock> {
 
   /// A caret handed to this Table goes to its name, as for a new Table.
   void _takeCaret() {
-    if (widget.views.caret.value?.view != widget.view.id) return;
+    final caret = widget.views.caret.value;
+    if (caret == null || caret.view != widget.view.id) return;
     widget.views.caret.value = null;
+    // What was typed while the Table was added is its name.
+    if (caret.text case final text? when text.isNotEmpty) {
+      _name.value = TextEditingValue(
+        text: text,
+        selection: TextSelection.collapsed(offset: text.length),
+      );
+    }
     _nameFocus.requestFocus();
   }
 
@@ -227,7 +244,8 @@ class _TableBlockState extends State<TableBlock> {
   void _left() {
     if (_nameFocus.hasFocus) return;
     _write();
-    if (widget.views.pending(_block) > 0) return;
+    final views = widget.views;
+    if (views.pending(_block) > 0 || views.sent(_block) != _readSent) return;
     _show(_database?.name ?? '');
   }
 
@@ -239,12 +257,19 @@ class _TableBlockState extends State<TableBlock> {
   /// Reads the name and fields, then the rows read so far.
   Future<void> _read() async {
     final read = ++_reads;
+    final views = widget.views;
+    // A read that crosses a rename on its way may miss it, whenever it answers.
+    final clean = views.pending(_block) == 0;
+    final sent = views.sent(_block);
     try {
       final answer = await _state.workspace.query(
         query: query(BridgeQueryKind.database, page: _page, block: _block),
       );
       if (!mounted || read != _reads) return;
-      if (!_nameFocus.hasFocus) _show(answer.database?.name ?? '');
+      if (clean && views.pending(_block) == 0 && sent == views.sent(_block)) {
+        _readSent = sent;
+        if (!_nameFocus.hasFocus) _show(answer.database?.name ?? '');
+      }
       setState(() => _database = answer.database);
     } on Object catch (error) {
       _report(error);
