@@ -112,6 +112,9 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
   /// What the model was last asked about, and how many commits it read.
   String? _asked;
   int _written = 0;
+
+  /// The model's text also describes uncommitted files.
+  bool _writtenFiles = false;
   int _writes = 0;
 
   /// Runs while Create waits after the model changed the fields, so a click meant for the
@@ -225,7 +228,8 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
       _body.text = _filledBody = plan.body;
       // The form replaces the reading state, whose dialog took the focus first.
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _titleFocus.requestFocus();
+        // The commit message comes first when there is one to write.
+        if (mounted) (_files?.messageFocus ?? _titleFocus).requestFocus();
       });
     }
     _plan = plan;
@@ -248,6 +252,7 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
         return;
       }
       final paths = _files?.paths ?? const <String>[];
+      _writtenFiles = paths.isNotEmpty;
       // Liquid's remote has the base only for the head's own repository, not a fork's parent.
       final base = plan.target == plan.identity.headRepository
           ? plan.base?.name
@@ -612,9 +617,11 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
     );
   }
 
+  /// The action the dialog opened for, which a commit it made keeps.
   String get _dialogTitle => !_compose
       ? 'Create pull request'
-      : _files != null && (_files!.plan == null || _hasFiles)
+      : _files != null &&
+            (_committed != null || _files!.plan == null || _hasFiles)
       ? 'Commit, push & create PR'
       : 'Push & create PR';
 
@@ -630,7 +637,7 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
       _Text.commit => null,
       _Text.written => Text(
         'Written by $_writer from ${_compose
-            ? _hasFiles
+            ? _writtenFiles
                   ? _written == 0
                         ? 'the files above'
                         : "the branch's commits and the files above"
@@ -831,7 +838,7 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
             chooser(
               'Target',
               target ?? 'Choose a repository…',
-              _reading || _running ? null : retarget,
+              _reading || _running || _creating ? null : retarget,
             ),
             target != null && fork && target == plan.targets.first
                 ? 'parent of ${plan.identity.headRepository}'
@@ -845,7 +852,9 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
           chooser(
             'Base',
             base?.shown ?? 'Choose a branch…',
-            _reading || _running || target == null ? null : _chooseBase,
+            _reading || _running || _creating || target == null
+                ? null
+                : _chooseBase,
           ),
           baseHint,
         ),

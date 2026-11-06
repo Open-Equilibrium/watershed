@@ -309,6 +309,16 @@ pub struct BridgePullRequestText {
     pub commits: i64,
 }
 
+impl From<meta_harness_core::PullRequestText> for BridgePullRequestText {
+    fn from(text: meta_harness_core::PullRequestText) -> Self {
+        Self {
+            title: text.title,
+            body: text.body,
+            commits: count(text.commits),
+        }
+    }
+}
+
 /// The identities a plan showed; return them unchanged when creating. `head_repository` is an
 /// `owner/name` GitHub validated, of letters, digits, `-`, `_` and `.`, so it shows as it is;
 /// never display `head_branch`, whose shown form is the plan's `head`.
@@ -1000,19 +1010,14 @@ impl AgentSession {
         merge_base: String,
         head_commit: String,
     ) -> Result<BridgePullRequestText, String> {
-        self.text(Box::pin(async {
-            self.checkpoints
-                .write_pull_request_text(
-                    &self.pi_program,
-                    &self.pi_args,
-                    &model,
-                    &merge_base,
-                    &head_commit,
-                )
-                .await
-                .map(Some)
-        }))?
-        .ok_or_else(|| "pi was not asked".to_owned())
+        self.text(Box::pin(self.checkpoints.write_pull_request_text(
+            &self.pi_program,
+            &self.pi_args,
+            &model,
+            &merge_base,
+            &head_commit,
+        )))
+        .map(BridgePullRequestText::from)
     }
 
     /// As [`AgentSession::write_pull_request_text`], before a commit and push: about the commits
@@ -1033,26 +1038,17 @@ impl AgentSession {
             &snapshot,
             &paths,
         )))
+        .map(|text| text.map(BridgePullRequestText::from))
     }
 
     /// Waits for `text` until a later request or a stop; stopping only stops the wait, and pi
     /// ends by itself or at its time limit.
     // Boxed by the callers, as flutter_rust_bridge cannot parse what `pin!` expands to.
     #[flutter_rust_bridge::frb(ignore)]
-    fn text(
+    fn text<T>(
         &self,
-        mut text: std::pin::Pin<
-            Box<
-                dyn Future<
-                        Output = Result<
-                            Option<meta_harness_core::PullRequestText>,
-                            PullRequestError,
-                        >,
-                    > + Send
-                    + '_,
-            >,
-        >,
-    ) -> Result<Option<BridgePullRequestText>, String> {
+        mut text: std::pin::Pin<Box<dyn Future<Output = Result<T, PullRequestError>> + Send + '_>>,
+    ) -> Result<T, String> {
         let (stop, stopped) = tokio::sync::oneshot::channel();
         *self.writing.lock().unwrap_or_else(PoisonError::into_inner) = Some(stop);
         RUNTIME.block_on(async {
@@ -1066,13 +1062,6 @@ impl AgentSession {
                     .map(|_| Err("stopped".to_owned()))
             })
             .await
-            .map(|text| {
-                text.map(|text| BridgePullRequestText {
-                    title: text.title,
-                    body: text.body,
-                    commits: count(text.commits),
-                })
-            })
         })
     }
 
