@@ -120,13 +120,9 @@ class _TableBlockState extends State<TableBlock> {
   final _panel = OverlayPortalController();
   final _plus = LayerLink();
 
-  /// Rows this Table added that no read counted yet, and the count last read, so the
-  /// rows scroll to their end as each one shows.
-  int _rowsAwaited = 0;
-  int? _rowsSeen;
-
-  /// Row adds on their way, and the reads started when the last returned; a read begun
-  /// later holds every row added, so it ends the wait.
+  /// After + New the rows scroll to their end on a read begun once every row add on its
+  /// way returned; the Table starts that read itself, so it holds the rows added.
+  var _rowAdded = false;
   int _rowsWriting = 0;
   int _readsAtRowAdd = 0;
 
@@ -232,21 +228,11 @@ class _TableBlockState extends State<TableBlock> {
   void _changed() {
     if (!mounted) return;
     setState(() {});
-    final count = _rows.count;
-    if (count == null) return;
-    final seen = _rowsSeen ?? count;
-    _rowsSeen = count;
-    if (_rowsAwaited > 0 && count > seen) {
-      _rowsAwaited = math.max(0, _rowsAwaited - (count - seen));
-      _toLastRow = true;
-    }
   }
 
   /// + New adds a row last, which the core places as it applies the write (ADR-0247),
   /// and shows it.
   Future<void> _addRow() async {
-    // Counted before the write, as its change may arrive first.
-    _rowsAwaited++;
     _rowsWriting++;
     try {
       await widget.views.write(
@@ -258,12 +244,13 @@ class _TableBlockState extends State<TableBlock> {
         ),
         const [],
       );
+      _rowAdded = true;
     } on Object catch (error) {
-      _rowsAwaited = math.max(0, _rowsAwaited - 1);
       _report(error);
     } finally {
       _rowsWriting--;
       _readsAtRowAdd = _reads;
+      if (_rowAdded && _rowsWriting == 0 && mounted) unawaited(_read());
     }
   }
 
@@ -293,8 +280,10 @@ class _TableBlockState extends State<TableBlock> {
     if (_database?.fields.any((field) => field.id == added.field) ?? false) {
       setState(() => _toLastField = true);
     } else {
+      // A read begun now holds the field, or it went elsewhere.
       _fieldAdded = added.field;
       _readsAtFieldAdd = _reads;
+      unawaited(_read());
     }
   }
 
@@ -402,12 +391,8 @@ class _TableBlockState extends State<TableBlock> {
       return;
     }
     await _rows.reread();
-    // Rows also removed elsewhere may hide the added ones in the count.
-    if (mounted &&
-        _rowsAwaited > 0 &&
-        _rowsWriting == 0 &&
-        read > _readsAtRowAdd) {
-      _rowsAwaited = 0;
+    if (mounted && _rowAdded && _rowsWriting == 0 && read > _readsAtRowAdd) {
+      _rowAdded = false;
       setState(() => _toLastRow = true);
     }
   }
