@@ -137,7 +137,7 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **Explorer** — Liquid's primary Workspace navigation surface, listing Pages and Sources as peer entries.
 - **Page template** — A reusable starting composition of Blocks, Views, Connections and Automations for one use case, saved from Arrange mode; it creates an ordinary Page, asking by default for the Chats it shows (ADR-0241).
 - **PowerBar** — Liquid's command and creation surface for finding Workspace objects, adding Blocks and invoking permitted Workspace or agent actions. Without a prefix it searches and jumps; `/` adds a Block and `>` lists actions, as the approved [Pages mockups](docs/design/mockups/liquid-workspace-pages.html) show; `@` is kept for people (ADR-0236).
-- **Block menu** — The menu `/` opens in an empty Text Block, as in Notion: the Text Block styles and Table, filtered by what follows `/`. It is the first part of the PowerBar's `/` ([Table View mockups](docs/design/mockups/liquid-database-table.html)).
+- **Slash commands** — The commands `/` lists in a menu at the caret in an empty Text Block, as in Notion and T3 Code: the Blocks to add, filtered by what follows `/`. The PowerBar's `/` lists the same ([Pages mockups](docs/design/mockups/liquid-workspace-pages.html)).
 - **Liquid key** — Caps Lock when the user opts in: a tap opens Liquid from any app, holding it in Liquid reveals shortcuts and ⇪ plus a key runs a Liquid command.
 - **Shortcut profile** — Liquid's set of shortcuts: Liquid key, Standard (⌘ only) or Custom.
 - **Reveal key** — The key whose hold shows contextual shortcut hints: the Liquid key while it is on, ⌘ otherwise.

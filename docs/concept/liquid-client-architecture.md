@@ -19,7 +19,7 @@ flowchart TD
   BR -->|"per-Block streams"| UI
 ```
 
-- Rust owns Workspace state, the mutation pipeline, History, queries, storage and sync. Dart holds only rendering state, the in-progress edit of the focused Block and, while a Page's structure changes, that Page's input queue (ADR-0240).
+- Rust owns Workspace state, the mutation pipeline, History, queries, storage and sync. Dart holds only rendering state, the in-progress edit of the focused Block and, while a Page's structure changes, that Page's input queue or a line's typing that becomes the name of the Block chosen in its place (ADR-0240).
 - Widgets read typed view models and emit intents. No widget writes storage or bypasses the mutation pipeline.
 
 ## Rules
