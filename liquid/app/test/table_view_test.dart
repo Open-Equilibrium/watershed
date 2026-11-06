@@ -345,6 +345,19 @@ void main() {
     },
   );
 
+  testWidgets('a new Table with only its Name field shows its header', (
+    tester,
+  ) async {
+    await show(tester, [
+      _Table(_expenses, fields: [_fields.first]),
+    ]);
+    expect(tester.getSize(inTable(find.text('Name'))).height, greaterThan(0));
+    expect(
+      tester.getRect(inTable(find.text('Name'))).bottom,
+      lessThan(tester.getRect(inTable(find.text('Groceries'))).top),
+    );
+  });
+
   testWidgets('a Table follows its rows as they change', (tester) async {
     await show(tester, [_Table(_expenses)]);
     final table = fake.views[page]!.single.block;

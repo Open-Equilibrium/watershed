@@ -337,7 +337,8 @@ class _TableBlockState extends State<TableBlock> {
           children: [
             Row(
               children: [
-                SizedBox(width: starts[from]),
+                // Also gives the line its height when only the first field is built.
+                SizedBox(width: starts[from], height: height),
                 for (var index = from; index < to; index++) box(index),
               ],
             ),
