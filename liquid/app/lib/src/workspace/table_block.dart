@@ -136,6 +136,9 @@ class _TableBlockState extends State<TableBlock> {
   /// Times the field panel opened, so an add closes only the panel it came from.
   int _panelOpened = 0;
 
+  /// Field adds on their way; + they push out of view comes back with the scroll to them.
+  int _fieldsWriting = 0;
+
   /// Whether to scroll to the last row or field once the next build laid it out.
   var _toLastRow = false;
   var _toLastField = false;
@@ -207,7 +210,7 @@ class _TableBlockState extends State<TableBlock> {
   }
 
   void _panelOutOfView() {
-    if (!_panel.isShowing) return;
+    if (!_panel.isShowing || _fieldsWriting > 0) return;
     // Checked once laid out, after any scroll to a new field, which brings + back.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_sideways.hasClients) return;
@@ -264,17 +267,23 @@ class _TableBlockState extends State<TableBlock> {
   /// the panel open.
   Future<void> _addField(String name, BridgeFieldKind kind) async {
     final opened = _panelOpened;
-    final added = await widget.views.write(
-      mutation(
-        BridgeMutationKind.addField,
-        page: _page,
-        block: _block,
-        text: name,
-        fieldKind: kind,
-        last: true,
-      ),
-      const [],
-    );
+    final BridgeApplied added;
+    _fieldsWriting++;
+    try {
+      added = await widget.views.write(
+        mutation(
+          BridgeMutationKind.addField,
+          page: _page,
+          block: _block,
+          text: name,
+          fieldKind: kind,
+          last: true,
+        ),
+        const [],
+      );
+    } finally {
+      _fieldsWriting--;
+    }
     if (!mounted) return;
     if (opened == _panelOpened) _panel.hide();
     if (_database?.fields.any((field) => field.id == added.field) ?? false) {
@@ -387,6 +396,9 @@ class _TableBlockState extends State<TableBlock> {
       }
       setState(() => _database = answer.database);
     } on Object catch (error) {
+      // What an add made is not shown later by surprise.
+      if (read > _readsAtRowAdd) _rowAdded = false;
+      if (read > _readsAtFieldAdd) _fieldAdded = null;
       _report(error);
       return;
     }

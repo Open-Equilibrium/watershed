@@ -963,4 +963,34 @@ void main() {
     await tester.pumpAndSettle();
     expect(panel, findsNothing);
   });
+
+  testWidgets(
+    'a reopened field panel stays while the field it pushes + out with '
+    'is added',
+    (tester) async {
+      await show(tester, [_Table(_expenses)]);
+      Future<void> open() async {
+        await tester.tap(inTable(find.byKey(const Key('add field'))));
+        await tester.pumpAndSettle();
+      }
+
+      await open();
+      final gate = fake.gate = Completer<void>();
+      fake.gatedKinds = {BridgeMutationKind.addField};
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      await open();
+      // The field's change and read arrive before the add's answer.
+      final answered = fake.answered = Completer<void>();
+      fake.gate = null;
+      gate.complete();
+      await tester.pumpAndSettle();
+      fake.answered = null;
+      answered.complete();
+      await tester.pumpAndSettle();
+      expect(panel, findsOneWidget);
+    },
+  );
 }

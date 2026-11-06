@@ -59,6 +59,16 @@ class FakeWorkspace implements LiquidWorkspace {
 
   @override
   Future<BridgeApplied> apply({required BridgeMutation mutation}) async {
+    final applied = await _apply(mutation);
+    await answered?.future;
+    return applied;
+  }
+
+  /// Holds each answer after its write applied and its changes went out, until it
+  /// completes, as the bridge may answer after them.
+  Completer<void>? answered;
+
+  Future<BridgeApplied> _apply(BridgeMutation mutation) async {
     if (gatedKinds?.contains(mutation.kind) ?? true) await gate?.future;
     if (delay case final delay?) await Future<void>.delayed(delay());
     if (refuse case final refused?) throw refused;
