@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -172,5 +173,62 @@ void main() {
     await tester.pumpAndSettle();
     expect(menu, findsNothing);
     expect(renamed(), isEmpty);
+  });
+
+  testWidgets('a rename elsewhere while the menu is open untouched stays', (
+    tester,
+  ) async {
+    await kit.show(tester, [TablePart(expenses)]);
+    final table = kit.fake.views[kit.page]!.single.block;
+    await open(tester, 'Category');
+    // Another device renames the field.
+    await kit.workspace.apply(
+      mutation(
+        BridgeMutationKind.renameField,
+        page: kit.page,
+        block: table,
+        field: 'category',
+        text: 'Type',
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tapAt(const Offset(1300, 850));
+    await tester.pumpAndSettle();
+    expect(renamed(), [('category', 'Type')]);
+    expect(header('Type'), findsOneWidget);
+  });
+
+  testWidgets('⏎ renames also with the pointer on Delete field', (
+    tester,
+  ) async {
+    await kit.show(tester, [TablePart(expenses)]);
+    await open(tester, 'Category');
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(
+      location: tester.getCenter(inMenu(find.text('Delete field'))),
+    );
+    addTearDown(mouse.removePointer);
+    await tester.pumpAndSettle();
+    await type(tester, 'Kind');
+    await key(tester, LogicalKeyboardKey.enter);
+    expect(dialog, findsNothing);
+    expect(renamed(), [('category', 'Kind')]);
+  });
+
+  testWidgets('a name typed is kept when the Page closes or Liquid quits', (
+    tester,
+  ) async {
+    await kit.show(tester, [TablePart(expenses)]);
+    await open(tester, 'Category');
+    await type(tester, 'Kind');
+    await kit.workspace.drain();
+    await tester.pumpAndSettle();
+    expect(renamed(), [('category', 'Kind')]);
+
+    await open(tester, 'Amount');
+    await type(tester, 'Sum');
+    await kit.workspace.newPage(kit.workspace.open.value!.area);
+    await tester.pumpAndSettle();
+    expect(renamed().last, ('amount', 'Sum'));
   });
 }

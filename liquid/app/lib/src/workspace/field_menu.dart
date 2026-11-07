@@ -36,8 +36,10 @@ class FieldMenu extends StatefulWidget {
 class _FieldMenuState extends State<FieldMenu> {
   late final _focus = FocusNode(debugLabel: 'Field menu', onKeyEvent: _key);
 
-  /// Whether ↓ chose Delete field.
+  /// Whether ↓ chose Delete field, which ⏎ then takes, and whether the pointer is on it,
+  /// which only shows.
   var _deleting = false;
+  var _hovered = false;
 
   @override
   void initState() {
@@ -117,8 +119,8 @@ class _FieldMenuState extends State<FieldMenu> {
             ),
             Divider(height: 9, thickness: 1, color: ws.border),
             MouseRegion(
-              onEnter: (_) => setState(() => _deleting = true),
-              onExit: (_) => setState(() => _deleting = false),
+              onEnter: (_) => setState(() => _hovered = true),
+              onExit: (_) => setState(() => _hovered = false),
               child: GestureDetector(
                 behavior: HitTestBehavior.opaque,
                 onTap: widget.onDelete,
@@ -127,7 +129,7 @@ class _FieldMenuState extends State<FieldMenu> {
                   icon: LucideIcons.trash,
                   label: 'Delete field',
                   color: ws.danger,
-                  on: _deleting,
+                  on: _deleting || _hovered,
                 ),
               ),
             ),

@@ -150,6 +150,7 @@ class _TableBlockState extends State<TableBlock> {
     _name.addListener(_typed);
     _state.finishing.add(_typed);
     _state.finishing.add(_cells.finish);
+    _state.finishing.add(_renameTyped);
     _nameFocus.addListener(_left);
     // Once every rename arrived, the name is read again.
     _settled = widget.views.settled
@@ -212,6 +213,9 @@ class _TableBlockState extends State<TableBlock> {
     _down.dispose();
     _name.dispose();
     _nameFocus.dispose();
+    // A name typed in a field's menu is kept as it stands.
+    _renameTyped();
+    _state.finishing.remove(_renameTyped);
     _menuName.dispose();
     // An edit still open is written as it stands.
     _cells.removeListener(_changed);
@@ -402,8 +406,10 @@ class _TableBlockState extends State<TableBlock> {
   final _fieldAnchor = LayerLink();
   String? _menuField;
 
-  /// The name typed in the field's menu, which closing it keeps unless esc drops it.
+  /// The name typed in the field's menu, which closing it keeps unless esc drops it, and
+  /// the name it opened with or last wrote.
   final _menuName = TextEditingController();
+  String _menuOpened = '';
 
   BridgeField? _fieldOf(String? id) =>
       _database?.fields.where((field) => field.id == id).firstOrNull;
@@ -418,31 +424,41 @@ class _TableBlockState extends State<TableBlock> {
       text: field.name,
       selection: TextSelection.collapsed(offset: field.name.length),
     );
+    _menuOpened = field.name;
     setState(() => _menuField = field.id);
     _fieldMenu.show();
   }
 
-  /// Closes the field's menu and renames the field as typed, unless `drop` or the name is
-  /// empty or unchanged.
+  /// Closes the field's menu and renames the field as typed, unless `drop`.
   void _closeFieldMenu({bool drop = false}) {
-    final field = _fieldOf(_menuField);
     if (_menuField == null) return;
+    if (!drop) _renameTyped();
     setState(() => _menuField = null);
     _fieldMenu.hide();
+  }
+
+  /// Renames the menu's field as typed, unless the name is empty or as the menu opened
+  /// with it, so a rename elsewhere meanwhile stays; also as the Table goes or Liquid
+  /// quits.
+  void _renameTyped() {
+    final field = _menuField;
     final name = _menuName.text.trim();
-    if (drop || field == null || name.isEmpty || name == field.name) return;
+    if (field == null || name.isEmpty || name == _menuOpened) return;
+    _menuOpened = name;
     widget.views
         .write(
           mutation(
             BridgeMutationKind.renameField,
             page: _page,
             block: _block,
-            field: field.id,
+            field: field,
             text: name,
           ),
           const [],
         )
-        .then((_) => _read(), onError: (Object _) {});
+        .then((_) {
+          if (mounted) unawaited(_read());
+        }, onError: (Object _) {});
   }
 
   /// Delete field asks first, then deletes the field and its values.
@@ -462,7 +478,9 @@ class _TableBlockState extends State<TableBlock> {
           ),
           const [],
         )
-        .then((_) => _read(), onError: (Object _) {});
+        .then((_) {
+          if (mounted) unawaited(_read());
+        }, onError: (Object _) {});
   }
 
   Widget _fieldMenuView(BuildContext context) {
