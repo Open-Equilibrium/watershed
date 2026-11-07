@@ -286,4 +286,21 @@ void main() {
       expect(kit.applied(BridgeMutationKind.setCell), isEmpty);
     },
   );
+
+  testWidgets('a cell\'s own day, though its year has fewer digits, is kept', (
+    tester,
+  ) async {
+    await kit.show(tester, [
+      TablePart([expenseRow('r1', 'Old', '0500-01-01', 'food', 1, false)]),
+    ]);
+    await open(tester, 'r1');
+    expect(typed(tester), 'Jan 1, 500');
+    await key(tester, LogicalKeyboardKey.enter);
+    expect(picker, findsNothing);
+    await key(tester, LogicalKeyboardKey.enter);
+    await key(tester, LogicalKeyboardKey.tab);
+    expect(picker, findsNothing);
+    expect(kit.inTable(find.textContaining('is no date')), findsNothing);
+    expect(kit.applied(BridgeMutationKind.setCell), isEmpty);
+  });
 }

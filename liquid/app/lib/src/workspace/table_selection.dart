@@ -159,10 +159,7 @@ class CellSelection extends ChangeNotifier {
     reveal(row, field);
     if (_target case (_, final column, final cell)
         when typed.isEmpty && column.kind == BridgeFieldKind.date) {
-      typed = switch (DateTime.tryParse(cell?.text ?? '')) {
-        final day? => shownDays(days).format(day),
-        null => '',
-      };
+      typed = _shownDay(cell);
     }
     pickText.value = TextEditingValue(
       text: typed,
@@ -217,10 +214,23 @@ class CellSelection extends ChangeNotifier {
     closePick(stay: stay);
   }
 
-  /// ⏎ in a date picker writes the day typed, or empties the cell when nothing is; a text
-  /// that is no day stays, saying so, and answers false.
+  /// A date cell's day as cells show it.
+  String _shownDay(BridgeCell? cell) =>
+      switch (DateTime.tryParse(cell?.text ?? '')) {
+        final day? => shownDays(days).format(day),
+        null => '',
+      };
+
+  /// ⏎ in a date picker writes the day typed, or empties the cell when nothing is; the
+  /// cell's own day is kept as it is, and a text that is no day stays, saying so, and
+  /// answers false.
   bool enterDay({bool stay = true}) {
     final typed = pickText.text;
+    if (_target case (_, _, final cell)
+        when typed.isNotEmpty && typed == _shownDay(cell)) {
+      closePick(stay: stay);
+      return true;
+    }
     final day = parseDay(typed, days);
     if (typed.trim().isNotEmpty && day == null) {
       error = '“$typed” is no date.';
