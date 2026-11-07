@@ -370,4 +370,57 @@ void main() {
       expect(chosen(), [('r1', 'home')]);
     },
   );
+
+  testWidgets(
+    'a select cell below the window brings itself into view to open',
+    (tester) async {
+      await kit.show(tester, [
+        TablePart(expenses),
+        for (var number = 0; number < 40; number++) TextPart('Line $number'),
+      ]);
+      final bottom = tester.getRect(cell('r1', 'category')).bottom;
+      await tester.binding.setSurfaceSize(Size(1400, bottom + 10));
+      await tester.pumpAndSettle();
+      await tester.tap(cell('r1', 'category'));
+      await tester.pumpAndSettle();
+      await key(tester, LogicalKeyboardKey.arrowDown);
+      await key(tester, LogicalKeyboardKey.enter);
+      final window = Offset.zero & tester.binding.renderViews.first.size;
+      expect(
+        window.contains(tester.getRect(cell('r2', 'category')).center),
+        isTrue,
+      );
+      expect(window.contains(tester.getRect(picker).center), isTrue);
+      await key(tester, LogicalKeyboardKey.enter);
+      expect(chosen(), [('r2', 'food')]);
+    },
+  );
+
+  testWidgets('⇥ in the options keeps the value and selects the next cell', (
+    tester,
+  ) async {
+    await kit.show(tester, [TablePart(expenses)]);
+    await open(tester, 'r1');
+    await key(tester, LogicalKeyboardKey.tab);
+    expect(picker, findsNothing);
+    // The next cell, Amount, takes the keys.
+    await key(tester, LogicalKeyboardKey.enter);
+    await tester.enterText(
+      kit.inTable(
+        find.descendant(
+          of: find.byKey(const Key('cell editor')),
+          matching: find.byType(TextField),
+        ),
+      ),
+      '12',
+    );
+    await key(tester, LogicalKeyboardKey.enter);
+    expect(
+      [
+        for (final set in kit.applied(BridgeMutationKind.setCell))
+          (set.row, set.field, set.cell!.number),
+      ],
+      [('r1', 'amount', 12.0)],
+    );
+  });
 }

@@ -191,6 +191,7 @@ class _TableBlockState extends State<TableBlock> {
   }
 
   void _moved() {
+    if (_scrollingItself) return _replacePick();
     if (_panel.isShowing) _panel.hide();
     _cells.closePick();
   }
@@ -333,6 +334,16 @@ class _TableBlockState extends State<TableBlock> {
         ),
       ),
     );
+  }
+
+  /// Brings the picked cell into the Page's view, as an editor's caret does, and shows
+  /// its picker.
+  void _placed() {
+    if (!mounted || !_cells.picking) return;
+    _scrollingItself = true;
+    _pickCell.currentContext?.findRenderObject()?.showOnScreen();
+    _scrollingItself = false;
+    setState(() {});
   }
 
   /// + New adds a row last, which the core places as it applies the write (ADR-0247),
@@ -815,9 +826,7 @@ class _TableBlockState extends State<TableBlock> {
               // Nor does it take the keys from the picker's filter.
               child: TextFieldTapRegion(
                 child: _PickedCell(
-                  onPlaced: () {
-                    if (mounted && _cells.picking) setState(() {});
-                  },
+                  onPlaced: _placed,
                   child: CompositedTransformTarget(
                     key: _pickCell,
                     link: _pickAnchor,
