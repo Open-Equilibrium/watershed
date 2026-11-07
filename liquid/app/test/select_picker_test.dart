@@ -322,4 +322,22 @@ void main() {
       );
     },
   );
+
+  testWidgets(
+    'rows added elsewhere that move the cell out of the built rows close its options',
+    (tester) async {
+      await kit.show(tester, [TablePart(expenses)]);
+      final table = kit.fake.views[kit.page]!.single.block;
+      await open(tester, 'r1');
+      expect(picker, findsOneWidget);
+      // Another device adds rows above it.
+      kit.fake.putRows(kit.page, table, [
+        for (var number = 3; number <= 80; number++) namedRow(number),
+        ...kit.fake.rows[table]!,
+      ]);
+      await tester.pumpAndSettle();
+      expect(picker, findsNothing);
+      expect(tester.binding.hasScheduledFrame, isFalse);
+    },
+  );
 }

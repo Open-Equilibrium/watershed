@@ -259,6 +259,7 @@ class _TableBlockState extends State<TableBlock> {
       ..read(rowIndex);
     setState(() {});
     _replacePick();
+    if (!_cells.picking) _pickWaited = false;
     if (_cells.picking != _pick.isShowing) {
       _cells.picking ? _pick.show() : _pick.hide();
     }
@@ -268,6 +269,9 @@ class _TableBlockState extends State<TableBlock> {
   final _pick = OverlayPortalController();
   final _pickAnchor = LayerLink();
   final _pickCell = GlobalKey();
+
+  /// Whether the picker waited a frame for its cell.
+  var _pickWaited = false;
 
   Future<String> _addOption(BridgeField field, String name, int color) async {
     final added = await widget.views.write(
@@ -291,12 +295,17 @@ class _TableBlockState extends State<TableBlock> {
     final overlay =
         Overlay.of(context).context.findRenderObject() as RenderBox?;
     if (cell == null || !cell.hasSize || overlay == null) {
-      // The cell takes its place in this frame; the picker then hangs from it.
+      // The cell takes its place in the frame the picker opens, which then hangs from
+      // it; a cell moved out of the built rows or fields closes it, as a scroll does.
+      final waited = _pickWaited;
+      _pickWaited = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) setState(() {});
+        if (!mounted) return;
+        waited ? _cells.closePick() : setState(() {});
       });
       return const SizedBox.shrink();
     }
+    _pickWaited = false;
     // It hangs under the cell, or above it when all options do not fit under it and
     // there is more room above; they scroll in the room it has.
     final top = cell.localToGlobal(Offset.zero, ancestor: overlay).dy;
