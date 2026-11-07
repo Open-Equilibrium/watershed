@@ -281,6 +281,7 @@ class CellSelection extends ChangeNotifier {
       // A cell moved under its picker closes it, as a scroll does.
       if (picking) {
         picking = false;
+        error = null;
         cellsFocus.requestFocus();
       }
       _changed();

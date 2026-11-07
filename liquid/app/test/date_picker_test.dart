@@ -202,4 +202,35 @@ void main() {
     final mondays = tester.getRect(inPicker(find.text('Mo'))).left;
     expect(sundays, lessThan(mondays));
   });
+
+  for (final form in ['10/15/26', '1/1/12345', '1/1/999999']) {
+    testWidgets('a year not of four digits, as in $form, is no date', (
+      tester,
+    ) async {
+      await kit.show(tester, [TablePart(expenses)]);
+      await open(tester, 'r1');
+      await tester.enterText(inPicker(find.byType(TextField)), form);
+      await tester.pumpAndSettle();
+      await key(tester, LogicalKeyboardKey.enter);
+      expect(picker, findsOneWidget);
+      expect(kit.inTable(find.text('“$form” is no date.')), findsOneWidget);
+      expect(written(), isEmpty);
+    });
+  }
+
+  testWidgets('a picker closed as its cell moves elsewhere drops its reason', (
+    tester,
+  ) async {
+    await kit.show(tester, [TablePart(expenses)]);
+    final table = kit.fake.views[kit.page]!.single.block;
+    await open(tester, 'r1');
+    await tester.enterText(inPicker(find.byType(TextField)), 'soon');
+    await tester.pumpAndSettle();
+    await key(tester, LogicalKeyboardKey.enter);
+    // Another device adds a row above it.
+    kit.fake.putRows(kit.page, table, [namedRow(3), ...kit.fake.rows[table]!]);
+    await tester.pumpAndSettle();
+    expect(picker, findsNothing);
+    expect(kit.inTable(find.text('“soon” is no date.')), findsNothing);
+  });
 }

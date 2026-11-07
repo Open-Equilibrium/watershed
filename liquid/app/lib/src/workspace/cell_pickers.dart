@@ -278,7 +278,7 @@ DateFormat shownDays(String locale) => DateFormat.yMMMd(locale);
 final storedDays = DateFormat('yyyy-MM-dd', 'en_US');
 
 /// The day typed in the person's region's short form, as cells show it, or as the core
-/// stores it; none for anything else.
+/// stores it, with a year of four digits; none for anything else, such as a year of two.
 DateTime? parseDay(String typed, String locale) {
   for (final format in [
     DateFormat.yMd(locale),
@@ -286,8 +286,11 @@ DateTime? parseDay(String typed, String locale) {
     storedDays,
   ]) {
     try {
-      return format.parseStrict(typed.trim());
+      final day = format.parseStrict(typed.trim());
+      return day.year >= 1000 && day.year <= 9999 ? day : null;
     } on FormatException {
+      continue;
+    } on ArgumentError {
       continue;
     }
   }
