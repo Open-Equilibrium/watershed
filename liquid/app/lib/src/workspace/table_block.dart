@@ -95,7 +95,8 @@ class _TableBlockState extends State<TableBlock> {
     write: _setCell,
     reveal: _reveal,
     leave: _leave,
-    report: _report,
+    // Also from dispose, so after the frame, when the Page may show it.
+    report: (problem) => scheduleMicrotask(() => _state.report(problem)),
   )..addListener(_changed);
 
   /// The grid's geometry as last built, to reveal a cell.

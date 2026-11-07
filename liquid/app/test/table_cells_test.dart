@@ -413,4 +413,18 @@ void main() {
     expect(written(), isEmpty);
     expect(kit.workspace.problem.value, contains('“-” is no number'));
   });
+
+  testWidgets('a number that is none says so when the Page closes', (
+    tester,
+  ) async {
+    await kit.show(tester, [TablePart(expenses)]);
+    await tester.tap(cell('r1', 'amount'));
+    await tester.pumpAndSettle();
+    await key(tester, LogicalKeyboardKey.enter);
+    await tester.enterText(editor(), '12x');
+    await kit.workspace.newPage(kit.workspace.open.value!.area);
+    await tester.pumpAndSettle();
+    expect(written(), isEmpty);
+    expect(kit.workspace.problem.value, contains('“12x” is no number'));
+  });
 }

@@ -185,7 +185,9 @@ class CellSelection extends ChangeNotifier {
 
   /// Writes an edit still open as it stands, as when the Table goes or Liquid quits.
   void finish() {
-    if (editing) commit(stay: false);
+    if (editing && !commit(stay: false)) {
+      report('$error It was not kept, as the Table closed.');
+    }
   }
 
   static bool _edits(BridgeFieldKind kind) =>
