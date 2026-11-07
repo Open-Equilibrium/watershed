@@ -634,6 +634,7 @@ class _TableBlockState extends State<TableBlock> {
       Decoration? Function(int index)? mark,
       void Function(int index)? onTap,
       Key? Function(int index)? keyOf,
+      bool Function(int index)? editing,
     }) => ListenableBuilder(
       listenable: _sideways,
       builder: (context, _) {
@@ -664,11 +665,15 @@ class _TableBlockState extends State<TableBlock> {
             child: cell(index),
           );
           if (onTap == null) return box;
-          return GestureDetector(
+          final tapped = GestureDetector(
             behavior: HitTestBehavior.opaque,
             onTap: () => onTap(index),
             child: box,
           );
+          // A click in the edited cell beside its text is no click outside the editor.
+          return editing?.call(index) ?? false
+              ? TextFieldTapRegion(child: tapped)
+              : tapped;
         }
 
         // The first field stays in view while the others scroll sideways; fields out of
@@ -773,6 +778,9 @@ class _TableBlockState extends State<TableBlock> {
                               }
                             },
                       mark: (index) => _cells.mark(context, rowIndex, index),
+                      editing: (index) =>
+                          _cells.editing &&
+                          _cells.selected == (rowIndex, index),
                       cell: (index) {
                         if (index == fields.length) {
                           return const SizedBox.shrink();

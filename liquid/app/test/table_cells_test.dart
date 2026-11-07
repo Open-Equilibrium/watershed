@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -219,17 +220,54 @@ void main() {
     expect(written(), isEmpty);
   });
 
-  testWidgets('a click in the edited cell keeps the edit', (tester) async {
-    await kit.show(tester, [TablePart(expenses)]);
-    await tester.tap(cell('r1', 'name'));
+  testWidgets(
+    'a click in the edited cell keeps the edit',
+    variant: TargetPlatformVariant.only(TargetPlatform.macOS),
+    (tester) async {
+      await kit.show(tester, [TablePart(expenses)]);
+      await tester.tap(cell('r1', 'name'));
+      await tester.pumpAndSettle();
+      await key(tester, LogicalKeyboardKey.enter);
+      await tester.enterText(editor(), 'Market');
+      await tester.tapAt(
+        tester.getRect(cell('r1', 'name')).bottomRight - const Offset(4, 4),
+        kind: PointerDeviceKind.mouse,
+      );
+      await tester.pumpAndSettle();
+      expect(tester.widget<TextField>(editor()).controller!.text, 'Market');
+      expect(written(), isEmpty);
+    },
+  );
+
+  testWidgets('scrolling sideways keeps an edit in view', (tester) async {
+    await kit.show(tester, [
+      TablePart(
+        expenses,
+        fields: [
+          ...expenseFields,
+          for (var number = 1; number < 6; number++)
+            BridgeField(
+              id: 'f$number',
+              name: 'Field $number',
+              kind: BridgeFieldKind.text,
+              options: const [],
+            ),
+        ],
+      ),
+    ]);
+    await tester.tap(cell('r1', 'amount'));
     await tester.pumpAndSettle();
     await key(tester, LogicalKeyboardKey.enter);
-    await tester.enterText(editor(), 'Market');
-    await tester.tapAt(
-      tester.getRect(cell('r1', 'name')).bottomRight - const Offset(4, 4),
-    );
+    await tester.enterText(editor(), '7');
+    final sideways = tester
+        .widget<SingleChildScrollView>(
+          kit.inTable(find.byType(SingleChildScrollView)),
+        )
+        .controller!;
+    sideways.jumpTo(150);
     await tester.pumpAndSettle();
-    expect(tester.widget<TextField>(editor()).controller!.text, 'Market');
+    expect(tester.widget<TextField>(editor()).controller!.text, '7');
+    expect(tester.widget<TextField>(editor()).focusNode!.hasFocus, isTrue);
     expect(written(), isEmpty);
   });
 }
