@@ -10,6 +10,8 @@ import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'field_panel.dart';
+import 'table_cells.dart';
+import 'table_selection.dart';
 import 'follow.dart';
 import 'page_views.dart';
 import 'windowed_list.dart';
@@ -33,53 +35,6 @@ double _width(BridgeFieldKind kind) => switch (kind) {
   BridgeFieldKind.date => 120,
   BridgeFieldKind.checkbox => 72,
 };
-
-/// `number` with every digit Dart's shortest form keeps, written out in `format`'s digits,
-/// separators and grouping; rounding comes with field formats (ADR-0242). intl itself
-/// keeps at most 18 decimals and 18 grouped digits exactly.
-String _number(NumberFormat format, double number) {
-  // The core refuses these, but a document it did not write may hold them.
-  if (!number.isFinite) return format.format(number);
-  final [mantissa, ...exponent] = number.abs().toString().split('e');
-  final [whole, ...fraction] = mantissa.split('.');
-  var digits = whole + fraction.join();
-  var point =
-      whole.length + (exponent.isEmpty ? 0 : int.parse(exponent.single));
-  if (point <= 0) {
-    digits = '0' * (1 - point) + digits;
-    point = 1;
-  }
-  digits = digits.padRight(point, '0');
-  final integer = digits.substring(0, point);
-  final decimals = digits.substring(point).replaceFirst(RegExp(r'0+$'), '');
-  final zero = format.symbols.ZERO_DIGIT.codeUnitAt(0);
-  String local(String digits) =>
-      String.fromCharCodes(digits.codeUnits.map((unit) => unit - 0x30 + zero));
-  final text = [
-    if (integer.length <= 18)
-      format.format(int.parse(integer))
-    else
-      local(integer),
-    if (decimals.isNotEmpty) ...[format.symbols.DECIMAL_SEP, local(decimals)],
-  ].join();
-  return number < 0
-      ? '${format.negativePrefix}$text${format.negativeSuffix}'
-      : text;
-}
-
-/// The most specific form of `locale` intl has formats for, keeping its script as in
-/// Serbian written in Latin, or US English where intl has none for a language Material
-/// knows.
-String _formats(Locale locale, bool Function(String) exists) {
-  final Locale(:languageCode, :scriptCode, :countryCode) = locale;
-  return [
-        locale.toString(),
-        if (scriptCode != null) '${languageCode}_$scriptCode',
-        if (countryCode != null) '${languageCode}_$countryCode',
-        languageCode,
-      ].where(exists).firstOrNull ??
-      'en_US';
-}
 
 /// A Table on its Page, as the approved Table View mockups show it: its name, a header of
 /// its fields, its rows, read in windows and scrolling inside a fixed height, and their
@@ -133,6 +88,21 @@ class _TableBlockState extends State<TableBlock> {
   /// the field went elsewhere.
   int _readsAtFieldAdd = 0;
 
+  late final _cells = CellSelection(
+    rowAt: _rows.at,
+    rowCount: () => _rows.count ?? 0,
+    fields: () => _database?.fields ?? const [],
+    write: _setCell,
+    reveal: _reveal,
+    leave: _leave,
+    // Also from dispose, so after the frame, when the Page may show it.
+    report: (problem) => scheduleMicrotask(() => _state.report(problem)),
+  )..addListener(_changed);
+
+  /// The grid's geometry as last built, to reveal a cell.
+  List<double> _starts = const [0];
+  double _first = 0;
+
   /// Times the field panel opened, so an add closes only the panel it came from.
   int _panelOpened = 0;
 
@@ -173,6 +143,7 @@ class _TableBlockState extends State<TableBlock> {
     _sideways.addListener(_closePanel);
     _name.addListener(_typed);
     _state.finishing.add(_typed);
+    _state.finishing.add(_cells.finish);
     _nameFocus.addListener(_left);
     // Once every rename arrived, the name is read again.
     _settled = widget.views.settled
@@ -206,6 +177,11 @@ class _TableBlockState extends State<TableBlock> {
     _down.dispose();
     _name.dispose();
     _nameFocus.dispose();
+    // An edit still open is written as it stands.
+    _cells.removeListener(_changed);
+    _cells.finish();
+    _state.finishing.remove(_cells.finish);
+    _cells.dispose();
     super.dispose();
   }
 
@@ -230,6 +206,10 @@ class _TableBlockState extends State<TableBlock> {
 
   void _changed() {
     if (!mounted) return;
+    int? rowIndex(String id) => _rows.indexWhere((row) => row.id == id);
+    _cells
+      ..relocate(rowIndex)
+      ..read(rowIndex);
     setState(() {});
   }
 
@@ -295,6 +275,57 @@ class _TableBlockState extends State<TableBlock> {
       _fieldAdded = added.field;
       _readsAtFieldAdd = _reads;
       unawaited(_read());
+    }
+  }
+
+  Future<void> _setCell(BridgeRow row, BridgeField field, BridgeCell cell) =>
+      widget.views.write(
+        mutation(
+          BridgeMutationKind.setCell,
+          page: _page,
+          block: _block,
+          row: row.id,
+          field: field.id,
+          cell: cell,
+        ),
+        const [],
+      );
+
+  /// Scrolls a cell into view, below and beside the first field.
+  void _reveal(int row, int field) =>
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        if (_down.hasClients) {
+          final top = row * WsMetrics.rowTable;
+          final view = _down.position.viewportDimension;
+          if (top < _down.offset) {
+            _down.jumpTo(top);
+          } else if (top + WsMetrics.rowTable > _down.offset + view) {
+            _down.jumpTo(top + WsMetrics.rowTable - view);
+          }
+        }
+        if (_sideways.hasClients && field > 0 && field + 1 < _starts.length) {
+          final view = _sideways.position.viewportDimension;
+          final (left, right) = (_starts[field], _starts[field + 1]);
+          _showingField = true;
+          if (left < _sideways.offset + _first) {
+            _sideways.jumpTo(left - _first);
+          } else if (right > _sideways.offset + view) {
+            _sideways.jumpTo(right - view);
+          }
+          _showingField = false;
+        }
+      });
+
+  /// esc leaves the Table; the caret goes to the Text Block below it, if any.
+  void _leave() {
+    final views = widget.views;
+    final at = views.indexOf(widget.view.id);
+    final next = at == null ? null : views.textFrom(at + 1, 1);
+    if (next != null) {
+      views.moveCaret(Caret(next.id, 0));
+    } else {
+      _cells.cellsFocus.unfocus();
     }
   }
 
@@ -397,6 +428,7 @@ class _TableBlockState extends State<TableBlock> {
         if (!_nameFocus.hasFocus) _show(answer.database?.name ?? '');
       }
       setState(() => _database = answer.database);
+      _cells.relocate((id) => _rows.indexWhere((row) => row.id == id));
     } on Object catch (error) {
       // What an add made is not shown later by surprise.
       if (read > _readsAtRowAdd) _rowAdded = false;
@@ -416,8 +448,9 @@ class _TableBlockState extends State<TableBlock> {
     final ws = context.ws;
     final database = _database;
     final locale = Localizations.localeOf(context);
-    final numbers = _formats(locale, NumberFormat.localeExists);
-    final days = _formats(locale, DateFormat.localeExists);
+    final numbers = intlLocale(locale, NumberFormat.localeExists);
+    _cells.numbers = NumberFormat.decimalPattern(numbers);
+    final days = intlLocale(locale, DateFormat.localeExists);
     final count = _rows.count ?? 0;
     if (_toLastRow || _toLastField) {
       final (down, sideways) = (_toLastRow, _toLastField);
@@ -485,58 +518,75 @@ class _TableBlockState extends State<TableBlock> {
               ),
             ),
             if (database != null)
-              ClipRRect(
-                borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
-                child: Container(
-                  foregroundDecoration: BoxDecoration(
-                    border: Border.all(color: ws.border),
-                    borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
+              Focus(
+                focusNode: _cells.cellsFocus,
+                // The keys of a selected cell, without a node of its own for readers.
+                includeSemantics: false,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
+                  child: Container(
+                    foregroundDecoration: BoxDecoration(
+                      border: Border.all(color: ws.border),
+                      borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        // A Table may lose all its fields, as when another device removes
+                        // them; its rows still count.
+                        if (database.fields.isEmpty)
+                          Container(
+                            height: _headerHeight,
+                            color: ws.subtle,
+                            alignment: Alignment.centerRight,
+                            child: SizedBox(
+                              width: _addWidth,
+                              child: _AddField(
+                                link: _plus,
+                                panel: _panel,
+                                onTap: _togglePanel,
+                              ),
+                            ),
+                          )
+                        else
+                          LayoutBuilder(
+                            builder: (context, constraints) => _grid(
+                              database.fields,
+                              constraints.maxWidth,
+                              NumberFormat.decimalPattern(numbers),
+                              DateFormat.yMMMd(days),
+                            ),
+                          ),
+                        _NewRow(onTap: () => unawaited(_addRow())),
+                        if (count > 0)
+                          Container(
+                            height: _footerHeight,
+                            color: ws.subtle,
+                            padding: const EdgeInsets.symmetric(horizontal: 10),
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              '${NumberFormat.decimalPattern(numbers).format(count)} '
+                              '${count == 1 ? 'row' : 'rows'}',
+                              style: TextStyle(
+                                fontSize: WsMetrics.fsCompact,
+                                color: ws.textFaint,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
                   ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      // A Table may lose all its fields, as when another device removes
-                      // them; its rows still count.
-                      if (database.fields.isEmpty)
-                        Container(
-                          height: _headerHeight,
-                          color: ws.subtle,
-                          alignment: Alignment.centerRight,
-                          child: SizedBox(
-                            width: _addWidth,
-                            child: _AddField(
-                              link: _plus,
-                              panel: _panel,
-                              onTap: _togglePanel,
-                            ),
-                          ),
-                        )
-                      else
-                        LayoutBuilder(
-                          builder: (context, constraints) => _grid(
-                            database.fields,
-                            constraints.maxWidth,
-                            NumberFormat.decimalPattern(numbers),
-                            DateFormat.yMMMd(days),
-                          ),
-                        ),
-                      _NewRow(onTap: () => unawaited(_addRow())),
-                      if (count > 0)
-                        Container(
-                          height: _footerHeight,
-                          color: ws.subtle,
-                          padding: const EdgeInsets.symmetric(horizontal: 10),
-                          alignment: Alignment.centerLeft,
-                          child: Text(
-                            '${NumberFormat.decimalPattern(numbers).format(count)} '
-                            '${count == 1 ? 'row' : 'rows'}',
-                            style: TextStyle(
-                              fontSize: WsMetrics.fsCompact,
-                              color: ws.textFaint,
-                            ),
-                          ),
-                        ),
-                    ],
+                ),
+              ),
+            // A value refused in place says why, under the Table (approved mockups).
+            if (_cells.error case final error?)
+              Padding(
+                padding: const EdgeInsets.only(top: WsMetrics.space2),
+                child: Text(
+                  error,
+                  style: TextStyle(
+                    fontSize: WsMetrics.fsSmall,
+                    color: ws.danger,
                   ),
                 ),
               ),
@@ -567,64 +617,67 @@ class _TableBlockState extends State<TableBlock> {
     for (final width in widths) {
       starts.add(starts.last + width);
     }
+    _starts = starts;
+    _first = first;
     final count = _rows.count ?? 0;
     final options = {
       for (final field in fields)
         if (field.kind == BridgeFieldKind.select)
           for (final option in field.options) option.id: option,
     };
-
-    Widget content(BridgeCell? cell) => switch (cell?.kind) {
-      null || BridgeCellKind.empty => const SizedBox.shrink(),
-      BridgeCellKind.text => _text(cell!.text ?? ''),
-      BridgeCellKind.number => _text(
-        _number(numbers, cell!.number),
-        style: const TextStyle(fontFeatures: [FontFeature.tabularFigures()]),
-      ),
-      BridgeCellKind.select => switch (options[cell!.text]) {
-        final option? => _Tag(option),
-        null => const SizedBox.shrink(),
-      },
-      BridgeCellKind.date => _text(switch (DateTime.tryParse(
-        cell!.text ?? '',
-      )) {
-        final day? => days.format(day),
-        null => cell.text ?? '',
-      }),
-      BridgeCellKind.checkbox => _Checkbox(checked: cell!.checked),
-    };
+    Widget content(BridgeCell? cell) =>
+        CellView(cell: cell, options: options, numbers: numbers, days: days);
 
     Widget line({
       required double height,
       required Color? color,
       required Widget Function(int index) cell,
       VoidCallback? addOutOfView,
+      Decoration? Function(int index)? mark,
+      void Function(int index)? onTap,
+      Key? Function(int index)? keyOf,
+      bool Function(int index)? editing,
     }) => ListenableBuilder(
       listenable: _sideways,
       builder: (context, _) {
         final offset = _sideways.hasClients ? _sideways.offset : 0.0;
-        Widget box(int index) => Container(
-          width: widths[index],
-          height: height,
-          padding: const EdgeInsets.symmetric(horizontal: 10),
-          decoration: BoxDecoration(
-            color: color,
-            border: index > 0
-                ? Border(left: BorderSide(color: ws.border))
-                : null,
-            boxShadow: index == 0 && offset > 0
-                ? const [
-                    BoxShadow(
-                      color: Color(0x40000000),
-                      blurRadius: 6,
-                      offset: Offset(4, 0),
-                      spreadRadius: -4,
-                    ),
-                  ]
-                : null,
-          ),
-          child: cell(index),
-        );
+        Widget box(int index) {
+          final box = Container(
+            key: keyOf?.call(index),
+            width: widths[index],
+            height: height,
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            foregroundDecoration: mark?.call(index),
+            decoration: BoxDecoration(
+              color: color,
+              border: index > 0
+                  ? Border(left: BorderSide(color: ws.border))
+                  : null,
+              boxShadow: index == 0 && offset > 0
+                  ? const [
+                      BoxShadow(
+                        color: Color(0x40000000),
+                        blurRadius: 6,
+                        offset: Offset(4, 0),
+                        spreadRadius: -4,
+                      ),
+                    ]
+                  : null,
+            ),
+            child: cell(index),
+          );
+          if (onTap == null) return box;
+          final tapped = GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => onTap(index),
+            child: box,
+          );
+          // A click in the edited cell beside its text is no click outside the editor.
+          return editing?.call(index) ?? false
+              ? TextFieldTapRegion(child: tapped)
+              : tapped;
+        }
+
         // The first field stays in view while the others scroll sideways; fields out of
         // view are not built.
         var from = 1;
@@ -689,7 +742,7 @@ class _TableBlockState extends State<TableBlock> {
                               color: ws.textFaint,
                             ),
                             const SizedBox(width: WsMetrics.space2),
-                            Flexible(child: _text(fields[index].name)),
+                            Flexible(child: cellText(fields[index].name)),
                           ],
                         ),
                 ),
@@ -702,8 +755,8 @@ class _TableBlockState extends State<TableBlock> {
                 controller: _down,
                 itemCount: count,
                 itemExtent: WsMetrics.rowTable,
-                itemBuilder: (context, index) {
-                  final row = _rows.at(index);
+                itemBuilder: (context, rowIndex) {
+                  final row = _rows.at(rowIndex);
                   final cells = {
                     for (final cell in row?.cells ?? const <BridgeFieldCell>[])
                       cell.field: cell.value,
@@ -716,11 +769,30 @@ class _TableBlockState extends State<TableBlock> {
                     child: line(
                       height: WsMetrics.rowTable,
                       color: ws.canvas,
+                      keyOf: (index) => row == null || index == fields.length
+                          ? null
+                          : ValueKey('cell ${row.id} ${fields[index].id}'),
+                      onTap: row == null
+                          ? null
+                          : (index) {
+                              if (index < fields.length) {
+                                _cells.tap(rowIndex, index);
+                              }
+                            },
+                      mark: (index) => _cells.mark(context, rowIndex, index),
+                      editing: (index) =>
+                          _cells.editing &&
+                          _cells.selected == (rowIndex, index),
                       cell: (index) {
                         if (index == fields.length) {
                           return const SizedBox.shrink();
                         }
                         final field = fields[index];
+                        if (_cells.editing &&
+                            _cells.selected == (rowIndex, index) &&
+                            row != null) {
+                          return _cells.editor(context, field);
+                        }
                         return Align(
                           alignment: switch (field.kind) {
                             BridgeFieldKind.number => Alignment.centerRight,
@@ -740,9 +812,6 @@ class _TableBlockState extends State<TableBlock> {
       ),
     );
   }
-
-  static Widget _text(String text, {TextStyle? style}) =>
-      Text(text, maxLines: 1, overflow: TextOverflow.ellipsis, style: style);
 }
 
 /// + after the last field, which opens the field panel.
@@ -813,75 +882,6 @@ class _NewRow extends StatelessWidget {
             ],
           ),
         ),
-      ),
-    );
-  }
-}
-
-/// An option as a colored tag; its color number picks one of the ten tag colors, wrapping.
-class _Tag extends StatelessWidget {
-  const _Tag(this.option);
-
-  final BridgeOption option;
-
-  @override
-  Widget build(BuildContext context) {
-    final ws = context.ws;
-    final colors = [
-      ws.tag0,
-      ws.tag1,
-      ws.tag2,
-      ws.tag3,
-      ws.tag4,
-      ws.tag5,
-      ws.tag6,
-      ws.tag7,
-      ws.tag8,
-      ws.tag9,
-    ];
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space2),
-      decoration: BoxDecoration(
-        color: colors[option.color % colors.length],
-        borderRadius: BorderRadius.circular(WsMetrics.radiusSm),
-      ),
-      child: Text(
-        option.name,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: TextStyle(
-          fontSize: WsMetrics.fsCompact,
-          height: 20 / WsMetrics.fsCompact,
-          color: ws.tagText,
-        ),
-      ),
-    );
-  }
-}
-
-class _Checkbox extends StatelessWidget {
-  const _Checkbox({required this.checked});
-
-  final bool checked;
-
-  @override
-  Widget build(BuildContext context) {
-    final ws = context.ws;
-    return Semantics(
-      checked: checked,
-      child: Container(
-        width: 14,
-        height: 14,
-        decoration: BoxDecoration(
-          color: checked ? ws.accent : null,
-          borderRadius: BorderRadius.circular(3),
-          border: checked
-              ? null
-              : Border.all(color: ws.borderStrong, width: 1.5),
-        ),
-        child: checked
-            ? Icon(LucideIcons.check, size: 10, color: ws.onAccent)
-            : null,
       ),
     );
   }

@@ -135,7 +135,7 @@ h4.qh{margin:14px 0 6px;font-size:13px}
   </section>
   <section>
     <h3 class="sec">4 · Editing cells</h3>
-    <p class="sub">A click selects a cell, a second click or ⏎ edits it, and typing replaces it, as in a spreadsheet and in Notion. Text and numbers edit in place; a select cell and a date cell open a picker; a checkbox ticks on click or Space. A number that is not one is refused in place.</p>
+    <p class="sub">A click selects a cell, a second click or ⏎ edits it, and typing replaces it, as in a spreadsheet and in Notion. Text and numbers edit in place; a select cell and a date cell open a picker; a checkbox ticks on click or Space. A number that is not one is refused in place and stays until it is fixed or undone. Leaving the editor keeps the edit, and an edit is written to the row it started on, also if that row moved meanwhile; if its row or field is gone, a number that is not one says “… It was not kept, as its row or field is gone.”, and “… as the Table closed.” when the Table closes.</p>
     <div class="gal" id="g-cells"></div>
   </section>
   <section>
@@ -165,11 +165,11 @@ h4.qh{margin:14px 0 6px;font-size:13px}
       <tr><th>Key</th><th>On a selected cell</th><th>While editing</th></tr>
       <tr><td><kbd>↑</kbd> <kbd>↓</kbd> <kbd>←</kbd> <kbd>→</kbd></td><td>Select the next cell</td><td>Move the caret; a picker moves its choice</td></tr>
       <tr><td><kbd>⏎</kbd></td><td>Edit, or open the picker</td><td>Keep the value and select the cell</td></tr>
-      <tr><td><kbd>⇥</kbd> <kbd>⇧⇥</kbd></td><td>Select the next or previous cell</td><td>Keep the value and select the next or previous cell</td></tr>
-      <tr><td><kbd>esc</kbd></td><td>Leave the table; the caret goes to the Page</td><td>Undo the edit and select the cell</td></tr>
+      <tr><td><kbd>⇥</kbd> <kbd>⇧⇥</kbd></td><td>Select the next or previous cell; after a row's last field, the next row's first, and nothing after the table's last cell</td><td>Keep the value and select the next or previous cell</td></tr>
+      <tr><td><kbd>esc</kbd></td><td>Leave the table; the caret goes to the start of the Text Block below it, if any</td><td>Undo the edit and select the cell</td></tr>
       <tr><td>Typing</td><td>Replace a text or number cell; open a picker filtered by it</td><td>Edit</td></tr>
       <tr><td><kbd>Space</kbd></td><td>Tick or untick a checkbox</td><td></td></tr>
-      <tr><td><kbd>⌫</kbd></td><td>Clear the cell</td><td>Delete a character</td></tr>
+      <tr><td><kbd>⌫</kbd> <kbd>⌦</kbd></td><td>Clear the cell</td><td>Delete a character</td></tr>
     </table></div>
   </section>
   <section>
@@ -198,6 +198,12 @@ h4.qh{margin:14px 0 6px;font-size:13px}
       <li>What <b>/</b> opens is called slash commands, as in Notion and T3 Code; the Blocks mockups keep "Block menu" for a Block's own menu.</li>
       <li>A field without a name takes its kind's name, as in Notion; it stays English until localization is decided (ADR-0246).</li>
       <li>+ New and + add last, which the core places as it applies the write (ADR-0247).</li>
+    </ol>
+    <h4 class="qh">Decided on 2026-11-07</h4>
+    <ol class="qs">
+      <li>esc on a selected cell puts the caret at the start of the Text Block below the table, if any; ⇥ goes on with the next row and stops at the table's last cell, as in Notion.</li>
+      <li>A number that is not one stays in its editor until it is fixed or undone; one that cannot be kept says so, as section 4 shows.</li>
+      <li>Liquid holds a table's cell writes not yet read back, so quick toggles flip; written values show when they are read back (ADR-0248).</li>
     </ol>
   </section>
 </div>

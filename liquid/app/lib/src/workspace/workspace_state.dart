@@ -134,6 +134,11 @@ class WorkspaceState {
   ValueListenable<List<BridgePage>> pages(String area) =>
       _trees.putIfAbsent(area, () => ValueNotifier(const []));
 
+  /// Shows `problem` until the next change or read succeeds, unless the window closed.
+  void report(Object problem) {
+    if (!_disposed) this.problem.value = '$problem';
+  }
+
   /// Completes once every mutation asked for so far is applied or refused.
   Future<void> get settled => _applied;
 
