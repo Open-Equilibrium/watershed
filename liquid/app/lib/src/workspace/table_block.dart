@@ -95,6 +95,7 @@ class _TableBlockState extends State<TableBlock> {
     write: _setCell,
     reveal: _reveal,
     leave: _leave,
+    report: _report,
   )..addListener(_changed);
 
   /// The grid's geometry as last built, to reveal a cell.

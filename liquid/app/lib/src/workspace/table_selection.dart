@@ -20,6 +20,7 @@ class CellSelection extends ChangeNotifier {
     required this.write,
     required this.reveal,
     required this.leave,
+    required this.report,
   }) {
     // Leaving the cell editor keeps what was typed, as a spreadsheet does.
     editFocus.addListener(() {
@@ -42,6 +43,9 @@ class CellSelection extends ChangeNotifier {
 
   /// esc on a selected cell leaves the Table.
   final VoidCallback leave;
+
+  /// Shows a problem on the Page.
+  final void Function(String problem) report;
 
   /// The selected cell, as row and field positions, and whether it is edited.
   (int, int)? selected;
@@ -136,7 +140,19 @@ class CellSelection extends ChangeNotifier {
   /// cell, which takes it if the row only moved and refuses it visibly if it went.
   void relocate(int? Function(String row) rowIndex) {
     final (row, _) = selected ?? (-1, -1);
-    if (row < 0) return;
+    // Ending an edit notifies, which asks to relocate again.
+    if (row < 0 || _relocating) return;
+    _relocating = true;
+    try {
+      _relocate(row, rowIndex);
+    } finally {
+      _relocating = false;
+    }
+  }
+
+  var _relocating = false;
+
+  void _relocate(int row, int? Function(String row) rowIndex) {
     // A selection made before its row was read takes the row once it is.
     _rowId ??= rowAt(row)?.id;
     final (rowId, fieldId) = (_rowId, _fieldId);
@@ -151,7 +167,10 @@ class CellSelection extends ChangeNotifier {
     }
     final unread = found == null && rowAt(row) == null && row < rowCount();
     if (at >= 0 && unread) return;
-    if (editing) commit(stay: false);
+    // A number that is none cannot be written; the Page says it was not kept.
+    if (editing && !commit(stay: false)) {
+      report('${error ?? 'The edit'} It was not kept, as its row moved away.');
+    }
     clear();
   }
 

@@ -393,4 +393,24 @@ void main() {
     await tester.pumpAndSettle();
     expect(written().single.$3.checked, isTrue);
   });
+
+  testWidgets('a number that is none says so when its row moves away', (
+    tester,
+  ) async {
+    await kit.show(tester, [TablePart(expenses)]);
+    final table = kit.fake.views[kit.page]!.single.block;
+    await tester.tap(cell('r2', 'amount'));
+    await tester.pumpAndSettle();
+    await key(tester, LogicalKeyboardKey.enter);
+    await tester.enterText(editor(), '-');
+    final rows = kit.fake.rows[table]!;
+    kit.fake.putRows(kit.page, table, [
+      rows[0],
+      for (var number = 10; number < 160; number++) namedRow(number),
+      rows[1],
+    ]);
+    await tester.pumpAndSettle();
+    expect(written(), isEmpty);
+    expect(kit.workspace.problem.value, contains('“-” is no number'));
+  });
 }
