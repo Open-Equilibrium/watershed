@@ -169,8 +169,26 @@ class _TableBlockState extends State<TableBlock> {
     ).listen((_) => unawaited(_read()), onError: _report);
   }
 
+  /// The Page's scroll, which moves the Table and so closes what hangs under it.
+  ScrollPosition? _pageScroll;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final scroll = Scrollable.maybeOf(context)?.position;
+    if (scroll == _pageScroll) return;
+    _pageScroll?.removeListener(_pageScrolled);
+    _pageScroll = scroll?..addListener(_pageScrolled);
+  }
+
+  void _pageScrolled() {
+    if (_panel.isShowing) _panel.hide();
+    _cells.closePick();
+  }
+
   @override
   void dispose() {
+    _pageScroll?.removeListener(_pageScrolled);
     // A composition still open is written as it stands.
     _write();
     _state.finishing.remove(_typed);
@@ -259,14 +277,17 @@ class _TableBlockState extends State<TableBlock> {
         child: TapRegion(
           groupId: _pick,
           onTapOutside: (_) => _cells.closePick(stay: false),
-          child: SelectPicker(
-            field: field,
-            text: _cells.pickText,
-            onPick: _cells.pick,
-            onCreate: _cells.create,
-            onClose: _cells.closePick,
-            onTab: _cells.tabFromPick,
-            onKeys: (keys) => _cells.pickKeys = keys,
+          // A click in the picker beside its filter keeps the filter's keys.
+          child: TextFieldTapRegion(
+            child: SelectPicker(
+              field: field,
+              text: _cells.pickText,
+              onPick: _cells.pick,
+              onCreate: _cells.create,
+              onClose: _cells.closePick,
+              onTab: _cells.tabFromPick,
+              onKeys: (keys) => _cells.pickKeys = keys,
+            ),
           ),
         ),
       ),
@@ -548,7 +569,10 @@ class _TableBlockState extends State<TableBlock> {
           child: TapRegion(
             groupId: _panel,
             onTapOutside: (_) => _panel.hide(),
-            child: FieldPanel(onAdd: _addField, onClose: _panel.hide),
+            // A click in the panel beside its field keeps the field's keys.
+            child: TextFieldTapRegion(
+              child: FieldPanel(onAdd: _addField, onClose: _panel.hide),
+            ),
           ),
         ),
       ),

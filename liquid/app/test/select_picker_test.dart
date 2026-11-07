@@ -160,4 +160,41 @@ void main() {
     expect(picker, findsNothing);
     expect(chosen(), isEmpty);
   });
+
+  testWidgets('scrolling the Page closes the options', (tester) async {
+    await kit.show(tester, [
+      TablePart(expenses),
+      for (var number = 0; number < 40; number++) TextPart('Line $number'),
+    ]);
+    await open(tester, 'r1');
+    expect(picker, findsOneWidget);
+    final page = tester.state<ScrollableState>(
+      find
+          .descendant(
+            of: find.byType(CustomScrollView),
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
+    page.position.jumpTo(200);
+    await tester.pumpAndSettle();
+    expect(picker, findsNothing);
+  });
+
+  testWidgets(
+    'a click in the options beside them keeps the keys',
+    variant: TargetPlatformVariant.only(TargetPlatform.macOS),
+    (tester) async {
+      await kit.show(tester, [TablePart(expenses)]);
+      await open(tester, 'r1');
+      await tester.tap(
+        inPicker(find.text('Choose an option or create one')),
+        kind: PointerDeviceKind.mouse,
+      );
+      await tester.pumpAndSettle();
+      await key(tester, LogicalKeyboardKey.arrowDown);
+      await key(tester, LogicalKeyboardKey.enter);
+      expect(chosen(), [('r1', 'home')]);
+    },
+  );
 }
