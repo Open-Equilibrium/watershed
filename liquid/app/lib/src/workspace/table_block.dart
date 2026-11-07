@@ -141,6 +141,7 @@ class _TableBlockState extends State<TableBlock> {
     _sideways.addListener(_closePanel);
     _name.addListener(_typed);
     _state.finishing.add(_typed);
+    _state.finishing.add(_cells.finish);
     _nameFocus.addListener(_left);
     // Once every rename arrived, the name is read again.
     _settled = widget.views.settled
@@ -174,6 +175,10 @@ class _TableBlockState extends State<TableBlock> {
     _down.dispose();
     _name.dispose();
     _nameFocus.dispose();
+    // An edit still open is written as it stands.
+    _cells.removeListener(_changed);
+    _cells.finish();
+    _state.finishing.remove(_cells.finish);
     _cells.dispose();
     super.dispose();
   }
@@ -199,6 +204,7 @@ class _TableBlockState extends State<TableBlock> {
 
   void _changed() {
     if (!mounted) return;
+    _cells.relocate((id) => _rows.indexWhere((row) => row.id == id));
     setState(() {});
   }
 
@@ -420,6 +426,7 @@ class _TableBlockState extends State<TableBlock> {
         if (!_nameFocus.hasFocus) _show(answer.database?.name ?? '');
       }
       setState(() => _database = answer.database);
+      _cells.relocate((id) => _rows.indexWhere((row) => row.id == id));
     } on Object catch (error) {
       // What an add made is not shown later by surprise.
       if (read > _readsAtRowAdd) _rowAdded = false;

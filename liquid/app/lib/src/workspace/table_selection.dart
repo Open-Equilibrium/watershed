@@ -44,6 +44,14 @@ class CellSelection extends ChangeNotifier {
   /// The selected cell, as row and field positions, and whether it is edited.
   (int, int)? selected;
   var editing = false;
+
+  /// The selected row's and field's identities, which the selection follows when rows or
+  /// fields change elsewhere.
+  String? _rowId;
+  String? _fieldId;
+
+  /// The cell an edit started on, which it is written to, and its value then.
+  (BridgeRow, BridgeField, BridgeCell?)? _edited;
   final edit = TextEditingController();
   late final editFocus = FocusNode(
     debugLabel: 'Cell editor',
@@ -91,7 +99,7 @@ class CellSelection extends ChangeNotifier {
   void tap(int row, int field) {
     if (editing && !commit(stay: false)) return;
     final again = selected == (row, field);
-    selected = (row, field);
+    _place(row, field);
     cellsFocus.requestFocus();
     _changed();
     final target = _target;
@@ -104,12 +112,38 @@ class CellSelection extends ChangeNotifier {
     }
   }
 
+  void _place(int row, int field) {
+    selected = (row, field);
+    _rowId = rowAt(row)?.id;
+    final all = fields();
+    _fieldId = field < all.length ? all[field].id : null;
+  }
+
+  /// Moves the selection to where its row and field are now, after rows or fields changed
+  /// elsewhere; a field gone ends it. A row not read where it was keeps its place.
+  void relocate(int? Function(String row) rowIndex) {
+    final (row, field) = selected ?? (-1, -1);
+    if (row < 0 || _rowId == null || _fieldId == null) return;
+    final at = fields().indexWhere((shown) => shown.id == _fieldId);
+    if (at < 0) return clear();
+    final moved = rowIndex(_rowId!) ?? row;
+    if ((moved, at) == selected) return;
+    selected = (moved, at);
+    _changed();
+  }
+
   /// Forgets the selection, as when the Table is left.
   void clear() {
     selected = null;
     editing = false;
+    _edited = null;
     error = null;
     _changed();
+  }
+
+  /// Writes an edit still open as it stands, as when the Table goes or Liquid quits.
+  void finish() {
+    if (editing) commit(stay: false);
   }
 
   static bool _edits(BridgeFieldKind kind) =>
@@ -123,6 +157,7 @@ class CellSelection extends ChangeNotifier {
   };
 
   void _startEdit(String text) {
+    _edited = _target;
     edit.value = TextEditingValue(
       text: text,
       selection: TextSelection.collapsed(offset: text.length),
@@ -138,7 +173,7 @@ class CellSelection extends ChangeNotifier {
   /// Writes what was typed and ends the edit; a number that is none stays to be fixed.
   /// With `stay`, the selection takes the keys again.
   bool commit({required bool stay}) {
-    final target = _target;
+    final target = _edited;
     if (target == null) {
       _endEdit(stay: stay);
       return true;
@@ -176,6 +211,7 @@ class CellSelection extends ChangeNotifier {
 
   void _endEdit({required bool stay}) {
     editing = false;
+    _edited = null;
     error = null;
     _changed();
     if (stay) cellsFocus.requestFocus();
@@ -217,7 +253,19 @@ class CellSelection extends ChangeNotifier {
 
   /// The keys on a selected cell (approved Table View mockups, section 9).
   KeyEventResult _cellKey(FocusNode _, KeyEvent event) {
-    if (event is KeyUpEvent || editing) return KeyEventResult.ignored;
+    if (event is KeyUpEvent) return KeyEventResult.ignored;
+    if (editing) {
+      // Typing that comes before the editor takes the keys goes into it.
+      final typed = event.character;
+      if (editFocus.hasFocus || typed == null || !_printable(typed)) {
+        return KeyEventResult.ignored;
+      }
+      edit.value = TextEditingValue(
+        text: edit.text + typed,
+        selection: TextSelection.collapsed(offset: edit.text.length + 1),
+      );
+      return KeyEventResult.handled;
+    }
     final target = _target;
     if (target == null) return KeyEventResult.ignored;
     final (row, field, cell) = target;
@@ -249,8 +297,7 @@ class CellSelection extends ChangeNotifier {
         // Typing replaces a text or number cell.
         final typed = event.character;
         if (typed == null ||
-            typed.isEmpty ||
-            typed.codeUnitAt(0) < 0x20 ||
+            !_printable(typed) ||
             keys.isControlPressed ||
             keys.isMetaPressed ||
             !_edits(field.kind)) {
@@ -260,6 +307,11 @@ class CellSelection extends ChangeNotifier {
     }
     return KeyEventResult.handled;
   }
+
+  static bool _printable(String typed) =>
+      typed.isNotEmpty &&
+      typed.codeUnitAt(0) >= 0x20 &&
+      typed.codeUnitAt(0) != 0x7f;
 
   void _move(int rows, int columns) {
     final (row, field) = selected!;
@@ -281,7 +333,7 @@ class CellSelection extends ChangeNotifier {
   }
 
   void _select(int row, int field) {
-    selected = (row, field);
+    _place(row, field);
     _changed();
     reveal(row, field);
   }

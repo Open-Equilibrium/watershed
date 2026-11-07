@@ -148,4 +148,56 @@ void main() {
     await key(tester, LogicalKeyboardKey.backspace);
     expect(written(), isEmpty);
   });
+
+  testWidgets('an edit goes to its cell when rows change elsewhere meanwhile', (
+    tester,
+  ) async {
+    await kit.show(tester, [TablePart(expenses)]);
+    final table = kit.fake.views[kit.page]!.single.block;
+    await tester.tap(cell('r2', 'name'));
+    await tester.pumpAndSettle();
+    await key(tester, LogicalKeyboardKey.enter);
+    await tester.enterText(editor(), 'Power');
+    // Another device removes the first row.
+    kit.fake.putRows(kit.page, table, [kit.fake.rows[table]![1]]);
+    await tester.pumpAndSettle();
+    if (editor().evaluate().isNotEmpty) {
+      await key(tester, LogicalKeyboardKey.enter);
+    }
+    expect(written(), [('r2', 'name', text('Power'))]);
+  });
+
+  testWidgets(
+    'an edit still open is kept when the Page closes or Liquid quits',
+    (tester) async {
+      await kit.show(tester, [TablePart(expenses)]);
+      await tester.tap(cell('r1', 'name'));
+      await tester.pumpAndSettle();
+      await key(tester, LogicalKeyboardKey.enter);
+      await tester.enterText(editor(), 'Market');
+      await kit.workspace.drain();
+      await tester.pumpAndSettle();
+      expect(written(), [('r1', 'name', text('Market'))]);
+
+      await tester.tap(cell('r2', 'name'));
+      await tester.pumpAndSettle();
+      await key(tester, LogicalKeyboardKey.enter);
+      await tester.enterText(editor(), 'Power');
+      await kit.workspace.newPage(kit.workspace.open.value!.area);
+      await tester.pumpAndSettle();
+      expect(written().last, ('r2', 'name', text('Power')));
+    },
+  );
+
+  testWidgets('keys typed before the editor takes them still count', (
+    tester,
+  ) async {
+    await kit.show(tester, [TablePart(expenses)]);
+    await tester.tap(cell('r1', 'name'));
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyB);
+    await tester.pumpAndSettle();
+    expect(tester.widget<TextField>(editor()).controller!.text, 'ab');
+  });
 }
