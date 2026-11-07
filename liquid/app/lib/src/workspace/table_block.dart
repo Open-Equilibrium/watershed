@@ -239,7 +239,16 @@ class _TableBlockState extends State<TableBlock> {
 
   /// The person scrolling the rows closes a select cell's picker, as its cell moves away.
   void _scrolled() {
-    if (!_scrollingItself) _cells.closePick();
+    _scrollingItself ? _replacePick() : _cells.closePick();
+  }
+
+  /// Chooses the picker's side and room again once the Table is laid out, after the
+  /// Table moved its cell.
+  void _replacePick() {
+    if (!_cells.picking) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) setState(() {});
+    });
   }
 
   void _changed() {
@@ -249,6 +258,7 @@ class _TableBlockState extends State<TableBlock> {
       ..relocate(rowIndex)
       ..read(rowIndex);
     setState(() {});
+    _replacePick();
     if (_cells.picking != _pick.isShowing) {
       _cells.picking ? _pick.show() : _pick.hide();
     }
@@ -256,6 +266,7 @@ class _TableBlockState extends State<TableBlock> {
 
   /// A select cell's picker, under the cell or above it, which a click outside closes.
   final _pick = OverlayPortalController();
+  final _pickAnchor = LayerLink();
   final _pickCell = GlobalKey();
 
   Future<String> _addOption(BridgeField field, String name, int color) async {
@@ -286,26 +297,41 @@ class _TableBlockState extends State<TableBlock> {
       });
       return const SizedBox.shrink();
     }
-    return CustomSingleChildLayout(
-      delegate: PickerLayout(
-        MatrixUtils.transformRect(
-          cell.getTransformTo(overlay),
-          Offset.zero & cell.size,
-        ),
-      ),
-      child: TapRegion(
-        groupId: _pick,
-        onTapOutside: (_) => _cells.closePick(stay: false),
-        // A click in the picker beside its filter keeps the filter's keys.
-        child: TextFieldTapRegion(
-          child: SelectPicker(
-            field: field,
-            text: _cells.pickText,
-            onPick: _cells.pick,
-            onCreate: _cells.create,
-            onClose: _cells.closePick,
-            onTab: _cells.tabFromPick,
-            onKeys: (keys) => _cells.pickKeys = keys,
+    // It hangs under the cell, or above it when all options do not fit under it and
+    // there is more room above; they scroll in the room it has.
+    final top = cell.localToGlobal(Offset.zero, ancestor: overlay).dy;
+    final below =
+        overlay.size.height - top - cell.size.height - 2 * WsMetrics.space1;
+    final above = top - 2 * WsMetrics.space1;
+    final up =
+        SelectPicker.heightFor(field.options.length) > below && above > below;
+    return Align(
+      alignment: Alignment.topLeft,
+      child: CompositedTransformFollower(
+        link: _pickAnchor,
+        showWhenUnlinked: false,
+        targetAnchor: up ? Alignment.topLeft : Alignment.bottomLeft,
+        followerAnchor: up ? Alignment.bottomLeft : Alignment.topLeft,
+        offset: Offset(0, up ? -WsMetrics.space1 : WsMetrics.space1),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: math.max(0, up ? above : below),
+          ),
+          child: TapRegion(
+            groupId: _pick,
+            onTapOutside: (_) => _cells.closePick(stay: false),
+            // A click in the picker beside its filter keeps the filter's keys.
+            child: TextFieldTapRegion(
+              child: SelectPicker(
+                field: field,
+                text: _cells.pickText,
+                onPick: _cells.pick,
+                onCreate: _cells.create,
+                onClose: _cells.closePick,
+                onTab: _cells.tabFromPick,
+                onKeys: (keys) => _cells.pickKeys = keys,
+              ),
+            ),
           ),
         ),
       ),
@@ -791,7 +817,11 @@ class _TableBlockState extends State<TableBlock> {
               groupId: _pick,
               // Nor does it take the keys from the picker's filter.
               child: TextFieldTapRegion(
-                child: KeyedSubtree(key: _pickCell, child: tapped),
+                child: CompositedTransformTarget(
+                  key: _pickCell,
+                  link: _pickAnchor,
+                  child: tapped,
+                ),
               ),
             );
           }

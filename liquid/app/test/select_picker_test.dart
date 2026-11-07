@@ -267,4 +267,59 @@ void main() {
     expect(picker, findsNothing);
     expect(chosen(), isEmpty);
   });
+
+  testWidgets(
+    'a select cell the Table scrolls into view to open hangs its options under it',
+    (tester) async {
+      await kit.show(tester, [
+        TablePart([
+          ...expenses,
+          for (var number = 3; number <= 30; number++) namedRow(number),
+        ]),
+      ]);
+      await tester.tap(cell('r1', 'category'));
+      await tester.pumpAndSettle();
+      final rows = tester
+          .widget<ListView>(find.byKey(const Key('table rows')))
+          .controller!;
+      // The cell, partly scrolled out of view, is still there.
+      rows.jumpTo(20);
+      await tester.pumpAndSettle();
+      await key(tester, LogicalKeyboardKey.keyF);
+      expect(rows.offset, 0);
+      expect(
+        tester.getRect(picker).top,
+        moreOrLessEquals(tester.getRect(cell('r1', 'category')).bottom + 4),
+      );
+    },
+  );
+
+  testWidgets(
+    'the options choose their side where the Table scrolls their cell to',
+    (tester) async {
+      await kit.show(tester, [
+        TablePart([
+          ...expenses,
+          for (var number = 3; number <= 30; number++) namedRow(number),
+        ]),
+      ]);
+      await tester.tap(cell('r1', 'category'));
+      await tester.pumpAndSettle();
+      // Under the cell where it is shown, the options' 132 do not fit; 20 higher they would.
+      final bottom = tester.getRect(cell('r1', 'category')).bottom;
+      await tester.binding.setSurfaceSize(Size(1400, bottom + 130));
+      await tester.pumpAndSettle();
+      final rows = tester
+          .widget<ListView>(find.byKey(const Key('table rows')))
+          .controller!;
+      rows.jumpTo(20);
+      await tester.pumpAndSettle();
+      await key(tester, LogicalKeyboardKey.enter);
+      expect(rows.offset, 0);
+      expect(
+        tester.getRect(picker).bottom,
+        lessThanOrEqualTo(tester.getRect(cell('r1', 'category')).top),
+      );
+    },
+  );
 }

@@ -1,5 +1,3 @@
-import 'dart:math' as math;
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -50,6 +48,17 @@ class SelectPicker extends StatefulWidget {
   /// Takes the picker's keys while it is open, for keys that reach the cell first.
   final void Function(KeyEventResult Function(KeyEvent event)? keys)? onKeys;
 
+  static const _filterHeight = 34.0;
+  static const _labelHeight = 22.0;
+  static const _itemHeight = 30.0;
+
+  /// The height the picker takes with `options` options and nothing typed.
+  static double heightFor(int options) =>
+      _filterHeight +
+      2 * WsMetrics.space2 +
+      _labelHeight +
+      options * _itemHeight;
+
   @override
   State<SelectPicker> createState() => _SelectPickerState();
 }
@@ -59,8 +68,6 @@ class _SelectPickerState extends State<SelectPicker> {
   late final _focus = FocusNode(debugLabel: 'Select picker', onKeyEvent: _key);
   final _list = ScrollController();
   var _chosen = 0;
-
-  static const _itemHeight = 30.0;
 
   @override
   void initState() {
@@ -81,8 +88,9 @@ class _SelectPickerState extends State<SelectPicker> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_list.hasClients) return;
       final position = _list.position;
-      final top = _chosen * _itemHeight;
-      final bottom = top + _itemHeight - position.viewportDimension;
+      final top = _chosen * SelectPicker._itemHeight;
+      final bottom =
+          top + SelectPicker._itemHeight - position.viewportDimension;
       if (top < position.pixels) position.jumpTo(top);
       if (bottom > position.pixels) position.jumpTo(bottom);
     });
@@ -150,7 +158,7 @@ class _SelectPickerState extends State<SelectPicker> {
         behavior: HitTestBehavior.opaque,
         onTap: () => _take(index),
         child: Container(
-          height: _itemHeight,
+          height: SelectPicker._itemHeight,
           padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space3),
           alignment: Alignment.centerLeft,
           decoration: BoxDecoration(
@@ -177,7 +185,7 @@ class _SelectPickerState extends State<SelectPicker> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Container(
-              constraints: const BoxConstraints(minHeight: 34),
+              height: SelectPicker._filterHeight,
               padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space3),
               alignment: Alignment.centerLeft,
               decoration: BoxDecoration(
@@ -199,13 +207,15 @@ class _SelectPickerState extends State<SelectPicker> {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Padding(
+                    Container(
+                      height: SelectPicker._labelHeight,
                       padding: const EdgeInsets.fromLTRB(
                         WsMetrics.space3,
                         WsMetrics.space1,
                         WsMetrics.space3,
                         2,
                       ),
+                      alignment: Alignment.centerLeft,
                       child: Text(
                         'Choose an option or create one',
                         style: TextStyle(
@@ -218,7 +228,7 @@ class _SelectPickerState extends State<SelectPicker> {
                       child: ListView.builder(
                         controller: _list,
                         shrinkWrap: true,
-                        itemExtent: _itemHeight,
+                        itemExtent: SelectPicker._itemHeight,
                         itemCount: _count,
                         itemBuilder: (context, index) => index < options.length
                             ? item(
@@ -257,41 +267,4 @@ class _SelectPickerState extends State<SelectPicker> {
       ),
     );
   }
-}
-
-/// Places a select cell's picker under the cell, or above it when only there it fits,
-/// in the window's height; the picker's list scrolls in what it gets.
-class PickerLayout extends SingleChildLayoutDelegate {
-  PickerLayout(this.cell);
-
-  /// The cell, where the picker's overlay lays it out.
-  final Rect cell;
-
-  static const _gap = WsMetrics.space1;
-  static const _margin = WsMetrics.space2;
-
-  double _below(Size window) => window.height - cell.bottom - _gap - _margin;
-  double get _above => cell.top - _gap - _margin;
-
-  @override
-  BoxConstraints getConstraintsForChild(BoxConstraints constraints) =>
-      BoxConstraints.loose(
-        Size(
-          constraints.maxWidth,
-          math.max(0, math.max(_below(constraints.biggest), _above)),
-        ),
-      );
-
-  @override
-  Offset getPositionForChild(Size size, Size childSize) {
-    final below = _below(size);
-    final above = childSize.height > below && _above > below;
-    return Offset(
-      math.max(0, math.min(cell.left, size.width - childSize.width)),
-      above ? cell.top - _gap - childSize.height : cell.bottom + _gap,
-    );
-  }
-
-  @override
-  bool shouldRelayout(PickerLayout old) => old.cell != cell;
 }
