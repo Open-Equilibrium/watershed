@@ -233,6 +233,11 @@ class CellSelection extends ChangeNotifier {
     if (at >= 0 && found != null) {
       if ((found, at) == selected) return;
       selected = (found, at);
+      // A cell moved under its picker closes it, as a scroll does.
+      if (picking) {
+        picking = false;
+        cellsFocus.requestFocus();
+      }
       _changed();
       return;
     }

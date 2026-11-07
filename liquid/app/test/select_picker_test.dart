@@ -340,4 +340,34 @@ void main() {
       expect(tester.binding.hasScheduledFrame, isFalse);
     },
   );
+
+  testWidgets(
+    'a select cell scrolled far out of view opens its options once revealed',
+    (tester) async {
+      await kit.show(tester, [
+        TablePart([
+          ...expenses,
+          for (var number = 3; number <= 90; number++) namedRow(number),
+        ]),
+      ]);
+      await tester.tap(cell('r1', 'category'));
+      await tester.pumpAndSettle();
+      final rows = tester
+          .widget<ListView>(find.byKey(const Key('table rows')))
+          .controller!;
+      rows.jumpTo(rows.position.maxScrollExtent);
+      await tester.pumpAndSettle();
+      expect(cell('r1', 'category'), findsNothing);
+      await key(tester, LogicalKeyboardKey.enter);
+      expect(rows.offset, 0);
+      expect(picker, findsOneWidget);
+      expect(
+        tester.getRect(picker).top,
+        moreOrLessEquals(tester.getRect(cell('r1', 'category')).bottom + 4),
+      );
+      await key(tester, LogicalKeyboardKey.arrowDown);
+      await key(tester, LogicalKeyboardKey.enter);
+      expect(chosen(), [('r1', 'home')]);
+    },
+  );
 }

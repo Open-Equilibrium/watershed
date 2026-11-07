@@ -259,7 +259,6 @@ class _TableBlockState extends State<TableBlock> {
       ..read(rowIndex);
     setState(() {});
     _replacePick();
-    if (!_cells.picking) _pickWaited = false;
     if (_cells.picking != _pick.isShowing) {
       _cells.picking ? _pick.show() : _pick.hide();
     }
@@ -269,9 +268,6 @@ class _TableBlockState extends State<TableBlock> {
   final _pick = OverlayPortalController();
   final _pickAnchor = LayerLink();
   final _pickCell = GlobalKey();
-
-  /// Whether the picker waited a frame for its cell.
-  var _pickWaited = false;
 
   Future<String> _addOption(BridgeField field, String name, int color) async {
     final added = await widget.views.write(
@@ -294,18 +290,10 @@ class _TableBlockState extends State<TableBlock> {
     final cell = _pickCell.currentContext?.findRenderObject() as RenderBox?;
     final overlay =
         Overlay.of(context).context.findRenderObject() as RenderBox?;
+    // The picker shows once its cell is laid out, which tells so.
     if (cell == null || !cell.hasSize || overlay == null) {
-      // The cell takes its place in the frame the picker opens, which then hangs from
-      // it; a cell moved out of the built rows or fields closes it, as a scroll does.
-      final waited = _pickWaited;
-      _pickWaited = true;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
-        waited ? _cells.closePick() : setState(() {});
-      });
       return const SizedBox.shrink();
     }
-    _pickWaited = false;
     // It hangs under the cell, or above it when all options do not fit under it and
     // there is more room above; they scroll in the room it has.
     final top = cell.localToGlobal(Offset.zero, ancestor: overlay).dy;
@@ -826,10 +814,15 @@ class _TableBlockState extends State<TableBlock> {
               groupId: _pick,
               // Nor does it take the keys from the picker's filter.
               child: TextFieldTapRegion(
-                child: CompositedTransformTarget(
-                  key: _pickCell,
-                  link: _pickAnchor,
-                  child: tapped,
+                child: _PickedCell(
+                  onPlaced: () {
+                    if (mounted && _cells.picking) setState(() {});
+                  },
+                  child: CompositedTransformTarget(
+                    key: _pickCell,
+                    link: _pickAnchor,
+                    child: tapped,
+                  ),
                 ),
               ),
             );
@@ -1050,4 +1043,28 @@ class _NewRow extends StatelessWidget {
       ),
     );
   }
+}
+
+/// The cell a select picker hangs from, which tells once it is first laid out.
+class _PickedCell extends StatefulWidget {
+  const _PickedCell({required this.onPlaced, required this.child});
+
+  final VoidCallback onPlaced;
+  final Widget child;
+
+  @override
+  State<_PickedCell> createState() => _PickedCellState();
+}
+
+class _PickedCellState extends State<_PickedCell> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) widget.onPlaced();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
 }
