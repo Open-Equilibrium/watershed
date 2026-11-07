@@ -9,6 +9,7 @@ import '../rust/api/workspace.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
+import 'cell_pickers.dart';
 import 'field_panel.dart';
 import 'table_cells.dart';
 import 'table_selection.dart';
@@ -97,6 +98,7 @@ class _TableBlockState extends State<TableBlock> {
     leave: _leave,
     // Also from dispose, so after the frame, when the Page may show it.
     report: (problem) => scheduleMicrotask(() => _state.report(problem)),
+    addOption: _addOption,
   )..addListener(_changed);
 
   /// The grid's geometry as last built, to reveal a cell.
@@ -211,6 +213,54 @@ class _TableBlockState extends State<TableBlock> {
       ..relocate(rowIndex)
       ..read(rowIndex);
     setState(() {});
+    if (_cells.picking != _pick.isShowing) {
+      _cells.picking ? _pick.show() : _pick.hide();
+    }
+  }
+
+  /// A select cell's picker, under the cell, which a click outside closes.
+  final _pick = OverlayPortalController();
+  final _pickAnchor = LayerLink();
+
+  Future<String> _addOption(BridgeField field, String name, int color) async {
+    final added = await widget.views.write(
+      mutation(
+        BridgeMutationKind.addOption,
+        page: _page,
+        block: _block,
+        field: field.id,
+        text: name,
+        color: color,
+      ),
+      const [],
+    );
+    return added.option!;
+  }
+
+  Widget _picker(BuildContext context) {
+    final field = _cells.picked;
+    if (field == null) return const SizedBox.shrink();
+    return Align(
+      alignment: Alignment.topLeft,
+      child: CompositedTransformFollower(
+        link: _pickAnchor,
+        showWhenUnlinked: false,
+        targetAnchor: Alignment.bottomLeft,
+        offset: const Offset(0, WsMetrics.space1),
+        child: TapRegion(
+          groupId: _pick,
+          onTapOutside: (_) => _cells.closePick(stay: false),
+          child: SelectPicker(
+            field: field,
+            text: _cells.pickText,
+            onPick: _cells.pick,
+            onCreate: _cells.create,
+            onClose: _cells.closePick,
+            onTab: _cells.tabFromPick,
+          ),
+        ),
+      ),
+    );
   }
 
   /// + New adds a row last, which the core places as it applies the write (ADR-0247),
@@ -488,109 +538,115 @@ class _TableBlockState extends State<TableBlock> {
           ),
         ),
       ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: WsMetrics.space3),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            SizedBox(
-              height: 32,
-              child: Row(
-                children: [
-                  Icon(LucideIcons.table, size: 16, color: ws.textFaint),
-                  const SizedBox(width: WsMetrics.space3),
-                  Expanded(
-                    child: TextField(
-                      controller: _name,
-                      focusNode: _nameFocus,
-                      style: TextStyle(
-                        fontSize: WsMetrics.fsProse,
-                        fontWeight: WsMetrics.fwSemibold,
-                        color: ws.text,
-                      ),
-                      decoration: InputDecoration.collapsed(
-                        hintText: 'Untitled',
-                        hintStyle: TextStyle(color: ws.textFaint),
+      child: OverlayPortal(
+        controller: _pick,
+        overlayChildBuilder: _picker,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: WsMetrics.space3),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              SizedBox(
+                height: 32,
+                child: Row(
+                  children: [
+                    Icon(LucideIcons.table, size: 16, color: ws.textFaint),
+                    const SizedBox(width: WsMetrics.space3),
+                    Expanded(
+                      child: TextField(
+                        controller: _name,
+                        focusNode: _nameFocus,
+                        style: TextStyle(
+                          fontSize: WsMetrics.fsProse,
+                          fontWeight: WsMetrics.fwSemibold,
+                          color: ws.text,
+                        ),
+                        decoration: InputDecoration.collapsed(
+                          hintText: 'Untitled',
+                          hintStyle: TextStyle(color: ws.textFaint),
+                        ),
                       ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-            if (database != null)
-              Focus(
-                focusNode: _cells.cellsFocus,
-                // The keys of a selected cell, without a node of its own for readers.
-                includeSemantics: false,
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
-                  child: Container(
-                    foregroundDecoration: BoxDecoration(
-                      border: Border.all(color: ws.border),
-                      borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        // A Table may lose all its fields, as when another device removes
-                        // them; its rows still count.
-                        if (database.fields.isEmpty)
-                          Container(
-                            height: _headerHeight,
-                            color: ws.subtle,
-                            alignment: Alignment.centerRight,
-                            child: SizedBox(
-                              width: _addWidth,
-                              child: _AddField(
-                                link: _plus,
-                                panel: _panel,
-                                onTap: _togglePanel,
+              if (database != null)
+                Focus(
+                  focusNode: _cells.cellsFocus,
+                  // The keys of a selected cell, without a node of its own for readers.
+                  includeSemantics: false,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
+                    child: Container(
+                      foregroundDecoration: BoxDecoration(
+                        border: Border.all(color: ws.border),
+                        borderRadius: BorderRadius.circular(WsMetrics.radiusLg),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          // A Table may lose all its fields, as when another device removes
+                          // them; its rows still count.
+                          if (database.fields.isEmpty)
+                            Container(
+                              height: _headerHeight,
+                              color: ws.subtle,
+                              alignment: Alignment.centerRight,
+                              child: SizedBox(
+                                width: _addWidth,
+                                child: _AddField(
+                                  link: _plus,
+                                  panel: _panel,
+                                  onTap: _togglePanel,
+                                ),
+                              ),
+                            )
+                          else
+                            LayoutBuilder(
+                              builder: (context, constraints) => _grid(
+                                database.fields,
+                                constraints.maxWidth,
+                                NumberFormat.decimalPattern(numbers),
+                                DateFormat.yMMMd(days),
                               ),
                             ),
-                          )
-                        else
-                          LayoutBuilder(
-                            builder: (context, constraints) => _grid(
-                              database.fields,
-                              constraints.maxWidth,
-                              NumberFormat.decimalPattern(numbers),
-                              DateFormat.yMMMd(days),
-                            ),
-                          ),
-                        _NewRow(onTap: () => unawaited(_addRow())),
-                        if (count > 0)
-                          Container(
-                            height: _footerHeight,
-                            color: ws.subtle,
-                            padding: const EdgeInsets.symmetric(horizontal: 10),
-                            alignment: Alignment.centerLeft,
-                            child: Text(
-                              '${NumberFormat.decimalPattern(numbers).format(count)} '
-                              '${count == 1 ? 'row' : 'rows'}',
-                              style: TextStyle(
-                                fontSize: WsMetrics.fsCompact,
-                                color: ws.textFaint,
+                          _NewRow(onTap: () => unawaited(_addRow())),
+                          if (count > 0)
+                            Container(
+                              height: _footerHeight,
+                              color: ws.subtle,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                              ),
+                              alignment: Alignment.centerLeft,
+                              child: Text(
+                                '${NumberFormat.decimalPattern(numbers).format(count)} '
+                                '${count == 1 ? 'row' : 'rows'}',
+                                style: TextStyle(
+                                  fontSize: WsMetrics.fsCompact,
+                                  color: ws.textFaint,
+                                ),
                               ),
                             ),
-                          ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
                 ),
-              ),
-            // A value refused in place says why, under the Table (approved mockups).
-            if (_cells.error case final error?)
-              Padding(
-                padding: const EdgeInsets.only(top: WsMetrics.space2),
-                child: Text(
-                  error,
-                  style: TextStyle(
-                    fontSize: WsMetrics.fsSmall,
-                    color: ws.danger,
+              // A value refused in place says why, under the Table (approved mockups).
+              if (_cells.error case final error?)
+                Padding(
+                  padding: const EdgeInsets.only(top: WsMetrics.space2),
+                  child: Text(
+                    error,
+                    style: TextStyle(
+                      fontSize: WsMetrics.fsSmall,
+                      color: ws.danger,
+                    ),
                   ),
                 ),
-              ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -637,6 +693,7 @@ class _TableBlockState extends State<TableBlock> {
       void Function(int index)? onTap,
       Key? Function(int index)? keyOf,
       bool Function(int index)? editing,
+      bool Function(int index)? picking,
     }) => ListenableBuilder(
       listenable: _sideways,
       builder: (context, _) {
@@ -672,6 +729,16 @@ class _TableBlockState extends State<TableBlock> {
             onTap: () => onTap(index),
             child: box,
           );
+          // The picker hangs under its cell, and a click in it is no click outside.
+          if (picking?.call(index) ?? false) {
+            return TapRegion(
+              groupId: _pick,
+              child: CompositedTransformTarget(
+                link: _pickAnchor,
+                child: tapped,
+              ),
+            );
+          }
           // A click in the edited cell beside its text is no click outside the editor.
           return editing?.call(index) ?? false
               ? TextFieldTapRegion(child: tapped)
@@ -780,6 +847,9 @@ class _TableBlockState extends State<TableBlock> {
                               }
                             },
                       mark: (index) => _cells.mark(context, rowIndex, index),
+                      picking: (index) =>
+                          _cells.picking &&
+                          _cells.selected == (rowIndex, index),
                       editing: (index) =>
                           _cells.editing &&
                           _cells.selected == (rowIndex, index),

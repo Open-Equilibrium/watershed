@@ -7,6 +7,7 @@ import 'package:intl/intl.dart';
 import '../rust/api/database.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
+import 'cell_pickers.dart';
 import 'table_cells.dart';
 
 /// A Table's selected cell and its edit, as in a spreadsheet and in Notion (approved Table
@@ -21,6 +22,7 @@ class CellSelection extends ChangeNotifier {
     required this.reveal,
     required this.leave,
     required this.report,
+    required this.addOption,
   }) {
     // Leaving the cell editor keeps what was typed, as a spreadsheet does.
     editFocus.addListener(() {
@@ -47,9 +49,17 @@ class CellSelection extends ChangeNotifier {
   /// Shows a problem on the Page.
   final void Function(String problem) report;
 
+  /// Adds an option named so, of that color, to a select field, and answers its identity.
+  final Future<String> Function(BridgeField field, String name, int color)
+  addOption;
+
   /// The selected cell, as row and field positions, and whether it is edited.
   (int, int)? selected;
   var editing = false;
+
+  /// Whether a select cell's picker is open, and what is typed to filter it.
+  var picking = false;
+  final pickText = TextEditingController();
 
   /// The selected row's and field's identities, which the selection follows when rows or
   /// fields change elsewhere.
@@ -124,7 +134,62 @@ class CellSelection extends ChangeNotifier {
       _toggle(read, column, cell);
     } else if (again && _edits(column.kind)) {
       _startEdit(_shown(column.kind, cell));
+    } else if (again && column.kind == BridgeFieldKind.select) {
+      _startPick('');
     }
+  }
+
+  /// The selected select cell's field while its picker is open.
+  BridgeField? get picked => picking ? _target?.$2 : null;
+
+  void _startPick(String typed) {
+    final (row, field) = selected!;
+    reveal(row, field);
+    pickText.value = TextEditingValue(
+      text: typed,
+      selection: TextSelection.collapsed(offset: typed.length),
+    );
+    picking = true;
+    _changed();
+  }
+
+  /// Picks `option` for the selected cell and closes the picker.
+  void pick(BridgeOption option) {
+    final target = _target;
+    if (target != null) {
+      final (row, field, _) = target;
+      _write(row, field, _cell(BridgeCellKind.select, text: option.id));
+    }
+    closePick();
+  }
+
+  /// Creates an option named `name` in the next color and picks it for the selected cell.
+  void create(String name) {
+    final target = _target;
+    closePick();
+    if (target == null) return;
+    final (row, field, _) = target;
+    addOption(field, name, nextColor(field))
+        .then(
+          (option) =>
+              write(row, field, _cell(BridgeCellKind.select, text: option)),
+        )
+        .then<void>((_) {}, onError: (Object _) {});
+  }
+
+  /// Closes the picker and keeps the cell as it is; with `stay`, the selection takes the
+  /// keys again.
+  void closePick({bool stay = true}) {
+    if (!picking) return;
+    picking = false;
+    _changed();
+    if (stay) cellsFocus.requestFocus();
+  }
+
+  /// ⇥ in the picker keeps the value and selects the next or, going back, previous cell.
+  void tabFromPick(bool back) {
+    closePick();
+    _tab(back: back);
   }
 
   void _place(int row, int field) {
@@ -180,6 +245,7 @@ class CellSelection extends ChangeNotifier {
   void clear() {
     selected = null;
     editing = false;
+    picking = false;
     _edited = null;
     error = null;
     _changed();
@@ -323,6 +389,16 @@ class CellSelection extends ChangeNotifier {
   /// The keys on a selected cell (approved Table View mockups, section 9).
   KeyEventResult _cellKey(FocusNode _, KeyEvent event) {
     if (event is KeyUpEvent) return KeyEventResult.ignored;
+    if (picking) {
+      // Typing that comes before the picker takes the keys filters it.
+      final typed = event.character;
+      if (typed == null || !_printable(typed)) return KeyEventResult.ignored;
+      pickText.value = TextEditingValue(
+        text: pickText.text + typed,
+        selection: TextSelection.collapsed(offset: pickText.text.length + 1),
+      );
+      return KeyEventResult.handled;
+    }
     if (editing) {
       if (editFocus.hasFocus) return KeyEventResult.ignored;
       // Until the editor takes the keys, ⏎, ⇥ and esc act on the edit as there, and
@@ -356,6 +432,9 @@ class CellSelection extends ChangeNotifier {
       case LogicalKeyboardKey.enter || LogicalKeyboardKey.numpadEnter
           when _edits(field.kind):
         _startEdit(_shown(field.kind, cell));
+      case LogicalKeyboardKey.enter || LogicalKeyboardKey.numpadEnter
+          when field.kind == BridgeFieldKind.select:
+        _startPick('');
       case LogicalKeyboardKey.escape:
         clear();
         leave();
@@ -367,16 +446,21 @@ class CellSelection extends ChangeNotifier {
           _write(row, field, _cell(BridgeCellKind.empty));
         }
       default:
-        // Typing replaces a text or number cell.
+        // Typing replaces a text or number cell, and filters a select cell's picker.
         final typed = event.character;
         if (typed == null ||
             !_printable(typed) ||
             keys.isControlPressed ||
-            keys.isMetaPressed ||
-            !_edits(field.kind)) {
+            keys.isMetaPressed) {
           return KeyEventResult.ignored;
         }
-        _startEdit(typed);
+        if (_edits(field.kind)) {
+          _startEdit(typed);
+        } else if (field.kind == BridgeFieldKind.select) {
+          _startPick(typed);
+        } else {
+          return KeyEventResult.ignored;
+        }
     }
     return KeyEventResult.handled;
   }
@@ -435,6 +519,7 @@ class CellSelection extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     edit.dispose();
+    pickText.dispose();
     editFocus.dispose();
     cellsFocus.dispose();
     super.dispose();

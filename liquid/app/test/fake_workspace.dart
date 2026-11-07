@@ -282,6 +282,29 @@ class FakeWorkspace implements LiquidWorkspace {
         );
         _changed(_blockResource(mutation));
         return BridgeApplied(action: _id());
+      case BridgeMutationKind.addOption:
+        final database = databases[mutation.block]!;
+        final option = BridgeOption(
+          id: _id(),
+          name: mutation.text!,
+          color: mutation.color,
+        );
+        databases[mutation.block!] = BridgeDatabase(
+          name: database.name,
+          fields: [
+            for (final field in database.fields)
+              field.id == mutation.field
+                  ? BridgeField(
+                      id: field.id,
+                      name: field.name,
+                      kind: field.kind,
+                      options: [...field.options, option],
+                    )
+                  : field,
+          ],
+        );
+        _changed(_blockResource(mutation));
+        return BridgeApplied(action: _id(), option: option.id);
       case BridgeMutationKind.renameDatabase:
         final database = databases[mutation.block]!;
         databases[mutation.block!] = BridgeDatabase(
