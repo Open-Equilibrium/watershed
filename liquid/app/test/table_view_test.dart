@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -457,6 +458,60 @@ void main() {
     expect(panel, findsNothing);
     expect(kit.applied(BridgeMutationKind.addField), isEmpty);
   });
+
+  testWidgets('scrolling the Page closes the field panel', (tester) async {
+    await kit.show(tester, [
+      TablePart(expenses),
+      for (var number = 0; number < 40; number++) TextPart('Line $number'),
+    ]);
+    await tester.tap(kit.inTable(find.byKey(const Key('add field'))));
+    await tester.pumpAndSettle();
+    tester
+        .state<ScrollableState>(
+          find
+              .descendant(
+                of: find.byType(CustomScrollView),
+                matching: find.byType(Scrollable),
+              )
+              .first,
+        )
+        .position
+        .jumpTo(200);
+    await tester.pumpAndSettle();
+    expect(panel, findsNothing);
+  });
+
+  testWidgets('resizing the window closes the field panel', (tester) async {
+    await kit.show(tester, [TablePart(expenses)]);
+    await tester.tap(kit.inTable(find.byKey(const Key('add field'))));
+    await tester.pumpAndSettle();
+    tester.view.physicalSize = tester.view.physicalSize / 2;
+    addTearDown(tester.view.resetPhysicalSize);
+    await tester.pumpAndSettle();
+    expect(panel, findsNothing);
+  });
+
+  testWidgets(
+    'a click in the field panel beside its name keeps the name\'s keys',
+    variant: TargetPlatformVariant.only(TargetPlatform.macOS),
+    (tester) async {
+      await kit.show(tester, [TablePart(expenses)]);
+      await tester.tap(kit.inTable(find.byKey(const Key('add field'))));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.descendant(of: panel, matching: find.text('Kind')),
+        kind: PointerDeviceKind.mouse,
+      );
+      await tester.pumpAndSettle();
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      expect(
+        kit.applied(BridgeMutationKind.addField).single.fieldKind,
+        BridgeFieldKind.number,
+      );
+    },
+  );
 
   testWidgets('⏎ pressed again while a field is added adds it once', (
     tester,
