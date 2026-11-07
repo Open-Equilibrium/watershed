@@ -200,4 +200,36 @@ void main() {
     await tester.pumpAndSettle();
     expect(tester.widget<TextField>(editor()).controller!.text, 'ab');
   });
+
+  testWidgets('an edit ends when its row is removed elsewhere', (tester) async {
+    await kit.show(tester, [
+      TablePart([...expenses, namedRow(3)]),
+    ]);
+    final table = kit.fake.views[kit.page]!.single.block;
+    await tester.tap(cell('r2', 'name'));
+    await tester.pumpAndSettle();
+    await key(tester, LogicalKeyboardKey.enter);
+    await tester.enterText(editor(), 'Power');
+    // Another device removes the edited row; the third slides into its place.
+    final rows = kit.fake.rows[table]!;
+    kit.fake.putRows(kit.page, table, [rows[0], rows[2]]);
+    await tester.pumpAndSettle();
+    expect(editor(), findsNothing);
+    expect(kit.inTable(find.text('Row 3')), findsOneWidget);
+    expect(written(), isEmpty);
+  });
+
+  testWidgets('a click in the edited cell keeps the edit', (tester) async {
+    await kit.show(tester, [TablePart(expenses)]);
+    await tester.tap(cell('r1', 'name'));
+    await tester.pumpAndSettle();
+    await key(tester, LogicalKeyboardKey.enter);
+    await tester.enterText(editor(), 'Market');
+    await tester.tapAt(
+      tester.getRect(cell('r1', 'name')).bottomRight - const Offset(4, 4),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.widget<TextField>(editor()).controller!.text, 'Market');
+    expect(written(), isEmpty);
+  });
 }

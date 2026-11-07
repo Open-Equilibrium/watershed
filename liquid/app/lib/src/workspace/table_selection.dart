@@ -97,6 +97,8 @@ class CellSelection extends ChangeNotifier {
 
   /// A click selects a cell, a second one edits text and numbers, and a checkbox ticks.
   void tap(int row, int field) {
+    // A click in the edited cell, beside its text, leaves the edit as it is.
+    if (editing && selected == (row, field)) return;
     if (editing && !commit(stay: false)) return;
     final again = selected == (row, field);
     _place(row, field);
@@ -120,13 +122,16 @@ class CellSelection extends ChangeNotifier {
   }
 
   /// Moves the selection to where its row and field are now, after rows or fields changed
-  /// elsewhere; a field gone ends it. A row not read where it was keeps its place.
+  /// elsewhere. A field gone, or a row gone from where it was read, ends it and an edit
+  /// of it; a row whose place is not read keeps its place.
   void relocate(int? Function(String row) rowIndex) {
     final (row, field) = selected ?? (-1, -1);
     if (row < 0 || _rowId == null || _fieldId == null) return;
     final at = fields().indexWhere((shown) => shown.id == _fieldId);
     if (at < 0) return clear();
-    final moved = rowIndex(_rowId!) ?? row;
+    final found = rowIndex(_rowId!);
+    if (found == null && rowAt(row) != null) return clear();
+    final moved = found ?? row;
     if ((moved, at) == selected) return;
     selected = (moved, at);
     _changed();
