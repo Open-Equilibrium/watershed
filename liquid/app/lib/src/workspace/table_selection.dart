@@ -122,19 +122,28 @@ class CellSelection extends ChangeNotifier {
   }
 
   /// Moves the selection to where its row and field are now, after rows or fields changed
-  /// elsewhere. A field gone, or a row gone from where it was read, ends it and an edit
-  /// of it; a row whose place is not read keeps its place.
+  /// elsewhere. A row whose place is not read keeps its place. A row or field no longer
+  /// where the reads have it ends the selection; an open edit is still written to its
+  /// cell, which takes it if the row only moved and refuses it visibly if it went.
   void relocate(int? Function(String row) rowIndex) {
-    final (row, field) = selected ?? (-1, -1);
-    if (row < 0 || _rowId == null || _fieldId == null) return;
-    final at = fields().indexWhere((shown) => shown.id == _fieldId);
-    if (at < 0) return clear();
-    final found = rowIndex(_rowId!);
-    if (found == null && rowAt(row) != null) return clear();
-    final moved = found ?? row;
-    if ((moved, at) == selected) return;
-    selected = (moved, at);
-    _changed();
+    final (row, _) = selected ?? (-1, -1);
+    if (row < 0) return;
+    // A selection made before its row was read takes the row once it is.
+    _rowId ??= rowAt(row)?.id;
+    final (rowId, fieldId) = (_rowId, _fieldId);
+    if (rowId == null || fieldId == null) return;
+    final at = fields().indexWhere((shown) => shown.id == fieldId);
+    final found = rowIndex(rowId);
+    if (at >= 0 && found != null) {
+      if ((found, at) == selected) return;
+      selected = (found, at);
+      _changed();
+      return;
+    }
+    final unread = found == null && rowAt(row) == null && row < rowCount();
+    if (at >= 0 && unread) return;
+    if (editing) commit(stay: false);
+    clear();
   }
 
   /// Forgets the selection, as when the Table is left.

@@ -202,7 +202,8 @@ void main() {
     expect(tester.widget<TextField>(editor()).controller!.text, 'ab');
   });
 
-  testWidgets('an edit ends when its row is removed elsewhere', (tester) async {
+  testWidgets('an edit whose row is removed elsewhere ends, its write refused '
+      'visibly', (tester) async {
     await kit.show(tester, [
       TablePart([...expenses, namedRow(3)]),
     ]);
@@ -217,7 +218,8 @@ void main() {
     await tester.pumpAndSettle();
     expect(editor(), findsNothing);
     expect(kit.inTable(find.text('Row 3')), findsOneWidget);
-    expect(written(), isEmpty);
+    expect(written(), [('r2', 'name', text('Power'))]);
+    expect(kit.workspace.problem.value, isNotNull);
   });
 
   testWidgets(
@@ -269,5 +271,48 @@ void main() {
     expect(tester.widget<TextField>(editor()).controller!.text, '7');
     expect(tester.widget<TextField>(editor()).focusNode!.hasFocus, isTrue);
     expect(written(), isEmpty);
+  });
+
+  testWidgets('an edit of the last row ends when it is removed elsewhere', (
+    tester,
+  ) async {
+    await kit.show(tester, [TablePart(expenses)]);
+    final table = kit.fake.views[kit.page]!.single.block;
+    await tester.tap(cell('r2', 'name'));
+    await tester.pumpAndSettle();
+    await key(tester, LogicalKeyboardKey.enter);
+    await tester.enterText(editor(), 'Power');
+    kit.fake.putRows(kit.page, table, [kit.fake.rows[table]!.first]);
+    await tester.pumpAndSettle();
+    expect(editor(), findsNothing);
+    await tester.tap(kit.inTable(find.text('New')));
+    await tester.pumpAndSettle();
+    await key(tester, LogicalKeyboardKey.backspace);
+    expect(
+      written().where((write) => write.$1 != 'r2'),
+      isEmpty,
+      reason: 'the new row comes up unselected',
+    );
+  });
+
+  testWidgets('an edit whose row moves out of what was read is still written', (
+    tester,
+  ) async {
+    await kit.show(tester, [TablePart(expenses)]);
+    final table = kit.fake.views[kit.page]!.single.block;
+    await tester.tap(cell('r2', 'name'));
+    await tester.pumpAndSettle();
+    await key(tester, LogicalKeyboardKey.enter);
+    await tester.enterText(editor(), 'Power');
+    // Another device puts 150 rows above it.
+    final rows = kit.fake.rows[table]!;
+    kit.fake.putRows(kit.page, table, [
+      rows[0],
+      for (var number = 10; number < 160; number++) namedRow(number),
+      rows[1],
+    ]);
+    await tester.pumpAndSettle();
+    expect(written(), [('r2', 'name', text('Power'))]);
+    expect(kit.workspace.problem.value, isNull);
   });
 }
