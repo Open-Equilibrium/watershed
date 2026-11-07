@@ -233,4 +233,24 @@ void main() {
     expect(picker, findsNothing);
     expect(kit.inTable(find.text('“soon” is no date.')), findsNothing);
   });
+
+  testWidgets(
+    'the day a cell has, or an empty cell cleared, is not written again',
+    (tester) async {
+      await kit.show(tester, [
+        TablePart([...expenses, namedRow(3)]),
+      ]);
+      await open(tester, 'r1');
+      await key(tester, LogicalKeyboardKey.enter);
+      // The cell stays selected; ⏎ opens it again.
+      await key(tester, LogicalKeyboardKey.enter);
+      await tester.tap(day('2026-11-01'));
+      await tester.pumpAndSettle();
+      await open(tester, 'r3');
+      await tester.tap(inPicker(find.text('Clear')));
+      await tester.pumpAndSettle();
+      expect(picker, findsNothing);
+      expect(kit.applied(BridgeMutationKind.setCell), isEmpty);
+    },
+  );
 }
