@@ -10,6 +10,7 @@ import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.g.dart';
 import 'field_panel.dart';
+import 'table_cells.dart';
 import 'follow.dart';
 import 'page_views.dart';
 import 'windowed_list.dart';
@@ -33,53 +34,6 @@ double _width(BridgeFieldKind kind) => switch (kind) {
   BridgeFieldKind.date => 120,
   BridgeFieldKind.checkbox => 72,
 };
-
-/// `number` with every digit Dart's shortest form keeps, written out in `format`'s digits,
-/// separators and grouping; rounding comes with field formats (ADR-0242). intl itself
-/// keeps at most 18 decimals and 18 grouped digits exactly.
-String _number(NumberFormat format, double number) {
-  // The core refuses these, but a document it did not write may hold them.
-  if (!number.isFinite) return format.format(number);
-  final [mantissa, ...exponent] = number.abs().toString().split('e');
-  final [whole, ...fraction] = mantissa.split('.');
-  var digits = whole + fraction.join();
-  var point =
-      whole.length + (exponent.isEmpty ? 0 : int.parse(exponent.single));
-  if (point <= 0) {
-    digits = '0' * (1 - point) + digits;
-    point = 1;
-  }
-  digits = digits.padRight(point, '0');
-  final integer = digits.substring(0, point);
-  final decimals = digits.substring(point).replaceFirst(RegExp(r'0+$'), '');
-  final zero = format.symbols.ZERO_DIGIT.codeUnitAt(0);
-  String local(String digits) =>
-      String.fromCharCodes(digits.codeUnits.map((unit) => unit - 0x30 + zero));
-  final text = [
-    if (integer.length <= 18)
-      format.format(int.parse(integer))
-    else
-      local(integer),
-    if (decimals.isNotEmpty) ...[format.symbols.DECIMAL_SEP, local(decimals)],
-  ].join();
-  return number < 0
-      ? '${format.negativePrefix}$text${format.negativeSuffix}'
-      : text;
-}
-
-/// The most specific form of `locale` intl has formats for, keeping its script as in
-/// Serbian written in Latin, or US English where intl has none for a language Material
-/// knows.
-String _formats(Locale locale, bool Function(String) exists) {
-  final Locale(:languageCode, :scriptCode, :countryCode) = locale;
-  return [
-        locale.toString(),
-        if (scriptCode != null) '${languageCode}_$scriptCode',
-        if (countryCode != null) '${languageCode}_$countryCode',
-        languageCode,
-      ].where(exists).firstOrNull ??
-      'en_US';
-}
 
 /// A Table on its Page, as the approved Table View mockups show it: its name, a header of
 /// its fields, its rows, read in windows and scrolling inside a fixed height, and their
@@ -416,8 +370,8 @@ class _TableBlockState extends State<TableBlock> {
     final ws = context.ws;
     final database = _database;
     final locale = Localizations.localeOf(context);
-    final numbers = _formats(locale, NumberFormat.localeExists);
-    final days = _formats(locale, DateFormat.localeExists);
+    final numbers = intlLocale(locale, NumberFormat.localeExists);
+    final days = intlLocale(locale, DateFormat.localeExists);
     final count = _rows.count ?? 0;
     if (_toLastRow || _toLastField) {
       final (down, sideways) = (_toLastRow, _toLastField);
@@ -573,26 +527,8 @@ class _TableBlockState extends State<TableBlock> {
         if (field.kind == BridgeFieldKind.select)
           for (final option in field.options) option.id: option,
     };
-
-    Widget content(BridgeCell? cell) => switch (cell?.kind) {
-      null || BridgeCellKind.empty => const SizedBox.shrink(),
-      BridgeCellKind.text => _text(cell!.text ?? ''),
-      BridgeCellKind.number => _text(
-        _number(numbers, cell!.number),
-        style: const TextStyle(fontFeatures: [FontFeature.tabularFigures()]),
-      ),
-      BridgeCellKind.select => switch (options[cell!.text]) {
-        final option? => _Tag(option),
-        null => const SizedBox.shrink(),
-      },
-      BridgeCellKind.date => _text(switch (DateTime.tryParse(
-        cell!.text ?? '',
-      )) {
-        final day? => days.format(day),
-        null => cell.text ?? '',
-      }),
-      BridgeCellKind.checkbox => _Checkbox(checked: cell!.checked),
-    };
+    Widget content(BridgeCell? cell) =>
+        CellView(cell: cell, options: options, numbers: numbers, days: days);
 
     Widget line({
       required double height,
@@ -689,7 +625,7 @@ class _TableBlockState extends State<TableBlock> {
                               color: ws.textFaint,
                             ),
                             const SizedBox(width: WsMetrics.space2),
-                            Flexible(child: _text(fields[index].name)),
+                            Flexible(child: cellText(fields[index].name)),
                           ],
                         ),
                 ),
@@ -740,9 +676,6 @@ class _TableBlockState extends State<TableBlock> {
       ),
     );
   }
-
-  static Widget _text(String text, {TextStyle? style}) =>
-      Text(text, maxLines: 1, overflow: TextOverflow.ellipsis, style: style);
 }
 
 /// + after the last field, which opens the field panel.
@@ -813,75 +746,6 @@ class _NewRow extends StatelessWidget {
             ],
           ),
         ),
-      ),
-    );
-  }
-}
-
-/// An option as a colored tag; its color number picks one of the ten tag colors, wrapping.
-class _Tag extends StatelessWidget {
-  const _Tag(this.option);
-
-  final BridgeOption option;
-
-  @override
-  Widget build(BuildContext context) {
-    final ws = context.ws;
-    final colors = [
-      ws.tag0,
-      ws.tag1,
-      ws.tag2,
-      ws.tag3,
-      ws.tag4,
-      ws.tag5,
-      ws.tag6,
-      ws.tag7,
-      ws.tag8,
-      ws.tag9,
-    ];
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: WsMetrics.space2),
-      decoration: BoxDecoration(
-        color: colors[option.color % colors.length],
-        borderRadius: BorderRadius.circular(WsMetrics.radiusSm),
-      ),
-      child: Text(
-        option.name,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: TextStyle(
-          fontSize: WsMetrics.fsCompact,
-          height: 20 / WsMetrics.fsCompact,
-          color: ws.tagText,
-        ),
-      ),
-    );
-  }
-}
-
-class _Checkbox extends StatelessWidget {
-  const _Checkbox({required this.checked});
-
-  final bool checked;
-
-  @override
-  Widget build(BuildContext context) {
-    final ws = context.ws;
-    return Semantics(
-      checked: checked,
-      child: Container(
-        width: 14,
-        height: 14,
-        decoration: BoxDecoration(
-          color: checked ? ws.accent : null,
-          borderRadius: BorderRadius.circular(3),
-          border: checked
-              ? null
-              : Border.all(color: ws.borderStrong, width: 1.5),
-        ),
-        child: checked
-            ? Icon(LucideIcons.check, size: 10, color: ws.onAccent)
-            : null,
       ),
     );
   }
