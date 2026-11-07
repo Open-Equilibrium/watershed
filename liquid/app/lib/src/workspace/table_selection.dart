@@ -57,7 +57,7 @@ class CellSelection extends ChangeNotifier {
   (int, int)? selected;
   var editing = false;
 
-  /// Whether a select cell's picker is open, and what is typed to filter it.
+  /// Whether a select or date cell's picker is open, and what is typed in it.
   var picking = false;
   final pickText = TextEditingController();
 
@@ -91,8 +91,9 @@ class CellSelection extends ChangeNotifier {
   /// Why the edited value was refused, shown under the Table until it is fixed.
   String? error;
 
-  /// The person's number format, as the Table last built it.
+  /// The person's number format and region, as the Table last built them.
   NumberFormat numbers = NumberFormat.decimalPattern('en_US');
+  String days = 'en_US';
 
   var _disposed = false;
 
@@ -140,17 +141,29 @@ class CellSelection extends ChangeNotifier {
       _toggle(read, column, cell);
     } else if (again && _edits(column.kind)) {
       _startEdit(_shown(column.kind, cell));
-    } else if (again && column.kind == BridgeFieldKind.select) {
+    } else if (again && _picks(column.kind)) {
       _startPick('');
     }
   }
 
-  /// The selected select cell's field while its picker is open.
+  static bool _picks(BridgeFieldKind kind) =>
+      kind == BridgeFieldKind.select || kind == BridgeFieldKind.date;
+
+  /// The selected select or date cell's field while its picker is open.
   BridgeField? get picked => picking ? _target?.$2 : null;
 
+  /// Opens the selected cell's picker with what is typed; a date cell's starts with its
+  /// day when nothing is.
   void _startPick(String typed) {
     final (row, field) = selected!;
     reveal(row, field);
+    if (_target case (_, final column, final cell)
+        when typed.isEmpty && column.kind == BridgeFieldKind.date) {
+      typed = switch (DateTime.tryParse(cell?.text ?? '')) {
+        final day? => shownDays(days).format(day),
+        null => '',
+      };
+    }
     pickText.value = TextEditingValue(
       text: typed,
       selection: TextSelection.collapsed(offset: typed.length),
@@ -183,11 +196,43 @@ class CellSelection extends ChangeNotifier {
         .then<void>((_) {}, onError: (Object _) {});
   }
 
+  /// Writes `day` into the selected date cell, or empties it, and closes the picker.
+  void pickDay(DateTime? day) {
+    if (_target case (final row, final field, final cell)) {
+      final stored = day == null ? null : storedDays.format(day);
+      final kept = stored == null
+          ? cell == null || cell.kind == BridgeCellKind.empty
+          : cell?.kind == BridgeCellKind.date && cell?.text == stored;
+      if (!kept) {
+        _write(
+          row,
+          field,
+          stored == null
+              ? _cell(BridgeCellKind.empty)
+              : _cell(BridgeCellKind.date, text: stored),
+        );
+      }
+    }
+    closePick();
+  }
+
+  /// ⏎ in a date picker writes the day typed, or empties the cell when nothing is; a text
+  /// that is no day stays, saying so.
+  void enterDay() {
+    final typed = pickText.text;
+    if (typed.trim().isEmpty) return pickDay(null);
+    final day = parseDay(typed, days);
+    if (day != null) return pickDay(day);
+    error = '“$typed” is no date.';
+    _changed();
+  }
+
   /// Closes the picker and keeps the cell as it is; with `stay`, the selection takes the
   /// keys again.
   void closePick({bool stay = true}) {
     if (!picking) return;
     picking = false;
+    error = null;
     _changed();
     if (stay) cellsFocus.requestFocus();
   }
@@ -447,7 +492,7 @@ class CellSelection extends ChangeNotifier {
           when _edits(field.kind):
         _startEdit(_shown(field.kind, cell));
       case LogicalKeyboardKey.enter || LogicalKeyboardKey.numpadEnter
-          when field.kind == BridgeFieldKind.select:
+          when _picks(field.kind):
         _startPick('');
       case LogicalKeyboardKey.escape:
         clear();
@@ -460,7 +505,8 @@ class CellSelection extends ChangeNotifier {
           _write(row, field, _cell(BridgeCellKind.empty));
         }
       default:
-        // Typing replaces a text or number cell, and filters a select cell's picker.
+        // Typing replaces a text or number cell, and goes into a select or date cell's
+        // picker.
         final typed = event.character;
         if (typed == null ||
             !_printable(typed) ||
@@ -470,7 +516,7 @@ class CellSelection extends ChangeNotifier {
         }
         if (_edits(field.kind)) {
           _startEdit(typed);
-        } else if (field.kind == BridgeFieldKind.select) {
+        } else if (_picks(field.kind)) {
           _startPick(typed);
         } else {
           return KeyEventResult.ignored;

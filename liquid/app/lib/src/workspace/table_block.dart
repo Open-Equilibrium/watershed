@@ -301,8 +301,11 @@ class _TableBlockState extends State<TableBlock> {
     final below =
         overlay.size.height - top - cell.size.height - 2 * WsMetrics.space1;
     final above = top - 2 * WsMetrics.space1;
-    final up =
-        SelectPicker.heightFor(field.options.length) > below && above > below;
+    final date = field.kind == BridgeFieldKind.date;
+    final height = date
+        ? DatePicker.height
+        : SelectPicker.heightFor(field.options.length);
+    final up = height > below && above > below;
     return Align(
       alignment: Alignment.topLeft,
       child: CompositedTransformFollower(
@@ -318,17 +321,28 @@ class _TableBlockState extends State<TableBlock> {
           child: TapRegion(
             groupId: _pick,
             onTapOutside: (_) => _cells.closePick(stay: false),
-            // A click in the picker beside its filter keeps the filter's keys.
+            // A click in the picker beside its field keeps the field's keys.
             child: TextFieldTapRegion(
-              child: SelectPicker(
-                field: field,
-                text: _cells.pickText,
-                onPick: _cells.pick,
-                onCreate: _cells.create,
-                onClose: _cells.closePick,
-                onTab: _cells.tabFromPick,
-                onKeys: (keys) => _cells.pickKeys = keys,
-              ),
+              child: date
+                  ? DatePicker(
+                      text: _cells.pickText,
+                      locale: _cells.days,
+                      onDay: _cells.pickDay,
+                      onEnter: _cells.enterDay,
+                      onClear: () => _cells.pickDay(null),
+                      onClose: _cells.closePick,
+                      onTab: _cells.tabFromPick,
+                      onKeys: (keys) => _cells.pickKeys = keys,
+                    )
+                  : SelectPicker(
+                      field: field,
+                      text: _cells.pickText,
+                      onPick: _cells.pick,
+                      onCreate: _cells.create,
+                      onClose: _cells.closePick,
+                      onTab: _cells.tabFromPick,
+                      onKeys: (keys) => _cells.pickKeys = keys,
+                    ),
             ),
           ),
         ),
@@ -586,6 +600,7 @@ class _TableBlockState extends State<TableBlock> {
     final numbers = intlLocale(locale, NumberFormat.localeExists);
     _cells.numbers = NumberFormat.decimalPattern(numbers);
     final days = intlLocale(locale, DateFormat.localeExists);
+    _cells.days = days;
     final count = _rows.count ?? 0;
     if (_toLastRow || _toLastField) {
       final (down, sideways) = (_toLastRow, _toLastField);
@@ -697,7 +712,7 @@ class _TableBlockState extends State<TableBlock> {
                                 database.fields,
                                 constraints.maxWidth,
                                 NumberFormat.decimalPattern(numbers),
-                                DateFormat.yMMMd(days),
+                                shownDays(days),
                               ),
                             ),
                           _NewRow(onTap: () => unawaited(_addRow())),
