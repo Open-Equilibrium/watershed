@@ -19,7 +19,7 @@ flowchart TD
   BR -->|"per-Block streams"| UI
 ```
 
-- Rust owns Workspace state, the mutation pipeline, History, queries, storage and sync. Dart holds only rendering state, the in-progress edit of the focused Block and, while a Page's structure changes, that Page's input queue or a line's typing that becomes the name of the Block chosen in its place (ADR-0240).
+- Rust owns Workspace state, the mutation pipeline, History, queries, storage and sync. Dart holds only rendering state, the in-progress edit of the focused Block and, while a Page's structure changes, that Page's input queue or a line's typing that becomes the name of the Block chosen in its place (ADR-0240), and a Table's cell writes not yet read back (ADR-0248).
 - Widgets read typed view models and emit intents. No widget writes storage or bypasses the mutation pipeline.
 
 ## Rules
@@ -35,7 +35,7 @@ flowchart TD
 
 5. Pages build only Views that intersect the viewport plus a bounded cache extent; Arrange mode virtualizes grid rows the same way. Measured View heights persist in a device-local cache outside synced layout and History, so scroll position stays stable when off-screen Views rebuild; that cache is not yet built.
 6. Each Block View subscribes only to its own Block's stream and is its own repaint boundary. Editing Block A never rebuilds the Page or the Explorer and never repaints another Block; the Page subscribes only to View order and layout.
-7. Text input, selection and IME composition live in the focused Block's controller and render in the next frame without awaiting the bridge; the resulting mutation crosses the pipeline asynchronously. Edit controls are enabled only where the effective permission already allows the write, and a later pipeline rejection reverts the local edit visibly.
+7. Text input, selection and IME composition live in the focused Block's controller and render in the next frame without awaiting the bridge; the resulting mutation crosses the pipeline asynchronously. A Table's written cell values show once read back, within milliseconds (ADR-0248). Edit controls are enabled only where the effective permission already allows the write, and a later pipeline rejection reverts the local edit visibly.
 8. Whiteboard, wide Database and complex App Views use their own tile or viewport slicing.
 
 ### Durability and sync
