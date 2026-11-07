@@ -169,7 +169,9 @@ class CellSelection extends ChangeNotifier {
     if (at >= 0 && unread) return;
     // A number that is none cannot be written; the Page says it was not kept.
     if (editing && !commit(stay: false)) {
-      report('${error ?? 'The edit'} It was not kept, as its row moved away.');
+      report(
+        '${error ?? 'The edit'} It was not kept, as its row or field is gone.',
+      );
     }
     clear();
   }

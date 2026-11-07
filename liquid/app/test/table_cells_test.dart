@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid/src/rust/api/database.dart';
 import 'package:liquid/src/rust/api/workspace.dart';
+import 'package:liquid/src/workspace/text_block.dart';
 
 import 'table_kit.dart';
 
@@ -426,5 +427,46 @@ void main() {
     await tester.pumpAndSettle();
     expect(written(), isEmpty);
     expect(kit.workspace.problem.value, contains('“12x” is no number'));
+  });
+
+  testWidgets('esc puts the caret at the start of the Text Block below', (
+    tester,
+  ) async {
+    await kit.show(tester, [
+      TablePart(expenses),
+      const TextPart('Paid by card.'),
+    ]);
+    await tester.tap(cell('r1', 'name'));
+    await tester.pumpAndSettle();
+    await key(tester, LogicalKeyboardKey.escape);
+    final below = tester.widget<TextField>(
+      find.descendant(
+        of: find.byType(TextBlock),
+        matching: find.byType(TextField),
+      ),
+    );
+    expect(below.focusNode!.hasFocus, isTrue);
+    expect(below.controller!.selection.baseOffset, 0);
+  });
+
+  testWidgets('the arrows bring the selected cell into view', (tester) async {
+    await kit.show(tester, [
+      TablePart([
+        for (var number = 1; number <= 30; number++) namedRow(number),
+      ]),
+    ]);
+    await tester.tap(cell('r1', 'name'));
+    await tester.pumpAndSettle();
+    for (var step = 0; step < 15; step++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    }
+    await tester.pumpAndSettle();
+    final rows = tester
+        .widget<ListView>(find.byKey(const Key('table rows')))
+        .controller!;
+    // Row 16 is the last in view: 16 rows down, 10 shown.
+    expect(rows.offset, (16 - 10) * 34.0);
+    await key(tester, LogicalKeyboardKey.backspace);
+    expect(written().single.$1, 'r16');
   });
 }
